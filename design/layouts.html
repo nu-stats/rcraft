@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RCraft window layouts</title>
+<style>
+:root{--bg:#ffffff;--panel:#f4f6f8;--line:#d6dbe0;--text:#1d2733;--dim:#566270;--cmd:#10141a;--err:#c42828;--warn:#9c5a00;--page:#e9edf1;--acc:#0e766e;--on:#ffffff}
+:root[data-theme="dark"]{--bg:#12161b;--panel:#1a2027;--line:#2c353f;--text:#e3e8ee;--dim:#9aa6b2;--cmd:#fafafa;--err:#ff7070;--warn:#f0b35a;--page:#0b0e11;--on:#101418}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--text);font:14px/1.45 "Segoe UI",system-ui,sans-serif}
+.top{display:flex;flex-wrap:wrap;gap:14px 24px;align-items:center;padding:12px 20px}
+.top h1{font-size:16px;font-weight:600;margin:0 8px 0 0}
+.grp{display:flex;gap:6px;align-items:center}
+.grp>span{color:var(--dim);font-size:12px;margin-right:2px}
+.seg button,.acc button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:4px 12px;cursor:pointer;border-radius:6px}
+.seg button[aria-pressed="true"]{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc);color:var(--acc);font-weight:600}
+.acc button{width:22px;height:22px;padding:0;border-radius:50%;border:2px solid var(--bg);box-shadow:0 0 0 1px var(--line)}
+.acc button[aria-pressed="true"]{box-shadow:0 0 0 2px var(--text)}
+.note{padding:0 20px 10px;color:var(--dim);font-size:13px;max-width:900px}
+#stage{padding:0 20px 24px}
+#app{height:640px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--bg);display:flex;flex-direction:column;box-shadow:0 1px 2px rgba(0,0,0,.06)}
+.menu{display:flex;gap:18px;align-items:center;padding:7px 14px;background:var(--panel);border-bottom:1px solid var(--line);font-size:13px}
+.menu .logo{width:20px;height:20px;border-radius:5px;background:var(--acc);color:var(--on);font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center}
+.menu .nm{font-weight:600;margin-right:6px}
+.menu span.m{color:var(--text)}
+.menu .sp{margin-left:auto;color:var(--dim);font-size:12px}
+.tool{display:none;gap:8px;padding:7px 14px;border-bottom:1px solid var(--line);background:var(--bg)}
+.tool button{font:inherit;font-size:13px;border:1px solid var(--line);background:var(--bg);color:var(--text);padding:4px 12px;border-radius:6px}
+.tool button.p{background:var(--acc);border-color:var(--acc);color:var(--on)}
+#grid{flex:1;min-height:0;display:grid;gap:0}
+.pane{display:flex;flex-direction:column;min-width:0;min-height:0;border:1px solid var(--line);margin:-0.5px;background:var(--bg)}
+.pane>.h{display:flex;align-items:center;gap:8px;padding:5px 10px;background:var(--panel);border-bottom:1px solid var(--line);font-size:12px;font-weight:600;color:var(--dim)}
+.pane>.h .r{margin-left:auto;font-weight:400}
+.pane>.b{flex:1;min-height:0;overflow:auto;padding:6px 0}
+.row{padding:3px 12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:13px;display:flex;gap:8px}
+.row .t{margin-left:auto;color:var(--dim);font-size:11px;align-self:center}
+.row.sel{background:color-mix(in srgb,var(--acc) 18%,var(--bg));box-shadow:inset 3px 0 0 var(--acc)}
+.row.bad{color:var(--err)}
+.mono{font-family:Consolas,Menlo,"DejaVu Sans Mono",monospace;font-size:13px}
+.res{padding:8px 14px;line-height:1.55}
+.res .c{color:var(--acc);font-weight:600}
+.res .e{color:var(--err)}.res .w{color:var(--warn)}
+.res .d{color:var(--dim)}
+.res pre{margin:0 0 10px;font:inherit;white-space:pre}
+.cmdline{display:flex;gap:8px;padding:8px 10px;align-items:center}
+.cmdline .in{flex:1;border:1px solid var(--acc);box-shadow:0 0 0 2px color-mix(in srgb,var(--acc) 25%,transparent);border-radius:6px;padding:6px 10px;color:var(--cmd);background:var(--bg)}
+.cmdline .hint{color:var(--dim);font-size:11px;white-space:nowrap}
+.btn{font:inherit;font-size:13px;border:none;background:var(--acc);color:var(--on);border-radius:6px;padding:6px 16px;font-weight:600}
+.btn.g{background:transparent;border:1px solid var(--line);color:var(--text);font-weight:400}
+.ed{display:flex;font-family:Consolas,Menlo,monospace;font-size:13px;line-height:1.6}
+.ed .ln{padding:6px 8px 6px 12px;color:var(--dim);text-align:right;user-select:none;border-right:1px solid var(--line);background:var(--panel)}
+.ed .cd{padding:6px 12px;white-space:pre}
+.ed .k{color:var(--acc)}.ed .s{color:var(--warn)}.ed .cm{color:var(--dim)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;padding:8px 12px;font-size:13px}
+.kv b{color:var(--dim);font-weight:400}
+.status{display:flex;gap:18px;padding:5px 14px;border-top:1px solid var(--line);background:var(--panel);font-size:12px;color:var(--dim)}
+.status .ok{color:var(--acc);font-weight:600}
+.rail{display:none;flex-direction:column;align-items:center;gap:6px;padding-top:8px;background:var(--panel);border:1px solid var(--line);margin:-0.5px}
+.rail button{width:32px;height:32px;border:none;background:transparent;border-radius:6px;color:var(--dim);font-size:11px;cursor:pointer}
+.rail button[aria-pressed="true"]{background:color-mix(in srgb,var(--acc) 18%,var(--bg));color:var(--acc);font-weight:700}
+#app.A #grid{grid-template-columns:230px 1fr 270px;grid-template-rows:1fr 1fr 74px;grid-template-areas:"hist res vars" "hist res props" "hist cmd props"}
+#app.A .script,#app.A .rail{display:none}
+#app.B #grid{grid-template-columns:240px 1fr;grid-template-rows:1fr 1.15fr 74px;grid-template-areas:"vars script" "hist res" "hist cmd"}
+#app.B .props,#app.B .rail{display:none}
+#app.C #grid{grid-template-columns:1fr 290px 44px;grid-template-rows:1fr 74px;grid-template-areas:"res drawer rail" "cmd drawer rail"}
+#app.C .tool{display:flex}
+#app.C .rail{display:flex}
+#app.C .hist,#app.C .vars,#app.C .props,#app.C .script{grid-area:drawer;display:none}
+#app.C[data-drawer="hist"] .hist,#app.C[data-drawer="vars"] .vars,#app.C[data-drawer="props"] .props,#app.C[data-drawer="script"] .script{display:flex}
+.hist{grid-area:hist}.vars{grid-area:vars}.props{grid-area:props}.res-p{grid-area:res}.cmd-p{grid-area:cmd}.script{grid-area:script}.rail{grid-area:rail}
+@media (max-width:900px){#app{height:auto}#grid{display:block!important}.pane{height:220px}.rail{display:none!important}}
+</style>
+</head>
+<body>
+<div class="top">
+  <h1>RCraft window layouts</h1>
+  <div class="grp seg" id="layouts"><span>Layout</span>
+    <button data-k="A" aria-pressed="true">A  Classic</button><button data-k="B" aria-pressed="false">B  Workbench</button><button data-k="C" aria-pressed="false">C  Focus</button></div>
+  <div class="grp seg" id="themes"><span>Mode</span><button data-k="light" aria-pressed="true">Light</button><button data-k="dark" aria-pressed="false">Dark</button></div>
+  <div class="grp acc" id="accents"><span>Accent</span></div>
+</div>
+<div class="note" id="note"></div>
+<div id="stage">
+<div id="app" class="A" data-drawer="vars">
+  <div class="menu"><div class="logo">R</div><span class="nm">RCraft</span>
+    <span class="m">File</span><span class="m">Edit</span><span class="m">Data</span><span class="m">Statistics</span><span class="m">Graphs</span><span class="m">Packages</span><span class="m">Session</span><span class="m">Help</span>
+    <span class="sp">R 4.4.3</span></div>
+  <div class="tool"><button class="p">Open file</button><button>Data editor</button><button>Summary</button><button>Linear model</button><button>Plot</button><button>Packages</button><button>Save script</button></div>
+  <div id="grid">
+    <div class="pane hist"><div class="h">History<span class="r">8</span></div><div class="b">
+      <div class="row">data(mtcars)</div><div class="row">summary(mtcars$mpg)</div><div class="row">hist(mtcars$mpg)</div>
+      <div class="row">cor(mtcars$mpg, mtcars$wt)</div><div class="row bad">lm(mpg ~ wtt, mtcars)</div>
+      <div class="row">fit &lt;- lm(mpg ~ wt + hp, mtcars)</div><div class="row sel">summary(fit)</div><div class="row">plot(fit, which = 1)</div></div></div>
+    <div class="pane vars"><div class="h">Variables<span class="r">11</span></div><div class="b">
+      <div class="row sel">mpg<span class="t">numeric</span></div><div class="row">cyl<span class="t">numeric</span></div><div class="row">disp<span class="t">numeric</span></div>
+      <div class="row">hp<span class="t">numeric</span></div><div class="row">drat<span class="t">numeric</span></div><div class="row">wt<span class="t">numeric</span></div>
+      <div class="row">qsec<span class="t">numeric</span></div><div class="row">vs<span class="t">numeric</span></div><div class="row">am<span class="t">numeric</span></div>
+      <div class="row">gear<span class="t">numeric</span></div><div class="row">carb<span class="t">numeric</span></div></div></div>
+    <div class="pane props"><div class="h">Properties</div><div class="b"><div class="kv">
+      <b>Variable</b><span>mpg</span><b>Type</b><span>numeric (double)</span><b>Values</b><span>32</span><b>Missing</b><span>0</span>
+      <b>Mean</b><span>20.09</span><b>Std. dev.</b><span>6.03</span><b>Range</b><span>10.4 to 33.9</span><b>Data</b><span>mtcars, 32 × 11</span></div></div></div>
+    <div class="pane script"><div class="h">Script<span class="r">analysis.R</span></div><div class="b" style="padding:0"><div class="ed"><div class="ln">1<br>2<br>3<br>4<br>5<br>6</div>
+      <div class="cd"><span class="cm"># Fuel economy</span>
+<span class="k">data</span>(mtcars)
+fit &lt;- <span class="k">lm</span>(mpg ~ wt + hp, data = mtcars)
+<span class="k">summary</span>(fit)
+
+<span class="k">plot</span>(fit, which = <span class="s">1</span>)</div></div></div></div>
+    <div class="pane res-p"><div class="h">Results<span class="r">Clear</span></div><div class="b res mono">
+      <pre><span class="c">&gt; summary(fit)</span></pre>
+<pre>Call:
+lm(formula = mpg ~ wt + hp, data = mtcars)
+
+Residuals:
+    Min      1Q  Median      3Q     Max
+-3.941  -1.600  -0.182   1.050   5.854
+
+Coefficients:
+            Estimate Std. Error t value Pr(&gt;|t|)
+(Intercept) 37.22727    1.59879  23.285  &lt; 2e-16 ***
+wt          -3.87783    0.63273  -6.129 1.12e-06 ***
+hp          -0.03177    0.00903  -3.519  0.00145 **
+
+Residual standard error: 2.593 on 29 degrees of freedom
+Multiple R-squared:  0.8268,	Adjusted R-squared:  0.8148</pre>
+      <pre><span class="c">&gt; lm(mpg ~ wtt, mtcars)</span>
+<span class="e">Error: object 'wtt' not found</span></pre></div></div>
+    <div class="pane cmd-p"><div class="h">Command<span class="r">Page Up / Down: earlier commands</span></div>
+      <div class="cmdline"><div class="in mono">&gt; plot(fit, which = 1)</div><button class="btn">Run</button><button class="btn g">Stop</button></div></div>
+    <div class="rail" id="rail"><button data-d="hist" aria-label="History" aria-pressed="false">Hist</button><button data-d="vars" aria-label="Variables" aria-pressed="true">Vars</button><button data-d="props" aria-label="Properties" aria-pressed="false">Info</button><button data-d="script" aria-label="Script" aria-pressed="false">Code</button></div>
+  </div>
+  <div class="status"><span class="ok">R ready</span><span>mtcars · 32 × 11</span><span id="stx">Selected: mpg, numeric, 0 missing</span><span style="margin-left:auto">Working folder: C:\Users\you\project</span></div>
+</div>
+</div>
+<script>
+var NOTES={A:"Classic. Familiar to Stata users: History left, Results centre, Variables and Properties right, Command below Results.",
+B:"Workbench. A Script pane above Results, like a code editor, for do-files and R scripts. Variables over History on the left; Properties moves to the status bar.",
+C:"Focus. Results take the window with quick buttons on top. One side drawer at a time (History, Variables, Properties or Script), chosen from the rail on the right."};
+var ACC=[["Blue","#1f5f99","#7fb3e6"],["Indigo","#4b4da8","#a5a8f0"],["Teal","#0e766e","#5fcbbe"],["Plum","#7a3e9d","#c79be6"],["Forest","#2d6a3e","#85cc95"],["Amber","#9c5a00","#f0b35a"],["Rose","#b0345f","#f09ab8"]];
+var app=document.getElementById("app"),root=document.documentElement,st={layout:"A",theme:"light",acc:2};
+function paint(){
+ app.className=st.layout;root.setAttribute("data-theme",st.theme);
+ var a=ACC[st.acc],c=st.theme==="dark"?a[2]:a[1];root.style.setProperty("--acc",c);
+ document.querySelectorAll("#layouts button").forEach(function(b){b.setAttribute("aria-pressed",b.dataset.k===st.layout)});
+ document.querySelectorAll("#themes button").forEach(function(b){b.setAttribute("aria-pressed",b.dataset.k===st.theme)});
+ document.querySelectorAll("#accents button").forEach(function(b,i){b.setAttribute("aria-pressed",i===st.acc);b.style.background=st.theme==="dark"?ACC[i][2]:ACC[i][1]});
+ document.getElementById("note").textContent=NOTES[st.layout];
+}
+document.querySelectorAll("#layouts button").forEach(function(b){b.onclick=function(){st.layout=b.dataset.k;paint()}});
+document.querySelectorAll("#themes button").forEach(function(b){b.onclick=function(){st.theme=b.dataset.k;paint()}});
+var ab=document.getElementById("accents");ACC.forEach(function(a,i){var b=document.createElement("button");b.title=a[0];b.setAttribute("aria-label",a[0]+" accent");b.onclick=function(){st.acc=i;paint()};ab.appendChild(b)});
+document.querySelectorAll("#rail button").forEach(function(b){b.onclick=function(){app.dataset.drawer=b.dataset.d;document.querySelectorAll("#rail button").forEach(function(x){x.setAttribute("aria-pressed",x===b)})}});
+paint();
+</script>
+</body>
+</html>
