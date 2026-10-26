@@ -197,3 +197,15 @@ exist on branch `p0/scaffold`.
   with the MinGW binutils from the Husky Eye View R environment appended to
   `PATH` (`...\envs\hev-r\Library\x86_64-w64-mingw32\bin` and `...\Library\bin`).
   Installing MinGW (or the Visual Studio build tools) would be cleaner.
+
+## Data-bridge spike and CI, 2026-10-26
+
+- Pushed through `1fe9532`; CI: Windows and macOS passed, Ubuntu failed to
+  build (no X11 development libraries on the runner). Fixed in `7a4d455`
+  (apt install step in `ci.yml`), not yet pushed.
+- Data bridge (`plan/data-bridge.md`): a base-R-only binary column format
+  beats delimited text (write 0.38 s vs 7.4 s, read 0.09 s vs 1.1 s, 54 MB vs
+  82 MB for 1M rows) and keeps types and missing values. Arrow and Parquet not
+  yet measured (need the `arrow` install, which needs the user's yes);
+  Application Control blocked `data.table`'s DLL, so no compiled package can be
+  assumed. Phase 3 may start once the user has read the recommendation.
