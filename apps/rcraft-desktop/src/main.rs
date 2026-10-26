@@ -1,6 +1,8 @@
 //! `rcraft-desktop`: the RCraft window (layer L7).
 //!
-//! `rcraft-desktop` opens the window. `rcraft-desktop --picture FILE.png`
+//! `rcraft-desktop` opens the window (on the graphics card when there is a
+//! working driver, otherwise drawn on the CPU). `rcraft-desktop --software`
+//! forces the CPU-drawn window. `rcraft-desktop --picture FILE.png`
 //! draws it to a picture instead, with no window and no graphics driver:
 //!
 //! ```text
@@ -21,6 +23,8 @@ fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = if args.is_empty() {
         rcraft_ui_egui::run()
+    } else if args == ["--software"] {
+        rcraft_ui_egui::run_software()
     } else {
         parse(&args).and_then(|o| rcraft_ui_egui::run_headless(&o))
     };

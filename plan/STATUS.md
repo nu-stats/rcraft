@@ -185,7 +185,12 @@ exist on branch `p0/scaffold`.
   `rcraft-desktop --picture FILE.png [--demo FILE] [--dark] [--accent NAME]`
   draws the real window to a PNG on the CPU (`softraster.rs`, `headless.rs`),
   with a live R session. Layout B was checked this way, light and dark.
-  A live window that uses the same software drawing is the next step.
+  The live window now falls back to the same CPU drawing when neither `wgpu`
+  nor OpenGL can start (`softwindow.rs`, winit and softbuffer), or with
+  `rcraft-desktop --software`. Checked here: it opens, titled RCraft, and
+  responds; how it looks and feels on screen still needs a person to confirm.
+  Dev builds optimise the drawing crates (root `Cargo.toml` profile) so it is
+  usable without a release build.
 - Building on this Windows machine: the Rust toolchain is the GNU one and the
   newer `windows-sys` crates need `dlltool` and `as`, which are not
   installed. `Cargo.lock` was seeded from StatCraft's, and the build worked

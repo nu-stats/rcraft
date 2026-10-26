@@ -51,3 +51,24 @@ indexing_slicing = "warn"
 [profile.release]
 lto = "thin"
 codegen-units = 1
+
+# The software-drawn window (and egui's layout and text code under it) is far
+# too slow unoptimised; these crates are built optimised even in debug builds.
+[profile.dev.package.rcraft-ui-egui]
+opt-level = 3
+[profile.dev.package.egui]
+opt-level = 3
+[profile.dev.package.epaint]
+opt-level = 3
+[profile.dev.package.emath]
+opt-level = 3
+[profile.dev.package.ecolor]
+opt-level = 3
+[profile.dev.package.ab_glyph]
+opt-level = 3
+[profile.dev.package.ab_glyph_rasterizer]
+opt-level = 3
+[profile.dev.package.owned_ttf_parser]
+opt-level = 3
+[profile.dev.package.ttf-parser]
+opt-level = 3

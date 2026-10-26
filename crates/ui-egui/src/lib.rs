@@ -11,6 +11,7 @@ mod app;
 mod headless;
 pub mod look;
 mod softraster;
+mod softwindow;
 
 pub use headless::{run_headless, HeadlessOptions};
 pub use look::Accent;
@@ -35,11 +36,24 @@ fn run_with(renderer: eframe::Renderer) -> Result<(), String> {
 /// Opens the window and runs until it is closed.
 ///
 /// Drawing uses `wgpu` (Direct3D, Vulkan or Metal), which works on machines
-/// where OpenGL does not; if it cannot start, OpenGL is tried.
+/// where OpenGL does not; if it cannot start, OpenGL is tried, and if that
+/// cannot either, the window is drawn on the CPU (see `softwindow.rs`).
 pub fn run() -> Result<(), String> {
     match run_with(eframe::Renderer::Wgpu) {
         Ok(()) => Ok(()),
-        Err(first) => run_with(eframe::Renderer::Glow)
-            .map_err(|second| format!("could not open the window: {first}; then {second}")),
+        Err(first) => match run_with(eframe::Renderer::Glow) {
+            Ok(()) => Ok(()),
+            Err(second) => {
+                eprintln!(
+                    "rcraft-desktop: no graphics driver ({first}; {second}); drawing the window in software"
+                );
+                softwindow::run()
+            }
+        },
     }
+}
+
+/// Opens the window drawn on the CPU, whatever the graphics driver is doing.
+pub fn run_software() -> Result<(), String> {
+    softwindow::run()
 }
