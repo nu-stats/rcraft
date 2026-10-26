@@ -18,6 +18,13 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - name: Linux window libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxext-dev \
+            libxkbcommon-dev libwayland-dev libxcb1-dev pkg-config
       - name: Read the R pins
         id: pins
         shell: bash
