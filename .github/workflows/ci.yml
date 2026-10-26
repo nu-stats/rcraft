@@ -44,7 +44,7 @@ jobs:
           cargo xtask ci 2>&1 | tee ci.log || {
             # put the end of the log in an annotation, which can be read
             # without signing in to GitHub
-            grep -vE 'cargo:rerun-if|^ +(Compiling|Checking|Fresh) ' ci.log | tail -n 60 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > ci-tail.txt
+            grep -vE 'cargo:rerun-if|^ +(Compiling|Checking|Fresh|Downloaded|Downloading|Updating|Locking|Blocking) ' ci.log | tail -n 25 | cut -c1-200 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > ci-tail.txt
             echo "::error title=cargo xtask ci failed::$(cat ci-tail.txt)"
             exit 1
           }
