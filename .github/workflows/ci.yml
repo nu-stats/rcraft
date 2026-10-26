@@ -28,5 +28,17 @@ jobs:
         with:
           r-version: ${{ steps.pins.outputs.r }}
           use-public-rspm: true
-      - run: cargo xtask ci
+      - name: Run cargo xtask ci
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          set -o pipefail
+          cargo xtask ci 2>&1 | tee ci.log || {
+            # put the end of the log in an annotation, which can be read
+            # without signing in to GitHub
+            tail -n 60 ci.log | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > ci-tail.txt
+            echo "::error title=cargo xtask ci failed::$(cat ci-tail.txt)"
+            exit 1
+          }
       - run: cargo run -p rcraft-cli -- --version

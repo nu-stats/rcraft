@@ -20,6 +20,7 @@
 //! <token>\tBEGIN\t<id>
 //! <token>\tWARN\t<id>\t<message>
 //! <token>\tERROR\t<id>\t<message>\t<call>
+//! <token>\tSYNC\t<id>        (on standard error, just before END)
 //! <token>\tEND\t<id>\t<ok|error|interrupted>
 //! ```
 //!
@@ -75,6 +76,11 @@ pub enum Frame {
     End {
         run: RunId,
         status: Status,
+    },
+    /// Sent on standard error just before `End`, so the reader of that stream
+    /// can tell that everything R wrote there for the run has been read.
+    Sync {
+        run: RunId,
     },
 }
 
@@ -192,6 +198,9 @@ fn parse_fields(rest: &str) -> Result<Frame, ProtoError> {
             message: unescape(next("message")?),
             call: unescape(next("call")?),
         }),
+        "SYNC" => Ok(Frame::Sync {
+            run: run(next("run id")?)?,
+        }),
         "END" => {
             let id = run(next("run id")?)?;
             let status = match next("status")? {
@@ -269,6 +278,10 @@ mod tests {
                 message: "boom".into(),
                 call: "f(x)".into()
             }))
+        );
+        assert_eq!(
+            parse_frame(T, &line("SYNC\t3")),
+            Some(Ok(Frame::Sync { run: 3 }))
         );
         assert_eq!(
             parse_frame(T, &line("END\t3\tinterrupted")),

@@ -206,6 +206,10 @@ struct RunState {
     started: Instant,
     last_memory_check: Instant,
     limit_hit: Option<Instant>,
+    /// The end frame from standard output, held until standard error has
+    /// caught up (its `Sync`), so no message is lost to a race.
+    end: Option<Status>,
+    synced: bool,
 }
 
 pub struct Session {
@@ -275,8 +279,8 @@ impl Session {
 
         let (tx, raw) = sync_channel(CHANNEL_CAPACITY);
         let current_id = Arc::new(AtomicU64::new(0));
-        spawn_stdout_reader(stdout, token, tx.clone());
-        spawn_stderr_reader(stderr, tx);
+        spawn_stdout_reader(stdout, token.clone(), tx.clone());
+        spawn_stderr_reader(stderr, token, tx);
 
         let mut session = Session {
             config,
@@ -336,6 +340,8 @@ impl Session {
             started: now,
             last_memory_check: now,
             limit_hit: None,
+            end: None,
+            synced: false,
         });
         self.current_id.store(id, Ordering::SeqCst);
         Ok(id)
@@ -561,16 +567,37 @@ impl Session {
                 self.pending.push_back(Event::Error { run, message, call });
             }
             Frame::End { run, status } => {
-                self.current = None;
-                self.current_id.store(0, Ordering::SeqCst);
-                let status = match status {
-                    Status::Ok => RunStatus::Ok,
-                    Status::Error => RunStatus::Error,
-                    Status::Interrupted => RunStatus::Interrupted,
-                };
-                self.pending.push_back(Event::Finished { run, status });
+                if let Some(state) = self.current.as_mut().filter(|s| s.id == run) {
+                    state.end = Some(status);
+                }
+                self.finish_if_ready(run);
+            }
+            Frame::Sync { run } => {
+                if let Some(state) = self.current.as_mut().filter(|s| s.id == run) {
+                    state.synced = true;
+                }
+                self.finish_if_ready(run);
             }
         }
+    }
+
+    /// A run is over once R has said so on standard output and everything R
+    /// wrote on standard error before that has been read too. The two streams
+    /// are read by separate threads, so either may arrive first.
+    fn finish_if_ready(&mut self, run: RunId) {
+        let status = match self.current.as_ref() {
+            Some(state) if state.id == run && state.synced => state.end,
+            _ => None,
+        };
+        let Some(status) = status else { return };
+        self.current = None;
+        self.current_id.store(0, Ordering::SeqCst);
+        let status = match status {
+            Status::Ok => RunStatus::Ok,
+            Status::Error => RunStatus::Error,
+            Status::Interrupted => RunStatus::Interrupted,
+        };
+        self.pending.push_back(Event::Finished { run, status });
     }
 
     fn handle_text(&mut self, stream: Stream, text: String) {
@@ -600,10 +627,13 @@ impl Session {
         self.stdin = None;
         let code = wait_briefly(&mut self.child);
         if let Some(state) = self.current.take() {
-            let status = if self.stopped_by_us {
-                RunStatus::Interrupted
-            } else {
-                RunStatus::Crashed
+            // R may have reported the end before it went away
+            let status = match state.end {
+                Some(Status::Ok) => RunStatus::Ok,
+                Some(Status::Error) => RunStatus::Error,
+                Some(Status::Interrupted) => RunStatus::Interrupted,
+                None if self.stopped_by_us => RunStatus::Interrupted,
+                None => RunStatus::Crashed,
             };
             self.pending.push_back(Event::Finished {
                 run: state.id,
@@ -687,10 +717,15 @@ fn spawn_stdout_reader(stdout: impl Read + Send + 'static, token: String, tx: Sy
     });
 }
 
-fn spawn_stderr_reader(stderr: impl Read + Send + 'static, tx: SyncSender<Raw>) {
+fn spawn_stderr_reader(stderr: impl Read + Send + 'static, token: String, tx: SyncSender<Raw>) {
     thread::spawn(move || {
         read_chunks(stderr, |chunk| {
-            tx.send(Raw::Text(Stream::Stderr, chunk)).is_ok()
+            // the only frame on standard error is `Sync`; anything else is text
+            let item = match parse_frame(&token, &chunk) {
+                Some(Ok(frame @ Frame::Sync { .. })) => Raw::Frame(frame),
+                _ => Raw::Text(Stream::Stderr, chunk),
+            };
+            tx.send(item).is_ok()
         });
         let _ = tx.send(Raw::Closed(Stream::Stderr));
     });

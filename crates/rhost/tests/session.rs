@@ -277,3 +277,22 @@ fn a_run_over_the_memory_limit_is_stopped() {
     let again = s.run_to_end("1 + 1", LIMIT).expect("run");
     assert_eq!(again.stdout.trim(), "[1] 2");
 }
+
+#[test]
+fn messages_are_never_lost_to_the_end_of_the_run() {
+    // standard error and standard output are read by different threads; the
+    // run must not be reported finished before the last message is in
+    let Some(mut s) = session() else { return };
+    for round in 0..15 {
+        let out = s
+            .run_to_end("for (i in 1:50) message('m', i)\ncat('done\\n')", LIMIT)
+            .expect("run");
+        assert_eq!(out.status, RunStatus::Ok, "round {round}");
+        assert!(
+            out.stderr.contains("m50\n"),
+            "round {round}: {:?}",
+            out.stderr
+        );
+        assert_eq!(out.stderr.lines().count(), 50, "round {round}");
+    }
+}

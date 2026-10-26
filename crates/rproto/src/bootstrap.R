@@ -52,6 +52,9 @@ local({
       }
     )
     flush(stdout())
+    # tell the reader of standard error that everything for this run is written
+    cat(token, "\tSYNC\t", id, "\n", sep = "", file = stderr())
+    flush(stderr())
     emit("END", id, status)
   }
 
