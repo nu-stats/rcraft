@@ -93,6 +93,8 @@ pub const ENTRIES: &[Entry] = &[
     planned("Stata mode switch", Area::Stata),
     planned("Translate Stata code", Area::Stata),
     planned("Translate do-file", Area::Stata),
+    planned("Open do-file and run", Area::Stata),
+    planned("Do-file dry-run report", Area::Stata),
     planned("Stata and R side by side", Area::Stata),
     planned("Stata differences guide", Area::Stata),
     planned("Help topic", Area::Help),

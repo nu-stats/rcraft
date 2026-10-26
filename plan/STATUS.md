@@ -45,7 +45,15 @@ exist on branch `p0/scaffold`.
 - P1.1 (find installed R) is done and committed; R is not installed on this
   machine, so `rcraft --find-r` reports none.
 
+- Researched 2026-10-26: run an existing do-file on R (`plan/do-file-run.md`,
+  Phase 2C). No mature tool exists; StatCraft's parsers are reusable.
+  Recommended approach: idiomatic R plus a small shipped R runtime package
+  for Stata-specific rules; verified against recorded Stata output.
+
 ## Open questions
+
+- Share StatCraft's parsers as a published crate, or vendor a copy?
+- Where the `rcraftstata` R package lives and how it is installed.
 
 - Stata mode: share StatCraft's parser (`lang` crate) or write a new one?
   Proposed: start from StatCraft's if its licence and layering allow.

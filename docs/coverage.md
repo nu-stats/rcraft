@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 31 | 0 | 0 | 31 |
+| 33 | 0 | 0 | 33 |
 
 ## File
 
@@ -67,6 +67,8 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Stata mode switch | planned |
 | Translate Stata code | planned |
 | Translate do-file | planned |
+| Open do-file and run | planned |
+| Do-file dry-run report | planned |
 | Stata and R side by side | planned |
 | Stata differences guide | planned |
 
