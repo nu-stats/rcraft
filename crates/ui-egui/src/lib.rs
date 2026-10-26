@@ -3,11 +3,16 @@
 //! Variables over History on the left, the Script above Results in the
 //! middle, the Command line below, and a status bar. The interface stays
 //! thin (AGENTS.md section 3): it reads the engine and sends it commands.
+//!
+//! Two ways to show it: a real window ([`run`]), and a picture drawn on the
+//! CPU with no window and no graphics driver ([`run_headless`]).
 
 mod app;
+mod headless;
 pub mod look;
-mod shot;
+mod softraster;
 
+pub use headless::{run_headless, HeadlessOptions};
 pub use look::Accent;
 
 fn run_with(renderer: eframe::Renderer) -> Result<(), String> {
@@ -22,7 +27,7 @@ fn run_with(renderer: eframe::Renderer) -> Result<(), String> {
     eframe::run_native(
         "RCraft",
         options,
-        Box::new(|cc| Ok(Box::new(app::App::new(cc)))),
+        Box::new(|cc| Ok(Box::new(app::App::new(&cc.egui_ctx)))),
     )
     .map_err(|e| e.to_string())
 }
@@ -30,8 +35,7 @@ fn run_with(renderer: eframe::Renderer) -> Result<(), String> {
 /// Opens the window and runs until it is closed.
 ///
 /// Drawing uses `wgpu` (Direct3D, Vulkan or Metal), which works on machines
-/// where OpenGL does not (remote sessions, some drivers); if it cannot start,
-/// OpenGL is tried.
+/// where OpenGL does not; if it cannot start, OpenGL is tried.
 pub fn run() -> Result<(), String> {
     match run_with(eframe::Renderer::Wgpu) {
         Ok(()) => Ok(()),

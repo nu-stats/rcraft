@@ -8,7 +8,6 @@ use rcraft_engine::{Engine, History, Item, Outcome, Recall, Source};
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
 
 use crate::look::{self, Accent, Palette};
-use crate::shot::Shot;
 
 const COMMAND_ID: &str = "command-line";
 /// History lines drawn (the newest); the rest stay in the engine.
@@ -48,17 +47,15 @@ pub struct App {
     focus_command: bool,
     needs_restart: bool,
     message: Option<String>,
-    /// Developer hook (see `shot.rs`); `None` in normal use.
-    shot: Option<Shot>,
 }
 
 impl App {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> App {
-        look::apply_static(&cc.egui_ctx);
+    pub fn new(ctx: &egui::Context) -> App {
+        look::apply_static(ctx);
         let accent = Accent::default();
-        look::apply_colors(&cc.egui_ctx, accent);
+        look::apply_colors(ctx, accent);
         let theme = egui::ThemePreference::System;
-        cc.egui_ctx.set_theme(theme);
+        ctx.set_theme(theme);
         App {
             engine: EngineState::Starting(start_engine()),
             command: String::new(),
@@ -69,7 +66,6 @@ impl App {
             focus_command: true,
             needs_restart: false,
             message: None,
-            shot: Shot::from_env(),
         }
     }
 
@@ -167,8 +163,15 @@ impl App {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.ui(ctx);
+    }
+}
+
+impl App {
+    /// Draws one frame and carries out what was asked. The window and the
+    /// offscreen picture (`headless.rs`) both call this.
+    pub fn ui(&mut self, ctx: &egui::Context) {
         self.poll(ctx);
-        self.developer_hook(ctx);
         let dark = ctx.style().visuals.dark_mode;
         let pal = Palette::new(self.accent, dark);
         let mut actions: Vec<Action> = Vec::new();
@@ -632,27 +635,28 @@ fn start_engine() -> Receiver<Result<Engine, String>> {
 }
 
 impl App {
-    /// Runs the screenshot hook when `RCRAFT_SCREENSHOT` is set.
-    fn developer_hook(&mut self, ctx: &egui::Context) {
-        let Some(mut shot) = self.shot.take() else {
-            return;
-        };
-        let idle = matches!(&self.engine, EngineState::Ready(e) if !e.is_busy());
-        let failed = matches!(self.engine, EngineState::Failed(_));
-        if idle {
-            if let Some(code) = shot.next_command() {
-                self.submit_typed(&code);
-            }
+    /// R is ready and nothing is running (or R could not start).
+    pub fn is_settled(&self) -> bool {
+        match &self.engine {
+            EngineState::Ready(e) => !e.is_busy(),
+            EngineState::Failed(_) => true,
+            EngineState::Starting(_) => false,
         }
-        shot.step(ctx, (idle && !self.engine_busy()) || failed);
-        self.shot = Some(shot);
     }
 
-    fn engine_busy(&self) -> bool {
-        self.engine().is_some_and(Engine::is_busy)
+    pub fn is_ready(&self) -> bool {
+        matches!(self.engine, EngineState::Ready(_))
     }
 
-    fn submit_typed(&mut self, code: &str) {
+    pub fn set_theme(&mut self, ctx: &egui::Context, theme: egui::ThemePreference) {
+        self.perform(ctx, Action::SetTheme(theme));
+    }
+
+    pub fn set_accent(&mut self, ctx: &egui::Context, accent: Accent) {
+        self.perform(ctx, Action::SetAccent(accent));
+    }
+
+    pub fn submit_typed(&mut self, code: &str) {
         if let EngineState::Ready(engine) = &mut self.engine {
             if let Err(e) = engine.submit(Source::Typed, code) {
                 self.message = Some(e.to_string());
