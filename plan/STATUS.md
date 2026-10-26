@@ -176,11 +176,16 @@ exist on branch `p0/scaffold`.
 - Drawing uses `wgpu` first and OpenGL as the fallback. On this machine
   neither opens (OpenGL 2.0 not available; `wgpu` finds no adapter), in the
   user's own terminal as well as mine, and StatCraft's window fails the same
-  way, although the machine has a Radeon RX 570. So the window has not been
-  seen running; its logic is covered by 13 unit tests and the engine tests.
-  Open question: is this a remote or restricted session? A screenshot hook
-  (`RCRAFT_SCREENSHOT`, `RCRAFT_DEMO_FILE`, see `crates/ui-egui/src/shot.rs`)
-  will produce a picture on any machine where the window opens.
+  way. Cause found: Windows reports the Radeon RX 570 with device error
+  Code 31 (its graphics driver does not load; the driver is dated 2023-03-29
+  on Windows build 26300), so only Microsoft's basic display adapter is in
+  use. Not a remote session. A reboot or a newer AMD driver should fix it;
+  the user did not want to reboot yet, and Win+Ctrl+Shift+B did not help.
+- So the window can be seen without a GPU:
+  `rcraft-desktop --picture FILE.png [--demo FILE] [--dark] [--accent NAME]`
+  draws the real window to a PNG on the CPU (`softraster.rs`, `headless.rs`),
+  with a live R session. Layout B was checked this way, light and dark.
+  A live window that uses the same software drawing is the next step.
 - Building on this Windows machine: the Rust toolchain is the GNU one and the
   newer `windows-sys` crates need `dlltool` and `as`, which are not
   installed. `Cargo.lock` was seeded from StatCraft's, and the build worked
