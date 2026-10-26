@@ -1,0 +1,19 @@
+[package]
+name = "rcraft-catalog"
+description = "The catalog of menu entries and their coverage status."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.rcraft]
+layer = 4
+
+[dependencies]
+rcraft-core.workspace = true
+rcraft-rcodegen.workspace = true
+
+[lints]
+workspace = true

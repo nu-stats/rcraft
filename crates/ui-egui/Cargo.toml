@@ -1,0 +1,19 @@
+[package]
+name = "rcraft-ui-egui"
+description = "The desktop interface panes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.rcraft]
+layer = 6
+
+[dependencies]
+rcraft-core.workspace = true
+rcraft-engine.workspace = true
+
+[lints]
+workspace = true

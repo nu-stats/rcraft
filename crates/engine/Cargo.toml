@@ -1,0 +1,25 @@
+[package]
+name = "rcraft-engine"
+description = "Session state, history, log and the link between catalog and R."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.rcraft]
+layer = 5
+
+[dependencies]
+rcraft-core.workspace = true
+rcraft-rproto.workspace = true
+rcraft-rhost.workspace = true
+rcraft-rdata.workspace = true
+rcraft-rcodegen.workspace = true
+rcraft-rgraph.workspace = true
+rcraft-report.workspace = true
+rcraft-catalog.workspace = true
+
+[lints]
+workspace = true

@@ -1,0 +1,17 @@
+[package]
+name = "rcraft-core"
+description = "Shared types, limits and error values."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.rcraft]
+layer = 0
+
+[dependencies]
+
+[lints]
+workspace = true

@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/core",
+    "crates/rproto",
+    "crates/rhost",
+    "crates/rdata",
+    "crates/rcodegen",
+    "crates/rgraph",
+    "crates/report",
+    "crates/catalog",
+    "crates/engine",
+    "crates/ui-egui",
+    "apps/rcraft-cli",
+    "xtask",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/nu-stats/rcraft"
+authors = ["RCraft contributors"]
+
+[workspace.dependencies]
+rcraft-core = { path = "crates/core" }
+rcraft-rproto = { path = "crates/rproto" }
+rcraft-rhost = { path = "crates/rhost" }
+rcraft-rdata = { path = "crates/rdata" }
+rcraft-rcodegen = { path = "crates/rcodegen" }
+rcraft-rgraph = { path = "crates/rgraph" }
+rcraft-report = { path = "crates/report" }
+rcraft-catalog = { path = "crates/catalog" }
+rcraft-engine = { path = "crates/engine" }
+rcraft-ui-egui = { path = "crates/ui-egui" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+indexing_slicing = "warn"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1

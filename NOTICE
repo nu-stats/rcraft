@@ -1,0 +1,11 @@
+RCraft
+Copyright (c) 2026 RCraft contributors
+
+Licensed under either of the Apache License, Version 2.0 (LICENSE-APACHE)
+or the MIT license (LICENSE-MIT), at your option.
+
+RCraft is an independent project. It is not affiliated with, endorsed by or
+sponsored by the R Foundation, Posit PBC or the Comprehensive R Archive
+Network. R is a separate program under its own licence (GPL); RCraft runs it
+as a separate process and does not link or modify it. "R" is the name of the
+language and is used only to describe what RCraft works with.

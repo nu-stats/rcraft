@@ -1,0 +1,19 @@
+[package]
+name = "rcraft-rdata"
+description = "Moves data frames between R and RCraft without copying whole tables."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.rcraft]
+layer = 2
+
+[dependencies]
+rcraft-core.workspace = true
+rcraft-rproto.workspace = true
+
+[lints]
+workspace = true

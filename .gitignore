@@ -1,0 +1,15 @@
+/target/
+/target-*/
+**/*.rs.bk
+
+# R session leftovers
+.Rhistory
+.RData
+.Rproj.user/
+/rlib/
+
+# Local editor and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

@@ -1,0 +1,5 @@
+# The R environment the tests run against (AGENTS.md section 5).
+# Changing a pin is its own commit. Values are placeholders until P0.5/P0.6
+# record the exact versions from the first CI run.
+R_VERSION=unpinned
+PACKAGE_SNAPSHOT=unpinned

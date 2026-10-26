@@ -1,0 +1,18 @@
+[package]
+name = "rcraft-rproto"
+description = "Session protocol to R: request, result, stream, interrupt."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.rcraft]
+layer = 1
+
+[dependencies]
+rcraft-core.workspace = true
+
+[lints]
+workspace = true
