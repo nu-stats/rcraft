@@ -61,11 +61,12 @@ exist on branch `p0/scaffold`.
 
 ## Not done
 
-- Nothing pushed yet: the GitHub repo `nu-stats/rcraft` was not found when
-  pushing (private repo without sign-in, or a different URL), so CI has not
-  run. Waiting on the exact URL and a git sign-in.
-- Untested on this machine: the Unix interrupt (SIGINT) and `ps` memory
-  paths, and the pinned-R CI step with the package snapshot date.
+- CI (GitHub Actions, run on `p0/scaffold`): the first run failed on Ubuntu
+  only; the cause was real, standard error text could arrive after the
+  end-of-run frame and be dropped. R now sends a SYNC frame on standard
+  error before END and a run finishes only when both are in. The second run
+  passed on Ubuntu, Windows and macOS, so the Unix interrupt, the `ps`
+  memory check and the pinned-R step all work.
 
 ## Phase 2 so far, 2026-10-26
 
@@ -161,3 +162,28 @@ exist on branch `p0/scaffold`.
 - Commit the scaffold (P0.1 to P0.4, P0.6)
 - P0.5 pin R and the package snapshot
 - P1.1 find an installed R
+
+## Desktop window, 2026-10-26
+
+- Layout B (Workbench) is built in egui (`crates/ui-egui`, app in
+  `apps/rcraft-desktop`): menu bar, Variables over History on the left,
+  Script above Results, Command line with Run and Stop, and a status bar.
+  Page Up/Down and the arrows recall earlier commands, clicking a History
+  entry puts it back, Ctrl+Enter in the Script runs the selection or the
+  current line. Accents (7, Teal default) and light/dark are under Edit.
+  Variables and the Data, Statistics, Graphs, Packages menus are
+  placeholders until those phases.
+- Drawing uses `wgpu` first and OpenGL as the fallback. On this machine
+  neither opens (OpenGL 2.0 not available; `wgpu` finds no adapter), in the
+  user's own terminal as well as mine, and StatCraft's window fails the same
+  way, although the machine has a Radeon RX 570. So the window has not been
+  seen running; its logic is covered by 13 unit tests and the engine tests.
+  Open question: is this a remote or restricted session? A screenshot hook
+  (`RCRAFT_SCREENSHOT`, `RCRAFT_DEMO_FILE`, see `crates/ui-egui/src/shot.rs`)
+  will produce a picture on any machine where the window opens.
+- Building on this Windows machine: the Rust toolchain is the GNU one and the
+  newer `windows-sys` crates need `dlltool` and `as`, which are not
+  installed. `Cargo.lock` was seeded from StatCraft's, and the build worked
+  with the MinGW binutils from the Husky Eye View R environment appended to
+  `PATH` (`...\envs\hev-r\Library\x86_64-w64-mingw32\bin` and `...\Library\bin`).
+  Installing MinGW (or the Visual Studio build tools) would be cleaner.

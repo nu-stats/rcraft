@@ -12,6 +12,7 @@ members = [
     "crates/engine",
     "crates/ui-egui",
     "apps/rcraft-cli",
+    "apps/rcraft-desktop",
     "xtask",
 ]
 
