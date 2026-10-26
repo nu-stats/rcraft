@@ -15,6 +15,32 @@ exist on branch `p0/scaffold`.
 - P0.4 Coverage inventory (`crates/catalog`, `docs/coverage.md`)
 - P0.6 CI workflow for Windows, macOS and Linux (not yet run: no remote)
 
+## P1.3 and P1.4 (R session), 2026-10-26
+
+- `rproto`: the wire format (requests, tab-separated frames led by a random
+  per-session token, escaping), and the R loop it talks to
+  (`crates/rproto/src/bootstrap.R`). 8 unit tests.
+- `rhost::Session`: starts R, `run`, streamed `Event`s (output, warnings,
+  errors, finished, exited), `interrupt`, `restart`, `run_to_end`. Output is
+  capped per run and the channel is bounded. 16 tests start a real R (skipped
+  with a note when none is installed) and pass here against R 4.4.3: state
+  persists, errors and parse errors, warnings versus messages, unicode, long
+  lines, huge output, crash then restart. No R processes were left behind.
+- `rcraft --eval "R code"` runs code through a session.
+- Interrupt: on Unix it sends SIGINT (`kill -INT`); that path is written but
+  untested here (this machine is Windows), so CI on Linux and macOS is its
+  first check. On Windows there is no way to signal R without `unsafe`, which
+  is forbidden, so interrupt stops the session and the caller restarts it;
+  the objects in memory are lost. Windows is tested and works that way.
+  Better ideas to weigh later: keep a checkpoint of the workspace so a stop
+  can restore it, or a vetted safe wrapper for console control events.
+- Output is line-buffered by R when piped, so progress text can arrive late
+  unless the code calls `flush.console()`.
+- Standard output and standard error are read on separate threads, so their
+  relative order is approximate.
+- P1.4 (supervision) is covered for crash, stop and restart. Hang and
+  out-of-memory handling need a watchdog and memory limit; not done.
+
 ## Not done
 
 - P0.5 `ENVIRONMENT` still holds placeholders; pin R and the package
@@ -71,8 +97,10 @@ exist on branch `p0/scaffold`.
 
 ## Open questions
 
-- None blocking. Next: P1.2 (download a portable R when none is found),
-  P1.3 (the R session process).
+- Windows interrupt (see P1.3 above): accept stop-and-restart, or build a
+  checkpoint so a stop does not lose the workspace?
+- Next: P1.4 watchdog and memory limit, P1.2 (download a portable R when
+  none is found), then Phase 2 (Command window and Results).
 
 - Stata mode: share StatCraft's parser (`lang` crate) or write a new one?
   Proposed: start from StatCraft's if its licence and layering allow.
