@@ -16,7 +16,7 @@
 //! random per session, so printed output cannot be mistaken for a frame.
 //!
 //! ```text
-//! <token>\tREADY\t<R version string>
+//! <token>\tREADY\t<R version string>\t<R's process id>
 //! <token>\tBEGIN\t<id>
 //! <token>\tWARN\t<id>\t<message>
 //! <token>\tERROR\t<id>\t<message>\t<call>
@@ -56,6 +56,9 @@ pub enum Status {
 pub enum Frame {
     Ready {
         r_version: String,
+        /// R's own process id (on Windows `Rscript` starts R as a child, so
+        /// this differs from the id of the process RCraft started).
+        pid: u32,
     },
     Begin {
         run: RunId,
@@ -175,6 +178,7 @@ fn parse_fields(rest: &str) -> Result<Frame, ProtoError> {
     match kind {
         "READY" => Ok(Frame::Ready {
             r_version: unescape(next("version")?),
+            pid: next("pid")?.parse().map_err(|_| bad("bad process id"))?,
         }),
         "BEGIN" => Ok(Frame::Begin {
             run: run(next("run id")?)?,
@@ -241,9 +245,10 @@ mod tests {
     fn parses_frames() {
         let line = |s: &str| format!("{T}\t{s}\n");
         assert_eq!(
-            parse_frame(T, &line("READY\tR version 4.4.3")),
+            parse_frame(T, &line("READY\tR version 4.4.3\t4242")),
             Some(Ok(Frame::Ready {
-                r_version: "R version 4.4.3".into()
+                r_version: "R version 4.4.3".into(),
+                pid: 4242
             }))
         );
         assert_eq!(
@@ -289,6 +294,8 @@ mod tests {
         for body in [
             "",
             "NOPE",
+            "READY\tR version 4.4.3",
+            "READY\tR version 4.4.3\tx",
             "BEGIN",
             "BEGIN\tx",
             "END\t1",

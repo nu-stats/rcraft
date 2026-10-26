@@ -4,7 +4,8 @@
 use std::time::Duration;
 
 use rcraft_rhost::{
-    find_installs, Env, Event, InterruptOutcome, RunStatus, Session, SessionConfig, SessionError,
+    find_installs, Env, Event, InterruptOutcome, Limit, RunStatus, Session, SessionConfig,
+    SessionError,
 };
 
 const LIMIT: Duration = Duration::from_secs(60);
@@ -216,6 +217,62 @@ fn a_crash_is_reported_and_the_session_can_restart() {
     assert_eq!(out.status, RunStatus::Crashed);
     assert!(!s.is_running());
     assert_eq!(s.run("1"), Err(SessionError::NotRunning));
+    s.restart().expect("restart");
+    let again = s.run_to_end("1 + 1", LIMIT).expect("run");
+    assert_eq!(again.stdout.trim(), "[1] 2");
+}
+
+fn session_with(set: impl FnOnce(&mut SessionConfig)) -> Option<Session> {
+    let install = find_installs(&Env::from_process())
+        .into_iter()
+        .find(|i| i.is_supported())?;
+    let mut config = SessionConfig::new(install);
+    set(&mut config);
+    Session::start(config).ok()
+}
+
+#[test]
+fn r_reports_its_own_process_id() {
+    let Some(mut s) = session() else { return };
+    assert!(s.r_pid() > 0);
+    let out = s.run_to_end("Sys.getpid()", LIMIT).expect("run");
+    assert_eq!(out.stdout.trim(), format!("[1] {}", s.r_pid()));
+}
+
+#[test]
+fn a_run_over_the_time_limit_is_stopped() {
+    let Some(mut s) = session_with(|c| c.max_run_time = Some(Duration::from_secs(1))) else {
+        return;
+    };
+    let started = std::time::Instant::now();
+    let out = s.run_to_end("Sys.sleep(120)", LIMIT).expect("run");
+    assert_eq!(out.limit, Some(Limit::Time));
+    assert_eq!(out.status, RunStatus::Interrupted);
+    assert!(started.elapsed() < Duration::from_secs(30));
+}
+
+#[test]
+fn a_run_under_the_time_limit_is_left_alone() {
+    let Some(mut s) = session_with(|c| c.max_run_time = Some(Duration::from_secs(30))) else {
+        return;
+    };
+    let out = s.run_to_end("1 + 1", LIMIT).expect("run");
+    assert_eq!(out.limit, None);
+    assert_eq!(out.status, RunStatus::Ok);
+}
+
+#[test]
+fn a_run_over_the_memory_limit_is_stopped() {
+    let Some(mut s) = session_with(|c| c.max_memory_bytes = Some(300 * 1024 * 1024)) else {
+        return;
+    };
+    let out = s
+        .run_to_end("x <- numeric(8e7); x[] <- 1; Sys.sleep(120)", LIMIT)
+        .expect("run");
+    assert_eq!(out.limit, Some(Limit::Memory));
+    assert_eq!(out.status, RunStatus::Interrupted);
+    assert!(!s.is_running());
+    // the session can be restarted afterwards
     s.restart().expect("restart");
     let again = s.run_to_end("1 + 1", LIMIT).expect("run");
     assert_eq!(again.stdout.trim(), "[1] 2");

@@ -36,6 +36,7 @@ use rcraft_rproto::{
 };
 
 use crate::find::RInstall;
+use crate::procinfo;
 
 /// Longest chunk read from R in one piece when it prints no newline.
 const MAX_CHUNK_BYTES: u64 = 64 * 1024;
@@ -61,6 +62,16 @@ pub enum RunStatus {
     Crashed,
 }
 
+/// Which limit a run went over.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Limit {
+    /// It ran longer than `max_run_time`: interrupted.
+    Time,
+    /// R used more than `max_memory_bytes`: stopped, because a process that
+    /// is out of memory may not answer an interrupt. Restart to go on.
+    Memory,
+}
+
 /// Something that happened in the session.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -84,6 +95,12 @@ pub enum Event {
     /// The run printed more than the cap; later output of this run is dropped.
     Truncated {
         run: RunId,
+    },
+    /// The run went over a limit from the settings, and RCraft is stopping it.
+    /// A `Finished` event follows.
+    LimitReached {
+        run: RunId,
+        limit: Limit,
     },
     Finished {
         run: RunId,
@@ -148,6 +165,11 @@ pub struct SessionConfig {
     pub startup_timeout: Duration,
     /// Per run, across both streams.
     pub max_output_bytes: usize,
+    /// A run longer than this is interrupted (`Limit::Time`). `None`: no limit.
+    pub max_run_time: Option<Duration>,
+    /// R using more than this many bytes is stopped (`Limit::Memory`).
+    /// Checked every couple of seconds while a run is going. `None`: no limit.
+    pub max_memory_bytes: Option<u64>,
 }
 
 impl SessionConfig {
@@ -157,9 +179,18 @@ impl SessionConfig {
             working_dir: None,
             startup_timeout: Duration::from_secs(60),
             max_output_bytes: 16 * 1024 * 1024,
+            max_run_time: None,
+            max_memory_bytes: None,
         }
     }
 }
+
+/// How often the limits are looked at while a caller waits for events.
+const POLL_INTERVAL: Duration = Duration::from_millis(200);
+/// How long an interrupted run may carry on before R is stopped outright.
+const ESCALATE_AFTER: Duration = Duration::from_secs(10);
+/// How often R's memory is read (each read starts a system tool).
+const MEMORY_CHECK_INTERVAL: Duration = Duration::from_secs(2);
 
 /// What the reader threads send.
 enum Raw {
@@ -172,6 +203,9 @@ struct RunState {
     id: RunId,
     bytes: usize,
     truncated: bool,
+    started: Instant,
+    last_memory_check: Instant,
+    limit_hit: Option<Instant>,
 }
 
 pub struct Session {
@@ -188,6 +222,7 @@ pub struct Session {
     exited: bool,
     stderr_tail: String,
     r_version: String,
+    r_pid: u32,
     script_dir: PathBuf,
 }
 
@@ -256,6 +291,7 @@ impl Session {
             exited: false,
             stderr_tail: String::new(),
             r_version: String::new(),
+            r_pid: 0,
             script_dir,
         };
         session.wait_until_ready()?;
@@ -292,10 +328,14 @@ impl Session {
             .and_then(|()| stdin.flush())
             .map_err(|e| SessionError::Io(e.to_string()))?;
         self.next_id += 1;
+        let now = Instant::now();
         self.current = Some(RunState {
             id,
             bytes: 0,
             truncated: false,
+            started: now,
+            last_memory_check: now,
+            limit_hit: None,
         });
         self.current_id.store(id, Ordering::SeqCst);
         Ok(id)
@@ -309,10 +349,19 @@ impl Session {
             if let Some(event) = self.pending.pop_front() {
                 return Some(event);
             }
+            self.check_limits();
+            if !self.pending.is_empty() {
+                continue;
+            }
             let left = deadline.saturating_duration_since(Instant::now());
-            match self.raw.recv_timeout(left) {
+            // wake regularly so the limits are looked at even when R is silent
+            match self.raw.recv_timeout(left.min(POLL_INTERVAL)) {
                 Ok(raw) => self.handle(raw),
-                Err(RecvTimeoutError::Timeout) => return None,
+                Err(RecvTimeoutError::Timeout) => {
+                    if Instant::now() >= deadline {
+                        return None;
+                    }
+                }
                 Err(RecvTimeoutError::Disconnected) => {
                     self.finish_exit();
                     return self.pending.pop_front();
@@ -321,17 +370,82 @@ impl Session {
         }
     }
 
+    /// Looks at the time and memory limits for the run in progress.
+    fn check_limits(&mut self) {
+        // A run that was interrupted but is still going (R can be deep in
+        // code that does not look for interrupts) is stopped after a while.
+        if let Some(at) = self.current.as_ref().and_then(|s| s.limit_hit) {
+            if at.elapsed() > ESCALATE_AFTER && !self.stopped_by_us && !self.exited {
+                self.stop_now();
+            }
+            return;
+        }
+        let (run, over_time, check_memory) = match self.current.as_ref() {
+            Some(state) if state.limit_hit.is_none() && !self.exited => (
+                state.id,
+                self.config
+                    .max_run_time
+                    .is_some_and(|max| state.started.elapsed() > max),
+                self.config.max_memory_bytes.is_some()
+                    && state.last_memory_check.elapsed() >= MEMORY_CHECK_INTERVAL,
+            ),
+            _ => return,
+        };
+        if over_time {
+            self.mark_limit_hit();
+            self.pending.push_back(Event::LimitReached {
+                run,
+                limit: Limit::Time,
+            });
+            self.interrupt();
+            return;
+        }
+        if check_memory {
+            if let Some(state) = self.current.as_mut() {
+                state.last_memory_check = Instant::now();
+            }
+            let used = procinfo::memory_bytes(self.r_pid);
+            if let (Some(used), Some(max)) = (used, self.config.max_memory_bytes) {
+                if used > max {
+                    self.mark_limit_hit();
+                    self.pending.push_back(Event::LimitReached {
+                        run,
+                        limit: Limit::Memory,
+                    });
+                    self.stop_now();
+                }
+            }
+        }
+    }
+
+    fn mark_limit_hit(&mut self) {
+        if let Some(state) = self.current.as_mut() {
+            state.limit_hit = Some(Instant::now());
+        }
+    }
+
+    /// Kills R now and remembers that RCraft did it, so the run in progress
+    /// is reported as interrupted rather than crashed.
+    fn stop_now(&mut self) {
+        self.stopped_by_us = true;
+        kill_tree(&mut self.child);
+    }
+
     /// Stops the current run. See [`InterruptOutcome`].
     pub fn interrupt(&mut self) -> InterruptOutcome {
         if self.current.is_none() || self.exited {
             return InterruptOutcome::Idle;
         }
-        if send_interrupt(self.child.id()) {
+        if send_interrupt(self.r_pid) {
             return InterruptOutcome::Signalled;
         }
-        self.stopped_by_us = true;
-        kill_tree(&mut self.child);
+        self.stop_now();
         InterruptOutcome::SessionStopped
+    }
+
+    /// R's own process id.
+    pub fn r_pid(&self) -> u32 {
+        self.r_pid
     }
 
     /// Ends this R and starts a fresh one with the same settings. Objects in
@@ -373,6 +487,7 @@ impl Session {
                     out.error = Some(RError { message, call });
                 }
                 Event::Truncated { run } if run == id => out.truncated = true,
+                Event::LimitReached { run, limit } if run == id => out.limit = Some(limit),
                 Event::Finished { run, status } if run == id => {
                     out.status = status;
                     return Ok(out);
@@ -387,7 +502,8 @@ impl Session {
         loop {
             let left = deadline.saturating_duration_since(Instant::now());
             match self.raw.recv_timeout(left) {
-                Ok(Raw::Frame(Frame::Ready { r_version })) => {
+                Ok(Raw::Frame(Frame::Ready { r_version, pid })) => {
+                    self.r_pid = pid;
                     self.r_version = r_version;
                     return Ok(());
                 }
@@ -525,6 +641,8 @@ pub struct RunOutput {
     pub warnings: Vec<String>,
     pub error: Option<RError>,
     pub truncated: bool,
+    /// Set when the run went over a limit from the settings.
+    pub limit: Option<Limit>,
 }
 
 impl Default for RunOutput {
@@ -536,6 +654,7 @@ impl Default for RunOutput {
             warnings: Vec::new(),
             error: None,
             truncated: false,
+            limit: None,
         }
     }
 }
@@ -607,6 +726,10 @@ fn read_chunks(source: impl Read, mut f: impl FnMut(String) -> bool) {
 
 #[cfg(unix)]
 fn send_interrupt(pid: u32) -> bool {
+    // `kill -INT 0` would signal a whole process group
+    if pid == 0 {
+        return false;
+    }
     Command::new("kill")
         .args(["-INT", &pid.to_string()])
         .stdin(Stdio::null())

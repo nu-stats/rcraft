@@ -52,7 +52,7 @@ local({
     emit("END", id, status)
   }
 
-  emit("READY", R.version.string)
+  emit("READY", R.version.string, Sys.getpid())
   done <- FALSE
   while (!done) {
     tryCatch(

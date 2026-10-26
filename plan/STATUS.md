@@ -38,8 +38,26 @@ exist on branch `p0/scaffold`.
   unless the code calls `flush.console()`.
 - Standard output and standard error are read on separate threads, so their
   relative order is approximate.
-- P1.4 (supervision) is covered for crash, stop and restart. Hang and
-  out-of-memory handling need a watchdog and memory limit; not done.
+- Windows interrupt: decided 2026-10-26 to keep stop-and-restart for now.
+
+## P1.4 supervision, 2026-10-26
+
+- R reports its own process id in the READY frame. On Windows `Rscript`
+  starts R as a child, so this is the id to measure and signal.
+- `SessionConfig::max_run_time`: a run over it is interrupted
+  (`Event::LimitReached`, `Limit::Time`); if R is still going 10 seconds
+  later (code that never checks for interrupts) it is stopped outright.
+- `SessionConfig::max_memory_bytes`: R's memory is read every 2 seconds
+  during a run with `tasklist` (Windows) or `ps` (elsewhere), so there is no
+  `unsafe` code; over the limit R is stopped (`Limit::Memory`) because a
+  process out of memory may not answer an interrupt. Restart to go on.
+- Both limits are off by default; the interface will set them.
+- Tested against R 4.4.3 here: the time limit, the memory limit (a 640 MB
+  vector against a 300 MB limit) and restart afterwards. The `ps` path is
+  covered only by its parser tests, since this is a Windows machine; CI on
+  Linux and macOS runs the real thing.
+- Not covered: a hung R that is idle (not in a run) and does not answer. The
+  time limit covers hung runs only.
 
 ## Not done
 
@@ -97,7 +115,7 @@ exist on branch `p0/scaffold`.
 
 ## Open questions
 
-- Windows interrupt (see P1.3 above): accept stop-and-restart, or build a
+- (Decided: Windows interrupt stays stop-and-restart; see P1.4 above.) Was: a
   checkpoint so a stop does not lose the workspace?
 - Next: P1.4 watchdog and memory limit, P1.2 (download a portable R when
   none is found), then Phase 2 (Command window and Results).
