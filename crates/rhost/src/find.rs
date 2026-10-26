@@ -103,6 +103,36 @@ pub fn parse_version_output(output: &str) -> Option<RVersion> {
 pub struct RInstall {
     pub rscript: PathBuf,
     pub version: RVersion,
+    /// Folders to put at the front of `PATH` when running this R. Empty for
+    /// ordinary installs; a conda environment needs its own `bin` folders
+    /// (without them R fails to start with a missing-DLL error on Windows).
+    pub path_prepend: Vec<PathBuf>,
+}
+
+/// The conda environment folder that holds `rscript`, if it is in one: the
+/// nearest parent (within a few levels) that has a `conda-meta` folder.
+pub fn conda_env_root(rscript: &Path, has_conda_meta: &dyn Fn(&Path) -> bool) -> Option<PathBuf> {
+    rscript
+        .ancestors()
+        .skip(1)
+        .take(6)
+        .find(|dir| has_conda_meta(&dir.join("conda-meta")))
+        .map(Path::to_path_buf)
+}
+
+/// What `conda activate` would add to `PATH` for an environment.
+pub fn conda_path_prepend(platform: Platform, root: &Path) -> Vec<PathBuf> {
+    match platform {
+        Platform::Windows => vec![
+            root.to_path_buf(),
+            root.join("Library").join("mingw-w64").join("bin"),
+            root.join("Library").join("usr").join("bin"),
+            root.join("Library").join("bin"),
+            root.join("Scripts"),
+            root.join("bin"),
+        ],
+        _ => vec![root.join("bin")],
+    }
 }
 
 impl RInstall {
@@ -138,6 +168,8 @@ pub struct Env {
     pub program_files: Vec<PathBuf>,
     pub local_app_data: Option<PathBuf>,
     pub home: Option<PathBuf>,
+    /// Conda or mamba installs (a base folder with an `envs` folder inside).
+    pub conda_roots: Vec<PathBuf>,
 }
 
 impl Env {
@@ -158,6 +190,7 @@ impl Env {
             home: var("HOME")
                 .or_else(|| var("USERPROFILE"))
                 .map(PathBuf::from),
+            conda_roots: conda_roots_from_process(&var),
         }
     }
 
@@ -166,9 +199,56 @@ impl Env {
     }
 }
 
+/// Conda-style installs: the active environment (`CONDA_PREFIX`), the
+/// folders in `RCRAFT_CONDA_ROOTS` (a path list, for installs kept anywhere,
+/// such as inside another app), and the usual home-folder names.
+fn conda_roots_from_process(var: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Some(prefix) = var("CONDA_PREFIX") {
+        roots.push(PathBuf::from(prefix));
+    }
+    if let Some(list) = var("RCRAFT_CONDA_ROOTS") {
+        roots.extend(std::env::split_paths(&list));
+    }
+    if let Some(home) = var("HOME").or_else(|| var("USERPROFILE")) {
+        let home = PathBuf::from(home);
+        for name in [
+            "miniforge3",
+            "miniconda3",
+            "anaconda3",
+            "mambaforge",
+            "micromamba",
+        ] {
+            roots.push(home.join(name));
+        }
+    }
+    roots
+}
+
+/// Where Rscript sits inside a conda environment folder, first choice first.
+fn conda_layouts(platform: Platform, dir: &Path) -> Vec<PathBuf> {
+    let name = platform.rscript_name();
+    match platform {
+        Platform::Windows => vec![
+            dir.join("Lib").join("R").join("bin").join(name),
+            dir.join("Scripts").join(name),
+            dir.join("bin").join(name),
+        ],
+        _ => vec![
+            dir.join("lib").join("R").join("bin").join(name),
+            dir.join("bin").join(name),
+        ],
+    }
+}
+
 /// Where to look, most specific first, without duplicates. `list_dirs`
-/// returns the sub-folders of a folder (empty when it does not exist).
-pub fn candidates(env: &Env, list_dirs: &dyn Fn(&Path) -> Vec<PathBuf>) -> Vec<PathBuf> {
+/// returns the sub-folders of a folder (empty when it does not exist);
+/// `is_file` says whether a file exists.
+pub fn candidates(
+    env: &Env,
+    list_dirs: &dyn Fn(&Path) -> Vec<PathBuf>,
+    is_file: &dyn Fn(&Path) -> bool,
+) -> Vec<PathBuf> {
     let platform = env.platform();
     let name = platform.rscript_name();
     let mut out: Vec<PathBuf> = Vec::new();
@@ -214,6 +294,26 @@ pub fn candidates(env: &Env, list_dirs: &dyn Fn(&Path) -> Vec<PathBuf>) -> Vec<P
         }
     }
 
+    // Conda environments: the base folder and each folder in its `envs`.
+    // One Rscript per environment, the first layout that exists, so a
+    // environment is not listed twice.
+    for root in &env.conda_roots {
+        let mut dirs = vec![root.clone()];
+        dirs.extend(
+            list_dirs(&root.join("envs"))
+                .into_iter()
+                .take(MAX_DIR_ENTRIES),
+        );
+        for dir in dirs {
+            if let Some(found) = conda_layouts(platform, &dir)
+                .into_iter()
+                .find(|p| is_file(p))
+            {
+                out.push(found);
+            }
+        }
+    }
+
     // Fixed places for the system's own R and Homebrew.
     match platform {
         Platform::Windows => {}
@@ -243,7 +343,21 @@ pub fn probe(rscript: &Path) -> Result<RInstall, ProbeError> {
     if !rscript.is_file() {
         return Err(ProbeError::NotRunnable("no such file".into()));
     }
-    let mut child = Command::new(rscript)
+    let path_prepend = conda_env_root(rscript, &|p| p.is_dir())
+        .map(|root| conda_path_prepend(Platform::current(), &root))
+        .unwrap_or_default();
+    let mut command = Command::new(rscript);
+    if !path_prepend.is_empty() {
+        let existing = std::env::var_os("PATH").unwrap_or_default();
+        let parts = path_prepend
+            .iter()
+            .cloned()
+            .chain(std::env::split_paths(&existing));
+        if let Ok(joined) = std::env::join_paths(parts) {
+            command.env("PATH", joined);
+        }
+    }
+    let mut child = command
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -279,6 +393,7 @@ pub fn probe(rscript: &Path) -> Result<RInstall, ProbeError> {
     Ok(RInstall {
         rscript: rscript.to_path_buf(),
         version,
+        path_prepend,
     })
 }
 
@@ -310,7 +425,7 @@ fn list_dirs_on_disk(dir: &Path) -> Vec<PathBuf> {
 pub fn find_installs(env: &Env) -> Vec<RInstall> {
     let mut seen = HashSet::new();
     let mut found: Vec<RInstall> = Vec::new();
-    for path in candidates(env, &list_dirs_on_disk) {
+    for path in candidates(env, &list_dirs_on_disk, &|p| p.is_file()) {
         if !path.is_file() {
             continue;
         }
@@ -380,6 +495,7 @@ mod tests {
             program_files: vec![PathBuf::from("C:/Program Files")],
             local_app_data: Some(PathBuf::from("C:/Users/a/AppData/Local")),
             home: None,
+            conda_roots: Vec::new(),
         };
         let list = |dir: &Path| {
             if dir == Path::new("C:/Program Files/R") {
@@ -388,7 +504,7 @@ mod tests {
                 Vec::new()
             }
         };
-        let got = candidates(&env, &list);
+        let got = candidates(&env, &list, &|_| false);
         assert_eq!(
             got.first(),
             Some(&PathBuf::from("C:/rhome/bin/Rscript.exe"))
@@ -415,7 +531,7 @@ mod tests {
                 Vec::new()
             }
         };
-        let got = candidates(&mac, &list);
+        let got = candidates(&mac, &list, &|_| false);
         assert!(got.contains(&PathBuf::from(
             "/Library/Frameworks/R.framework/Versions/4.4-arm64/Resources/bin/Rscript"
         )));
@@ -433,9 +549,63 @@ mod tests {
                 Vec::new()
             }
         };
-        let got = candidates(&linux, &list);
+        let got = candidates(&linux, &list, &|_| false);
         assert!(got.contains(&PathBuf::from("/opt/R/4.3.2/bin/Rscript")));
         assert!(got.contains(&PathBuf::from("/usr/bin/Rscript")));
+    }
+
+    #[test]
+    fn conda_environments_give_one_candidate_each() {
+        let env = Env {
+            platform: Some(Platform::Windows),
+            conda_roots: vec![PathBuf::from("C:/conda")],
+            ..Env::default()
+        };
+        let list = |dir: &Path| {
+            if dir == Path::new("C:/conda/envs") {
+                vec![
+                    PathBuf::from("C:/conda/envs/stats"),
+                    PathBuf::from("C:/conda/envs/empty"),
+                ]
+            } else {
+                Vec::new()
+            }
+        };
+        // Both layouts exist in `stats`; only the second exists in `base`.
+        let is_file = |p: &Path| {
+            p == Path::new("C:/conda/envs/stats/Lib/R/bin/Rscript.exe")
+                || p == Path::new("C:/conda/envs/stats/Scripts/Rscript.exe")
+                || p == Path::new("C:/conda/Scripts/Rscript.exe")
+        };
+        let got = candidates(&env, &list, &is_file);
+        let stats = PathBuf::from("C:/conda/envs/stats/Lib/R/bin/Rscript.exe");
+        assert!(got.contains(&stats));
+        assert!(!got.contains(&PathBuf::from("C:/conda/envs/stats/Scripts/Rscript.exe")));
+        assert!(got.contains(&PathBuf::from("C:/conda/Scripts/Rscript.exe")));
+        assert!(!got.iter().any(|p| p.starts_with("C:/conda/envs/empty")));
+    }
+
+    #[test]
+    fn finds_the_conda_environment_of_an_rscript() {
+        let has_meta = |p: &Path| p == Path::new("C:/conda/envs/stats/conda-meta");
+        let rscript = Path::new("C:/conda/envs/stats/Lib/R/bin/Rscript.exe");
+        assert_eq!(
+            conda_env_root(rscript, &has_meta),
+            Some(PathBuf::from("C:/conda/envs/stats"))
+        );
+        let plain = Path::new("C:/Program Files/R/R-4.4.1/bin/Rscript.exe");
+        assert_eq!(conda_env_root(plain, &has_meta), None);
+    }
+
+    #[test]
+    fn conda_path_has_the_library_folders_on_windows() {
+        let root = Path::new("C:/conda/envs/stats");
+        let win = conda_path_prepend(Platform::Windows, root);
+        assert!(win.contains(&root.join("Library").join("bin")));
+        assert_eq!(
+            conda_path_prepend(Platform::Linux, root),
+            [root.join("bin")]
+        );
     }
 
     #[test]
@@ -445,7 +615,7 @@ mod tests {
             path: vec![PathBuf::from("/usr/bin"), PathBuf::from("/usr/bin")],
             ..Env::default()
         };
-        let got = candidates(&env, &no_dirs);
+        let got = candidates(&env, &no_dirs, &|_| false);
         let unique: HashSet<_> = got.iter().collect();
         assert_eq!(got.len(), unique.len());
     }
@@ -465,7 +635,7 @@ mod tests {
                 Vec::new()
             }
         };
-        assert!(candidates(&env, &list).len() < 1000);
+        assert!(candidates(&env, &list, &|_| false).len() < 1000);
     }
 
     #[test]
