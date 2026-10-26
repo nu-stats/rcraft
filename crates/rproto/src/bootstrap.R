@@ -45,6 +45,9 @@ local({
         status <<- "error"
         call <- conditionCall(e)
         text <- if (is.null(call)) "" else paste(deparse(call, nlines = 1L), collapse = " ")
+        # this loop's own calls are not the user's: a top-level stop() or a
+        # syntax error should read "Error: message", not name them
+        if (text %in% c("eval(e, globalenv())", "parse(text = code, keep.source = FALSE)")) text <- ""
         emit("ERROR", id, esc(conditionMessage(e)), esc(text))
       }
     )

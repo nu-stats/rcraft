@@ -1,4 +1,7 @@
-//! RCraft command-line app. For now: `--version` and `--find-r`.
+//! RCraft command-line app: with no arguments, the terminal console;
+//! also `--version`, `--find-r` and `--eval`.
+
+mod console;
 
 use std::time::Duration;
 
@@ -7,6 +10,7 @@ use rcraft_rhost::{find_installs, Env, RunStatus, Session, SessionConfig, MIN_VE
 fn main() {
     let arg = std::env::args().nth(1);
     match arg.as_deref() {
+        None => std::process::exit(console::run()),
         Some("--version") | Some("-V") => {
             println!("{} {}", rcraft_core::PRODUCT, rcraft_core::version());
         }
@@ -19,7 +23,7 @@ fn main() {
             }
         },
         _ => {
-            eprintln!("usage: rcraft --version | --find-r | --eval \"R code\"");
+            eprintln!("usage: rcraft | rcraft --version | --find-r | --eval \"R code\"");
             std::process::exit(2);
         }
     }

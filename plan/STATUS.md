@@ -61,12 +61,34 @@ exist on branch `p0/scaffold`.
 
 ## Not done
 
-- P0.5 `ENVIRONMENT` still holds placeholders; pin R and the package
-  snapshot once R is installed (R is not installed on this machine).
-- The `xtask` crate's own unit test (in `layers.rs`) is blocked on this
-  machine by a Windows Application Control policy (os error 4551), so
-  `cargo xtask ci` stops at the test step here. Every other check passes
-  when run on its own. It should run on CI.
+- Nothing pushed yet: the GitHub repo `nu-stats/rcraft` was not found when
+  pushing (private repo without sign-in, or a different URL), so CI has not
+  run. Waiting on the exact URL and a git sign-in.
+- Untested on this machine: the Unix interrupt (SIGINT) and `ps` memory
+  paths, and the pinned-R CI step with the package snapshot date.
+
+## Phase 2 so far, 2026-10-26
+
+- P2.1 history and recall: `engine::history` (`History`, `Recall`): the
+  commands run, the Page Up/Down and arrow stepping that returns to the
+  half-typed text, blank and repeated commands skipped, capped at 10,000.
+- P2.3 results: `engine::results`, one block per command, text joined,
+  errors, warnings and notices kept apart, capped at 64 MB.
+- P2.4 log and script: `engine::transcript`; the log (`> code`, output) can
+  also follow into a file; the script keeps only commands that ran without
+  error, with a comment naming menu entries.
+- `Engine` ties a session to these; `submit` and `poll` are all an interface
+  needs. 17 unit tests and 9 integration tests against real R pass.
+- `rcraft` with no arguments is a terminal console on the engine (one
+  command per line, `:history`, `:log`, `:script`, `:restart`, `:quit`).
+- Top-level errors read `Error: message`, not R's internal call.
+- Not done: P2.2 Tab completion, the egui window (Command, Results,
+  History panes), multi-line input (a line that is an unfinished R
+  statement should wait for more, not fail), the clicking of History
+  entries.
+- Windows Application Control sometimes blocks a freshly built test or app
+  binary (os error 4551); running it again a little later works. All checks,
+  including `cargo xtask ci`, now pass here.
 
 ## Decisions made
 
