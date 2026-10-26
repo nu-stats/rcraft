@@ -12,6 +12,7 @@ pub enum Area {
     Graphs,
     Reports,
     Packages,
+    Stata,
     Help,
 }
 
@@ -24,6 +25,7 @@ impl Area {
             Area::Graphs => "Graphs",
             Area::Reports => "Reports",
             Area::Packages => "Packages",
+            Area::Stata => "Stata mode",
             Area::Help => "Help",
         }
     }
@@ -88,6 +90,11 @@ pub const ENTRIES: &[Entry] = &[
     planned("Install package", Area::Packages),
     planned("Installed packages", Area::Packages),
     planned("Update packages", Area::Packages),
+    planned("Stata mode switch", Area::Stata),
+    planned("Translate Stata code", Area::Stata),
+    planned("Translate do-file", Area::Stata),
+    planned("Stata and R side by side", Area::Stata),
+    planned("Stata differences guide", Area::Stata),
     planned("Help topic", Area::Help),
     planned("Search help", Area::Help),
     planned("Vignettes", Area::Help),

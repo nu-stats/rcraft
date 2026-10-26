@@ -9,3 +9,7 @@ sponsored by the R Foundation, Posit PBC or the Comprehensive R Archive
 Network. R is a separate program under its own licence (GPL); RCraft runs it
 as a separate process and does not link or modify it. "R" is the name of the
 language and is used only to describe what RCraft works with.
+
+Stata is a registered trademark of StataCorp LLC. RCraft is not affiliated
+with, endorsed by or sponsored by StataCorp LLC; the name is used only to
+describe the Stata-code translation feature.

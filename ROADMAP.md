@@ -132,6 +132,82 @@ menu, `help topic` in the Command window, and F1 on a word or a dialog.
 - P2A.9 Tests: help rendering on made-up Rd pages built in code; search
   ranking; dialog pages checked for broken function links
 
+## Phase 2B: Stata mode (Stata code in, R code out, R runs)
+
+A **Stata mode** switch (a toggle on the Command window and the Script
+Editor, and a **Translate Stata** button) for people who know Stata. The user
+types or pastes Stata commands; RCraft translates them to R, shows the R it
+made beside the Stata, and runs it in the R session. The same translator
+reads whole do-files.
+
+What it is and is not:
+
+- It is a translator, not Stata. It aims at the same *meaning* (same
+  estimates, same rows kept, same variables made), written as readable R the
+  user can keep. It does not promise Stata's exact printed layout; the
+  Results window shows R's output, and a **Stata-style output** option for the
+  commonest commands (`summarize`, `regress`, `tabulate`) comes later.
+- Anything it cannot translate is marked, never guessed: the line is kept as a
+  comment, the reason is given, and the run stops or skips by the user's
+  choice. Silent wrong answers are the failure to avoid.
+- Related, separate project: StatCraft runs Stata code natively. Stata mode
+  here does not need StatCraft; the two may share a parser later (both are
+  our own permissively licensed code).
+
+Tasks:
+
+- P2B.1 Stata syntax reader (`statatr` crate, L3): commands with `if`,
+  `in`, `by:`, `[weight]`, `using`, options after the comma, abbreviations
+  (`reg`, `gen`, `sum`), local and global macros, comments and line
+  continuation (`///`), `foreach`, `forvalues`, `capture`, `quietly`. Never
+  crashes on bad input; reports line and column.
+- P2B.2 Expressions: Stata operators and functions to R (`==`, `&`, `|`,
+  `!`, `inrange`, `inlist`, `missing()`, string, date and math functions),
+  Stata missing values `.` and `.a`-`.z` mapped to `NA` (the extended
+  missings kept as an attribute where it matters), `_n` and `_N` inside
+  `by`, `[_n-1]` lags, and the rule that missing sorts high in comparisons.
+- P2B.3 Data commands: `use`, `save`, `import delimited`, `import excel`,
+  `generate`, `replace`, `drop`, `keep`, `rename`, `recode`, `label`,
+  `sort`, `gsort`, `egen`, `merge`, `append`, `reshape`, `collapse`,
+  `duplicates`, `encode`, `destring`, `tostring`, `order`, `describe`,
+  `list`, `count`, `set seed`. Variable and value labels kept as labelled
+  columns.
+- P2B.4 Statistics commands: `summarize`, `tabulate`, `correlate`, `ttest`,
+  `regress` (with `robust` and `cluster()`), `logit`, `probit`, `poisson`,
+  `nbreg`, `ologit`, `mlogit`, `anova`, `predict`, `test`, `lincom`,
+  `margins`, `estat`, `xtset`/`xtreg`, `ivregress`, `stset`/`stcox`. Each
+  maps to a chosen R function in a named package (for example `fixest`,
+  `sandwich`, `survival`) and the package is offered through Phase 1A when
+  missing.
+- P2B.5 Graph commands: `twoway`, `histogram`, `graph bar`, `scatter`,
+  `line`, `kdensity` to ggplot2.
+- P2B.6 Estimates and returned values: `e()`, `r()` and `_b[]`/`_se[]`
+  after a translated command, with `estimates store` and `esttab`/`outreg2`
+  style tables going to Phase 7.
+- P2B.7 The two-pane view: Stata on the left, generated R on the right,
+  line by line, with a mapping so a click on either highlights the other; a
+  note on each line that has a known difference from Stata.
+- P2B.8 Differences guide: a page per translated command listing where R
+  and Stata differ (default standard errors, degrees of freedom, how ties
+  and missing values are handled, sort stability, string widths, float
+  versus double). Linked from the note in P2B.7.
+- P2B.9 Do-file runner: translate and run a whole `.do` file, with a
+  dry-run report first (how many lines translate, which do not and why),
+  and **Save as R script** or **Save as Quarto** for the result.
+- P2B.10 Checked against Stata: a private corpus of made-up data and
+  recorded Stata results, the same method as StatCraft's observation kit, so
+  translated estimates are compared with Stata's to about 8 significant
+  digits. A command moves to `Verified` only when its translation matches.
+- P2B.11 Ado programs, Mata and `net`/`ssc` commands are out of scope for
+  the first release; `ssc install x` is translated to `rc install` (Phase
+  1A) when an R package of that name exists, and flagged otherwise.
+
+Rules (also in AGENTS.md section 1): translations are written from Stata's
+public documentation and from observing a licensed Stata with made-up data.
+Stata's program files are never read. Stata's own ado code, help files,
+datasets and wording are never copied. "Stata" is named only to describe
+compatibility, with the trademark notice in `NOTICE`.
+
 ## Phase 3: Data
 
 - P3.1 Data Editor and Browser, virtualised, for millions of rows, backed by

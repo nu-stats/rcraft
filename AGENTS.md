@@ -38,6 +38,18 @@ a hard process boundary.
   installed into the user's own library, under their authors' licences.
 - Committing data you do not have the right to redistribute.
 
+**Stata mode (Phase 2B).** The Stata-to-R translator follows StatCraft's
+clean-room rules. Allowed: Stata's public manuals, online help and Stata
+Journal articles; command, option and function names and documented syntax;
+black-box observation of a licensed Stata run on made-up data. Forbidden:
+reading Stata's program files, `.ado`, `.mata`, `.sthlp` or `.dlg` files;
+committing anything Stata produced (logs, `.dta`, `.smcl`, `.gph`,
+screenshots); copying StataCorp's example datasets, dialog layouts or
+wording. Observations go into plain-language notes under `plan/stata/`.
+Code from StatCraft (our own project) may be reused. Output that reaches the
+user is R's; it is never presented as Stata's. A command that cannot be
+translated is marked, never guessed.
+
 **Names.** The product is RCraft. "R" is the name of the language; do not
 imply that RCraft is made or endorsed by the R Foundation or Posit. The
 disclaimer in `NOTICE` applies.
@@ -78,7 +90,7 @@ layer. `cargo xtask layers` enforces this from `[package.metadata.rcraft]`.
 | L0 | `core` |
 | L1 | `rproto` |
 | L2 | `rhost`, `rdata` |
-| L3 | `rcodegen`, `rgraph`, `report` |
+| L3 | `rcodegen`, `rgraph`, `report`, `statatr` (Stata to R translator) |
 | L4 | `catalog` |
 | L5 | `engine` |
 | L6 | `ui-egui` |

@@ -38,7 +38,18 @@ exist on branch `p0/scaffold`.
   vignettes, per-dialog help). Network rules are in AGENTS.md section 1 and
   `docs/network.md`.
 
+- Added 2026-10-26: Phase 2B (Stata mode): a switch and button that take
+  Stata code, translate it to R, show both side by side and run the R. A
+  translator, not Stata; unsupported commands are marked, never guessed.
+  Clean-room rules in AGENTS.md section 1; new `statatr` crate planned at L3.
+- P1.1 (find installed R) is done and committed; R is not installed on this
+  machine, so `rcraft --find-r` reports none.
+
 ## Open questions
+
+- Stata mode: share StatCraft's parser (`lang` crate) or write a new one?
+  Proposed: start from StatCraft's if its licence and layering allow.
+- Stata mode output: R's own output first; Stata-style tables later.
 
 - Phase 1A providers: CRAN and Bioconductor first; r-universe and GitHub
   after? Download counts from a third-party service are optional.
