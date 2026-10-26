@@ -210,8 +210,19 @@ fn conda_roots_from_process(var: &dyn Fn(&str) -> Option<std::ffi::OsString>) ->
     if let Some(list) = var("RCRAFT_CONDA_ROOTS") {
         roots.extend(std::env::split_paths(&list));
     }
-    if let Some(home) = var("HOME").or_else(|| var("USERPROFILE")) {
-        let home = PathBuf::from(home);
+    let user_home = var("HOME")
+        .or_else(|| var("USERPROFILE"))
+        .map(PathBuf::from);
+    // Pinokio keeps its own conda installs (apps there may hold an R).
+    let pinokio_home = var("PINOKIO_HOME").map(PathBuf::from).or_else(|| {
+        user_home
+            .as_deref()
+            .and_then(crate::pinokio::home_from_config_file)
+    });
+    if let Some(home) = pinokio_home {
+        roots.extend(crate::pinokio::conda_roots(&home));
+    }
+    if let Some(home) = user_home {
         for name in [
             "miniforge3",
             "miniconda3",

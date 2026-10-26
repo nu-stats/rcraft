@@ -1,5 +1,11 @@
 # The R environment the tests run against (AGENTS.md section 5).
-# Changing a pin is its own commit. Values are placeholders until P0.5/P0.6
-# record the exact versions from the first CI run.
-R_VERSION=unpinned
-PACKAGE_SNAPSHOT=unpinned
+# Changing a pin is its own commit. CI reads this file.
+#
+# R 4.4.3 is the version installed on the maintainer's machine (checked
+# 2026-10-26) and is available for Windows, macOS and Linux. Move to a newer
+# release as its own commit once CI has run on it.
+R_VERSION=4.4.3
+# A dated Posit Package Manager snapshot (after R 4.4.3's release on
+# 2025-02-28), so package versions do not move under the tests. The date is
+# not yet confirmed against the service: the first CI run settles it.
+PACKAGE_SNAPSHOT=2025-03-15

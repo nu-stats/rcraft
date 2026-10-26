@@ -50,10 +50,29 @@ exist on branch `p0/scaffold`.
   Recommended approach: idiomatic R plus a small shipped R runtime package
   for Stata-specific rules; verified against recorded Stata output.
 
+## Decided 2026-10-26 (open items worked)
+
+- P0.5: `ENVIRONMENT` pins R 4.4.3 and a package snapshot dated 2025-03-15;
+  CI installs that R with `r-lib/actions/setup-r`. Neither the snapshot date
+  nor the CI step has run yet (no remote), so the first CI run confirms them.
+- Pinokio's conda installs are found with no setting: Pinokio's home comes
+  from `PINOKIO_HOME` or `~/.pinokio/config.json`, then `bin/miniforge` and
+  `bin/miniconda`. `rcraft --find-r` now reports R 4.4.3 on this machine.
+- Do not install packages into another app's environment. The R found here
+  belongs to Husky Eye View (`hev-r`, 62 packages, no tidyverse). RCraft uses
+  its own user library for installs (P1.5, Phase 1A).
+- Shared parsers: extract StatCraft's do-file reader, syntax and expression
+  parsers into a shared crate when P2C.3 starts, and depend on that; do not
+  copy them here. That change is made in the StatCraft repository, so it is
+  not done from this one and needs the maintainer's go-ahead.
+- `rcraftstata` (the shipped R runtime package) lives in this repository
+  under `r/rcraftstata/` and is installed into RCraft's own user library on
+  first use, with the user's yes. Created when P2C.4 starts.
+
 ## Open questions
 
-- Share StatCraft's parsers as a published crate, or vendor a copy?
-- Where the `rcraftstata` R package lives and how it is installed.
+- None blocking. Next: P1.2 (download a portable R when none is found),
+  P1.3 (the R session process).
 
 - Stata mode: share StatCraft's parser (`lang` crate) or write a new one?
   Proposed: start from StatCraft's if its licence and layering allow.
