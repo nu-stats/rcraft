@@ -14,6 +14,7 @@ layer = 7
 [dependencies]
 rcraft-core.workspace = true
 rcraft-engine.workspace = true
+rcraft-rhost.workspace = true
 
 [lints]
 workspace = true

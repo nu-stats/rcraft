@@ -16,6 +16,7 @@ version = "0.0.1"
 dependencies = [
  "rcraft-core",
  "rcraft-engine",
+ "rcraft-rhost",
 ]
 
 [[package]]
