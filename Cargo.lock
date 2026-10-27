@@ -2056,6 +2056,7 @@ dependencies = [
  "egui-winit",
  "rcraft-core",
  "rcraft-engine",
+ "rcraft-rdata",
  "rcraft-rhost",
  "softbuffer",
  "winit",

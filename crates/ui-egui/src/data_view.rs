@@ -1,0 +1,301 @@
+//! The Data browser (a virtualised grid) and the variable list. Only the
+//! rows and columns in view are drawn, so a table of millions of rows costs
+//! no more than a screenful.
+
+use eframe::egui::{self, Align2, Color32, FontId, Rect, RichText, Sense, TextStyle};
+use rcraft_rdata::display::cell_text;
+use rcraft_rdata::{Column, Data, Table};
+
+use crate::look::Palette;
+
+const ROW_HEIGHT: f32 = 20.0;
+const MIN_COLUMN: f32 = 56.0;
+const MAX_COLUMN: f32 = 320.0;
+/// Rows measured to pick a column's width.
+const SAMPLE_ROWS: usize = 30;
+/// Width of one character, in points, for choosing column widths.
+const CHAR_WIDTH: f32 = 7.4;
+
+/// A name R can use as it is; anything else needs backticks.
+pub fn r_name(name: &str) -> String {
+    let mut chars = name.chars();
+    let starts_ok = chars.next().is_some_and(|c| c.is_alphabetic() || c == '.');
+    let plain = starts_ok
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '.' || c == '_');
+    let reserved = matches!(
+        name,
+        "if" | "else"
+            | "repeat"
+            | "while"
+            | "function"
+            | "for"
+            | "next"
+            | "break"
+            | "TRUE"
+            | "FALSE"
+            | "NULL"
+            | "Inf"
+            | "NaN"
+            | "NA"
+            | "in"
+    );
+    let dot_digit = name
+        .strip_prefix('.')
+        .and_then(|rest| rest.chars().next())
+        .is_some_and(|c| c.is_ascii_digit());
+    if plain && !reserved && !dot_digit {
+        name.to_string()
+    } else {
+        format!("`{}`", name.replace('\\', "\\\\").replace('`', "\\`"))
+    }
+}
+
+fn right_aligned(data: &Data) -> bool {
+    matches!(
+        data,
+        Data::Int(_)
+            | Data::Double(_)
+            | Data::Date(_)
+            | Data::DateTime { .. }
+            | Data::Duration { .. }
+    )
+}
+
+/// Width in points for each column, from its name and a sample of its rows.
+fn column_widths(table: &Table) -> Vec<f32> {
+    let step = (table.nrow / SAMPLE_ROWS).max(1);
+    table
+        .columns
+        .iter()
+        .map(|col| {
+            let mut longest = col.name.chars().count();
+            for row in (0..table.nrow).step_by(step).take(SAMPLE_ROWS) {
+                longest = longest.max(cell_text(&col.data, row).chars().count());
+            }
+            (longest as f32 * CHAR_WIDTH + 18.0).clamp(MIN_COLUMN, MAX_COLUMN)
+        })
+        .collect()
+}
+
+/// The grid. `offset_x` carries the sideways scroll position from the body to
+/// the header between frames.
+pub fn grid(ui: &mut egui::Ui, pal: &Palette, table: &Table, offset_x: &mut f32) {
+    let widths = column_widths(table);
+    let gutter = (table.nrow.to_string().len() as f32 * CHAR_WIDTH + 18.0).max(36.0);
+    let total = gutter + widths.iter().sum::<f32>();
+    let font: FontId = TextStyle::Body.resolve(ui.style());
+    let stripe = pal.dim.gamma_multiply(0.10);
+
+    egui::ScrollArea::horizontal()
+        .id_salt("grid-head")
+        .horizontal_scroll_offset(*offset_x)
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
+        .enable_scrolling(false)
+        .max_height(ROW_HEIGHT + 2.0)
+        .show(ui, |ui| {
+            let (rect, _) = ui.allocate_exact_size(egui::vec2(total, ROW_HEIGHT), Sense::hover());
+            let mut x = rect.left() + gutter;
+            for (col, width) in table.columns.iter().zip(&widths) {
+                let cell =
+                    Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(*width, ROW_HEIGHT));
+                if ui.is_rect_visible(cell) {
+                    let painter = ui
+                        .painter()
+                        .with_clip_rect(cell.shrink2(egui::vec2(3.0, 0.0)));
+                    // the header sits over its numbers, on the same side
+                    let (at, align) = if right_aligned(&col.data) {
+                        (
+                            cell.right_center() - egui::vec2(6.0, 0.0),
+                            Align2::RIGHT_CENTER,
+                        )
+                    } else {
+                        (
+                            cell.left_center() + egui::vec2(6.0, 0.0),
+                            Align2::LEFT_CENTER,
+                        )
+                    };
+                    painter.text(at, align, &col.name, font.clone(), pal.accent);
+                    ui.interact(cell, ui.id().with(("head", x as i64)), Sense::hover())
+                        .on_hover_text(header_hint(col));
+                }
+                x += *width;
+            }
+        });
+
+    let out = egui::ScrollArea::both()
+        .id_salt("grid-body")
+        .auto_shrink([false, false])
+        .show_rows(ui, ROW_HEIGHT, table.nrow, |ui, rows| {
+            let visible = ui.clip_rect();
+            for row in rows {
+                let (rect, _) =
+                    ui.allocate_exact_size(egui::vec2(total, ROW_HEIGHT), Sense::hover());
+                if row % 2 == 1 {
+                    ui.painter().rect_filled(rect, 0.0, stripe);
+                }
+                let number = Rect::from_min_size(rect.min, egui::vec2(gutter, ROW_HEIGHT));
+                ui.painter().text(
+                    number.right_center() - egui::vec2(8.0, 0.0),
+                    Align2::RIGHT_CENTER,
+                    (row + 1).to_string(),
+                    font.clone(),
+                    pal.dim,
+                );
+                let mut x = rect.left() + gutter;
+                for (col, width) in table.columns.iter().zip(&widths) {
+                    let cell = Rect::from_min_size(
+                        egui::pos2(x, rect.top()),
+                        egui::vec2(*width, ROW_HEIGHT),
+                    );
+                    x += *width;
+                    if cell.right() < visible.left() || cell.left() > visible.right() {
+                        continue;
+                    }
+                    let text = cell_text(&col.data, row);
+                    let color: Color32 = if text == "NA" || text == "NaN" {
+                        pal.dim
+                    } else {
+                        pal.text
+                    };
+                    let painter = ui
+                        .painter()
+                        .with_clip_rect(cell.shrink2(egui::vec2(3.0, 0.0)));
+                    if right_aligned(&col.data) {
+                        painter.text(
+                            cell.right_center() - egui::vec2(6.0, 0.0),
+                            Align2::RIGHT_CENTER,
+                            text,
+                            font.clone(),
+                            color,
+                        );
+                    } else {
+                        painter.text(
+                            cell.left_center() + egui::vec2(6.0, 0.0),
+                            Align2::LEFT_CENTER,
+                            text,
+                            font.clone(),
+                            color,
+                        );
+                    }
+                }
+            }
+        });
+    *offset_x = out.state.offset.x;
+}
+
+fn header_hint(col: &Column) -> String {
+    let mut hint = format!("{}  ({})", col.name, col.data.kind_name());
+    if let Some(label) = col.label() {
+        hint.push_str(&format!("\n{label}"));
+    }
+    hint
+}
+
+/// What the Variables pane asks for.
+pub enum VariableClick {
+    /// Put the variable's name in the Command line.
+    Insert(String),
+}
+
+/// One line per variable: name, kind, missing count; the label on hover.
+pub fn variable_list(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    table: &Table,
+    out: &mut Vec<VariableClick>,
+) {
+    for col in &table.columns {
+        let missing = col.data.missing();
+        let response = ui
+            .horizontal(|ui| {
+                let name = ui.selectable_label(false, RichText::new(&col.name).monospace());
+                ui.label(RichText::new(col.data.kind_name()).small().color(pal.dim));
+                if missing > 0 {
+                    ui.label(
+                        RichText::new(format!("{missing} missing"))
+                            .small()
+                            .color(pal.warning),
+                    );
+                }
+                name
+            })
+            .inner;
+        let response = response.on_hover_text(variable_hint(col));
+        if response.clicked() {
+            out.push(VariableClick::Insert(r_name(&col.name)));
+        }
+    }
+}
+
+fn variable_hint(col: &Column) -> String {
+    let mut hint = format!("{} ({})", col.name, col.class);
+    if let Some(label) = col.label() {
+        hint.push_str(&format!("\nLabel: {label}"));
+    }
+    let labels = col.value_labels();
+    if !labels.is_empty() {
+        hint.push_str("\nValue labels:");
+        for (value, text) in labels.iter().take(12) {
+            hint.push_str(&format!(
+                "\n  {} = {text}",
+                rcraft_rdata::display::number(*value)
+            ));
+        }
+        if labels.len() > 12 {
+            hint.push_str("\n  …");
+        }
+    }
+    if let Data::Factor { levels, .. } = &col.data {
+        hint.push_str(&format!("\n{} levels", levels.len()));
+    }
+    if col.dropped_attrs > 0 {
+        hint.push_str(&format!(
+            "\n{} attribute(s) could not be brought over",
+            col.dropped_attrs
+        ));
+    }
+    hint.push_str("\nClick to put the name in the Command line");
+    hint
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plain_names_are_left_alone_and_others_are_quoted() {
+        assert_eq!(r_name("age"), "age");
+        assert_eq!(r_name("my.var_2"), "my.var_2");
+        assert_eq!(r_name(".hidden"), ".hidden");
+        assert_eq!(r_name("two words"), "`two words`");
+        assert_eq!(r_name("2fast"), "`2fast`");
+        assert_eq!(r_name(".5x"), "`.5x`");
+        assert_eq!(r_name("if"), "`if`");
+        assert_eq!(r_name("a`b"), "`a\\`b`");
+        assert_eq!(r_name(""), "``");
+        assert_eq!(r_name("é"), "é");
+    }
+
+    #[test]
+    fn widths_stay_within_bounds() {
+        let table = Table {
+            nrow: 2,
+            columns: vec![Column {
+                name: "x".repeat(500),
+                class: "character".into(),
+                attrs: Vec::new(),
+                dropped_attrs: 0,
+                data: Data::Text(vec![Some("a".into()), None]),
+            }],
+        };
+        let w = column_widths(&table);
+        assert_eq!(w, vec![MAX_COLUMN]);
+        let empty = Table {
+            nrow: 0,
+            columns: Vec::new(),
+        };
+        assert!(column_widths(&empty).is_empty());
+    }
+}

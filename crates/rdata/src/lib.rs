@@ -32,6 +32,8 @@
 //! that are actually left, so a truncated or hostile file gives an error, not
 //! a crash or a huge allocation.
 
+pub mod display;
+
 use std::fmt;
 use std::path::Path;
 

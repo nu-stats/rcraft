@@ -221,3 +221,25 @@ exist on branch `p0/scaffold`.
   (`rproto::parse_frame_after_text`). Regression test in `rhost/tests/session.rs`.
 - CI on Ubuntu needed more X11 development libraries; all three systems were
   green at 425c378.
+
+## Phase 3 started: workspace, Variables pane and Data browser, 2026-10-26
+
+- Engine: hidden queries (`engine::workspace`, `Engine::watch/unwatch/table/
+  workspace/refresh`) list R's workspace and bring watched data frames over
+  through the bridge, after every command. They never reach the history, log or
+  Results, and a command typed while one runs waits for it (up to 30 s) instead
+  of being refused. Table files are numbered process-wide (found by a flaky test:
+  engines in one process shared a file name). 5 tests against real R.
+- `rdata::display`: cell text as R prints it (7 significant digits, ISO dates,
+  `NA`), 4 tests.
+- Window: Variables pane with a data-frame switcher, kind, missing count, label
+  and value labels on hover, click to put the name in the Command line; a
+  Results / Data tab switch; the Data tab is a virtualised grid (only visible
+  rows and columns are drawn) with a pinned header. `--picture ... --data`
+  shows it offscreen. Checked on a 5000 x 7 table.
+- Known limits: the whole table is brought over (cap 200 million cells; a table
+  over 5 million cells is refreshed only on request, the button for that is not
+  built yet); the UI thread owns the engine, so a very large fetch can pause
+  the window while a command is submitted; the History list wraps long
+  commands (should truncate); no sorting, editing or column resizing yet.
+- Next in Phase 3: P3.2 "Use my file" (csv first), P3.4 Objects pane, editing.

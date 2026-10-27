@@ -8,6 +8,7 @@
 //! CPU with no window and no graphics driver ([`run_headless`]).
 
 mod app;
+mod data_view;
 mod headless;
 pub mod look;
 mod softraster;

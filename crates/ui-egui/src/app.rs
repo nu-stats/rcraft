@@ -7,7 +7,15 @@ use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
 use rcraft_engine::{Engine, History, Item, Outcome, Recall, Source};
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
 
+use crate::data_view::{self, VariableClick};
 use crate::look::{self, Accent, Palette};
+
+/// What the middle pane shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum View {
+    Results,
+    Data,
+}
 
 const COMMAND_ID: &str = "command-line";
 /// History lines drawn (the newest); the rest stay in the engine.
@@ -27,6 +35,10 @@ enum EngineState {
 enum Action {
     Submit(Source, String),
     SetCommand(String),
+    /// Add text (a variable name) to the Command line.
+    Insert(String),
+    SelectDataset(Option<String>),
+    SetView(View),
     Interrupt,
     Restart,
     ClearResults,
@@ -47,6 +59,11 @@ pub struct App {
     focus_command: bool,
     needs_restart: bool,
     message: Option<String>,
+    view: View,
+    /// The data frame shown in Variables and Data.
+    dataset: Option<String>,
+    /// Sideways scroll of the Data grid, handed to its header.
+    grid_x: f32,
 }
 
 impl App {
@@ -66,6 +83,9 @@ impl App {
             focus_command: true,
             needs_restart: false,
             message: None,
+            view: View::Results,
+            dataset: None,
+            grid_x: 0.0,
         }
     }
 
@@ -93,8 +113,35 @@ impl App {
             if polled.changed {
                 ctx.request_repaint();
             }
-            if engine.is_busy() {
+            if engine.is_working() {
                 ctx.request_repaint_after(Duration::from_millis(33));
+            }
+        }
+        self.follow_datasets();
+    }
+
+    /// Keeps the chosen data frame valid: picks the first one when none is
+    /// chosen, and lets go of one that has gone from R.
+    fn follow_datasets(&mut self) {
+        let EngineState::Ready(engine) = &mut self.engine else {
+            return;
+        };
+        if let Some(name) = &self.dataset {
+            let gone = !engine.is_working()
+                && !engine
+                    .workspace()
+                    .iter()
+                    .any(|w| &w.name == name && w.is_data_frame());
+            if gone {
+                engine.unwatch(name);
+                self.dataset = None;
+            }
+        }
+        if self.dataset.is_none() {
+            if let Some(first) = engine.workspace().iter().find(|w| w.is_data_frame()) {
+                let name = first.name.clone();
+                engine.watch(&name);
+                self.dataset = Some(name);
             }
         }
     }
@@ -115,6 +162,26 @@ impl App {
                 self.focus_command = true;
                 cursor_to_end(ctx, egui::Id::new(COMMAND_ID), &self.command);
             }
+            Action::Insert(text) => {
+                let mut command = std::mem::take(&mut self.command);
+                if !command.is_empty() && !command.ends_with([' ', '(', ',']) {
+                    command.push(' ');
+                }
+                command.push_str(&text);
+                self.perform(ctx, Action::SetCommand(command));
+            }
+            Action::SelectDataset(choice) => {
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    if let Some(old) = &self.dataset {
+                        engine.unwatch(old);
+                    }
+                    if let Some(new) = &choice {
+                        engine.watch(new);
+                    }
+                }
+                self.dataset = choice;
+            }
+            Action::SetView(view) => self.view = view,
             Action::Interrupt => {
                 if let EngineState::Ready(engine) = &mut self.engine {
                     if engine.interrupt() == InterruptOutcome::SessionStopped {
@@ -318,7 +385,14 @@ impl App {
             };
             ui.label(RichText::new(text).strong().color(color));
             ui.separator();
-            ui.label(RichText::new("No data in memory").color(pal.dim));
+            let data_note = match (&self.dataset, self.engine()) {
+                (Some(name), Some(engine)) => match engine.table(name) {
+                    Some(t) => format!("{name}: {} rows × {} columns", t.nrow, t.columns.len()),
+                    None => name.clone(),
+                },
+                _ => "No data in memory".to_string(),
+            };
+            ui.label(RichText::new(data_note).color(pal.dim));
             if let Some(message) = &self.message {
                 ui.separator();
                 ui.label(RichText::new(message).color(pal.error));
@@ -335,13 +409,64 @@ impl App {
     fn side_panel(&self, ui: &mut egui::Ui, pal: &Palette, out: &mut Vec<Action>) {
         let total = ui.available_height();
         pane_title(ui, pal, "Variables");
+        let frames: Vec<String> = self
+            .engine()
+            .map(|e| {
+                e.workspace()
+                    .iter()
+                    .filter(|w| w.is_data_frame())
+                    .map(|w| w.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !frames.is_empty() {
+            let shown = self.dataset.clone().unwrap_or_else(|| "(none)".into());
+            egui::ComboBox::from_id_salt("dataset")
+                .selected_text(RichText::new(shown).monospace())
+                .width(ui.available_width() - 8.0)
+                .show_ui(ui, |ui| {
+                    for name in &frames {
+                        let chosen = self.dataset.as_deref() == Some(name.as_str());
+                        if ui
+                            .selectable_label(chosen, RichText::new(name).monospace())
+                            .clicked()
+                            && !chosen
+                        {
+                            out.push(Action::SelectDataset(Some(name.clone())));
+                        }
+                    }
+                });
+        }
         egui::ScrollArea::vertical()
             .id_salt("variables")
             .max_height(total * 0.42)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.add_space(4.0);
-                ui.label(RichText::new("Open a data file to see its variables.").color(pal.dim));
+                let table = self
+                    .dataset
+                    .as_deref()
+                    .and_then(|name| self.engine().and_then(|e| e.table(name)));
+                if let Some(table) = table {
+                    let mut clicks = Vec::new();
+                    data_view::variable_list(ui, pal, table, &mut clicks);
+                    for VariableClick::Insert(name) in clicks {
+                        out.push(Action::Insert(name));
+                    }
+                } else if let Some(why) = self
+                    .dataset
+                    .as_deref()
+                    .and_then(|name| self.engine().and_then(|e| e.table_error(name)))
+                {
+                    ui.label(RichText::new(why).color(pal.error));
+                } else if self.dataset.is_some() {
+                    ui.label(RichText::new("Bringing the table over…").color(pal.dim));
+                } else {
+                    ui.label(
+                        RichText::new("Create or open a data frame to see its variables.")
+                            .color(pal.dim),
+                    );
+                }
             });
         ui.separator();
         let count = self.engine().map_or(0, |e| e.history().len());
@@ -396,8 +521,25 @@ impl App {
         }
     }
 
-    fn results_pane(&self, ui: &mut egui::Ui, pal: &Palette, _out: &mut Vec<Action>) {
-        pane_title(ui, pal, "Results");
+    fn results_pane(&mut self, ui: &mut egui::Ui, pal: &Palette, out: &mut Vec<Action>) {
+        ui.horizontal(|ui| {
+            for (view, label) in [(View::Results, "Results"), (View::Data, "Data")] {
+                let chosen = self.view == view;
+                let text = RichText::new(label).strong();
+                let text = if chosen {
+                    text.color(pal.accent)
+                } else {
+                    text.color(pal.dim)
+                };
+                if ui.selectable_label(chosen, text).clicked() && !chosen {
+                    out.push(Action::SetView(view));
+                }
+            }
+        });
+        if self.view == View::Data {
+            self.data_pane(ui, pal);
+            return;
+        }
         egui::ScrollArea::both()
             .id_salt("results")
             .auto_shrink([false, false])
@@ -417,6 +559,28 @@ impl App {
                 }
                 EngineState::Ready(engine) => results_list(ui, pal, engine),
             });
+    }
+
+    fn data_pane(&mut self, ui: &mut egui::Ui, pal: &Palette) {
+        let Some(name) = self.dataset.clone() else {
+            ui.label(
+                RichText::new("No data frame yet. Create one, or open a data file.").color(pal.dim),
+            );
+            return;
+        };
+        let (table, error) = match &self.engine {
+            EngineState::Ready(engine) => (engine.table(&name), engine.table_error(&name)),
+            _ => (None, None),
+        };
+        match (table, error) {
+            (Some(table), _) => data_view::grid(ui, pal, table, &mut self.grid_x),
+            (None, Some(why)) => {
+                ui.label(RichText::new(why).color(pal.error));
+            }
+            (None, None) => {
+                ui.label(RichText::new("Bringing the table over…").color(pal.dim));
+            }
+        }
     }
 
     fn command_pane(
@@ -638,7 +802,7 @@ impl App {
     /// R is ready and nothing is running (or R could not start).
     pub fn is_settled(&self) -> bool {
         match &self.engine {
-            EngineState::Ready(e) => !e.is_busy(),
+            EngineState::Ready(e) => !e.is_working(),
             EngineState::Failed(_) => true,
             EngineState::Starting(_) => false,
         }
@@ -650,6 +814,11 @@ impl App {
 
     pub fn set_theme(&mut self, ctx: &egui::Context, theme: egui::ThemePreference) {
         self.perform(ctx, Action::SetTheme(theme));
+    }
+
+    /// Switches the middle pane to the Data tab.
+    pub fn show_data(&mut self, ctx: &egui::Context) {
+        self.perform(ctx, Action::SetView(View::Data));
     }
 
     pub fn set_accent(&mut self, ctx: &egui::Context, accent: Accent) {
