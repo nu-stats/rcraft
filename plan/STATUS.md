@@ -358,3 +358,27 @@ exist on branch `p0/scaffold`.
 - Picture options `--dialog NAME` and `--set ID=VALUE`.
 - The four entries are `partial`: the tidyverse code is snapshot-tested only, as
   CI has no dplyr. Recode, type conversion, factor, date and string tools next.
+
+## Session protocol review fixes, 2026-10-27
+
+Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test
+in `rhost/tests/session.rs` (or a unit test for the output reader).
+
+- A `sink()` left on (or a message sink) no longer hangs the session: frames
+  written while a sink is on wait for the run's end, sinks still on are turned
+  off with a warning saying so. `capture.output()` no longer captures frames.
+- Output is read in 64 KiB pieces; a piece no longer ends inside a frame marker
+  (lost END: the run never finished) or inside a character (shown as `�`).
+- Interrupts are held off except while the user's code runs, so one arriving
+  as a request is read or a run is reported cannot lose END. Known limit (Unix):
+  an interrupt that lands just after a run has ended may stop the next run.
+- An interrupt R does not answer is followed by stopping R after 10 s, as the
+  limits already were; a timed-out `run_to_end` waits for that, so the session
+  is free afterwards.
+- `options(warn)` is respected (2 makes warnings errors, negative hides them);
+  a warning raised with `signalCondition()` is no longer an error.
+- R's last words on standard error when it stops are kept (the exit waits up
+  to 2 s for standard error to close).
+- `closeAllConnections()` in user code no longer ends the session (the
+  request connection is checked by id and reopened).
+- Cleanup: unused `current_id` removed; an idle R gets 0.5 s to quit on QUIT.

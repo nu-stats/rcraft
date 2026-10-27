@@ -27,13 +27,12 @@ use std::path::PathBuf;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use rcraft_rproto::{
-    encode_run, new_token, parse_frame, parse_frame_after_text, Frame, ProtoError, RunId, Status,
-    BOOTSTRAP_R, QUIT,
+    encode_run, frame_marker, new_token, parse_frame, parse_frame_after_text, Frame, ProtoError,
+    RunId, Status, BOOTSTRAP_R, QUIT,
 };
 
 use crate::find::RInstall;
@@ -196,6 +195,11 @@ const POLL_INTERVAL: Duration = Duration::from_millis(200);
 const ESCALATE_AFTER: Duration = Duration::from_secs(10);
 /// How often R's memory is read (each read starts a system tool).
 const MEMORY_CHECK_INTERVAL: Duration = Duration::from_secs(2);
+/// How long standard error may stay open after standard output has closed;
+/// R's last words (why it stopped) are on standard error.
+const STDERR_GRACE: Duration = Duration::from_secs(2);
+/// How long [`Session::stop`] lets an idle R quit on its own.
+const QUIT_GRACE: Duration = Duration::from_millis(500);
 
 /// What the reader threads send.
 enum Raw {
@@ -210,7 +214,9 @@ struct RunState {
     truncated: bool,
     started: Instant,
     last_memory_check: Instant,
-    limit_hit: Option<Instant>,
+    /// When RCraft asked the run to stop (a limit, or an interrupt). A run
+    /// still going [`ESCALATE_AFTER`] later is stopped outright.
+    stopping_since: Option<Instant>,
     /// The end frame from standard output, held until standard error has
     /// caught up (its `Sync`), so no message is lost to a race.
     end: Option<Status>,
@@ -225,10 +231,12 @@ pub struct Session {
     pending: VecDeque<Event>,
     next_id: RunId,
     current: Option<RunState>,
-    /// The run that standard-error text belongs to (0 when idle).
-    current_id: Arc<AtomicU64>,
     stopped_by_us: bool,
     exited: bool,
+    /// When standard output closed; the exit is reported once standard error
+    /// has closed too, or [`STDERR_GRACE`] later.
+    stdout_closed: Option<Instant>,
+    stderr_closed: bool,
     stderr_tail: String,
     r_version: String,
     r_pid: u32,
@@ -289,7 +297,6 @@ impl Session {
         };
 
         let (tx, raw) = sync_channel(CHANNEL_CAPACITY);
-        let current_id = Arc::new(AtomicU64::new(0));
         spawn_stdout_reader(stdout, token.clone(), tx.clone());
         spawn_stderr_reader(stderr, token, tx);
 
@@ -301,9 +308,10 @@ impl Session {
             pending: VecDeque::new(),
             next_id: 1,
             current: None,
-            current_id,
             stopped_by_us: false,
             exited: false,
+            stdout_closed: None,
+            stderr_closed: false,
             stderr_tail: String::new(),
             r_version: String::new(),
             r_pid: 0,
@@ -350,11 +358,10 @@ impl Session {
             truncated: false,
             started: now,
             last_memory_check: now,
-            limit_hit: None,
+            stopping_since: None,
             end: None,
             synced: false,
         });
-        self.current_id.store(id, Ordering::SeqCst);
         Ok(id)
     }
 
@@ -367,6 +374,13 @@ impl Session {
                 return Some(event);
             }
             self.check_limits();
+            if !self.exited
+                && self
+                    .stdout_closed
+                    .is_some_and(|at| at.elapsed() >= STDERR_GRACE)
+            {
+                self.finish_exit();
+            }
             if !self.pending.is_empty() {
                 continue;
             }
@@ -391,14 +405,14 @@ impl Session {
     fn check_limits(&mut self) {
         // A run that was interrupted but is still going (R can be deep in
         // code that does not look for interrupts) is stopped after a while.
-        if let Some(at) = self.current.as_ref().and_then(|s| s.limit_hit) {
+        if let Some(at) = self.current.as_ref().and_then(|s| s.stopping_since) {
             if at.elapsed() > ESCALATE_AFTER && !self.stopped_by_us && !self.exited {
                 self.stop_now();
             }
             return;
         }
         let (run, over_time, check_memory) = match self.current.as_ref() {
-            Some(state) if state.limit_hit.is_none() && !self.exited => (
+            Some(state) if !self.exited => (
                 state.id,
                 self.config
                     .max_run_time
@@ -409,7 +423,6 @@ impl Session {
             _ => return,
         };
         if over_time {
-            self.mark_limit_hit();
             self.pending.push_back(Event::LimitReached {
                 run,
                 limit: Limit::Time,
@@ -424,7 +437,7 @@ impl Session {
             let used = procinfo::memory_bytes(self.r_pid);
             if let (Some(used), Some(max)) = (used, self.config.max_memory_bytes) {
                 if used > max {
-                    self.mark_limit_hit();
+                    self.mark_stopping();
                     self.pending.push_back(Event::LimitReached {
                         run,
                         limit: Limit::Memory,
@@ -435,9 +448,9 @@ impl Session {
         }
     }
 
-    fn mark_limit_hit(&mut self) {
+    fn mark_stopping(&mut self) {
         if let Some(state) = self.current.as_mut() {
-            state.limit_hit = Some(Instant::now());
+            state.stopping_since.get_or_insert_with(Instant::now);
         }
     }
 
@@ -448,11 +461,13 @@ impl Session {
         kill_tree(&mut self.child);
     }
 
-    /// Stops the current run. See [`InterruptOutcome`].
+    /// Stops the current run. See [`InterruptOutcome`]. A run that is still
+    /// going [`ESCALATE_AFTER`] later is stopped outright, with R.
     pub fn interrupt(&mut self) -> InterruptOutcome {
         if self.current.is_none() || self.exited {
             return InterruptOutcome::Idle;
         }
+        self.mark_stopping();
         if send_interrupt(self.r_pid) {
             return InterruptOutcome::Signalled;
         }
@@ -476,7 +491,9 @@ impl Session {
     }
 
     /// Runs `code` and collects everything, waiting at most `limit`. On
-    /// timeout the run is interrupted and `TimedOut` is returned.
+    /// timeout the run is interrupted, its end is waited for (R is stopped if
+    /// it does not answer), and `TimedOut` is returned; the session is then
+    /// free for the next run, or no longer running.
     pub fn run_to_end(&mut self, code: &str, limit: Duration) -> Result<RunOutput, SessionError> {
         let id = self.run(code)?;
         let deadline = Instant::now() + limit;
@@ -485,6 +502,7 @@ impl Session {
             let left = deadline.saturating_duration_since(Instant::now());
             if left.is_zero() {
                 self.interrupt();
+                self.wait_for_end(id);
                 return Err(SessionError::TimedOut);
             }
             let Some(event) = self.next_event(left.min(Duration::from_millis(250))) else {
@@ -511,6 +529,15 @@ impl Session {
                 }
                 _ => {}
             }
+        }
+    }
+
+    /// Reads events until run `id` has ended, dropping them. Bounded: past
+    /// [`ESCALATE_AFTER`] the limits check stops R, which ends the run.
+    fn wait_for_end(&mut self, id: RunId) {
+        let deadline = Instant::now() + ESCALATE_AFTER + STDERR_GRACE + Duration::from_secs(5);
+        while self.current.as_ref().is_some_and(|s| s.id == id) && Instant::now() < deadline {
+            let _ = self.next_event(POLL_INTERVAL);
         }
     }
 
@@ -562,8 +589,20 @@ impl Session {
         match raw {
             Raw::Frame(frame) => self.handle_frame(frame),
             Raw::Text(stream, text) => self.handle_text(stream, text),
-            Raw::Closed(Stream::Stdout) => self.finish_exit(),
-            Raw::Closed(Stream::Stderr) => {}
+            // the process is gone, but what it wrote last on standard error
+            // (often why it stopped) may still be on its way
+            Raw::Closed(Stream::Stdout) => {
+                self.stdout_closed.get_or_insert_with(Instant::now);
+                if self.stderr_closed {
+                    self.finish_exit();
+                }
+            }
+            Raw::Closed(Stream::Stderr) => {
+                self.stderr_closed = true;
+                if self.stdout_closed.is_some() {
+                    self.finish_exit();
+                }
+            }
         }
     }
 
@@ -602,7 +641,6 @@ impl Session {
         };
         let Some(status) = status else { return };
         self.current = None;
-        self.current_id.store(0, Ordering::SeqCst);
         let status = match status {
             Status::Ok => RunStatus::Ok,
             Status::Error => RunStatus::Error,
@@ -629,7 +667,7 @@ impl Session {
         self.pending.push_back(Event::Output { run, stream, text });
     }
 
-    /// R's standard output closed: the process is gone.
+    /// R's output streams have closed: the process is gone.
     fn finish_exit(&mut self) {
         if self.exited {
             return;
@@ -651,15 +689,21 @@ impl Session {
                 status,
             });
         }
-        self.current_id.store(0, Ordering::SeqCst);
         self.pending.push_back(Event::Exited { code });
     }
 
-    /// Asks R to quit, then makes sure it is gone and cleans up.
+    /// Asks R to quit (and, when it is idle, gives it a moment to), then
+    /// makes sure it is gone and cleans up.
     fn stop(&mut self) {
         if let Some(mut stdin) = self.stdin.take() {
-            let _ = stdin.write_all(QUIT);
-            let _ = stdin.flush();
+            let asked = stdin.write_all(QUIT).and_then(|()| stdin.flush()).is_ok();
+            drop(stdin);
+            if asked && self.current.is_none() {
+                let deadline = Instant::now() + QUIT_GRACE;
+                while matches!(self.child.try_wait(), Ok(None)) && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
         }
         kill_tree(&mut self.child);
         self.exited = true;
@@ -716,7 +760,8 @@ fn make_script_dir() -> Result<PathBuf, SessionError> {
 
 fn spawn_stdout_reader(stdout: impl Read + Send + 'static, token: String, tx: SyncSender<Raw>) {
     thread::spawn(move || {
-        read_chunks(stdout, |chunk| {
+        let marker = frame_marker(&token);
+        read_chunks(stdout, marker.as_bytes(), |chunk| {
             let item = match parse_frame(&token, &chunk) {
                 Some(Ok(frame)) => Raw::Frame(frame),
                 // a frame we cannot read is shown as text rather than lost
@@ -744,7 +789,8 @@ fn spawn_stdout_reader(stdout: impl Read + Send + 'static, token: String, tx: Sy
 
 fn spawn_stderr_reader(stderr: impl Read + Send + 'static, token: String, tx: SyncSender<Raw>) {
     thread::spawn(move || {
-        read_chunks(stderr, |chunk| {
+        let marker = frame_marker(&token);
+        read_chunks(stderr, marker.as_bytes(), |chunk| {
             // the only frame on standard error is `Sync`; anything else is text
             let item = match parse_frame(&token, &chunk) {
                 Some(Ok(frame @ Frame::Sync { .. })) => Raw::Frame(frame),
@@ -773,28 +819,86 @@ fn spawn_stderr_reader(stderr: impl Read + Send + 'static, token: String, tx: Sy
 /// Reads lines, or pieces of at most [`MAX_CHUNK_BYTES`] when a line is
 /// longer, and passes each to `f`. Stops when `f` returns false or the
 /// stream ends.
-fn read_chunks(source: impl Read, mut f: impl FnMut(String) -> bool) {
+///
+/// A piece cut short of a line break never ends inside a frame (`marker`
+/// starts one) or inside a character: that tail is carried into the next
+/// piece, so a frame glued to long unterminated output is still found.
+fn read_chunks(source: impl Read, marker: &[u8], mut f: impl FnMut(String) -> bool) {
     let mut reader = BufReader::new(source);
-    let mut buf = Vec::new();
+    let mut buf: Vec<u8> = Vec::new();
     loop {
-        buf.clear();
-        match reader
-            .by_ref()
-            .take(MAX_CHUNK_BYTES)
-            .read_until(b'\n', &mut buf)
-        {
-            Ok(0) | Err(_) => return,
-            Ok(_) => {
-                // Windows R writes CRLF; callers see the same text everywhere.
-                if buf.ends_with(b"\r\n") {
-                    buf.truncate(buf.len() - 2);
-                    buf.push(b'\n');
-                }
-                if !f(String::from_utf8_lossy(&buf).into_owned()) {
-                    return;
+        let room = MAX_CHUNK_BYTES.saturating_sub(buf.len() as u64).max(1);
+        let read = reader.by_ref().take(room).read_until(b'\n', &mut buf);
+        if matches!(read, Ok(0) | Err(_)) {
+            if !buf.is_empty() {
+                let _ = f(String::from_utf8_lossy(&buf).into_owned());
+            }
+            return;
+        }
+        let carry = if buf.ends_with(b"\n") {
+            Vec::new()
+        } else {
+            let cut = safe_cut(&buf, marker);
+            buf.split_off(cut)
+        };
+        // Windows R writes CRLF; callers see the same text everywhere.
+        if buf.ends_with(b"\r\n") {
+            buf.truncate(buf.len() - 2);
+            buf.push(b'\n');
+        }
+        if !f(String::from_utf8_lossy(&buf).into_owned()) {
+            return;
+        }
+        buf = carry;
+    }
+}
+
+/// Where to end a piece that has no line break: before a frame marker that
+/// starts after the beginning, before a tail that could be the start of one,
+/// and never inside a character or between `\r` and `\n`. Never 0, so a
+/// piece always makes progress.
+fn safe_cut(buf: &[u8], marker: &[u8]) -> usize {
+    let mut cut = buf.len();
+    let found = (!marker.is_empty())
+        .then(|| buf.windows(marker.len()).position(|w| w == marker))
+        .flatten();
+    match found {
+        Some(at) if at > 0 => cut = at,
+        Some(_) => {}
+        None => {
+            for k in (1..marker.len().min(buf.len() + 1)).rev() {
+                if marker.get(..k).is_some_and(|start| buf.ends_with(start)) {
+                    cut = buf.len() - k;
+                    break;
                 }
             }
         }
+    }
+    // the last character must be whole: step back over continuation bytes to
+    // its first byte and see whether all of it is in
+    for i in (cut.saturating_sub(4)..cut).rev() {
+        let Some(&b) = buf.get(i) else { break };
+        if b & 0xC0 == 0x80 {
+            continue;
+        }
+        let len = match b {
+            0xF0.. => 4,
+            0xE0.. => 3,
+            0xC0.. => 2,
+            _ => 1,
+        };
+        if i + len > cut {
+            cut = i;
+        }
+        break;
+    }
+    if cut > 1 && buf.get(cut - 1) == Some(&b'\r') {
+        cut -= 1;
+    }
+    if cut == 0 {
+        buf.len()
+    } else {
+        cut
     }
 }
 
@@ -869,7 +973,7 @@ mod tests {
     fn long_lines_are_split_not_buffered_whole() {
         let data = vec![b'a'; (MAX_CHUNK_BYTES as usize) * 2 + 10];
         let mut chunks = Vec::new();
-        read_chunks(&data[..], |c| {
+        read_chunks(&data[..], b"", |c| {
             chunks.push(c.len());
             true
         });
@@ -880,7 +984,7 @@ mod tests {
     #[test]
     fn lines_come_out_whole() {
         let mut chunks = Vec::new();
-        read_chunks(&b"one\ntwo\nthree"[..], |c| {
+        read_chunks(&b"one\ntwo\nthree"[..], b"", |c| {
             chunks.push(c);
             true
         });
@@ -890,7 +994,7 @@ mod tests {
     #[test]
     fn crlf_becomes_lf() {
         let mut chunks = Vec::new();
-        read_chunks(&b"a\r\nb\r\nc"[..], |c| {
+        read_chunks(&b"a\r\nb\r\nc"[..], b"", |c| {
             chunks.push(c);
             true
         });
@@ -900,10 +1004,77 @@ mod tests {
     #[test]
     fn invalid_utf8_does_not_panic() {
         let mut chunks = Vec::new();
-        read_chunks(&[0xff, 0xfe, b'\n'][..], |c| {
+        read_chunks(&[0xff, 0xfe, b'\n'][..], b"", |c| {
             chunks.push(c);
             true
         });
         assert_eq!(chunks.len(), 1);
+    }
+
+    const MARKER: &[u8] = b"rcraft0123456789abcdef\t";
+
+    fn chunks_of(data: &[u8]) -> Vec<String> {
+        let mut chunks = Vec::new();
+        read_chunks(data, MARKER, |c| {
+            chunks.push(c);
+            true
+        });
+        chunks
+    }
+
+    #[test]
+    fn a_frame_across_the_piece_boundary_stays_whole() {
+        // the review found END lost when its marker straddled 64 KiB
+        let cap = MAX_CHUNK_BYTES as usize;
+        for before in [
+            cap - 1,
+            cap - 10,
+            cap - MARKER.len(),
+            cap - MARKER.len() + 1,
+            cap,
+        ] {
+            let mut data = vec![b'a'; before];
+            data.extend_from_slice(MARKER);
+            data.extend_from_slice(b"END\t1\tok\n");
+            let chunks = chunks_of(&data);
+            let last = chunks.last().map(String::as_str).unwrap_or_default();
+            let marker = std::str::from_utf8(MARKER).unwrap_or_default();
+            assert!(
+                last.starts_with(marker) || last.contains(&format!("a{marker}")),
+                "{before}: the frame was split: {:?}",
+                chunks.iter().map(|c| c.len()).collect::<Vec<_>>()
+            );
+            assert!(last.ends_with("END\t1\tok\n"), "{before}");
+            assert_eq!(chunks.concat().len(), data.len());
+        }
+    }
+
+    #[test]
+    fn a_character_across_the_piece_boundary_stays_whole() {
+        let cap = MAX_CHUNK_BYTES as usize;
+        for before in [cap - 1, cap - 2, cap - 3] {
+            let mut data = vec![b'a'; before];
+            data.extend_from_slice("é中😀\n".as_bytes());
+            let text = chunks_of(&data).concat();
+            assert!(!text.contains('\u{fffd}'), "{before}");
+            assert!(text.ends_with("é中😀\n"));
+        }
+    }
+
+    #[test]
+    fn crlf_across_the_piece_boundary_becomes_lf() {
+        let mut data = vec![b'a'; MAX_CHUNK_BYTES as usize - 1];
+        data.extend_from_slice(b"\r\nnext\n");
+        let text = chunks_of(&data).concat();
+        assert!(!text.contains('\r'));
+        assert!(text.ends_with("a\nnext\n"));
+    }
+
+    #[test]
+    fn safe_cut_always_makes_progress() {
+        assert_eq!(safe_cut(MARKER, MARKER), MARKER.len());
+        assert_eq!(safe_cut(b"\r", MARKER), 1);
+        assert_eq!(safe_cut(&[0xE4], MARKER), 1);
+        assert_eq!(safe_cut(b"abc", b""), 3);
     }
 }

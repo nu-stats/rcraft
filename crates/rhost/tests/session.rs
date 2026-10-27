@@ -297,6 +297,197 @@ fn messages_are_never_lost_to_the_end_of_the_run() {
     }
 }
 
+// Regression tests for the rproto/session review (P3 session fixes).
+
+#[test]
+fn a_sink_left_on_does_not_hang_the_session() {
+    let Some(mut s) = session() else { return };
+    let out = s
+        .run_to_end("sink(tempfile()); warning('inside'); 1", LIMIT)
+        .expect("run");
+    assert_eq!(out.status, RunStatus::Ok);
+    assert_eq!(out.warnings.first().map(String::as_str), Some("inside"));
+    assert!(out.warnings.iter().any(|w| w.contains("sink()")), "{out:?}");
+    // the sink was turned off, so output shows again
+    let again = s.run_to_end("1 + 1", LIMIT).expect("run");
+    assert_eq!(again.stdout.trim(), "[1] 2");
+    assert!(again.warnings.is_empty());
+}
+
+#[test]
+fn a_message_sink_left_on_does_not_hang_the_session() {
+    let Some(mut s) = session() else { return };
+    let out = s
+        .run_to_end(
+            "zz <- file(tempfile(), 'w'); sink(zz, type = 'message'); message('hidden')",
+            LIMIT,
+        )
+        .expect("run");
+    assert_eq!(out.status, RunStatus::Ok);
+    let again = s.run_to_end("message('seen')", LIMIT).expect("run");
+    assert!(again.stderr.contains("seen"), "{again:?}");
+}
+
+#[test]
+fn capture_output_does_not_capture_rcraft_frames() {
+    let Some(mut s) = session() else { return };
+    let out = s
+        .run_to_end("x <- capture.output({warning('w'); cat('a\\n')}); x", LIMIT)
+        .expect("run");
+    assert_eq!(out.status, RunStatus::Ok);
+    assert_eq!(out.stdout.trim(), "[1] \"a\"");
+    assert_eq!(out.warnings, ["w"]);
+}
+
+#[test]
+fn a_frame_after_long_unterminated_output_is_found() {
+    let Some(mut s) = session() else { return };
+    // the END frame's marker starts on either side of the 64 KiB read boundary
+    for n in [65513, 65520, 65526, 65535, 65536] {
+        let out = s
+            .run_to_end(&format!("cat(strrep('a', {n}))"), LIMIT)
+            .expect("run");
+        assert_eq!(out.status, RunStatus::Ok, "{n}");
+        assert_eq!(out.stdout.len(), n, "{n}");
+    }
+}
+
+#[test]
+fn a_character_on_the_read_boundary_is_not_garbled() {
+    let Some(mut s) = session() else { return };
+    let out = s
+        .run_to_end("cat(strrep('a', 65535), '\\u00e9\\n', sep = '')", LIMIT)
+        .expect("run");
+    assert!(!out.stdout.contains('\u{fffd}'));
+    assert!(out.stdout.ends_with("a\u{e9}\n"));
+}
+
+#[test]
+fn an_interrupt_racing_the_end_of_a_run_does_not_hang_it() {
+    let Some(mut s) = session() else { return };
+    for round in 0..20 {
+        let id = s.run("1").expect("run");
+        let outcome = s.interrupt();
+        let mut finished = false;
+        while let Some(event) = s.next_event(Duration::from_secs(20)) {
+            if matches!(event, Event::Finished { run, .. } if run == id) {
+                finished = true;
+                break;
+            }
+        }
+        assert!(finished, "round {round}: the run never ended");
+        if outcome == InterruptOutcome::SessionStopped {
+            // no signals on Windows: the interrupt stopped R
+            s.restart().expect("restart");
+        }
+        let out = s.run_to_end("2 + 2", LIMIT).expect("run");
+        assert_eq!(out.stdout.trim(), "[1] 4", "round {round}");
+    }
+}
+
+#[test]
+fn an_interrupt_r_does_not_answer_ends_in_stopping_r() {
+    let Some(mut s) = session() else { return };
+    let id = s.run("suspendInterrupts(Sys.sleep(60))").expect("run");
+    std::thread::sleep(Duration::from_millis(500));
+    let started = std::time::Instant::now();
+    s.interrupt();
+    let mut status = None;
+    while let Some(event) = s.next_event(Duration::from_secs(30)) {
+        if let Event::Finished { run, status: st } = event {
+            if run == id {
+                status = Some(st);
+                break;
+            }
+        }
+    }
+    assert_eq!(status, Some(RunStatus::Interrupted));
+    assert!(started.elapsed() < Duration::from_secs(25));
+}
+
+#[test]
+fn a_timed_out_run_to_end_leaves_the_session_free() {
+    let Some(mut s) = session() else { return };
+    let out = s.run_to_end("Sys.sleep(60)", Duration::from_secs(1));
+    assert_eq!(out, Err(SessionError::TimedOut));
+    assert!(!s.is_busy());
+    if !s.is_running() {
+        s.restart().expect("restart");
+    }
+    let again = s.run_to_end("1 + 1", LIMIT).expect("run");
+    assert_eq!(again.stdout.trim(), "[1] 2");
+}
+
+#[test]
+fn options_warn_is_respected() {
+    let Some(mut s) = session() else { return };
+    let strict = s
+        .run_to_end("options(warn = 2); warning('strict')", LIMIT)
+        .expect("run");
+    assert_eq!(strict.status, RunStatus::Error);
+    assert!(strict
+        .error
+        .as_ref()
+        .is_some_and(|e| e.message.contains("strict")));
+    let quiet = s
+        .run_to_end("options(warn = -1); warning('quiet'); 1", LIMIT)
+        .expect("run");
+    assert_eq!(quiet.status, RunStatus::Ok);
+    assert!(quiet.warnings.is_empty(), "{quiet:?}");
+    let normal = s
+        .run_to_end("options(warn = 0); warning('normal')", LIMIT)
+        .expect("run");
+    assert_eq!(normal.warnings, ["normal"]);
+}
+
+#[test]
+fn a_warning_with_no_muffle_restart_is_not_an_error() {
+    let Some(mut s) = session() else { return };
+    let out = s
+        .run_to_end(
+            "invisible(signalCondition(simpleWarning('bare'))); 1",
+            LIMIT,
+        )
+        .expect("run");
+    assert_eq!(out.status, RunStatus::Ok);
+    assert_eq!(out.warnings, ["bare"]);
+    assert_eq!(out.stdout.trim(), "[1] 1");
+}
+
+#[test]
+fn r_s_last_words_on_standard_error_are_kept() {
+    let Some(mut s) = session() else { return };
+    for round in 0..10 {
+        let out = s
+            .run_to_end(
+                "cat('dying words\\n', file = stderr()); quit(save = 'no', status = 4)",
+                LIMIT,
+            )
+            .expect("run");
+        assert_eq!(out.status, RunStatus::Crashed, "round {round}");
+        assert!(out.stderr.contains("dying words"), "round {round}: {out:?}");
+        s.restart().expect("restart");
+    }
+}
+
+#[test]
+fn close_all_connections_does_not_end_the_session() {
+    let Some(mut s) = session() else { return };
+    let out = s.run_to_end("closeAllConnections()", LIMIT).expect("run");
+    assert_eq!(out.status, RunStatus::Ok);
+    let again = s.run_to_end("1 + 1", LIMIT).expect("run");
+    assert_eq!(again.stdout.trim(), "[1] 2");
+    // R gives the closed connection's number to the next one opened
+    s.run_to_end(
+        "closeAllConnections(); keep <- file(tempfile(), 'w')",
+        LIMIT,
+    )
+    .expect("run");
+    let third = s.run_to_end("2 + 2", LIMIT).expect("run");
+    assert_eq!(third.stdout.trim(), "[1] 4");
+    assert!(s.is_running());
+}
+
 #[test]
 fn output_without_a_final_line_break_does_not_hang_the_run() {
     let Some(mut s) = session() else { return };

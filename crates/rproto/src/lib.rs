@@ -166,6 +166,11 @@ pub fn unescape(text: &str) -> String {
     out
 }
 
+/// What every frame starts with: the token and a tab.
+pub fn frame_marker(token: &str) -> String {
+    format!("{token}\t")
+}
+
 /// Reads one line of R's standard output. `None` means the line is not a
 /// frame (it is the run's printed output); `Some(Err(..))` means it carried
 /// the token but could not be read.
@@ -182,7 +187,7 @@ pub fn parse_frame_after_text<'a>(
     token: &str,
     line: &'a str,
 ) -> Option<(&'a str, Result<Frame, ProtoError>)> {
-    let marker = format!("{token}\t");
+    let marker = frame_marker(token);
     let at = line.find(&marker).filter(|&at| at > 0)?;
     let (text, frame) = line.split_at(at);
     Some((text, parse_frame(token, frame)?))
