@@ -7,9 +7,9 @@
 #
 # Interrupts are held off everywhere except while the user's code runs, so one
 # that arrives while a request is read or a run is being reported cannot lose
-# the END frame. One held off that way waits for the next point where R looks
-# for interrupts: so an interrupt that lands just after a run has ended may
-# stop the next run instead (it can no longer hang the session).
+# the END frame. RCraft interrupts a run only after it has seen the run's
+# BEGIN, so an interrupt still pending when the next run is about to begin was
+# meant for an earlier one (sent just as it ended) and is dropped there.
 local({
   token <- commandArgs(trailingOnly = TRUE)[[1L]]
   con <- file("stdin", "rb")
@@ -64,6 +64,8 @@ local({
   run_one <- function(id, n) {
     code <- readChar(con, n, useBytes = TRUE)
     Encoding(code) <- "UTF-8"
+    # Sys.sleep() looks for interrupts, so a stale one is taken here
+    tryCatch(allowInterrupts(Sys.sleep(0)), interrupt = function(i) NULL)
     emit("BEGIN", id)
     status <- "ok"
     tryCatch(

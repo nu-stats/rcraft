@@ -217,6 +217,11 @@ struct RunState {
     /// When RCraft asked the run to stop (a limit, or an interrupt). A run
     /// still going [`ESCALATE_AFTER`] later is stopped outright.
     stopping_since: Option<Instant>,
+    /// R has sent the run's `Begin`. Before that an interrupt would reach R
+    /// while it still drops interrupts left over from the run before, so it
+    /// waits (`interrupt_wanted`) and is sent when `Begin` arrives.
+    begun: bool,
+    interrupt_wanted: bool,
     /// The end frame from standard output, held until standard error has
     /// caught up (its `Sync`), so no message is lost to a race.
     end: Option<Status>,
@@ -359,6 +364,8 @@ impl Session {
             started: now,
             last_memory_check: now,
             stopping_since: None,
+            begun: false,
+            interrupt_wanted: false,
             end: None,
             synced: false,
         });
@@ -468,8 +475,18 @@ impl Session {
             return InterruptOutcome::Idle;
         }
         self.mark_stopping();
-        if send_interrupt(self.r_pid) {
-            return InterruptOutcome::Signalled;
+        if CAN_SIGNAL {
+            match self.current.as_mut() {
+                Some(state) if !state.begun => {
+                    state.interrupt_wanted = true;
+                    return InterruptOutcome::Signalled;
+                }
+                _ => {
+                    if send_interrupt(self.r_pid) {
+                        return InterruptOutcome::Signalled;
+                    }
+                }
+            }
         }
         self.stop_now();
         InterruptOutcome::SessionStopped
@@ -609,7 +626,17 @@ impl Session {
     fn handle_frame(&mut self, frame: Frame) {
         match frame {
             Frame::Ready { .. } => {}
-            Frame::Begin { run } => self.pending.push_back(Event::Started { run }),
+            Frame::Begin { run } => {
+                let mut wanted = false;
+                if let Some(state) = self.current.as_mut().filter(|s| s.id == run) {
+                    state.begun = true;
+                    wanted = std::mem::take(&mut state.interrupt_wanted);
+                }
+                if wanted && !self.exited && !send_interrupt(self.r_pid) {
+                    self.stop_now();
+                }
+                self.pending.push_back(Event::Started { run });
+            }
             Frame::Warning { run, message } => {
                 self.pending.push_back(Event::Warning { run, message });
             }
@@ -901,6 +928,9 @@ fn safe_cut(buf: &[u8], marker: &[u8]) -> usize {
         cut
     }
 }
+
+/// Whether this system can interrupt R without stopping it.
+const CAN_SIGNAL: bool = cfg!(unix);
 
 #[cfg(unix)]
 fn send_interrupt(pid: u32) -> bool {

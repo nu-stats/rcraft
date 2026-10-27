@@ -370,8 +370,10 @@ in `rhost/tests/session.rs` (or a unit test for the output reader).
 - Output is read in 64 KiB pieces; a piece no longer ends inside a frame marker
   (lost END: the run never finished) or inside a character (shown as `�`).
 - Interrupts are held off except while the user's code runs, so one arriving
-  as a request is read or a run is reported cannot lose END. Known limit (Unix):
-  an interrupt that lands just after a run has ended may stop the next run.
+  as a request is read or a run is reported cannot lose END. RCraft signals a
+  run only once it has seen its BEGIN, and R drops any interrupt still pending
+  just before BEGIN, so one sent as a run ends cannot stop the next run (CI
+  caught that on Ubuntu with the first version of the fix).
 - An interrupt R does not answer is followed by stopping R after 10 s, as the
   limits already were; a timed-out `run_to_end` waits for that, so the session
   is free afterwards.
