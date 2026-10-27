@@ -16,6 +16,8 @@ pub struct RunRequest {
     pub result: String,
     /// Whether that is the data frame the dialog worked on.
     pub replaces: bool,
+    /// The data frame (or object) the dialog worked on.
+    pub dataset: String,
 }
 
 struct Open {
@@ -110,8 +112,13 @@ impl SpecDialog {
             .default_pos(egui::pos2(280.0, 60.0))
             .show(ctx, |ui| {
                 ui.label(RichText::new(open.spec.about).color(pal.dim));
+                let subject = if rcraft_catalog::data::is_object_menu(open.spec.menu) {
+                    "Object"
+                } else {
+                    "Data frame"
+                };
                 ui.label(
-                    RichText::new(format!("Data frame: {}", open.ctx.dataset))
+                    RichText::new(format!("{subject}: {}", open.ctx.dataset))
                         .small()
                         .color(pal.dim),
                 );
@@ -181,6 +188,7 @@ impl SpecDialog {
                                 code: code.clone(),
                                 replaces: result == open.ctx.dataset,
                                 result,
+                                dataset: open.ctx.dataset.clone(),
                             });
                         }
                     }

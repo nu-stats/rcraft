@@ -301,6 +301,9 @@ pub enum ObjectClick {
     Open(String),
     /// Put the object's name in the Command line.
     Insert(String),
+    /// From the object's right-click menu: open the dialog for this action
+    /// (one of `rcraft_catalog::data::OBJECT_SPECS`) on the object.
+    Dialog(&'static rcraft_rcodegen::dialog::Spec, String),
 }
 
 /// Everything in R's workspace: name, class, and size for data frames. A data
@@ -332,10 +335,18 @@ pub fn object_list(
                 name
             })
             .inner;
+        response.context_menu(|ui| {
+            for spec in rcraft_catalog::data::OBJECT_SPECS {
+                if ui.button(format!("{}…", spec.entry)).clicked() {
+                    out.push(ObjectClick::Dialog(spec, item.name.clone()));
+                    ui.close_menu();
+                }
+            }
+        });
         let hint = if item.is_data_frame() {
-            "Click to show this data frame in Variables and Data"
+            "Click to show this data frame in Variables and Data. Right-click for more."
         } else {
-            "Click to put the name in the Command line"
+            "Click to put the name in the Command line. Right-click for more."
         };
         if response.on_hover_text(hint).clicked() {
             out.push(if item.is_data_frame() {

@@ -39,6 +39,9 @@ pub struct HeadlessOptions {
     pub set: Vec<(String, String)>,
     /// Open "Use my file" on this file.
     pub import: Option<PathBuf>,
+    /// The recent files "Use my file" offers, newest first. A picture never
+    /// reads or changes the user's own list.
+    pub recent: Vec<String>,
     pub accent: Accent,
     /// Width and height in points.
     pub size: [u32; 2],
@@ -57,6 +60,7 @@ impl HeadlessOptions {
             dialog: None,
             set: Vec::new(),
             import: None,
+            recent: Vec::new(),
             accent: Accent::default(),
             size: [1240, 780],
             pixels_per_point: 1.0,
@@ -74,6 +78,11 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     let ctx = egui::Context::default();
     ctx.set_pixels_per_point(ppp);
     let mut app = App::new(&ctx);
+    let mut recent = rcraft_rhost::recent::Recent::at(None);
+    for path in options.recent.iter().rev() {
+        recent.add(path);
+    }
+    app.use_recent(recent);
     app.set_theme(
         &ctx,
         if options.dark {

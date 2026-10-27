@@ -6,6 +6,7 @@ pub mod find;
 pub mod library;
 pub mod pinokio;
 pub mod procinfo;
+pub mod recent;
 pub mod session;
 
 pub use session::{

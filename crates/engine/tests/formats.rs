@@ -8,7 +8,8 @@ use std::time::{Duration, Instant};
 
 use rcraft_engine::{Engine, Outcome, Source};
 use rcraft_rcodegen::{
-    package_check_code, sheets_code, ExcelImport, HavenImport, HavenKind, Import, RObjectImport,
+    package_check_code, sheets_code, ArrowFormat, ArrowImport, ExcelImport, HavenImport, HavenKind,
+    Import, RObjectImport,
 };
 use rcraft_rdata::{Data, Table};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -481,4 +482,62 @@ fn a_missing_package_is_reported_as_no_not_an_error() {
     let (ok, answer) = ask(&mut e, &package_check_code("definitelyNotAPackage"));
     assert!(ok);
     assert_eq!(answer.trim(), "no");
+}
+
+#[test]
+fn parquet_and_feather_files_import_with_their_types() {
+    let Some(mut e) = engine_with("arrow") else {
+        return;
+    };
+    let d = dir();
+    let (pq, ft) = (d.join("t.parquet"), d.join("t.feather"));
+    let make = format!(
+        "df <- data.frame(id = 1:4, x = c(1.5, NA, 3, 4), g = factor(c('a', 'b', 'a', NA)), \
+         when = as.Date('2024-01-01') + 0:3, name = c('p', 'q', NA, 's')); \
+         arrow::write_parquet(df, \"{}\"); arrow::write_feather(df, \"{}\")",
+        rpath(&pq),
+        rpath(&ft)
+    );
+    assert!(e.submit(Source::Typed, &make).is_ok());
+    settle(&mut e);
+
+    for (path, format, label) in [
+        (&pq, ArrowFormat::Parquet, "parquet"),
+        (&ft, ArrowFormat::Feather, "feather"),
+    ] {
+        let mut a = ArrowImport::new(&rpath(path), format);
+        a.name = "imported".into();
+        let (t, outcome) = run_import(&mut e, &Import::Arrow(a.clone()));
+        assert_eq!(outcome, Outcome::Ok, "{label}");
+        let Some(t) = t else {
+            panic!("{label}: no table")
+        };
+        assert_eq!((t.nrow, t.columns.len()), (4, 5), "{label}");
+        assert_eq!(
+            col(&t, "id").map(|c| c.data.clone()),
+            Some(Data::Int(vec![1, 2, 3, 4])),
+            "{label}"
+        );
+        assert!(
+            matches!(col(&t, "x").map(|c| &c.data), Some(Data::Double(v)) if v.len() == 4 && rcraft_rdata::is_na(v[1])),
+            "{label}: x"
+        );
+        assert!(
+            matches!(col(&t, "g").map(|c| &c.data), Some(Data::Factor { levels, .. }) if levels.len() == 2),
+            "{label}: g"
+        );
+        assert!(
+            matches!(col(&t, "when").map(|c| &c.data), Some(Data::Date(v)) if v.len() == 4),
+            "{label}: when"
+        );
+        assert!(
+            matches!(col(&t, "name").map(|c| &c.data), Some(Data::Text(v)) if v.get(2) == Some(&None)),
+            "{label}: name"
+        );
+        let (ok, preview) = ask(&mut e, &Import::Arrow(a).preview_code(2));
+        assert!(
+            ok && preview.contains("5 columns; 4 rows") && preview.contains("name"),
+            "{label}: {preview}"
+        );
+    }
 }

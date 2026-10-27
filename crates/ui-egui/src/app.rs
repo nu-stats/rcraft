@@ -7,6 +7,7 @@ use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
 use rcraft_engine::{Engine, History, Item, Outcome, Recall, Source};
 use rcraft_rcodegen::dialog::Spec;
 use rcraft_rdata::display::LabelView;
+use rcraft_rhost::recent::Recent;
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
 
 use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
@@ -54,6 +55,8 @@ enum Action {
     OpenImport,
     /// Open a catalog dialog on the data frame shown in Variables.
     OpenSpec(&'static Spec),
+    /// Open one of the Objects pane's dialogs on this object.
+    OpenObjectSpec(&'static Spec, String),
     SetView(View),
     SetSideTab(SideTab),
     SetTypeFilter(TypeFilter),
@@ -91,6 +94,8 @@ pub struct App {
     spec_dialog: SpecDialog,
     /// A data frame to switch to once R lists it.
     show_when_listed: Option<String>,
+    /// Files imported lately, kept between runs.
+    recent: Recent,
 }
 
 impl App {
@@ -100,6 +105,9 @@ impl App {
         look::apply_colors(ctx, accent);
         let theme = egui::ThemePreference::System;
         ctx.set_theme(theme);
+        let recent = Recent::load(&Env::from_process());
+        let mut import = ImportDialog::default();
+        import.set_recent(recent.paths());
         App {
             engine: EngineState::Starting(start_engine()),
             command: String::new(),
@@ -116,10 +124,18 @@ impl App {
             label_view: LabelView::default(),
             side_tab: SideTab::Variables,
             type_filter: TypeFilter::default(),
-            import: ImportDialog::default(),
+            import,
             spec_dialog: SpecDialog::default(),
             show_when_listed: None,
+            recent,
         }
+    }
+
+    /// Uses another list of recent files (pictures and tests keep their own,
+    /// so they neither read nor change the user's).
+    pub fn use_recent(&mut self, recent: Recent) {
+        self.import.set_recent(recent.paths());
+        self.recent = recent;
     }
 
     fn engine(&self) -> Option<&Engine> {
@@ -236,7 +252,10 @@ impl App {
             Action::SetView(view) => self.view = view,
             Action::SetSideTab(tab) => self.side_tab = tab,
             Action::SetTypeFilter(filter) => self.type_filter = filter,
-            Action::OpenImport => self.import.open_empty(),
+            Action::OpenImport => {
+                self.import.set_recent(self.recent.paths());
+                self.import.open_empty();
+            }
             Action::OpenSpec(spec) => {
                 let table = self.dataset.as_deref().and_then(|name| {
                     self.engine()
@@ -249,6 +268,16 @@ impl App {
                         self.message = Some(format!("{}: open a data frame first.", spec.entry));
                     }
                 }
+            }
+            Action::OpenObjectSpec(spec, name) => {
+                // an object has no columns to choose from
+                self.spec_dialog.open(
+                    spec,
+                    rcraft_rcodegen::dialog::Context {
+                        dataset: name,
+                        columns: Vec::new(),
+                    },
+                );
             }
             Action::ShowWhenListed(name) => self.show_when_listed = Some(name),
             Action::Interrupt => {
@@ -345,6 +374,7 @@ impl App {
         // a file dropped on the window opens the dialog on it
         let dropped = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
         if let Some(path) = dropped {
+            self.import.set_recent(self.recent.paths());
             self.import.open_with(&path);
         }
         let frames: Vec<String> = self
@@ -362,7 +392,9 @@ impl App {
             _ => None,
         };
         match self.import.show(ctx, &pal, &frames, engine) {
-            Some(DialogAction::Import { code, name }) => {
+            Some(DialogAction::Import { code, name, file }) => {
+                self.recent.add(&file);
+                self.import.set_recent(self.recent.paths());
                 actions.push(Action::Submit(
                     Source::Menu("File > Use my file".into()),
                     code,
@@ -393,8 +425,15 @@ impl App {
             self.spec_dialog.refresh(fresh);
         }
         if let Some(run) = self.spec_dialog.show(ctx, &pal) {
+            // a renamed object is followed only when it was the one shown;
+            // otherwise the window would wait for a data frame that never comes
+            let follow = if rcraft_catalog::data::is_object_menu(&run.menu) {
+                self.dataset.as_deref() == Some(run.dataset.as_str())
+            } else {
+                true
+            };
             actions.push(Action::Submit(Source::Menu(run.menu), run.code));
-            if !run.replaces {
+            if !run.replaces && follow {
                 actions.push(Action::ShowWhenListed(run.result));
             }
         }
@@ -625,6 +664,9 @@ impl App {
                                 out.push(Action::SetSideTab(SideTab::Variables));
                             }
                             ObjectClick::Insert(name) => out.push(Action::Insert(name)),
+                            ObjectClick::Dialog(spec, name) => {
+                                out.push(Action::OpenObjectSpec(spec, name));
+                            }
                         }
                     }
                     return;
@@ -1034,9 +1076,19 @@ impl App {
     ) -> Result<(), String> {
         let spec = rcraft_catalog::data::SPECS
             .iter()
+            .chain(rcraft_catalog::data::OBJECT_SPECS)
             .find(|s| s.entry.eq_ignore_ascii_case(entry))
             .ok_or_else(|| format!("no dialog called {entry}"))?;
-        self.perform(ctx, Action::OpenSpec(spec));
+        if rcraft_catalog::data::is_object_menu(spec.menu) {
+            // the Objects pane's dialogs work on the object shown in Variables
+            let name = self
+                .dataset
+                .clone()
+                .ok_or_else(|| format!("{entry}: no data frame is shown in Variables"))?;
+            self.perform(ctx, Action::OpenObjectSpec(spec, name));
+        } else {
+            self.perform(ctx, Action::OpenSpec(spec));
+        }
         if self.spec_dialog.dataset().is_none() {
             return Err(format!("{entry}: no data frame is shown in Variables"));
         }
@@ -1271,5 +1323,61 @@ mod tests {
             last.map(|h| h.source),
             Some(Source::Menu("Data > Sort rows".into()))
         );
+    }
+
+    #[test]
+    fn the_objects_menu_renames_and_removes_any_object() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                "frame1 <- data.frame(a = 1:3); answer <- 42".into(),
+            ),
+        );
+        let listed = |a: &App, name: &str| {
+            a.engine()
+                .is_some_and(|e| e.workspace().iter().any(|w| w.name == name))
+        };
+        assert!(frames_until(&mut app, &ctx, |a| listed(a, "answer")
+            && a.dataset.as_deref() == Some("frame1")));
+
+        // rename a plain object: the data frame shown stays shown
+        let rename = &rcraft_catalog::data::RENAME_OBJECT;
+        app.perform(&ctx, Action::OpenObjectSpec(rename, "answer".into()));
+        assert_eq!(app.spec_dialog.dataset(), Some("answer"));
+        app.spec_dialog.set_text("result", "reply");
+        let code = app.spec_dialog.code().and_then(Result::ok);
+        assert!(code
+            .as_deref()
+            .is_some_and(|c| c.contains("reply <- answer")));
+        app.perform(
+            &ctx,
+            Action::Submit(Source::Menu(rename.menu.into()), code.unwrap_or_default()),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| listed(a, "reply")
+            && !listed(a, "answer")
+            && a.is_settled()));
+        assert_eq!(app.dataset.as_deref(), Some("frame1"));
+        assert_eq!(app.show_when_listed, None);
+
+        // remove the data frame that is shown: the window lets go of it
+        let remove = &rcraft_catalog::data::REMOVE_OBJECT;
+        app.perform(&ctx, Action::OpenObjectSpec(remove, "frame1".into()));
+        let code = app.spec_dialog.code().and_then(Result::ok);
+        assert_eq!(code.as_deref(), Some("rm(frame1)"));
+        app.perform(
+            &ctx,
+            Action::Submit(Source::Menu(remove.menu.into()), code.unwrap_or_default()),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| !listed(a, "frame1")
+            && a.dataset.is_none()
+            && a.is_settled()));
     }
 }

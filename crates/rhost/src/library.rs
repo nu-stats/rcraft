@@ -7,27 +7,27 @@ use std::path::{Path, PathBuf};
 
 use crate::find::{Env, Platform};
 
+/// RCraft's own folder for what it keeps for the user (packages, the list of
+/// recent files), for this machine. It may not exist yet; nothing is created
+/// here.
+pub fn app_data_dir(env: &Env) -> Option<PathBuf> {
+    match env.platform.unwrap_or_else(Platform::current) {
+        Platform::Windows => env.local_app_data.as_ref().map(|d| d.join("RCraft")),
+        Platform::MacOs => env
+            .home
+            .as_ref()
+            .map(|h| h.join("Library").join("Application Support").join("RCraft")),
+        Platform::Linux => env
+            .home
+            .as_ref()
+            .map(|h| h.join(".local").join("share").join("rcraft")),
+    }
+}
+
 /// The folder for packages RCraft installs, for this machine. It may not
 /// exist yet; nothing is created here.
 pub fn user_library_dir(env: &Env) -> Option<PathBuf> {
-    match env.platform.unwrap_or_else(Platform::current) {
-        Platform::Windows => env
-            .local_app_data
-            .as_ref()
-            .map(|d| d.join("RCraft").join("R-library")),
-        Platform::MacOs => env.home.as_ref().map(|h| {
-            h.join("Library")
-                .join("Application Support")
-                .join("RCraft")
-                .join("R-library")
-        }),
-        Platform::Linux => env.home.as_ref().map(|h| {
-            h.join(".local")
-                .join("share")
-                .join("rcraft")
-                .join("R-library")
-        }),
-    }
+    app_data_dir(env).map(|d| d.join("R-library"))
 }
 
 /// The value for `R_LIBS_USER`: RCraft's library first, then whatever the

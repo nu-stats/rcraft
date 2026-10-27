@@ -359,6 +359,29 @@ exist on branch `p0/scaffold`.
 - The four entries are `partial`: the tidyverse code is snapshot-tested only, as
   CI has no dplyr. Recode, type conversion, factor, date and string tools next.
 
+## P3 leftovers: labels, Objects actions, recent files, Browse, Parquet, 2026-10-27
+
+- Labels (P3.3): Data menu dialogs *Variable label*, *Value labels* (`1 = Low; 2 = High`,
+  replaces the old labels, empty removes them) and *Labelled to factor* (unlabelled
+  values become missing, the variable label is kept). Base R only. Run against real R.
+  `Labelled to factor` is a function call so its names cannot clash with the data
+  frame's (a result named `f` broke the first version).
+- Objects (P3.4): a right-click menu on any object: *Rename* (refuses a name that is
+  taken), *Remove*, *Save* (`saveRDS`; will not replace a file unless asked). They are
+  specs (`catalog::data::OBJECT_SPECS`) drawn by the same dialog, so the R is shown and
+  goes into History as `Objects > ...`.
+- Recent files (P3.2): `rhost::recent` keeps the last ten in `recent-files.txt` in
+  RCraft's own folder (next to `R-library`); "Use my file" lists them, dimming ones
+  that are gone. Pictures and tests use an in-memory list (`--recent PATH`).
+- Browse (P3.2): the system's file chooser through `rfd` (UI crate only; on Linux the
+  portal backend, so no GTK needed). The chooser opens where the file in the box, or the
+  newest recent file, is. **Not clicked in a real window here**, only built and its
+  start-folder logic tested.
+- Parquet and Feather (P3.2): `arrow::read_parquet` / `read_feather` through the same
+  missing-package panel as Excel and Stata; the preview reads an Arrow table and shows
+  only the first rows. CI now installs `arrow` with the other packages so the real-R
+  test runs there. **Not run on this machine** (no `arrow` here), only in CI.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

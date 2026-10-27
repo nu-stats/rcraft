@@ -15,6 +15,7 @@
 //! --dialog NAME    after the demo, open a Data menu dialog ("Sort rows")
 //! --set ID=VALUE   set one of that dialog's values (repeatable)
 //! --import FILE    open "Use my file" on FILE
+//! --recent FILE    list FILE under "Recent files" in that dialog (repeatable)
 //! --accent NAME    Blue, Indigo, Teal, Plum, Forest, Amber or Rose
 //! --size WxH       size in points (default 1240x780)
 //! --scale N        pixels per point (default 1)
@@ -63,6 +64,7 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
                 options.set.push((id.to_string(), v.to_string()));
             }
             "--import" => options.import = Some(PathBuf::from(value("--import")?)),
+            "--recent" => options.recent.push(value("--recent")?.clone()),
             "--accent" => {
                 let name = value("--accent")?;
                 options.accent = Accent::ALL

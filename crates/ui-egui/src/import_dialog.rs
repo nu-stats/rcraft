@@ -1,6 +1,6 @@
 //! File > Use my file: choose a data file, see what it looks like, change how
-//! it is read, and import it. Delimited text, Excel, Stata, SPSS, SAS and R
-//! data files are handled. The dialog shows the R code it will run (AGENTS.md:
+//! it is read, and import it. Delimited text, Excel, Stata, SPSS, SAS, Parquet,
+//! Feather and R data files are handled. The dialog shows the R code it will run (AGENTS.md:
 //! the generated R is the product) and R's own preview of the first rows.
 
 use std::path::Path;
@@ -8,8 +8,9 @@ use std::path::Path;
 use eframe::egui::{self, Key, RichText};
 use rcraft_engine::{Engine, QueryId};
 use rcraft_rcodegen::{
-    package_check_code, parse_na_strings, r_string, sheets_code, CsvImport, ExcelImport, FileKind,
-    HavenImport, HavenKind, Import, Quote, RObjectImport,
+    package_check_code, parse_na_strings, r_string, sheets_code, ArrowFormat, ArrowImport,
+    CsvImport, ExcelImport, FileKind, HavenImport, HavenKind, Import, Quote, RObjectImport,
+    DATA_EXTENSIONS,
 };
 use rcraft_rdata::sniff::{sniff_file, Encoding, SniffError, Sniffed};
 
@@ -21,7 +22,12 @@ const PREVIEW_ROWS: usize = 10;
 /// What the dialog asks the window to do.
 pub enum DialogAction {
     /// Run this R code; show the data frame `name` afterwards, if known.
-    Import { code: String, name: Option<String> },
+    /// `file` is the file it reads, for the list of recent files.
+    Import {
+        code: String,
+        name: Option<String>,
+        file: String,
+    },
     /// Run this R code to install a package, as a menu command.
     Install { code: String },
 }
@@ -61,11 +67,14 @@ pub struct ImportDialog {
     install_seen_busy: bool,
     /// What the buttons at the foot of the window need, set while drawing.
     footer: Option<Footer>,
+    /// Files opened lately, newest first, and whether each is still there.
+    recent: Vec<(String, bool)>,
 }
 
 struct Footer {
     code: String,
     name: Option<String>,
+    file: String,
     problem: Option<&'static str>,
 }
 
@@ -119,6 +128,15 @@ impl ImportDialog {
         self.open = true;
     }
 
+    /// Sets the list of recent files the dialog offers (newest first), and
+    /// looks which of them are still there.
+    pub fn set_recent(&mut self, paths: &[String]) {
+        self.recent = paths
+            .iter()
+            .map(|p| (p.clone(), Path::new(p).is_file()))
+            .collect();
+    }
+
     /// Looks at the file in the path box and sets the choices from it.
     fn look(&mut self) {
         self.looked_at = self.path.clone();
@@ -166,12 +184,8 @@ impl ImportDialog {
             ))),
             FileKind::Rds => Some(Import::RObject(RObjectImport::new(&path, false))),
             FileKind::RData => Some(Import::RObject(RObjectImport::new(&path, true))),
-            FileKind::Planned(name) => {
-                self.error = Some(format!(
-                    "{name} files are planned: they need the arrow package, which is not set up yet."
-                ));
-                None
-            }
+            FileKind::Parquet => Some(Import::Arrow(ArrowImport::new(&path, ArrowFormat::Parquet))),
+            FileKind::Feather => Some(Import::Arrow(ArrowImport::new(&path, ArrowFormat::Feather))),
         };
     }
 
@@ -188,7 +202,7 @@ impl ImportDialog {
                 if matches!(e, SniffError::NotText(_)) {
                     why.push_str(
                         ". RCraft opens delimited text (.csv, .tsv, .txt), Excel, Stata, \
-                         SPSS, SAS and R data files.",
+                         SPSS, SAS, Parquet, Feather and R data files.",
                     );
                 }
                 self.error = Some(why);
@@ -335,14 +349,18 @@ impl ImportDialog {
             let edit = ui.add(
                 egui::TextEdit::singleline(&mut self.path)
                     .hint_text("Type or paste a file path, or drop a file on the window")
-                    .desired_width(ui.available_width() - 110.0),
+                    .desired_width(ui.available_width() - 200.0),
             );
             let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
+            if ui.button("Browse…").clicked() {
+                self.browse();
+            }
             let look = ui.button("Look at file").clicked();
             if look || ((enter || edit.lost_focus()) && self.path != self.looked_at) {
                 self.look();
             }
         });
+        self.recent_list(ui, pal);
         if let Some(why) = &self.error {
             ui.add_space(4.0);
             ui.label(RichText::new(why).color(pal.error));
@@ -368,6 +386,15 @@ impl ImportDialog {
                 Import::Csv(spec) => self.csv_options(ui, spec),
                 Import::Excel(spec) => self.excel_options(ui, spec),
                 Import::Haven(spec) => haven_options(ui, spec),
+                Import::Arrow(_) => {
+                    ui.label(
+                        RichText::new(
+                            "Parquet and Feather files keep the type of every column, so \
+                             the file is read as it is.",
+                        )
+                        .color(pal.dim),
+                    );
+                }
                 Import::RObject(spec) => {
                     if spec.workspace {
                         ui.label(
@@ -410,10 +437,64 @@ impl ImportDialog {
             self.footer = Some(Footer {
                 code,
                 name: import.result_name().map(str::to_string),
+                file: self.path.trim().to_string(),
                 problem: import.problem(),
             });
         }
         self.import = Some(import);
+    }
+
+    /// The files opened lately; a click chooses one. Open while nothing is chosen.
+    fn recent_list(&mut self, ui: &mut egui::Ui, pal: &Palette) {
+        if self.recent.is_empty() {
+            return;
+        }
+        let mut chosen: Option<String> = None;
+        egui::CollapsingHeader::new(RichText::new("Recent files").small().color(pal.dim))
+            .id_salt("import-recent")
+            .default_open(self.path.trim().is_empty())
+            .show(ui, |ui| {
+                for (path, exists) in &self.recent {
+                    let text = RichText::new(path).monospace().small();
+                    let text = if *exists { text } else { text.color(pal.dim) };
+                    let hint = if *exists {
+                        "Choose this file"
+                    } else {
+                        "This file is not there any more"
+                    };
+                    if ui
+                        .selectable_label(false, text)
+                        .on_hover_text(hint)
+                        .clicked()
+                    {
+                        chosen = Some(path.clone());
+                    }
+                }
+            });
+        if let Some(path) = chosen {
+            self.choose(path);
+        }
+    }
+
+    /// Asks the system's file chooser for a data file, and looks at the one
+    /// picked. The window waits while the chooser is open.
+    fn browse(&mut self) {
+        let mut chooser = rfd::FileDialog::new()
+            .set_title("Choose a data file")
+            .add_filter("Data files", DATA_EXTENSIONS)
+            .add_filter("All files", &["*"]);
+        if let Some(dir) = start_folder(&self.path, &self.recent) {
+            chooser = chooser.set_directory(dir);
+        }
+        if let Some(path) = chooser.pick_file() {
+            self.choose(path.to_string_lossy().into_owned());
+        }
+    }
+
+    /// Takes `path` as the file and looks at it.
+    fn choose(&mut self, path: String) {
+        self.path = path;
+        self.look();
     }
 
     /// The buttons at the foot of the window, kept in view while the rest scrolls.
@@ -438,6 +519,7 @@ impl ImportDialog {
                     *action = Some(DialogAction::Import {
                         code: footer.code.clone(),
                         name: footer.name.clone(),
+                        file: footer.file.clone(),
                     });
                 }
             }
@@ -758,6 +840,23 @@ fn haven_options(ui: &mut egui::Ui, spec: &mut HavenImport) {
 }
 
 /// RCraft's own package library, as a path R understands.
+/// The folder the file chooser opens in: where the file in the box is, else
+/// where the newest recent file that is still there is.
+fn start_folder(path: &str, recent: &[(String, bool)]) -> Option<std::path::PathBuf> {
+    let folder_of = |p: &str| {
+        Path::new(p.trim())
+            .parent()
+            .filter(|d| d.is_dir())
+            .map(Path::to_path_buf)
+    };
+    folder_of(path).or_else(|| {
+        recent
+            .iter()
+            .filter(|(_, there)| *there)
+            .find_map(|(p, _)| folder_of(p))
+    })
+}
+
 fn library_dir() -> Option<String> {
     rcraft_rhost::library::user_library_dir(&rcraft_rhost::Env::from_process())
         .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -816,6 +915,8 @@ mod tests {
             ("a.sav", "haven"),
             ("a.sas7bdat", "haven"),
             ("a.xpt", "haven"),
+            ("a.parquet", "arrow"),
+            ("a.feather", "arrow"),
         ];
         for (file, package) in cases {
             let path = temp(file, b"binary \0 stuff");
@@ -841,11 +942,6 @@ mod tests {
         assert!(d.import.is_none());
         assert!(d.error.as_deref().is_some_and(|e| e.contains("not found")));
 
-        let parquet = temp("t.parquet", b"PAR1");
-        d.open_with(&parquet);
-        assert!(d.import.is_none());
-        assert!(d.error.as_deref().is_some_and(|e| e.contains("Parquet")));
-
         let weird = temp("blob.bin", b"\0\x01\x02 binary");
         d.open_with(&weird);
         assert!(d.import.is_none() && d.error.is_some());
@@ -858,6 +954,49 @@ mod tests {
         assert!(code.contains("https://cloud.r-project.org"));
         assert!(code.starts_with("dir.create("));
         assert!(!install_code("haven", None).contains("lib ="));
+    }
+
+    #[test]
+    fn recent_files_are_offered_and_choosing_one_looks_at_it() {
+        let there = temp("recent.csv", b"a,b\n1,2\n")
+            .to_string_lossy()
+            .into_owned();
+        let mut d = ImportDialog::default();
+        d.set_recent(&[there.clone(), "gone/file.csv".into()]);
+        let exist: Vec<bool> = d.recent.iter().map(|(_, e)| *e).collect();
+        assert_eq!(exist, [true, false]);
+
+        d.choose(there.clone());
+        assert_eq!(d.path, there);
+        assert!(matches!(d.import, Some(Import::Csv(_))), "{:?}", d.error);
+        d.choose("gone/file.csv".into());
+        assert!(d.import.is_none() && d.error.as_deref().is_some_and(|e| e.contains("not found")));
+
+        // the dialog draws with the list, open and closed, without a click
+        d.open = true;
+        let ctx = egui::Context::default();
+        let pal = Palette::new(crate::look::Accent::default(), false);
+        for path in ["", "gone/file.csv"] {
+            d.path = path.to_string();
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                assert!(d.show(ctx, &pal, &[], None).is_none());
+            });
+        }
+        assert!(d.open);
+    }
+
+    #[test]
+    fn the_chooser_opens_where_the_file_or_a_recent_one_is() {
+        let file = temp("start.csv", b"a\n1\n");
+        let dir = file.parent().map(Path::to_path_buf);
+        let file = file.to_string_lossy().into_owned();
+        assert_eq!(start_folder(&file, &[]), dir);
+        // an empty or missing path falls back to the newest recent file that exists
+        let recent = [("gone/dir/x.csv".to_string(), false), (file.clone(), true)];
+        assert_eq!(start_folder("", &recent), dir);
+        assert_eq!(start_folder("nowhere/at/all.csv", &recent), dir);
+        assert_eq!(start_folder("", &[]), None);
+        assert_eq!(start_folder("", &[("gone/x.csv".into(), false)]), None);
     }
 
     #[test]

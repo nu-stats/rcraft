@@ -248,15 +248,16 @@ skipped. It never gives a silent wrong answer.
   the RCraft columnar bridge from R (`rdata`, see `plan/data-bridge.md`)
 - P3.2 **Use my file**: done for csv/tsv/txt, xlsx/xls (sheet and cell range),
   `.dta`, `.sav`/`.zsav`/`.por`, `.xpt`, `.sas7bdat`, `.rds` and `.RData`, with R's own
-  preview and the generated R shown; packages `readxl`/`haven` are installed on request
-  into RCraft's own library. Still to do: parquet, feather (need `arrow`), a Browse
-  button, remembering recent files, `.sas7bdat` catalogue files
-- P3.3 Labels (shown in the grid and Variables pane with a conversion report; editing and
-  conversion still to do): variable labels and value labels kept as labelled vectors and
-  shown in the editor; conversion report of what was kept, changed or dropped
-- P3.4 Variables pane (done: type, label, missing count, factor level count, filter by
-  type, and an Objects pane for the whole workspace; to do: a level list per factor,
-  an Objects context menu to rename, remove and save)
+  preview and the generated R shown; packages `readxl`/`haven`/`arrow` are installed on
+  request into RCraft's own library; parquet and feather; a Browse button; the ten most
+  recent files remembered. Still to do: `.sas7bdat` catalogue files
+- P3.3 Labels (shown in the grid and Variables pane with a conversion report; variable
+  labels and value labels kept as labelled vectors; conversion report of what was kept,
+  changed or dropped; Data menu dialogs to set a variable label, set value labels and turn
+  a labelled variable into a factor)
+- P3.4 Variables pane (type, label, missing count, factor level count, filter by type) and
+  an Objects pane for the whole workspace, with a right-click menu to rename, remove and
+  save (as .rds) any object. Still to do: a level list per factor
 - P3.5 Data management dialogs (started: the dialog-spec format, plan/dialog-spec.md, and
   new variable, filter, sort and rename in base and tidyverse style; still to do: recode,
   type conversion, factor tools, dates, strings)

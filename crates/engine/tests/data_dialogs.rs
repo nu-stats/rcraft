@@ -5,7 +5,9 @@
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::data::{COMPUTE, FILTER, RENAME, SORT};
+use rcraft_catalog::data::{
+    COMPUTE, FILTER, LABELLED_TO_FACTOR, RENAME, SAVE_OBJECT, SORT, VALUE_LABELS, VARIABLE_LABEL,
+};
 use rcraft_engine::{Engine, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind};
 use rcraft_rdata::display::cell_text;
@@ -80,7 +82,17 @@ const MAKE: &str = "d <- data.frame(id = 1:5, g = factor(c(\"b\", \"a\", \"b\", 
 /// Builds `d` again, runs `spec` with these values on it, and returns the
 /// table named `result`.
 fn apply(e: &mut Engine, spec: &Spec, set: &[(&str, &str)], result: &str) -> Option<Table> {
-    assert_eq!(run(e, Source::Typed, MAKE), Outcome::Ok);
+    apply_to(e, MAKE, spec, set, result)
+}
+
+fn apply_to(
+    e: &mut Engine,
+    make: &str,
+    spec: &Spec,
+    set: &[(&str, &str)],
+    result: &str,
+) -> Option<Table> {
+    assert_eq!(run(e, Source::Typed, make), Outcome::Ok);
     let table = fetch(e, "d")?;
     let ctx = context("d", &table);
     let mut values = spec.defaults(&ctx);
@@ -168,4 +180,141 @@ fn base_r_data_dialogs_change_the_data_as_shown() {
         names,
         Some(vec!["id".to_string(), "group".into(), "x".into()])
     );
+}
+
+const MAKE_LABELLED: &str = "d <- data.frame(id = 1:4, s = c(1, 2, 1, 9), t = c(\"a\", \"b\", \"a\", \"c\")); \
+                             attr(d$s, \"labels\") <- c(Low = 1, High = 2); attr(d$s, \"label\") <- \"Score\"";
+
+fn attr_text(table: &Table, column: &str, key: &str) -> Option<String> {
+    let col = table.columns.iter().find(|c| c.name == column)?;
+    let a = col.attrs.iter().find(|a| a.key == key)?;
+    Some(format!("{:?}", a.value))
+}
+
+#[test]
+fn label_dialogs_change_the_labels_as_shown() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+
+    // a variable label, set and then removed
+    let t = apply_to(
+        &mut e,
+        MAKE_LABELLED,
+        &VARIABLE_LABEL,
+        &[("var", "id"), ("label", "Identifier")],
+        "d",
+    );
+    assert!(t.is_some_and(|t| t
+        .columns
+        .iter()
+        .any(|c| c.name == "id" && c.label() == Some("Identifier"))));
+    let t = apply_to(
+        &mut e,
+        MAKE_LABELLED,
+        &VARIABLE_LABEL,
+        &[("var", "s"), ("label", "")],
+        "d",
+    );
+    assert!(t.is_some_and(|t| t.columns.iter().all(|c| c.label().is_none())));
+
+    // value labels replace the old ones
+    let t = apply_to(
+        &mut e,
+        MAKE_LABELLED,
+        &VALUE_LABELS,
+        &[("var", "s"), ("labels", "9 = Odd; 1 = One")],
+        "d",
+    );
+    let labels = t.and_then(|t| {
+        t.columns
+            .iter()
+            .find(|c| c.name == "s")
+            .map(|c| c.value_labels())
+    });
+    assert_eq!(
+        labels,
+        Some(vec![(9.0, "Odd".to_string()), (1.0, "One".to_string())])
+    );
+    let t = apply_to(
+        &mut e,
+        MAKE_LABELLED,
+        &VALUE_LABELS,
+        &[("var", "t"), ("labels", "a = Alpha")],
+        "d",
+    );
+    assert!(t.is_some_and(|t| attr_text(&t, "t", "labels").is_some()));
+
+    // labelled to factor: unlabelled values become missing, the label stays
+    let t = apply_to(
+        &mut e,
+        MAKE_LABELLED,
+        &LABELLED_TO_FACTOR,
+        &[("var", "s"), ("result", "f")],
+        "f",
+    );
+    assert_eq!(
+        t.as_ref().map(|t| column(t, "s")),
+        Some(vec![
+            "Low".to_string(),
+            "High".into(),
+            "Low".into(),
+            "NA".into()
+        ])
+    );
+    assert!(t.is_some_and(|t| t
+        .columns
+        .iter()
+        .any(|c| c.name == "s" && c.label() == Some("Score"))));
+
+    // a variable without labels is refused by R, and nothing changes
+    assert_eq!(run(&mut e, Source::Typed, MAKE_LABELLED), Outcome::Ok);
+    let table = fetch(&mut e, "d");
+    let ctx = context("d", &table.expect("table"));
+    let mut values = LABELLED_TO_FACTOR.defaults(&ctx);
+    values.set_text("var", "id");
+    let code = LABELLED_TO_FACTOR
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    assert_eq!(
+        run(&mut e, Source::Menu(LABELLED_TO_FACTOR.menu.into()), &code),
+        Outcome::Error
+    );
+    assert_eq!(fetch(&mut e, "d").map(|t| t.columns.len()), Some(3));
+}
+
+#[test]
+fn save_object_writes_an_rds_file_and_will_not_replace_one_unasked() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    assert_eq!(run(&mut e, Source::Typed, MAKE_LABELLED), Outcome::Ok);
+    let table = fetch(&mut e, "d").expect("table");
+    let ctx = context("d", &table);
+    let path = std::env::temp_dir().join(format!("rcraft-save-{}.rds", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let path_text = path.to_string_lossy().into_owned();
+
+    let mut values = SAVE_OBJECT.defaults(&ctx);
+    values.set_text("file", &path_text);
+    let code = SAVE_OBJECT
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    let menu = Source::Menu(SAVE_OBJECT.menu.into());
+    assert_eq!(run(&mut e, menu.clone(), &code), Outcome::Ok, "{code}");
+    assert!(path.is_file());
+
+    // saved as it is: the labels come back with it
+    let back = format!(
+        "back <- readRDS({}); stopifnot(identical(back, d))",
+        rcraft_rcodegen::r_string(&path_text.replace('\\', "/"))
+    );
+    assert_eq!(run(&mut e, Source::Typed, &back), Outcome::Ok);
+
+    // a second save stops unless the box is ticked
+    assert_eq!(run(&mut e, menu.clone(), &code), Outcome::Error);
+    values.set_flag("replace", true);
+    let again = SAVE_OBJECT
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    assert_eq!(run(&mut e, menu, &again), Outcome::Ok);
+    let _ = std::fs::remove_file(&path);
 }

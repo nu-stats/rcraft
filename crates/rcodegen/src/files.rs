@@ -1,9 +1,9 @@
 //! R code for "Use my file" with Excel, Stata, SPSS, SAS and R data files,
 //! and one type, [`Import`], that stands for any of them.
 //!
-//! Excel files are read with `readxl` and Stata, SPSS and SAS files with
-//! `haven`. Neither package comes with R, so [`Import::package`] names what
-//! must be installed first.
+//! Excel files are read with `readxl`, Stata, SPSS and SAS files with `haven`,
+//! and Parquet and Feather files with `arrow`. None of these packages comes
+//! with R, so [`Import::package`] names what must be installed first.
 
 use crate::import::{r_bool, r_name, r_string, CsvImport};
 
@@ -22,10 +22,18 @@ pub enum FileKind {
     Rds,
     /// Saved R objects (`load`).
     RData,
-    /// Recognised but not supported yet (Parquet, Feather).
-    Planned(&'static str),
+    /// Apache Parquet (`arrow::read_parquet`).
+    Parquet,
+    /// Feather and Arrow IPC files (`arrow::read_feather`).
+    Feather,
     Unknown,
 }
+
+/// The endings of the files "Use my file" opens, for a file chooser's filter.
+pub const DATA_EXTENSIONS: &[&str] = &[
+    "csv", "tsv", "txt", "tab", "dat", "psv", "xlsx", "xlsm", "xls", "dta", "sav", "zsav", "por",
+    "sas7bdat", "xpt", "rds", "rdata", "rda", "parquet", "feather", "arrow",
+];
 
 impl FileKind {
     pub fn from_path(path: &str) -> FileKind {
@@ -43,8 +51,8 @@ impl FileKind {
             "xpt" => FileKind::SasTransport,
             "rds" => FileKind::Rds,
             "rdata" | "rda" => FileKind::RData,
-            "parquet" => FileKind::Planned("Parquet"),
-            "feather" | "arrow" => FileKind::Planned("Feather"),
+            "parquet" => FileKind::Parquet,
+            "feather" | "arrow" => FileKind::Feather,
             _ => FileKind::Unknown,
         }
     }
@@ -60,7 +68,8 @@ impl FileKind {
             FileKind::SasTransport => "SAS transport",
             FileKind::Rds => "R data (one object)",
             FileKind::RData => "R data (workspace)",
-            FileKind::Planned(name) => name,
+            FileKind::Parquet => "Parquet data",
+            FileKind::Feather => "Feather data",
             FileKind::Unknown => "Unknown file type",
         }
     }
@@ -290,12 +299,78 @@ fn name_problem(name: &str) -> Option<&'static str> {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArrowFormat {
+    Parquet,
+    Feather,
+}
+
+impl ArrowFormat {
+    fn function(self) -> &'static str {
+        match self {
+            ArrowFormat::Parquet => "read_parquet",
+            ArrowFormat::Feather => "read_feather",
+        }
+    }
+}
+
+/// A Parquet or Feather file, read with `arrow`. Both keep each column's type,
+/// so there is nothing to choose: the file is read as it is.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArrowImport {
+    pub path: String,
+    pub name: String,
+    pub format: ArrowFormat,
+}
+
+impl ArrowImport {
+    pub fn new(path: &str, format: ArrowFormat) -> ArrowImport {
+        let file = path.rsplit(['/', '\\']).next().unwrap_or(path);
+        ArrowImport {
+            path: path.to_string(),
+            name: crate::import::name_from_file(file),
+            format,
+        }
+    }
+
+    fn read(&self, as_data_frame: bool) -> String {
+        let path = r_string(&self.path.replace('\\', "/"));
+        let function = self.format.function();
+        if as_data_frame {
+            format!("as.data.frame(arrow::{function}({path}))")
+        } else {
+            format!("arrow::{function}({path}, as_data_frame = FALSE)")
+        }
+    }
+
+    /// R code that prints the size of the file and its first rows. The file
+    /// is read as an Arrow table (cheap for Feather, a full read for Parquet)
+    /// and only the first rows are turned into a data frame.
+    pub fn preview_code(&self, rows: usize) -> String {
+        format!(
+            "local({{ op <- options(width = 150); on.exit(options(op)); \
+             t <- {}; n <- min({rows}L, as.integer(t$num_rows)); \
+             cat(t$num_columns, \"columns;\", t$num_rows, \"rows\\n\"); \
+             print(as.data.frame(t$Slice(0L, n))) }})",
+            self.read(false)
+        )
+    }
+
+    pub fn problem(&self) -> Option<&'static str> {
+        if self.path.trim().is_empty() {
+            return Some("Choose a file.");
+        }
+        name_problem(&self.name)
+    }
+}
+
 /// Any file the dialog can import.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Import {
     Csv(CsvImport),
     Excel(ExcelImport),
     Haven(HavenImport),
+    Arrow(ArrowImport),
     RObject(RObjectImport),
 }
 
@@ -306,6 +381,7 @@ impl Import {
             Import::Csv(c) => Some(&c.name),
             Import::Excel(e) => Some(&e.name),
             Import::Haven(h) => Some(&h.name),
+            Import::Arrow(a) => Some(&a.name),
             Import::RObject(r) if !r.workspace => Some(&r.name),
             Import::RObject(_) => None,
         }
@@ -316,6 +392,7 @@ impl Import {
             Import::Csv(c) => Some(&mut c.name),
             Import::Excel(e) => Some(&mut e.name),
             Import::Haven(h) => Some(&mut h.name),
+            Import::Arrow(a) => Some(&mut a.name),
             Import::RObject(r) if !r.workspace => Some(&mut r.name),
             Import::RObject(_) => None,
         }
@@ -326,6 +403,7 @@ impl Import {
         match self {
             Import::Excel(_) => Some("readxl"),
             Import::Haven(_) => Some("haven"),
+            Import::Arrow(_) => Some("arrow"),
             Import::Csv(_) | Import::RObject(_) => None,
         }
     }
@@ -335,6 +413,7 @@ impl Import {
             Import::Csv(c) => c.problem(),
             Import::Excel(e) => e.problem(),
             Import::Haven(h) => h.problem(),
+            Import::Arrow(a) => a.problem(),
             Import::RObject(r) => r.problem(),
         }
     }
@@ -345,6 +424,7 @@ impl Import {
             Import::Csv(c) => c.code(),
             Import::Excel(e) => format!("{} <- {}", r_name(&e.name), e.read_expr(None)),
             Import::Haven(h) => format!("{} <- {}", r_name(&h.name), h.read_expr(None)),
+            Import::Arrow(a) => format!("{} <- {}", r_name(&a.name), a.read(true)),
             Import::RObject(r) => {
                 let path = r_string(&r.path.replace('\\', "/"));
                 if r.workspace {
@@ -370,6 +450,7 @@ impl Import {
             Import::Csv(c) => show(&c.read_expr(Some(rows))),
             Import::Excel(e) => show(&e.read_expr(Some(rows))),
             Import::Haven(h) => show(&h.read_expr(Some(rows))),
+            Import::Arrow(a) => a.preview_code(rows),
             Import::RObject(r) => {
                 let path = r_string(&r.path.replace('\\', "/"));
                 if r.workspace {
@@ -412,6 +493,45 @@ mod tests {
     use super::*;
 
     #[test]
+    fn parquet_and_feather_are_read_with_arrow() {
+        let p = Import::Arrow(ArrowImport::new(
+            "C:\\data\\Big file.parquet",
+            ArrowFormat::Parquet,
+        ));
+        assert_eq!(p.package(), Some("arrow"));
+        assert_eq!(p.result_name(), Some("Big_file"));
+        assert_eq!(
+            p.code(),
+            "Big_file <- as.data.frame(arrow::read_parquet(\"C:/data/Big file.parquet\"))"
+        );
+        let f = Import::Arrow(ArrowImport::new("/d/x.feather", ArrowFormat::Feather));
+        assert_eq!(
+            f.code(),
+            "x <- as.data.frame(arrow::read_feather(\"/d/x.feather\"))"
+        );
+        let preview = f.preview_code(8);
+        assert!(preview.contains("arrow::read_feather(\"/d/x.feather\", as_data_frame = FALSE)"));
+        assert!(preview.contains("min(8L, as.integer(t$num_rows))"));
+        let mut empty = ArrowImport::new("", ArrowFormat::Parquet);
+        assert_eq!(empty.problem(), Some("Choose a file."));
+        empty.path = "a.parquet".into();
+        empty.name = "1bad".into();
+        assert!(empty.problem().is_some());
+    }
+
+    #[test]
+    fn every_extension_the_chooser_offers_is_a_known_kind() {
+        for ext in DATA_EXTENSIONS {
+            let kind = FileKind::from_path(&format!("file.{ext}"));
+            assert_ne!(kind, FileKind::Unknown, "{ext}");
+        }
+        // and no ending the dialog reads is left off the list
+        for ext in ["xlsx", "dta", "rds", "parquet"] {
+            assert!(DATA_EXTENSIONS.contains(&ext), "{ext}");
+        }
+    }
+
+    #[test]
     fn files_are_told_apart_by_their_ending() {
         let k = FileKind::from_path;
         assert_eq!(k("C:\\d\\a.CSV"), FileKind::Delimited);
@@ -426,7 +546,9 @@ mod tests {
         assert_eq!(k("a.xpt"), FileKind::SasTransport);
         assert_eq!(k("a.RDS"), FileKind::Rds);
         assert_eq!(k("a.RData"), FileKind::RData);
-        assert_eq!(k("a.parquet"), FileKind::Planned("Parquet"));
+        assert_eq!(k("a.parquet"), FileKind::Parquet);
+        assert_eq!(k("a.Feather"), FileKind::Feather);
+        assert_eq!(k("a.arrow"), FileKind::Feather);
         assert_eq!(k("a.bin"), FileKind::Unknown);
         assert_eq!(k("C:\\dir.v2\\noext"), FileKind::Delimited);
     }
