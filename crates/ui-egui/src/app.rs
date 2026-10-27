@@ -13,7 +13,7 @@ use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, 
 use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
 use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
-use crate::spec_dialog::{self, SpecDialog};
+use crate::spec_dialog::{self, SpecAction, SpecDialog};
 
 /// What the middle pane shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -424,18 +424,31 @@ impl App {
         if let Some(fresh) = fresh {
             self.spec_dialog.refresh(fresh);
         }
-        if let Some(run) = self.spec_dialog.show(ctx, &pal) {
-            // a renamed object is followed only when it was the one shown;
-            // otherwise the window would wait for a data frame that never comes
-            let follow = if rcraft_catalog::data::is_object_menu(&run.menu) {
-                self.dataset.as_deref() == Some(run.dataset.as_str())
-            } else {
-                true
-            };
-            actions.push(Action::Submit(Source::Menu(run.menu), run.code));
-            if !run.replaces && follow {
-                actions.push(Action::ShowWhenListed(run.result));
+        let engine = match &mut self.engine {
+            EngineState::Ready(e) => Some(&mut **e),
+            _ => None,
+        };
+        match self.spec_dialog.show(ctx, &pal, engine) {
+            Some(SpecAction::Run(run)) => {
+                // a renamed object is followed only when it was the one shown;
+                // otherwise the window would wait for a data frame that never comes
+                let follow = if rcraft_catalog::data::is_object_menu(&run.menu) {
+                    self.dataset.as_deref() == Some(run.dataset.as_str())
+                } else {
+                    true
+                };
+                actions.push(Action::Submit(Source::Menu(run.menu), run.code));
+                if !run.replaces && follow {
+                    actions.push(Action::ShowWhenListed(run.result));
+                }
             }
+            Some(SpecAction::Install { code }) => {
+                actions.push(Action::Submit(
+                    Source::Menu("Packages > Install".into()),
+                    code,
+                ));
+            }
+            None => {}
         }
 
         for action in actions {

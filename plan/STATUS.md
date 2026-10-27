@@ -405,6 +405,23 @@ The Data menu now draws a dialog whose menu path has three parts in a submenu
 CI runs it on the three systems). Tidyverse styles for these are not written; the
 dialogs are base R only.
 
+## P3.5 package panel and dplyr in CI, 2026-10-27
+
+- Spec dialogs now ask R which packages the chosen code style needs
+  (`Style::packages`, so dplyr for tidyverse) with `missing_packages_code`, and show
+  the same install offer as "Use my file" when one is missing: the R it will run, an
+  Install button (an ordinary command, `Packages > Install`, into RCraft's own library),
+  Check again. Run waits until R says they are all there. Base R dialogs never wait.
+  The logic is `ui-egui/src/packages.rs` (`PackageCheck`), shared with the import
+  dialog's `install_code` and `library_dir`.
+- A real-R test caught the first version treating R's empty answer (a bare line break)
+  as a missing package; blank lines are ignored.
+- CI installs dplyr with readxl, haven and arrow. `tidyverse_style_gives_the_same_tables_as_base_style`
+  (engine/tests/data_dialogs.rs) runs sort, filter, compute and rename in both styles and
+  compares every cell; it skips with a note where dplyr is not installed, which is the
+  case on this machine, so it has only run in CI. **The panel's drawing was not looked
+  at in a window**, only its logic and R's answers were tested.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

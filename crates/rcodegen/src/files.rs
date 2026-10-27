@@ -488,9 +488,26 @@ pub fn package_check_code(package: &str) -> String {
     )
 }
 
+/// R code that prints the packages among `packages` that cannot be loaded,
+/// one per line (nothing when they all can).
+pub fn missing_packages_code(packages: &[&str]) -> String {
+    let names: Vec<String> = packages.iter().map(|p| r_string(p)).collect();
+    format!(
+        "cat(Filter(function(p) !requireNamespace(p, quietly = TRUE), c({})), sep = \"\\n\")",
+        names.join(", ")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_packages_are_asked_for_by_name() {
+        let code = missing_packages_code(&["dplyr", "tidyr"]);
+        assert!(code.contains("c(\"dplyr\", \"tidyr\")"), "{code}");
+        assert!(code.contains("requireNamespace(p, quietly = TRUE)"));
+    }
 
     #[test]
     fn parquet_and_feather_are_read_with_arrow() {

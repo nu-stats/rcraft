@@ -2,10 +2,12 @@
 //! will run, and Run. The dialog never writes R itself; the spec does.
 
 use eframe::egui::{self, RichText};
+use rcraft_engine::Engine;
 use rcraft_rcodegen::dialog::{Context, Spec, Style, Values, Widget};
 use rcraft_rdata::Table;
 
 use crate::look::Palette;
+use crate::packages::PackageCheck;
 
 /// What Run asks for.
 pub struct RunRequest {
@@ -20,6 +22,16 @@ pub struct RunRequest {
     pub dataset: String,
 }
 
+/// What the dialog asks the window to do.
+pub enum SpecAction {
+    Run(RunRequest),
+    /// Run this R code to install the packages the code style needs, as a menu
+    /// command; the dialog stays open and checks again when R is free.
+    Install {
+        code: String,
+    },
+}
+
 struct Open {
     spec: &'static Spec,
     ctx: Context,
@@ -30,6 +42,7 @@ struct Open {
 #[derive(Default)]
 pub struct SpecDialog {
     open: Option<Open>,
+    packages: PackageCheck,
 }
 
 /// The columns of `table` as a dialog sees them.
@@ -51,6 +64,7 @@ impl SpecDialog {
     pub fn open(&mut self, spec: &'static Spec, ctx: Context) {
         let values = spec.defaults(&ctx);
         let style = spec.styles.first().copied().unwrap_or_default();
+        self.packages.reset();
         self.open = Some(Open {
             spec,
             ctx,
@@ -99,10 +113,26 @@ impl SpecDialog {
         self.open.as_mut().map(|o| &mut o.values)
     }
 
-    pub fn show(&mut self, ctx: &egui::Context, pal: &Palette) -> Option<RunRequest> {
-        let open = self.open.as_mut()?;
+    /// Draws the dialog if it is open. With an `engine`, R is asked whether the
+    /// packages the chosen code style needs are installed, and Run waits for it.
+    pub fn show(
+        &mut self,
+        ctx: &egui::Context,
+        pal: &Palette,
+        engine: Option<&mut Engine>,
+    ) -> Option<SpecAction> {
+        let SpecDialog { open, packages } = self;
+        let open = open.as_mut()?;
+        let checked = engine.is_some();
+        if let Some(engine) = engine {
+            packages.service(engine, open.style.packages());
+        }
+        if packages.is_waiting() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(60));
+        }
         let mut keep = true;
         let mut run = None;
+        let mut install = None;
         let mut cancel = false;
         egui::Window::new(open.spec.entry)
             .open(&mut keep)
@@ -153,6 +183,13 @@ impl SpecDialog {
                         }
                     });
                 }
+                let needed = open.style.packages();
+                if checked {
+                    if let Some(code) = packages.panel(ui, pal, needed) {
+                        install = Some(code);
+                    }
+                }
+                let can_run = !checked || packages.ready(needed);
                 ui.add_space(6.0);
                 ui.label(RichText::new("R that will run").strong().color(pal.dim));
                 let code = open.spec.generate(&open.ctx, &open.values, open.style);
@@ -173,7 +210,7 @@ impl SpecDialog {
                 ui.separator();
                 ui.horizontal(|ui| {
                     if ui
-                        .add_enabled(code.is_ok(), egui::Button::new("Run"))
+                        .add_enabled(code.is_ok() && can_run, egui::Button::new("Run"))
                         .clicked()
                     {
                         if let Ok(code) = &code {
@@ -200,7 +237,8 @@ impl SpecDialog {
         if !keep || cancel || run.is_some() {
             self.open = None;
         }
-        run
+        run.map(SpecAction::Run)
+            .or_else(|| install.map(|code| SpecAction::Install { code }))
     }
 }
 
@@ -309,7 +347,10 @@ mod tests {
         let pal = Palette::new(crate::look::Accent::default(), false);
         let mut out = None;
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            out = dialog.show(ctx, &pal);
+            out = match dialog.show(ctx, &pal, None) {
+                Some(SpecAction::Run(run)) => Some(run),
+                _ => None,
+            };
         });
         out
     }

@@ -8,13 +8,13 @@ use std::path::Path;
 use eframe::egui::{self, Key, RichText};
 use rcraft_engine::{Engine, QueryId};
 use rcraft_rcodegen::{
-    package_check_code, parse_na_strings, r_string, sheets_code, ArrowFormat, ArrowImport,
-    CsvImport, ExcelImport, FileKind, HavenImport, HavenKind, Import, Quote, RObjectImport,
-    DATA_EXTENSIONS,
+    package_check_code, parse_na_strings, sheets_code, ArrowFormat, ArrowImport, CsvImport,
+    ExcelImport, FileKind, HavenImport, HavenKind, Import, Quote, RObjectImport, DATA_EXTENSIONS,
 };
 use rcraft_rdata::sniff::{sniff_file, Encoding, SniffError, Sniffed};
 
 use crate::look::Palette;
+use crate::packages::{install_code, library_dir};
 
 /// Rows shown in R's preview.
 const PREVIEW_ROWS: usize = 10;
@@ -579,7 +579,7 @@ impl ImportDialog {
                     .color(pal.warning),
                 );
                 let library = library_dir();
-                let code = install_code(pkg, library.as_deref());
+                let code = install_code(&[pkg], library.as_deref());
                 ui.label(
                     RichText::new(
                         "RCraft can install it for you. It is downloaded from CRAN (with the \
@@ -839,7 +839,6 @@ fn haven_options(ui: &mut egui::Ui, spec: &mut HavenImport) {
     }
 }
 
-/// RCraft's own package library, as a path R understands.
 /// The folder the file chooser opens in: where the file in the box is, else
 /// where the newest recent file that is still there is.
 fn start_folder(path: &str, recent: &[(String, bool)]) -> Option<std::path::PathBuf> {
@@ -855,27 +854,6 @@ fn start_folder(path: &str, recent: &[(String, bool)]) -> Option<std::path::Path
             .filter(|(_, there)| *there)
             .find_map(|(p, _)| folder_of(p))
     })
-}
-
-fn library_dir() -> Option<String> {
-    rcraft_rhost::library::user_library_dir(&rcraft_rhost::Env::from_process())
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-}
-
-/// R code that installs `package` into RCraft's library.
-fn install_code(package: &str, library: Option<&str>) -> String {
-    match library {
-        Some(lib) => format!(
-            "dir.create({lib}, recursive = TRUE, showWarnings = FALSE); \
-             install.packages({pkg}, lib = {lib}, repos = \"https://cloud.r-project.org\")",
-            lib = r_string(lib),
-            pkg = r_string(package)
-        ),
-        None => format!(
-            "install.packages({}, repos = \"https://cloud.r-project.org\")",
-            r_string(package)
-        ),
-    }
 }
 
 #[cfg(test)]
@@ -945,15 +923,6 @@ mod tests {
         let weird = temp("blob.bin", b"\0\x01\x02 binary");
         d.open_with(&weird);
         assert!(d.import.is_none() && d.error.is_some());
-    }
-
-    #[test]
-    fn installing_goes_to_rcrafts_own_library() {
-        let code = install_code("haven", Some("C:/Users/me/AppData/Local/RCraft/R-library"));
-        assert!(code.contains("lib = \"C:/Users/me/AppData/Local/RCraft/R-library\""));
-        assert!(code.contains("https://cloud.r-project.org"));
-        assert!(code.starts_with("dir.create("));
-        assert!(!install_code("haven", None).contains("lib ="));
     }
 
     #[test]

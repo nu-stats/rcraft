@@ -12,6 +12,7 @@ mod data_view;
 mod headless;
 mod import_dialog;
 pub mod look;
+mod packages;
 mod softraster;
 mod softwindow;
 mod spec_dialog;

@@ -261,9 +261,10 @@ skipped. It never gives a silent wrong answer.
 - P3.5 Data management dialogs (done: the dialog-spec format, plan/dialog-spec.md; new
   variable, filter, sort and rename in base and tidyverse style; recode, convert type,
   factor levels (reference, combine, reorder), text (case and spaces, find and replace,
-  extract) and dates (text to date, date part) in base R, each run against real R. Still
-  to do: dplyr in CI so the tidyverse styles run, a missing-package panel in these dialogs,
-  and a per-factor level list in the Variables pane)
+  extract) and dates (text to date, date part) in base R, each run against real R; a
+  missing-package panel in the dialogs (the tidyverse style asks R for dplyr and offers to
+  install it); CI installs dplyr and checks the tidyverse styles give the base styles'
+  tables. Still to do: the per-factor level list in the Variables pane (P3.4))
 - P3.6 Combine and reshape: join, append, pivot long/wide, aggregate, sample,
   duplicates and missing-value tools
 - P3.7 Save and export (the same formats), plus "save workspace"

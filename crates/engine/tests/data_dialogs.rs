@@ -318,3 +318,89 @@ fn save_object_writes_an_rds_file_and_will_not_replace_one_unasked() {
     assert_eq!(run(&mut e, menu, &again), Outcome::Ok);
     let _ = std::fs::remove_file(&path);
 }
+
+/// Every cell of `table` as shown, column by column, with the column's name.
+fn shown(table: &Table) -> Vec<(String, Vec<String>)> {
+    table
+        .columns
+        .iter()
+        .map(|c| (c.name.clone(), column(table, &c.name)))
+        .collect()
+}
+
+/// As [`apply`], in the given code style.
+fn apply_in(
+    e: &mut Engine,
+    spec: &Spec,
+    set: &[(&str, &str)],
+    result: &str,
+    style: Style,
+) -> Option<Table> {
+    assert_eq!(run(e, Source::Typed, MAKE), Outcome::Ok);
+    let table = fetch(e, "d")?;
+    let ctx = context("d", &table);
+    let mut values = spec.defaults(&ctx);
+    for (id, text) in set {
+        values.set_text(id, *text);
+    }
+    let code = spec.generate(&ctx, &values, style).unwrap_or_default();
+    assert_eq!(
+        run(e, Source::Menu(spec.menu.into()), &code),
+        Outcome::Ok,
+        "{code}"
+    );
+    fetch(e, result)
+}
+
+/// The tidyverse style must give the very table the base style gives. Needs
+/// dplyr, which CI installs; skipped with a note where it is missing.
+#[test]
+fn tidyverse_style_gives_the_same_tables_as_base_style() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let have = run(
+        &mut e,
+        Source::Typed,
+        "stopifnot(requireNamespace(\"dplyr\", quietly = TRUE))",
+    );
+    if have != Outcome::Ok {
+        eprintln!("skipped: the R package dplyr is not installed");
+        return;
+    }
+    type Case<'a> = (&'a Spec, Vec<(&'a str, &'a str)>, &'a str);
+    let cases: [Case; 6] = [
+        (
+            &SORT,
+            vec![("by1", "g"), ("by2", "x"), ("order2", "down")],
+            "d",
+        ),
+        (&SORT, vec![("by1", "x")], "d"),
+        (&FILTER, vec![("condition", "x > 1")], "d"),
+        (
+            &FILTER,
+            vec![
+                ("condition", "x > 1"),
+                ("keep", "drop"),
+                ("result", "small"),
+            ],
+            "small",
+        ),
+        (
+            &COMPUTE,
+            vec![("name", "x two"), ("value", "x * 2"), ("result", "d2")],
+            "d2",
+        ),
+        (&RENAME, vec![("old", "g"), ("new", "group")], "d"),
+    ];
+    for (spec, set, result) in cases {
+        let base = apply_in(&mut e, spec, &set, result, Style::Base);
+        let tidy = apply_in(&mut e, spec, &set, result, Style::Tidyverse);
+        assert!(base.is_some(), "{} gave no table in base style", spec.entry);
+        assert_eq!(
+            tidy.as_ref().map(shown),
+            base.as_ref().map(shown),
+            "{} differs between the styles: {set:?}",
+            spec.entry
+        );
+    }
+}

@@ -56,9 +56,9 @@ jobs:
             export REPO="https://packagemanager.posit.co/cran/$SNAPSHOT"
           fi
           echo "package repository: $REPO"
-          Rscript -e 'install.packages(c("readxl", "haven", "arrow"), repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("haven"), requireNamespace("arrow"))' 2>&1 | tee pkgs.log || {
+          Rscript -e 'install.packages(c("readxl", "haven", "arrow", "dplyr"), repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("haven"), requireNamespace("arrow"), requireNamespace("dplyr"))' 2>&1 | tee pkgs.log || {
             tail -n 25 pkgs.log | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > pkgs-tail.txt
-            echo "::error title=installing readxl, haven and arrow failed::$(cat pkgs-tail.txt)"
+            echo "::error title=installing readxl, haven, arrow and dplyr failed::$(cat pkgs-tail.txt)"
             exit 1
           }
       - name: Run cargo xtask ci
