@@ -296,3 +296,17 @@ fn messages_are_never_lost_to_the_end_of_the_run() {
         assert_eq!(out.stderr.lines().count(), 50, "round {round}");
     }
 }
+
+#[test]
+fn output_without_a_final_line_break_does_not_hang_the_run() {
+    let Some(mut s) = session() else { return };
+    let out = s.run_to_end("cat('hi')", LIMIT).expect("run");
+    assert_eq!(out.status, RunStatus::Ok);
+    assert_eq!(out.stdout, "hi");
+    // and the next run is unaffected
+    let out = s
+        .run_to_end("cat('a'); cat('b', file = stderr()); 1", LIMIT)
+        .expect("run");
+    assert_eq!(out.stdout, "a[1] 1\n");
+    assert_eq!(out.stderr, "b");
+}

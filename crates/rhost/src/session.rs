@@ -32,7 +32,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use rcraft_rproto::{
-    encode_run, new_token, parse_frame, Frame, ProtoError, RunId, Status, BOOTSTRAP_R, QUIT,
+    encode_run, new_token, parse_frame, parse_frame_after_text, Frame, ProtoError, RunId, Status,
+    BOOTSTRAP_R, QUIT,
 };
 
 use crate::find::RInstall;
@@ -709,7 +710,21 @@ fn spawn_stdout_reader(stdout: impl Read + Send + 'static, token: String, tx: Sy
             let item = match parse_frame(&token, &chunk) {
                 Some(Ok(frame)) => Raw::Frame(frame),
                 // a frame we cannot read is shown as text rather than lost
-                Some(Err(_)) | None => Raw::Text(Stream::Stdout, chunk),
+                Some(Err(_)) => Raw::Text(Stream::Stdout, chunk),
+                None => {
+                    // text with no line break (`cat("hi")`) comes first, then the frame
+                    if let Some((text, Ok(frame))) = parse_frame_after_text(&token, &chunk) {
+                        if tx
+                            .send(Raw::Text(Stream::Stdout, text.to_string()))
+                            .is_err()
+                        {
+                            return false;
+                        }
+                        Raw::Frame(frame)
+                    } else {
+                        Raw::Text(Stream::Stdout, chunk)
+                    }
+                }
             };
             tx.send(item).is_ok()
         });
@@ -723,7 +738,21 @@ fn spawn_stderr_reader(stderr: impl Read + Send + 'static, token: String, tx: Sy
             // the only frame on standard error is `Sync`; anything else is text
             let item = match parse_frame(&token, &chunk) {
                 Some(Ok(frame @ Frame::Sync { .. })) => Raw::Frame(frame),
-                _ => Raw::Text(Stream::Stderr, chunk),
+                _ => {
+                    if let Some((text, Ok(frame @ Frame::Sync { .. }))) =
+                        parse_frame_after_text(&token, &chunk)
+                    {
+                        if tx
+                            .send(Raw::Text(Stream::Stderr, text.to_string()))
+                            .is_err()
+                        {
+                            return false;
+                        }
+                        Raw::Frame(frame)
+                    } else {
+                        Raw::Text(Stream::Stderr, chunk)
+                    }
+                }
             };
             tx.send(item).is_ok()
         });

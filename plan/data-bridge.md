@@ -45,13 +45,20 @@ Both readers matched R's own sums, missing counts and quote counts.
 ## Recommendation
 
 - **Primary bridge: "RCraft columnar" (`RCB1`)**, versioned, little-endian,
-  writer in `bootstrap.R` (base R only), reader in `rdata` (L2). Kinds so far:
+  writer `rcb.R` (base R only), reader in `rdata` (L2). Kinds so far:
   integer, double, logical, factor (levels plus codes), Date, text.
   Missing: R's own integer and double missing patterns, length -1 for text.
-- **Extensions needed before Phase 3 uses it**: per-column attributes (label,
-  value labels, units) as a key/value block; POSIXct and difftime; list
-  columns (marked, shown as text, never guessed); a row-count and size cap;
-  a checksum so a truncated file is refused, not half-read.
+- **Extensions: built 2026-10-26** in `crates/rdata` (writer `rcb.R`, reader
+  `lib.rs`; format described at the top of `lib.rs`): per-column attributes
+  (variable label, value labels, and a count of attributes left out so a
+  report can say so); date-times with time zone; durations; ordered factors;
+  list and matrix columns shown as text (kind 9, never guessed); a cell cap
+  (200 million) checked in R before anything is written; an end marker with the
+  recorded length instead of a checksum (the file is local and temporary, so
+  truncation, not corruption, is the real risk). The reader checks every count
+  against the bytes left, so a hostile file cannot crash it or force a large
+  allocation. Tested against real R (every kind, 300,000 rows summed against
+  R, a half file refused) and with prefix and byte-flip tests.
 - **Optional fast path later**: Arrow IPC when `arrow` is present and loads.
   It is an optimisation behind the same Rust trait, never a requirement.
 - **Parquet**: for the user's own import and export (File menu), not the

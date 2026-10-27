@@ -209,3 +209,15 @@ exist on branch `p0/scaffold`.
   yet measured (need the `arrow` install, which needs the user's yes);
   Application Control blocked `data.table`'s DLL, so no compiled package can be
   assumed. Phase 3 may start once the user has read the recommendation.
+
+## Data bridge extensions and a session bug, 2026-10-26
+
+- `rcraft-rdata` now holds the bridge: `write_code` (R code, base R only),
+  `read_file`/`decode`, `Table`/`Column`/`Data` with labels and value labels.
+  See `plan/data-bridge.md`. Tests: 9 unit, 3 against real R (`engine/tests/bridge.rs`).
+- Found and fixed while testing: output with no final line break, such as
+  `cat("hi")`, hung the run for good, because R's end-of-run frame was glued to
+  the text and not recognised. The readers now find a frame after text
+  (`rproto::parse_frame_after_text`). Regression test in `rhost/tests/session.rs`.
+- CI on Ubuntu needed more X11 development libraries; all three systems were
+  green at 425c378.

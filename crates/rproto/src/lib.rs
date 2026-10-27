@@ -175,6 +175,19 @@ pub fn parse_frame(token: &str, line: &str) -> Option<Result<Frame, ProtoError>>
     Some(parse_fields(rest))
 }
 
+/// Like [`parse_frame`], for a frame that follows text with no line break
+/// (`cat("hi")` leaves the cursor mid-line, so R's next frame is glued to it).
+/// Returns the text before the frame, which is never empty, and the frame.
+pub fn parse_frame_after_text<'a>(
+    token: &str,
+    line: &'a str,
+) -> Option<(&'a str, Result<Frame, ProtoError>)> {
+    let marker = format!("{token}\t");
+    let at = line.find(&marker).filter(|&at| at > 0)?;
+    let (text, frame) = line.split_at(at);
+    Some((text, parse_frame(token, frame)?))
+}
+
 fn parse_fields(rest: &str) -> Result<Frame, ProtoError> {
     let bad = |why: &str| ProtoError::BadFrame(format!("{why}: {rest}"));
     let mut fields = rest.split('\t');
@@ -227,6 +240,27 @@ mod tests {
             assert_eq!(unescape(&escape(text)), text);
         }
         assert!(!escape("a\tb\nc").contains(['\t', '\n']));
+    }
+
+    #[test]
+    fn a_frame_glued_to_unterminated_text_is_found() {
+        let line = format!("hi{T}\tEND\t3\tok\n");
+        let found = parse_frame_after_text(T, &line);
+        assert_eq!(
+            found,
+            Some((
+                "hi",
+                Ok(Frame::End {
+                    run: 3,
+                    status: Status::Ok
+                })
+            ))
+        );
+        // a frame at the start of the line is parse_frame's job, and plain
+        // text, or text that merely resembles the token, is not a frame
+        assert!(parse_frame_after_text(T, &format!("{T}\tEND\t3\tok\n")).is_none());
+        assert!(parse_frame_after_text(T, "no frame here\n").is_none());
+        assert!(parse_frame_after_text(T, &format!("x {T} y\n")).is_none());
     }
 
     #[test]
