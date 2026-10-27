@@ -281,7 +281,10 @@ skipped. It never gives a silent wrong answer.
   a multi-variable widget was added to the dialog-spec format. Still to do: a Q-Q plot with
   Phase 5, and rich tables in Results with P2.3)
 - P4.2 Tests and intervals: t-tests, proportions, nonparametrics, variance
-  tests, exact tests, agreement measures
+  tests, exact tests, agreement measures (done in base R, each checked against R's own
+  report: one-sample, two-sample and paired t-tests, test of proportions, exact binomial,
+  Fisher's exact, Mann-Whitney, Wilcoxon signed-rank, Kruskal-Wallis, variance tests. Still
+  to do: agreement measures such as Cohen's kappa)
 - P4.3 ANOVA and linear models: `lm`, anova tables, contrasts, post-hoc
 - P4.4 Generalised models: logit, probit, Poisson, negative binomial,
   ordinal, multinomial

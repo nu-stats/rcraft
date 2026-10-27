@@ -7,6 +7,7 @@
 
 pub mod data;
 pub mod data_tools;
+pub mod inference;
 pub mod stats;
 
 /// Where an entry sits in the menus.
@@ -112,7 +113,16 @@ pub const ENTRIES: &[Entry] = &[
     partial("Correlation", Area::Statistics),
     partial("Missing-data patterns", Area::Statistics),
     partial("Normality test", Area::Statistics),
-    planned("t-test", Area::Statistics),
+    partial("One-sample t-test", Area::Statistics),
+    partial("Two-sample t-test", Area::Statistics),
+    partial("Paired t-test", Area::Statistics),
+    partial("Test of proportions", Area::Statistics),
+    partial("Exact binomial test", Area::Statistics),
+    partial("Fisher's exact test", Area::Statistics),
+    partial("Mann-Whitney test", Area::Statistics),
+    partial("Wilcoxon signed-rank test", Area::Statistics),
+    partial("Kruskal-Wallis test", Area::Statistics),
+    partial("Variance test", Area::Statistics),
     planned("Linear model", Area::Statistics),
     planned("Logistic model", Area::Statistics),
     planned("Histogram", Area::Graphs),

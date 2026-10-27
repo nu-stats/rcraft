@@ -89,6 +89,9 @@ pub enum TextRule {
     /// An R expression, inserted as it is; must not be empty, and brackets
     /// and quotes must balance so it cannot spill out of the call around it.
     Expression,
+    /// One finite number, inserted as typed (so `1e3` and `.5` pass, `inf` and
+    /// words do not).
+    Number,
 }
 
 /// One option of a [`Widget::Choice`]: the value code functions see, and the
@@ -421,6 +424,16 @@ fn widget_problem(w: &Widget, ctx: &Context, values: &Values) -> Option<Problem>
                         None
                     }
                 }
+                TextRule::Number => {
+                    let t = text.trim();
+                    if t.is_empty() {
+                        Some(Problem::new(id, format!("Type {}.", lower(label))))
+                    } else if !t.parse::<f64>().is_ok_and(f64::is_finite) {
+                        Some(Problem::new(id, format!("{t} is not a number.")))
+                    } else {
+                        None
+                    }
+                }
                 TextRule::Expression => {
                     if text.trim().is_empty() {
                         Some(Problem::new(id, format!("Type {}.", lower(label))))
@@ -566,6 +579,11 @@ impl Args<'_> {
             .filter(|c| kinds.is_empty() || kinds.contains(&c.kind))
             .map(|c| c.name.as_str())
             .collect()
+    }
+
+    /// A number typed in a [`TextRule::Number`] box, as typed but trimmed.
+    pub fn number(&self, id: &str) -> &str {
+        self.values.text(id).trim()
     }
 
     /// An expression the user typed, exactly as typed but trimmed.

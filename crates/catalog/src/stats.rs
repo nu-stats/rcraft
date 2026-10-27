@@ -10,6 +10,7 @@ use rcraft_rcodegen::dialog::{Style, Widget};
 use rcraft_rcodegen::r_string;
 
 use crate::data::BASE;
+use crate::inference;
 
 /// `c("a", "b")` for column names.
 fn names_vector(names: &[&str]) -> String {
@@ -391,7 +392,7 @@ pub const NORMALITY: Spec = Spec {
     },
 };
 
-/// The Statistics menu's dialogs, in menu order.
+/// The Statistics menu's dialogs, in menu order (descriptives here, tests in `inference`).
 pub const SPECS: &[&Spec] = &[
     &SUMMARY,
     &FREQUENCY,
@@ -399,6 +400,16 @@ pub const SPECS: &[&Spec] = &[
     &CORRELATION,
     &MISSING,
     &NORMALITY,
+    &inference::ONE_T,
+    &inference::TWO_T,
+    &inference::PAIRED_T,
+    &inference::PROPORTIONS,
+    &inference::BINOMIAL,
+    &inference::FISHER,
+    &inference::MANN_WHITNEY,
+    &inference::SIGNED_RANK,
+    &inference::KRUSKAL,
+    &inference::VARIANCE,
 ];
 
 #[cfg(test)]
@@ -585,7 +596,7 @@ mod tests {
                 "{} has no Statistics catalog entry",
                 spec.entry
             );
-            assert!(spec.menu.starts_with("Statistics > Descriptives > "));
+            assert!(spec.menu.starts_with("Statistics > "));
             let mut ids: Vec<&str> = spec.widgets.iter().map(|w| w.id()).collect();
             ids.sort_unstable();
             let n = ids.len();

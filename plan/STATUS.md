@@ -449,6 +449,27 @@ dialog on a small data frame in real R and checks the numbers (saved summary tab
 against `sd()`, `mean()` and so on, correlations, patterns, Shapiro); an app test runs
 the Correlation dialog through the menu path and finds the table in Results.
 
+## P4.2 Tests and intervals, 2026-10-27
+
+Ten dialogs in `catalog::inference`, under *Statistics > Tests and intervals*, base R
+(`stats::`), each printing R's own test report in Results and changing no data:
+one-sample, two-sample (Welch or pooled) and paired t-tests; test of proportions (one
+proportion against a value, or between groups); exact binomial; Fisher's exact;
+Mann-Whitney; Wilcoxon signed-rank; Kruskal-Wallis; variance tests (Brown-Forsythe,
+Bartlett, F). Alternative (two-sided, less, greater) and confidence level (90, 95, 99%)
+are choices. The dialog-spec format gained `TextRule::Number` (one finite number,
+inserted as typed) and `Args::number`.
+
+Tests: `engine/tests/inference.rs` runs each dialog in real R and requires its printed
+report to equal what R prints for the same call written by hand (the `data:` line
+aside), so the options chosen really reach R; a three-group two-sample test is refused by
+R and its message shown. Unit tests give the exact code. A hand-written reference caught
+a wrong expected count in my own test (the dialog was right).
+
+Limits: a two-sample test needs exactly two groups and R checks that when it runs; the
+Brown-Forsythe test is the median-centred Levene test written in base R. Agreement
+measures (Cohen's kappa) are not done.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

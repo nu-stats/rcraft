@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 53 | 0 | 27 | 26 |
+| 62 | 0 | 37 | 25 |
 
 ## File
 
@@ -52,7 +52,16 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Correlation | partial |
 | Missing-data patterns | partial |
 | Normality test | partial |
-| t-test | planned |
+| One-sample t-test | partial |
+| Two-sample t-test | partial |
+| Paired t-test | partial |
+| Test of proportions | partial |
+| Exact binomial test | partial |
+| Fisher's exact test | partial |
+| Mann-Whitney test | partial |
+| Wilcoxon signed-rank test | partial |
+| Kruskal-Wallis test | partial |
+| Variance test | partial |
 | Linear model | planned |
 | Logistic model | planned |
 
