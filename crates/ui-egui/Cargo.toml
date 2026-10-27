@@ -13,6 +13,7 @@ layer = 6
 
 [dependencies]
 rcraft-core.workspace = true
+rcraft-catalog.workspace = true
 rcraft-engine.workspace = true
 rcraft-rcodegen.workspace = true
 rcraft-rdata.workspace = true

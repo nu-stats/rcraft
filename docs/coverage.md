@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 33 | 0 | 1 | 32 |
+| 35 | 0 | 5 | 30 |
 
 ## File
 
@@ -19,9 +19,11 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| New variable | planned |
+| New variable | partial |
 | Recode | planned |
-| Filter rows | planned |
+| Filter rows | partial |
+| Sort rows | partial |
+| Rename variable | partial |
 | Join | planned |
 | Reshape | planned |
 

@@ -12,6 +12,8 @@
 //! --data           show the Data tab instead of Results
 //! --objects        show the Objects list instead of Variables
 //! --filter TYPE    list only one type of variable (Numbers, Text, Factors, ...)
+//! --dialog NAME    after the demo, open a Data menu dialog ("Sort rows")
+//! --set ID=VALUE   set one of that dialog's values (repeatable)
 //! --import FILE    open "Use my file" on FILE
 //! --accent NAME    Blue, Indigo, Teal, Plum, Forest, Amber or Rose
 //! --size WxH       size in points (default 1240x780)
@@ -54,6 +56,12 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
             "--data" => options.show_data = true,
             "--objects" => options.show_objects = true,
             "--filter" => options.filter = Some(value("--filter")?.clone()),
+            "--dialog" => options.dialog = Some(value("--dialog")?.clone()),
+            "--set" => {
+                let pair = value("--set")?;
+                let (id, v) = pair.split_once('=').ok_or("--set is ID=VALUE")?;
+                options.set.push((id.to_string(), v.to_string()));
+            }
             "--import" => options.import = Some(PathBuf::from(value("--import")?)),
             "--accent" => {
                 let name = value("--accent")?;

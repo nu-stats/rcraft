@@ -257,8 +257,9 @@ skipped. It never gives a silent wrong answer.
 - P3.4 Variables pane (done: type, label, missing count, factor level count, filter by
   type, and an Objects pane for the whole workspace; to do: a level list per factor,
   an Objects context menu to rename, remove and save)
-- P3.5 Data management dialogs: new variable, recode, filter, sort, rename,
-  type conversion, factor tools, dates, strings
+- P3.5 Data management dialogs (started: the dialog-spec format, plan/dialog-spec.md, and
+  new variable, filter, sort and rename in base and tidyverse style; still to do: recode,
+  type conversion, factor tools, dates, strings)
 - P3.6 Combine and reshape: join, append, pivot long/wide, aggregate, sample,
   duplicates and missing-value tools
 - P3.7 Save and export (the same formats), plus "save workspace"

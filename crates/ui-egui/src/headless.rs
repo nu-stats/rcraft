@@ -33,6 +33,10 @@ pub struct HeadlessOptions {
     pub show_objects: bool,
     /// List only variables of this type (`Factors`, `Numbers`, ...).
     pub filter: Option<String>,
+    /// After the demo, open this Data menu dialog (`"Sort rows"`) ...
+    pub dialog: Option<String>,
+    /// ... with these values set, as (widget id, value).
+    pub set: Vec<(String, String)>,
     /// Open "Use my file" on this file.
     pub import: Option<PathBuf>,
     pub accent: Accent,
@@ -50,6 +54,8 @@ impl HeadlessOptions {
             show_data: false,
             show_objects: false,
             filter: None,
+            dialog: None,
+            set: Vec::new(),
             import: None,
             accent: Accent::default(),
             size: [1240, 780],
@@ -97,6 +103,7 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     let mut textures = Textures::default();
     let started = Instant::now();
     let (mut next, mut settled) = (0usize, 0u32);
+    let mut dialog_opened = false;
     let mut shapes: Vec<egui::epaint::ClippedShape>;
     loop {
         let raw = egui::RawInput {
@@ -115,6 +122,14 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
                     app.submit_typed(code);
                     next += 1;
                     settled = 0;
+                }
+                // after the demo, once the data frame has come over
+                None if !dialog_opened && settled >= SETTLE_FRAMES / 2 => {
+                    if let Some(entry) = &options.dialog {
+                        app.open_dialog(&ctx, entry, &options.set)?;
+                        settled = 0;
+                    }
+                    dialog_opened = true;
                 }
                 _ => settled += 1,
             }

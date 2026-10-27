@@ -2055,6 +2055,7 @@ version = "0.0.1"
 dependencies = [
  "eframe",
  "egui-winit",
+ "rcraft-catalog",
  "rcraft-core",
  "rcraft-engine",
  "rcraft-rcodegen",

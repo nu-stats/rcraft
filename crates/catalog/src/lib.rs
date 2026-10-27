@@ -2,6 +2,10 @@
 //!
 //! Every user-visible action is an entry here (AGENTS.md section 3).
 //! `cargo xtask coverage` renders `docs/coverage.md` from [`ENTRIES`].
+//! Entries with a dialog have a [`rcraft_rcodegen::dialog::Spec`] in an area
+//! module ([`data`]).
+
+pub mod data;
 
 /// Where an entry sits in the menus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -78,9 +82,11 @@ const fn planned(name: &'static str, area: Area) -> Entry {
 pub const ENTRIES: &[Entry] = &[
     partial("Use my file", Area::File),
     planned("Save data", Area::File),
-    planned("New variable", Area::Data),
+    partial("New variable", Area::Data),
     planned("Recode", Area::Data),
-    planned("Filter rows", Area::Data),
+    partial("Filter rows", Area::Data),
+    partial("Sort rows", Area::Data),
+    partial("Rename variable", Area::Data),
     planned("Join", Area::Data),
     planned("Reshape", Area::Data),
     planned("Summary statistics", Area::Statistics),

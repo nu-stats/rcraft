@@ -14,6 +14,7 @@ mod import_dialog;
 pub mod look;
 mod softraster;
 mod softwindow;
+mod spec_dialog;
 
 pub use headless::{run_headless, HeadlessOptions};
 pub use look::Accent;

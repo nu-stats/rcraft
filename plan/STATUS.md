@@ -339,3 +339,22 @@ exist on branch `p0/scaffold`.
   non-frame and that the tab and filter are remembered.
 - Picture options `--objects` and `--filter TYPE` added to the desktop picture mode.
 - Not yet: a level list per factor, and rename/remove/save from the Objects list.
+
+## P3.5 Data management dialogs (first part)
+
+- The dialog-spec format (`plan/dialog-spec.md`): `rcraft_rcodegen::dialog` holds
+  `Spec`, `Widget` (Variable with kind filters, Text with Name/Expression rules,
+  Choice, Check), `Values`, `Context`, `Style` (base R, tidyverse via `dplyr::`),
+  per-widget and per-spec checks, and `Args`, which quotes every name so code
+  functions never join raw text. One renderer, `ui-egui/src/spec_dialog.rs`, draws
+  any spec with its hints, problems, a code-style choice and the R that will run.
+- Data menu: New variable, Filter rows, Sort rows, Rename variable
+  (`catalog::data`). Each puts its result in the data frame named in the dialog
+  (its own name by default, which replaces it; a new name keeps the original and
+  the window switches to it).
+- Tests: format checks (7), snapshot tests of the R in both styles (6), a real-R
+  run of every base-R dialog on a made-up data frame, renderer tests (2) and an
+  app test that opens a dialog and runs it as a menu command.
+- Picture options `--dialog NAME` and `--set ID=VALUE`.
+- The four entries are `partial`: the tidyverse code is snapshot-tested only, as
+  CI has no dplyr. Recode, type conversion, factor, date and string tools next.

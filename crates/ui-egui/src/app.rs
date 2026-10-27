@@ -5,12 +5,14 @@ use std::time::Duration;
 
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
 use rcraft_engine::{Engine, History, Item, Outcome, Recall, Source};
+use rcraft_rcodegen::dialog::Spec;
 use rcraft_rdata::display::LabelView;
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
 
 use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
 use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
+use crate::spec_dialog::{self, SpecDialog};
 
 /// What the middle pane shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -50,6 +52,8 @@ enum Action {
     /// Show this data frame as soon as R lists it (after an import).
     ShowWhenListed(String),
     OpenImport,
+    /// Open a catalog dialog on the data frame shown in Variables.
+    OpenSpec(&'static Spec),
     SetView(View),
     SetSideTab(SideTab),
     SetTypeFilter(TypeFilter),
@@ -83,6 +87,8 @@ pub struct App {
     side_tab: SideTab,
     type_filter: TypeFilter,
     import: ImportDialog,
+    /// The open catalog dialog (Data menu), if any.
+    spec_dialog: SpecDialog,
     /// A data frame to switch to once R lists it.
     show_when_listed: Option<String>,
 }
@@ -111,6 +117,7 @@ impl App {
             side_tab: SideTab::Variables,
             type_filter: TypeFilter::default(),
             import: ImportDialog::default(),
+            spec_dialog: SpecDialog::default(),
             show_when_listed: None,
         }
     }
@@ -230,6 +237,19 @@ impl App {
             Action::SetSideTab(tab) => self.side_tab = tab,
             Action::SetTypeFilter(filter) => self.type_filter = filter,
             Action::OpenImport => self.import.open_empty(),
+            Action::OpenSpec(spec) => {
+                let table = self.dataset.as_deref().and_then(|name| {
+                    self.engine()
+                        .and_then(|e| e.table(name))
+                        .map(|t| spec_dialog::context(name, t))
+                });
+                match table {
+                    Some(dialog_ctx) => self.spec_dialog.open(spec, dialog_ctx),
+                    None => {
+                        self.message = Some(format!("{}: open a data frame first.", spec.entry));
+                    }
+                }
+            }
             Action::ShowWhenListed(name) => self.show_when_listed = Some(name),
             Action::Interrupt => {
                 if let EngineState::Ready(engine) = &mut self.engine {
@@ -363,6 +383,22 @@ impl App {
             None => {}
         }
 
+        // a catalog dialog sees the data frame's columns as they are now
+        let fresh = self.spec_dialog.dataset().and_then(|name| {
+            self.engine()
+                .and_then(|e| e.table(name))
+                .map(|t| spec_dialog::context(name, t))
+        });
+        if let Some(fresh) = fresh {
+            self.spec_dialog.refresh(fresh);
+        }
+        if let Some(run) = self.spec_dialog.show(ctx, &pal) {
+            actions.push(Action::Submit(Source::Menu(run.menu), run.code));
+            if !run.replaces {
+                actions.push(Action::ShowWhenListed(run.result));
+            }
+        }
+
         for action in actions {
             self.perform(ctx, action);
         }
@@ -434,7 +470,22 @@ impl App {
                     }
                 });
             });
-            for title in ["Data", "Statistics", "Graphs", "Packages"] {
+            ui.menu_button("Data", |ui| {
+                let has_data = self
+                    .dataset
+                    .as_deref()
+                    .is_some_and(|name| self.engine().is_some_and(|e| e.table(name).is_some()));
+                for spec in rcraft_catalog::data::SPECS {
+                    let button = ui
+                        .add_enabled(has_data, egui::Button::new(format!("{}…", spec.entry)))
+                        .on_disabled_hover_text("Open a data frame first");
+                    if button.clicked() {
+                        out.push(Action::OpenSpec(spec));
+                        ui.close_menu();
+                    }
+                }
+            });
+            for title in ["Statistics", "Graphs", "Packages"] {
                 ui.menu_button(title, |ui| {
                     ui.add_enabled(false, egui::Button::new("Coming in a later phase"));
                 });
@@ -973,6 +1024,28 @@ impl App {
         self.import.open_with(path);
     }
 
+    /// Opens a Data menu dialog by its name (case does not matter) on the
+    /// data frame shown in Variables, with some values already set.
+    pub fn open_dialog(
+        &mut self,
+        ctx: &egui::Context,
+        entry: &str,
+        set: &[(String, String)],
+    ) -> Result<(), String> {
+        let spec = rcraft_catalog::data::SPECS
+            .iter()
+            .find(|s| s.entry.eq_ignore_ascii_case(entry))
+            .ok_or_else(|| format!("no dialog called {entry}"))?;
+        self.perform(ctx, Action::OpenSpec(spec));
+        if self.spec_dialog.dataset().is_none() {
+            return Err(format!("{entry}: no data frame is shown in Variables"));
+        }
+        for (id, value) in set {
+            self.spec_dialog.set_text(id, value);
+        }
+        Ok(())
+    }
+
     /// Switches the left pane to the Objects list.
     pub fn show_objects(&mut self, ctx: &egui::Context) {
         self.perform(ctx, Action::SetSideTab(SideTab::Objects));
@@ -1141,5 +1214,62 @@ mod tests {
         app.perform(&ctx, Action::SetTypeFilter(TypeFilter::Factors));
         assert_eq!(app.side_tab, SideTab::Objects);
         assert_eq!(app.type_filter, TypeFilter::Factors);
+    }
+
+    #[test]
+    fn a_data_dialog_needs_a_data_frame_and_runs_its_code_as_a_menu_command() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        // nothing shown yet: the dialog does not open
+        assert!(app.open_dialog(&ctx, "Sort rows", &[]).is_err());
+        assert!(app.open_dialog(&ctx, "No such dialog", &[]).is_err());
+
+        app.perform(
+            &ctx,
+            Action::Submit(Source::Typed, "d <- data.frame(x = c(3, 1, 2))".into()),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.dataset.as_deref() == Some("d") && a.engine().is_some_and(|e| e.table("d").is_some())
+        }));
+        let set = [
+            ("by1".to_string(), "x".to_string()),
+            ("result".to_string(), "sorted".to_string()),
+        ];
+        assert!(app.open_dialog(&ctx, "sort ROWS", &set).is_ok());
+        assert_eq!(app.spec_dialog.dataset(), Some("d"));
+
+        // what Run hands over, done the way the window does it
+        let code = app.spec_dialog.code();
+        assert_eq!(
+            code,
+            Some(Ok(
+                "sorted <- d[order(d[[\"x\"]]), , drop = FALSE]".to_string()
+            ))
+        );
+        let code = code.and_then(Result::ok);
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Menu("Data > Sort rows".into()),
+                code.unwrap_or_default(),
+            ),
+        );
+        app.perform(&ctx, Action::ShowWhenListed("sorted".into()));
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.dataset.as_deref() == Some("sorted")
+                && a.engine().is_some_and(|e| e.table("sorted").is_some())
+        }));
+        let last = app
+            .engine()
+            .and_then(|e| e.history().entries().last().cloned());
+        assert_eq!(
+            last.map(|h| h.source),
+            Some(Source::Menu("Data > Sort rows".into()))
+        );
     }
 }

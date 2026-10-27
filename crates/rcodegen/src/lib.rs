@@ -1,5 +1,6 @@
 //! Turns dialog specs into R code and parses R output.
 
+pub mod dialog;
 pub mod files;
 pub mod import;
 
