@@ -6,6 +6,7 @@
 //! module ([`data`]).
 
 pub mod data;
+pub mod data_tools;
 
 /// Where an entry sits in the menus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -83,7 +84,16 @@ pub const ENTRIES: &[Entry] = &[
     partial("Use my file", Area::File),
     planned("Save data", Area::File),
     partial("New variable", Area::Data),
-    planned("Recode", Area::Data),
+    partial("Recode", Area::Data),
+    partial("Convert type", Area::Data),
+    partial("Reference level", Area::Data),
+    partial("Combine levels", Area::Data),
+    partial("Reorder levels", Area::Data),
+    partial("Text case and spaces", Area::Data),
+    partial("Find and replace text", Area::Data),
+    partial("Extract part of text", Area::Data),
+    partial("Text to date", Area::Data),
+    partial("Date part", Area::Data),
     partial("Filter rows", Area::Data),
     partial("Sort rows", Area::Data),
     partial("Rename variable", Area::Data),

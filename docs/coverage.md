@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 41 | 0 | 11 | 30 |
+| 50 | 0 | 21 | 29 |
 
 ## File
 
@@ -21,7 +21,16 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Entry | Status |
 |---|---|
 | New variable | partial |
-| Recode | planned |
+| Recode | partial |
+| Convert type | partial |
+| Reference level | partial |
+| Combine levels | partial |
+| Reorder levels | partial |
+| Text case and spaces | partial |
+| Find and replace text | partial |
+| Extract part of text | partial |
+| Text to date | partial |
+| Date part | partial |
 | Filter rows | partial |
 | Sort rows | partial |
 | Rename variable | partial |

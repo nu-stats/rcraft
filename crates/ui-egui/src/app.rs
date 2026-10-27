@@ -514,13 +514,22 @@ impl App {
                     .dataset
                     .as_deref()
                     .is_some_and(|name| self.engine().is_some_and(|e| e.table(name).is_some()));
+                // "Data > Factor > Reference level" goes in a Factor submenu
+                let mut opened: Vec<&str> = Vec::new();
                 for spec in rcraft_catalog::data::SPECS {
-                    let button = ui
-                        .add_enabled(has_data, egui::Button::new(format!("{}…", spec.entry)))
-                        .on_disabled_hover_text("Open a data frame first");
-                    if button.clicked() {
-                        out.push(Action::OpenSpec(spec));
-                        ui.close_menu();
+                    match menu_group(spec) {
+                        None => spec_button(ui, has_data, spec, out),
+                        Some(group) if !opened.contains(&group) => {
+                            opened.push(group);
+                            ui.menu_button(group, |ui| {
+                                for member in rcraft_catalog::data::SPECS {
+                                    if menu_group(member) == Some(group) {
+                                        spec_button(ui, has_data, member, out);
+                                    }
+                                }
+                            });
+                        }
+                        Some(_) => {}
                     }
                 }
             });
@@ -973,6 +982,24 @@ fn results_list(ui: &mut egui::Ui, pal: &Palette, engine: &Engine) {
             }
         }
         ui.add_space(6.0);
+    }
+}
+
+/// The submenu of a dialog whose menu path has three parts ("Data > Factor >
+/// Reference level" is in Factor); `None` for a plain Data menu entry.
+fn menu_group(spec: &'static Spec) -> Option<&'static str> {
+    let mut path = spec.menu.split(" > ").skip(1);
+    let group = path.next()?;
+    path.next().map(|_| group)
+}
+
+fn spec_button(ui: &mut egui::Ui, has_data: bool, spec: &'static Spec, out: &mut Vec<Action>) {
+    let button = ui
+        .add_enabled(has_data, egui::Button::new(format!("{}…", spec.entry)))
+        .on_disabled_hover_text("Open a data frame first");
+    if button.clicked() {
+        out.push(Action::OpenSpec(spec));
+        ui.close_menu();
     }
 }
 

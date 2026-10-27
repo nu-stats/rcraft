@@ -258,9 +258,12 @@ skipped. It never gives a silent wrong answer.
 - P3.4 Variables pane (type, label, missing count, factor level count, filter by type) and
   an Objects pane for the whole workspace, with a right-click menu to rename, remove and
   save (as .rds) any object. Still to do: a level list per factor
-- P3.5 Data management dialogs (started: the dialog-spec format, plan/dialog-spec.md, and
-  new variable, filter, sort and rename in base and tidyverse style; still to do: recode,
-  type conversion, factor tools, dates, strings)
+- P3.5 Data management dialogs (done: the dialog-spec format, plan/dialog-spec.md; new
+  variable, filter, sort and rename in base and tidyverse style; recode, convert type,
+  factor levels (reference, combine, reorder), text (case and spaces, find and replace,
+  extract) and dates (text to date, date part) in base R, each run against real R. Still
+  to do: dplyr in CI so the tidyverse styles run, a missing-package panel in these dialogs,
+  and a per-factor level list in the Variables pane)
 - P3.6 Combine and reshape: join, append, pivot long/wide, aggregate, sample,
   duplicates and missing-value tools
 - P3.7 Save and export (the same formats), plus "save workspace"

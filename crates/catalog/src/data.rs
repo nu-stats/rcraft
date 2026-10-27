@@ -7,9 +7,11 @@ use rcraft_rcodegen::dialog::{
 };
 use rcraft_rcodegen::r_string;
 
+use crate::data_tools;
+
 const BOTH: &[Style] = &[Style::Base, Style::Tidyverse];
 
-const RESULT: Widget = Widget::Text {
+pub(crate) const RESULT: Widget = Widget::Text {
     id: "result",
     label: "Put the result in",
     default: TextDefault::DatasetName,
@@ -19,7 +21,7 @@ const RESULT: Widget = Widget::Text {
 
 /// `result <- data` when the result is a new data frame, so the lines after it
 /// can change `result` in place.
-fn copy_line(a: &Args) -> String {
+pub(crate) fn copy_line(a: &Args) -> String {
     if a.replaces_data("result") {
         String::new()
     } else {
@@ -321,7 +323,7 @@ pub const RENAME: Spec = Spec {
 // `labels` (a named vector: names are the labels, values the codes), which is
 // what haven and the Variables pane use. Base R only: no package is needed.
 
-const BASE: &[Style] = &[Style::Base];
+pub(crate) const BASE: &[Style] = &[Style::Base];
 
 const fn labelled_var(hint: &'static str) -> Widget {
     Widget::Variable {
@@ -622,6 +624,16 @@ pub const SPECS: &[&Spec] = &[
     &VARIABLE_LABEL,
     &VALUE_LABELS,
     &LABELLED_TO_FACTOR,
+    &data_tools::RECODE,
+    &data_tools::CONVERT_TYPE,
+    &data_tools::REFERENCE_LEVEL,
+    &data_tools::COMBINE_LEVELS,
+    &data_tools::REORDER_LEVELS,
+    &data_tools::TEXT_CASE,
+    &data_tools::FIND_REPLACE,
+    &data_tools::EXTRACT_TEXT,
+    &data_tools::TEXT_TO_DATE,
+    &data_tools::DATE_PART,
 ];
 
 #[cfg(test)]

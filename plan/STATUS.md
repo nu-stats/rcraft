@@ -382,6 +382,29 @@ exist on branch `p0/scaffold`.
   only the first rows. CI now installs `arrow` with the other packages so the real-R
   test runs there. **Not run on this machine** (no `arrow` here), only in CI.
 
+## P3.5 value-changing dialogs, 2026-10-27
+
+Ten new Data menu dialogs in `catalog::data_tools`, all base R (no package needed),
+each applied as a small function to the column so its names (x, y, lab) cannot clash
+with the data frame's, into the variable itself or a new one, keeping the variable label:
+
+- *Recode* (`1, 2 = Low; 3 to 9 = High; NA = 0`; first matching rule wins; text news
+  make a text variable; "quoted" values are text, so `"NA"` is the text NA).
+- *Convert type* (number, text, factor). A factor converts to a number by what it says,
+  not by its internal codes.
+- *Factor* submenu: reference level, combine levels, reorder levels (R refuses a
+  level that is not there, or a list that leaves one out, rather than making values missing).
+- *Text* submenu: case and spaces, find and replace (literal unless the pattern box is
+  ticked), extract part.
+- *Date* submenu: text to date (a value that does not fit becomes missing and R warns
+  how many), date part (year, month, day, weekday, quarter).
+
+The Data menu now draws a dialog whose menu path has three parts in a submenu
+(`app.rs: menu_group`). Tests: unit tests in `data_tools.rs`, and
+`crates/engine/tests/data_tools.rs` runs every dialog against real R (passes on Windows;
+CI runs it on the three systems). Tidyverse styles for these are not written; the
+dialogs are base R only.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test
