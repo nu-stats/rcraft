@@ -36,6 +36,13 @@ jobs:
         with:
           r-version: ${{ steps.pins.outputs.r }}
           use-public-rspm: true
+      - name: Use the pinned R everywhere
+        shell: bash
+        run: |
+          # runner images carry other R versions; the finder lists the newest
+          # first unless R_HOME says which one to use
+          echo "R_HOME=$(Rscript -e 'cat(R.home())')" >> "$GITHUB_ENV"
+          Rscript --version
       - name: R packages the file-format tests use
         shell: bash
         env:

@@ -449,7 +449,25 @@ pub fn find_installs(env: &Env) -> Vec<RInstall> {
         }
     }
     found.sort_by_key(|i| std::cmp::Reverse(i.version));
-    found
+    prefer_r_home(found, env.r_home.as_deref())
+}
+
+/// Puts the install under `r_home` (the user's own choice, `R_HOME`) first,
+/// whatever its version; the rest keep their order.
+pub fn prefer_r_home(mut installs: Vec<RInstall>, r_home: Option<&Path>) -> Vec<RInstall> {
+    let Some(home) = r_home else {
+        return installs;
+    };
+    let home = std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    let under = |i: &RInstall| {
+        let path = std::fs::canonicalize(&i.rscript).unwrap_or_else(|_| i.rscript.clone());
+        path.starts_with(&home)
+    };
+    if let Some(at) = installs.iter().position(under) {
+        let chosen = installs.remove(at);
+        installs.insert(0, chosen);
+    }
+    installs
 }
 
 #[cfg(test)]
@@ -673,5 +691,34 @@ mod tests {
         let end = floor_boundary(&text, 5);
         assert!(text.is_char_boundary(end));
         assert!(end <= 5);
+    }
+
+    #[test]
+    fn an_explicit_r_home_wins_over_a_newer_version() {
+        let dir = std::env::temp_dir().join(format!("rcraft-rhome-{}", std::process::id()));
+        let (old_home, new_home) = (dir.join("R-4.4.3"), dir.join("R-4.5.1"));
+        for home in [&old_home, &new_home] {
+            let _ = std::fs::create_dir_all(home.join("bin"));
+            let _ = std::fs::write(home.join("bin").join("Rscript"), b"");
+        }
+        let install = |home: &Path, version: RVersion| RInstall {
+            rscript: home.join("bin").join("Rscript"),
+            version,
+            path_prepend: Vec::new(),
+        };
+        let list = vec![
+            install(&new_home, v(4, 5, 1)),
+            install(&old_home, v(4, 4, 3)),
+        ];
+        let chosen = prefer_r_home(list.clone(), Some(&old_home));
+        assert_eq!(chosen.first().map(|i| i.version), Some(v(4, 4, 3)));
+        assert_eq!(chosen.len(), 2);
+        // no R_HOME, or one that matches nothing: the order is unchanged
+        assert_eq!(prefer_r_home(list.clone(), None), list);
+        assert_eq!(
+            prefer_r_home(list.clone(), Some(&dir.join("nowhere"))),
+            list
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
