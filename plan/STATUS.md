@@ -309,3 +309,19 @@ exist on branch `p0/scaffold`.
   (haven can only read, not write, them; the code path is `read_sas`).
 - A table the preview reads only the first rows of says "first N rows", never a
   total.
+
+## P3.3 Labels (first part)
+
+- CI is green on all three systems at 0064699 (the finder prefers `R_HOME`; CI
+  sets it to the pinned R).
+- Data grid: "Show labelled values as" Labels / Values / Both. A numeric code with
+  a value label shows the label (or `label (code)`); codes with no label, missing
+  values and other columns show as they are. Labelled columns sit on the left.
+- Variables pane: the variable label shows after the type, and a "Conversion
+  report" under the list says what was kept (variable labels, value labels,
+  SPSS user-missing), changed (columns shown as text only) and dropped
+  (attributes RCraft cannot carry). Nothing is shown for a plain table.
+- `rdata::display::{LabelView, labelled_text}` and `rdata::summary::Report`, with
+  unit tests; checked in a picture with a `haven` labelled table.
+- Not yet: editing labels, turning labelled columns into factors from the grid,
+  a per-variable value-label list in the pane, labels in dialog variable pickers.

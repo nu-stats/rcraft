@@ -3,7 +3,8 @@
 //! no more than a screenful.
 
 use eframe::egui::{self, Align2, Color32, FontId, Rect, RichText, Sense, TextStyle};
-use rcraft_rdata::display::cell_text;
+use rcraft_rdata::display::{labelled_text, LabelView};
+use rcraft_rdata::summary::Report;
 use rcraft_rdata::{Column, Data, Table};
 
 use crate::look::Palette;
@@ -27,16 +28,41 @@ fn right_aligned(data: &Data) -> bool {
     )
 }
 
+/// One column as the grid draws it: its value labels, and whether they are
+/// being shown (labels are text, so they sit on the left).
+struct Shown {
+    labels: Vec<(f64, String)>,
+    view: LabelView,
+}
+
+impl Shown {
+    fn new(col: &Column, view: LabelView) -> Shown {
+        Shown {
+            labels: col.value_labels(),
+            view,
+        }
+    }
+
+    fn text(&self, col: &Column, row: usize) -> String {
+        labelled_text(&col.data, &self.labels, row, self.view)
+    }
+
+    fn right(&self, col: &Column) -> bool {
+        right_aligned(&col.data) && (self.view == LabelView::Values || self.labels.is_empty())
+    }
+}
+
 /// Width in points for each column, from its name and a sample of its rows.
-fn column_widths(table: &Table) -> Vec<f32> {
+fn column_widths(table: &Table, shown: &[Shown]) -> Vec<f32> {
     let step = (table.nrow / SAMPLE_ROWS).max(1);
     table
         .columns
         .iter()
-        .map(|col| {
+        .zip(shown)
+        .map(|(col, shown)| {
             let mut longest = col.name.chars().count();
             for row in (0..table.nrow).step_by(step).take(SAMPLE_ROWS) {
-                longest = longest.max(cell_text(&col.data, row).chars().count());
+                longest = longest.max(shown.text(col, row).chars().count());
             }
             (longest as f32 * CHAR_WIDTH + 18.0).clamp(MIN_COLUMN, MAX_COLUMN)
         })
@@ -45,8 +71,9 @@ fn column_widths(table: &Table) -> Vec<f32> {
 
 /// The grid. `offset_x` carries the sideways scroll position from the body to
 /// the header between frames.
-pub fn grid(ui: &mut egui::Ui, pal: &Palette, table: &Table, offset_x: &mut f32) {
-    let widths = column_widths(table);
+pub fn grid(ui: &mut egui::Ui, pal: &Palette, table: &Table, view: LabelView, offset_x: &mut f32) {
+    let shown: Vec<Shown> = table.columns.iter().map(|c| Shown::new(c, view)).collect();
+    let widths = column_widths(table, &shown);
     let gutter = (table.nrow.to_string().len() as f32 * CHAR_WIDTH + 18.0).max(36.0);
     let total = gutter + widths.iter().sum::<f32>();
     let font: FontId = TextStyle::Body.resolve(ui.style());
@@ -61,7 +88,7 @@ pub fn grid(ui: &mut egui::Ui, pal: &Palette, table: &Table, offset_x: &mut f32)
         .show(ui, |ui| {
             let (rect, _) = ui.allocate_exact_size(egui::vec2(total, ROW_HEIGHT), Sense::hover());
             let mut x = rect.left() + gutter;
-            for (col, width) in table.columns.iter().zip(&widths) {
+            for ((col, width), shown) in table.columns.iter().zip(&widths).zip(&shown) {
                 let cell =
                     Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(*width, ROW_HEIGHT));
                 if ui.is_rect_visible(cell) {
@@ -69,7 +96,7 @@ pub fn grid(ui: &mut egui::Ui, pal: &Palette, table: &Table, offset_x: &mut f32)
                         .painter()
                         .with_clip_rect(cell.shrink2(egui::vec2(3.0, 0.0)));
                     // the header sits over its numbers, on the same side
-                    let (at, align) = if right_aligned(&col.data) {
+                    let (at, align) = if shown.right(col) {
                         (
                             cell.right_center() - egui::vec2(6.0, 0.0),
                             Align2::RIGHT_CENTER,
@@ -108,7 +135,7 @@ pub fn grid(ui: &mut egui::Ui, pal: &Palette, table: &Table, offset_x: &mut f32)
                     pal.dim,
                 );
                 let mut x = rect.left() + gutter;
-                for (col, width) in table.columns.iter().zip(&widths) {
+                for ((col, width), shown) in table.columns.iter().zip(&widths).zip(&shown) {
                     let cell = Rect::from_min_size(
                         egui::pos2(x, rect.top()),
                         egui::vec2(*width, ROW_HEIGHT),
@@ -117,7 +144,7 @@ pub fn grid(ui: &mut egui::Ui, pal: &Palette, table: &Table, offset_x: &mut f32)
                     if cell.right() < visible.left() || cell.left() > visible.right() {
                         continue;
                     }
-                    let text = cell_text(&col.data, row);
+                    let text = shown.text(col, row);
                     let color: Color32 = if text == "NA" || text == "NaN" {
                         pal.dim
                     } else {
@@ -126,7 +153,7 @@ pub fn grid(ui: &mut egui::Ui, pal: &Palette, table: &Table, offset_x: &mut f32)
                     let painter = ui
                         .painter()
                         .with_clip_rect(cell.shrink2(egui::vec2(3.0, 0.0)));
-                    if right_aligned(&col.data) {
+                    if shown.right(col) {
                         painter.text(
                             cell.right_center() - egui::vec2(6.0, 0.0),
                             Align2::RIGHT_CENTER,
@@ -183,6 +210,12 @@ pub fn variable_list(
                             .color(pal.warning),
                     );
                 }
+                if let Some(label) = col.label() {
+                    ui.add(
+                        egui::Label::new(RichText::new(label).small().italics().color(pal.dim))
+                            .truncate(),
+                    );
+                }
                 name
             })
             .inner;
@@ -191,6 +224,29 @@ pub fn variable_list(
             out.push(VariableClick::Insert(rcraft_rcodegen::r_name(&col.name)));
         }
     }
+}
+
+/// What was kept, shown as text only or dropped when the table came over,
+/// under the variable list. Shows nothing for a table with nothing to say.
+pub fn conversion_report(ui: &mut egui::Ui, pal: &Palette, table: &Table) {
+    let report = Report::of(table);
+    if report.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    egui::CollapsingHeader::new(RichText::new("Conversion report").small().color(pal.dim))
+        .id_salt("conversion-report")
+        .default_open(true)
+        .show(ui, |ui| {
+            for line in report.lines() {
+                let color = if line.starts_with("Dropped") {
+                    pal.warning
+                } else {
+                    pal.dim
+                };
+                ui.add(egui::Label::new(RichText::new(line).small().color(color)).wrap());
+            }
+        });
 }
 
 fn variable_hint(col: &Column) -> String {
@@ -240,12 +296,17 @@ mod tests {
                 data: Data::Text(vec![Some("a".into()), None]),
             }],
         };
-        let w = column_widths(&table);
+        let shown: Vec<Shown> = table
+            .columns
+            .iter()
+            .map(|c| Shown::new(c, LabelView::Labels))
+            .collect();
+        let w = column_widths(&table, &shown);
         assert_eq!(w, vec![MAX_COLUMN]);
         let empty = Table {
             nrow: 0,
             columns: Vec::new(),
         };
-        assert!(column_widths(&empty).is_empty());
+        assert!(column_widths(&empty, &[]).is_empty());
     }
 }

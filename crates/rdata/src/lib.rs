@@ -34,6 +34,7 @@
 
 pub mod display;
 pub mod sniff;
+pub mod summary;
 
 use std::fmt;
 use std::path::Path;

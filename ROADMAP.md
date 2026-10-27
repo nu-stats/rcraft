@@ -251,7 +251,8 @@ skipped. It never gives a silent wrong answer.
   preview and the generated R shown; packages `readxl`/`haven` are installed on request
   into RCraft's own library. Still to do: parquet, feather (need `arrow`), a Browse
   button, remembering recent files, `.sas7bdat` catalogue files
-- P3.3 Labels: variable labels and value labels kept as labelled vectors and
+- P3.3 Labels (shown in the grid and Variables pane with a conversion report; editing and
+  conversion still to do): variable labels and value labels kept as labelled vectors and
   shown in the editor; conversion report of what was kept, changed or dropped
 - P3.4 Variables pane: type, label, missing count, factor levels, filter by
   type; Objects pane for everything in the workspace

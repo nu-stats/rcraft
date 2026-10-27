@@ -46,6 +46,54 @@ pub fn cell_text(data: &Data, row: usize) -> String {
     }
 }
 
+/// What a labelled column shows: its codes, its value labels, or both.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum LabelView {
+    Values,
+    #[default]
+    Labels,
+    Both,
+}
+
+impl LabelView {
+    pub const ALL: [LabelView; 3] = [LabelView::Labels, LabelView::Values, LabelView::Both];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LabelView::Values => "Values",
+            LabelView::Labels => "Labels",
+            LabelView::Both => "Both",
+        }
+    }
+}
+
+/// Like [`cell_text`], but a numeric code that has a value label shows the
+/// label as `view` asks. `labels` is the column's [`crate::Column::value_labels`];
+/// codes without a label, missing values and other kinds of column show as
+/// they are.
+pub fn labelled_text(data: &Data, labels: &[(f64, String)], row: usize, view: LabelView) -> String {
+    let plain = cell_text(data, row);
+    if view == LabelView::Values || labels.is_empty() {
+        return plain;
+    }
+    let code = match data {
+        Data::Int(v) => v.get(row).copied().filter(|&x| x != INT_NA).map(f64::from),
+        Data::Double(v) => v.get(row).copied().filter(|x| !x.is_nan()),
+        _ => None,
+    };
+    let Some(code) = code else {
+        return plain;
+    };
+    match labels
+        .iter()
+        .find(|(v, text)| (v - code).abs() < 1e-9 && !text.is_empty())
+    {
+        Some((_, text)) if view == LabelView::Both => format!("{text} ({plain})"),
+        Some((_, text)) => text.clone(),
+        None => plain,
+    }
+}
+
 /// Line breaks and tabs would break a table cell; show them as escapes.
 fn one_line(s: &str) -> String {
     s.replace('\r', "\\r")
@@ -169,6 +217,28 @@ mod tests {
         assert_eq!(date_time(946_684_800.0, ""), "2000-01-01 00:00:00 UTC");
         assert_eq!(date_time(-1.0, "UTC"), "1969-12-31 23:59:59 UTC");
         assert_eq!(date_time(f64::NAN, "UTC"), "NA");
+    }
+
+    #[test]
+    fn value_labels_replace_codes_only_where_one_exists() {
+        let labels = vec![(1.0, "Male".to_string()), (2.0, "Female".to_string())];
+        let codes = Data::Double(vec![1.0, 2.0, 3.0, f64::NAN]);
+        let show = |row, view| labelled_text(&codes, &labels, row, view);
+        assert_eq!(show(0, LabelView::Labels), "Male");
+        assert_eq!(show(1, LabelView::Both), "Female (2)");
+        assert_eq!(show(0, LabelView::Values), "1");
+        assert_eq!(show(2, LabelView::Labels), "3", "no label for 3");
+        assert_eq!(show(3, LabelView::Labels), "NaN");
+        assert_eq!(show(9, LabelView::Labels), "", "past the end");
+        let ints = Data::Int(vec![2, INT_NA]);
+        assert_eq!(
+            labelled_text(&ints, &labels, 0, LabelView::Labels),
+            "Female"
+        );
+        assert_eq!(labelled_text(&ints, &labels, 1, LabelView::Labels), "NA");
+        let blank = vec![(1.0, String::new())];
+        assert_eq!(labelled_text(&codes, &blank, 0, LabelView::Labels), "1");
+        assert_eq!(labelled_text(&codes, &[], 0, LabelView::Labels), "1");
     }
 
     #[test]

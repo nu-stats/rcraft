@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
 use rcraft_engine::{Engine, History, Item, Outcome, Recall, Source};
+use rcraft_rdata::display::LabelView;
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
 
 use crate::data_view::{self, VariableClick};
@@ -68,6 +69,8 @@ pub struct App {
     dataset: Option<String>,
     /// Sideways scroll of the Data grid, handed to its header.
     grid_x: f32,
+    /// Whether the Data grid shows value labels, codes or both.
+    label_view: LabelView,
     import: ImportDialog,
     /// A data frame to switch to once R lists it.
     show_when_listed: Option<String>,
@@ -93,6 +96,7 @@ impl App {
             view: View::Results,
             dataset: None,
             grid_x: 0.0,
+            label_view: LabelView::default(),
             import: ImportDialog::default(),
             show_when_listed: None,
         }
@@ -524,6 +528,7 @@ impl App {
                 if let Some(table) = table {
                     let mut clicks = Vec::new();
                     data_view::variable_list(ui, pal, table, &mut clicks);
+                    data_view::conversion_report(ui, pal, table);
                     for VariableClick::Insert(name) in clicks {
                         out.push(Action::Insert(name));
                     }
@@ -609,6 +614,22 @@ impl App {
                     out.push(Action::SetView(view));
                 }
             }
+            if self.view == View::Data {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    egui::ComboBox::from_id_salt("label-view")
+                        .selected_text(self.label_view.label())
+                        .show_ui(ui, |ui| {
+                            for choice in LabelView::ALL {
+                                ui.selectable_value(&mut self.label_view, choice, choice.label());
+                            }
+                        });
+                    ui.label(
+                        RichText::new("Show labelled values as")
+                            .small()
+                            .color(pal.dim),
+                    );
+                });
+            }
         });
         if self.view == View::Data {
             self.data_pane(ui, pal);
@@ -647,7 +668,7 @@ impl App {
             _ => (None, None),
         };
         match (table, error) {
-            (Some(table), _) => data_view::grid(ui, pal, table, &mut self.grid_x),
+            (Some(table), _) => data_view::grid(ui, pal, table, self.label_view, &mut self.grid_x),
             (None, Some(why)) => {
                 ui.label(RichText::new(why).color(pal.error));
             }
