@@ -36,6 +36,10 @@ jobs:
         with:
           r-version: ${{ steps.pins.outputs.r }}
           use-public-rspm: true
+      - name: R packages the file-format tests use
+        shell: bash
+        run: |
+          Rscript -e 'lib <- Sys.getenv("R_LIBS_USER"); dir.create(lib, recursive = TRUE, showWarnings = FALSE); install.packages(c("readxl", "haven"), lib = lib)'
       - name: Run cargo xtask ci
         shell: bash
         env:

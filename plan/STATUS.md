@@ -268,3 +268,44 @@ exist on branch `p0/scaffold`.
   the Data tab after Import), tidyverse code style (`readr`) as an option.
 - Added a thin border to inactive widgets so text boxes show on white windows.
 - `rcraft-desktop --picture ... --import FILE` shows the dialog offscreen.
+
+## P3.2 continued: Excel, Stata, SPSS, SAS, R data, 2026-10-26
+
+- Done with the user's go-ahead to install `readxl` and `haven` (21 packages
+  from the CRAN cloud mirror, into RCraft's own library, nothing added to
+  Pinokio's HEV R). RCraft's library (`rhost::library`) is put first on every
+  session's R search path when it exists: `%LOCALAPPDATA%\RCraft\R-library`
+  on Windows, `~/Library/Application Support/RCraft/R-library` on macOS,
+  `~/.local/share/rcraft/R-library` on Linux. The packages loaded here, so
+  Application Control did not block these compiled packages.
+- Heads-up about this machine: the Claude app's sandbox redirects
+  `%LOCALAPPDATA%`, so the first install went into the app's private store
+  (`...\Packages\Claude_...\LocalCache\Local\RCraft`). The same folder was
+  copied to the real `C:\Users\jstow\AppData\Local\RCraft` from the user's
+  terminal, so RCraft run from the user's own PowerShell finds the packages.
+- `rcodegen::files`: `FileKind`, `ExcelImport` (`readxl::read_excel`: sheet,
+  range with a checker, header, skip, missing text, trim, guess rows),
+  `HavenImport` (`read_dta`, `read_sav`, `read_por`, `read_sas`, `read_xpt`;
+  labels kept as attributes or turned into factors; encoding; SPSS user-missing),
+  `RObjectImport` (`readRDS`, `load`), and `Import`, one type for them all, with
+  `preview_code` (R prints the first rows) and `package()`.
+- Engine: `Engine::query` / `query_result`, hidden questions to R (no history,
+  log or Results). The dialog uses them for the package check, the Excel sheet
+  names and the preview.
+- Dialog: sheet picker, range, label and encoding options, "How R reads it"
+  preview (with a "choices changed" hint), and a missing-package panel that
+  shows the exact `install.packages` call and the library folder and installs
+  only on a click; the install runs as an ordinary command (Results, log) and the
+  dialog checks again when R is free. Import and Cancel are pinned below the
+  scrolling part of the window.
+- Tests: 12 code generation, 5 end to end with real files (a two-sheet `.xlsx`
+  built by hand in the test, and `.dta`, `.sav`, `.xpt`, `.rds`, `.RData` written by
+  R), 5 dialog (preview from R for text and Stata, the missing-package flow). CI
+  now installs `readxl` and `haven` so these run there too (first run of that
+  step: see below).
+- Found while testing: Stata and SPSS files have no missing text, so a missing
+  string reads back as an empty string (the format's own rule). A "treat empty
+  text as missing" choice is a candidate. Not tested against a real `.sas7bdat`
+  (haven can only read, not write, them; the code path is `read_sas`).
+- A table the preview reads only the first rows of says "first N rows", never a
+  total.

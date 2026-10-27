@@ -80,7 +80,24 @@ pub struct Engine {
     tables: BTreeMap<String, Table>,
     table_errors: BTreeMap<String, String>,
     fetch_queue: VecDeque<String>,
+    /// Questions the interface asked R, waiting their turn.
+    query_queue: VecDeque<(QueryId, String)>,
+    query_results: BTreeMap<QueryId, QueryResult>,
+    next_query: QueryId,
 }
+
+/// Names a question asked with [`Engine::query`].
+pub type QueryId = u64;
+
+/// R's answer to a question: what it printed, or the error message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QueryResult {
+    pub ok: bool,
+    pub text: String,
+}
+
+/// Most answers kept.
+const MAX_QUERY_RESULTS: usize = 32;
 
 /// A query the engine runs for itself. Its output never reaches the history,
 /// the log or the Results window.
@@ -92,6 +109,7 @@ struct InternalRun {
 }
 
 enum InternalKind {
+    Query(QueryId),
     Listing,
     Fetch { name: String, path: PathBuf },
 }
@@ -112,6 +130,9 @@ impl Engine {
             tables: BTreeMap::new(),
             table_errors: BTreeMap::new(),
             fetch_queue: VecDeque::new(),
+            query_queue: VecDeque::new(),
+            query_results: BTreeMap::new(),
+            next_query: 1,
         })
     }
 
@@ -263,6 +284,21 @@ impl Engine {
         self.fetch_queue.retain(|n| n != name);
     }
 
+    /// Asks R to run `code` out of sight and keep what it prints. The answer
+    /// arrives through later calls to [`Engine::poll`]; see
+    /// [`Engine::query_result`]. Nothing reaches the history, log or Results.
+    pub fn query(&mut self, code: &str) -> QueryId {
+        let id = self.next_query;
+        self.next_query += 1;
+        self.query_queue.push_back((id, code.to_string()));
+        id
+    }
+
+    /// The answer to a question, once R has given it.
+    pub fn query_result(&self, id: QueryId) -> Option<&QueryResult> {
+        self.query_results.get(&id)
+    }
+
     /// The data frame `name` as last brought over.
     pub fn table(&self, name: &str) -> Option<&Table> {
         self.tables.get(name)
@@ -279,6 +315,7 @@ impl Engine {
             || self.internal.is_some()
             || self.stale
             || !self.fetch_queue.is_empty()
+            || !self.query_queue.is_empty()
     }
 
     fn queue_fetch(&mut self, name: &str) {
@@ -292,7 +329,9 @@ impl Engine {
         if self.current.is_some() || self.internal.is_some() || !self.session.is_running() {
             return;
         }
-        let (kind, code) = if let Some(name) = self.fetch_queue.pop_front() {
+        let (kind, code) = if let Some((id, code)) = self.query_queue.pop_front() {
+            (InternalKind::Query(id), code)
+        } else if let Some(name) = self.fetch_queue.pop_front() {
             let path = std::env::temp_dir().join(format!(
                 "rcraft-{}-table-{}.rcb",
                 std::process::id(),
@@ -324,6 +363,7 @@ impl Engine {
                 // R is busy or gone; try again on a later poll
                 match kind {
                     InternalKind::Listing => self.stale = true,
+                    InternalKind::Query(id) => self.query_queue.push_front((id, code)),
                     InternalKind::Fetch { name, .. } => self.fetch_queue.push_front(name),
                 }
             }
@@ -333,6 +373,18 @@ impl Engine {
     /// A hidden query ended: use what it found.
     fn finish_internal(&mut self, done: InternalRun) {
         match done.kind {
+            InternalKind::Query(id) => {
+                self.query_results.insert(
+                    id,
+                    QueryResult {
+                        ok: !done.failed,
+                        text: done.out,
+                    },
+                );
+                while self.query_results.len() > MAX_QUERY_RESULTS {
+                    self.query_results.pop_first();
+                }
+            }
             InternalKind::Listing => {
                 if !done.failed {
                     self.workspace = parse_listing(&done.out);
@@ -404,6 +456,8 @@ impl Engine {
         self.stale = true;
         let names: Vec<String> = self.watched.iter().cloned().collect();
         self.fetch_queue.clear();
+        self.query_queue.clear();
+        self.query_results.clear();
         for name in names {
             self.queue_fetch(&name);
         }

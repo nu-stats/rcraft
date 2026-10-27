@@ -318,12 +318,30 @@ impl App {
                     .collect()
             })
             .unwrap_or_default();
-        if let Some(DialogAction::Import { code, name }) = self.import.show(ctx, &pal, &frames) {
-            actions.push(Action::Submit(
-                Source::Menu("File > Use my file".into()),
-                code,
-            ));
-            actions.push(Action::ShowWhenListed(name));
+        let engine = match &mut self.engine {
+            EngineState::Ready(e) => Some(&mut **e),
+            _ => None,
+        };
+        match self.import.show(ctx, &pal, &frames, engine) {
+            Some(DialogAction::Import { code, name }) => {
+                actions.push(Action::Submit(
+                    Source::Menu("File > Use my file".into()),
+                    code,
+                ));
+                if let Some(name) = name {
+                    actions.push(Action::ShowWhenListed(name));
+                }
+            }
+            Some(DialogAction::Install { code }) => {
+                // the install runs as an ordinary command, so its progress is
+                // in Results and it is in the log; the dialog stays open and
+                // checks for the package again when R is free
+                actions.push(Action::Submit(
+                    Source::Menu("Packages > Install".into()),
+                    code,
+                ));
+            }
+            None => {}
         }
 
         for action in actions {

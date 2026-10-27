@@ -171,6 +171,9 @@ pub struct SessionConfig {
     /// R using more than this many bytes is stopped (`Limit::Memory`).
     /// Checked every couple of seconds while a run is going. `None`: no limit.
     pub max_memory_bytes: Option<u64>,
+    /// RCraft's own package library, put first on R's search path when the
+    /// folder exists. `None`: leave R's libraries as they are.
+    pub library: Option<PathBuf>,
 }
 
 impl SessionConfig {
@@ -182,6 +185,7 @@ impl SessionConfig {
             max_output_bytes: 16 * 1024 * 1024,
             max_run_time: None,
             max_memory_bytes: None,
+            library: crate::library::user_library_dir(&crate::find::Env::from_process()),
         }
     }
 }
@@ -260,6 +264,12 @@ impl Session {
                 .chain(std::env::split_paths(&existing));
             if let Ok(joined) = std::env::join_paths(parts) {
                 command.env("PATH", joined);
+            }
+        }
+        if let Some(lib) = config.library.as_ref().filter(|l| l.is_dir()) {
+            let existing = std::env::var_os("R_LIBS_USER");
+            if let Some(value) = crate::library::libs_user_value(existing.as_deref(), lib) {
+                command.env("R_LIBS_USER", value);
             }
         }
         no_console_window(&mut command);

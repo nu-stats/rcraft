@@ -175,6 +175,11 @@ impl CsvImport {
 
     /// The R code that reads the file into `name`.
     pub fn code(&self) -> String {
+        format!("{} <- {}", r_name(&self.name), self.read_expr(None))
+    }
+
+    /// The `read.table(...)` call; `rows` limits it to the first rows, for a preview.
+    pub fn read_expr(&self, rows: Option<usize>) -> String {
         let path = self.path.replace('\\', "/");
         let sep = self.delimiter.map_or(",".to_string(), |d| d.to_string());
         // a space means any run of white space, as in R's own convention
@@ -185,12 +190,12 @@ impl CsvImport {
             .map(|s| r_string(s))
             .collect::<Vec<_>>()
             .join(", ");
+        let limit = rows.map_or(String::new(), |n| format!(", nrows = {n}"));
         format!(
-            "{name} <- read.table({path}, header = {header}, sep = {sep}, dec = {dec}, \
+            "read.table({path}, header = {header}, sep = {sep}, dec = {dec}, \
 quote = {quote}, skip = {skip}, na.strings = c({na}), fileEncoding = {enc}, \
 stringsAsFactors = {factors}, strip.white = {strip}, comment.char = \"\", \
-fill = TRUE, check.names = TRUE)",
-            name = r_name(&self.name),
+fill = TRUE, check.names = TRUE{limit})",
             path = r_string(&path),
             header = r_bool(self.header),
             sep = r_string(&sep_arg),
@@ -204,7 +209,7 @@ fill = TRUE, check.names = TRUE)",
     }
 }
 
-fn r_bool(b: bool) -> &'static str {
+pub(crate) fn r_bool(b: bool) -> &'static str {
     if b {
         "TRUE"
     } else {
