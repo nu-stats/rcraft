@@ -254,8 +254,9 @@ skipped. It never gives a silent wrong answer.
 - P3.3 Labels (shown in the grid and Variables pane with a conversion report; editing and
   conversion still to do): variable labels and value labels kept as labelled vectors and
   shown in the editor; conversion report of what was kept, changed or dropped
-- P3.4 Variables pane: type, label, missing count, factor levels, filter by
-  type; Objects pane for everything in the workspace
+- P3.4 Variables pane (done: type, label, missing count, factor level count, filter by
+  type, and an Objects pane for the whole workspace; to do: a level list per factor,
+  an Objects context menu to rename, remove and save)
 - P3.5 Data management dialogs: new variable, recode, filter, sort, rename,
   type conversion, factor tools, dates, strings
 - P3.6 Combine and reshape: join, append, pivot long/wide, aggregate, sample,

@@ -29,6 +29,10 @@ pub struct HeadlessOptions {
     pub dark: bool,
     /// Show the Data tab instead of Results.
     pub show_data: bool,
+    /// Show the Objects list instead of Variables.
+    pub show_objects: bool,
+    /// List only variables of this type (`Factors`, `Numbers`, ...).
+    pub filter: Option<String>,
     /// Open "Use my file" on this file.
     pub import: Option<PathBuf>,
     pub accent: Accent,
@@ -44,6 +48,8 @@ impl HeadlessOptions {
             demo: None,
             dark: false,
             show_data: false,
+            show_objects: false,
+            filter: None,
             import: None,
             accent: Accent::default(),
             size: [1240, 780],
@@ -73,6 +79,12 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     app.set_accent(&ctx, options.accent);
     if options.show_data {
         app.show_data(&ctx);
+    }
+    if options.show_objects {
+        app.show_objects(&ctx);
+    }
+    if let Some(name) = &options.filter {
+        app.filter_variables(&ctx, name)?;
     }
     if let Some(path) = &options.import {
         app.open_import(path);

@@ -3,6 +3,7 @@
 //! no more than a screenful.
 
 use eframe::egui::{self, Align2, Color32, FontId, Rect, RichText, Sense, TextStyle};
+use rcraft_engine::WorkspaceItem;
 use rcraft_rdata::display::{labelled_text, LabelView};
 use rcraft_rdata::summary::Report;
 use rcraft_rdata::{Column, Data, Table};
@@ -26,6 +27,58 @@ fn right_aligned(data: &Data) -> bool {
             | Data::DateTime { .. }
             | Data::Duration { .. }
     )
+}
+
+/// Which variables the Variables pane lists.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TypeFilter {
+    #[default]
+    All,
+    Numbers,
+    Text,
+    Factors,
+    Dates,
+    Logical,
+    Labelled,
+}
+
+impl TypeFilter {
+    pub const ALL: [TypeFilter; 7] = [
+        TypeFilter::All,
+        TypeFilter::Numbers,
+        TypeFilter::Text,
+        TypeFilter::Factors,
+        TypeFilter::Dates,
+        TypeFilter::Logical,
+        TypeFilter::Labelled,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            TypeFilter::All => "All types",
+            TypeFilter::Numbers => "Numbers",
+            TypeFilter::Text => "Text",
+            TypeFilter::Factors => "Factors",
+            TypeFilter::Dates => "Dates and times",
+            TypeFilter::Logical => "Logical",
+            TypeFilter::Labelled => "With labels",
+        }
+    }
+
+    pub fn matches(self, col: &Column) -> bool {
+        match self {
+            TypeFilter::All => true,
+            TypeFilter::Numbers => matches!(col.data, Data::Int(_) | Data::Double(_)),
+            TypeFilter::Text => matches!(col.data, Data::Text(_)),
+            TypeFilter::Factors => matches!(col.data, Data::Factor { .. }),
+            TypeFilter::Dates => matches!(
+                col.data,
+                Data::Date(_) | Data::DateTime { .. } | Data::Duration { .. }
+            ),
+            TypeFilter::Logical => matches!(col.data, Data::Logical(_)),
+            TypeFilter::Labelled => col.label().is_some() || !col.value_labels().is_empty(),
+        }
+    }
 }
 
 /// One column as the grid draws it: its value labels, and whether they are
@@ -195,14 +248,30 @@ pub fn variable_list(
     ui: &mut egui::Ui,
     pal: &Palette,
     table: &Table,
+    filter: TypeFilter,
     out: &mut Vec<VariableClick>,
 ) {
-    for col in &table.columns {
+    if filter != TypeFilter::All {
+        let shown = table.columns.iter().filter(|c| filter.matches(c)).count();
+        ui.label(
+            RichText::new(format!("{shown} of {} variables", table.columns.len()))
+                .small()
+                .color(pal.dim),
+        );
+    }
+    for col in table.columns.iter().filter(|c| filter.matches(c)) {
         let missing = col.data.missing();
         let response = ui
             .horizontal(|ui| {
                 let name = ui.selectable_label(false, RichText::new(&col.name).monospace());
                 ui.label(RichText::new(col.data.kind_name()).small().color(pal.dim));
+                if let Data::Factor { levels, .. } = &col.data {
+                    ui.label(
+                        RichText::new(format!("{} levels", levels.len()))
+                            .small()
+                            .color(pal.dim),
+                    );
+                }
                 if missing > 0 {
                     ui.label(
                         RichText::new(format!("{missing} missing"))
@@ -222,6 +291,58 @@ pub fn variable_list(
         let response = response.on_hover_text(variable_hint(col));
         if response.clicked() {
             out.push(VariableClick::Insert(rcraft_rcodegen::r_name(&col.name)));
+        }
+    }
+}
+
+/// What the Objects pane asks for.
+pub enum ObjectClick {
+    /// Make this data frame the one shown in Variables and Data.
+    Open(String),
+    /// Put the object's name in the Command line.
+    Insert(String),
+}
+
+/// Everything in R's workspace: name, class, and size for data frames. A data
+/// frame opens on a click; anything else puts its name in the Command line.
+pub fn object_list(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    items: &[WorkspaceItem],
+    current: Option<&str>,
+    out: &mut Vec<ObjectClick>,
+) {
+    if items.is_empty() {
+        ui.label(RichText::new("Nothing in R's workspace yet.").color(pal.dim));
+        return;
+    }
+    for item in items {
+        let chosen = current == Some(item.name.as_str());
+        let response = ui
+            .horizontal(|ui| {
+                let name = ui.selectable_label(chosen, RichText::new(&item.name).monospace());
+                ui.label(RichText::new(&item.class).small().color(pal.dim));
+                if let Some((rows, cols)) = item.dims {
+                    ui.label(
+                        RichText::new(format!("{rows} × {cols}"))
+                            .small()
+                            .color(pal.dim),
+                    );
+                }
+                name
+            })
+            .inner;
+        let hint = if item.is_data_frame() {
+            "Click to show this data frame in Variables and Data"
+        } else {
+            "Click to put the name in the Command line"
+        };
+        if response.on_hover_text(hint).clicked() {
+            out.push(if item.is_data_frame() {
+                ObjectClick::Open(item.name.clone())
+            } else {
+                ObjectClick::Insert(rcraft_rcodegen::r_name(&item.name))
+            });
         }
     }
 }
@@ -283,6 +404,52 @@ fn variable_hint(col: &Column) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn column(name: &str, data: Data) -> Column {
+        Column {
+            name: name.into(),
+            class: "x".into(),
+            attrs: Vec::new(),
+            dropped_attrs: 0,
+            data,
+        }
+    }
+
+    #[test]
+    fn the_type_filter_picks_columns_by_kind_and_labels() {
+        let number = column("n", Data::Double(vec![1.0]));
+        let text = column("t", Data::Text(vec![None]));
+        let factor = column(
+            "f",
+            Data::Factor {
+                levels: vec![Some("a".into())],
+                codes: vec![0],
+                ordered: false,
+            },
+        );
+        let date = column("d", Data::Date(vec![0.0]));
+        let flag = column("l", Data::Logical(vec![1]));
+        let mut labelled = column("v", Data::Int(vec![1]));
+        labelled.attrs.push(rcraft_rdata::Attr {
+            key: "label".into(),
+            value: rcraft_rdata::AttrValue::Text(vec![Some("Age".into())]),
+            names: None,
+        });
+        let all = [&number, &text, &factor, &date, &flag, &labelled];
+        let picked = |f: TypeFilter| -> Vec<&str> {
+            all.iter()
+                .filter(|c| f.matches(c))
+                .map(|c| c.name.as_str())
+                .collect()
+        };
+        assert_eq!(picked(TypeFilter::All).len(), 6);
+        assert_eq!(picked(TypeFilter::Numbers), ["n", "v"]);
+        assert_eq!(picked(TypeFilter::Text), ["t"]);
+        assert_eq!(picked(TypeFilter::Factors), ["f"]);
+        assert_eq!(picked(TypeFilter::Dates), ["d"]);
+        assert_eq!(picked(TypeFilter::Logical), ["l"]);
+        assert_eq!(picked(TypeFilter::Labelled), ["v"]);
+    }
 
     #[test]
     fn widths_stay_within_bounds() {

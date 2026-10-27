@@ -8,7 +8,7 @@ use rcraft_engine::{Engine, History, Item, Outcome, Recall, Source};
 use rcraft_rdata::display::LabelView;
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
 
-use crate::data_view::{self, VariableClick};
+use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
 use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 
@@ -17,6 +17,13 @@ use crate::look::{self, Accent, Palette};
 enum View {
     Results,
     Data,
+}
+
+/// What the left pane's top half lists.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SideTab {
+    Variables,
+    Objects,
 }
 
 const COMMAND_ID: &str = "command-line";
@@ -44,6 +51,8 @@ enum Action {
     ShowWhenListed(String),
     OpenImport,
     SetView(View),
+    SetSideTab(SideTab),
+    SetTypeFilter(TypeFilter),
     Interrupt,
     Restart,
     ClearResults,
@@ -71,6 +80,8 @@ pub struct App {
     grid_x: f32,
     /// Whether the Data grid shows value labels, codes or both.
     label_view: LabelView,
+    side_tab: SideTab,
+    type_filter: TypeFilter,
     import: ImportDialog,
     /// A data frame to switch to once R lists it.
     show_when_listed: Option<String>,
@@ -97,6 +108,8 @@ impl App {
             dataset: None,
             grid_x: 0.0,
             label_view: LabelView::default(),
+            side_tab: SideTab::Variables,
+            type_filter: TypeFilter::default(),
             import: ImportDialog::default(),
             show_when_listed: None,
         }
@@ -214,6 +227,8 @@ impl App {
                 self.dataset = choice;
             }
             Action::SetView(view) => self.view = view,
+            Action::SetSideTab(tab) => self.side_tab = tab,
+            Action::SetTypeFilter(filter) => self.type_filter = filter,
             Action::OpenImport => self.import.open_empty(),
             Action::ShowWhenListed(name) => self.show_when_listed = Some(name),
             Action::Interrupt => {
@@ -486,7 +501,23 @@ impl App {
 
     fn side_panel(&self, ui: &mut egui::Ui, pal: &Palette, out: &mut Vec<Action>) {
         let total = ui.available_height();
-        pane_title(ui, pal, "Variables");
+        ui.horizontal(|ui| {
+            for (tab, label) in [
+                (SideTab::Variables, "Variables"),
+                (SideTab::Objects, "Objects"),
+            ] {
+                let chosen = self.side_tab == tab;
+                let text = RichText::new(label).strong();
+                let text = if chosen {
+                    text.color(pal.accent)
+                } else {
+                    text.color(pal.dim)
+                };
+                if ui.selectable_label(chosen, text).clicked() && !chosen {
+                    out.push(Action::SetSideTab(tab));
+                }
+            }
+        });
         let frames: Vec<String> = self
             .engine()
             .map(|e| {
@@ -497,7 +528,7 @@ impl App {
                     .collect()
             })
             .unwrap_or_default();
-        if !frames.is_empty() {
+        if self.side_tab == SideTab::Variables && !frames.is_empty() {
             let shown = self.dataset.clone().unwrap_or_else(|| "(none)".into());
             egui::ComboBox::from_id_salt("dataset")
                 .selected_text(RichText::new(shown).monospace())
@@ -514,6 +545,17 @@ impl App {
                         }
                     }
                 });
+            egui::ComboBox::from_id_salt("type-filter")
+                .selected_text(self.type_filter.label())
+                .width(ui.available_width() - 8.0)
+                .show_ui(ui, |ui| {
+                    for choice in TypeFilter::ALL {
+                        let chosen = self.type_filter == choice;
+                        if ui.selectable_label(chosen, choice.label()).clicked() && !chosen {
+                            out.push(Action::SetTypeFilter(choice));
+                        }
+                    }
+                });
         }
         egui::ScrollArea::vertical()
             .id_salt("variables")
@@ -521,13 +563,28 @@ impl App {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.add_space(4.0);
+                if self.side_tab == SideTab::Objects {
+                    let items = self.engine().map_or(&[][..], |e| e.workspace());
+                    let mut clicks = Vec::new();
+                    data_view::object_list(ui, pal, items, self.dataset.as_deref(), &mut clicks);
+                    for click in clicks {
+                        match click {
+                            ObjectClick::Open(name) => {
+                                out.push(Action::SelectDataset(Some(name)));
+                                out.push(Action::SetSideTab(SideTab::Variables));
+                            }
+                            ObjectClick::Insert(name) => out.push(Action::Insert(name)),
+                        }
+                    }
+                    return;
+                }
                 let table = self
                     .dataset
                     .as_deref()
                     .and_then(|name| self.engine().and_then(|e| e.table(name)));
                 if let Some(table) = table {
                     let mut clicks = Vec::new();
-                    data_view::variable_list(ui, pal, table, &mut clicks);
+                    data_view::variable_list(ui, pal, table, self.type_filter, &mut clicks);
                     data_view::conversion_report(ui, pal, table);
                     for VariableClick::Insert(name) in clicks {
                         out.push(Action::Insert(name));
@@ -916,6 +973,26 @@ impl App {
         self.import.open_with(path);
     }
 
+    /// Switches the left pane to the Objects list.
+    pub fn show_objects(&mut self, ctx: &egui::Context) {
+        self.perform(ctx, Action::SetSideTab(SideTab::Objects));
+    }
+
+    /// Lists only the variables of one type, named as in the filter menu
+    /// (`Factors`, `Numbers`, `Text`, ...; case does not matter).
+    pub fn filter_variables(&mut self, ctx: &egui::Context, name: &str) -> Result<(), String> {
+        let found = TypeFilter::ALL
+            .into_iter()
+            .find(|f| f.label().eq_ignore_ascii_case(name));
+        match found {
+            Some(filter) => {
+                self.perform(ctx, Action::SetTypeFilter(filter));
+                Ok(())
+            }
+            None => Err(format!("unknown type filter {name}")),
+        }
+    }
+
     /// Switches the middle pane to the Data tab.
     pub fn show_data(&mut self, ctx: &egui::Context) {
         self.perform(ctx, Action::SetView(View::Data));
@@ -1028,5 +1105,41 @@ mod tests {
             && a.is_settled()));
         assert_eq!(app.view, View::Results);
         assert_eq!(app.dataset.as_deref(), Some("imported"));
+    }
+
+    #[test]
+    fn the_objects_tab_lists_everything_and_the_tab_and_filter_are_remembered() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                "frame1 <- data.frame(a = 1:3); answer <- 42".into(),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.engine()
+                .is_some_and(|e| e.workspace().iter().any(|w| w.name == "answer"))
+        }));
+        let items = app
+            .engine()
+            .map(|e| e.workspace().to_vec())
+            .unwrap_or_default();
+        let frame = items.iter().find(|w| w.name == "frame1");
+        let other = items.iter().find(|w| w.name == "answer");
+        assert_eq!(frame.and_then(|w| w.dims), Some((3, 1)));
+        assert!(other.is_some_and(|w| !w.is_data_frame()));
+
+        assert_eq!(app.side_tab, SideTab::Variables);
+        app.perform(&ctx, Action::SetSideTab(SideTab::Objects));
+        app.perform(&ctx, Action::SetTypeFilter(TypeFilter::Factors));
+        assert_eq!(app.side_tab, SideTab::Objects);
+        assert_eq!(app.type_filter, TypeFilter::Factors);
     }
 }

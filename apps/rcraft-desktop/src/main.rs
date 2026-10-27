@@ -10,6 +10,8 @@
 //! --demo FILE      first run each line of FILE as a typed command
 //! --dark           dark mode (default light)
 //! --data           show the Data tab instead of Results
+//! --objects        show the Objects list instead of Variables
+//! --filter TYPE    list only one type of variable (Numbers, Text, Factors, ...)
 //! --import FILE    open "Use my file" on FILE
 //! --accent NAME    Blue, Indigo, Teal, Plum, Forest, Amber or Rose
 //! --size WxH       size in points (default 1240x780)
@@ -50,6 +52,8 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
             "--demo" => options.demo = Some(PathBuf::from(value("--demo")?)),
             "--dark" => options.dark = true,
             "--data" => options.show_data = true,
+            "--objects" => options.show_objects = true,
+            "--filter" => options.filter = Some(value("--filter")?.clone()),
             "--import" => options.import = Some(PathBuf::from(value("--import")?)),
             "--accent" => {
                 let name = value("--accent")?;

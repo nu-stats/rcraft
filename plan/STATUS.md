@@ -325,3 +325,17 @@ exist on branch `p0/scaffold`.
   unit tests; checked in a picture with a `haven` labelled table.
 - Not yet: editing labels, turning labelled columns into factors from the grid,
   a per-variable value-label list in the pane, labels in dialog variable pickers.
+
+## P3.4 Variables and Objects panes
+
+- The left pane has two tabs. Variables: the data-frame picker, a type filter (All
+  types, Numbers, Text, Factors, Dates and times, Logical, With labels) with an
+  "N of M variables" note, and the factor level count after the type. Objects:
+  everything in R's workspace with its class and, for data frames, rows by columns.
+  A data frame opens on a click (and the pane returns to Variables); other objects
+  put their name in the Command line.
+- `TypeFilter` and `object_list` in `ui-egui/src/data_view.rs`; unit test for the
+  filter, and an R-backed app test that the Objects list sees a data frame and a
+  non-frame and that the tab and filter are remembered.
+- Picture options `--objects` and `--filter TYPE` added to the desktop picture mode.
+- Not yet: a level list per factor, and rename/remove/save from the Objects list.
