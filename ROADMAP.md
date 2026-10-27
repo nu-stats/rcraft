@@ -277,7 +277,9 @@ skipped. It never gives a silent wrong answer.
   defaults, validation, code templates in tidyverse and base styles; one spec
   gives the dialog and the code; snapshot tests of generated R
 - P4.1 Descriptives: summary statistics, frequency tables, cross-tabs,
-  correlation, normality, missing-data patterns
+  correlation, normality, missing-data patterns (done in base R, each run against real R;
+  a multi-variable widget was added to the dialog-spec format. Still to do: a Q-Q plot with
+  Phase 5, and rich tables in Results with P2.3)
 - P4.2 Tests and intervals: t-tests, proportions, nonparametrics, variance
   tests, exact tests, agreement measures
 - P4.3 ANOVA and linear models: `lm`, anova tables, contrasts, post-hoc

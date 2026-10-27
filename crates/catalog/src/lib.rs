@@ -7,6 +7,7 @@
 
 pub mod data;
 pub mod data_tools;
+pub mod stats;
 
 /// Where an entry sits in the menus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -105,9 +106,12 @@ pub const ENTRIES: &[Entry] = &[
     partial("Save object", Area::File),
     planned("Join", Area::Data),
     planned("Reshape", Area::Data),
-    planned("Summary statistics", Area::Statistics),
-    planned("Frequency table", Area::Statistics),
-    planned("Cross-tabulation", Area::Statistics),
+    partial("Summary statistics", Area::Statistics),
+    partial("Frequency table", Area::Statistics),
+    partial("Cross-tabulation", Area::Statistics),
+    partial("Correlation", Area::Statistics),
+    partial("Missing-data patterns", Area::Statistics),
+    partial("Normality test", Area::Statistics),
     planned("t-test", Area::Statistics),
     planned("Linear model", Area::Statistics),
     planned("Logistic model", Area::Statistics),

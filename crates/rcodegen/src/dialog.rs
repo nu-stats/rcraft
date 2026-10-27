@@ -111,6 +111,15 @@ pub enum Widget {
         required: bool,
         hint: &'static str,
     },
+    /// Several columns, in the order chosen: at least `min` of them. With
+    /// `min` 0, choosing none means every column of the allowed kinds.
+    Variables {
+        id: &'static str,
+        label: &'static str,
+        kinds: &'static [VarKind],
+        min: usize,
+        hint: &'static str,
+    },
     Text {
         id: &'static str,
         label: &'static str,
@@ -138,6 +147,7 @@ impl Widget {
     pub fn id(&self) -> &'static str {
         match self {
             Widget::Variable { id, .. }
+            | Widget::Variables { id, .. }
             | Widget::Text { id, .. }
             | Widget::Choice { id, .. }
             | Widget::Check { id, .. } => id,
@@ -173,14 +183,29 @@ impl Style {
 }
 
 /// Every widget's value, by id: text for variables, text boxes and choices,
-/// a flag for check boxes.
+/// a flag for check boxes, a list of names for multi-variable widgets.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Values {
     texts: BTreeMap<String, String>,
     flags: BTreeMap<String, bool>,
+    lists: BTreeMap<String, Vec<String>>,
 }
 
 impl Values {
+    pub fn set_list(&mut self, id: &str, names: Vec<String>) {
+        self.lists.insert(id.to_string(), names);
+    }
+
+    /// The names chosen for `id`, in order; empty when unset.
+    pub fn list(&self, id: &str) -> &[String] {
+        self.lists.get(id).map_or(&[], Vec::as_slice)
+    }
+
+    /// The names for `id`, for the interface to edit in place.
+    pub fn list_mut(&mut self, id: &str) -> &mut Vec<String> {
+        self.lists.entry(id.to_string()).or_default()
+    }
+
     pub fn set_text(&mut self, id: &str, text: impl Into<String>) {
         self.texts.insert(id.to_string(), text.into());
     }
@@ -265,6 +290,7 @@ impl Spec {
                 ),
                 Widget::Choice { id, default, .. } => values.set_text(id, default),
                 Widget::Check { id, default, .. } => values.set_flag(id, default),
+                Widget::Variables { id, .. } => values.set_list(id, Vec::new()),
             }
         }
         values
@@ -273,7 +299,7 @@ impl Spec {
     /// The columns a variable widget offers.
     pub fn choices<'a>(&self, widget: &Widget, ctx: &'a Context) -> Vec<&'a ColumnInfo> {
         let kinds: &[VarKind] = match widget {
-            Widget::Variable { kinds, .. } => kinds,
+            Widget::Variable { kinds, .. } | Widget::Variables { kinds, .. } => kinds,
             _ => return Vec::new(),
         };
         ctx.columns
@@ -344,6 +370,40 @@ fn widget_problem(w: &Widget, ctx: &Context, values: &Values) -> Option<Problem>
                 )),
                 Some(_) => None,
             }
+        }
+        Widget::Variables {
+            id,
+            label,
+            kinds,
+            min,
+            ..
+        } => {
+            let names = values.list(id);
+            if names.len() < min {
+                return Some(Problem::new(
+                    id,
+                    format!(
+                        "Choose at least {min} variable{} for {}.",
+                        if min == 1 { "" } else { "s" },
+                        lower(label)
+                    ),
+                ));
+            }
+            names.iter().find_map(|name| match ctx.column(name) {
+                None => Some(Problem::new(
+                    id,
+                    format!("{name} is not in {}.", ctx.dataset),
+                )),
+                Some(c) if !kinds.is_empty() && !kinds.contains(&c.kind) => Some(Problem::new(
+                    id,
+                    format!(
+                        "{name} is {}; this needs {}.",
+                        c.kind.label(),
+                        kinds_text(kinds)
+                    ),
+                )),
+                Some(_) => None,
+            })
         }
         Widget::Text {
             id, label, rule, ..
@@ -486,6 +546,26 @@ impl Args<'_> {
     /// The raw column name chosen (for comparisons in checks).
     pub fn var_text(&self, id: &str) -> &str {
         self.values.text(id)
+    }
+
+    /// The columns chosen in a multi-variable widget, in order.
+    pub fn vars(&self, id: &str) -> Vec<&str> {
+        self.values.list(id).iter().map(String::as_str).collect()
+    }
+
+    /// The columns chosen in a multi-variable widget, or, when none is chosen,
+    /// every column of the given kinds.
+    pub fn vars_or_all(&self, id: &str, kinds: &[VarKind]) -> Vec<&str> {
+        let chosen = self.vars(id);
+        if !chosen.is_empty() {
+            return chosen;
+        }
+        self.ctx
+            .columns
+            .iter()
+            .filter(|c| kinds.is_empty() || kinds.contains(&c.kind))
+            .map(|c| c.name.as_str())
+            .collect()
     }
 
     /// An expression the user typed, exactly as typed but trimmed.
@@ -633,6 +713,73 @@ mod tests {
         assert!(expression_problem("x # note").is_some());
         assert!(expression_problem("x; y").is_some());
         assert!(expression_problem("x\ny").is_some());
+    }
+
+    #[test]
+    fn multi_variable_widgets_check_count_names_and_kinds() {
+        const MANY: Widget = Widget::Variables {
+            id: "vars",
+            label: "Variables",
+            kinds: &[VarKind::Number],
+            min: 2,
+            hint: "",
+        };
+        const SPEC2: Spec = Spec {
+            entry: "Test",
+            menu: "Data > Test",
+            about: "",
+            widgets: &[MANY],
+            styles: &[Style::Base],
+            check: no_check,
+            code: |a, _| a.vars("vars").join("+"),
+        };
+        let c = ctx();
+        let mut v = SPEC2.defaults(&c);
+        assert!(v.list("vars").is_empty());
+        assert_eq!(
+            SPEC2.problems(&c, &v)[0].message,
+            "Choose at least 2 variables for variables."
+        );
+        v.set_list("vars", vec!["age".into()]);
+        assert!(SPEC2.problems(&c, &v)[0].message.contains("at least 2"));
+        v.set_list("vars", vec!["age".into(), "sex".into()]);
+        assert_eq!(
+            SPEC2.problems(&c, &v)[0].message,
+            "sex is factor; this needs number."
+        );
+        v.set_list("vars", vec!["age".into(), "height".into()]);
+        assert_eq!(
+            SPEC2.problems(&c, &v)[0].message,
+            "height is not in people."
+        );
+        v.list_mut("vars").clear();
+        v.list_mut("vars")
+            .extend(["age".to_string(), "age".to_string()]);
+        assert_eq!(
+            SPEC2.generate(&c, &v, Style::Base),
+            Ok("age+age".to_string())
+        );
+        // only number columns are offered
+        assert_eq!(SPEC2.choices(&MANY, &c).len(), 1);
+    }
+
+    #[test]
+    fn none_chosen_can_mean_every_column_of_the_kinds() {
+        let c = ctx();
+        let v = Values::default();
+        let a = Args {
+            ctx: &c,
+            values: &v,
+        };
+        assert_eq!(a.vars_or_all("vars", &[VarKind::Number]), vec!["age"]);
+        assert_eq!(a.vars_or_all("vars", &[]), vec!["age", "sex"]);
+        let mut chosen = Values::default();
+        chosen.set_list("vars", vec!["sex".into()]);
+        let a = Args {
+            ctx: &c,
+            values: &chosen,
+        };
+        assert_eq!(a.vars_or_all("vars", &[VarKind::Number]), vec!["sex"]);
     }
 
     #[test]

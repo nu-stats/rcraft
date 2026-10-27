@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 50 | 0 | 21 | 29 |
+| 53 | 0 | 27 | 26 |
 
 ## File
 
@@ -46,9 +46,12 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| Summary statistics | planned |
-| Frequency table | planned |
-| Cross-tabulation | planned |
+| Summary statistics | partial |
+| Frequency table | partial |
+| Cross-tabulation | partial |
+| Correlation | partial |
+| Missing-data patterns | partial |
+| Normality test | partial |
 | t-test | planned |
 | Linear model | planned |
 | Logistic model | planned |

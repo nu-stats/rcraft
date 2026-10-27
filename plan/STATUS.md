@@ -422,6 +422,33 @@ dialogs are base R only.
   case on this machine, so it has only run in CI. **The panel's drawing was not looked
   at in a window**, only its logic and R's answers were tested.
 
+## P4.1 Descriptives, 2026-10-27
+
+Six Statistics menu dialogs in `catalog::stats`, under *Statistics > Descriptives*, all
+base R (`stats` ships with R). Each prints its tables in Results and changes no data;
+each is one call of an anonymous function on the chosen columns, so no helper name lands
+in the user's workspace.
+
+- *Summary statistics*: n, missing, mean, sd, min, quartiles, max for number variables,
+  all together or split by a group; none chosen means every number variable; an optional
+  name saves the table.
+- *Frequency table*: one table per variable, percentages and missing-as-a-category optional.
+- *Cross-tabulation*: counts with totals, row/column/total percentages, chi-squared test.
+- *Correlation*: Pearson, Spearman or Kendall, pairwise or complete rows, rows used per
+  pair, optional p-values (unadjusted).
+- *Missing-data patterns*: missing count and share per variable, and the patterns.
+- *Normality test*: Shapiro-Wilk; a constant or too-short variable gives NA, not an error.
+
+The dialog-spec format gained `Widget::Variables { min }` (several columns, in order
+chosen; `min` 0 means none chosen = all of the allowed kinds), `Values::list`, and
+`Args::vars` / `vars_or_all`. The renderer draws a scrollable checkbox list with Select
+all and Clear. The Statistics menu is drawn from `stats::SPECS` with the same submenu
+logic as Data (`spec_menu`). `--set vars=a,b` sets a multi-variable widget in pictures.
+Tests: unit tests in `stats.rs` and `dialog.rs`; `engine/tests/stats.rs` runs every
+dialog on a small data frame in real R and checks the numbers (saved summary tables
+against `sd()`, `mean()` and so on, correlations, patterns, Shapiro); an app test runs
+the Correlation dialog through the menu path and finds the table in Results.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

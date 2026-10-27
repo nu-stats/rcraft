@@ -527,26 +527,16 @@ impl App {
                     .dataset
                     .as_deref()
                     .is_some_and(|name| self.engine().is_some_and(|e| e.table(name).is_some()));
-                // "Data > Factor > Reference level" goes in a Factor submenu
-                let mut opened: Vec<&str> = Vec::new();
-                for spec in rcraft_catalog::data::SPECS {
-                    match menu_group(spec) {
-                        None => spec_button(ui, has_data, spec, out),
-                        Some(group) if !opened.contains(&group) => {
-                            opened.push(group);
-                            ui.menu_button(group, |ui| {
-                                for member in rcraft_catalog::data::SPECS {
-                                    if menu_group(member) == Some(group) {
-                                        spec_button(ui, has_data, member, out);
-                                    }
-                                }
-                            });
-                        }
-                        Some(_) => {}
-                    }
-                }
+                spec_menu(ui, has_data, rcraft_catalog::data::SPECS, out);
             });
-            for title in ["Statistics", "Graphs", "Packages"] {
+            ui.menu_button("Statistics", |ui| {
+                let has_data = self
+                    .dataset
+                    .as_deref()
+                    .is_some_and(|name| self.engine().is_some_and(|e| e.table(name).is_some()));
+                spec_menu(ui, has_data, rcraft_catalog::stats::SPECS, out);
+            });
+            for title in ["Graphs", "Packages"] {
                 ui.menu_button(title, |ui| {
                     ui.add_enabled(false, egui::Button::new("Coming in a later phase"));
                 });
@@ -1006,6 +996,33 @@ fn menu_group(spec: &'static Spec) -> Option<&'static str> {
     path.next().map(|_| group)
 }
 
+/// A menu's dialogs in order; those with a three-part path are grouped into a
+/// submenu named by its middle part ("Data > Factor > Reference level").
+fn spec_menu(
+    ui: &mut egui::Ui,
+    has_data: bool,
+    specs: &'static [&'static Spec],
+    out: &mut Vec<Action>,
+) {
+    let mut opened: Vec<&str> = Vec::new();
+    for spec in specs {
+        match menu_group(spec) {
+            None => spec_button(ui, has_data, spec, out),
+            Some(group) if !opened.contains(&group) => {
+                opened.push(group);
+                ui.menu_button(group, |ui| {
+                    for member in specs {
+                        if menu_group(member) == Some(group) {
+                            spec_button(ui, has_data, member, out);
+                        }
+                    }
+                });
+            }
+            Some(_) => {}
+        }
+    }
+}
+
 fn spec_button(ui: &mut egui::Ui, has_data: bool, spec: &'static Spec, out: &mut Vec<Action>) {
     let button = ui
         .add_enabled(has_data, egui::Button::new(format!("{}…", spec.entry)))
@@ -1117,6 +1134,7 @@ impl App {
         let spec = rcraft_catalog::data::SPECS
             .iter()
             .chain(rcraft_catalog::data::OBJECT_SPECS)
+            .chain(rcraft_catalog::stats::SPECS)
             .find(|s| s.entry.eq_ignore_ascii_case(entry))
             .ok_or_else(|| format!("no dialog called {entry}"))?;
         if rcraft_catalog::data::is_object_menu(spec.menu) {
@@ -1362,6 +1380,65 @@ mod tests {
         assert_eq!(
             last.map(|h| h.source),
             Some(Source::Menu("Data > Sort rows".into()))
+        );
+    }
+
+    #[test]
+    fn a_statistics_dialog_takes_several_variables_and_prints_in_results() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                "d <- data.frame(x = c(1, 2, 3, 4), y = c(2, 4, 5, 9))".into(),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.dataset.as_deref() == Some("d") && a.engine().is_some_and(|e| e.table("d").is_some())
+        }));
+        // several variables are set as one comma-separated list
+        let set = [("vars".to_string(), "x, y".to_string())];
+        assert!(app.open_dialog(&ctx, "correlation", &set).is_ok());
+        let code = app.spec_dialog.code().and_then(Result::ok);
+        let code = code.unwrap_or_default();
+        assert!(code.ends_with("d[c(\"x\", \"y\")], \"pearson\")"), "{code}");
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Menu("Statistics > Descriptives > Correlation".into()),
+                code,
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let printed = app.engine().map(|e| {
+            e.results()
+                .blocks()
+                .iter()
+                .flat_map(|b| b.items.iter())
+                .filter_map(|i| match i {
+                    Item::Text { text, .. } => Some(text.clone()),
+                    _ => None,
+                })
+                .collect::<String>()
+        });
+        assert!(
+            printed.is_some_and(|t| t.contains("Correlations") && t.contains("0.9")),
+            "the table is in Results"
+        );
+        let last = app
+            .engine()
+            .and_then(|e| e.history().entries().last().cloned());
+        assert_eq!(
+            last.map(|h| h.source),
+            Some(Source::Menu(
+                "Statistics > Descriptives > Correlation".into()
+            ))
         );
     }
 

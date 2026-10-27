@@ -93,10 +93,26 @@ impl SpecDialog {
         }
     }
 
-    /// Sets one widget's text, as if typed or chosen.
+    /// Sets one widget's text, as if typed or chosen. For a multi-variable
+    /// widget the text is the column names separated by commas.
     pub fn set_text(&mut self, id: &str, value: &str) {
         if let Some(open) = &mut self.open {
-            open.values.set_text(id, value);
+            let many = open
+                .spec
+                .widgets
+                .iter()
+                .any(|w| matches!(w, Widget::Variables { id: wid, .. } if *wid == id));
+            if many {
+                let names = value
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|n| !n.is_empty())
+                    .map(str::to_string)
+                    .collect();
+                open.values.set_list(id, names);
+            } else {
+                open.values.set_text(id, value);
+            }
         }
     }
 
@@ -251,6 +267,7 @@ fn widget_row(
 ) {
     let (label, hint) = match *w {
         Widget::Variable { label, hint, .. }
+        | Widget::Variables { label, hint, .. }
         | Widget::Text { label, hint, .. }
         | Widget::Choice { label, hint, .. } => (label, hint),
         Widget::Check { hint, .. } => ("", hint),
@@ -290,6 +307,45 @@ fn widget_row(
                             }
                         }
                     });
+            }
+            Widget::Variables { id, min, .. } => {
+                let choices: Vec<(String, &'static str)> = open
+                    .spec
+                    .choices(w, &open.ctx)
+                    .into_iter()
+                    .map(|c| (c.name.clone(), c.kind.label()))
+                    .collect();
+                let chosen = open.values.list_mut(id);
+                egui::ScrollArea::vertical()
+                    .id_salt(("spec-vars", id))
+                    .max_height(130.0)
+                    .show(ui, |ui| {
+                        for (name, kind) in &choices {
+                            let mut on = chosen.contains(name);
+                            let text = RichText::new(format!("{name}   {kind}")).monospace();
+                            if ui.checkbox(&mut on, text).changed() {
+                                if on {
+                                    chosen.push(name.clone());
+                                } else {
+                                    chosen.retain(|n| n != name);
+                                }
+                            }
+                        }
+                    });
+                ui.horizontal(|ui| {
+                    if ui.small_button("Select all").clicked() {
+                        *chosen = choices.iter().map(|(n, _)| n.clone()).collect();
+                    }
+                    if ui.small_button("Clear").clicked() {
+                        chosen.clear();
+                    }
+                    let note = if min == 0 {
+                        format!("{} chosen (none: all of them)", chosen.len())
+                    } else {
+                        format!("{} chosen", chosen.len())
+                    };
+                    ui.label(RichText::new(note).small().color(pal.dim));
+                });
             }
             Widget::Text { id, .. } => {
                 ui.add(egui::TextEdit::singleline(open.values.text_mut(id)).desired_width(320.0));
