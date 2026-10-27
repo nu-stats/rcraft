@@ -39,7 +39,12 @@ jobs:
       - name: R packages the file-format tests use
         shell: bash
         run: |
-          Rscript -e 'lib <- Sys.getenv("R_LIBS_USER"); dir.create(lib, recursive = TRUE, showWarnings = FALSE); install.packages(c("readxl", "haven"), lib = lib)'
+          set -o pipefail
+          Rscript -e 'install.packages(c("readxl", "haven")); stopifnot(requireNamespace("readxl"), requireNamespace("haven"))' 2>&1 | tee pkgs.log || {
+            tail -n 25 pkgs.log | tr -d '' | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > pkgs-tail.txt
+            echo "::error title=installing readxl and haven failed::$(cat pkgs-tail.txt)"
+            exit 1
+          }
       - name: Run cargo xtask ci
         shell: bash
         env:
