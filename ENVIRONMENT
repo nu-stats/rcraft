@@ -7,5 +7,5 @@
 R_VERSION=4.4.3
 # A dated Posit Package Manager snapshot (after R 4.4.3's release on
 # 2025-02-28), so package versions do not move under the tests. The date is
-# not yet confirmed against the service: the first CI run settles it.
+# confirmed by the CI run that installs readxl and haven from it.
 PACKAGE_SNAPSHOT=2025-03-15

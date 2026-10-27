@@ -38,9 +38,18 @@ jobs:
           use-public-rspm: true
       - name: R packages the file-format tests use
         shell: bash
+        env:
+          SNAPSHOT: ${{ steps.pins.outputs.snapshot }}
         run: |
           set -o pipefail
-          Rscript -e 'r <- getOption("repos"); if (is.null(r) || identical(unname(r["CRAN"]), "@CRAN@")) r <- c(CRAN = "https://cloud.r-project.org"); install.packages(c("readxl", "haven"), repos = r); stopifnot(requireNamespace("readxl"), requireNamespace("haven"))' 2>&1 | tee pkgs.log || {
+          # the dated snapshot in ENVIRONMENT, so the packages match the pinned R
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            export REPO="https://packagemanager.posit.co/cran/__linux__/$(lsb_release -cs)/$SNAPSHOT"
+          else
+            export REPO="https://packagemanager.posit.co/cran/$SNAPSHOT"
+          fi
+          echo "package repository: $REPO"
+          Rscript -e 'install.packages(c("readxl", "haven"), repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("haven"))' 2>&1 | tee pkgs.log || {
             tail -n 25 pkgs.log | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > pkgs-tail.txt
             echo "::error title=installing readxl and haven failed::$(cat pkgs-tail.txt)"
             exit 1
