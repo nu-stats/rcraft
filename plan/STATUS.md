@@ -470,6 +470,31 @@ Limits: a two-sample test needs exactly two groups and R checks that when it run
 Brown-Forsythe test is the median-centred Levene test written in base R. Agreement
 measures (Cohen's kappa) are not done.
 
+## P4.3 Linear models and ANOVA, 2026-10-27
+
+Three dialogs in `catalog::models`, under *Statistics > Linear models*, base R (`stats::`).
+Each fits a model, keeps it in R's workspace under a name the dialog asks for (default
+`model`, `anova`; a name already in use is replaced, but never the data frame's own name),
+prints R's own `summary`, and changes no data.
+
+- *Linear model*: outcome, one or more number or categorical predictors, no interactions
+  or all two-way ones, optional weights, confidence level for the printed intervals.
+  Categorical predictors use R's treatment contrasts (first level is the reference).
+- *One-way ANOVA*: the table, group means, optional Tukey comparisons.
+- *Factorial ANOVA*: several grouping variables, full factorial or main effects only,
+  optional Tukey comparisons. Sequential (type I) sums of squares, said in the dialog:
+  with unequal group sizes the order of the variables matters. Types II and III need
+  the car package; not done.
+
+Tests: `engine/tests/models.rs` requires the saved model to equal R's for the same call
+written by hand (`all.equal` on the coefficients) and the printed summary, group means and
+Tukey report to equal R's own; unit tests give the exact code and the refusals.
+
+Open design for P4.5: post-estimation needs to know "the last model". Today the model is
+only an object in the workspace under the saved name; the menu will probably list the
+workspace's `lm`/`glm`/`aov` objects (the Objects pane already knows their classes)
+rather than track a hidden "last model".
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

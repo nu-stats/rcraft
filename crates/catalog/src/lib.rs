@@ -8,6 +8,7 @@
 pub mod data;
 pub mod data_tools;
 pub mod inference;
+pub mod models;
 pub mod stats;
 
 /// Where an entry sits in the menus.
@@ -123,7 +124,9 @@ pub const ENTRIES: &[Entry] = &[
     partial("Wilcoxon signed-rank test", Area::Statistics),
     partial("Kruskal-Wallis test", Area::Statistics),
     partial("Variance test", Area::Statistics),
-    planned("Linear model", Area::Statistics),
+    partial("Linear model", Area::Statistics),
+    partial("One-way ANOVA", Area::Statistics),
+    partial("Factorial ANOVA", Area::Statistics),
     planned("Logistic model", Area::Statistics),
     planned("Histogram", Area::Graphs),
     planned("Scatter plot", Area::Graphs),

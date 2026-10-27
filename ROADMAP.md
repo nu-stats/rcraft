@@ -285,7 +285,11 @@ skipped. It never gives a silent wrong answer.
   report: one-sample, two-sample and paired t-tests, test of proportions, exact binomial,
   Fisher's exact, Mann-Whitney, Wilcoxon signed-rank, Kruskal-Wallis, variance tests. Still
   to do: agreement measures such as Cohen's kappa)
-- P4.3 ANOVA and linear models: `lm`, anova tables, contrasts, post-hoc
+- P4.3 ANOVA and linear models: `lm`, anova tables, contrasts, post-hoc (done in base R:
+  linear model with categorical predictors, interactions, weights and confidence
+  intervals; one-way and factorial ANOVA with Tukey comparisons; each saves its model
+  under a chosen name. Still to do: Type II and III sums of squares and custom contrasts,
+  which need a package, and diagnostics with P4.5)
 - P4.4 Generalised models: logit, probit, Poisson, negative binomial,
   ordinal, multinomial
 - P4.5 Post-estimation context menu on the last model: predict, residuals,

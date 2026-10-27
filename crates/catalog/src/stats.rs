@@ -11,6 +11,7 @@ use rcraft_rcodegen::r_string;
 
 use crate::data::BASE;
 use crate::inference;
+use crate::models;
 
 /// `c("a", "b")` for column names.
 fn names_vector(names: &[&str]) -> String {
@@ -410,6 +411,9 @@ pub const SPECS: &[&Spec] = &[
     &inference::SIGNED_RANK,
     &inference::KRUSKAL,
     &inference::VARIANCE,
+    &models::LINEAR,
+    &models::ONE_WAY,
+    &models::FACTORIAL,
 ];
 
 #[cfg(test)]
