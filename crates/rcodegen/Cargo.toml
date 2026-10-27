@@ -13,6 +13,7 @@ layer = 3
 
 [dependencies]
 rcraft-core.workspace = true
+rcraft-rdata.workspace = true
 rcraft-rproto.workspace = true
 
 [lints]

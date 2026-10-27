@@ -8,6 +8,7 @@ use rcraft_engine::{Engine, History, Item, Outcome, Recall, Source};
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
 
 use crate::data_view::{self, VariableClick};
+use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 
 /// What the middle pane shows.
@@ -38,6 +39,9 @@ enum Action {
     /// Add text (a variable name) to the Command line.
     Insert(String),
     SelectDataset(Option<String>),
+    /// Show this data frame as soon as R lists it (after an import).
+    ShowWhenListed(String),
+    OpenImport,
     SetView(View),
     Interrupt,
     Restart,
@@ -64,6 +68,9 @@ pub struct App {
     dataset: Option<String>,
     /// Sideways scroll of the Data grid, handed to its header.
     grid_x: f32,
+    import: ImportDialog,
+    /// A data frame to switch to once R lists it.
+    show_when_listed: Option<String>,
 }
 
 impl App {
@@ -86,6 +93,8 @@ impl App {
             view: View::Results,
             dataset: None,
             grid_x: 0.0,
+            import: ImportDialog::default(),
+            show_when_listed: None,
         }
     }
 
@@ -137,6 +146,25 @@ impl App {
                 self.dataset = None;
             }
         }
+        if let Some(wanted) = self.show_when_listed.clone() {
+            let listed = engine
+                .workspace()
+                .iter()
+                .any(|w| w.name == wanted && w.is_data_frame());
+            if listed {
+                if let Some(old) = self.dataset.take() {
+                    engine.unwatch(&old);
+                }
+                engine.watch(&wanted);
+                self.dataset = Some(wanted);
+                self.view = View::Data;
+                self.show_when_listed = None;
+            } else if !engine.is_working() {
+                // the import failed: the error is in Results
+                self.show_when_listed = None;
+                self.view = View::Results;
+            }
+        }
         if self.dataset.is_none() {
             if let Some(first) = engine.workspace().iter().find(|w| w.is_data_frame()) {
                 let name = first.name.clone();
@@ -182,6 +210,8 @@ impl App {
                 self.dataset = choice;
             }
             Action::SetView(view) => self.view = view,
+            Action::OpenImport => self.import.open_empty(),
+            Action::ShowWhenListed(name) => self.show_when_listed = Some(name),
             Action::Interrupt => {
                 if let EngineState::Ready(engine) = &mut self.engine {
                     if engine.interrupt() == InterruptOutcome::SessionStopped {
@@ -273,6 +303,29 @@ impl App {
             self.results_pane(ui, &pal, &mut actions);
         });
 
+        // a file dropped on the window opens the dialog on it
+        let dropped = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
+        if let Some(path) = dropped {
+            self.import.open_with(&path);
+        }
+        let frames: Vec<String> = self
+            .engine()
+            .map(|e| {
+                e.workspace()
+                    .iter()
+                    .filter(|w| w.is_data_frame())
+                    .map(|w| w.name.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        if let Some(DialogAction::Import { code, name }) = self.import.show(ctx, &pal, &frames) {
+            actions.push(Action::Submit(
+                Source::Menu("File > Use my file".into()),
+                code,
+            ));
+            actions.push(Action::ShowWhenListed(name));
+        }
+
         for action in actions {
             self.perform(ctx, action);
         }
@@ -291,7 +344,10 @@ impl App {
             ui.label(RichText::new("RCraft").strong());
             ui.add_space(6.0);
             ui.menu_button("File", |ui| {
-                ui.add_enabled(false, egui::Button::new("Open file…"));
+                if ui.button("Use my file…").clicked() {
+                    out.push(Action::OpenImport);
+                    ui.close_menu();
+                }
                 ui.add_enabled(false, egui::Button::new("Open script…"));
                 ui.separator();
                 if ui.button("Quit").clicked() {
@@ -816,6 +872,11 @@ impl App {
         self.perform(ctx, Action::SetTheme(theme));
     }
 
+    /// Opens "Use my file" on a file, as if it had been dropped on the window.
+    pub fn open_import(&mut self, path: &std::path::Path) {
+        self.import.open_with(path);
+    }
+
     /// Switches the middle pane to the Data tab.
     pub fn show_data(&mut self, ctx: &egui::Context) {
         self.perform(ctx, Action::SetView(View::Data));
@@ -873,5 +934,60 @@ mod tests {
     fn multibyte_text_is_cut_by_characters() {
         let text = "é <- 1\nü <- 2";
         assert_eq!(selection_or_line(text, 7, 13), Some("ü <- 2".into()));
+    }
+
+    /// Runs frames until `done` or a minute has passed.
+    fn frames_until(app: &mut App, ctx: &egui::Context, done: impl Fn(&App) -> bool) -> bool {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        let started = std::time::Instant::now();
+        while started.elapsed() < Duration::from_secs(60) {
+            let raw = egui::RawInput {
+                screen_rect: Some(screen),
+                time: Some(started.elapsed().as_secs_f64()),
+                ..Default::default()
+            };
+            let _ = ctx.run(raw, |ctx| app.ui(ctx));
+            if done(app) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        false
+    }
+
+    #[test]
+    fn an_import_switches_to_the_new_data_frame_and_a_failed_one_does_not() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let menu = || Source::Menu("File > Use my file".into());
+        app.perform(
+            &ctx,
+            Action::Submit(menu(), "imported <- data.frame(a = 1:3)".into()),
+        );
+        app.perform(&ctx, Action::ShowWhenListed("imported".into()));
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.dataset.as_deref() == Some("imported")
+                && a.engine().is_some_and(|e| e.table("imported").is_some())
+        }));
+        assert_eq!(app.view, View::Data);
+        assert_eq!(app.show_when_listed, None);
+
+        // a failing import: the wish is dropped and Results is shown
+        app.perform(
+            &ctx,
+            Action::Submit(menu(), "broken <- read.table(\"no/such/file.csv\")".into()),
+        );
+        app.perform(&ctx, Action::ShowWhenListed("broken".into()));
+        assert!(frames_until(&mut app, &ctx, |a| a
+            .show_when_listed
+            .is_none()
+            && a.is_settled()));
+        assert_eq!(app.view, View::Results);
+        assert_eq!(app.dataset.as_deref(), Some("imported"));
     }
 }

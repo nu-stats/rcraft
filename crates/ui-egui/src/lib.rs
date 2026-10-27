@@ -10,6 +10,7 @@
 mod app;
 mod data_view;
 mod headless;
+mod import_dialog;
 pub mod look;
 mod softraster;
 mod softwindow;

@@ -2007,6 +2007,7 @@ name = "rcraft-rcodegen"
 version = "0.0.1"
 dependencies = [
  "rcraft-core",
+ "rcraft-rdata",
  "rcraft-rproto",
 ]
 
@@ -2056,6 +2057,7 @@ dependencies = [
  "egui-winit",
  "rcraft-core",
  "rcraft-engine",
+ "rcraft-rcodegen",
  "rcraft-rdata",
  "rcraft-rhost",
  "softbuffer",

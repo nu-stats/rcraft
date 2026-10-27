@@ -16,42 +16,6 @@ const SAMPLE_ROWS: usize = 30;
 /// Width of one character, in points, for choosing column widths.
 const CHAR_WIDTH: f32 = 7.4;
 
-/// A name R can use as it is; anything else needs backticks.
-pub fn r_name(name: &str) -> String {
-    let mut chars = name.chars();
-    let starts_ok = chars.next().is_some_and(|c| c.is_alphabetic() || c == '.');
-    let plain = starts_ok
-        && name
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '.' || c == '_');
-    let reserved = matches!(
-        name,
-        "if" | "else"
-            | "repeat"
-            | "while"
-            | "function"
-            | "for"
-            | "next"
-            | "break"
-            | "TRUE"
-            | "FALSE"
-            | "NULL"
-            | "Inf"
-            | "NaN"
-            | "NA"
-            | "in"
-    );
-    let dot_digit = name
-        .strip_prefix('.')
-        .and_then(|rest| rest.chars().next())
-        .is_some_and(|c| c.is_ascii_digit());
-    if plain && !reserved && !dot_digit {
-        name.to_string()
-    } else {
-        format!("`{}`", name.replace('\\', "\\\\").replace('`', "\\`"))
-    }
-}
-
 fn right_aligned(data: &Data) -> bool {
     matches!(
         data,
@@ -224,7 +188,7 @@ pub fn variable_list(
             .inner;
         let response = response.on_hover_text(variable_hint(col));
         if response.clicked() {
-            out.push(VariableClick::Insert(r_name(&col.name)));
+            out.push(VariableClick::Insert(rcraft_rcodegen::r_name(&col.name)));
         }
     }
 }
@@ -263,20 +227,6 @@ fn variable_hint(col: &Column) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn plain_names_are_left_alone_and_others_are_quoted() {
-        assert_eq!(r_name("age"), "age");
-        assert_eq!(r_name("my.var_2"), "my.var_2");
-        assert_eq!(r_name(".hidden"), ".hidden");
-        assert_eq!(r_name("two words"), "`two words`");
-        assert_eq!(r_name("2fast"), "`2fast`");
-        assert_eq!(r_name(".5x"), "`.5x`");
-        assert_eq!(r_name("if"), "`if`");
-        assert_eq!(r_name("a`b"), "`a\\`b`");
-        assert_eq!(r_name(""), "``");
-        assert_eq!(r_name("é"), "é");
-    }
 
     #[test]
     fn widths_stay_within_bounds() {

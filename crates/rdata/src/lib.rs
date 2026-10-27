@@ -33,6 +33,7 @@
 //! a crash or a huge allocation.
 
 pub mod display;
+pub mod sniff;
 
 use std::fmt;
 use std::path::Path;

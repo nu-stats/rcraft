@@ -191,6 +191,7 @@ fn visuals(accent: Accent, dark: bool) -> egui::Visuals {
     v.hyperlink_color = p.accent;
     v.override_text_color = Some(p.text);
     v.widgets.noninteractive.bg_stroke = Stroke::new(1.0_f32, line);
+    v.widgets.inactive.bg_stroke = Stroke::new(1.0_f32, line);
     v.widgets.noninteractive.fg_stroke = Stroke::new(1.0_f32, p.text);
     v.widgets.inactive.fg_stroke = Stroke::new(1.0_f32, p.text);
     v.widgets.inactive.weak_bg_fill = mix(p.text, panel, 6);

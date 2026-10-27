@@ -6,13 +6,13 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 33 | 0 | 0 | 33 |
+| 33 | 0 | 1 | 32 |
 
 ## File
 
 | Entry | Status |
 |---|---|
-| Use my file | planned |
+| Use my file | partial |
 | Save data | planned |
 
 ## Data

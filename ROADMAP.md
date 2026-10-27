@@ -245,8 +245,10 @@ skipped. It never gives a silent wrong answer.
 ## Phase 3: Data
 
 - P3.1 Data Editor and Browser, virtualised, for millions of rows, backed by
-  Arrow IPC from R (`rdata`)
-- P3.2 **Use my file**: csv/tsv, xlsx/xls, `.dta`, `.sav`/`.zsav`, `.sas7bdat`,
+  the RCraft columnar bridge from R (`rdata`, see `plan/data-bridge.md`)
+- P3.2 **Use my file**: csv/tsv/txt done (delimiter, header, decimal mark, quotes,
+  encoding, skip, missing text, preview, generated R shown); still to do: xlsx/xls
+  (sheet and range choices; needs `readxl`), `.dta`, `.sav`/`.zsav`, `.sas7bdat` (`haven`),
   `.rds`/`.RData`, parquet, feather; sheet and header choices
 - P3.3 Labels: variable labels and value labels kept as labelled vectors and
   shown in the editor; conversion report of what was kept, changed or dropped

@@ -29,6 +29,8 @@ pub struct HeadlessOptions {
     pub dark: bool,
     /// Show the Data tab instead of Results.
     pub show_data: bool,
+    /// Open "Use my file" on this file.
+    pub import: Option<PathBuf>,
     pub accent: Accent,
     /// Width and height in points.
     pub size: [u32; 2],
@@ -42,6 +44,7 @@ impl HeadlessOptions {
             demo: None,
             dark: false,
             show_data: false,
+            import: None,
             accent: Accent::default(),
             size: [1240, 780],
             pixels_per_point: 1.0,
@@ -70,6 +73,9 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     app.set_accent(&ctx, options.accent);
     if options.show_data {
         app.show_data(&ctx);
+    }
+    if let Some(path) = &options.import {
+        app.open_import(path);
     }
 
     let screen = Rect::from_min_size(

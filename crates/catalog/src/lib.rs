@@ -58,6 +58,14 @@ pub struct Entry {
     pub status: Status,
 }
 
+const fn partial(name: &'static str, area: Area) -> Entry {
+    Entry {
+        name,
+        area,
+        status: Status::Partial,
+    }
+}
+
 const fn planned(name: &'static str, area: Area) -> Entry {
     Entry {
         name,
@@ -68,7 +76,7 @@ const fn planned(name: &'static str, area: Area) -> Entry {
 
 /// The inventory. Seeded from ROADMAP.md; grows with each phase.
 pub const ENTRIES: &[Entry] = &[
-    planned("Use my file", Area::File),
+    partial("Use my file", Area::File),
     planned("Save data", Area::File),
     planned("New variable", Area::Data),
     planned("Recode", Area::Data),

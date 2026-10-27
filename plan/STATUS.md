@@ -243,3 +243,28 @@ exist on branch `p0/scaffold`.
   the window while a command is submitted; the History list wraps long
   commands (should truncate); no sorting, editing or column resizing yet.
 - Next in Phase 3: P3.2 "Use my file" (csv first), P3.4 Objects pane, editing.
+
+## P3.2 Use my file: delimited text, 2026-10-26
+
+- File > Use my file… (and dropping a file on the window) opens a dialog: the
+  file is looked at (`rdata::sniff`: text encoding including byte order marks
+  and UTF-16, delimiter, header row, decimal mark; binary files such as .xlsx
+  are refused with a reason), the choices are filled in and can all be changed
+  (delimiter, decimal mark, quotes, encoding, lines to skip, missing-value text,
+  header, trim spaces, text as factors, the name), the first lines of the raw
+  file are shown, and so is the R it will run (`rcodegen::CsvImport`, base R
+  `read.table`, no package needed). Import runs it as a menu command, so it is
+  in the history, the log and the script, and the new data frame is shown in the
+  Data tab; a failed import leaves the Results with R's error.
+- Tests: 13 sniffing (including hostile bytes), 5 code generation, 6 end to end
+  against real R (quotes with embedded line breaks, Latin-1, semicolons with
+  decimal commas, UTF-8 and UTF-16 with byte order marks, `#` inside data, skip,
+  no header, custom missing text, a missing file), 3 dialog, 1 app-level
+  (import switches the view; a failed one does not).
+- Not done in P3.2: Excel (needs `readxl`, so sheet and range choices wait for
+  it), Stata/SPSS/SAS (`haven`), R data, Parquet, a Browse button (no file
+  dialog library yet; paste a path or drop a file), a preview of the parsed
+  table before importing (the raw lines are shown; the parsed table appears in
+  the Data tab after Import), tidyverse code style (`readr`) as an option.
+- Added a thin border to inactive widgets so text boxes show on white windows.
+- `rcraft-desktop --picture ... --import FILE` shows the dialog offscreen.
