@@ -41,7 +41,7 @@ jobs:
         run: |
           set -o pipefail
           Rscript -e 'install.packages(c("readxl", "haven")); stopifnot(requireNamespace("readxl"), requireNamespace("haven"))' 2>&1 | tee pkgs.log || {
-            tail -n 25 pkgs.log | tr -d '' | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > pkgs-tail.txt
+            tail -n 25 pkgs.log | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > pkgs-tail.txt
             echo "::error title=installing readxl and haven failed::$(cat pkgs-tail.txt)"
             exit 1
           }
@@ -54,7 +54,7 @@ jobs:
           cargo xtask ci 2>&1 | tee ci.log || {
             # put the end of the log in an annotation, which can be read
             # without signing in to GitHub
-            grep -vE 'cargo:rerun-if|^ +(Compiling|Checking|Fresh|Downloaded|Downloading|Updating|Locking|Blocking) ' ci.log | tail -n 25 | cut -c1-200 | tr -d '\r' | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > ci-tail.txt
+            grep -vE 'cargo:rerun-if|^ +(Compiling|Checking|Fresh|Downloaded|Downloading|Updating|Locking|Blocking) ' ci.log | tail -n 25 | cut -c1-200 | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > ci-tail.txt
             echo "::error title=cargo xtask ci failed::$(cat ci-tail.txt)"
             exit 1
           }
