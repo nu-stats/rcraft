@@ -81,6 +81,23 @@ fn run_import(e: &mut Engine, import: &Import) -> (Option<Table>, Outcome) {
         .last()
         .and_then(|h| h.outcome)
         .unwrap_or(Outcome::Error);
+    if outcome != Outcome::Ok {
+        // say what R said, so a failure on another machine can be read
+        let id = r.unwrap_or_default();
+        let said: Vec<String> = e
+            .results()
+            .blocks()
+            .iter()
+            .filter(|b| b.command == id)
+            .flat_map(|b| b.items.iter())
+            .map(|i| format!("{i:?}"))
+            .collect();
+        println!(
+            "the import failed.\ncode: {}\nR said: {}",
+            import.code(),
+            said.join(" | ")
+        );
+    }
     let Some(name) = import.result_name().map(str::to_string) else {
         return (None, outcome);
     };
