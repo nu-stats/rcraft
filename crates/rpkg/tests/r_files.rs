@@ -232,3 +232,37 @@ fn searching_the_real_database_finds_the_obvious_package_first() {
         }
     }
 }
+
+/// The real `Views.rds`, when `RCRAFT_REAL_VIEWS_RDS` names a downloaded copy.
+#[test]
+fn the_real_task_views_read_when_a_copy_is_given() {
+    use rcraft_rpkg::views::Views;
+    let Ok(path) = std::env::var("RCRAFT_REAL_VIEWS_RDS") else {
+        eprintln!("skipped: set RCRAFT_REAL_VIEWS_RDS to a downloaded Views.rds");
+        return;
+    };
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let node = rds::read(&bytes).unwrap_or_else(|e| panic!("reading: {e}"));
+    let views = Views::from_node(&node).unwrap_or_else(|e| panic!("views: {e}"));
+    eprintln!(
+        "{} views; Econometrics has {} packages, {} core",
+        views.views().len(),
+        views.get("Econometrics").map_or(0, |v| v.packages.len()),
+        views
+            .get("Econometrics")
+            .map_or(0, |v| v.packages.iter().filter(|p| p.core).count())
+    );
+    assert!(views.views().len() >= 30);
+    let econ = views.get("Econometrics");
+    assert!(econ.is_some_and(|v| v.packages.iter().any(|p| p.name == "plm" && p.core)));
+    assert!(views
+        .views_of("survival")
+        .iter()
+        .any(|v| v.name == "Survival"));
+    assert!(views
+        .views()
+        .iter()
+        .all(|v| !v.topic.is_empty() && !v.packages.is_empty()));
+    let (back, at) = Views::from_text(&views.to_text(7)).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!((back, at), (views, 7));
+}

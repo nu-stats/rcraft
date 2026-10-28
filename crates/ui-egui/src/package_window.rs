@@ -33,6 +33,8 @@ const RESULT_LIMIT: usize = 100;
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tab {
     Find,
+    /// The CRAN task views, field by field.
+    Browse,
     Installed,
     /// The package list of a project: save it, open it, install from it.
     List,
@@ -137,6 +139,10 @@ pub struct PackagesWindow {
     query: String,
     licence: String,
     compile: Compile,
+    /// Only packages of this task view are searched.
+    view_filter: Option<String>,
+    /// The task view open in the Browse tab.
+    view_open: Option<String>,
     selected: Option<String>,
     installed_filter: String,
     r: RState,
@@ -165,7 +171,7 @@ pub struct PackagesWindow {
     list_height: f32,
     where_result: Option<String>,
     /// The last search: what it was for, and what it found.
-    found_for: Option<(String, String, Compile, u64, usize)>,
+    found_for: Option<(String, String, Compile, u64, usize, Option<String>)>,
     found: Vec<Package>,
 }
 
@@ -177,6 +183,8 @@ impl Default for PackagesWindow {
             query: String::new(),
             licence: String::new(),
             compile: Compile::Any,
+            view_filter: None,
+            view_open: None,
             selected: None,
             installed_filter: String::new(),
             r: RState::default(),
@@ -455,6 +463,12 @@ installation of package 'fixest' had non-zero exit status"
         }
     }
 
+    /// Opens a task view in the Browse tab and filters Find by it, for pictures.
+    pub fn preset_view(&mut self, view: Option<&str>) {
+        self.view_open = view.map(str::to_string);
+        self.view_filter = view.map(str::to_string);
+    }
+
     pub fn open_on(&mut self, tab: Tab) {
         self.open = true;
         self.tab = tab;
@@ -667,6 +681,7 @@ installation of package 'fixest' had non-zero exit status"
                 }
                 match self.tab {
                     Tab::Find => run = self.find_tab(ui, pal, index, r_present, r_ready),
+                    Tab::Browse => self.browse_tab(ui, pal, index),
                     Tab::Installed => run = self.installed_tab(ui, pal, index, r_present, r_ready),
                     Tab::List => run = self.list_tab(ui, pal, index, r_present, r_ready),
                 }
@@ -857,6 +872,7 @@ installation of package 'fixest' had non-zero exit status"
     fn toolbar(&mut self, ui: &mut egui::Ui, pal: &Palette, index: &mut PackageIndexService) {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Find, "Find on CRAN");
+            ui.selectable_value(&mut self.tab, Tab::Browse, "Task views");
             ui.selectable_value(&mut self.tab, Tab::Installed, "Installed");
             ui.selectable_value(&mut self.tab, Tab::List, "Project list");
             ui.with_layout(
@@ -990,10 +1006,16 @@ installation of package 'fixest' had non-zero exit status"
             self.compile,
             ix.fetched_at,
             ix.len(),
+            self.view_filter.clone(),
         );
         if self.found_for.as_ref() == Some(&key) {
             return;
         }
+        let only = self
+            .view_filter
+            .as_deref()
+            .zip(index.views())
+            .map(|(name, views)| views.members_of(name));
         let filters = Filters {
             licence: Some(self.licence.trim().to_string()).filter(|l| !l.is_empty()),
             needs_compilation: match self.compile {
@@ -1001,17 +1023,35 @@ installation of package 'fixest' had non-zero exit status"
                 Compile::Yes => Some(true),
                 Compile::No => Some(false),
             },
+            only,
             ..Filters::default()
         };
-        self.found = if self.query.trim().is_empty() && filters.licence.is_none() {
+        let compile_ok = |p: &Package| match self.compile {
+            Compile::Any => true,
+            Compile::Yes => p.needs_compilation == Some(true),
+            Compile::No => p.needs_compilation == Some(false),
+        };
+        let nothing_typed = self.query.trim().is_empty() && filters.licence.is_none();
+        self.found = if nothing_typed && self.view_filter.is_some() {
+            // a task view chosen and no words: its packages, the core ones first
+            let order: Vec<String> = self
+                .view_filter
+                .as_deref()
+                .and_then(|n| index.views().and_then(|v| v.get(n)))
+                .map(|v| v.packages.iter().map(|p| p.name.clone()).collect())
+                .unwrap_or_default();
+            order
+                .iter()
+                .filter_map(|n| ix.get(n))
+                .filter(|p| compile_ok(p))
+                .take(RESULT_LIMIT)
+                .cloned()
+                .collect()
+        } else if nothing_typed {
             // nothing asked yet: the newest packages
             ix.recently_published(RESULT_LIMIT)
                 .into_iter()
-                .filter(|p| match self.compile {
-                    Compile::Any => true,
-                    Compile::Yes => p.needs_compilation == Some(true),
-                    Compile::No => p.needs_compilation == Some(false),
-                })
+                .filter(|p| compile_ok(p))
                 .cloned()
                 .collect()
         } else {
@@ -1041,6 +1081,24 @@ installation of package 'fixest' had non-zero exit status"
             );
             ui.label("Licence");
             ui.add(egui::TextEdit::singleline(&mut self.licence).desired_width(70.0));
+            if let Some(views) = index.views() {
+                let shown = self
+                    .view_filter
+                    .clone()
+                    .unwrap_or_else(|| "Any task view".to_string());
+                egui::ComboBox::from_id_salt("pkg_view")
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut self.view_filter, None, "Any task view");
+                        for v in views.views() {
+                            ui.selectable_value(
+                                &mut self.view_filter,
+                                Some(v.name.clone()),
+                                &v.name,
+                            );
+                        }
+                    });
+            }
             egui::ComboBox::from_id_salt("pkg_compile")
                 .selected_text(match self.compile {
                     Compile::Any => "Any build",
@@ -1213,6 +1271,7 @@ installation of package 'fixest' had non-zero exit status"
                     ui.label(&p.description);
                     ui.add_space(4.0);
                 }
+if let Some(of) = index.views().map(|v| v.views_of(&p.name)) {                    if !of.is_empty() {                        ui.label(RichText::new("In task views").small().color(pal.dim));                        let names: Vec<&str> = of.iter().map(|v| v.topic.as_str()).collect();                        ui.label(names.join(", "));                    }                }
                 for (kind, list) in &d.needs {
                     ui.label(RichText::new(kind.label()).small().color(pal.dim));
                     let text: Vec<String> = list
@@ -1986,6 +2045,126 @@ impl PackagesWindow {
     }
 }
 
+impl PackagesWindow {
+    /// The CRAN task views: the fields CRAN keeps curated lists for, each with
+    /// its packages (the core ones first). Clicking a package goes to its page.
+    fn browse_tab(&mut self, ui: &mut egui::Ui, pal: &Palette, index: &PackageIndexService) {
+        let Some(views) = index.views() else {
+            ui.add_space(8.0);
+            ui.label("The task views have not been downloaded yet.");
+            ui.label(
+                RichText::new(
+                    "They come with the package list: press \"Refresh list\" (a few more kilobytes).",
+                )
+                .color(pal.dim),
+            );
+            return;
+        };
+        let mut go: Option<(String, Option<String>)> = None;
+        ui.columns(2, |cols| {
+            if let Some(col) = cols.get_mut(0) {
+                egui::ScrollArea::vertical()
+                    .id_salt("pkg_views")
+                    .max_height(self.list_height)
+                    .auto_shrink([false, false])
+                    .show(col, |ui| {
+                        for v in views.views() {
+                            let on = self.view_open.as_deref() == Some(v.name.as_str());
+                            if ui
+                                .selectable_label(
+                                    on,
+                                    RichText::new(if v.topic.is_empty() {
+                                        &v.name
+                                    } else {
+                                        &v.topic
+                                    })
+                                    .strong(),
+                                )
+                                .clicked()
+                            {
+                                self.view_open = Some(v.name.clone());
+                            }
+                            ui.label(
+                                RichText::new(format!("{} packages", v.packages.len()))
+                                    .small()
+                                    .color(pal.dim),
+                            );
+                            ui.add_space(2.0);
+                        }
+                    });
+            }
+            if let Some(col) = cols.get_mut(1) {
+                let Some(view) = self.view_open.as_deref().and_then(|n| views.get(n)) else {
+                    col.label(RichText::new("Pick a field to see its packages.").color(pal.dim));
+                    return;
+                };
+                col.label(RichText::new(&view.topic).heading().strong());
+                col.label(
+                    RichText::new(format!(
+                        "Kept by {}, version of {}",
+                        if view.maintainer.is_empty() {
+                            "its maintainers"
+                        } else {
+                            &view.maintainer
+                        },
+                        if view.updated.is_empty() {
+                            "an unknown day"
+                        } else {
+                            &view.updated
+                        }
+                    ))
+                    .small()
+                    .color(pal.dim),
+                );
+                col.horizontal(|ui| {
+                    if ui
+                        .button("Search inside this view")
+                        .on_hover_text("Goes to Find on CRAN with this view as the filter")
+                        .clicked()
+                    {
+                        go = Some((String::new(), Some(view.name.clone())));
+                    }
+                    if !view.url.is_empty() && ui.link("Its web page").clicked() {
+                        ui.ctx().open_url(egui::OpenUrl::new_tab(&view.url));
+                    }
+                });
+                egui::ScrollArea::vertical()
+                    .id_salt("pkg_view_packages")
+                    .max_height(self.list_height)
+                    .auto_shrink([false, false])
+                    .show(col, |ui| {
+                        for p in &view.packages {
+                            let known = index.index().and_then(|ix| ix.get(&p.name));
+                            ui.horizontal(|ui| {
+                                if ui.link(RichText::new(&p.name).strong()).clicked() {
+                                    go = Some((p.name.clone(), None));
+                                }
+                                if p.core {
+                                    ui.label(RichText::new("core").small().color(pal.accent));
+                                }
+                                if known.is_none() {
+                                    ui.label(
+                                        RichText::new("not on CRAN").small().color(pal.warning),
+                                    );
+                                }
+                            });
+                            if let Some(k) = known {
+                                ui.label(RichText::new(&k.title).small().color(pal.dim));
+                            }
+                        }
+                    });
+            }
+        });
+        if let Some((words, view)) = go {
+            self.tab = Tab::Find;
+            self.query = words.clone();
+            self.view_filter = view;
+            self.selected = (!words.is_empty()).then_some(words);
+            self.confirm = None;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2307,5 +2486,86 @@ mod list_tests {
         assert!(code.contains("install.packages(\"zoo\""), "{code}");
         let run = w.confirm.as_ref().and_then(Confirm::run_for);
         assert_eq!(run.map(|r| r.menu), Some("Packages > Restore"));
+    }
+}
+
+#[cfg(test)]
+mod view_tests {
+    use super::*;
+    use rcraft_rpkg::index::sample;
+    use rcraft_rpkg::views::{TaskView, ViewPackage, Views};
+
+    fn service() -> PackageIndexService {
+        let mut s = PackageIndexService::in_memory(sample());
+        let vp = |n: &str, core: bool| ViewPackage {
+            name: n.into(),
+            core,
+        };
+        s.set_views(Views::new(vec![
+            TaskView {
+                name: "Econ".into(),
+                topic: "Econometrics".into(),
+                packages: vec![
+                    vp("zoo", false),
+                    vp("AER", true),
+                    vp("sandwich", true),
+                    vp("gone", false),
+                ],
+                ..TaskView::default()
+            },
+            TaskView {
+                name: "Other".into(),
+                topic: "Other".into(),
+                packages: vec![vp("fixest", true)],
+                ..TaskView::default()
+            },
+        ]));
+        s
+    }
+
+    fn found(w: &PackagesWindow) -> Vec<&str> {
+        w.found.iter().map(|p| p.name.as_str()).collect()
+    }
+
+    #[test]
+    fn a_chosen_task_view_with_no_words_lists_its_packages_core_first_and_skips_unlisted_ones() {
+        let s = service();
+        let mut w = PackagesWindow {
+            view_filter: Some("Econ".into()),
+            ..PackagesWindow::default()
+        };
+        w.refresh_results(&s);
+        // core packages first, then the rest; "gone" is not in the index so it is left out
+        assert_eq!(found(&w), vec!["AER", "sandwich", "zoo"]);
+    }
+
+    #[test]
+    fn words_search_only_inside_the_chosen_view() {
+        let s = service();
+        let mut w = PackagesWindow {
+            query: "robust".into(),
+            view_filter: Some("Econ".into()),
+            ..PackagesWindow::default()
+        };
+        w.refresh_results(&s);
+        assert_eq!(found(&w), vec!["sandwich"]);
+        w.view_filter = Some("Other".into());
+        w.refresh_results(&s);
+        assert!(w.found.is_empty(), "sandwich is not in the Other view");
+        w.view_filter = None;
+        w.refresh_results(&s);
+        assert_eq!(found(&w), vec!["sandwich"]);
+    }
+
+    #[test]
+    fn picture_presets_open_and_filter_a_view() {
+        let mut w = PackagesWindow::default();
+        w.preset_view(Some("Econ"));
+        assert_eq!(
+            (w.view_open.as_deref(), w.view_filter.as_deref()),
+            (Some("Econ"), Some("Econ"))
+        );
+        w.preset_view(None);
+        assert_eq!((w.view_open, w.view_filter), (None, None));
     }
 }

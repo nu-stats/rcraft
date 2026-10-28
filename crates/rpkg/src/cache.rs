@@ -20,10 +20,13 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::index::{Detail, Index, Package, FIELD_NAMES};
+use crate::views::Views;
 use crate::{Error, Result};
 
 /// The file name inside the cache folder.
 pub const FILE_NAME: &str = "cran-index.txt";
+/// The file for the task views, next to it.
+pub const VIEWS_FILE_NAME: &str = "task-views.txt";
 const MAGIC: &str = "RCRAN2";
 /// Largest cache read, in bytes.
 pub const MAX_BYTES: u64 = 256 * 1024 * 1024;
@@ -68,10 +71,15 @@ impl Cache {
     /// Writes `index` as the cache, replacing the old one only once the new
     /// file is complete.
     pub fn store(&self, index: &Index) -> Result<()> {
+        self.write_atomic(FILE_NAME, &to_text(index))
+    }
+
+    /// Writes the file `name` in the cache folder under a temporary name and
+    /// renames it, so a failure part-way leaves the old file as it was.
+    fn write_atomic(&self, name: &str, text: &str) -> Result<()> {
         fs::create_dir_all(&self.dir).map_err(|e| io(&self.dir, "create", &e))?;
-        let final_path = self.path();
-        let tmp = self.dir.join(format!("{FILE_NAME}.tmp"));
-        let text = to_text(index);
+        let final_path = self.dir.join(name);
+        let tmp = self.dir.join(format!("{name}.tmp"));
         let written = (|| -> std::io::Result<()> {
             let mut f = fs::File::create(&tmp)?;
             f.write_all(text.as_bytes())?;
@@ -83,6 +91,30 @@ impl Cache {
             return Err(io(&final_path, "write", &e));
         }
         Ok(())
+    }
+
+    /// Keeps the task views, fetched at `fetched_at`.
+    pub fn store_views(&self, views: &Views, fetched_at: u64) -> Result<()> {
+        self.write_atomic(VIEWS_FILE_NAME, &views.to_text(fetched_at))
+    }
+
+    /// The kept task views; `Ok(None)` when there are none yet.
+    pub fn load_views(&self) -> Result<Option<(Views, u64)>> {
+        let path = self.dir.join(VIEWS_FILE_NAME);
+        let meta = match fs::metadata(&path) {
+            Ok(m) => m,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(io(&path, "read", &e)),
+        };
+        if meta.len() > MAX_BYTES {
+            return Err(Error::TooBig(format!(
+                "the task views are over {MAX_BYTES} bytes"
+            )));
+        }
+        let bytes = fs::read(&path).map_err(|e| io(&path, "read", &e))?;
+        let text = String::from_utf8(bytes)
+            .map_err(|_| Error::Format("the task views are not valid text".into()))?;
+        Views::from_text(&text).map(Some)
     }
 }
 

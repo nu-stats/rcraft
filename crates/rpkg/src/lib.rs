@@ -31,6 +31,7 @@ pub mod refresh;
 pub mod search;
 pub mod table;
 pub mod unpack;
+pub mod views;
 
 use std::fmt;
 

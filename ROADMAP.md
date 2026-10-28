@@ -66,6 +66,8 @@ Tasks:
   and the rest) as a tree; "new" and "recently updated" lists
   (`ssc new`/`ssc hot` equivalents); optional download counts from the
   public download-logs service
+  (done: task views, with a filter in Find and a Browse tab, and a recently-published list;
+  not done: download counts, a "new packages" list. P1A.3 is done apart from those)
   (partly done: a newest-packages list; not done: task views, download counts, and
   "new" packages, which CRAN's files do not say)
 - P1A.4 Describe: package page with description, version, authors, links,

@@ -20,6 +20,7 @@ use crate::dcf;
 use crate::index::{Detail, Index, DB_COLUMNS, DCF_FIELDS};
 use crate::rds;
 use crate::table;
+use crate::views::Views;
 use crate::{Error, Result};
 
 /// The default mirror (the "cloud" mirror), until the user picks another.
@@ -28,6 +29,10 @@ pub const DEFAULT_MIRROR: &str = "https://cloud.r-project.org";
 pub const PACKAGES_PATH: &str = "src/contrib/PACKAGES.gz";
 /// Path of R's package database, under the mirror.
 pub const DATABASE_PATH: &str = "web/packages/packages.rds";
+/// Path of the task view list, under the mirror.
+pub const VIEWS_PATH: &str = "src/contrib/Views.rds";
+/// Most bytes accepted for `Views.rds` (it is about 70 KB).
+pub const MAX_VIEWS_BYTES: u64 = 8 * 1024 * 1024;
 /// Most bytes accepted for `PACKAGES.gz`.
 pub const MAX_PACKAGES_BYTES: u64 = 64 * 1024 * 1024;
 /// Most bytes accepted for `packages.rds`.
@@ -49,6 +54,8 @@ pub enum Stage {
     Names,
     /// `packages.rds`.
     Details,
+    /// `Views.rds`, the task views.
+    Views,
 }
 
 /// What a progress callback answers.
@@ -77,6 +84,8 @@ pub struct Outcome {
     pub index: Index,
     /// Set when the details could not be had and the index has names only.
     pub note: Option<String>,
+    /// The task views, when they could be had (the saved ones are kept when not).
+    pub views: Option<Views>,
 }
 
 /// `mirror` and `path` joined with one slash.
@@ -152,8 +161,36 @@ pub fn refresh(
             )
         }
     };
+    let views = fetcher
+        .get(
+            &url(mirror, VIEWS_PATH),
+            MAX_VIEWS_BYTES,
+            &mut |done, total| {
+                on_progress(Progress {
+                    stage: Stage::Views,
+                    done,
+                    total,
+                })
+            },
+        )
+        .and_then(|bytes| Views::from_node(&rds::read(&bytes)?));
+    let (views, note) = match views {
+        Ok(v) => (Some(v), note),
+        Err(Error::Cancelled) => return Err(Error::Cancelled),
+        Err(e) => {
+            let extra =
+                format!("The task views could not be loaded ({e}); the saved ones are kept.");
+            (
+                None,
+                Some(note.map_or(extra.clone(), |n| format!("{n} {extra}"))),
+            )
+        }
+    };
     cache.store(&index)?;
-    Ok(Outcome { index, note })
+    if let Some(v) = &views {
+        cache.store_views(v, now)?;
+    }
+    Ok(Outcome { index, note, views })
 }
 
 #[cfg(test)]
@@ -165,6 +202,7 @@ mod tests {
 
     const PACKAGES_GZ: &[u8] = include_bytes!("../tests/fixtures/PACKAGES.gz");
     const DB_V3: &[u8] = include_bytes!("../tests/fixtures/db_matrix_v3.rds");
+    const VIEWS_RDS: &[u8] = include_bytes!("../tests/fixtures/Views.rds");
 
     /// Serves canned bodies; a URL not in the map is a failed request.
     struct Canned {
@@ -177,6 +215,10 @@ mod tests {
             let mut bodies = HashMap::new();
             bodies.insert(url("https://mirror.test", PACKAGES_PATH), names);
             bodies.insert(url("https://mirror.test", DATABASE_PATH), db);
+            bodies.insert(
+                url("https://mirror.test", VIEWS_PATH),
+                Ok(VIEWS_RDS.to_vec()),
+            );
             Canned {
                 bodies,
                 asked: Default::default(),
@@ -243,7 +285,8 @@ mod tests {
             *f.asked.borrow(),
             vec![
                 "https://mirror.test/src/contrib/PACKAGES.gz".to_string(),
-                "https://mirror.test/web/packages/packages.rds".to_string()
+                "https://mirror.test/web/packages/packages.rds".to_string(),
+                "https://mirror.test/src/contrib/Views.rds".to_string()
             ]
         );
         let _ = fs::remove_dir_all(&dir);
@@ -426,5 +469,130 @@ impl Fetcher for Offline {
         _progress: &mut dyn FnMut(u64, Option<u64>) -> Control,
     ) -> Result<Vec<u8>> {
         Err(Error::Fetch(format!("{url}: no network in this run")))
+    }
+}
+
+#[cfg(test)]
+mod views_tests {
+    use super::*;
+    use std::fs;
+
+    const PACKAGES_GZ: &[u8] = include_bytes!("../tests/fixtures/PACKAGES.gz");
+    const DB_V3: &[u8] = include_bytes!("../tests/fixtures/db_matrix_v3.rds");
+    const VIEWS_RDS: &[u8] = include_bytes!("../tests/fixtures/Views.rds");
+
+    struct Serve(Vec<(String, Result<Vec<u8>>)>);
+
+    impl Fetcher for Serve {
+        fn get(
+            &self,
+            url: &str,
+            _max: u64,
+            progress: &mut dyn FnMut(u64, Option<u64>) -> Control,
+        ) -> Result<Vec<u8>> {
+            let body = self
+                .0
+                .iter()
+                .find(|(u, _)| u.as_str() == url)
+                .map(|(_, b)| b.clone())
+                .unwrap_or_else(|| Err(Error::Fetch(format!("no such file {url}"))))?;
+            if progress(body.len() as u64, None) == Control::Cancel {
+                return Err(Error::Cancelled);
+            }
+            Ok(body)
+        }
+    }
+
+    fn serve(views: Result<Vec<u8>>) -> Serve {
+        Serve(vec![
+            (
+                url("https://m.test", PACKAGES_PATH),
+                Ok(PACKAGES_GZ.to_vec()),
+            ),
+            (url("https://m.test", DATABASE_PATH), Ok(DB_V3.to_vec())),
+            (url("https://m.test", VIEWS_PATH), views),
+        ])
+    }
+
+    fn temp(name: &str) -> std::path::PathBuf {
+        let d =
+            std::env::temp_dir().join(format!("rcraft-rpkg-views-{name}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        d
+    }
+
+    #[test]
+    fn task_views_arrive_with_the_refresh_and_are_kept_for_next_time() {
+        let dir = temp("ok");
+        let cache = Cache::new(&dir);
+        let out = refresh(
+            &serve(Ok(VIEWS_RDS.to_vec())),
+            "https://m.test",
+            &cache,
+            77,
+            &mut |_| Control::Continue,
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(out.note, None);
+        let v = out.views.clone().unwrap_or_default();
+        assert_eq!(v.views().len(), 2);
+        assert_eq!(cache.load_views(), Ok(Some((v, 77))));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn missing_or_damaged_views_do_not_fail_the_refresh_and_keep_the_old_ones() {
+        let dir = temp("bad");
+        let cache = Cache::new(&dir);
+        let first = refresh(
+            &serve(Ok(VIEWS_RDS.to_vec())),
+            "https://m.test",
+            &cache,
+            1,
+            &mut |_| Control::Continue,
+        )
+        .unwrap_or_else(|e| panic!("{e}"));
+        for bad in [Err(Error::Fetch("503".into())), Ok(b"junk".to_vec())] {
+            let out = refresh(&serve(bad), "https://m.test", &cache, 2, &mut |_| {
+                Control::Continue
+            })
+            .unwrap_or_else(|e| panic!("{e}"));
+            assert!(out.views.is_none());
+            assert!(
+                out.note
+                    .as_deref()
+                    .is_some_and(|n| n.contains("task views")),
+                "{:?}",
+                out.note
+            );
+            assert_eq!(out.index.len(), 4, "the package list itself is fine");
+            assert_eq!(
+                cache.load_views(),
+                Ok(Some((first.views.clone().unwrap_or_default(), 1)))
+            );
+        }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cancelling_during_the_views_changes_nothing() {
+        let dir = temp("cancel");
+        let cache = Cache::new(&dir);
+        let r = refresh(
+            &serve(Ok(VIEWS_RDS.to_vec())),
+            "https://m.test",
+            &cache,
+            1,
+            &mut |p| {
+                if p.stage == Stage::Views {
+                    Control::Cancel
+                } else {
+                    Control::Continue
+                }
+            },
+        );
+        assert_eq!(r.map(|o| o.index.len()), Err(Error::Cancelled));
+        assert_eq!(cache.load(), Ok(None));
+        let _ = fs::remove_dir_all(&dir);
     }
 }

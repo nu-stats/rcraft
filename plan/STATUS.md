@@ -1133,3 +1133,26 @@ The first GitHub run of everything on `p3/join-keys-tidyverse` failed on all thr
   affected. The GitHub macOS runner has no XQuartz, so its tests now expect that message for SVG and
   compare PNGs for the choice of plot.
 - Lesson kept: a graphics device that cannot open does not always raise an error; check the file.
+
+## P1A.3 Task views (browse), 2026-10-28
+
+CRAN's task views are part of the package list now. `src/contrib/Views.rds` (about 70 KB, 50 views,
+checked once with the user's yes on 2026-10-28) is fetched as the third file of a refresh. A failure to
+get or read it does not fail the refresh: the packages are stored, the saved views are kept, and a note
+says the views could not be loaded. Cancelling during it cancels the whole refresh and changes nothing.
+Kept in `task-views.txt` next to the index cache (same atomic write).
+
+- `rpkg::views`: the reader (name, topic, maintainer, date, address, package table with the core flag),
+  sorted views, core packages first, `members_of`, `views_of`, and the cache text. Real file: 50 views,
+  Econometrics 150 packages of which 12 core (`the_real_task_views_*` in `tests/r_files.rs`, opt in with
+  `RCRAFT_REAL_VIEWS_RDS`).
+- **Packages > Task views** tab: the views by field, each with its packages (core ones marked), a title
+  line from the package list, "not on CRAN" for listed names it lacks, a link to the view's own page (opened
+  only on a click) and **Search inside this view**. Clicking a package goes to its page.
+- **Find on CRAN** has a task view filter: with words they search only inside the view; with none it lists
+  the view's packages core first. A package's page says which task views list it.
+- Pictures: `--packages browse --packages-views Views.rds --packages-view Econometrics`.
+
+Not done in P1A.3: download counts (needs another host, the public download-logs service, one request per
+look, so it wants its own decision), and a "new packages" list, which CRAN's files do not support (only
+"recently published" exists, in Find with no words).

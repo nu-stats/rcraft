@@ -24,6 +24,7 @@ use rcraft_rpkg::refresh::{
     self, validate_mirror, Control, Fetcher, Outcome, Progress, DEFAULT_MIRROR,
 };
 use rcraft_rpkg::search::{Filters, Hit, Searcher};
+use rcraft_rpkg::views::Views;
 
 /// What the service is doing.
 #[derive(Debug, Clone, PartialEq)]
@@ -42,6 +43,8 @@ pub enum Status {
 
 enum Msg {
     Progress(Progress),
+    /// The task views kept in the cache (none when there are none or they are damaged).
+    Views(Option<Views>),
     Loaded(Result<Option<(Index, Searcher)>, String>),
     Refreshed(Result<(Outcome, Searcher), rcraft_rpkg::Error>),
 }
@@ -101,6 +104,8 @@ pub struct PackageIndexService {
     index: Option<Index>,
     /// Prepared for `index` by the worker that read or fetched it.
     searcher: Option<Searcher>,
+    /// The CRAN task views, read from the cache or the last refresh.
+    views: Option<Views>,
     status: Status,
     /// A note from the last refresh (for example, that titles were missing).
     note: Option<String>,
@@ -143,6 +148,7 @@ impl PackageIndexService {
             mirror,
             index: None,
             searcher: None,
+            views: None,
             status: Status::Idle,
             note: None,
             job: None,
@@ -181,6 +187,16 @@ impl PackageIndexService {
             .into_iter()
             .filter_map(|h| ix.packages().get(h.position).map(|p| (p, h)))
             .collect()
+    }
+
+    /// The CRAN task views, when they have been downloaded.
+    pub fn views(&self) -> Option<&Views> {
+        self.views.as_ref()
+    }
+
+    /// Sets the task views by hand: for pictures and tests.
+    pub fn set_views(&mut self, views: Views) {
+        self.views = Some(views);
     }
 
     pub fn status(&self) -> &Status {
@@ -249,6 +265,9 @@ impl PackageIndexService {
         });
         self.status = Status::Loading;
         thread::spawn(move || {
+            let _ = tx.send(Msg::Views(
+                cache.load_views().ok().flatten().map(|(v, _)| v),
+            ));
             let r = cache
                 .load()
                 .map(|loaded| {
@@ -325,6 +344,10 @@ impl PackageIndexService {
                     self.status = Status::Refreshing { progress: Some(p) };
                     changed = true;
                 }
+                Ok(Msg::Views(v)) => {
+                    self.views = v;
+                    changed = true;
+                }
                 Ok(Msg::Loaded(r)) => {
                     match r {
                         Ok(Some((ix, searcher))) => {
@@ -347,6 +370,9 @@ impl PackageIndexService {
                         Ok((out, searcher)) => {
                             self.index = Some(out.index);
                             self.searcher = Some(searcher);
+                            if out.views.is_some() {
+                                self.views = out.views;
+                            }
                             self.note = out.note;
                             self.status = Status::Idle;
                         }
@@ -394,6 +420,7 @@ mod tests {
 
     const PACKAGES_GZ: &[u8] = include_bytes!("../../rpkg/tests/fixtures/PACKAGES.gz");
     const DB_V3: &[u8] = include_bytes!("../../rpkg/tests/fixtures/db_matrix_v3.rds");
+    const VIEWS_RDS: &[u8] = include_bytes!("../../rpkg/tests/fixtures/Views.rds");
 
     struct Canned {
         bodies: HashMap<String, Result<Vec<u8>>>,
@@ -406,6 +433,10 @@ mod tests {
             let mut bodies = HashMap::new();
             bodies.insert(url("https://mirror.test", PACKAGES_PATH), names);
             bodies.insert(url("https://mirror.test", DATABASE_PATH), db);
+            bodies.insert(
+                url("https://mirror.test", rcraft_rpkg::refresh::VIEWS_PATH),
+                Ok(VIEWS_RDS.to_vec()),
+            );
             Canned {
                 bodies,
                 slow: Duration::ZERO,
@@ -634,6 +665,30 @@ mod tests {
         assert!(s.refresh_suggested());
         assert_eq!(s.status(), &Status::Idle);
         assert!(!s.is_busy());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn task_views_come_with_a_refresh_and_are_read_back_from_the_cache() {
+        let dir = temp("views");
+        let mut s = service(
+            &dir,
+            Canned::serving(Ok(PACKAGES_GZ.to_vec()), Ok(DB_V3.to_vec())),
+        );
+        assert!(s.views().is_none());
+        s.refresh();
+        finish(&mut s);
+        let names: Vec<String> = s
+            .views()
+            .map(|v| v.views().iter().map(|t| t.name.clone()).collect())
+            .unwrap_or_default();
+        assert_eq!(names, vec!["FakeFields", "FakeTools"]);
+        // a new service on the same folder finds them in the cache
+        let offline = || Err(Error::Fetch("offline".into()));
+        let mut again = service(&dir, Canned::serving(offline(), offline()));
+        again.ensure_loaded();
+        finish(&mut again);
+        assert_eq!(again.views(), s.views());
         let _ = std::fs::remove_dir_all(&dir);
     }
 

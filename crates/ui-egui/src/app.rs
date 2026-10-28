@@ -1444,6 +1444,22 @@ impl App {
         self.import.open_with(path);
     }
 
+    /// For pictures: gives the Packages window the task views of a downloaded
+    /// `Views.rds`, and opens (and filters by) one of them when named.
+    pub fn show_packages_views(
+        &mut self,
+        path: &std::path::Path,
+        view: Option<&str>,
+    ) -> Result<(), String> {
+        let bytes =
+            std::fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
+        let node = rcraft_rpkg::rds::read(&bytes).map_err(|e| e.to_string())?;
+        let views = rcraft_rpkg::views::Views::from_node(&node).map_err(|e| e.to_string())?;
+        self.package_index.set_views(views);
+        self.packages_window.preset_view(view);
+        Ok(())
+    }
+
     /// For pictures: opens a package list file in the Packages window.
     pub fn show_packages_lock(&mut self, path: &std::path::Path) -> Result<(), String> {
         let text = std::fs::read_to_string(path)
@@ -1472,6 +1488,7 @@ impl App {
             "find" => PackagesTab::Find,
             "installed" => PackagesTab::Installed,
             "list" => PackagesTab::List,
+            "browse" => PackagesTab::Browse,
             other => {
                 return Err(format!(
                     "unknown Packages tab {other}; use find or installed"
