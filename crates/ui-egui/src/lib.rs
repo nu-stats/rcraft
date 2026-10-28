@@ -13,6 +13,7 @@ mod graph_view;
 mod headless;
 mod import_dialog;
 pub mod look;
+mod package_window;
 mod packages;
 mod softraster;
 mod softwindow;

@@ -53,23 +53,35 @@ Tasks:
   titles, descriptions, versions, authors, licences, dependencies, system
   requirements, published date); refreshed on request and when stale;
   searchable offline once cached
+  (done: crate `rpkg`; read from `packages.rds` and `PACKAGES.gz`, trimmed text cache,
+  refresh on request only with progress and cancel, a checked HTTPS mirror setting,
+  checked against the real 25,581-package file. P1A.1 is done)
 - P1A.2 `search`: keyword search over names, titles, descriptions and
   keywords, ranked; filters by provider, task view, licence, and "has
   binary for my platform"; results show title, version, date, maintainer
   and a one-line description
+  (done for CRAN: ranked, with licence, compiler and date filters; not yet: task view
+  and "has a binary" filters, other providers)
 - P1A.3 Browse: CRAN Task Views (Econometrics, Survival, Bayesian, Spatial
   and the rest) as a tree; "new" and "recently updated" lists
   (`ssc new`/`ssc hot` equivalents); optional download counts from the
   public download-logs service
+  (partly done: a newest-packages list; not done: task views, download counts, and
+  "new" packages, which CRAN's files do not say)
 - P1A.4 Describe: package page with description, version, authors, links,
   reverse dependencies, vignettes and the system libraries it needs
   (`ssc describe` equivalent)
+  (done, except vignettes: needs, who needs it, links, system requirements)
 - P1A.5 Install: one click or `rc install pkg` (with `version`, `provider`,
   `from()` choices); resolves dependencies, shows what will be installed
   and downloaded, prefers binaries, runs in a supervised R process with
   progress and a cancel button; the exact R call is shown and logged
+  (done for CRAN: plan, confirmation with the exact call, install through R; the older-version
+  call exists but is not in a screen; progress is R's own output and Stop cancels)
 - P1A.6 Installed packages: list, version, update available, update,
   remove, `which`-style "where does this function come from", load status
+  (done in the Packages window: list, versions, loaded, updates for RCraft's own library,
+  remove, where a function comes from)
 - P1A.7 Failures made readable: missing compiler or system library, with
   the platform-specific fix named; retry from binary or older version
 - P1A.8 Reproducibility: record installed packages and versions in the

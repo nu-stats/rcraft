@@ -15,22 +15,21 @@ pub(crate) fn library_dir() -> Option<String> {
         .map(|p| p.to_string_lossy().replace('\\', "/"))
 }
 
-/// R code that installs `packages` into RCraft's library.
+/// The CRAN mirror the user chose in the Packages window (the default when
+/// none was chosen).
+pub(crate) fn saved_mirror() -> String {
+    rcraft_engine::package_index::saved_mirror(&rcraft_rhost::Env::from_process())
+}
+
+/// R code that installs `packages` into RCraft's library, from the saved mirror.
 pub(crate) fn install_code(packages: &[&str], library: Option<&str>) -> String {
-    let names: Vec<String> = packages.iter().map(|p| r_string(p)).collect();
-    let pkgs = if let [one] = names.as_slice() {
-        one.clone()
-    } else {
-        format!("c({})", names.join(", "))
-    };
-    match library {
-        Some(lib) => format!(
-            "dir.create({lib}, recursive = TRUE, showWarnings = FALSE); \
-             install.packages({pkgs}, lib = {lib}, repos = \"https://cloud.r-project.org\")",
-            lib = r_string(lib),
-        ),
-        None => format!("install.packages({pkgs}, repos = \"https://cloud.r-project.org\")"),
-    }
+    install_code_from(packages, library, &saved_mirror())
+}
+
+/// R code that installs `packages` into `library` from `mirror`.
+pub(crate) fn install_code_from(packages: &[&str], library: Option<&str>, mirror: &str) -> String {
+    rcraft_rcodegen::packages::install_code(packages, library, mirror, false)
+        .unwrap_or_else(|why| format!("stop({})", r_string(&why)))
 }
 
 #[derive(Default)]
@@ -182,20 +181,23 @@ mod tests {
 
     #[test]
     fn installing_goes_to_rcrafts_own_library() {
-        let code = install_code(
+        let code = install_code_from(
             &["haven"],
             Some("C:/Users/me/AppData/Local/RCraft/R-library"),
+            "https://cloud.r-project.org",
         );
         assert!(code.contains("lib = \"C:/Users/me/AppData/Local/RCraft/R-library\""));
         assert!(code.contains("https://cloud.r-project.org"));
         assert!(code.starts_with("dir.create("));
         assert!(code.contains("install.packages(\"haven\","));
-        assert!(!install_code(&["haven"], None).contains("lib ="));
+        assert!(
+            !install_code_from(&["haven"], None, "https://cloud.r-project.org").contains("lib =")
+        );
     }
 
     #[test]
     fn several_packages_install_together() {
-        let code = install_code(&["dplyr", "tidyr"], None);
+        let code = install_code_from(&["dplyr", "tidyr"], None, "https://cloud.r-project.org");
         assert!(
             code.contains("install.packages(c(\"dplyr\", \"tidyr\"),"),
             "{code}"

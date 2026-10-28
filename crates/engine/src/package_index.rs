@@ -51,6 +51,20 @@ struct Job {
     cancel: Arc<AtomicBool>,
 }
 
+/// Where the chosen mirror is kept on this machine.
+pub fn mirror_file(env: &Env) -> Option<PathBuf> {
+    app_data_dir(env).map(|d| d.join("cran-mirror.txt"))
+}
+
+/// The mirror the user chose (the default when none, or when the saved one is
+/// not a valid address).
+pub fn saved_mirror(env: &Env) -> String {
+    mirror_file(env)
+        .and_then(|f| std::fs::read_to_string(f).ok())
+        .and_then(|t| validate_mirror(&t).ok())
+        .unwrap_or_else(|| DEFAULT_MIRROR.to_string())
+}
+
 /// Seconds since 1970 now (0 if the clock is before that).
 pub fn unix_now() -> u64 {
     SystemTime::now()
@@ -83,7 +97,7 @@ impl PackageIndexService {
         let dir = app_data_dir(env);
         PackageIndexService::new(
             dir.as_ref().map(|d| d.join("package-index")),
-            dir.as_ref().map(|d| d.join("cran-mirror.txt")),
+            mirror_file(env),
             Arc::new(UreqFetcher::new()),
             unix_now,
         )
@@ -115,6 +129,21 @@ impl PackageIndexService {
             fetcher,
             clock,
         }
+    }
+
+    /// A service that holds `index` already and cannot reach the network, with
+    /// nothing read from or written to disk: for pictures and tests.
+    pub fn in_memory(index: Index) -> PackageIndexService {
+        let mut s = PackageIndexService::new(
+            None,
+            None,
+            Arc::new(rcraft_rpkg::refresh::Offline),
+            unix_now,
+        );
+        s.searcher = Some(Searcher::new(&index));
+        s.index = Some(index);
+        s.loaded_once = true;
+        s
     }
 
     pub fn index(&self) -> Option<&Index> {

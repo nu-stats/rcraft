@@ -887,3 +887,72 @@ Mozilla roots, not the operating system's store, so a network that inspects TLS
 with its own certificate (some campus and company proxies) will fail the
 handshake; ureq's `platform-verifier` feature would use the system store and is
 the fix if that is reported.
+
+## Phase 1A: search, describe, install, installed (first slice), 2026-10-28
+
+**Packages menu: Find and install, Installed packages** (`ui-egui::package_window`).
+CRAN only. The window works with R not running for searching and reading; install,
+update and remove go through R.
+
+- **Package list service** (`engine::package_index`): loads the cache on a worker
+  thread, builds the search index there, refreshes only when the user presses the
+  button (it says which host it asks and how big it is), with progress and Cancel;
+  offers a refresh when the list is over a week old and never makes one; the mirror
+  is checked (https, no spaces) and kept in `cran-mirror.txt` in RCraft's folder.
+  A failed or cancelled refresh keeps the old list; a damaged cache is reported and a
+  refresh replaces it.
+- **Search** (`rpkg::search`): every word must match; order is a name equal to the whole
+  query, then names (a prefix counts for less when the query has several words),
+  title words, a phrase in the title, mentions in the description, and how many CRAN
+  packages need the package (`Reverse depends`, `imports`, `linking to` from the
+  database). Tuned on the real database: `ggplot2`, `data.table`, `survival analysis`
+  and `panel data econometrics` put the obvious package first, `fixed effects` puts
+  `fixest` first. Known weak spot: `mixed models` puts `glmmTMB` first and `lme4` is
+  not in the top 8, because the others have the phrase in the title. A search takes
+  about 60 ms in a debug build, 25,581 packages. Filters: licence, needs a compiler.
+  The cache format is now version 2 (it holds who needs each package).
+- **Package page** (`rpkg::describe`): version, date, licence, maintainer, authors,
+  needs (Depends, Imports, LinkingTo, Suggests) with where each comes from (R, CRAN,
+  not on CRAN), who needs it, system requirements, links. Links are only `http` and
+  `https`, and open in the browser only on a click.
+- **Install plan** (`rpkg::plan`): the packages asked for, what they need that is
+  missing or too old (R's version rules), and problems named before anything runs: a
+  name CRAN lacks (with a "did you mean" for a case difference), a needed package that
+  was removed from CRAN, a version CRAN does not offer. A list over 2000 is cut short
+  and refused. R still does the install and its own resolving.
+- **Confirmation** before every install, update and remove: what will be installed with
+  versions and why, the mirror host, a warning that packages run their authors' code,
+  a note on packages with compiled code, and the exact R call; "Yes, install" is at the
+  top. The command runs as an ordinary command, so it is in Results and the log.
+- **Code** (`rcodegen::packages`): install (binary where the platform has one, or
+  `type = "source"`), install an older version from CRAN's archive (no screen yet),
+  remove, list installed, loaded packages, where a function comes from. Names and
+  versions are checked before they go into code.
+- **Installed tab**: from R's `installed.packages()`; version, loaded or attached,
+  update available (only for packages in RCraft's own library: it never updates or
+  removes packages in another app's library), Update all, Remove, and "where does this
+  function come from".
+- The old one-click panel in dialogs (a dialog needs `haven`) now installs from the
+  saved mirror through the same generator.
+
+Found on the way: on Windows, `install.packages` with a repository that lacks a binary
+folder (`bin/windows/contrib/4.4`) stops with "cannot open the connection", so a local
+test repository must be installed `type = "source"`. CRAN has binaries, so this does
+not happen there.
+
+Tests: `rpkg` 63 + 11 integration (real file ones opt in), `rcodegen` code generators,
+`engine` service (8) and `tests/packages.rs` (3, real R against a repository built on
+the spot: planned, installed with its import, listed, removed, where-from and loaded),
+`ui-egui` window logic (5) and app (2). The window was looked at in pictures over the
+real list: Find with a selection, the confirmation, and the Installed tab
+(`rcraft-desktop --picture out.png --packages find --packages-query "fixed effects"
+--packages-select fixest --packages-confirm --packages-from packages.rds`).
+
+**Not done:** task views and the browse tree (needs `Views.rds`, 70 KB, not downloaded
+yet: ask first); download counts; providers other than CRAN (Bioconductor, r-universe,
+GitHub, local); readable install failures (P1A.7: missing compiler or system library, with
+the fix named, and retry from an older version in a screen); the lockfile (P1A.8); command
+forms `rc install`, `rc search` and Tab completion (P1A.9); "has a binary for my platform"
+filter; installing or updating on a click in the real window has not been done by hand
+(the flow is tested in real R and the screens are checked in pictures). The Packages
+window is not a catalog entry like the dialogs are.

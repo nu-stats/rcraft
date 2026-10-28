@@ -42,6 +42,17 @@ pub struct HeadlessOptions {
     /// The recent files "Use my file" offers, newest first. A picture never
     /// reads or changes the user's own list.
     pub recent: Vec<String>,
+    /// Open the Packages window on this tab (`find` or `installed`) ...
+    pub packages: Option<String>,
+    /// ... with this search typed in and this package selected ...
+    pub packages_query: String,
+    pub packages_select: Option<String>,
+    /// ... and the install list for it showing, waiting for a yes ...
+    pub packages_confirm: bool,
+    /// ... over the package list read from this downloaded `packages.rds` (a
+    /// small made-up list when none). A picture never reaches the network or
+    /// reads the user's own cache.
+    pub packages_from: Option<PathBuf>,
     pub accent: Accent,
     /// Width and height in points.
     pub size: [u32; 2],
@@ -61,6 +72,11 @@ impl HeadlessOptions {
             set: Vec::new(),
             import: None,
             recent: Vec::new(),
+            packages: None,
+            packages_query: String::new(),
+            packages_select: None,
+            packages_confirm: false,
+            packages_from: None,
             accent: Accent::default(),
             size: [1240, 780],
             pixels_per_point: 1.0,
@@ -103,6 +119,15 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     }
     if let Some(path) = &options.import {
         app.open_import(path);
+    }
+    if let Some(tab) = &options.packages {
+        app.show_packages(
+            tab,
+            &options.packages_query,
+            options.packages_select.as_deref(),
+            options.packages_confirm,
+            options.packages_from.as_deref(),
+        )?;
     }
 
     let screen = Rect::from_min_size(

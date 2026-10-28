@@ -16,6 +16,11 @@
 //! --set ID=VALUE   set one of that dialog's values (repeatable)
 //! --import FILE    open "Use my file" on FILE
 //! --recent FILE    list FILE under "Recent files" in that dialog (repeatable)
+//! --packages TAB   open the Packages window on `find` or `installed` ...
+//! --packages-query TEXT   ... with this search typed in ...
+//! --packages-select NAME  ... and this package selected ...
+//! --packages-confirm      ... and the install list for it showing
+//! --packages-from FILE    ... over a downloaded packages.rds (default: a tiny made-up list)
 //! --accent NAME    Blue, Indigo, Teal, Plum, Forest, Amber or Rose
 //! --size WxH       size in points (default 1240x780)
 //! --scale N        pixels per point (default 1)
@@ -65,6 +70,15 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
             }
             "--import" => options.import = Some(PathBuf::from(value("--import")?)),
             "--recent" => options.recent.push(value("--recent")?.clone()),
+            "--packages" => options.packages = Some(value("--packages")?.clone()),
+            "--packages-query" => options.packages_query = value("--packages-query")?.clone(),
+            "--packages-select" => {
+                options.packages_select = Some(value("--packages-select")?.clone())
+            }
+            "--packages-confirm" => options.packages_confirm = true,
+            "--packages-from" => {
+                options.packages_from = Some(PathBuf::from(value("--packages-from")?))
+            }
             "--accent" => {
                 let name = value("--accent")?;
                 options.accent = Accent::ALL

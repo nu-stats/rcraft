@@ -2404,6 +2404,7 @@ dependencies = [
  "rcraft-report",
  "rcraft-rgraph",
  "rcraft-rhost",
+ "rcraft-rpkg",
  "rcraft-rproto",
 ]
 
@@ -2476,6 +2477,7 @@ dependencies = [
  "rcraft-rcodegen",
  "rcraft-rdata",
  "rcraft-rhost",
+ "rcraft-rpkg",
  "rfd",
  "softbuffer",
  "winit",

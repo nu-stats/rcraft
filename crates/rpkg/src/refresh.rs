@@ -413,3 +413,18 @@ mod mirror_tests {
         assert!(validate_mirror("https://a.org/\u{7}").is_err());
     }
 }
+
+/// A fetcher that never reaches anything: every request fails with a message.
+/// For pictures and tests that must not touch the network.
+pub struct Offline;
+
+impl Fetcher for Offline {
+    fn get(
+        &self,
+        url: &str,
+        _max_bytes: u64,
+        _progress: &mut dyn FnMut(u64, Option<u64>) -> Control,
+    ) -> Result<Vec<u8>> {
+        Err(Error::Fetch(format!("{url}: no network in this run")))
+    }
+}

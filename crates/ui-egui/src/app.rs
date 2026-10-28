@@ -4,7 +4,7 @@ use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::time::Duration;
 
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
-use rcraft_engine::{Engine, History, Item, Outcome, Recall, Source};
+use rcraft_engine::{Engine, History, Item, Outcome, PackageIndexService, Recall, Source};
 use rcraft_rcodegen::dialog::Spec;
 use rcraft_rdata::display::LabelView;
 use rcraft_rhost::recent::Recent;
@@ -14,6 +14,7 @@ use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
 use crate::graph_view::GraphView;
 use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
+use crate::package_window::{PackagesWindow, Tab as PackagesTab};
 use crate::spec_dialog::{self, SpecAction, SpecDialog};
 
 /// What the middle pane shows.
@@ -55,6 +56,8 @@ enum Action {
     /// Show this data frame as soon as R lists it (after an import).
     ShowWhenListed(String),
     OpenImport,
+    /// Open the Packages window on this tab.
+    OpenPackages(PackagesTab),
     /// Open a catalog dialog on the data frame shown in Variables.
     OpenSpec(&'static Spec),
     /// Open one of the Objects pane's dialogs on this object.
@@ -104,6 +107,9 @@ pub struct App {
     show_when_listed: Option<String>,
     /// Files imported lately, kept between runs.
     recent: Recent,
+    /// The CRAN package list, cached on this computer.
+    package_index: PackageIndexService,
+    packages_window: PackagesWindow,
 }
 
 impl App {
@@ -138,6 +144,8 @@ impl App {
             spec_dialog: SpecDialog::default(),
             show_when_listed: None,
             recent,
+            package_index: PackageIndexService::for_machine(&Env::from_process()),
+            packages_window: PackagesWindow::default(),
         }
     }
 
@@ -306,6 +314,7 @@ impl App {
             Action::SetView(view) => self.view = view,
             Action::SetSideTab(tab) => self.side_tab = tab,
             Action::SetTypeFilter(filter) => self.type_filter = filter,
+            Action::OpenPackages(tab) => self.packages_window.open_on(tab),
             Action::OpenImport => {
                 self.import.set_recent(self.recent.paths());
                 self.import.open_empty();
@@ -481,6 +490,24 @@ impl App {
             None => {}
         }
 
+        // the package list: what its worker has reported, then the window
+        if self.package_index.poll() {
+            ctx.request_repaint();
+        }
+        if self.package_index.is_busy() {
+            ctx.request_repaint_after(Duration::from_millis(50));
+        }
+        let engine = match &mut self.engine {
+            EngineState::Ready(e) => Some(&mut **e),
+            _ => None,
+        };
+        if let Some(run) = self
+            .packages_window
+            .show(ctx, &pal, &mut self.package_index, engine)
+        {
+            actions.push(Action::Submit(Source::Menu(run.menu.into()), run.code));
+        }
+
         // a plot that has just been drawn is shown in the Graph tab
         if let EngineState::Ready(engine) = &self.engine {
             if self.graph.note_new(engine) {
@@ -635,7 +662,14 @@ impl App {
                 }
             });
             ui.menu_button("Packages", |ui| {
-                ui.add_enabled(false, egui::Button::new("Coming in a later phase"));
+                if ui.button("Find and install…").clicked() {
+                    out.push(Action::OpenPackages(PackagesTab::Find));
+                    ui.close_menu();
+                }
+                if ui.button("Installed packages…").clicked() {
+                    out.push(Action::OpenPackages(PackagesTab::Installed));
+                    ui.close_menu();
+                }
             });
             ui.menu_button("Session", |ui| {
                 if ui.button("Stop the running command").clicked() {
@@ -1243,6 +1277,48 @@ impl App {
         self.import.open_with(path);
     }
 
+    /// Opens the Packages window for a picture: over a package list read from
+    /// `from` (a downloaded `packages.rds`) or a tiny made-up one, never over the
+    /// user's cache or the network.
+    pub fn show_packages(
+        &mut self,
+        tab: &str,
+        query: &str,
+        select: Option<&str>,
+        confirm: bool,
+        from: Option<&std::path::Path>,
+    ) -> Result<(), String> {
+        let tab = match tab.to_ascii_lowercase().as_str() {
+            "find" => PackagesTab::Find,
+            "installed" => PackagesTab::Installed,
+            other => {
+                return Err(format!(
+                    "unknown Packages tab {other}; use find or installed"
+                ))
+            }
+        };
+        let index = match from {
+            Some(path) => {
+                let bytes = std::fs::read(path)
+                    .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+                let node = rcraft_rpkg::rds::read(&bytes).map_err(|e| e.to_string())?;
+                let table = rcraft_rpkg::table::from_node(&node, rcraft_rpkg::index::DB_COLUMNS)
+                    .map_err(|e| e.to_string())?;
+                rcraft_rpkg::index::Index::from_tables(
+                    Some(&table),
+                    None,
+                    rcraft_engine::package_index::unix_now(),
+                )
+            }
+            None => rcraft_rpkg::index::sample(),
+        };
+        self.package_index = PackageIndexService::in_memory(index);
+        self.packages_window.open_on(tab);
+        self.packages_window
+            .preset(&self.package_index, query, select, confirm);
+        Ok(())
+    }
+
     /// Opens a Data menu dialog by its name (case does not matter) on the
     /// data frame shown in Variables, with some values already set.
     pub fn open_dialog(
@@ -1683,5 +1759,42 @@ mod tests {
         assert!(frames_until(&mut app, &ctx, |a| !listed(a, "frame1")
             && a.dataset.is_none()
             && a.is_settled()));
+    }
+
+    #[test]
+    fn the_packages_window_opens_on_a_tab_and_rejects_an_unknown_one() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(app
+            .show_packages("nonsense", "", None, false, None)
+            .is_err());
+        assert!(!app.packages_window.open);
+        assert!(app
+            .show_packages("find", "robust", Some("sandwich"), false, None)
+            .is_ok());
+        assert!(app.packages_window.open);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        // the window stays up through frames, over the made-up list, with no network
+        assert!(app.packages_window.open);
+        assert!(!app.package_index.is_busy());
+    }
+
+    #[test]
+    fn the_installed_tab_lists_what_r_has() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        assert!(app
+            .show_packages("installed", "", None, false, None)
+            .is_ok());
+        assert!(frames_until(&mut app, &ctx, |a| a
+            .packages_window
+            .installed_names()
+            .iter()
+            .any(|n| n == "stats")));
     }
 }
