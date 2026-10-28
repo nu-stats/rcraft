@@ -144,6 +144,9 @@ fn report(text: &str) -> Vec<String> {
                 || l.starts_with("polr(")
                 || l.starts_with("nnet::multinom(")
                 || l.starts_with("multinom(")
+                // R's progress note goes to stderr, whose place among the tables
+                // on stdout is approximate
+                || l.starts_with("Waiting for profiling")
                 || l.starts_with("warning:"))
         })
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
