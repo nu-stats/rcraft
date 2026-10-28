@@ -1198,10 +1198,21 @@ installed over the source folder of the same name; the binary is now built throu
 own. R installs a source archive whose top folder is named `repo-ref` (as GitHub's are) under the
 package's own name.
 
-**Not checked against the real services:** Bioconductor's `config.yaml` is read in the form shown in
-the code (`r_ver_for_bioc_ver:` with `"3.20": "4.4"` lines), a release's `VIEWS` as a DCF file, a
-universe's `PACKAGES.gz`, GitHub's `raw` and `archive` addresses, and BiocManager's install. None has
-been asked for real yet: that needs the network and the user's go-ahead.
+**Checked against the real services (2026-10-28, with the user's go-ahead; nothing installed)**, with
+`engine/tests/live_sources.rs` (opt in with `RCRAFT_LIVE_SOURCES=1`):
+
+- Bioconductor: `config.yaml` read as written; for R 4.4.3 the release chosen is **3.20** (3.19 and 3.20
+  are both for R 4.4; the newer is taken). Its `bioc/VIEWS` read as DCF: **2,289 packages, all with
+  titles**.
+- r-universe: `ropensci` gave **366 packages**, but its `PACKAGES.gz` has **no titles**, so a search of a
+  universe matches names only. r-universe's JSON listing has titles; reading it is not done.
+- GitHub: `r-lib/cli` at `HEAD` gave `cli 3.6.6.9000`, "Helpers for Developing Command Line
+  Interfaces", Imports `utils`. A source DESCRIPTION has no `NeedsCompilation` field, so a GitHub
+  package is always said to be built here. The archive address (asked with a header request only)
+  redirects to `codeload.github.com/r-lib/cli/tar.gz/<commit>` and serves gzip; that commit could be
+  shown and recorded to make `HEAD` repeatable, which is not done.
+- Not run for real: BiocManager's install, an r-universe install and a GitHub install (they install,
+  which was not asked for).
 
 Limits, also in `plan/providers.md`: GitHub packages in a subfolder; annotation and experiment-data
 packages of Bioconductor are not in the search (BiocManager still installs them by name); lookups are
