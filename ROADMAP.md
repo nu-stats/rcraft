@@ -102,6 +102,9 @@ Tasks:
 - P1A.10 "Package needed" prompt: when a menu entry or command needs a
   package that is not installed, offer to install it, with the same
   confirmation as P1A.5
+- Providers (Bioconductor, r-universe, GitHub, local): done in Packages > Other sources and `rc
+  install ..., provider(...)`, with trust labels and an extra tick for unreviewed code; not yet
+  checked against the real services
 - P1A.11 Tests: provider parsing and ranking on a small recorded index
   built in code; the install flow against a local test repository so CI
   needs no network

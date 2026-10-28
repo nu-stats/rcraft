@@ -56,6 +56,8 @@ pub struct HeadlessOptions {
     /// ... with the task views from a downloaded `Views.rds`, and this one open.
     pub packages_views: Option<PathBuf>,
     pub packages_view: Option<String>,
+    /// ... or a made-up GitHub install waiting for its yes.
+    pub packages_source_demo: bool,
     /// ... over the package list read from this downloaded `packages.rds` (a
     /// small made-up list when none). A picture never reaches the network or
     /// reads the user's own cache.
@@ -87,6 +89,7 @@ impl HeadlessOptions {
             packages_lock: None,
             packages_views: None,
             packages_view: None,
+            packages_source_demo: false,
             packages_from: None,
             accent: Accent::default(),
             size: [1240, 780],
@@ -147,6 +150,9 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
         }
         if let Some(path) = &options.packages_views {
             app.show_packages_views(path, options.packages_view.as_deref())?;
+        }
+        if options.packages_source_demo {
+            app.show_packages_source_demo();
         }
     }
 

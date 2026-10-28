@@ -23,6 +23,7 @@
 //! --packages-lock FILE   ... or a package list file opened (with --packages list)
 //! --packages-views FILE  ... with task views from a downloaded Views.rds, and
 //! --packages-view NAME   ... this task view open (use with --packages browse)
+//! --packages-source-demo   ... or a made-up GitHub install waiting for its yes
 //! --packages-failure KIND  ... or a made-up install failure: compiler, newer-r, network
 //! --packages-from FILE    ... over a downloaded packages.rds (default: a tiny made-up list)
 //! --accent NAME    Blue, Indigo, Teal, Plum, Forest, Amber or Rose
@@ -87,6 +88,7 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
                 options.packages_views = Some(PathBuf::from(value("--packages-views")?))
             }
             "--packages-view" => options.packages_view = Some(value("--packages-view")?.clone()),
+            "--packages-source-demo" => options.packages_source_demo = true,
             "--packages-failure" => {
                 options.packages_failure = Some(value("--packages-failure")?.clone())
             }

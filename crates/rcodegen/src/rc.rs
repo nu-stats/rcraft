@@ -7,7 +7,10 @@
 //! A line is an `rc` command only when `rc` is followed by one of the command
 //! words, so an R object called `rc` (`rc <- 3`, `rc(1)`) is still R.
 
+use rcraft_rpkg::provider::{is_universe, parse_github};
+
 use crate::packages::{is_package_name, is_version, InstallFrom};
+use crate::sources::check_path;
 
 /// What an `rc` line asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,6 +21,11 @@ pub enum Rc {
         /// One older version, for a single package.
         version: Option<String>,
         from: InstallFrom,
+    },
+    /// One package (or a repository or path) from a source other than CRAN.
+    InstallFrom {
+        source: RcSource,
+        what: String,
     },
     Remove {
         packages: Vec<String>,
@@ -51,8 +59,12 @@ pub const COMMANDS: &[&str] = &[
 
 /// What `rc help` prints.
 pub const HELP: &str = "\
-rc install PACKAGE [PACKAGE ...] [, version(1.2.3) from(source|binary) provider(cran)]
+rc install PACKAGE [PACKAGE ...] [, version(1.2.3) from(source|binary)]
     install from CRAN, after you say yes to the list (Packages window)
+rc install PACKAGE, provider(bioc)    or    provider(universe:OWNER)
+rc install OWNER/REPO[@REF], provider(github)
+rc install PATH/TO/FILE.tar.gz    (or .zip, .tgz, a folder with provider(local))
+    the same from Bioconductor, an r-universe, GitHub or a file, with the source named
 rc remove PACKAGE [PACKAGE ...]
     remove from RCraft's library, after you say yes
 rc update [PACKAGE ...]
@@ -137,6 +149,60 @@ fn names(text: &str, what: &str) -> Result<Vec<String>, String> {
     Ok(list)
 }
 
+/// A source other than CRAN for `rc install`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RcSource {
+    Bioconductor,
+    /// An r-universe, by its owner's name.
+    Universe(String),
+    GitHub,
+    Local,
+}
+
+/// Whether what follows `rc install` is a file or folder rather than names.
+fn looks_like_path(text: &str) -> bool {
+    let t = text.trim().to_ascii_lowercase();
+    let drive = t.len() > 2
+        && t.as_bytes().get(1) == Some(&b':')
+        && t.as_bytes().first().is_some_and(u8::is_ascii_alphabetic);
+    t.ends_with(".tar.gz")
+        || t.ends_with(".zip")
+        || t.ends_with(".tgz")
+        || t.starts_with("./")
+        || t.starts_with("../")
+        || t.starts_with('/')
+        || t.starts_with('~')
+        || t.starts_with(".\\")
+        || drive
+}
+
+fn install_from(source: RcSource, main: &str) -> Result<Rc, String> {
+    let what = main.trim().to_string();
+    match &source {
+        RcSource::GitHub => {
+            parse_github(&what)?;
+        }
+        RcSource::Local => check_path(&what)?,
+        RcSource::Universe(u) => {
+            if !is_universe(u) {
+                return Err(format!(
+                    "\"{u}\" is not an r-universe name, for example: provider(universe:ropensci)"
+                ));
+            }
+            one_package(&what)?;
+        }
+        RcSource::Bioconductor => one_package(&what)?,
+    }
+    Ok(Rc::InstallFrom { source, what })
+}
+
+fn one_package(text: &str) -> Result<(), String> {
+    match names(text, "rc install")?.as_slice() {
+        [_] => Ok(()),
+        _ => Err("Name one package at a time from this source.".into()),
+    }
+}
+
 fn command(word: &str, tail: &str) -> Result<Rc, String> {
     // the part before the first comma, and the options after it
     let (main, opts) = match tail.split_once(',') {
@@ -172,7 +238,33 @@ fn command(word: &str, tail: &str) -> Result<Rc, String> {
             packages: names(main, "")?,
         }),
         _ => {
-            // install
+            // install: another source when provider() says so, or the name is a path
+            let provider = opts
+                .iter()
+                .find(|(n, _)| n == "provider")
+                .map(|(_, a)| a.trim().to_string());
+            let lower = provider.as_deref().map(str::to_ascii_lowercase);
+            let other_options = opts.iter().any(|(n, _)| n == "version" || n == "from");
+            let source = match lower.as_deref() {
+                Some("github") => Some(RcSource::GitHub),
+                Some("bioc" | "bioconductor") => Some(RcSource::Bioconductor),
+                Some("local") => Some(RcSource::Local),
+                Some(p) if p.starts_with("universe:") => Some(RcSource::Universe(
+                    provider
+                        .as_deref()
+                        .and_then(|a| a.split_once(':'))
+                        .map(|(_, u)| u.trim().to_string())
+                        .unwrap_or_default(),
+                )),
+                None if looks_like_path(main) => Some(RcSource::Local),
+                _ => None,
+            };
+            if let Some(source) = source {
+                if other_options {
+                    return Err("version() and from() are for CRAN packages.".into());
+                }
+                return install_from(source, main);
+            }
             let packages = names(main, "rc install")?;
             let mut version = None;
             let mut from = InstallFrom::Default;
@@ -201,7 +293,7 @@ fn command(word: &str, tail: &str) -> Result<Rc, String> {
                     "provider" => {
                         if !arg.eq_ignore_ascii_case("cran") {
                             return Err(format!(
-                                "provider({arg}) is not available yet; only provider(cran) is."
+                                "provider({arg}) is not known; use cran, bioc, github, local or universe:NAME."
                             ));
                         }
                     }
@@ -422,7 +514,7 @@ mod tests {
         assert!(err("rc install fi xest!").contains("not a package name"));
         assert!(err("rc install a b, version(1.0)").contains("one package"));
         assert!(err("rc install a, version(1/../2)").contains("not a version"));
-        assert!(err("rc install a, provider(github)").contains("not available yet"));
+        assert!(err("rc install a, provider(github)").contains("owner/repository"));
         assert!(err("rc install a, from(cd)").contains("not known"));
         assert!(err("rc install a, speed(3)").contains("not an option"));
         assert!(err("rc install a, from(source").contains("not closed"));
@@ -519,5 +611,77 @@ mod tests {
         assert_eq!(common_prefix(&w(&["x", "y"])), "");
         assert_eq!(common_prefix(&w(&["é1", "é2"])), "é");
         assert_eq!(common_prefix(&[]), "");
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+
+    fn ok(line: &str) -> Rc {
+        match parse(line) {
+            Some(Ok(rc)) => rc,
+            other => panic!("{line:?} gave {other:?}"),
+        }
+    }
+
+    fn err(line: &str) -> String {
+        match parse(line) {
+            Some(Err(e)) => e,
+            other => panic!("{line:?} gave {other:?}"),
+        }
+    }
+
+    #[test]
+    fn other_sources_are_named_with_provider_or_by_a_path() {
+        assert_eq!(
+            ok("rc install rstudio/gt@v0.10.0, provider(github)"),
+            Rc::InstallFrom {
+                source: RcSource::GitHub,
+                what: "rstudio/gt@v0.10.0".into()
+            }
+        );
+        assert_eq!(
+            ok("rc install limma, provider(bioc)"),
+            Rc::InstallFrom {
+                source: RcSource::Bioconductor,
+                what: "limma".into()
+            }
+        );
+        assert_eq!(
+            ok("rc install rtweet, provider(universe:ropensci)"),
+            Rc::InstallFrom {
+                source: RcSource::Universe("ropensci".into()),
+                what: "rtweet".into()
+            }
+        );
+        assert_eq!(
+            ok("rc install C:/pkgs/x_1.0.tar.gz"),
+            Rc::InstallFrom {
+                source: RcSource::Local,
+                what: "C:/pkgs/x_1.0.tar.gz".into()
+            }
+        );
+        assert_eq!(
+            ok("rc install ./mypkg, provider(local)"),
+            Rc::InstallFrom {
+                source: RcSource::Local,
+                what: "./mypkg".into()
+            }
+        );
+        // CRAN is still the default, and can be named
+        assert!(matches!(
+            ok("rc install fixest, provider(cran)"),
+            Rc::Install { .. }
+        ));
+    }
+
+    #[test]
+    fn mistakes_with_other_sources_are_said() {
+        assert!(err("rc install gt, provider(github)").contains("owner/repository"));
+        assert!(err("rc install a b, provider(bioc)").contains("one package"));
+        assert!(err("rc install x, provider(universe:bad name)").contains("r-universe name"));
+        assert!(err("rc install x, provider(sourceforge)").contains("not known"));
+        assert!(err("rc install me/x, provider(github) version(1.0)").contains("for CRAN"));
     }
 }

@@ -536,6 +536,14 @@ impl App {
                     self.message = Some(e.to_string());
                 }
             }
+            Rc::InstallFrom { source, what } => {
+                engine.echo(
+                    line,
+                    "Opening the Packages window: it looks the source up, then shows the list to say yes to. Nothing is installed before that.",
+                    Outcome::Ok,
+                );
+                self.packages_window.start_source(source, what);
+            }
             Rc::Install { .. } | Rc::Update { .. } | Rc::Remove { .. } => {
                 engine.echo(
                     line,
@@ -1458,6 +1466,11 @@ impl App {
         self.package_index.set_views(views);
         self.packages_window.preset_view(view);
         Ok(())
+    }
+
+    /// For pictures: a GitHub install waiting for its yes.
+    pub fn show_packages_source_demo(&mut self) {
+        self.packages_window.preset_source_demo(&self.package_index);
     }
 
     /// For pictures: opens a package list file in the Packages window.

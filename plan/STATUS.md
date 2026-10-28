@@ -1156,3 +1156,53 @@ Kept in `task-views.txt` next to the index cache (same atomic write).
 Not done in P1A.3: download counts (needs another host, the public download-logs service, one request per
 look, so it wants its own decision), and a "new packages" list, which CRAN's files do not support (only
 "recently published" exists, in Find with no words).
+
+## P1A providers: Bioconductor, r-universe, GitHub, local files, 2026-10-28
+
+Built to `plan/providers.md` (written first, on Opus). **Packages > Other sources** tab, and
+`rc install` forms. Each source has a trust label, shown with every list to say yes to; the three
+nobody reviews (r-universe, GitHub, a local file) need a tick, "I understand this code has not been
+reviewed", before **Yes, install** turns on.
+
+- **Bioconductor**: *Look up* asks `bioconductor.org/config.yaml` which release is for this R
+  (the newest one made for this major.minor that is not the development release), then that
+  release's `bioc/VIEWS` (names, versions, titles, needs), searchable here. Install is
+  `BiocManager::install(..., update = FALSE, ask = FALSE)`, installing BiocManager from CRAN first
+  when it is missing, with CRAN set to the chosen mirror for the install only.
+- **r-universe**: a universe name (checked as a GitHub owner name), then its
+  `src/contrib/PACKAGES.gz`, searchable. Install is `install.packages(pkg, repos = c(universe, CRAN))`.
+- **GitHub**: `owner/repo[@ref]` (or a github.com address), checked; *Look up* reads its
+  `DESCRIPTION` from `raw.githubusercontent.com`. The list shows the CRAN packages it needs that
+  are missing or too old (planned with the CRAN list; one not on CRAN stops the install with a
+  reason) and the label says when the reference is `HEAD`, which can change. Install is base R:
+  the CRAN needs, then `download.file()` of `github.com/<owner>/<repo>/archive/<ref>.tar.gz` and
+  `install.packages(f, repos = NULL, type = "source")`.
+- **A local file**: a `.tar.gz`, `.zip`, `.tgz` or a folder (File… and Folder… choosers). *Read it*
+  has R print the DESCRIPTION inside it (untar/unzip into a temporary folder, nothing installed);
+  the list then works as for GitHub, with the right `type` for the file.
+- `rc install PKG, provider(bioc)`, `rc install PKG, provider(universe:OWNER)`,
+  `rc install OWNER/REPO[@REF], provider(github)` and `rc install PATH` (a path is recognised by
+  its ending or its start; `provider(local)` for a folder) open the tab, look the source up (the
+  typed command is the request) and show the list once R has said what is installed.
+- Addresses are in `docs/network.md` (its own commit); each *Look up* button says what it will ask.
+
+Tests: `rpkg::provider` (names, references, labels, the release choice), `rcodegen::sources` (the code
+for each source), `engine::sources` (the lookups against a stand-in for the network),
+`engine/tests/sources.rs` in real R (a `.tar.gz` and a folder read and installed; a `.zip` where R can
+build one, which needs Rtools; a GitHub-style archive with its `repo-ref/` top folder fetched from a
+file address and installed), the window's lists and the `rc` path. Seen in a picture:
+`--packages find --packages-source-demo`.
+
+Found while building: a test that built a Windows binary with `R CMD INSTALL --build --library=.`
+installed over the source folder of the same name; the binary is now built through a library of its
+own. R installs a source archive whose top folder is named `repo-ref` (as GitHub's are) under the
+package's own name.
+
+**Not checked against the real services:** Bioconductor's `config.yaml` is read in the form shown in
+the code (`r_ver_for_bioc_ver:` with `"3.20": "4.4"` lines), a release's `VIEWS` as a DCF file, a
+universe's `PACKAGES.gz`, GitHub's `raw` and `archive` addresses, and BiocManager's install. None has
+been asked for real yet: that needs the network and the user's go-ahead.
+
+Limits, also in `plan/providers.md`: GitHub packages in a subfolder; annotation and experiment-data
+packages of Bioconductor are not in the search (BiocManager still installs them by name); lookups are
+kept in memory, not cached; package lists record these packages as `other`.

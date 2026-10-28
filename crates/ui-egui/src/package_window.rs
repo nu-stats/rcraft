@@ -8,6 +8,7 @@
 use std::collections::HashMap;
 
 use eframe::egui::{self, RichText};
+use rcraft_engine::sources::{Found, Lookup, LookupState, SourceLookups};
 use rcraft_engine::{Engine, IndexStatus, PackageIndexService, QueryId};
 use rcraft_rcodegen::failure::{diagnose, Diagnosis, Os, Retry};
 use rcraft_rcodegen::packages::{
@@ -15,12 +16,17 @@ use rcraft_rcodegen::packages::{
     loaded_packages_code, parse_installed, parse_loaded, remove_code, restore_code, where_code,
     InstallFrom, Installed,
 };
-use rcraft_rcodegen::rc::Rc;
+use rcraft_rcodegen::rc::{Rc, RcSource};
+use rcraft_rcodegen::sources::{
+    check_path, describe_local_code, install_bioc_code, install_github_code, install_local_code,
+    install_universe_code, LocalKind,
+};
 use rcraft_rhost::Platform;
 use rcraft_rpkg::describe::{describe, Source};
 use rcraft_rpkg::index::Package;
 use rcraft_rpkg::lockfile::{restore_plan, Action, Entry, Lock, Restore};
 use rcraft_rpkg::plan::{compare_versions, plan, updates, Plan, Step, Why};
+use rcraft_rpkg::provider::{is_universe, parse_github, Provider};
 use rcraft_rpkg::refresh::Stage;
 use rcraft_rpkg::search::Filters;
 
@@ -38,6 +44,8 @@ pub enum Tab {
     Installed,
     /// The package list of a project: save it, open it, install from it.
     List,
+    /// Bioconductor, r-universe, GitHub and local files.
+    Sources,
 }
 
 /// What the window asks the app to run.
@@ -71,6 +79,19 @@ enum Confirm {
     Restore {
         restore: Restore,
         code: Result<String, String>,
+    },
+    /// One package from a source other than CRAN, after the CRAN packages it needs.
+    Source {
+        provider: Provider,
+        name: String,
+        version: String,
+        title: String,
+        deps: Vec<Step>,
+        problems: Vec<String>,
+        note: Option<String>,
+        may_compile: bool,
+        code: Result<String, String>,
+        menu: &'static str,
     },
 }
 
@@ -157,6 +178,24 @@ pub struct PackagesWindow {
     lock_library_only: bool,
     /// An `rc` command waiting for R to have listed its packages.
     pending_rc: Option<Rc>,
+    /// The Other sources tab.
+    source_kind: SourceKind,
+    source_text: String,
+    source_query: String,
+    source_selected: Option<String>,
+    /// The tick an unreviewed source needs before the yes.
+    source_understood: bool,
+    lookups: SourceLookups,
+    /// A local file to read (when R is free), R reading it, and what it found.
+    peek_pending: Option<String>,
+    peek_query: Option<QueryId>,
+    peek_found: Option<Result<Package, String>>,
+    /// For an `rc` command: the package to pick once the list is in, a
+    /// Bioconductor lookup waiting for the R version, and whether to show the
+    /// list to say yes to as soon as it can be.
+    pending_source_pick: Option<String>,
+    pending_bioc_lookup: bool,
+    auto_confirm: bool,
     /// What the last `rc` command could not do, in words.
     rc_note: Option<String>,
     /// This R's version number, such as 4.4.3, once the engine has said.
@@ -195,6 +234,18 @@ impl Default for PackagesWindow {
             lock_note: None,
             lock_library_only: false,
             pending_rc: None,
+            source_kind: SourceKind::default(),
+            source_text: String::new(),
+            source_query: String::new(),
+            source_selected: None,
+            source_understood: false,
+            lookups: SourceLookups::for_machine(),
+            peek_pending: None,
+            peek_query: None,
+            peek_found: None,
+            pending_source_pick: None,
+            pending_bioc_lookup: false,
+            auto_confirm: false,
             rc_note: None,
             r_version_number: String::new(),
             mirror_text: String::new(),
@@ -238,6 +289,12 @@ fn same_folder(a: &str, b: &str) -> bool {
 }
 
 impl PackagesWindow {
+    /// Uses another way of looking sources up (tests use a stand-in for the network).
+    #[cfg(test)]
+    pub(crate) fn set_lookups(&mut self, lookups: SourceLookups) {
+        self.lookups = lookups;
+    }
+
     /// Whether a list is waiting for the user's yes.
     #[cfg(test)]
     pub(crate) fn has_confirmation(&self) -> bool {
@@ -463,6 +520,25 @@ installation of package 'fixest' had non-zero exit status"
         }
     }
 
+    /// For pictures: the list to say yes to for a made-up GitHub package that
+    /// needs two CRAN packages, as it would look before the tick.
+    pub fn preset_source_demo(&mut self, index: &PackageIndexService) {
+        self.tab = Tab::Sources;
+        self.source_kind = SourceKind::GitHub;
+        self.source_text = "someone/madeup".into();
+        let package = Package {
+            name: "madeup".into(),
+            version: "0.3.0.9000".into(),
+            title: "A Made-Up Package on GitHub".into(),
+            imports: "dplyr, ggplot2".into(),
+            needs_compilation: Some(false),
+            ..Package::default()
+        };
+        if let Ok(gh) = parse_github("someone/madeup") {
+            self.begin_source_install(index, gh, &package);
+        }
+    }
+
     /// Opens a task view in the Browse tab and filters Find by it, for pictures.
     pub fn preset_view(&mut self, view: Option<&str>) {
         self.view_open = view.map(str::to_string);
@@ -537,6 +613,27 @@ installation of package 'fixest' had non-zero exit status"
                 engine.query(installed_packages_code()),
                 engine.query(loaded_packages_code()),
             ));
+        }
+        // a local package file to read: R prints its DESCRIPTION, nothing is installed
+        if let Some(path) = self.peek_pending.take() {
+            if engine.is_busy() {
+                self.peek_pending = Some(path);
+            } else {
+                match describe_local_code(&path) {
+                    Ok(code) => self.peek_query = Some(engine.query(&code)),
+                    Err(e) => self.peek_found = Some(Err(e)),
+                }
+            }
+        }
+        if let Some(q) = self.peek_query {
+            if let Some(r) = engine.query_result(q) {
+                self.peek_found = Some(if r.ok {
+                    package_from_dcf(&r.text)
+                } else {
+                    Err(format!("R could not read it: {}", r.text.trim()))
+                });
+                self.peek_query = None;
+            }
         }
         if let Some(name) = self.where_pending.take() {
             if engine.is_busy() {
@@ -659,6 +756,17 @@ installation of package 'fixest' had non-zero exit status"
         let r_present = engine.is_some();
         self.service(engine);
         self.apply_pending_rc(index, r_present);
+        self.lookups.poll();
+        if self.pending_bioc_lookup && !self.r_version_number.is_empty() {
+            self.pending_bioc_lookup = false;
+            self.lookups.start(Lookup::Bioconductor {
+                r_version: self.r_version_number.clone(),
+            });
+        }
+        self.apply_pending_source(index, r_present);
+        if self.lookups.is_busy() || self.peek_query.is_some() || self.peek_pending.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
         let mut open = self.open;
         let mut run = None;
         self.list_height = (ctx.screen_rect().height() - 250.0).clamp(160.0, 520.0);
@@ -684,6 +792,7 @@ installation of package 'fixest' had non-zero exit status"
                     Tab::Browse => self.browse_tab(ui, pal, index),
                     Tab::Installed => run = self.installed_tab(ui, pal, index, r_present, r_ready),
                     Tab::List => run = self.list_tab(ui, pal, index, r_present, r_ready),
+                    Tab::Sources => run = self.sources_tab(ui, pal, index, r_present, r_ready),
                 }
             });
         self.open = open;
@@ -698,6 +807,9 @@ installation of package 'fixest' had non-zero exit status"
                         .map(|s| (s.name.clone(), s.version.clone()))
                         .collect(),
                 ),
+                Some(Confirm::Source { name, version, .. }) => {
+                    Some(vec![(name.clone(), version.clone())])
+                }
                 Some(Confirm::Restore { restore, .. }) => Some(
                     restore
                         .steps
@@ -874,6 +986,7 @@ installation of package 'fixest' had non-zero exit status"
             ui.selectable_value(&mut self.tab, Tab::Find, "Find on CRAN");
             ui.selectable_value(&mut self.tab, Tab::Browse, "Task views");
             ui.selectable_value(&mut self.tab, Tab::Installed, "Installed");
+            ui.selectable_value(&mut self.tab, Tab::Sources, "Other sources");
             ui.selectable_value(&mut self.tab, Tab::List, "Project list");
             ui.with_layout(
                 egui::Layout::right_to_left(egui::Align::Center),
@@ -1195,7 +1308,14 @@ installation of package 'fixest' had non-zero exit status"
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 if let Some(confirm) = &self.confirm {
-                    let (go, cancel) = confirm_panel(ui, pal, confirm, index.mirror(), r_ready);
+                    let (go, cancel) = confirm_panel(
+                        ui,
+                        pal,
+                        confirm,
+                        index.mirror(),
+                        r_ready,
+                        &mut self.source_understood,
+                    );
                     if go {
                         run = confirm.run_for();
                     }
@@ -1457,7 +1577,14 @@ if let Some(of) = index.views().map(|v| v.views_of(&p.name)) {                  
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 if let Some(confirm) = &self.confirm {
-                    let (go, cancel) = confirm_panel(ui, pal, confirm, index.mirror(), r_ready);
+                    let (go, cancel) = confirm_panel(
+                        ui,
+                        pal,
+                        confirm,
+                        index.mirror(),
+                        r_ready,
+                        &mut self.source_understood,
+                    );
                     if go {
                         run = confirm.run_for();
                     }
@@ -1564,6 +1691,12 @@ impl Confirm {
                 menu: "Packages > Restore",
                 code: c.clone(),
             }),
+            Confirm::Source {
+                code: Ok(c), menu, ..
+            } => Some(Run {
+                menu,
+                code: c.clone(),
+            }),
             _ => None,
         }
     }
@@ -1577,6 +1710,7 @@ fn confirm_panel(
     confirm: &Confirm,
     mirror: &str,
     r_ready: bool,
+    understood: &mut bool,
 ) -> (bool, bool) {
     let mut go = false;
     let mut cancel = false;
@@ -1740,6 +1874,108 @@ fn confirm_panel(
                 .small()
                 .color(pal.dim),
             );
+            match code {
+                Ok(c) => {
+                    ui.label(RichText::new("R calls").small().color(pal.dim));
+                    let mut shown = c.clone();
+                    ui.add(
+                        egui::TextEdit::multiline(&mut shown)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_rows(4)
+                            .desired_width(f32::INFINITY)
+                            .interactive(false),
+                    );
+                }
+                Err(e) => {
+                    ui.label(RichText::new(e).color(pal.error));
+                }
+            }
+        }
+        Confirm::Source {
+            provider,
+            name,
+            version,
+            title,
+            deps,
+            problems,
+            note,
+            may_compile,
+            code,
+            ..
+        } => {
+            let reviewed = provider.reviewed();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("This will install").strong());
+                let can =
+                    problems.is_empty() && code.is_ok() && r_ready && (reviewed || *understood);
+                if ui
+                    .add_enabled(can, egui::Button::new("Yes, install"))
+                    .on_disabled_hover_text(if !reviewed && !*understood {
+                        "Tick the box below first"
+                    } else {
+                        "Not possible yet: see below"
+                    })
+                    .clicked()
+                {
+                    go = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+            ui.label(RichText::new(provider.label()).small().color(if reviewed {
+                pal.dim
+            } else {
+                pal.warning
+            }));
+            ui.add_space(4.0);
+            egui::Grid::new("pkg_source_steps")
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label(RichText::new(name).strong());
+                    ui.label(version);
+                    ui.label(
+                        RichText::new(format!("from {}", provider.name()))
+                            .small()
+                            .color(pal.dim),
+                    );
+                    ui.end_row();
+                    for s in deps {
+                        ui.label(RichText::new(&s.name).strong());
+                        ui.label(&s.version);
+                        ui.label(
+                            RichText::new(match &s.why {
+                                Why::Asked => format!("needed by {name}, from CRAN"),
+                                Why::NeededBy(by) => format!("needed by {by}, from CRAN"),
+                            })
+                            .small()
+                            .color(pal.dim),
+                        );
+                        ui.end_row();
+                    }
+                });
+            if !title.is_empty() {
+                ui.label(RichText::new(title).small());
+            }
+            for p in problems {
+                ui.label(RichText::new(p).color(pal.error));
+            }
+            if let Some(n) = note {
+                ui.label(RichText::new(n).small().color(pal.dim));
+            }
+            if *may_compile {
+                ui.label(
+                    RichText::new(
+                        "This is built from source here. If it has compiled code that needs a \
+                         compiler (Rtools on Windows, the command line tools on a Mac).",
+                    )
+                    .small()
+                    .color(pal.warning),
+                );
+            }
+            if !reviewed {
+                ui.checkbox(understood, "I understand this code has not been reviewed");
+            }
             match code {
                 Ok(c) => {
                     ui.label(RichText::new("R calls").small().color(pal.dim));
@@ -2001,7 +2237,14 @@ impl PackagesWindow {
         });
         if let Some(Confirm::Restore { .. }) = &self.confirm {
             if let Some(confirm) = &self.confirm {
-                let (go, cancel) = confirm_panel(ui, pal, confirm, index.mirror(), r_ready);
+                let (go, cancel) = confirm_panel(
+                    ui,
+                    pal,
+                    confirm,
+                    index.mirror(),
+                    r_ready,
+                    &mut self.source_understood,
+                );
                 if go {
                     run = confirm.run_for();
                 }
@@ -2161,6 +2404,623 @@ impl PackagesWindow {
             self.view_filter = view;
             self.selected = (!words.is_empty()).then_some(words);
             self.confirm = None;
+        }
+    }
+}
+
+/// The source picked in the Other sources tab.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum SourceKind {
+    #[default]
+    Bioconductor,
+    Universe,
+    GitHub,
+    Local,
+}
+
+/// The first package of a DESCRIPTION printed by R or fetched from GitHub.
+fn package_from_dcf(text: &str) -> Result<Package, String> {
+    let table =
+        rcraft_rpkg::dcf::table(text, rcraft_rpkg::index::DB_COLUMNS).map_err(|e| e.to_string())?;
+    rcraft_rpkg::index::Index::from_tables(Some(&table), None, 0)
+        .packages()
+        .first()
+        .cloned()
+        .ok_or_else(|| "no package DESCRIPTION was found".to_string())
+}
+
+impl PackagesWindow {
+    /// An `rc install ..., provider(...)` or a path typed in the Command window:
+    /// opens Other sources, looks the source up (the typed command is the
+    /// request), and shows the list to say yes to once it is known.
+    pub fn start_source(&mut self, source: RcSource, what: String) {
+        self.open = true;
+        self.tab = Tab::Sources;
+        self.confirm = None;
+        self.rc_note = None;
+        self.source_query.clear();
+        self.source_selected = None;
+        self.auto_confirm = true;
+        self.r.stale = true;
+        match source {
+            RcSource::Bioconductor => {
+                self.source_kind = SourceKind::Bioconductor;
+                self.pending_source_pick = Some(what);
+                self.pending_bioc_lookup = true;
+            }
+            RcSource::Universe(u) => {
+                self.source_kind = SourceKind::Universe;
+                self.source_text = u.clone();
+                self.pending_source_pick = Some(what);
+                self.lookups.start(Lookup::Universe(u));
+            }
+            RcSource::GitHub => {
+                self.source_kind = SourceKind::GitHub;
+                self.source_text = what.clone();
+                if let Ok(Provider::GitHub {
+                    owner,
+                    repo,
+                    reference,
+                }) = parse_github(&what)
+                {
+                    self.lookups.start(Lookup::GitHub {
+                        owner,
+                        repo,
+                        reference,
+                    });
+                }
+            }
+            RcSource::Local => {
+                self.source_kind = SourceKind::Local;
+                self.source_text = what.clone();
+                self.peek_found = None;
+                self.peek_pending = Some(what);
+            }
+        }
+    }
+
+    /// Builds the list to say yes to for `package` from `provider`, with the
+    /// CRAN packages it needs when it is a GitHub repository or a local file.
+    fn begin_source_install(
+        &mut self,
+        index: &PackageIndexService,
+        provider: Provider,
+        package: &Package,
+    ) {
+        let installed = self.installed_map();
+        let library = library_dir();
+        let mirror = index.mirror().to_string();
+        let mut deps: Vec<Step> = Vec::new();
+        let mut problems: Vec<String> = Vec::new();
+        let builds_here = match &provider {
+            Provider::GitHub { .. } => true,
+            Provider::Local(path) => LocalKind::of(path).is_source(),
+            _ => false,
+        };
+        let plans_needs = matches!(provider, Provider::GitHub { .. } | Provider::Local(_));
+        if plans_needs {
+            // what it needs that is not installed already at a version it accepts
+            let needs: Vec<String> = package
+                .hard_dependencies()
+                .into_iter()
+                .filter(|d| !rcraft_rpkg::describe::is_base_package(&d.name))
+                .filter(|d| {
+                    installed.get(&d.name).is_none_or(|have| {
+                        d.constraint
+                            .as_deref()
+                            .is_some_and(|c| !rcraft_rpkg::plan::satisfies(have, c))
+                    })
+                })
+                .map(|d| d.name)
+                .collect();
+            let missing: Vec<&str> = needs
+                .iter()
+                .filter(|n| !installed.contains_key(*n))
+                .map(String::as_str)
+                .collect();
+            match index.index() {
+                Some(ix) if !needs.is_empty() => {
+                    let refs: Vec<&str> = needs.iter().map(String::as_str).collect();
+                    let pl = plan(ix, &installed, &refs);
+                    for p in &pl.problems {
+                        problems.push(match p {
+                            rcraft_rpkg::plan::Problem::NotFound { name, .. } => format!(
+                                "{} needs \"{name}\", which is not on CRAN. Install it first from its own source.",
+                                package.name
+                            ),
+                            other => other.message(),
+                        });
+                    }
+                    deps = pl.steps;
+                }
+                None if !missing.is_empty() => problems.push(format!(
+                    "{} needs {}. Download the CRAN package list (Find on CRAN) so RCraft can \
+                     install those first.",
+                    package.name,
+                    missing.join(", ")
+                )),
+                _ => {}
+            }
+        }
+        let asked: Vec<&str> = deps
+            .iter()
+            .filter(|s| s.why == Why::Asked)
+            .map(|s| s.name.as_str())
+            .collect();
+        let (code, menu, note) = match &provider {
+            Provider::GitHub {
+                owner,
+                repo,
+                reference,
+            } => (
+                install_github_code(owner, repo, reference, &asked, library.as_deref(), &mirror),
+                "Packages > Install from GitHub",
+                Some(
+                    "R downloads the archive from github.com and builds it here. Packages in a \
+                     subfolder of a repository are not handled."
+                        .to_string(),
+                ),
+            ),
+            Provider::Local(path) => (
+                install_local_code(path, &asked, library.as_deref(), &mirror),
+                "Packages > Install from a file",
+                None,
+            ),
+            Provider::Universe(u) => (
+                install_universe_code(u, &[package.name.as_str()], library.as_deref(), &mirror),
+                "Packages > Install from r-universe",
+                Some(
+                    "R installs what it needs from the universe or, failing that, from CRAN."
+                        .to_string(),
+                ),
+            ),
+            Provider::Bioconductor => (
+                install_bioc_code(&[package.name.as_str()], library.as_deref(), &mirror),
+                "Packages > Install from Bioconductor",
+                Some(
+                    "BiocManager installs what it needs from Bioconductor and CRAN. If BiocManager \
+                     is missing it is installed from CRAN first."
+                        .to_string(),
+                ),
+            ),
+            Provider::Cran => (
+                Err("CRAN packages are installed from Find on CRAN".to_string()),
+                "Packages > Install",
+                None,
+            ),
+        };
+        self.source_understood = false;
+        self.confirm = Some(Confirm::Source {
+            provider,
+            name: package.name.clone(),
+            version: package.version.clone(),
+            title: package.title.clone(),
+            deps,
+            problems,
+            note,
+            may_compile: builds_here && package.needs_compilation != Some(false),
+            code,
+            menu,
+        });
+    }
+
+    /// One package from another source, with an Install button. Returns
+    /// whether it was pressed.
+    fn source_detail(&self, ui: &mut egui::Ui, pal: &Palette, p: &Package, r_ready: bool) -> bool {
+        ui.label(
+            RichText::new(format!("{} {}", p.name, p.version))
+                .heading()
+                .strong(),
+        );
+        if !p.title.is_empty() {
+            ui.label(&p.title);
+        }
+        if let Some(v) = self.installed_map().get(&p.name) {
+            ui.label(RichText::new(format!("Installed: version {v}")).color(pal.accent));
+        }
+        let pressed = ui
+            .add_enabled(r_ready, egui::Button::new("Install…"))
+            .on_disabled_hover_text("R is busy or not available")
+            .clicked();
+        for (label, value) in [
+            ("Depends", p.depends.as_str()),
+            ("Imports", p.imports.as_str()),
+            ("LinkingTo", p.linking_to.as_str()),
+            ("Licence", p.license.as_str()),
+        ] {
+            if !value.is_empty() {
+                ui.label(RichText::new(label).small().color(pal.dim));
+                ui.label(value);
+            }
+        }
+        if !p.description.is_empty() {
+            ui.add_space(4.0);
+            ui.label(&p.description);
+        }
+        pressed
+    }
+
+    fn sources_tab(
+        &mut self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        index: &PackageIndexService,
+        r_present: bool,
+        r_ready: bool,
+    ) -> Option<Run> {
+        let mut run = None;
+        ui.horizontal(|ui| {
+            for (kind, label) in [
+                (SourceKind::Bioconductor, "Bioconductor"),
+                (SourceKind::Universe, "r-universe"),
+                (SourceKind::GitHub, "GitHub"),
+                (SourceKind::Local, "A file on this computer"),
+            ] {
+                if ui.radio_value(&mut self.source_kind, kind, label).changed() {
+                    self.confirm = None;
+                    self.source_selected = None;
+                    self.source_query.clear();
+                    self.peek_found = None;
+                    self.lookups.clear();
+                }
+            }
+        });
+        let busy = self.lookups.is_busy();
+        let mut start: Option<Lookup> = None;
+        ui.horizontal(|ui| match self.source_kind {
+            SourceKind::Bioconductor => {
+                let r = self.r_version_number.clone();
+                ui.label(format!(
+                    "Bioconductor's software packages for R {}",
+                    if r.is_empty() { "?" } else { &r }
+                ));
+                let l = Lookup::Bioconductor {
+                    r_version: r.clone(),
+                };
+                if ui
+                    .add_enabled(!busy && !r.is_empty(), egui::Button::new("Look up"))
+                    .on_hover_text(format!("Asks {}", l.addresses().join(" and ")))
+                    .clicked()
+                {
+                    start = Some(l);
+                }
+            }
+            SourceKind::Universe => {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.source_text)
+                        .desired_width(200.0)
+                        .hint_text("universe, e.g. ropensci"),
+                );
+                let name = self.source_text.trim().to_string();
+                let ok = is_universe(&name);
+                let l = Lookup::Universe(name);
+                if ui
+                    .add_enabled(!busy && ok, egui::Button::new("Look up"))
+                    .on_hover_text(if ok {
+                        format!("Asks {}", l.addresses().join(" and "))
+                    } else {
+                        "Type the universe's name (its owner on GitHub)".to_string()
+                    })
+                    .clicked()
+                {
+                    start = Some(l);
+                }
+            }
+            SourceKind::GitHub => {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.source_text)
+                        .desired_width(260.0)
+                        .hint_text("owner/repo or owner/repo@tag"),
+                );
+                let parsed = parse_github(&self.source_text);
+                let lookup = match &parsed {
+                    Ok(Provider::GitHub {
+                        owner,
+                        repo,
+                        reference,
+                    }) => Some(Lookup::GitHub {
+                        owner: owner.clone(),
+                        repo: repo.clone(),
+                        reference: reference.clone(),
+                    }),
+                    _ => None,
+                };
+                let hover = match (&lookup, &parsed) {
+                    (Some(l), _) => format!("Asks {}", l.addresses().join(" and ")),
+                    (None, Err(e)) => e.clone(),
+                    (None, Ok(_)) => String::new(),
+                };
+                if ui
+                    .add_enabled(!busy && lookup.is_some(), egui::Button::new("Look up"))
+                    .on_hover_text(hover)
+                    .clicked()
+                {
+                    start = lookup;
+                }
+            }
+            SourceKind::Local => {
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.source_text)
+                        .desired_width(300.0)
+                        .hint_text("a .tar.gz, .zip or .tgz file, or a package folder"),
+                );
+                if ui.button("File…").clicked() {
+                    if let Some(p) = rfd::FileDialog::new()
+                        .add_filter("R package", &["gz", "zip", "tgz"])
+                        .pick_file()
+                    {
+                        self.source_text = p.to_string_lossy().into_owned();
+                    }
+                }
+                if ui.button("Folder…").clicked() {
+                    if let Some(p) = rfd::FileDialog::new().pick_folder() {
+                        self.source_text = p.to_string_lossy().into_owned();
+                    }
+                }
+                let ok = check_path(&self.source_text).is_ok() && r_present;
+                if ui
+                    .add_enabled(
+                        ok && self.peek_query.is_none(),
+                        egui::Button::new("Read it"),
+                    )
+                    .on_hover_text("R reads the package's DESCRIPTION; nothing is installed")
+                    .clicked()
+                {
+                    self.peek_found = None;
+                    self.confirm = None;
+                    self.peek_pending = Some(self.source_text.trim().to_string());
+                }
+            }
+        });
+        if let Some(l) = start {
+            self.confirm = None;
+            self.source_selected = None;
+            self.lookups.start(l);
+        }
+        match self.lookups.state() {
+            LookupState::Running(l) => {
+                let a = l.addresses().join(" and ");
+                let mut stop = false;
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("Asking {a}…")).color(pal.dim));
+                    stop = ui.button("Cancel").clicked();
+                });
+                if stop {
+                    self.lookups.cancel();
+                }
+            }
+            LookupState::Failed(m) => {
+                ui.label(RichText::new(m).color(pal.error));
+            }
+            _ => {}
+        }
+        if self.source_kind == SourceKind::Local {
+            if self.peek_query.is_some() || self.peek_pending.is_some() {
+                ui.label(RichText::new("R is reading the file…").color(pal.dim));
+            }
+            if let Some(Err(e)) = &self.peek_found {
+                ui.label(RichText::new(e).color(pal.error));
+            }
+        }
+        ui.separator();
+
+        // a list to say yes to takes the place of the details
+        if matches!(self.confirm, Some(Confirm::Source { .. })) {
+            egui::ScrollArea::vertical()
+                .id_salt("pkg_source_confirm")
+                .max_height(self.list_height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    if let Some(confirm) = &self.confirm {
+                        let (go, cancel) = confirm_panel(
+                            ui,
+                            pal,
+                            confirm,
+                            index.mirror(),
+                            r_ready,
+                            &mut self.source_understood,
+                        );
+                        if go {
+                            run = confirm.run_for();
+                        }
+                        if cancel {
+                            self.confirm = None;
+                        }
+                    }
+                });
+            return run;
+        }
+
+        let mut chosen: Option<(Provider, Package)> = None;
+        match (self.source_kind, self.lookups.state()) {
+            (SourceKind::Local, _) => {
+                if let Some(Ok(p)) = &self.peek_found {
+                    let p = p.clone();
+                    if self.source_detail(ui, pal, &p, r_ready) {
+                        chosen = Some((Provider::Local(self.source_text.trim().to_string()), p));
+                    }
+                }
+            }
+            (_, LookupState::Done(found)) => match &**found {
+                Found::Description { provider, package } => {
+                    let p = (**package).clone();
+                    let pr = provider.clone();
+                    if self.source_detail(ui, pal, &p, r_ready) {
+                        chosen = Some((pr, p));
+                    }
+                }
+                Found::List {
+                    provider,
+                    release,
+                    index: list,
+                    searcher,
+                } => {
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.source_query)
+                                .desired_width(260.0)
+                                .hint_text("Search this list"),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} packages from {}{}",
+                                list.len(),
+                                provider.name(),
+                                release
+                                    .as_deref()
+                                    .map(|r| format!(" {r}"))
+                                    .unwrap_or_default()
+                            ))
+                            .small()
+                            .color(pal.dim),
+                        );
+                    });
+                    let hits: Vec<Package> = if self.source_query.trim().is_empty() {
+                        list.packages().iter().take(RESULT_LIMIT).cloned().collect()
+                    } else {
+                        searcher
+                            .search(list, &self.source_query, &Filters::default(), RESULT_LIMIT)
+                            .iter()
+                            .filter_map(|h| list.packages().get(h.position))
+                            .cloned()
+                            .collect()
+                    };
+                    let selected = self
+                        .source_selected
+                        .as_deref()
+                        .and_then(|n| list.get(n))
+                        .cloned();
+                    let provider = provider.clone();
+                    let mut pick: Option<String> = None;
+                    ui.columns(2, |cols| {
+                        if let Some(col) = cols.get_mut(0) {
+                            egui::ScrollArea::vertical()
+                                .id_salt("pkg_source_list")
+                                .max_height(self.list_height)
+                                .auto_shrink([false, false])
+                                .show(col, |ui| {
+                                    for p in &hits {
+                                        let on = self.source_selected.as_deref() == Some(&p.name);
+                                        if ui
+                                            .selectable_label(
+                                                on,
+                                                RichText::new(format!("{}  {}", p.name, p.version))
+                                                    .strong(),
+                                            )
+                                            .clicked()
+                                        {
+                                            pick = Some(p.name.clone());
+                                        }
+                                        if !p.title.is_empty() {
+                                            ui.label(RichText::new(&p.title).small());
+                                        }
+                                    }
+                                });
+                        }
+                        if let Some(col) = cols.get_mut(1) {
+                            if let Some(p) = &selected {
+                                egui::ScrollArea::vertical()
+                                    .id_salt("pkg_source_detail")
+                                    .max_height(self.list_height)
+                                    .auto_shrink([false, false])
+                                    .show(col, |ui| {
+                                        if self.source_detail(ui, pal, p, r_ready) {
+                                            chosen = Some((provider.clone(), p.clone()));
+                                        }
+                                    });
+                            } else {
+                                col.label(
+                                    RichText::new("Pick a package to read about it.")
+                                        .color(pal.dim),
+                                );
+                            }
+                        }
+                    });
+                    if let Some(n) = pick {
+                        self.source_selected = Some(n);
+                    }
+                }
+            },
+            _ => {
+                ui.label(
+                    RichText::new(match self.source_kind {
+                        SourceKind::Bioconductor => {
+                            "Look up Bioconductor's list to search it. Its packages are reviewed by the Bioconductor project."
+                        }
+                        SourceKind::Universe => {
+                            "Type a universe and look it up. r-universe builds packages from their owners' repositories; nobody reviews them."
+                        }
+                        SourceKind::GitHub => {
+                            "Type owner/repository and look it up. Code from GitHub is not reviewed by anyone."
+                        }
+                        SourceKind::Local => {
+                            "Pick a package file or folder and press Read it. Nothing is installed until you say yes."
+                        }
+                    })
+                    .color(pal.dim),
+                );
+            }
+        }
+        if let Some((provider, package)) = chosen {
+            self.begin_source_install(index, provider, &package);
+        }
+        run
+    }
+
+    /// After a lookup an `rc` command started: picks the package it named and
+    /// shows the list to say yes to.
+    fn apply_pending_source(&mut self, index: &PackageIndexService, r_present: bool) {
+        if !self.auto_confirm || self.confirm.is_some() || self.lookups.is_busy() {
+            return;
+        }
+        if r_present && (!self.r.known || self.r.stale || self.r.asked.is_some()) {
+            return;
+        }
+        let chosen: Option<(Provider, Package)> = match (self.source_kind, self.lookups.state()) {
+            (SourceKind::Local, _) => match &self.peek_found {
+                Some(Ok(p)) => Some((
+                    Provider::Local(self.source_text.trim().to_string()),
+                    p.clone(),
+                )),
+                Some(Err(_)) => {
+                    self.auto_confirm = false;
+                    None
+                }
+                None => None,
+            },
+            (_, LookupState::Done(found)) => match &**found {
+                Found::Description { provider, package } => {
+                    Some((provider.clone(), (**package).clone()))
+                }
+                Found::List {
+                    provider,
+                    index: list,
+                    ..
+                } => {
+                    let want = self.pending_source_pick.clone().unwrap_or_default();
+                    match list.get(&want) {
+                        Some(p) => Some((provider.clone(), p.clone())),
+                        None => {
+                            self.rc_note = Some(format!(
+                                "There is no package \"{want}\" in {}.",
+                                provider.name()
+                            ));
+                            self.auto_confirm = false;
+                            None
+                        }
+                    }
+                }
+            },
+            (_, LookupState::Failed(_)) => {
+                self.auto_confirm = false;
+                None
+            }
+            _ => None,
+        };
+        if let Some((provider, package)) = chosen {
+            self.auto_confirm = false;
+            self.source_selected = Some(package.name.clone());
+            self.begin_source_install(index, provider, &package);
         }
     }
 }
@@ -2567,5 +3427,232 @@ mod view_tests {
         );
         w.preset_view(None);
         assert_eq!((w.view_open, w.view_filter), (None, None));
+    }
+}
+
+#[cfg(test)]
+mod source_tests {
+    use super::*;
+    use rcraft_rpkg::index::sample;
+
+    fn pkg(name: &str, imports: &str, linking: &str) -> Package {
+        Package {
+            name: name.into(),
+            version: "0.1.0".into(),
+            title: "Made up".into(),
+            imports: imports.into(),
+            linking_to: linking.into(),
+            ..Package::default()
+        }
+    }
+
+    fn source_confirm(
+        w: &PackagesWindow,
+    ) -> (
+        &Provider,
+        &[Step],
+        &[String],
+        &Result<String, String>,
+        &'static str,
+    ) {
+        match &w.confirm {
+            Some(Confirm::Source {
+                provider,
+                deps,
+                problems,
+                code,
+                menu,
+                ..
+            }) => (provider, deps.as_slice(), problems.as_slice(), code, *menu),
+            _ => panic!("no source confirmation"),
+        }
+    }
+
+    #[test]
+    fn a_github_package_installs_its_cran_needs_first_and_needs_the_tick() {
+        let s = PackageIndexService::in_memory(sample());
+        let mut w = PackagesWindow::default();
+        let gh = parse_github("me/madeup@v1").unwrap_or(Provider::Cran);
+        w.begin_source_install(&s, gh, &pkg("madeup", "sandwich, stats", "Rcpp"));
+        let (provider, deps, problems, code, menu) = source_confirm(&w);
+        assert!(!provider.reviewed());
+        let names: Vec<&str> = deps.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, vec!["Rcpp", "sandwich"], "stats comes with R");
+        assert!(problems.is_empty(), "{problems:?}");
+        let code = code.as_ref().map(String::as_str).unwrap_or("");
+        assert!(
+            code.contains("install.packages(c(\"Rcpp\", \"sandwich\")"),
+            "{code}"
+        );
+        assert!(
+            code.contains("https://github.com/me/madeup/archive/v1.tar.gz"),
+            "{code}"
+        );
+        assert_eq!(menu, "Packages > Install from GitHub");
+        assert!(!w.source_understood, "the tick starts off");
+    }
+
+    #[test]
+    fn a_need_that_is_not_on_cran_stops_the_install_with_a_reason() {
+        let s = PackageIndexService::in_memory(sample());
+        let mut w = PackagesWindow::default();
+        w.begin_source_install(
+            &s,
+            Provider::Local("C:/x_1.0.tar.gz".into()),
+            &pkg("x", "limma", ""),
+        );
+        let (_, _, problems, _, menu) = source_confirm(&w);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("\"limma\", which is not on CRAN")),
+            "{problems:?}"
+        );
+        assert_eq!(menu, "Packages > Install from a file");
+        // with no CRAN list at all, the needs cannot be installed either
+        let none = PackageIndexService::new(
+            None,
+            None,
+            std::sync::Arc::new(rcraft_rpkg::refresh::Offline),
+            rcraft_engine::package_index::unix_now,
+        );
+        w.begin_source_install(
+            &none,
+            Provider::Local("C:/x_1.0.tar.gz".into()),
+            &pkg("x", "cli", ""),
+        );
+        let (_, _, problems, _, _) = source_confirm(&w);
+        assert!(
+            problems
+                .iter()
+                .any(|p| p.contains("Download the CRAN package list")),
+            "{problems:?}"
+        );
+    }
+
+    #[test]
+    fn bioconductor_and_universe_packages_leave_their_needs_to_r() {
+        let s = PackageIndexService::in_memory(sample());
+        let mut w = PackagesWindow::default();
+        w.begin_source_install(&s, Provider::Bioconductor, &pkg("limma", "", ""));
+        let (provider, deps, problems, code, menu) = source_confirm(&w);
+        assert!(provider.reviewed());
+        assert!(deps.is_empty() && problems.is_empty());
+        assert!(code
+            .as_ref()
+            .is_ok_and(|c| c.contains("BiocManager::install(c(\"limma\")")));
+        assert_eq!(menu, "Packages > Install from Bioconductor");
+        w.begin_source_install(
+            &s,
+            Provider::Universe("ropensci".into()),
+            &pkg("rtweet", "", ""),
+        );
+        let (provider, _, _, code, _) = source_confirm(&w);
+        assert!(!provider.reviewed());
+        assert!(code
+            .as_ref()
+            .is_ok_and(|c| c.contains("https://ropensci.r-universe.dev")));
+    }
+
+    #[test]
+    fn a_dcf_printed_by_r_becomes_a_package() {
+        let p = package_from_dcf("Package: x\nVersion: 1.0\nTitle: X\nImports: cli\n");
+        assert_eq!(
+            p.map(|p| (p.name, p.imports)),
+            Ok(("x".to_string(), "cli".to_string()))
+        );
+        assert!(package_from_dcf("").is_err());
+    }
+
+    /// Serves one GitHub DESCRIPTION.
+    struct OneDescription;
+
+    impl rcraft_rpkg::refresh::Fetcher for OneDescription {
+        fn get(
+            &self,
+            url: &str,
+            _max: u64,
+            _p: &mut dyn FnMut(u64, Option<u64>) -> rcraft_rpkg::refresh::Control,
+        ) -> rcraft_rpkg::Result<Vec<u8>> {
+            if url == "https://raw.githubusercontent.com/me/madeup/HEAD/DESCRIPTION" {
+                Ok(b"Package: madeup\nVersion: 0.2\nTitle: Made Up\nImports: zoo\n".to_vec())
+            } else {
+                Err(rcraft_rpkg::Error::Fetch(format!("{url}: 404")))
+            }
+        }
+    }
+
+    #[test]
+    fn an_rc_github_install_looks_the_repository_up_and_then_shows_the_list() {
+        let s = PackageIndexService::in_memory(sample());
+        let mut w = PackagesWindow::default();
+        w.set_lookups(SourceLookups::new(std::sync::Arc::new(OneDescription)));
+        w.start_source(RcSource::GitHub, "me/madeup".into());
+        assert_eq!(w.tab, Tab::Sources);
+        let started = std::time::Instant::now();
+        while w.lookups.is_busy() {
+            w.lookups.poll();
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        // with no R in this test, the list is made as soon as the lookup is in
+        w.apply_pending_source(&s, false);
+        let (provider, deps, _, code, _) = source_confirm(&w);
+        assert!(matches!(provider, Provider::GitHub { repo, .. } if repo == "madeup"));
+        assert_eq!(
+            deps.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+            vec!["zoo"]
+        );
+        assert!(code
+            .as_ref()
+            .is_ok_and(|c| c.contains("archive/HEAD.tar.gz")));
+        // only once
+        w.confirm = None;
+        w.apply_pending_source(&s, false);
+        assert!(w.confirm.is_none());
+    }
+}
+
+#[cfg(test)]
+mod source_needs_tests {
+    use super::*;
+    use rcraft_rpkg::index::sample;
+
+    #[test]
+    fn needs_already_installed_at_an_accepted_version_are_left_alone() {
+        let s = PackageIndexService::in_memory(sample());
+        let mut w = PackagesWindow::default();
+        w.r.installed = vec![Installed {
+            name: "sandwich".into(),
+            version: "2.0".into(),
+            library: "C:/lib".into(),
+            priority: String::new(),
+            repository: "CRAN".into(),
+        }];
+        let p = Package {
+            name: "madeup".into(),
+            version: "0.1".into(),
+            imports: "sandwich, Rcpp (>= 1.0)".into(),
+            ..Package::default()
+        };
+        w.begin_source_install(&s, Provider::Local("C:/m.tar.gz".into()), &p);
+        let Some(Confirm::Source { deps, .. }) = &w.confirm else {
+            panic!("no confirmation");
+        };
+        let names: Vec<&str> = deps.iter().map(|d| d.name.as_str()).collect();
+        assert_eq!(names, vec!["Rcpp"], "sandwich 2.0 is there and accepted");
+        // a version that is too old is installed again
+        let strict = Package {
+            imports: "sandwich (>= 3.0)".into(),
+            ..p
+        };
+        w.begin_source_install(&s, Provider::Local("C:/m.tar.gz".into()), &strict);
+        let Some(Confirm::Source { deps, .. }) = &w.confirm else {
+            panic!("no confirmation");
+        };
+        assert_eq!(
+            deps.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
+            vec!["sandwich"]
+        );
     }
 }
