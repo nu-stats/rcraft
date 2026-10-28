@@ -27,6 +27,9 @@ pub const DB_COLUMNS: &[&str] = &[
     "SystemRequirements",
     "Published",
     "Date/Publication",
+    "Reverse depends",
+    "Reverse imports",
+    "Reverse linking to",
 ];
 
 /// The fields read from `PACKAGES.gz`.
@@ -67,11 +70,14 @@ pub struct Package {
     pub system_requirements: String,
     /// The date CRAN published this version, as `YYYY-MM-DD` when known.
     pub published: String,
+    /// Packages on CRAN that need this one installed (those that Depend on, Import
+    /// or LinkTo it), comma separated; empty when the source does not say.
+    pub used_by: String,
 }
 
 /// The names of a [`Package`]'s fields in the order [`Package::to_fields`]
 /// gives them, which is the order the cache stores them in.
-pub const FIELD_NAMES: [&str; 17] = [
+pub const FIELD_NAMES: [&str; 18] = [
     "name",
     "version",
     "priority",
@@ -89,11 +95,12 @@ pub const FIELD_NAMES: [&str; 17] = [
     "bug_reports",
     "system_requirements",
     "published",
+    "used_by",
 ];
 
 impl Package {
     /// The fields as text, in [`FIELD_NAMES`] order.
-    pub fn to_fields(&self) -> [String; 17] {
+    pub fn to_fields(&self) -> [String; 18] {
         [
             self.name.clone(),
             self.version.clone(),
@@ -116,13 +123,14 @@ impl Package {
             self.bug_reports.clone(),
             self.system_requirements.clone(),
             self.published.clone(),
+            self.used_by.clone(),
         ]
     }
 
     /// The inverse of [`Package::to_fields`]; `None` unless `fields` has
-    /// exactly the 17 fields.
+    /// exactly the 18 fields.
     pub fn from_fields(fields: &[String]) -> Option<Package> {
-        let [name, version, priority, title, description, authors, maintainer, license, depends, imports, linking_to, suggests, needs, url, bug_reports, system_requirements, published] =
+        let [name, version, priority, title, description, authors, maintainer, license, depends, imports, linking_to, suggests, needs, url, bug_reports, system_requirements, published, used_by] =
             fields
         else {
             return None;
@@ -149,6 +157,7 @@ impl Package {
             bug_reports: bug_reports.clone(),
             system_requirements: system_requirements.clone(),
             published: published.clone(),
+            used_by: used_by.clone(),
         })
     }
 
@@ -186,7 +195,8 @@ impl Package {
             url,
             bug_reports,
             system_requirements,
-            published
+            published,
+            used_by
         );
         if self.needs_compilation.is_none() {
             self.needs_compilation = other.needs_compilation;
@@ -420,6 +430,7 @@ fn packages_from(t: &Table) -> Vec<Package> {
             bug_reports: text("BugReports"),
             system_requirements: text("SystemRequirements"),
             published,
+            used_by: used_by(t, row),
         });
     }
     out
@@ -479,6 +490,31 @@ pub fn sample() -> Index {
         1_700_000_000,
         Detail::Full,
     )
+}
+
+/// The packages that need this one, from the three "Reverse ..." columns of the
+/// database, each name once, in the order found.
+fn used_by(t: &Table, row: usize) -> String {
+    let mut seen: Vec<&str> = Vec::new();
+    for col in ["Reverse depends", "Reverse imports", "Reverse linking to"] {
+        for name in t.get(col, row).unwrap_or("").split(',') {
+            let name = name.trim();
+            if !name.is_empty() && !seen.contains(&name) {
+                seen.push(name);
+            }
+        }
+    }
+    seen.join(", ")
+}
+
+impl Package {
+    /// How many packages on CRAN need this one.
+    pub fn used_by_count(&self) -> usize {
+        self.used_by
+            .split(',')
+            .filter(|n| !n.trim().is_empty())
+            .count()
+    }
 }
 
 #[cfg(test)]

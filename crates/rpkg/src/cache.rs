@@ -2,11 +2,11 @@
 //! fast and works with no network.
 //!
 //! ```text
-//! RCRAN1
+//! RCRAN2
 //! fetched<TAB>seconds since 1970
 //! detail<TAB>full or names
 //! count<TAB>number of packages
-//! one line per package: the 17 fields of `index::FIELD_NAMES`, tab separated
+//! one line per package: the 18 fields of `index::FIELD_NAMES`, tab separated
 //! ```
 //!
 //! In a field a backslash is `\\`, a tab `\t`, a newline `\n` and a carriage
@@ -24,7 +24,7 @@ use crate::{Error, Result};
 
 /// The file name inside the cache folder.
 pub const FILE_NAME: &str = "cran-index.txt";
-const MAGIC: &str = "RCRAN1";
+const MAGIC: &str = "RCRAN2";
 /// Largest cache read, in bytes.
 pub const MAX_BYTES: u64 = 256 * 1024 * 1024;
 /// Most packages accepted.
@@ -249,8 +249,8 @@ mod tests {
         assert!(from_text(&format!("{text}extra\n")).is_err());
         assert!(from_text(&text.replace("count\t6", "count\t7")).is_err());
         assert!(from_text(&text.replace("count\t6", "count\t99999999")).is_err());
-        assert!(from_text("RCRAN2\n").is_err());
-        assert!(from_text("RCRAN1\nfetched\tsoon\n").is_err());
+        assert!(from_text("RCRAN1\n").is_err());
+        assert!(from_text("RCRAN2\nfetched\tsoon\n").is_err());
         assert!(from_text(&text.replace("zoo\t", "zoo\\x\t")).is_err());
         // a damaged file on disk is reported and not deleted
         assert!(fs::write(cache.path(), "garbage").is_ok());

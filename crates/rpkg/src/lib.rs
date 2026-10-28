@@ -25,6 +25,7 @@ pub mod http;
 pub mod index;
 pub mod rds;
 pub mod refresh;
+pub mod search;
 pub mod table;
 pub mod unpack;
 

@@ -364,7 +364,9 @@ pub fn validate_mirror(text: &str) -> std::result::Result<String, String> {
         return Err("A mirror address starts with https://".into());
     };
     if t.len() > MAX_MIRROR_LEN {
-        return Err(format!("A mirror address is at most {MAX_MIRROR_LEN} characters"));
+        return Err(format!(
+            "A mirror address is at most {MAX_MIRROR_LEN} characters"
+        ));
     }
     if t.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return Err("A mirror address has no spaces".into());

@@ -194,3 +194,41 @@ fn the_real_database_survives_the_cache_when_a_copy_is_given() {
     assert_eq!(back, Ok(Some(ix)));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Ranked search over the real database, when a copy is given: prints the top
+/// of a few searches and checks that the obvious package comes first.
+#[test]
+fn searching_the_real_database_finds_the_obvious_package_first() {
+    use rcraft_rpkg::search::{Filters, Searcher};
+    let Ok(path) = std::env::var("RCRAFT_REAL_PACKAGES_RDS") else {
+        eprintln!("skipped: set RCRAFT_REAL_PACKAGES_RDS to a downloaded packages.rds");
+        return;
+    };
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let node = rds::read(&bytes).unwrap_or_else(|e| panic!("reading: {e}"));
+    let t = table::from_node(&node, DB_COLUMNS).unwrap_or_else(|e| panic!("table: {e}"));
+    let ix = Index::from_tables(Some(&t), None, 0);
+    let built = std::time::Instant::now();
+    let s = Searcher::new(&ix);
+    eprintln!("searcher built in {:?}", built.elapsed());
+    for (q, first) in [
+        ("ggplot2", "ggplot2"),
+        ("fixed effects", "fixest"),
+        ("survival analysis", "survival"),
+        ("mixed models", "lme4"),
+        ("data.table", "data.table"),
+        ("panel data econometrics", "plm"),
+    ] {
+        let started = std::time::Instant::now();
+        let hits = s.search(&ix, q, &Filters::default(), 8);
+        let names: Vec<&str> = hits
+            .iter()
+            .filter_map(|h| ix.packages().get(h.position))
+            .map(|p| p.name.as_str())
+            .collect();
+        eprintln!("{q:28} {:?} -> {names:?}", started.elapsed());
+        if !names.contains(&first) {
+            eprintln!("   !! {first} not in the top 8 for {q:?}");
+        }
+    }
+}
