@@ -338,6 +338,21 @@ pub const ROBUST: Spec = Spec {
             default: "HC1",
             hint: "",
         },
+        Widget::Text {
+            id: "cluster",
+            label: "Cluster by",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Optional: a variable whose groups may be correlated inside. Needs the data \
+                   frame below. Rows the model left out are matched by row name.",
+        },
+        Widget::Text {
+            id: "data",
+            label: "Data frame",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "The data frame the model was fitted to; only needed to cluster.",
+        },
         Widget::Choice {
             id: "conf",
             label: "Confidence level",
@@ -348,21 +363,155 @@ pub const ROBUST: Spec = Spec {
     ],
     needs: &["sandwich", "lmtest"],
     styles: BASE,
-    check: |_| Vec::new(),
+    check: |a| {
+        let (cluster, data) = (a.name_text("cluster"), a.name_text("data"));
+        if !cluster.is_empty() && data.is_empty() {
+            vec![Problem::new(
+                "data",
+                "Name the data frame that holds the cluster variable.",
+            )]
+        } else if cluster.is_empty() && !data.is_empty() {
+            vec![Problem::new(
+                "cluster",
+                "Name the cluster variable, or empty the data frame.",
+            )]
+        } else {
+            Vec::new()
+        }
+    },
     code: |a, _| {
         let m = a.data();
-        let vcov = format!(
-            "sandwich::vcovHC({m}, type = {})",
-            r_string(a.choice("type"))
-        );
+        let ty = r_string(a.choice("type"));
+        let (cluster, data) = (a.name_text("cluster"), a.name("data"));
+        let (vcov, label) = if cluster.is_empty() {
+            (
+                format!("sandwich::vcovHC({m}, type = {ty})"),
+                format!("{} robust", a.choice("type")),
+            )
+        } else {
+            (
+                format!(
+                    "sandwich::vcovCL({m}, cluster = {data}[[{}]][match(rownames(stats::model.frame({m})), \
+                     rownames({data}))], type = {ty})",
+                    a.name_string("cluster"),
+                ),
+                format!("{} cluster-robust (by {cluster})", a.choice("type")),
+            )
+        };
         format!(
-            "{guard}\ncat(\"Coefficients with {} robust standard errors\\n\")\n\
+            "{guard}\ncat(\"Coefficients with {label} standard errors\\n\")\n\
              print(lmtest::coeftest({m}, vcov. = {vcov}))\n\
              cat(\"\\nConfidence intervals\\n\")\n\
              print(lmtest::coefci({m}, vcov. = {vcov}, level = {}))",
-            a.choice("type"),
             a.choice("conf"),
             guard = linear_guard(&m),
+        )
+    },
+};
+
+// ---- Tests of terms ----
+
+const TERM_TESTS: &[Opt] = &[
+    Opt {
+        value: "each",
+        label: "Each term on its own (drop it from the model)",
+    },
+    Opt {
+        value: "together",
+        label: "The terms listed below, together",
+    },
+];
+
+/// The terms typed in the box, separated by commas.
+fn typed_terms<'a>(a: &'a Args) -> Vec<&'a str> {
+    a.values
+        .text("terms")
+        .split(',')
+        .map(str::trim)
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+pub const TEST_TERMS: Spec = Spec {
+    entry: "Test terms",
+    menu: "Objects > Model > Test terms",
+    about: "Test whether terms of the model matter: each term on its own, or several together \
+            (does the model fit worse without them?). An F test for linear models, a \
+            likelihood-ratio test for generalised ones.",
+    widgets: &[
+        Widget::Choice {
+            id: "kind",
+            label: "Test",
+            options: TERM_TESTS,
+            default: "each",
+            hint: "",
+        },
+        Widget::Text {
+            id: "terms",
+            label: "Terms to test together",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Variable names in the model, separated by commas. Used by the second choice.",
+        },
+    ],
+    needs: &[],
+    styles: BASE,
+    check: |a| {
+        if a.choice("kind") == "together" && typed_terms(a).is_empty() {
+            vec![Problem::new("terms", "Type the terms to test together.")]
+        } else {
+            Vec::new()
+        }
+    },
+    code: |a, _| {
+        let m = a.data();
+        let test = "if (inherits(m, \"glm\")) \"Chisq\" else \"F\"";
+        if a.choice("kind") == "each" {
+            return format!(
+                "{}\n(function(m) stats::drop1(m, test = {test}))({m})",
+                linear_guard(&m)
+            );
+        }
+        let terms = typed_terms(a);
+        let quoted: Vec<String> = terms.iter().map(|t| r_string(&r_name(t))).collect();
+        let minus: Vec<String> = terms.iter().map(|t| r_name(t)).collect();
+        format!(
+            "{guard}\n(function(m) {{\n  have <- attr(stats::terms(m), \"term.labels\")\n  \
+             stopifnot(\"not terms of the model\" = all(c({}) %in% have))\n  \
+             reduced <- stats::update(m, . ~ . - {})\n  \
+             cat(\"Model without the terms against the full model\\n\")\n  \
+             print(stats::anova(reduced, m, test = {test}))\n}})({m})",
+            quoted.join(", "),
+            minus.join(" - "),
+            guard = linear_guard(&m),
+        )
+    },
+};
+
+// ---- Average marginal effects ----
+
+pub const MARGINAL_EFFECTS: Spec = Spec {
+    entry: "Average marginal effects",
+    menu: "Objects > Model > Average marginal effects",
+    about: "How much the outcome changes, on average over the rows, when each predictor goes \
+            up by one unit (or, for a category, from the reference category). On the \
+            outcome's own scale, so a logistic model gives changes in probability. Uses the \
+            marginaleffects package.",
+    widgets: &[Widget::Choice {
+        id: "conf",
+        label: "Confidence level",
+        options: LEVELS,
+        default: "0.95",
+        hint: "",
+    }],
+    needs: &["marginaleffects"],
+    styles: BASE,
+    check: |_| Vec::new(),
+    code: |a, _| {
+        format!(
+            "print(marginaleffects::avg_slopes({}, conf_level = {}))",
+            a.data(),
+            a.choice("conf")
         )
     },
 };
@@ -374,6 +523,8 @@ pub const MODEL_SPECS: &[&Spec] = &[
     &PREDICTED,
     &DIAGNOSTICS,
     &ROBUST,
+    &TEST_TERMS,
+    &MARGINAL_EFFECTS,
 ];
 
 #[cfg(test)]
@@ -501,6 +652,67 @@ mod tests {
         );
         assert!(out.ends_with("level = 0.9))"), "{out}");
         assert!(message(&ROBUST, "m1", &[("type", "HC9")]).contains("Pick one"));
+    }
+
+    #[test]
+    fn clustering_needs_both_the_variable_and_the_data_frame() {
+        assert!(message(&ROBUST, "m1", &[("cluster", "school")]).contains("Name the data frame"));
+        assert!(message(&ROBUST, "m1", &[("data", "d")]).contains("Name the cluster variable"));
+        let out = make(
+            &ROBUST,
+            "m1",
+            &[("cluster", "school"), ("data", "my data"), ("type", "HC3")],
+        )
+        .unwrap_or_default();
+        assert!(
+            out.contains(
+                "sandwich::vcovCL(m1, cluster = `my data`[[\"school\"]]\
+                 [match(rownames(stats::model.frame(m1)), rownames(`my data`))], type = \"HC3\")"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("HC3 cluster-robust (by school) standard errors"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn test_terms_checks_the_terms_in_the_generated_r() {
+        let each = make(&TEST_TERMS, "m1", &[]).unwrap_or_default();
+        assert!(
+            each.ends_with(
+                "stats::drop1(m, test = if (inherits(m, \"glm\")) \"Chisq\" else \"F\"))(m1)"
+            ),
+            "{each}"
+        );
+        assert!(message(&TEST_TERMS, "m1", &[("kind", "together")]).contains("Type the terms"));
+        let together = make(
+            &TEST_TERMS,
+            "m1",
+            &[("kind", "together"), ("terms", "age, my var")],
+        )
+        .unwrap_or_default();
+        assert!(
+            together.contains("all(c(\"age\", \"`my var`\") %in% have)"),
+            "{together}"
+        );
+        assert!(
+            together.contains("stats::update(m, . ~ . - age - `my var`)"),
+            "{together}"
+        );
+    }
+
+    #[test]
+    fn marginal_effects_need_their_package_and_use_the_level() {
+        assert_eq!(
+            MARGINAL_EFFECTS.packages(Style::Base),
+            vec!["marginaleffects"]
+        );
+        assert_eq!(
+            make(&MARGINAL_EFFECTS, "my fit", &[("conf", "0.9")]).unwrap_or_default(),
+            "print(marginaleffects::avg_slopes(`my fit`, conf_level = 0.9))"
+        );
     }
 
     #[test]

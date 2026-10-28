@@ -5,7 +5,9 @@
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::postest::{COMPARE_MODELS, DIAGNOSTICS, MODEL_FIT, PREDICTED, ROBUST};
+use rcraft_catalog::postest::{
+    COMPARE_MODELS, DIAGNOSTICS, MARGINAL_EFFECTS, MODEL_FIT, PREDICTED, ROBUST, TEST_TERMS,
+};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{Context, Spec, Style, Widget};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -69,6 +71,7 @@ const SETUP: &str = "d <- data.frame(\
      y = c(10.1, 12.3, 11.8, 14.2, 15.1, 13.9, 17.2, 18.1, 16.5, 19.0, 20.2, 18.8), \
      x = c(1, 2, 3, NA, 5, 6, 7, 8, 9, 10, 11, 12), \
      z = c(2.1, 1.9, 3.2, 2.8, 3.9, 3.1, 4.5, 4.0, 5.2, 4.8, 6.1, 5.5), \
+     g = rep(c('a', 'b', 'c', 'd'), each = 3), \
      won = c(0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1)); \
      m1 <- lm(y ~ x, data = d); m2 <- lm(y ~ x + z, data = d, subset = !is.na(x)); \
      g1 <- glm(won ~ z, data = d, family = binomial)";
@@ -327,4 +330,113 @@ fn robust_standard_errors_are_the_ones_sandwich_gives() {
     // a different correction changes the standard errors
     let (_, hc0) = on_model(&mut e, &ROBUST, "m1", &[("type", "HC0")], &[]);
     assert_ne!(tidy(&hc0)[2..], tidy(&text)[2..]);
+}
+
+#[test]
+fn test_terms_gives_the_tests_r_gives() {
+    let Some(mut e) = started() else { return };
+    let (outcome, text) = on_model(&mut e, &TEST_TERMS, "m2", &[], &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (_, expected) = run(&mut e, Source::Typed, "print(drop1(m2, test = 'F'))");
+    assert_eq!(tidy(&text), tidy(&expected), "{text}");
+
+    let (outcome, text) = on_model(
+        &mut e,
+        &TEST_TERMS,
+        "m2",
+        &[("kind", "together"), ("terms", "x, z")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "reduced <- update(m2, . ~ . - x - z); \
+         cat('Model without the terms against the full model\n'); \
+         print(anova(reduced, m2, test = 'F'))",
+    );
+    assert_eq!(tidy(&text), tidy(&expected), "{text}");
+
+    // a generalised model gets a likelihood-ratio test
+    let (outcome, text) = on_model(&mut e, &TEST_TERMS, "g1", &[], &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (_, expected) = run(&mut e, Source::Typed, "print(drop1(g1, test = 'Chisq'))");
+    assert_eq!(tidy(&text), tidy(&expected), "{text}");
+
+    // something that is not a term of the model is refused by the generated R
+    let (outcome, text) = on_model(
+        &mut e,
+        &TEST_TERMS,
+        "m2",
+        &[("kind", "together"), ("terms", "nothing")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("not terms of the model"), "{text}");
+}
+
+/// Marginal effects need the marginaleffects package; skipped with a note
+/// where it is missing (CI installs it).
+#[test]
+fn average_marginal_effects_are_the_ones_marginaleffects_gives() {
+    let Some(mut e) = started() else { return };
+    let (outcome, _) = run(
+        &mut e,
+        Source::Typed,
+        "stopifnot(requireNamespace('marginaleffects', quietly = TRUE))",
+    );
+    if outcome != Outcome::Ok {
+        eprintln!("skipped: the R package marginaleffects is not installed");
+        return;
+    }
+    let (outcome, text) = on_model(&mut e, &MARGINAL_EFFECTS, "g1", &[], &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "print(marginaleffects::avg_slopes(g1, conf_level = 0.95))",
+    );
+    assert_eq!(tidy(&text), tidy(&expected), "{text}");
+    // for a logistic model the effect of z is a change in probability: it is
+    // not the log-odds coefficient
+    holds(
+        &mut e,
+        "abs(marginaleffects::avg_slopes(g1)$estimate - unname(coef(g1)['z'])) > 1e-6",
+    );
+}
+
+/// Clustered standard errors need sandwich and lmtest; skipped with a note
+/// where either is missing (CI installs both).
+#[test]
+fn clustered_standard_errors_line_up_with_the_rows_the_model_kept() {
+    let Some(mut e) = started() else { return };
+    for package in ["sandwich", "lmtest"] {
+        let (outcome, _) = run(
+            &mut e,
+            Source::Typed,
+            &format!("stopifnot(requireNamespace('{package}', quietly = TRUE))"),
+        );
+        if outcome != Outcome::Ok {
+            eprintln!("skipped: the R package {package} is not installed");
+            return;
+        }
+    }
+    // m1 left row 4 out (a missing x); the cluster variable must be matched on rows
+    let (outcome, text) = on_model(
+        &mut e,
+        &ROBUST,
+        "m1",
+        &[("type", "HC1"), ("cluster", "g"), ("data", "d")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "kept <- d[rownames(model.frame(m1)), ]; v <- sandwich::vcovCL(m1, cluster = kept$g, type = 'HC1'); \
+         cat('Coefficients with HC1 cluster-robust (by g) standard errors\n'); \
+         print(lmtest::coeftest(m1, vcov. = v)); cat('\nConfidence intervals\n'); \
+         print(lmtest::coefci(m1, vcov. = v, level = 0.95))",
+    );
+    assert_eq!(tidy(&text), tidy(&expected), "{text}");
 }

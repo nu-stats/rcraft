@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 73 | 0 | 50 | 23 |
+| 75 | 0 | 52 | 23 |
 
 ## File
 
@@ -75,6 +75,8 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Predicted values and residuals | partial |
 | Model diagnostics | partial |
 | Robust standard errors | partial |
+| Test terms | partial |
+| Average marginal effects | partial |
 
 ## Graphs
 

@@ -139,6 +139,8 @@ pub const ENTRIES: &[Entry] = &[
     partial("Predicted values and residuals", Area::Statistics),
     partial("Model diagnostics", Area::Statistics),
     partial("Robust standard errors", Area::Statistics),
+    partial("Test terms", Area::Statistics),
+    partial("Average marginal effects", Area::Statistics),
     planned("Histogram", Area::Graphs),
     planned("Scatter plot", Area::Graphs),
     planned("Model table", Area::Reports),

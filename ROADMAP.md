@@ -302,9 +302,9 @@ skipped. It never gives a silent wrong answer.
   standard errors, model comparison (first part done: a Model submenu in the Objects pane's
   right-click menu on a fitted model, with fit statistics, comparison of models, predicted
   values and residuals added to a data frame, diagnostics, and robust standard errors (needs
-  sandwich and lmtest). Still to do: marginal effects, hypothesis tests on coefficients,
-  clustered standard errors, odds-ratio and other transforms of any model, residual plots with
-  Phase 5)
+  sandwich and lmtest), with clustered standard errors, tests of terms (each, or several
+  together) and average marginal effects (marginaleffects package). P4.5 is done apart from
+  residual plots, which come with Phase 5)
 
 ## Phase 5: Graphs
 

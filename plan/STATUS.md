@@ -583,6 +583,24 @@ added columns against what R gives directly (an NA row is checked to line up). T
 standard errors test skips where sandwich or lmtest is missing, which is the case on this
 machine, so it has only run in CI (which now installs both).
 
+## P4.5 Post-estimation (rest), 2026-10-27
+
+- *Robust standard errors* can cluster: a cluster variable and the data frame that holds it;
+  `sandwich::vcovCL` with the cluster values matched to the rows the model kept by row name
+  (`rownames(model.frame(model))`), so a row dropped for a missing value cannot shift the groups.
+- *Test terms* (base R): each term dropped in turn (`drop1`, F test for linear models and
+  likelihood-ratio for generalised ones), or several terms together against the full model
+  (`update`, then `anova`); the generated R first checks the names are terms of the model.
+- *Average marginal effects* (needs marginaleffects): `avg_slopes`, so a logistic model gives
+  changes in probability. CI installs marginaleffects.
+- Tests: test terms ran for real against R. The robust, clustered and marginal-effects tests skip
+  where their packages are missing; sandwich/lmtest are missing here, so the clustered and robust
+  tests have only run in CI.
+- A flaky comparison fixed: `Waiting for profiling to be done...` is R's progress note on stderr,
+  whose place among the stdout tables is approximate (the two streams are read on separate
+  threads), so the glm tests now ignore that line. It made the logistic and ordinal tests fail on
+  Ubuntu in one run and pass in others.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test
