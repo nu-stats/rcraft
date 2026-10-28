@@ -23,7 +23,7 @@
 use std::collections::VecDeque;
 use std::fmt;
 use std::io::{BufRead, BufReader, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{sync_channel, Receiver, RecvTimeoutError, SyncSender};
@@ -101,6 +101,12 @@ pub enum Event {
     LimitReached {
         run: RunId,
         limit: Limit,
+    },
+    /// A graphics page the run drew, written as a PNG file in the session's
+    /// plot folder. Sent just before `Finished`, in page order.
+    Plot {
+        run: RunId,
+        path: PathBuf,
     },
     Finished {
         run: RunId,
@@ -246,6 +252,8 @@ pub struct Session {
     r_version: String,
     r_pid: u32,
     script_dir: PathBuf,
+    /// Where R's graphics device writes each page (inside `script_dir`).
+    plot_dir: PathBuf,
 }
 
 impl Session {
@@ -255,12 +263,15 @@ impl Session {
         let script_dir = make_script_dir()?;
         let script = script_dir.join("bootstrap.R");
         std::fs::write(&script, BOOTSTRAP_R).map_err(|e| SessionError::Io(e.to_string()))?;
+        let plot_dir = script_dir.join("plots");
+        std::fs::create_dir_all(&plot_dir).map_err(|e| SessionError::Io(e.to_string()))?;
 
         let mut command = Command::new(&config.install.rscript);
         command
             .arg("--vanilla")
             .arg(&script)
             .arg(&token)
+            .env("RCRAFT_PLOT_DIR", &plot_dir)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -321,6 +332,7 @@ impl Session {
             r_version: String::new(),
             r_pid: 0,
             script_dir,
+            plot_dir,
         };
         session.wait_until_ready()?;
         Ok(session)
@@ -673,6 +685,9 @@ impl Session {
             Status::Error => RunStatus::Error,
             Status::Interrupted => RunStatus::Interrupted,
         };
+        for path in plot_files(&self.plot_dir, run) {
+            self.pending.push_back(Event::Plot { run, path });
+        }
         self.pending.push_back(Event::Finished { run, status });
     }
 
@@ -775,6 +790,27 @@ impl Default for RunOutput {
 pub struct RError {
     pub message: String,
     pub call: String,
+}
+
+/// The pages run `run` drew, in page order: `<run>-001.png`, `<run>-002.png`,
+/// ... in the plot folder. Empty files (a page R was still writing) are left out.
+fn plot_files(dir: &Path, run: RunId) -> Vec<PathBuf> {
+    let prefix = format!("{run}-");
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut files: Vec<PathBuf> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.starts_with(&prefix) && n.ends_with(".png"))
+                && std::fs::metadata(p).is_ok_and(|m| m.len() > 0)
+        })
+        .collect();
+    files.sort();
+    files
 }
 
 fn make_script_dir() -> Result<PathBuf, SessionError> {

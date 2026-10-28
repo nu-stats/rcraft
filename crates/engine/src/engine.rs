@@ -501,6 +501,7 @@ impl Engine {
                 message,
                 call,
             } if r == run => Item::Error { message, call },
+            Event::Plot { run: r, path } if r == run => Item::Plot { path },
             Event::Truncated { run: r } if r == run => {
                 Item::Notice("output cut off: more than the limit was printed".into())
             }
@@ -538,6 +539,7 @@ impl Engine {
             | Event::Error { run, .. }
             | Event::Truncated { run }
             | Event::LimitReached { run, .. }
+            | Event::Plot { run, .. }
             | Event::Finished { run, .. } => *run,
             Event::Exited { .. } => return false,
         };

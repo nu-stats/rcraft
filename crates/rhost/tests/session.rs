@@ -501,3 +501,169 @@ fn output_without_a_final_line_break_does_not_hang_the_run() {
     assert_eq!(out.stdout, "a[1] 1\n");
     assert_eq!(out.stderr, "b");
 }
+
+/// Runs `code` and returns the plots it drew, in order, and how it ended.
+fn plots_of(s: &mut Session, code: &str) -> (Vec<std::path::PathBuf>, RunStatus) {
+    let Ok(id) = s.run(code) else {
+        return (Vec::new(), RunStatus::Crashed);
+    };
+    let mut plots = Vec::new();
+    loop {
+        match s.next_event(LIMIT) {
+            Some(Event::Plot { run, path }) if run == id => plots.push(path),
+            Some(Event::Finished { run, status }) if run == id => return (plots, status),
+            Some(_) => {}
+            // nothing came back in time: the tests that call this then fail on what they expect
+            None => return (plots, RunStatus::Crashed),
+        }
+    }
+}
+
+fn is_png(path: &std::path::Path) -> bool {
+    std::fs::read(path)
+        .is_ok_and(|b| b.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]))
+}
+
+#[test]
+fn a_plot_comes_back_as_a_png_file() {
+    let Some(mut s) = session() else { return };
+    let (plots, status) = plots_of(&mut s, "plot(1:10, main = 'ten')");
+    assert_eq!(status, RunStatus::Ok);
+    assert_eq!(plots.len(), 1, "{plots:?}");
+    assert!(is_png(&plots[0]), "{:?}", plots[0]);
+    assert!(std::fs::metadata(&plots[0]).map_or(0, |m| m.len()) > 1000);
+}
+
+#[test]
+fn each_page_is_its_own_file_in_page_order() {
+    let Some(mut s) = session() else { return };
+    let (plots, status) = plots_of(&mut s, "plot(1:3)\nhist(rnorm(50))\nboxplot(1:5)");
+    assert_eq!(status, RunStatus::Ok);
+    assert_eq!(plots.len(), 3, "{plots:?}");
+    let names: Vec<String> = plots
+        .iter()
+        .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(String::from))
+        .collect();
+    let mut sorted = names.clone();
+    sorted.sort();
+    assert_eq!(names, sorted);
+    assert!(plots.iter().all(|p| is_png(p)));
+}
+
+#[test]
+fn code_that_draws_nothing_brings_no_plot_and_runs_do_not_share_plots() {
+    let Some(mut s) = session() else { return };
+    let (plots, _) = plots_of(&mut s, "x <- 1 + 1; print(x)");
+    assert!(plots.is_empty());
+    let (first, _) = plots_of(&mut s, "plot(1:3)");
+    assert_eq!(first.len(), 1);
+    let (none, _) = plots_of(&mut s, "cat('no plot here\n')");
+    assert!(
+        none.is_empty(),
+        "the earlier run's plot must not come back: {none:?}"
+    );
+    let (second, _) = plots_of(&mut s, "plot(3:1)");
+    assert_eq!(second.len(), 1);
+    assert_ne!(first, second);
+    // the first run's file is still there, so a Graph window can keep a history
+    assert!(first[0].is_file());
+}
+
+#[test]
+fn a_plot_drawn_before_an_error_is_kept() {
+    let Some(mut s) = session() else { return };
+    let (plots, status) = plots_of(&mut s, "plot(1:5)\nstop('after the plot')");
+    assert_eq!(status, RunStatus::Error);
+    assert_eq!(plots.len(), 1);
+    assert!(is_png(&plots[0]));
+    // and the session still works afterwards
+    let out = s.run_to_end("1 + 1", LIMIT).expect("run");
+    assert_eq!(out.status, RunStatus::Ok);
+}
+
+#[test]
+fn a_run_stopped_midway_still_closes_its_device() {
+    let Some(mut s) = session() else { return };
+    let id = s.run("plot(1:5)\nSys.sleep(30)").expect("run");
+    // wait for the run to begin, then stop it
+    loop {
+        if matches!(s.next_event(LIMIT).expect("event"), Event::Started { run } if run == id) {
+            break;
+        }
+    }
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    let _ = s.interrupt();
+    let mut plots = Vec::new();
+    loop {
+        match s.next_event(LIMIT).expect("event") {
+            Event::Plot { run, path } if run == id => plots.push(path),
+            Event::Finished { run, .. } if run == id => break,
+            Event::Exited { .. } => break,
+            _ => {}
+        }
+    }
+    // where an interrupt stops R and it restarts, there is nothing to say about
+    // the plot; where R survives, the page it had drawn is complete
+    for p in &plots {
+        assert!(is_png(p), "{p:?}");
+    }
+}
+
+#[test]
+fn the_plot_folder_goes_away_with_the_session() {
+    let Some(mut s) = session() else { return };
+    let (plots, _) = plots_of(&mut s, "plot(1:3)");
+    let file = plots.first().cloned().expect("a plot");
+    assert!(file.is_file());
+
+    drop(s);
+    assert!(!file.exists(), "{file:?}");
+}
+
+#[test]
+fn a_plot_can_be_added_to_by_the_next_command() {
+    let Some(mut s) = session() else { return };
+    let (first, status) = plots_of(&mut s, "plot(1:10)");
+    assert_eq!(status, RunStatus::Ok);
+    assert_eq!(first.len(), 1);
+    // abline() needs the plot of the earlier command: the device stays open
+    let (second, status) = plots_of(&mut s, "abline(h = 5, col = 'red')");
+    assert_eq!(status, RunStatus::Ok, "abline must find the earlier plot");
+    assert_eq!(second.len(), 1, "{second:?}");
+    assert_ne!(first, second);
+    // the added line changes the picture
+    assert_ne!(
+        std::fs::read(&first[0]).unwrap_or_default(),
+        std::fs::read(&second[0]).unwrap_or_default()
+    );
+    // a command that adds nothing leaves the history alone
+    let (none, _) = plots_of(&mut s, "x <- 1");
+    assert!(none.is_empty(), "{none:?}");
+    // and a new plot starts a new page
+    let (third, _) = plots_of(&mut s, "plot(10:1)");
+    assert_eq!(third.len(), 1);
+}
+
+#[test]
+fn closing_the_device_in_the_user_s_code_does_not_break_the_next_plot() {
+    let Some(mut s) = session() else { return };
+    let (a, _) = plots_of(&mut s, "plot(1:3)\ndev.off()");
+    let _ = a;
+    let (b, status) = plots_of(&mut s, "plot(3:1)");
+    assert_eq!(status, RunStatus::Ok);
+    assert_eq!(b.len(), 1, "{b:?}");
+    assert!(is_png(&b[0]));
+}
+
+#[test]
+fn a_file_device_the_user_opens_is_left_alone() {
+    let Some(mut s) = session() else { return };
+    let dir = std::env::temp_dir().join(format!("rcraft-userplot-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let file = dir.join("mine.png").to_string_lossy().replace('\\', "/");
+    let (plots, status) = plots_of(&mut s, &format!("png('{file}')\nplot(1:3)\ndev.off()"));
+    assert_eq!(status, RunStatus::Ok);
+    assert!(plots.is_empty(), "the user chose a file: {plots:?}");
+    assert!(std::path::Path::new(&file).is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+}

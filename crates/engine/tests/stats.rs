@@ -55,6 +55,7 @@ fn run(e: &mut Engine, source: Source, code: &str) -> (Outcome, String) {
                     Item::Warning(w) => format!("warning: {w}"),
                     Item::Error { message, .. } => format!("error: {message}"),
                     Item::Notice(n) => n.clone(),
+                    Item::Plot { .. } => String::new(),
                 })
                 .collect::<Vec<_>>()
                 .join("")

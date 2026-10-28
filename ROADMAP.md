@@ -308,7 +308,10 @@ skipped. It never gives a silent wrong answer.
 
 ## Phase 5: Graphs
 
-- P5.1 Graph window: capture R devices, history of plots, zoom
+- P5.1 Graph window: capture R devices, history of plots, zoom (done: plots are captured as
+  PNG snapshots from one live device that stays open between commands, so a later command can
+  add to a plot; a Graph tab with older and newer, the command that drew each, fitted to the
+  pane, and Save as PNG. Still to do: zoom, and copy to the clipboard)
 - P5.2 ggplot2 builder: pick data, geoms and aesthetics; facets and themes
 - P5.3 Plot menus: histogram, density, box, bar, scatter with fit, line,
   heatmap, QQ, diagnostics, survival curves

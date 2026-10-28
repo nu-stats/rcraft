@@ -175,3 +175,30 @@ fn the_log_can_follow_into_a_file() {
     assert!(text.contains("after"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_plot_is_a_result_item_a_log_note_and_a_file_that_outlives_the_command() {
+    let Some(mut e) = engine() else { return };
+    let id = run(&mut e, "plot(1:5, main = 'five')");
+    let plots: Vec<std::path::PathBuf> = e
+        .results()
+        .blocks()
+        .iter()
+        .filter(|b| b.command == id)
+        .flat_map(|b| b.items.iter())
+        .filter_map(|i| match i {
+            Item::Plot { path } => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(plots.len(), 1, "{plots:?}");
+    assert!(plots[0].is_file());
+    assert!(
+        e.log_text().contains("a plot was drawn"),
+        "{}",
+        e.log_text()
+    );
+    // a later command that draws nothing leaves the earlier file in place
+    let _ = run(&mut e, "x <- 1");
+    assert!(plots[0].is_file());
+}

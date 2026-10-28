@@ -146,6 +146,8 @@ impl Shown {
                 Item::Error { message, call } if call.is_empty() => println!("Error: {message}"),
                 Item::Error { message, call } => println!("Error in {call} : {message}"),
                 Item::Notice(note) => println!("({note})"),
+                // a terminal cannot show it; say where the picture is
+                Item::Plot { path } => println!("(a plot was drawn: {})", path.display()),
             }
             self.items += 1;
             self.partial = 0;

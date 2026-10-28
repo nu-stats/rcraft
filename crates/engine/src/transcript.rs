@@ -85,6 +85,8 @@ impl Transcript {
             Item::Error { message, call } if call.is_empty() => format!("Error: {message}\n"),
             Item::Error { message, call } => format!("Error in {call} : {message}\n"),
             Item::Notice(note) => format!("({note})\n"),
+            // a picture has no text; the log says one was drawn
+            Item::Plot { .. } => "(a plot was drawn; see the Graph tab)\n".to_string(),
         };
         self.append(&text);
     }

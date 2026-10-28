@@ -14,6 +14,46 @@ local({
   token <- commandArgs(trailingOnly = TRUE)[[1L]]
   con <- file("stdin", "rb")
 
+  # Plots: when RCraft names a folder, the graphics the user's code draws go to
+  # one device that stays open between commands (so a plot can be added to by
+  # the next command, as in any R console). A snapshot of the page is written
+  # as <run id>-001.png, <run id>-002.png, ... when a command ends with the
+  # page changed, and just before a new page replaces it.
+  plot_dir <- Sys.getenv("RCRAFT_PLOT_DIR")
+  live_dev <- NA_integer_
+  last_dl <- NULL
+  cur_run <- ""
+  page_no <- 0L
+  snap <- function() {
+    if (is.na(live_dev) || !identical(unname(grDevices::dev.cur()), live_dev)) {
+      return(invisible())
+    }
+    dl <- tryCatch(grDevices::recordPlot()[[1L]], error = function(e) NULL)
+    if (is.null(dl) || length(dl) == 0L || identical(dl, last_dl)) return(invisible())
+    page_no <<- page_no + 1L
+    file <- file.path(plot_dir, sprintf("%s-%03d.png", cur_run, page_no))
+    try(
+      {
+        grDevices::dev.copy(grDevices::png, file, width = 1000, height = 700, res = 120)
+        grDevices::dev.off()
+        grDevices::dev.set(live_dev)
+      },
+      silent = TRUE
+    )
+    last_dl <<- dl
+    invisible()
+  }
+  if (nzchar(plot_dir)) {
+    options(device = function(...) {
+      grDevices::png(file.path(plot_dir, "live-%04d.png"), width = 1000, height = 700, res = 120)
+      grDevices::dev.control("enable")
+      live_dev <<- unname(grDevices::dev.cur())
+      last_dl <<- NULL
+    })
+    setHook("before.plot.new", function(...) snap())
+    setHook("before.grid.newpage", function(...) snap())
+  }
+
   # closeAllConnections() in the user's code closes `con` too, and R may give
   # its number to a newer connection, so the id is compared as well
   con_ok <- function() {
@@ -67,6 +107,8 @@ local({
     # Sys.sleep() looks for interrupts, so a stale one is taken here
     tryCatch(allowInterrupts(Sys.sleep(0)), interrupt = function(i) NULL)
     emit("BEGIN", id)
+    cur_run <<- id
+    page_no <<- 0L
     status <- "ok"
     tryCatch(
       withCallingHandlers(
@@ -101,6 +143,7 @@ local({
         emit("ERROR", id, esc(conditionMessage(e)), esc(text))
       }
     )
+    if (nzchar(plot_dir)) try(snap(), silent = TRUE)
     end_sinks(id)
     flush(stdout())
     # tell the reader of standard error that everything for this run is written

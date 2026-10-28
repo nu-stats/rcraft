@@ -22,6 +22,10 @@ pub enum Item {
     },
     /// RCraft's own notes: output cut off, a limit reached, R stopped.
     Notice(String),
+    /// A graphics page the command drew, as a PNG file kept for the session.
+    Plot {
+        path: std::path::PathBuf,
+    },
 }
 
 impl Item {
@@ -30,6 +34,8 @@ impl Item {
             Item::Text { text, .. } => text.len(),
             Item::Warning(s) | Item::Notice(s) => s.len(),
             Item::Error { message, call } => message.len() + call.len(),
+            // the picture is a file on disk, not text held here
+            Item::Plot { path } => path.as_os_str().len(),
         }
     }
 }

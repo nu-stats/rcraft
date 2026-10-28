@@ -601,6 +601,41 @@ machine, so it has only run in CI (which now installs both).
   threads), so the glm tests now ignore that line. It made the logistic and ordinal tests fail on
   Ubuntu in one run and pass in others.
 
+## P5.1 Graph capture and the Graph tab, 2026-10-27
+
+How plots reach RCraft (this changes `rproto/bootstrap.R`, so it wants the same review as the rest
+of the session protocol):
+
+- The session creates a plot folder inside its own temp folder and names it to R in the
+  environment variable `RCRAFT_PLOT_DIR`. R's default graphics device becomes one `png()` device
+  with its display list enabled, **kept open between commands**, so `plot()` in one command and
+  `abline()` in the next work as in any R console. (The first version closed the device at the end
+  of each command and broke exactly that; a picture of the window showed it, and the design was
+  changed before any more was built on it.)
+- A snapshot of the page is written, with `recordPlot()` and `dev.copy()`, as `<run id>-001.png`,
+  `<run id>-002.png`, ... when a command ends with the page changed (compared with the last
+  snapshot's display list), and just before a new page replaces it (hooks `before.plot.new` and
+  `before.grid.newpage`, so base graphics and grid/ggplot2 are both covered). One page drawn on over
+  two commands gives two snapshots, the second including the added line.
+- `rhost::Session` sends `Event::Plot { run, path }` for each snapshot just before `Finished`, and
+  removes the folder with the session. The engine keeps them as `Item::Plot` in the Results (so
+  the history is the Results), the log says "(a plot was drawn; see the Graph tab)", and the
+  terminal console prints the file's path.
+- A device the user opens themselves (`png("x.png")`) is left alone and not captured; `dev.off()`
+  in the user's code closes the live device, and the next plot opens a new one.
+- The Graph tab (`ui-egui/src/graph_view.rs`): older and newer, "Plot 2 of 3", the command that
+  drew it, the picture fitted to the pane (never enlarged), Save as PNG (copies the file). It opens
+  by itself when a new plot arrives and then follows the newest. PNG decoding uses the `image`
+  crate (png feature only), already in the dependency tree through eframe.
+- Tests: 9 new host tests against real R (one plot, three pages in order, no plot, runs not sharing
+  plots, a plot before an error, a run stopped midway, folder removed with the session, a plot
+  added to by the next command, the user closing or opening their own device), an engine test, an
+  app test for the tab switching, and unit tests for loading and fitting. A picture of the window
+  was rendered and looked at.
+- Not done: zoom, copy to the clipboard, the plot dialogs of P5.3, the ggplot2 builder (P5.2).
+  CI on Linux and macOS is the first run of the png device there; if a runner has no graphics
+  capability for `png()` the tests will say so.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

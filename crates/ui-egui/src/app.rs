@@ -11,6 +11,7 @@ use rcraft_rhost::recent::Recent;
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
 
 use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
+use crate::graph_view::GraphView;
 use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 use crate::spec_dialog::{self, SpecAction, SpecDialog};
@@ -20,6 +21,7 @@ use crate::spec_dialog::{self, SpecAction, SpecDialog};
 enum View {
     Results,
     Data,
+    Graph,
 }
 
 /// What the left pane's top half lists.
@@ -81,6 +83,8 @@ pub struct App {
     needs_restart: bool,
     message: Option<String>,
     view: View,
+    /// The Graph tab: plots R has drawn, and which one is shown.
+    graph: GraphView,
     /// The data frame shown in Variables and Data.
     dataset: Option<String>,
     /// Sideways scroll of the Data grid, handed to its header.
@@ -119,6 +123,7 @@ impl App {
             needs_restart: false,
             message: None,
             view: View::Results,
+            graph: GraphView::default(),
             dataset: None,
             grid_x: 0.0,
             label_view: LabelView::default(),
@@ -413,6 +418,13 @@ impl App {
                 ));
             }
             None => {}
+        }
+
+        // a plot that has just been drawn is shown in the Graph tab
+        if let EngineState::Ready(engine) = &self.engine {
+            if self.graph.note_new(engine) {
+                self.view = View::Graph;
+            }
         }
 
         // a catalog dialog sees the data frame's columns as they are now
@@ -764,7 +776,11 @@ impl App {
 
     fn results_pane(&mut self, ui: &mut egui::Ui, pal: &Palette, out: &mut Vec<Action>) {
         ui.horizontal(|ui| {
-            for (view, label) in [(View::Results, "Results"), (View::Data, "Data")] {
+            for (view, label) in [
+                (View::Results, "Results"),
+                (View::Data, "Data"),
+                (View::Graph, "Graph"),
+            ] {
                 let chosen = self.view == view;
                 let text = RichText::new(label).strong();
                 let text = if chosen {
@@ -795,6 +811,15 @@ impl App {
         });
         if self.view == View::Data {
             self.data_pane(ui, pal);
+            return;
+        }
+        if self.view == View::Graph {
+            match &self.engine {
+                EngineState::Ready(engine) => self.graph.show(ui, pal, engine),
+                _ => {
+                    ui.label(RichText::new("R is not running.").color(pal.dim));
+                }
+            }
             return;
         }
         egui::ScrollArea::both()
@@ -981,6 +1006,13 @@ fn results_list(ui: &mut egui::Ui, pal: &Palette, engine: &Engine) {
                 }
                 Item::Notice(note) => {
                     ui.label(RichText::new(format!("({note})")).italics().color(pal.dim));
+                }
+                Item::Plot { .. } => {
+                    ui.label(
+                        RichText::new("(a plot was drawn; see the Graph tab)")
+                            .italics()
+                            .color(pal.dim),
+                    );
                 }
             }
         }
@@ -1441,6 +1473,32 @@ mod tests {
                 "Statistics > Descriptives > Correlation".into()
             ))
         );
+    }
+
+    #[test]
+    fn a_new_plot_opens_the_graph_tab_and_keeps_following_the_newest() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        assert_eq!(app.view, View::Results);
+        app.perform(&ctx, Action::Submit(Source::Typed, "plot(1:5)".into()));
+        assert!(frames_until(&mut app, &ctx, |a| a.view == View::Graph));
+        let count = |a: &App| a.engine().map_or(0, |e| crate::graph_view::plots(e).len());
+        assert_eq!(count(&app), 1);
+        assert_eq!(app.graph.shown(), None, "the newest is followed");
+        // the user goes back to Results; a command that draws nothing leaves them there
+        app.perform(&ctx, Action::SetView(View::Results));
+        app.perform(&ctx, Action::Submit(Source::Typed, "x <- 1".into()));
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        assert_eq!(app.view, View::Results);
+        // the next plot brings the Graph tab back, with the added line in a new snapshot
+        app.perform(&ctx, Action::Submit(Source::Typed, "abline(h = 3)".into()));
+        assert!(frames_until(&mut app, &ctx, |a| a.view == View::Graph));
+        assert_eq!(count(&app), 2);
     }
 
     #[test]
