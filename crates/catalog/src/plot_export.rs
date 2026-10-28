@@ -219,23 +219,24 @@ fn export_code(a: &Args, _: Style) -> String {
             a.number("dpi")
         ),
     };
-    let cairo_check = if a.choice("format") == "svg" {
-        format!(
-            "  if (!isTRUE(capabilities(\"cairo\"))) stop({})\n",
-            r_string(
-                "SVG needs R's cairo graphics, which this R cannot load. On a Mac this usually \
-                 means XQuartz is not installed (xquartz.org). PNG and PDF still work"
-            )
-        )
+    // a device that cannot open (svg() on a Mac without XQuartz only warns, and
+    // capabilities("cairo") still says TRUE) leaves the device as it was: say so,
+    // and never close the device that was current before (the Graph tab's own)
+    let no_device = if a.choice("format") == "svg" {
+        "SVG needs R's cairo graphics, which this R cannot load. On a Mac this usually \
+         means XQuartz is not installed (xquartz.org). PNG and PDF still work"
     } else {
-        String::new()
+        "R could not open the file to draw in; check that the folder exists and can be written to"
     };
     format!(
         "{guard}local({{\n  plots <- getOption(\"rcraft.plots\")\n  rec <- {lookup}\n  \
-         if (is.null(rec)) stop({})\n{cairo_check}  {device}\n  on.exit(grDevices::dev.off())\n  \
+         if (is.null(rec)) stop({})\n  before <- grDevices::dev.cur()\n  {device}\n  \
+         if (grDevices::dev.cur() == before) stop({})\n  opened <- grDevices::dev.cur()\n  \
+         on.exit(grDevices::dev.off(opened))\n  \
          grDevices::replayPlot(rec)\n}})\n\
          if (!isTRUE(file.size({path}) > 0)) stop({})",
         r_string("that plot is no longer kept; draw it again, then export it"),
+        r_string(no_device),
         r_string("R wrote no file; check that the folder exists and can be written to")
     )
 }
@@ -294,10 +295,11 @@ mod tests {
             "{c}"
         );
         assert!(c.ends_with("can be written to\")"), "{c}");
-        assert!(
-            !c.contains("capabilities(\"cairo\")"),
-            "only SVG needs cairo: {c}"
-        );
+        assert!(!c.contains("XQuartz"), "only SVG needs cairo: {c}");
+        // only the device opened here is closed, never the one that was current
+        assert!(c.contains("before <- grDevices::dev.cur()"), "{c}");
+        assert!(c.contains("if (grDevices::dev.cur() == before) stop("), "{c}");
+        assert!(c.contains("on.exit(grDevices::dev.off(opened))"), "{c}");
         assert!(!c.contains("file.exists"), "{c}");
     }
 
@@ -306,7 +308,7 @@ mod tests {
         let svg = code(&[("file", "a.svg"), ("format", "svg")], true).unwrap_or_default();
         assert!(
             svg.contains("grDevices::svg(\"a.svg\", width = 7, height = 5)")
-                && svg.contains("capabilities(\"cairo\")"),
+                && svg.contains("XQuartz"),
             "{svg}"
         );
         let pdf = code(

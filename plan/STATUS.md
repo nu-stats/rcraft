@@ -1217,3 +1217,10 @@ package's own name.
 Limits, also in `plan/providers.md`: GitHub packages in a subfolder; annotation and experiment-data
 packages of Bioconductor are not in the search (BiocManager still installs them by name); lookups are
 kept in memory, not cached; package lists record these packages as `other`.
+- Second macOS run (2026-10-28): `capabilities("cairo")` says TRUE on the runner even though
+  `svg()` cannot load cairo there, so that check never fired; the file-size check caught it with
+  the generic message. The export now notes the current device, stops with the XQuartz message
+  when the SVG device did not open, and closes only the device it opened. Before, a device that
+  failed to open meant `dev.off()` closed the Graph tab's own capture device. A test checks that a
+  failed export leaves the Graph tab drawing, and the tests probe SVG by drawing one, not by asking
+  `capabilities()`.

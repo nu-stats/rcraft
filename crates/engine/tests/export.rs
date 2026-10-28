@@ -111,9 +111,17 @@ fn export(e: &mut Engine, set: &[(&str, &str)], replace: bool) -> (Outcome, Vec<
     )
 }
 
-/// Whether this R can load cairo, which SVG needs (a Mac without XQuartz cannot).
+/// Whether this R can really draw an SVG (a Mac without XQuartz cannot, though
+/// `capabilities("cairo")` says it can): tried on a scratch file, leaving the
+/// current device alone.
 fn has_cairo(e: &mut Engine) -> bool {
-    let (_, _, text) = run(e, Source::Typed, "cat(isTRUE(capabilities('cairo')))");
+    let (_, _, text) = run(
+        e,
+        Source::Typed,
+        "local({ f <- tempfile(fileext = '.svg'); b <- grDevices::dev.cur(); \
+         suppressWarnings(try(grDevices::svg(f), silent = TRUE)); \
+         if (grDevices::dev.cur() != b) grDevices::dev.off(); cat(isTRUE(file.size(f) > 0)) })",
+    );
     text.trim() == "TRUE"
 }
 
@@ -381,33 +389,32 @@ fn only_the_newest_thirty_plots_are_kept() {
 }
 
 #[test]
-fn svg_without_cairo_says_so_and_writes_nothing() {
+fn a_failed_export_leaves_the_graph_tab_drawing() {
     let Some(mut e) = engine() else { return };
-    let dir = Folder::new("nocairo");
+    let dir = Folder::new("keepdevice");
     run(&mut e, Source::Typed, "plot(1:10)");
-    // an R that cannot load cairo: a stand-in for `capabilities()` in the workspace says so
-    run(
-        &mut e,
-        Source::Typed,
-        "capabilities <- function(what = NULL) c(cairo = FALSE)",
-    );
+    // a folder that is not there: the file device cannot open
     let (o, _, text) = export(
         &mut e,
-        &[("file", &dir.file("x.svg")), ("format", "svg")],
+        &[("file", &dir.file("nowhere/x.pdf")), ("format", "pdf")],
         false,
     );
     assert_eq!(o, Outcome::Error, "{text}");
-    assert!(text.contains("cairo") && text.contains("XQuartz"), "{text}");
-    assert!(dir.bytes("x.svg").is_empty());
-    // PNG does not need cairo and still works
-    let (o, _, text) = export(
-        &mut e,
-        &[("file", &dir.file("x.png")), ("format", "png")],
-        false,
-    );
-    assert_eq!(o, Outcome::Ok, "{text}");
-    assert!(!dir.bytes("x.png").is_empty());
-    run(&mut e, Source::Typed, "rm(capabilities)");
+    // the device the Graph tab draws on was not closed: the next plot still arrives
+    let (o, drawn, text) = run(&mut e, Source::Typed, "plot(1:3)");
+    assert_eq!((o, drawn.len()), (Outcome::Ok, 1), "{text}");
+    // and SVG, where this R cannot draw it, says why and writes nothing
+    if !has_cairo(&mut e) {
+        let (o, _, text) = export(
+            &mut e,
+            &[("file", &dir.file("x.svg")), ("format", "svg")],
+            false,
+        );
+        assert_eq!(o, Outcome::Error, "{text}");
+        assert!(text.contains("XQuartz"), "{text}");
+        let (o, drawn, _) = run(&mut e, Source::Typed, "plot(1:4)");
+        assert_eq!((o, drawn.len()), (Outcome::Ok, 1));
+    }
 }
 
 #[test]
