@@ -327,7 +327,10 @@ skipped. It never gives a silent wrong answer.
   scatter plot matrix, each run against real R and required to draw exactly one picture; and a
   four-panel diagnostic plot for a fitted model in the Objects pane's Model menu. Still to do:
   heatmap and survival curves)
-- P5.4 Export: SVG, PDF, PNG at chosen size and dpi
+- P5.4 Export: SVG, PDF, PNG at chosen size and dpi (done: Graphs > Export plot, and an Export button
+  on the Graph tab, draw a captured plot again on a PNG, SVG or PDF file of the size given in
+  inches, centimetres or pixels, at a chosen resolution; R keeps the newest 30 plots of a session
+  for it, an older one says so. P5.4 is done)
 
 ## Phase 6: Depth modules
 

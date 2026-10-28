@@ -59,6 +59,8 @@ enum Action {
     OpenSpec(&'static Spec),
     /// Open one of the Objects pane's dialogs on this object.
     OpenObjectSpec(&'static Spec, String),
+    /// Open Export plot on this plot (its file name; empty: the newest).
+    OpenPlotExport(String),
     SetView(View),
     SetSideTab(SideTab),
     SetTypeFilter(TypeFilter),
@@ -330,6 +332,18 @@ impl App {
                         columns: Vec::new(),
                     },
                 );
+            }
+            Action::OpenPlotExport(plot) => {
+                // a plot needs no data frame, so the dialog has no columns
+                self.spec_dialog.open(
+                    &rcraft_catalog::plot_export::EXPORT_PLOT,
+                    rcraft_rcodegen::dialog::Context {
+                        dataset: "(plot)".into(),
+                        frames: Vec::new(),
+                        columns: Vec::new(),
+                    },
+                );
+                self.spec_dialog.set_text("plot", &plot);
             }
             Action::ShowWhenListed(name) => self.show_when_listed = Some(name),
             Action::Interrupt => {
@@ -607,6 +621,18 @@ impl App {
                     .as_deref()
                     .is_some_and(|name| self.engine().is_some_and(|e| e.table(name).is_some()));
                 spec_menu(ui, has_data, rcraft_catalog::graphs::SPECS, out);
+                ui.separator();
+                let has_plot = self
+                    .engine()
+                    .is_some_and(|e| !crate::graph_view::plots(e).is_empty());
+                if ui
+                    .add_enabled(has_plot, egui::Button::new("Export plot…"))
+                    .on_disabled_hover_text("Draw a plot first")
+                    .clicked()
+                {
+                    out.push(Action::OpenPlotExport(String::new()));
+                    ui.close_menu();
+                }
             });
             ui.menu_button("Packages", |ui| {
                 ui.add_enabled(false, egui::Button::new("Coming in a later phase"));
@@ -873,7 +899,11 @@ impl App {
         }
         if self.view == View::Graph {
             match &self.engine {
-                EngineState::Ready(engine) => self.graph.show(ui, pal, engine),
+                EngineState::Ready(engine) => {
+                    if let Some(plot) = self.graph.show(ui, pal, engine) {
+                        out.push(Action::OpenPlotExport(plot));
+                    }
+                }
                 _ => {
                     ui.label(RichText::new("R is not running.").color(pal.dim));
                 }
@@ -1228,9 +1258,13 @@ impl App {
             .chain(rcraft_catalog::graphs::SPECS)
             .chain(rcraft_catalog::postest::MODEL_SPECS)
             .chain(rcraft_catalog::save::SPECS)
+            .chain(rcraft_catalog::plot_export::PLOT_SPECS)
             .find(|s| s.entry.eq_ignore_ascii_case(entry))
             .ok_or_else(|| format!("no dialog called {entry}"))?;
-        if rcraft_catalog::data::is_object_menu(spec.menu) {
+        if spec.entry == rcraft_catalog::plot_export::EXPORT_PLOT.entry {
+            // a plot needs no data frame
+            self.perform(ctx, Action::OpenPlotExport(String::new()));
+        } else if rcraft_catalog::data::is_object_menu(spec.menu) {
             // the Objects pane's dialogs work on the object shown in Variables
             let name = self
                 .dataset
@@ -1559,6 +1593,40 @@ mod tests {
         app.perform(&ctx, Action::Submit(Source::Typed, "abline(h = 3)".into()));
         assert!(frames_until(&mut app, &ctx, |a| a.view == View::Graph));
         assert_eq!(count(&app), 2);
+    }
+
+    #[test]
+    fn export_plot_opens_without_a_data_frame_on_the_plot_shown() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        // no data frame is open, and a plot is all the dialog needs
+        app.perform(&ctx, Action::Submit(Source::Typed, "plot(1:5)".into()));
+        assert!(frames_until(&mut app, &ctx, |a| a.view == View::Graph));
+        let name = app
+            .engine()
+            .and_then(|e| crate::graph_view::plots(e).pop())
+            .and_then(|p| p.path.file_name().map(|n| n.to_string_lossy().into_owned()))
+            .unwrap_or_default();
+        assert!(name.ends_with(".png"), "{name}");
+        app.perform(&ctx, Action::OpenPlotExport(name.clone()));
+        assert_eq!(app.spec_dialog.dataset(), Some("(plot)"));
+        app.spec_dialog.set_text("file", "out/p.svg");
+        app.spec_dialog.set_text("format", "svg");
+        let code = app
+            .spec_dialog
+            .code()
+            .and_then(Result::ok)
+            .unwrap_or_default();
+        assert!(code.contains(&format!("plots[[\"{name}\"]]")), "{code}");
+        assert!(code.contains("grDevices::svg(\"out/p.svg\""), "{code}");
+        // the scripted route opens the same dialog, on the newest plot
+        assert!(app.open_dialog(&ctx, "Export plot", &[]).is_ok());
+        assert_eq!(app.spec_dialog.dataset(), Some("(plot)"));
     }
 
     #[test]

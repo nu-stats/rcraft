@@ -25,6 +25,7 @@ local({
   cur_run <- ""
   page_started <- FALSE
   page_no <- 0L
+  keep_plots <- 30L
   # what a page shows: its recorded drawing calls, without par() settings, which
   # change the record but not the picture
   drawing <- function(dl) {
@@ -36,10 +37,17 @@ local({
     if (!page_started || is.na(live_dev) || !identical(unname(grDevices::dev.cur()), live_dev)) {
       return(invisible())
     }
-    dl <- tryCatch(drawing(grDevices::recordPlot()[[1L]]), error = function(e) NULL)
+    rec <- tryCatch(grDevices::recordPlot(), error = function(e) NULL)
+    dl <- if (is.null(rec)) NULL else drawing(rec[[1L]])
     if (is.null(dl) || length(dl) == 0L || identical(dl, last_dl)) return(invisible())
     page_no <<- page_no + 1L
     file <- file.path(plot_dir, sprintf("%s-%03d.png", cur_run, page_no))
+    # the recording is kept, under the snapshot's file name, so the plot can be
+    # drawn again on a file device of any size (Graphs > Export plot); the
+    # newest few only, as a recording can hold the data it plots
+    kept <- c(getOption("rcraft.plots"), stats::setNames(list(rec), basename(file)))
+    if (length(kept) > keep_plots) kept <- kept[seq.int(length(kept) - keep_plots + 1L, length(kept))]
+    options(rcraft.plots = kept)
     try(
       {
         grDevices::dev.copy(grDevices::png, file, width = 1000, height = 700, res = 120)

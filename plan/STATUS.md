@@ -780,3 +780,32 @@ installs `writexl`. This machine now has every package CI installs, from the
 2025-03-15 snapshot (added 2026-10-28: dplyr, readxl, writexl, haven, arrow,
 sandwich, lmtest, marginaleffects), so `cargo xtask ci` runs all 369 tests here
 with none skipped for a missing package.
+
+## P5.4 Export plot, 2026-10-28
+
+**Graphs > Export plot** (`catalog::plot_export`), also the **Export…** button on
+the Graph tab (it opens the dialog on the plot being shown). A plot is drawn
+again on a `png()`, `svg()` or `pdf()` file device of the size asked for, so the
+file is sharp at that size rather than the screen picture scaled. Size in inches,
+centimetres or pixels (pixels are turned into inches with the resolution, for
+SVG and PDF); resolution 36 to 1200 dpi; a PNG is at most 20,000 pixels on a
+side, any file at most 100 inches; the file name must end in the format's
+ending; a file is never written over unless **Replace** is ticked.
+
+How it works (this changes `rproto/bootstrap.R`, so it wants the same review as
+the rest of the session protocol): when `snap()` captures a page it now keeps the
+`recordPlot()` under the snapshot's file name in `options("rcraft.plots")`, the
+newest 30 only (a recording can hold the data it plots). The dialog's code looks
+the recording up, opens the file device and `replayPlot()`s it; a name R no
+longer has stops with "that plot is no longer kept". The option is not an object
+in the workspace, so `ls()` and *Save workspace* do not see it.
+
+`engine/tests/export.rs` runs it in real R: PNG sizes checked from the file's own
+header (2100x1500 at 7x5 in and 300 dpi; centimetres; exactly 800x600 pixels), SVG
+`width="504"`/`viewBox` and PDF `/MediaBox [0 0 504 360]` for 7x5 in and
+`[0 0 595 841]` for A4, the newest plot, a plot by name, one that is gone, the
+overwrite guard, a grid plot, plotting going on after an export, and the cap of 30.
+Not done: viewing the dialog and the Export button in a rendered picture of the
+window (the logic and the app test pass; how it looks has not been checked).
+Limits: a recording replays on a differently sized device, which is right for
+base and grid graphics, but a plot that fixes its own size in pixels may not scale.

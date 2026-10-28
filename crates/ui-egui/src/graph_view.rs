@@ -82,7 +82,10 @@ impl GraphView {
         self.index
     }
 
-    pub fn show(&mut self, ui: &mut egui::Ui, pal: &Palette, engine: &Engine) {
+    /// Draws the tab. Returns the file name of the plot shown when Export was
+    /// pressed: R knows its plots by those names (`options("rcraft.plots")`).
+    pub fn show(&mut self, ui: &mut egui::Ui, pal: &Palette, engine: &Engine) -> Option<String> {
+        let mut export = None;
         let all = plots(engine);
         let Some(last) = all.len().checked_sub(1) else {
             ui.label(
@@ -92,12 +95,10 @@ impl GraphView {
                 )
                 .color(pal.dim),
             );
-            return;
+            return None;
         };
         let at = self.index.unwrap_or(last).min(last);
-        let Some(current) = all.get(at) else {
-            return;
-        };
+        let current = all.get(at)?;
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(at > 0, egui::Button::new("◀ Older"))
@@ -115,6 +116,16 @@ impl GraphView {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("Save as PNG…").clicked() {
                     self.save(&current.path);
+                }
+                if ui
+                    .button("Export…")
+                    .on_hover_text("PNG, SVG or PDF at a size and resolution you choose")
+                    .clicked()
+                {
+                    export = current
+                        .path
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned());
                 }
             });
         });
@@ -144,7 +155,7 @@ impl GraphView {
                 }
                 Err(why) => {
                     ui.label(RichText::new(why).color(pal.error));
-                    return;
+                    return export;
                 }
             }
         }
@@ -160,6 +171,7 @@ impl GraphView {
                     ui.image((texture.id(), size * scale));
                 });
         }
+        export
     }
 
     /// Copies the plot file where the user chooses.

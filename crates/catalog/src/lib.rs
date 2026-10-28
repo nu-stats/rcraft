@@ -12,6 +12,7 @@ pub mod generalised;
 pub mod graphs;
 pub mod inference;
 pub mod models;
+pub mod plot_export;
 pub mod postest;
 pub mod save;
 pub mod stats;
@@ -164,6 +165,7 @@ pub const ENTRIES: &[Entry] = &[
     partial("Scatter plot", Area::Graphs),
     partial("Line plot", Area::Graphs),
     partial("Scatter plot matrix", Area::Graphs),
+    partial("Export plot", Area::Graphs),
     planned("Model table", Area::Reports),
     planned("Search packages", Area::Packages),
     planned("Browse task views", Area::Packages),

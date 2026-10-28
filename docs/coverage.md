@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 93 | 0 | 75 | 18 |
+| 94 | 0 | 76 | 18 |
 
 ## File
 
@@ -102,6 +102,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Scatter plot | partial |
 | Line plot | partial |
 | Scatter plot matrix | partial |
+| Export plot | partial |
 
 ## Reports
 
