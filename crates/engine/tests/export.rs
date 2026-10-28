@@ -111,6 +111,12 @@ fn export(e: &mut Engine, set: &[(&str, &str)], replace: bool) -> (Outcome, Vec<
     )
 }
 
+/// Whether this R can load cairo, which SVG needs (a Mac without XQuartz cannot).
+fn has_cairo(e: &mut Engine) -> bool {
+    let (_, _, text) = run(e, Source::Typed, "cat(isTRUE(capabilities('cairo')))");
+    text.trim() == "TRUE"
+}
+
 /// A PNG's width and height from its header.
 fn png_size(bytes: &[u8]) -> Option<(u32, u32)> {
     let be = |at: usize| -> Option<u32> {
@@ -173,16 +179,24 @@ fn a_plot_is_drawn_again_at_the_size_asked_for_in_each_format() {
         &[("file", &dir.file("a.svg")), ("format", "svg")],
         false,
     );
-    assert_eq!(o, Outcome::Ok, "{text}");
-    let svg = dir.bytes("a.svg");
-    assert!(
-        contains(&svg, "<svg"),
-        "not an SVG ({} bytes). R said: {text}",
-        svg.len()
-    );
-    // cairo writes `width="504"` or, in older versions, `width="504pt"`
-    assert!(contains(&svg, "width=\"504") && contains(&svg, "height=\"360"));
-    assert!(contains(&svg, "viewBox=\"0 0 504 360\""));
+    if has_cairo(&mut e) {
+        assert_eq!(o, Outcome::Ok, "{text}");
+        let svg = dir.bytes("a.svg");
+        assert!(
+            contains(&svg, "<svg"),
+            "not an SVG ({} bytes). R said: {text}",
+            svg.len()
+        );
+        // cairo writes `width="504"` or, in older versions, `width="504pt"`
+        assert!(contains(&svg, "width=\"504") && contains(&svg, "height=\"360"));
+        assert!(contains(&svg, "viewBox=\"0 0 504 360\""));
+    } else {
+        // R cannot load cairo (a Mac without XQuartz, such as the CI runner): SVG says so
+        // and writes nothing, rather than reporting success with an empty file
+        assert_eq!(o, Outcome::Error, "{text}");
+        assert!(text.contains("cairo") && text.contains("XQuartz"), "{text}");
+        assert!(dir.bytes("a.svg").is_empty());
+    }
     let (o, _, text) = export(
         &mut e,
         &[("file", &dir.file("a.pdf")), ("format", "pdf")],
@@ -226,55 +240,55 @@ fn the_newest_plot_a_named_one_and_one_that_is_gone() {
     };
     let newest = export(
         &mut e,
-        &[("file", &dir.file("newest.svg")), ("format", "svg")],
+        &[("file", &dir.file("newest.png")), ("format", "png")],
         false,
     );
     assert_eq!(newest.0, Outcome::Ok, "{}", newest.2);
     let by_name = export(
         &mut e,
         &[
-            ("file", &dir.file("first.svg")),
-            ("format", "svg"),
+            ("file", &dir.file("first.png")),
+            ("format", "png"),
             ("plot", &name(&second)),
         ],
         false,
     );
     assert_eq!(by_name.0, Outcome::Ok, "{}", by_name.2);
     assert_eq!(
-        dir.bytes("newest.svg"),
-        dir.bytes("first.svg"),
+        dir.bytes("newest.png"),
+        dir.bytes("first.png"),
         "empty means the newest"
     );
     let older = export(
         &mut e,
         &[
-            ("file", &dir.file("older.svg")),
-            ("format", "svg"),
+            ("file", &dir.file("older.png")),
+            ("format", "png"),
             ("plot", &name(&first)),
         ],
         false,
     );
     assert_eq!(older.0, Outcome::Ok, "{}", older.2);
     assert_ne!(
-        dir.bytes("older.svg"),
-        dir.bytes("newest.svg"),
+        dir.bytes("older.png"),
+        dir.bytes("newest.png"),
         "the older plot is a different picture ({} bytes). R said: {}",
-        dir.bytes("older.svg").len(),
+        dir.bytes("older.png").len(),
         older.2
     );
     // a name R does not have says so, and writes nothing
     let gone = export(
         &mut e,
         &[
-            ("file", &dir.file("gone.svg")),
-            ("format", "svg"),
+            ("file", &dir.file("gone.png")),
+            ("format", "png"),
             ("plot", "nope.png"),
         ],
         false,
     );
     assert_eq!(gone.0, Outcome::Error);
     assert!(gone.2.contains("no longer kept"), "{}", gone.2);
-    assert!(dir.bytes("gone.svg").is_empty());
+    assert!(dir.bytes("gone.png").is_empty());
 }
 
 #[test]
@@ -312,7 +326,11 @@ fn grid_plots_export_too_and_plotting_goes_on_afterwards() {
         "grid::grid.newpage(); grid::grid.rect(gp = grid::gpar(fill = 'tomato')); grid::grid.text('hello')",
     );
     assert_eq!((o, drawn.len()), (Outcome::Ok, 1), "{text}");
+    let cairo = has_cairo(&mut e);
     for format in ["png", "svg", "pdf"] {
+        if format == "svg" && !cairo {
+            continue;
+        }
         let r = export(
             &mut e,
             &[
@@ -360,4 +378,45 @@ fn only_the_newest_thirty_plots_are_kept() {
         &format!("stopifnot(is.null(getOption('rcraft.plots')[['{first_gone}']]))"),
     );
     assert_eq!(o, Outcome::Ok);
+}
+
+#[test]
+fn svg_without_cairo_says_so_and_writes_nothing() {
+    let Some(mut e) = engine() else { return };
+    let dir = Folder::new("nocairo");
+    run(&mut e, Source::Typed, "plot(1:10)");
+    // an R that cannot load cairo: a stand-in for `capabilities()` in the workspace says so
+    run(
+        &mut e,
+        Source::Typed,
+        "capabilities <- function(what = NULL) c(cairo = FALSE)",
+    );
+    let (o, _, text) = export(
+        &mut e,
+        &[("file", &dir.file("x.svg")), ("format", "svg")],
+        false,
+    );
+    assert_eq!(o, Outcome::Error, "{text}");
+    assert!(text.contains("cairo") && text.contains("XQuartz"), "{text}");
+    assert!(dir.bytes("x.svg").is_empty());
+    // PNG does not need cairo and still works
+    let (o, _, text) = export(
+        &mut e,
+        &[("file", &dir.file("x.png")), ("format", "png")],
+        false,
+    );
+    assert_eq!(o, Outcome::Ok, "{text}");
+    assert!(!dir.bytes("x.png").is_empty());
+    run(&mut e, Source::Typed, "rm(capabilities)");
+}
+
+#[test]
+fn a_device_that_writes_no_file_is_reported_not_called_success() {
+    let Some(mut e) = engine() else { return };
+    let dir = Folder::new("nofile");
+    run(&mut e, Source::Typed, "plot(1:10)");
+    // a folder that does not exist: the device opens nothing and writes nothing
+    let missing = dir.file("no-such-folder/x.pdf");
+    let (o, _, text) = export(&mut e, &[("file", &missing), ("format", "pdf")], false);
+    assert_eq!(o, Outcome::Error, "{text}");
 }

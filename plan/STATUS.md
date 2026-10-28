@@ -1115,3 +1115,21 @@ Not done: the completion of installed names works only after the Packages window
 `rc` lines in the Script pane's Run are not intercepted (only the Command window and the demo
 runner); no `rc which` (which package a function comes from) form; a mistyped command word
 (`rc instal`) goes to R and fails there.
+
+## CI findings on the first pull request, 2026-10-28
+
+The first GitHub run of everything on `p3/join-keys-tidyverse` failed on all three systems.
+
+- Two were tests of mine: a Linux path in the saved-list test, and the unwritable-library test
+  that used `C:/Windows/System32` (a runner is an administrator, so it was writable). Fixed; Ubuntu
+  and Windows then passed.
+- macOS found a real bug in P5.4 (Export plot): **SVG export reported success and wrote an empty
+  file** on an R that cannot load cairo. The CRAN macOS build of R needs XQuartz's libraries
+  (`/opt/X11/lib/libXrender.1.dylib`) for `svg()`; where they are missing R only warns
+  ("failed to load cairo DLL") and the file is empty. Now the export code checks
+  `capabilities("cairo")` first for SVG and stops with "SVG needs R's cairo graphics, which this R
+  cannot load. On a Mac this usually means XQuartz is not installed (xquartz.org). PNG and PDF still
+  work", and every export checks that the file was written and is not empty. PNG and PDF are not
+  affected. The GitHub macOS runner has no XQuartz, so its tests now expect that message for SVG and
+  compare PNGs for the choice of plot.
+- Lesson kept: a graphics device that cannot open does not always raise an error; check the file.

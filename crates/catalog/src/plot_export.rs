@@ -219,11 +219,24 @@ fn export_code(a: &Args, _: Style) -> String {
             a.number("dpi")
         ),
     };
+    let cairo_check = if a.choice("format") == "svg" {
+        format!(
+            "  if (!isTRUE(capabilities(\"cairo\"))) stop({})\n",
+            r_string(
+                "SVG needs R's cairo graphics, which this R cannot load. On a Mac this usually \
+                 means XQuartz is not installed (xquartz.org). PNG and PDF still work"
+            )
+        )
+    } else {
+        String::new()
+    };
     format!(
         "{guard}local({{\n  plots <- getOption(\"rcraft.plots\")\n  rec <- {lookup}\n  \
-         if (is.null(rec)) stop({})\n  {device}\n  on.exit(grDevices::dev.off())\n  \
-         grDevices::replayPlot(rec)\n}})",
-        r_string("that plot is no longer kept; draw it again, then export it")
+         if (is.null(rec)) stop({})\n{cairo_check}  {device}\n  on.exit(grDevices::dev.off())\n  \
+         grDevices::replayPlot(rec)\n}})\n\
+         if (!isTRUE(file.size({path}) > 0)) stop({})",
+        r_string("that plot is no longer kept; draw it again, then export it"),
+        r_string("R wrote no file; check that the folder exists and can be written to")
     )
 }
 
@@ -274,7 +287,17 @@ mod tests {
             c.contains("rec <- if (length(plots)) plots[[length(plots)]]"),
             "{c}"
         );
-        assert!(c.ends_with("grDevices::replayPlot(rec)\n})"), "{c}");
+        assert!(
+            c.contains(
+                "grDevices::replayPlot(rec)\n})\nif (!isTRUE(file.size(\"C:/p/a.png\") > 0))"
+            ),
+            "{c}"
+        );
+        assert!(c.ends_with("can be written to\")"), "{c}");
+        assert!(
+            !c.contains("capabilities(\"cairo\")"),
+            "only SVG needs cairo: {c}"
+        );
         assert!(!c.contains("file.exists"), "{c}");
     }
 
@@ -282,7 +305,8 @@ mod tests {
     fn svg_and_pdf_get_inches_whatever_the_units() {
         let svg = code(&[("file", "a.svg"), ("format", "svg")], true).unwrap_or_default();
         assert!(
-            svg.contains("grDevices::svg(\"a.svg\", width = 7, height = 5)"),
+            svg.contains("grDevices::svg(\"a.svg\", width = 7, height = 5)")
+                && svg.contains("capabilities(\"cairo\")"),
             "{svg}"
         );
         let pdf = code(
