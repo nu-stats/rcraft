@@ -373,6 +373,24 @@ impl Index {
         self.packages.get(from..from + len).unwrap_or(&[])
     }
 
+    /// The packages published most recently, newest first (ties by name), at
+    /// most `limit`. Packages with no date are left out. CRAN's files do not say
+    /// when a package was first published, so there is no "new packages" list.
+    pub fn recently_published(&self, limit: usize) -> Vec<&Package> {
+        let mut dated: Vec<&Package> = self
+            .packages
+            .iter()
+            .filter(|p| !p.published.is_empty())
+            .collect();
+        dated.sort_by(|a, b| {
+            b.published
+                .cmp(&a.published)
+                .then_with(|| cmp_names(&a.name, &b.name))
+        });
+        dated.truncate(limit);
+        dated
+    }
+
     /// Seconds since this index was fetched, given the clock `now`.
     pub fn age(&self, now: u64) -> u64 {
         now.saturating_sub(self.fetched_at)
@@ -545,6 +563,30 @@ mod tests {
         assert!(ix.with_prefix("q").is_empty());
         assert_eq!(ix.with_prefix("").len(), 6);
         assert!(ix.with_prefix("zoooo").is_empty());
+    }
+
+    #[test]
+    fn the_newest_packages_come_first() {
+        let mut ps = sample().packages().to_vec();
+        for (p, d) in ps.iter_mut().zip([
+            "2025-01-05",
+            "2025-03-01",
+            "",
+            "2025-03-01",
+            "2024-12-31",
+            "2025-02-02",
+        ]) {
+            p.published = d.into();
+        }
+        let ix = Index::new(ps, 0, Detail::Full);
+        let names: Vec<&str> = ix
+            .recently_published(3)
+            .iter()
+            .map(|p| p.name.as_str())
+            .collect();
+        // aer and Rcpp share a date, so they go by name; fixest has no date
+        assert_eq!(names, vec!["aer", "Rcpp", "zoo"]);
+        assert_eq!(ix.recently_published(100).len(), 5);
     }
 
     #[test]

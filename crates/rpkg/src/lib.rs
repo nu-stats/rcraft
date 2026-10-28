@@ -21,6 +21,7 @@
 
 pub mod cache;
 pub mod dcf;
+pub mod describe;
 pub mod http;
 pub mod index;
 pub mod rds;
