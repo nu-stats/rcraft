@@ -132,6 +132,40 @@ pub fn installed_packages_code() -> &'static str {
      ifelse(is.na(ip[, \"Priority\"]), \"\", ip[, \"Priority\"]), sep = \"\\t\"), sep = \"\\n\") })"
 }
 
+/// R code that prints, one per line, where `name` can be found: the attached
+/// packages (and the global workspace) that hold an object of that name, then
+/// the namespaces that have one that is not attached (R's `getAnywhere`).
+pub fn where_code(name: &str) -> String {
+    let n = r_string(name);
+    format!(
+        "local({{ w <- unique(c(find({n}), getAnywhere({n})$where)); \
+         w <- sub('^namespace:', '', w); cat(w, sep = \"\n\") }})"
+    )
+}
+
+/// R code that prints the packages loaded in this session, one per line, and
+/// marks those on the search path (attached) with a tab and `attached`.
+pub fn loaded_packages_code() -> &'static str {
+    "local({ l <- sort(loadedNamespaces()); \
+     a <- sub('^package:', '', grep('^package:', search(), value = TRUE)); \
+     cat(paste0(l, ifelse(l %in% a, '\tattached', '')), sep = \"\n\") })"
+}
+
+/// Names of the loaded packages from [`loaded_packages_code`]'s output, with
+/// whether each is attached.
+pub fn parse_loaded(text: &str) -> Vec<(String, bool)> {
+    text.lines()
+        .filter_map(|l| {
+            let l = l.trim_end_matches('\r');
+            let (name, attached) = match l.split_once('\t') {
+                Some((n, a)) => (n, a == "attached"),
+                None => (l, false),
+            };
+            is_package_name(name).then(|| (name.to_string(), attached))
+        })
+        .collect()
+}
+
 /// A package R has installed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Installed {
@@ -269,5 +303,31 @@ mod tests {
         let c = installed_packages_code();
         assert!(c.contains("installed.packages()"));
         assert!(c.contains("LibPath") && c.contains("Priority"));
+    }
+}
+
+#[cfg(test)]
+mod where_tests {
+    use super::*;
+
+    #[test]
+    fn the_where_code_quotes_the_name() {
+        let c = where_code("a\"b");
+        assert!(c.contains("find(\"a\\\"b\")"), "{c}");
+        assert!(c.contains("getAnywhere"));
+    }
+
+    #[test]
+    fn the_loaded_list_is_read_with_attached_marks() {
+        let text = "base\tattached\r\ncompiler\nstats\tattached\nbad name\n";
+        assert_eq!(
+            parse_loaded(text),
+            vec![
+                ("base".to_string(), true),
+                ("compiler".to_string(), false),
+                ("stats".to_string(), true)
+            ]
+        );
+        assert!(loaded_packages_code().contains("loadedNamespaces()"));
     }
 }

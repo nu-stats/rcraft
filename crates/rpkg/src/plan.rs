@@ -436,3 +436,66 @@ mod tests {
         assert!(!pl.can_run());
     }
 }
+
+/// An installed package for which CRAN offers a newer version.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Update {
+    pub name: String,
+    pub installed: String,
+    pub available: String,
+}
+
+/// The installed packages (name to version) that CRAN has a newer version of,
+/// sorted by name. Packages CRAN does not list (those that come with R, or
+/// were installed from elsewhere) are left out.
+pub fn updates(index: &Index, installed: &HashMap<String, String>) -> Vec<Update> {
+    let mut out: Vec<Update> = installed
+        .iter()
+        .filter_map(|(name, have)| {
+            let p = index.get(name)?;
+            (compare_versions(&p.version, have) == Ordering::Greater).then(|| Update {
+                name: name.clone(),
+                installed: have.clone(),
+                available: p.version.clone(),
+            })
+        })
+        .collect();
+    out.sort_by_key(|u| u.name.to_lowercase());
+    out
+}
+
+#[cfg(test)]
+mod update_tests {
+    use super::*;
+    use crate::index::{Detail, Package};
+
+    #[test]
+    fn newer_versions_on_cran_are_found_and_unlisted_packages_skipped() {
+        let p = |n: &str, v: &str| Package {
+            name: n.into(),
+            version: v.into(),
+            ..Package::default()
+        };
+        let ix = Index::new(
+            vec![p("a", "1.10"), p("b", "2.0"), p("C", "0.5")],
+            0,
+            Detail::Full,
+        );
+        let have: HashMap<String, String> = [
+            ("a", "1.9"),
+            ("b", "2.0"),
+            ("C", "0.4"),
+            ("stats", "4.4.3"),
+            ("local", "9"),
+        ]
+        .iter()
+        .map(|(n, v)| ((*n).to_string(), (*v).to_string()))
+        .collect();
+        let u = updates(&ix, &have);
+        let got: Vec<(&str, &str, &str)> = u
+            .iter()
+            .map(|u| (u.name.as_str(), u.installed.as_str(), u.available.as_str()))
+            .collect();
+        assert_eq!(got, vec![("a", "1.9", "1.10"), ("C", "0.4", "0.5")]);
+    }
+}

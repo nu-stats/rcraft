@@ -207,3 +207,23 @@ fn installing_a_name_the_repository_lacks_fails_in_r_with_its_message() {
     );
     assert_eq!(n.trim(), "0");
 }
+
+#[test]
+fn where_a_function_comes_from_and_what_is_loaded_are_read_from_r() {
+    use rcraft_rcodegen::packages::{loaded_packages_code, parse_loaded, where_code};
+    let Some(mut e) = engine() else { return };
+    let w = ask(&mut e, &where_code("median"));
+    assert!(
+        w.lines()
+            .any(|l| l.trim() == "package:stats" || l.trim() == "stats"),
+        "{w:?}"
+    );
+    // a name nothing holds prints nothing, and does not fail
+    assert_eq!(
+        ask(&mut e, &where_code("rcraft_no_such_function")).trim(),
+        ""
+    );
+    let loaded = parse_loaded(&ask(&mut e, loaded_packages_code()));
+    assert!(loaded.contains(&("stats".to_string(), true)), "{loaded:?}");
+    assert!(loaded.iter().any(|(n, _)| n == "methods"), "{loaded:?}");
+}
