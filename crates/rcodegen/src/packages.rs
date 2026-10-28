@@ -133,6 +133,30 @@ pub fn install_version_code(
     ))
 }
 
+/// R code that installs the packages of a saved list: the older versions one by
+/// one from CRAN's archive first, then the rest in one call at CRAN's current
+/// versions (R installs what they need that is still missing, so a pinned
+/// older package is not replaced by a newer one it was just given). One
+/// statement per line.
+pub fn restore_code(
+    current: &[&str],
+    older: &[(&str, &str)],
+    library: Option<&str>,
+    repo: &str,
+) -> Result<String, String> {
+    if current.is_empty() && older.is_empty() {
+        return Err("nothing to install".into());
+    }
+    let mut lines = Vec::new();
+    for (package, version) in older {
+        lines.push(install_version_code(package, version, library, repo)?);
+    }
+    if !current.is_empty() {
+        lines.push(install_code(current, library, repo, InstallFrom::Default)?);
+    }
+    Ok(lines.join("\n"))
+}
+
 /// R code that removes `packages` from `library` (or the first library).
 pub fn remove_code(packages: &[&str], library: Option<&str>) -> Result<String, String> {
     check_names(packages)?;
@@ -144,12 +168,14 @@ pub fn remove_code(packages: &[&str], library: Option<&str>) -> Result<String, S
 }
 
 /// R code that prints one line per installed package, `name<TAB>version<TAB>
-/// library<TAB>priority` (priority empty for packages with none), every library
-/// on R's search path, in search order.
+/// library<TAB>priority<TAB>repository` (priority and repository empty for
+/// packages with none; the repository is `CRAN` for packages installed from
+/// CRAN), every library on R's search path, in search order.
 pub fn installed_packages_code() -> &'static str {
-    "local({ ip <- installed.packages(); \
-     cat(paste(ip[, \"Package\"], ip[, \"Version\"], ip[, \"LibPath\"], \
-     ifelse(is.na(ip[, \"Priority\"]), \"\", ip[, \"Priority\"]), sep = \"\\t\"), sep = \"\\n\") })"
+    "local({ ip <- installed.packages(fields = \"Repository\"); \
+     na0 <- function(x) ifelse(is.na(x), \"\", x); \
+     cat(paste(ip[, \"Package\"], ip[, \"Version\"], ip[, \"LibPath\"], na0(ip[, \"Priority\"]), \
+     na0(ip[, \"Repository\"]), sep = \"\\t\"), sep = \"\\n\") })"
 }
 
 /// R code that prints, one per line, where `name` can be found: the attached
@@ -194,23 +220,29 @@ pub struct Installed {
     pub library: String,
     /// `base` or `recommended` for packages that come with R, else empty.
     pub priority: String,
+    /// R's `Repository` field: `CRAN` for packages installed from CRAN, else
+    /// empty or another repository.
+    pub repository: String,
 }
 
 /// Reads the output of [`installed_packages_code`]. Lines that do not have
-/// the four fields are skipped.
+/// four or five fields are skipped.
 pub fn parse_installed(text: &str) -> Vec<Installed> {
     text.lines()
         .filter_map(|line| {
             let f: Vec<&str> = line.trim_end_matches('\r').split('\t').collect();
-            match f.as_slice() {
-                [name, version, library, priority] if is_package_name(name) => Some(Installed {
-                    name: (*name).to_string(),
-                    version: (*version).to_string(),
-                    library: (*library).to_string(),
-                    priority: (*priority).to_string(),
-                }),
-                _ => None,
-            }
+            let (name, version, library, priority, repository) = match f.as_slice() {
+                [n, v, l, p] => (n, v, l, p, ""),
+                [n, v, l, p, r] => (n, v, l, p, *r),
+                _ => return None,
+            };
+            is_package_name(name).then(|| Installed {
+                name: (*name).to_string(),
+                version: (*version).to_string(),
+                library: (*library).to_string(),
+                priority: (*priority).to_string(),
+                repository: repository.to_string(),
+            })
         })
         .collect()
 }
@@ -330,9 +362,9 @@ mod tests {
     }
 
     #[test]
-    fn the_listing_code_asks_for_the_four_columns() {
+    fn the_listing_code_asks_for_the_columns() {
         let c = installed_packages_code();
-        assert!(c.contains("installed.packages()"));
+        assert!(c.contains("installed.packages("));
         assert!(c.contains("LibPath") && c.contains("Priority"));
     }
 }
@@ -360,5 +392,46 @@ mod where_tests {
             ]
         );
         assert!(loaded_packages_code().contains("loadedNamespaces()"));
+    }
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+
+    #[test]
+    fn a_list_is_restored_older_versions_first_one_statement_per_line() {
+        let code = restore_code(
+            &["dplyr", "tidyr"],
+            &[("Rcpp", "1.0.14")],
+            Some("/lib"),
+            "https://cloud.r-project.org",
+        )
+        .unwrap_or_default();
+        let lines: Vec<&str> = code.lines().collect();
+        assert_eq!(lines.len(), 2, "{code}");
+        assert!(
+            lines[0].contains("Archive/Rcpp/Rcpp_1.0.14.tar.gz"),
+            "{code}"
+        );
+        assert!(
+            lines[1].contains("install.packages(c(\"dplyr\", \"tidyr\")"),
+            "{code}"
+        );
+        assert!(restore_code(&[], &[], None, "https://x.org").is_err());
+        assert!(restore_code(&["a b"], &[], None, "https://x.org").is_err());
+        assert!(restore_code(&[], &[("ok", "1/../x")], None, "https://x.org").is_err());
+    }
+
+    #[test]
+    fn the_installed_list_reads_the_repository_when_there_is_one() {
+        let list = parse_installed(
+            "dplyr\t1.1.4\tC:/lib\t\tCRAN\nstats\t4.4.3\tC:/R\tbase\t\nold\t1.0\tC:/lib\t\n",
+        );
+        assert_eq!(list.len(), 3);
+        assert_eq!(list[0].repository, "CRAN");
+        assert_eq!(list[1].priority, "base");
+        assert_eq!(list[2].repository, "");
+        assert!(installed_packages_code().contains("Repository"));
     }
 }

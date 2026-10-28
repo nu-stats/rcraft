@@ -51,6 +51,8 @@ pub struct HeadlessOptions {
     pub packages_confirm: bool,
     /// ... or a made-up install failure (`compiler`, `newer-r`, `network`) ...
     pub packages_failure: Option<String>,
+    /// ... or a package list file opened in the Project list tab.
+    pub packages_lock: Option<PathBuf>,
     /// ... over the package list read from this downloaded `packages.rds` (a
     /// small made-up list when none). A picture never reaches the network or
     /// reads the user's own cache.
@@ -79,6 +81,7 @@ impl HeadlessOptions {
             packages_select: None,
             packages_confirm: false,
             packages_failure: None,
+            packages_lock: None,
             packages_from: None,
             accent: Accent::default(),
             size: [1240, 780],
@@ -133,6 +136,9 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
         )?;
         if let Some(kind) = &options.packages_failure {
             app.show_packages_failure(kind)?;
+        }
+        if let Some(path) = &options.packages_lock {
+            app.show_packages_lock(path)?;
         }
     }
 

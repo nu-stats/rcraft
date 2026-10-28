@@ -1037,3 +1037,46 @@ fixest --packages-failure compiler` (also `newer-r` and `network`).
 
 Not done: a failure of an update through *Update all* offers *Try again* only for the
 names of the plan; there is no per-package retry. Removal failures are not diagnosed.
+
+## P1A.8 Package lists (reproducibility), 2026-10-28
+
+**Packages > Project package list**, a third tab in the Packages window. A package list is
+a small text file (`# RCraft package list (version 1)`, then `r`, `mirror`, `saved` and one
+`package<TAB>name<TAB>version<TAB>source` line per package; source is `cran`, `base` or
+`other`). It is meant to be kept with a project.
+
+- **Save list…** records the packages loaded in this session (or, ticked, every package in
+  RCraft's own library) with their versions, the R version, the mirror and the day. Where each
+  came from is taken from what R records (`Repository: CRAN`, `Priority`): GitHub or local
+  installs are recorded as `other`.
+- **Open list…** reads a file strictly (header, tab-separated fields, valid names, versions
+  and mirror, no repeats, at most 2 MB and 5000 packages; the first fault is reported with its
+  line) and shows each package: listed version, installed version, and what would happen:
+  already installed; install (CRAN's current version is the listed one); install this older
+  version (from CRAN's archive); or left alone, with the reason (comes with R; was not from
+  CRAN; no longer on CRAN; CRAN's version is older than the listed one; download the package
+  list first). A note appears when the list was made with a different R (major.minor).
+- **Install what is missing…** shows the usual list to say yes to with the exact R calls: the
+  older versions one by one first, then the rest in one call. Failures go through the same
+  banner as other installs (P1A.7).
+- Nothing in the app writes a list unasked, and nothing installs without the yes.
+
+Code: `rpkg::lockfile` (format, parse, `restore_plan`), `rcodegen::packages::restore_code`, and the
+installed-package list now carries the `Repository` column. `engine::package_index::today()` gives
+the date written into a list.
+
+`engine/tests/packages.rs` runs it in real R against a repository built on the spot with an
+archive folder: a list naming `pfold` 1.0 (archived, CRAN now has 2.0) and `pfcur` 1.0 is read back
+from its file text, planned (one older, one current), installed with the generated calls, and
+planned again (nothing left). Seen in a picture: `--packages list --packages-lock FILE`.
+
+Found: R installs an archive tarball from a web address (https) but not from a `file://` one, so the
+test names the local copy by path; the real https route to CRAN's archive has not been run (it is R's
+documented way, `install.packages(url, repos = NULL, type = "source")`).
+
+Limits, said in the window: an older version is built from source (compiler needed if it has
+compiled code), and what it needs that is missing comes at its newest version, so a list does not
+reproduce the whole dependency tree's versions unless every package is in the list (saving the
+loaded packages includes the dependencies that are loaded). There is no `renv`-style isolation. Not
+done: a list kept automatically with the session, the list in the saved R script's header, and
+`rc` command forms (P1A.9).

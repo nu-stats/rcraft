@@ -89,6 +89,9 @@ Tasks:
   are not yet checked against real output. P1A.7 is done)
 - P1A.8 Reproducibility: record installed packages and versions in the
   session and project lockfile; install a project's packages in one step
+  (done: Packages > Project package list saves the loaded packages with versions to a text
+  file and installs from one with a yes; older versions from CRAN's archive; not done: a list
+  kept automatically, or written into the saved script. P1A.8 is done)
 - P1A.9 Command forms in the Command window, for example `rc install
   fixest`, `rc search panel data`, `rc describe fixest`, `rc update`,
   `rc installed`; Tab completion over the index

@@ -12,12 +12,13 @@ use rcraft_engine::{Engine, IndexStatus, PackageIndexService, QueryId};
 use rcraft_rcodegen::failure::{diagnose, Diagnosis, Os, Retry};
 use rcraft_rcodegen::packages::{
     install_code, install_version_code, installed_packages_code, installed_versions,
-    loaded_packages_code, parse_installed, parse_loaded, remove_code, where_code, InstallFrom,
-    Installed,
+    loaded_packages_code, parse_installed, parse_loaded, remove_code, restore_code, where_code,
+    InstallFrom, Installed,
 };
 use rcraft_rhost::Platform;
 use rcraft_rpkg::describe::{describe, Source};
 use rcraft_rpkg::index::Package;
+use rcraft_rpkg::lockfile::{restore_plan, Action, Entry, Lock, Restore};
 use rcraft_rpkg::plan::{compare_versions, plan, updates, Plan, Step, Why};
 use rcraft_rpkg::refresh::Stage;
 use rcraft_rpkg::search::Filters;
@@ -32,6 +33,8 @@ const RESULT_LIMIT: usize = 100;
 pub enum Tab {
     Find,
     Installed,
+    /// The package list of a project: save it, open it, install from it.
+    List,
 }
 
 /// What the window asks the app to run.
@@ -59,6 +62,11 @@ enum Confirm {
     },
     Remove {
         names: Vec<String>,
+        code: Result<String, String>,
+    },
+    /// Installing what a saved package list names.
+    Restore {
+        restore: Restore,
         code: Result<String, String>,
     },
 }
@@ -135,6 +143,13 @@ pub struct PackagesWindow {
     /// The packages of the install now running (set when the user said yes).
     last_install: Option<Vec<(String, String)>>,
     failure: Option<Failure>,
+    /// The package list opened in the Project list tab, and a message about it.
+    lock: Option<Lock>,
+    lock_note: Option<String>,
+    /// Save only what RCraft's own library holds, not every loaded package.
+    lock_library_only: bool,
+    /// This R's version number, such as 4.4.3, once the engine has said.
+    r_version_number: String,
     mirror_text: String,
     mirror_note: Option<String>,
     show_mirror: bool,
@@ -163,6 +178,10 @@ impl Default for PackagesWindow {
             confirm: None,
             last_install: None,
             failure: None,
+            lock: None,
+            lock_note: None,
+            lock_library_only: false,
+            r_version_number: String::new(),
             mirror_text: String::new(),
             mirror_note: None,
             show_mirror: false,
@@ -272,6 +291,9 @@ installation of package 'fixest' had non-zero exit status"
         let Some(engine) = engine else {
             return;
         };
+        if self.r_version_number.is_empty() {
+            self.r_version_number = r_number(engine.r_version());
+        }
         if self.r.waiting_for_run {
             if engine.is_busy() {
                 self.r.seen_busy = true;
@@ -466,6 +488,7 @@ installation of package 'fixest' had non-zero exit status"
                 match self.tab {
                     Tab::Find => run = self.find_tab(ui, pal, index, r_present, r_ready),
                     Tab::Installed => run = self.installed_tab(ui, pal, index, r_present, r_ready),
+                    Tab::List => run = self.list_tab(ui, pal, index, r_present, r_ready),
                 }
             });
         self.open = open;
@@ -478,6 +501,16 @@ installation of package 'fixest' had non-zero exit status"
                         .iter()
                         .filter(|s| s.why == Why::Asked)
                         .map(|s| (s.name.clone(), s.version.clone()))
+                        .collect(),
+                ),
+                Some(Confirm::Restore { restore, .. }) => Some(
+                    restore
+                        .steps
+                        .iter()
+                        .filter(|s| {
+                            matches!(s.action, Action::InstallCurrent | Action::InstallOlder)
+                        })
+                        .map(|s| (s.name.clone(), s.wanted.clone()))
                         .collect(),
                 ),
                 _ => None,
@@ -645,6 +678,7 @@ installation of package 'fixest' had non-zero exit status"
         ui.horizontal(|ui| {
             ui.selectable_value(&mut self.tab, Tab::Find, "Find on CRAN");
             ui.selectable_value(&mut self.tab, Tab::Installed, "Installed");
+            ui.selectable_value(&mut self.tab, Tab::List, "Project list");
             ui.with_layout(
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| match index.status().clone() {
@@ -1287,6 +1321,10 @@ impl Confirm {
                 menu: "Packages > Remove",
                 code: c.clone(),
             }),
+            Confirm::Restore { code: Ok(c), .. } => Some(Run {
+                menu: "Packages > Restore",
+                code: c.clone(),
+            }),
             _ => None,
         }
     }
@@ -1395,6 +1433,91 @@ fn confirm_panel(
                 }
             }
         }
+        Confirm::Restore { restore, code } => {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("This will install").strong());
+                let can = restore.can_run() && code.is_ok() && r_ready;
+                if ui
+                    .add_enabled(can, egui::Button::new("Yes, install"))
+                    .clicked()
+                {
+                    go = true;
+                }
+                if ui.button("Cancel").clicked() {
+                    cancel = true;
+                }
+            });
+            ui.label(
+                RichText::new(format!(
+                    "From CRAN, through {}. The list's versions are installed, not the newest.",
+                    host_of(mirror)
+                ))
+                .small()
+                .color(pal.dim),
+            );
+            ui.add_space(4.0);
+            egui::Grid::new("pkg_restore_steps")
+                .striped(true)
+                .show(ui, |ui| {
+                    for s in &restore.steps {
+                        let what = match &s.action {
+                            Action::InstallCurrent => "current version".to_string(),
+                            Action::InstallOlder => "older version, built from source".to_string(),
+                            _ => continue,
+                        };
+                        ui.label(RichText::new(&s.name).strong());
+                        ui.label(&s.wanted);
+                        ui.label(RichText::new(what).small().color(pal.dim));
+                        ui.end_row();
+                    }
+                });
+            for s in &restore.steps {
+                if let Action::Skip(why) = &s.action {
+                    ui.label(
+                        RichText::new(format!("{} {}: left alone.", s.name, why))
+                            .small()
+                            .color(pal.warning),
+                    );
+                }
+            }
+            if let Some(n) = &restore.r_note {
+                ui.label(RichText::new(n).small().color(pal.warning));
+            }
+            if !restore.older().is_empty() {
+                ui.label(
+                    RichText::new(
+                        "Older versions come from CRAN's archive and are built from source: packages \
+                         with compiled code need a compiler. What they need that is missing is \
+                         installed at its newest version.",
+                    )
+                    .small()
+                    .color(pal.warning),
+                );
+            }
+            ui.label(
+                RichText::new(
+                    "Installing a package runs code from its authors. Install only packages you trust.",
+                )
+                .small()
+                .color(pal.dim),
+            );
+            match code {
+                Ok(c) => {
+                    ui.label(RichText::new("R calls").small().color(pal.dim));
+                    let mut shown = c.clone();
+                    ui.add(
+                        egui::TextEdit::multiline(&mut shown)
+                            .font(egui::TextStyle::Monospace)
+                            .desired_rows(4)
+                            .desired_width(f32::INFINITY)
+                            .interactive(false),
+                    );
+                }
+                Err(e) => {
+                    ui.label(RichText::new(e).color(pal.error));
+                }
+            }
+        }
         Confirm::Remove { names, code } => {
             ui.label(RichText::new(format!("Remove {}?", names.join(", "))).strong());
             ui.label(
@@ -1434,6 +1557,253 @@ fn confirm_panel(
         }
     }
     (go, cancel)
+}
+
+impl PackagesWindow {
+    /// The entries of the packages R lists, as the package list wants them.
+    fn lock_entries(&self) -> Vec<Entry> {
+        self.r
+            .installed
+            .iter()
+            .map(|i| Entry {
+                name: i.name.clone(),
+                version: i.version.clone(),
+                priority: i.priority.clone(),
+                repository: i.repository.clone(),
+            })
+            .collect()
+    }
+
+    /// The list for what this session has, as the options say.
+    fn make_lock(&self, index: &PackageIndexService, r_version: &str) -> Lock {
+        let own = library_dir();
+        let mut entries = self.lock_entries();
+        if self.lock_library_only {
+            let in_own: Vec<String> = self
+                .r
+                .installed
+                .iter()
+                .filter(|i| own.as_deref().is_some_and(|o| same_folder(&i.library, o)))
+                .map(|i| i.name.clone())
+                .collect();
+            entries.retain(|e| in_own.contains(&e.name));
+        }
+        let loaded: Vec<String> = self.r.loaded.iter().map(|(n, _)| n.clone()).collect();
+        let only = (!self.lock_library_only).then_some(loaded.as_slice());
+        Lock::from_entries(
+            &entries,
+            only,
+            r_version,
+            index.mirror(),
+            &rcraft_engine::package_index::today(),
+        )
+    }
+
+    /// Reads list text into the tab, or says what is wrong with it.
+    pub(crate) fn load_lock_text(&mut self, text: &str) {
+        match Lock::parse(text) {
+            Ok(lock) => {
+                self.lock_note = Some(format!(
+                    "Opened a list of {} packages.",
+                    lock.packages.len()
+                ));
+                self.lock = Some(lock);
+            }
+            Err(e) => {
+                self.lock = None;
+                self.lock_note = Some(e);
+            }
+        }
+    }
+
+    fn save_list(&mut self, index: &PackageIndexService, r_version: &str) {
+        let lock = self.make_lock(index, r_version);
+        let Some(path) = rfd::FileDialog::new()
+            .set_file_name("rcraft-packages.txt")
+            .add_filter("Package list", &["txt"])
+            .save_file()
+        else {
+            return;
+        };
+        self.lock_note = Some(match std::fs::write(&path, lock.to_text()) {
+            Ok(()) => format!(
+                "Saved {} packages to {}.",
+                lock.packages.len(),
+                path.display()
+            ),
+            Err(e) => format!("Could not save the list: {e}"),
+        });
+    }
+
+    fn open_list(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .add_filter("Package list", &["txt"])
+            .pick_file()
+        else {
+            return;
+        };
+        let too_big = std::fs::metadata(&path)
+            .map(|m| m.len() > rcraft_rpkg::lockfile::MAX_BYTES as u64)
+            .unwrap_or(false);
+        if too_big {
+            self.lock = None;
+            self.lock_note = Some("That file is too large to be a package list.".to_string());
+            return;
+        }
+        match std::fs::read_to_string(&path) {
+            Ok(text) => self.load_lock_text(&text),
+            Err(e) => {
+                self.lock = None;
+                self.lock_note = Some(format!("Could not read the file: {e}"));
+            }
+        }
+    }
+
+    /// Works out what installing the opened list would do and asks for the yes.
+    fn begin_restore(&mut self, restore: Restore, index: &PackageIndexService) {
+        let code = restore_code(
+            &restore.current(),
+            &restore.older(),
+            library_dir().as_deref(),
+            index.mirror(),
+        );
+        self.confirm = Some(Confirm::Restore { restore, code });
+    }
+
+    fn list_tab(
+        &mut self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        index: &mut PackageIndexService,
+        r_present: bool,
+        r_ready: bool,
+    ) -> Option<Run> {
+        let mut run = None;
+        ui.label(
+            "A package list records which packages a project uses and their versions, in a small \
+             text file you can keep with the project. Open it later, or on another computer, to \
+             install the same packages.",
+        );
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut self.lock_library_only,
+                "Only packages in RCraft's own library",
+            )
+            .on_hover_text("Unticked, the list holds the packages loaded in this session");
+            ui.add_enabled_ui(r_present && self.r.known, |ui| {
+                if ui
+                    .button("Save list…")
+                    .on_disabled_hover_text("R has not listed its packages yet")
+                    .clicked()
+                {
+                    let version = self.r_version_number.clone();
+                    self.save_list(index, &version);
+                }
+            });
+            if ui.button("Open list…").clicked() {
+                self.open_list();
+            }
+        });
+        if let Some(n) = &self.lock_note {
+            ui.label(RichText::new(n).small().color(pal.dim));
+        }
+        ui.separator();
+        let Some(lock) = self.lock.clone() else {
+            ui.label(RichText::new("No list opened.").color(pal.dim));
+            return None;
+        };
+        let installed = self.installed_map();
+        let restore = restore_plan(index.index(), &installed, &lock, &self.r_version_number);
+        ui.label(
+            RichText::new(format!(
+                "Made with R {} on {} from {}",
+                if lock.r_version.is_empty() {
+                    "?"
+                } else {
+                    &lock.r_version
+                },
+                if lock.saved.is_empty() {
+                    "an unknown day"
+                } else {
+                    &lock.saved
+                },
+                if lock.mirror.is_empty() {
+                    "an unknown mirror"
+                } else {
+                    &lock.mirror
+                },
+            ))
+            .small()
+            .color(pal.dim),
+        );
+        if let Some(note) = &restore.r_note {
+            ui.label(RichText::new(note).small().color(pal.warning));
+        }
+        if index.index().is_none() {
+            ui.label(
+                RichText::new(
+                    "Download the package list (Find on CRAN) to see what can be installed.",
+                )
+                .small()
+                .color(pal.warning),
+            );
+        }
+        ui.horizontal(|ui| {
+            ui.add_enabled_ui(restore.can_run() && r_ready, |ui| {
+                if ui
+                    .button("Install what is missing…")
+                    .on_disabled_hover_text("Nothing to install, or R is busy")
+                    .clicked()
+                {
+                    self.begin_restore(restore.clone(), index);
+                }
+            });
+        });
+        if let Some(Confirm::Restore { .. }) = &self.confirm {
+            if let Some(confirm) = &self.confirm {
+                let (go, cancel) = confirm_panel(ui, pal, confirm, index.mirror(), r_ready);
+                if go {
+                    run = confirm.run_for();
+                }
+                if cancel {
+                    self.confirm = None;
+                }
+            }
+            return run;
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("pkg_list")
+            .max_height(self.list_height)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Grid::new("pkg_list_grid")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("Package").small().color(pal.dim));
+                        ui.label(RichText::new("Listed").small().color(pal.dim));
+                        ui.label(RichText::new("Installed").small().color(pal.dim));
+                        ui.label(RichText::new("What happens").small().color(pal.dim));
+                        ui.end_row();
+                        for s in &restore.steps {
+                            ui.label(&s.name);
+                            ui.label(&s.wanted);
+                            ui.label(s.have.clone().unwrap_or_else(|| "-".to_string()));
+                            let (text, color) = match &s.action {
+                                Action::AlreadyThere => ("already installed".to_string(), pal.dim),
+                                Action::InstallCurrent => ("install".to_string(), pal.accent),
+                                Action::InstallOlder => {
+                                    ("install this older version".to_string(), pal.accent)
+                                }
+                                Action::Skip(why) => (format!("left alone: {why}"), pal.warning),
+                            };
+                            ui.label(RichText::new(text).small().color(color));
+                            ui.end_row();
+                        }
+                    });
+            });
+        run
+    }
 }
 
 #[cfg(test)]
@@ -1642,5 +2012,120 @@ mod retry_tests {
             "4.4.3"
         );
         assert_eq!(r_number("nonsense"), "");
+    }
+}
+
+#[cfg(test)]
+mod list_tests {
+    use super::*;
+    use rcraft_rpkg::index::sample;
+
+    fn installed(name: &str, version: &str, priority: &str, repository: &str) -> Installed {
+        Installed {
+            name: name.into(),
+            version: version.into(),
+            library: "C:/lib".into(),
+            priority: priority.into(),
+            repository: repository.into(),
+        }
+    }
+
+    fn window() -> PackagesWindow {
+        let mut w = PackagesWindow::default();
+        w.r.installed = vec![
+            installed("stats", "4.4.3", "base", ""),
+            installed("fixest", "0.12.1", "", "CRAN"),
+            installed("zoo", "1.8-12", "", "CRAN"),
+            installed("mine", "0.1", "", ""),
+        ];
+        w.r.loaded = vec![
+            ("stats".to_string(), true),
+            ("fixest".to_string(), true),
+            ("mine".to_string(), false),
+        ];
+        w
+    }
+
+    #[test]
+    fn the_saved_list_holds_the_loaded_packages_with_where_each_came_from() {
+        let w = window();
+        let s = PackageIndexService::in_memory(sample());
+        let lock = w.make_lock(&s, "4.4.3");
+        let got: Vec<(&str, &str, &str)> = lock
+            .packages
+            .iter()
+            .map(|p| {
+                (
+                    p.name.as_str(),
+                    p.version.as_str(),
+                    match p.source {
+                        rcraft_rpkg::lockfile::LockSource::Cran => "cran",
+                        rcraft_rpkg::lockfile::LockSource::Base => "base",
+                        rcraft_rpkg::lockfile::LockSource::Other => "other",
+                    },
+                )
+            })
+            .collect();
+        // zoo is installed but not loaded, so it is not in the list
+        assert_eq!(
+            got,
+            vec![
+                ("fixest", "0.12.1", "cran"),
+                ("mine", "0.1", "other"),
+                ("stats", "4.4.3", "base")
+            ]
+        );
+        assert_eq!(lock.r_version, "4.4.3");
+        assert_eq!(lock.mirror, "https://cloud.r-project.org");
+        assert_eq!(lock.saved.len(), 10);
+    }
+
+    #[test]
+    fn an_opened_list_is_read_or_refused_with_a_reason() {
+        let mut w = window();
+        w.load_lock_text(
+            "# RCraft package list (version 1)\nr\t4.4.3\npackage\tzoo\t1.8-12\tcran\n",
+        );
+        assert_eq!(w.lock.as_ref().map(|l| l.packages.len()), Some(1));
+        assert!(w
+            .lock_note
+            .as_deref()
+            .is_some_and(|n| n.contains("1 packages")));
+        w.load_lock_text("not a list");
+        assert!(w.lock.is_none());
+        assert!(w
+            .lock_note
+            .as_deref()
+            .is_some_and(|n| n.contains("not an RCraft package list")));
+    }
+
+    #[test]
+    fn restoring_a_list_asks_for_a_yes_with_both_kinds_of_install() {
+        let mut w = window();
+        let s = PackageIndexService::in_memory(sample());
+        let lock = Lock::parse(
+            "# RCraft package list (version 1)\nr\t4.4.3\npackage\tzoo\t1.8-12\tcran\npackage\tfixest\t0.11.0\tcran\npackage\tmine\t0.1\tother\n",
+        )
+        .unwrap_or_default();
+        // an older zoo is installed, so the list's zoo has to be installed again
+        w.r.installed.retain(|i| i.name != "zoo");
+        w.r.installed.push(installed("zoo", "1.8-10", "", "CRAN"));
+        let have = w.installed_map();
+        let restore = restore_plan(s.index(), &have, &lock, "4.4.3");
+        // zoo 1.8-12 is what the made-up index offers: current; fixest 0.11.0 is older than its 0.12.1
+        assert_eq!(restore.current(), vec!["zoo"]);
+        assert_eq!(restore.older(), vec![("fixest", "0.11.0")]);
+        w.begin_restore(restore, &s);
+        let Some(Confirm::Restore { code, .. }) = &w.confirm else {
+            panic!("no confirmation");
+        };
+        let code = code.as_ref().map(String::as_str).unwrap_or("");
+        assert!(
+            code.contains("Archive/fixest/fixest_0.11.0.tar.gz"),
+            "{code}"
+        );
+        assert!(code.contains("install.packages(\"zoo\""), "{code}");
+        let run = w.confirm.as_ref().and_then(Confirm::run_for);
+        assert_eq!(run.map(|r| r.menu), Some("Packages > Restore"));
     }
 }

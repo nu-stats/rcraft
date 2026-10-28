@@ -670,6 +670,10 @@ impl App {
                     out.push(Action::OpenPackages(PackagesTab::Installed));
                     ui.close_menu();
                 }
+                if ui.button("Project package list…").clicked() {
+                    out.push(Action::OpenPackages(PackagesTab::List));
+                    ui.close_menu();
+                }
             });
             ui.menu_button("Session", |ui| {
                 if ui.button("Stop the running command").clicked() {
@@ -1277,6 +1281,14 @@ impl App {
         self.import.open_with(path);
     }
 
+    /// For pictures: opens a package list file in the Packages window.
+    pub fn show_packages_lock(&mut self, path: &std::path::Path) -> Result<(), String> {
+        let text = std::fs::read_to_string(path)
+            .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+        self.packages_window.load_lock_text(&text);
+        Ok(())
+    }
+
     /// For pictures: the Packages window with a made-up install failure showing.
     pub fn show_packages_failure(&mut self, kind: &str) -> Result<(), String> {
         self.packages_window.preset_failure(kind)
@@ -1296,6 +1308,7 @@ impl App {
         let tab = match tab.to_ascii_lowercase().as_str() {
             "find" => PackagesTab::Find,
             "installed" => PackagesTab::Installed,
+            "list" => PackagesTab::List,
             other => {
                 return Err(format!(
                     "unknown Packages tab {other}; use find or installed"
