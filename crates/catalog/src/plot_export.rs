@@ -298,7 +298,10 @@ mod tests {
         assert!(!c.contains("XQuartz"), "only SVG needs cairo: {c}");
         // only the device opened here is closed, never the one that was current
         assert!(c.contains("before <- grDevices::dev.cur()"), "{c}");
-        assert!(c.contains("if (grDevices::dev.cur() == before) stop("), "{c}");
+        assert!(
+            c.contains("if (grDevices::dev.cur() == before) stop("),
+            "{c}"
+        );
         assert!(c.contains("on.exit(grDevices::dev.off(opened))"), "{c}");
         assert!(!c.contains("file.exists"), "{c}");
     }
