@@ -53,6 +53,10 @@ fn run(e: &mut Engine, source: Source, code: &str) -> (Outcome, Vec<PathBuf>, St
                 Item::Plot { path } => plots.push(path.clone()),
                 Item::Text { text: t, .. } => text.push_str(t),
                 Item::Error { message, .. } => text.push_str(&format!("error: {message}\n")),
+                Item::Warning(w) => text.push_str(&format!(
+                    "warning: {w}
+"
+                )),
                 _ => {}
             }
         }
@@ -171,7 +175,11 @@ fn a_plot_is_drawn_again_at_the_size_asked_for_in_each_format() {
     );
     assert_eq!(o, Outcome::Ok, "{text}");
     let svg = dir.bytes("a.svg");
-    assert!(contains(&svg, "<svg"), "not an SVG");
+    assert!(
+        contains(&svg, "<svg"),
+        "not an SVG ({} bytes). R said: {text}",
+        svg.len()
+    );
     // cairo writes `width="504"` or, in older versions, `width="504pt"`
     assert!(contains(&svg, "width=\"504") && contains(&svg, "height=\"360"));
     assert!(contains(&svg, "viewBox=\"0 0 504 360\""));
@@ -250,7 +258,9 @@ fn the_newest_plot_a_named_one_and_one_that_is_gone() {
     assert_ne!(
         dir.bytes("older.svg"),
         dir.bytes("newest.svg"),
-        "the older plot is a different picture"
+        "the older plot is a different picture ({} bytes). R said: {}",
+        dir.bytes("older.svg").len(),
+        older.2
     );
     // a name R does not have says so, and writes nothing
     let gone = export(
@@ -312,7 +322,11 @@ fn grid_plots_export_too_and_plotting_goes_on_afterwards() {
             false,
         );
         assert_eq!(r.0, Outcome::Ok, "{format}: {}", r.2);
-        assert!(!dir.bytes(&format!("g.{format}")).is_empty(), "{format}");
+        assert!(
+            !dir.bytes(&format!("g.{format}")).is_empty(),
+            "{format} is empty. R said: {}",
+            r.2
+        );
     }
     // the live device still takes the next plot, and it is the newest
     let (o, drawn, text) = run(&mut e, Source::Typed, "plot(1:5)");

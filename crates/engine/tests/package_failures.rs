@@ -194,18 +194,19 @@ fn r_s_own_messages_for_failed_installs_are_diagnosed() {
     );
     assert_eq!(causes(&t, &version), vec![Cause::Network], "{t}");
 
-    // a library folder that cannot be written
-    if cfg!(windows) {
-        let code = install_code(
-            &["pfcompiled"],
-            Some("C:/Windows/System32/rcraft-nolib"),
-            &repo,
-            InstallFrom::Source,
-        )
-        .unwrap_or_default();
-        let t = output_of(&mut e, &code).1;
-        assert!(causes(&t, &version).contains(&Cause::NotWritable), "{t}");
-    }
+    // a library folder that cannot be written: one whose parent is a file, so it cannot
+    // be made (a folder in the system area would be writable on a runner with admin rights)
+    let blocker = dir.path("blocker");
+    assert!(std::fs::write(&blocker, "not a folder").is_ok());
+    let code = install_code(
+        &["pfcompiled"],
+        Some(&format!("{blocker}/lib")),
+        &repo,
+        InstallFrom::Source,
+    )
+    .unwrap_or_default();
+    let t = output_of(&mut e, &code).1;
+    assert!(causes(&t, &version).contains(&Cause::NotWritable), "{t}");
 
     // a package with compiled code, where R has no `make`
     if make.is_empty() {

@@ -330,7 +330,12 @@ fn a_saved_list_installs_the_current_and_the_archived_versions_it_names() {
     let code = code.replace("repos = \"file:", "type = \"source\", repos = \"file:");
     // R installs an archive file from a web address (https) but not from a file:// one, so
     // here the local copy is named by its path
-    let code = code.replace("install.packages(\"file:///", "install.packages(\"");
+    let local_prefix = if cfg!(windows) {
+        "install.packages(\"file:///"
+    } else {
+        "install.packages(\"file://"
+    };
+    let code = code.replace(local_prefix, "install.packages(\"");
     assert_eq!(run(&mut e, &code), Outcome::Ok);
     let got = ask(
         &mut e,
