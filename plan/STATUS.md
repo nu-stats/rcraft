@@ -520,6 +520,21 @@ package panel for its own dialog: `Spec` has no per-dialog package list yet, onl
 style's (`Style::packages`). Next design step: a `needs` field on `Spec` that the panel
 reads together with the style's packages.
 
+## P4.4 negative binomial and per-dialog packages, 2026-10-27
+
+- `Spec` gained `needs: &[&str]`: R packages a dialog needs whatever the code style
+  (`Spec::packages(style)` is the dialog's own plus the style's, each once). The package
+  panel and Run gate read it, so a dialog that needs MASS shows the same install offer as the
+  tidyverse style does for dplyr. The panel text now says "this dialog needs".
+- *Negative binomial model* (`generalised::NEGATIVE_BINOMIAL`, needs MASS): `MASS::glm.nb`,
+  an exposure becomes `offset(log(exposure))` in the formula, rate ratios optional. Its summary
+  includes theta.
+- `engine/tests/glm.rs` requires the printed report and ratio table to equal R's for the call
+  written by hand and the saved model's coefficients to equal it (the exposure changes them).
+  The test skips with a note where MASS is not installed; CI now installs MASS with the other
+  packages so it runs there. MASS is present in the R used here (4.4.3). nnet is not, which
+  matters for the multinomial dialog next.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

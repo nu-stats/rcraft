@@ -114,6 +114,7 @@ pub const ONE_T: Spec = Spec {
         ALTERNATIVE,
         CONFIDENCE,
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -155,6 +156,7 @@ pub const TWO_T: Spec = Spec {
         ALTERNATIVE,
         CONFIDENCE,
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -208,6 +210,7 @@ pub const PAIRED_T: Spec = Spec {
     about: "Test whether the mean difference between two measurements on the same rows is zero. \
             Rows missing either value are left out.",
     widgets: &[PAIR[0], PAIR[1], ALTERNATIVE, CONFIDENCE],
+    needs: &[],
     styles: BASE,
     check: pair_check,
     code: |a, _| {
@@ -295,6 +298,7 @@ pub const PROPORTIONS: Spec = Spec {
         P0,
         CONFIDENCE,
     ],
+    needs: &[],
     styles: BASE,
     check: proportions_check,
     code: |a, _| {
@@ -325,6 +329,7 @@ pub const BINOMIAL: Spec = Spec {
     about: "Exact test of one proportion against a value, with an exact confidence interval. \
             Missing values are left out.",
     widgets: &[OUTCOME_ANY, SUCCESS, P0, ALTERNATIVE, CONFIDENCE],
+    needs: &[],
     styles: BASE,
     check: p0_check,
     code: |a, _| {
@@ -358,6 +363,7 @@ pub const FISHER: Spec = Spec {
             hint: "",
         },
     ],
+    needs: &[],
     styles: BASE,
     check: |a| {
         if a.var_text("row") == a.var_text("col") {
@@ -387,6 +393,7 @@ pub const MANN_WHITNEY: Spec = Spec {
     about: "Compare a number variable between two groups by ranks, without assuming it is \
             normal (the Wilcoxon rank-sum test).",
     widgets: &[outcome("Variable"), GROUP, ALTERNATIVE],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -406,6 +413,7 @@ pub const SIGNED_RANK: Spec = Spec {
     about: "Test whether paired measurements differ, by ranks (the paired non-parametric test). \
             Rows missing either value are left out.",
     widgets: &[PAIR[0], PAIR[1], ALTERNATIVE],
+    needs: &[],
     styles: BASE,
     check: pair_check,
     code: |a, _| {
@@ -424,6 +432,7 @@ pub const KRUSKAL: Spec = Spec {
     menu: "Statistics > Tests and intervals > Kruskal-Wallis test",
     about: "Compare a number variable between two or more groups by ranks.",
     widgets: &[outcome("Variable"), GROUPS_ANY],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -468,6 +477,7 @@ pub const VARIANCE: Spec = Spec {
             hint: "Brown-Forsythe holds up best when the data are not normal.",
         },
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {

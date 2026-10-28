@@ -148,6 +148,7 @@ pub const LINEAR: Spec = Spec {
         },
         save("model"),
     ],
+    needs: &[],
     styles: BASE,
     check: linear_check,
     code: |a, _| {
@@ -207,6 +208,7 @@ pub const ONE_WAY: Spec = Spec {
         },
         save("anova"),
     ],
+    needs: &[],
     styles: BASE,
     check: |a| {
         let mut out = Vec::new();
@@ -272,6 +274,7 @@ pub const FACTORIAL: Spec = Spec {
         },
         save("anova"),
     ],
+    needs: &[],
     styles: BASE,
     check: anova_check,
     code: |a, _| {

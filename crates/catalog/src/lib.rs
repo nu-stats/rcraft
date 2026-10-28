@@ -130,6 +130,7 @@ pub const ENTRIES: &[Entry] = &[
     partial("Factorial ANOVA", Area::Statistics),
     partial("Logistic model", Area::Statistics),
     partial("Poisson model", Area::Statistics),
+    partial("Negative binomial model", Area::Statistics),
     planned("Histogram", Area::Graphs),
     planned("Scatter plot", Area::Graphs),
     planned("Model table", Area::Reports),

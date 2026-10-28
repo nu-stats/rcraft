@@ -263,6 +263,9 @@ pub struct Spec {
     /// One line under the title saying what the dialog does.
     pub about: &'static str,
     pub widgets: &'static [Widget],
+    /// R packages the dialog needs whatever the style (a model from MASS, say),
+    /// beyond base R and the style's own.
+    pub needs: &'static [&'static str],
     /// The styles it can write, the first being the default.
     pub styles: &'static [Style],
     /// Checks beyond each widget's own (a new name that is taken, say).
@@ -277,6 +280,18 @@ pub fn no_check(_: &Args) -> Vec<Problem> {
 }
 
 impl Spec {
+    /// Every package the code needs in `style`: the dialog's own, then the
+    /// style's, each once.
+    pub fn packages(&self, style: Style) -> Vec<&'static str> {
+        let mut out: Vec<&'static str> = self.needs.to_vec();
+        for p in style.packages() {
+            if !out.contains(p) {
+                out.push(p);
+            }
+        }
+        out
+    }
+
     /// The values a dialog opens with.
     pub fn defaults(&self, ctx: &Context) -> Values {
         let mut values = Values::default();
@@ -671,6 +686,7 @@ mod tests {
         menu: "Data > Test",
         about: "",
         widgets: WIDGETS,
+        needs: &[],
         styles: &[Style::Base],
         check: no_check,
         code,
@@ -747,6 +763,7 @@ mod tests {
             menu: "Data > Test",
             about: "",
             widgets: &[MANY],
+            needs: &[],
             styles: &[Style::Base],
             check: no_check,
             code: |a, _| a.vars("vars").join("+"),
@@ -779,6 +796,24 @@ mod tests {
         );
         // only number columns are offered
         assert_eq!(SPEC2.choices(&MANY, &c).len(), 1);
+    }
+
+    #[test]
+    fn a_dialog_needs_its_own_packages_and_its_styles_once_each() {
+        const NEEDY: Spec = Spec {
+            entry: "Test",
+            menu: "Data > Test",
+            about: "",
+            widgets: &[],
+            needs: &["MASS", "dplyr"],
+            styles: &[Style::Base, Style::Tidyverse],
+            check: no_check,
+            code: |_, _| String::new(),
+        };
+        assert_eq!(NEEDY.packages(Style::Base), vec!["MASS", "dplyr"]);
+        assert_eq!(NEEDY.packages(Style::Tidyverse), vec!["MASS", "dplyr"]);
+        assert_eq!(SPEC.packages(Style::Base), Vec::<&str>::new());
+        assert_eq!(SPEC.packages(Style::Tidyverse), vec!["dplyr"]);
     }
 
     #[test]

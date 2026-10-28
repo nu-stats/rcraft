@@ -277,6 +277,7 @@ pub const RECODE: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: recode_check,
     code: recode_code,
@@ -353,6 +354,7 @@ pub const CONVERT_TYPE: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: convert_check,
     code: convert_code,
@@ -388,6 +390,7 @@ pub const REFERENCE_LEVEL: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -444,6 +447,7 @@ pub const COMBINE_LEVELS: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: |a| match combine_groups(a.expr("groups")) {
         Ok(_) => Vec::new(),
@@ -485,6 +489,7 @@ pub const REORDER_LEVELS: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: |a| {
         let levels = level_list(a.expr("levels"));
@@ -555,6 +560,7 @@ pub const TEXT_CASE: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -626,6 +632,7 @@ pub const FIND_REPLACE: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: find_check,
     code: |a, _| {
@@ -694,6 +701,7 @@ pub const EXTRACT_TEXT: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: |a| match extract_bounds(a) {
         Ok(_) => Vec::new(),
@@ -754,6 +762,7 @@ pub const TEXT_TO_DATE: Spec = Spec {
         INTO,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -809,6 +818,7 @@ pub const DATE_PART: Spec = Spec {
         INTO_NAMED,
         RESULT,
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {

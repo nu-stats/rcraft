@@ -141,7 +141,7 @@ impl SpecDialog {
         let open = open.as_mut()?;
         let checked = engine.is_some();
         if let Some(engine) = engine {
-            packages.service(engine, open.style.packages());
+            packages.service(engine, &open.spec.packages(open.style));
         }
         if packages.is_waiting() {
             ctx.request_repaint_after(std::time::Duration::from_millis(60));
@@ -189,7 +189,7 @@ impl SpecDialog {
                                     ui.selectable_value(&mut open.style, *s, s.label());
                                 }
                             });
-                        let packages = open.style.packages();
+                        let packages = open.spec.packages(open.style);
                         if !packages.is_empty() {
                             ui.label(
                                 RichText::new(format!("needs {}", packages.join(", ")))
@@ -199,13 +199,21 @@ impl SpecDialog {
                         }
                     });
                 }
-                let needed = open.style.packages();
+                let needed = open.spec.packages(open.style);
+                if open.spec.styles.len() <= 1 && !needed.is_empty() {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("needs the R package {}", needed.join(", ")))
+                            .small()
+                            .color(pal.dim),
+                    );
+                }
                 if checked {
-                    if let Some(code) = packages.panel(ui, pal, needed) {
+                    if let Some(code) = packages.panel(ui, pal, &needed) {
                         install = Some(code);
                     }
                 }
-                let can_run = !checked || packages.ready(needed);
+                let can_run = !checked || packages.ready(&needed);
                 ui.add_space(6.0);
                 ui.label(RichText::new("R that will run").strong().color(pal.dim));
                 let code = open.spec.generate(&open.ctx, &open.values, open.style);

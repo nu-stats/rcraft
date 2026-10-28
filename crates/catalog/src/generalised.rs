@@ -142,6 +142,7 @@ pub const LOGISTIC: Spec = Spec {
         CONFIDENCE,
         SAVE,
     ],
+    needs: &[],
     styles: BASE,
     check: common_check,
     code: |a, _| {
@@ -231,6 +232,7 @@ pub const POISSON: Spec = Spec {
         CONFIDENCE,
         SAVE,
     ],
+    needs: &[],
     styles: BASE,
     check: poisson_check,
     code: |a, _| {
@@ -257,8 +259,67 @@ pub const POISSON: Spec = Spec {
     },
 };
 
+// ---- Negative binomial model ----
+
+pub const NEGATIVE_BINOMIAL: Spec = Spec {
+    entry: "Negative binomial model",
+    menu: "Statistics > Generalised models > Negative binomial model",
+    about: "Model a count outcome that varies more than a Poisson model allows. It fits with \
+            MASS::glm.nb, which estimates the extra spread (theta) along with the \
+            coefficients. The counts must be whole numbers of zero or more.",
+    widgets: &[
+        Widget::Variable {
+            id: "y",
+            label: "Outcome (counts)",
+            kinds: NUMBERS,
+            required: true,
+            hint: "",
+        },
+        PREDICTOR_LIST,
+        Widget::Variable {
+            id: "exposure",
+            label: "Exposure",
+            kinds: NUMBERS,
+            required: false,
+            hint: "Optional: how long or how much each row was observed. The model then \
+                   describes rates; its log is added as an offset. Must be above zero.",
+        },
+        Widget::Check {
+            id: "ratios",
+            label: "Show rate ratios with confidence intervals",
+            default: true,
+            hint: "",
+        },
+        CONFIDENCE,
+        SAVE,
+    ],
+    needs: &["MASS"],
+    styles: BASE,
+    check: poisson_check,
+    code: |a, _| {
+        let model = a.name("save");
+        let offset = a
+            .var("exposure")
+            .map_or_else(String::new, |e| format!(" + offset(log({e}))"));
+        let mut code = format!(
+            "{model} <- MASS::glm.nb({} ~ {}{offset}, data = {})\nprint(summary({model}))",
+            a.var("y").unwrap_or_default(),
+            rhs(a),
+            a.data(),
+        );
+        if a.flag("ratios") {
+            code.push_str(&format!(
+                "\ncat(\"\\nRate ratios\\n\")\nprint(exp(cbind(rate_ratio = stats::coef({model}), \
+                 stats::confint({model}, level = {}))))",
+                a.choice("conf")
+            ));
+        }
+        code
+    },
+};
+
 /// The dialogs of this module, in menu order.
-pub const SPECS: &[&Spec] = &[&LOGISTIC, &POISSON];
+pub const SPECS: &[&Spec] = &[&LOGISTIC, &POISSON, &NEGATIVE_BINOMIAL];
 
 #[cfg(test)]
 mod tests {
@@ -397,6 +458,51 @@ mod tests {
         )
         .contains("choose another"));
         assert!(message(&POISSON, &[("y", "arm")], &[("x", &["age"])]).contains("needs number"));
+    }
+
+    #[test]
+    fn negative_binomial_uses_mass_and_an_offset_for_an_exposure() {
+        assert_eq!(NEGATIVE_BINOMIAL.packages(Style::Base), vec!["MASS"]);
+        let plain = code(&NEGATIVE_BINOMIAL, &[("y", "visits")], &[("x", &["age"])]);
+        assert!(
+            plain.starts_with("model <- MASS::glm.nb(visits ~ age, data = `my data`)\n"),
+            "{plain}"
+        );
+        assert!(plain.contains("Rate ratios"), "{plain}");
+        let rate = code(
+            &NEGATIVE_BINOMIAL,
+            &[
+                ("y", "visits"),
+                ("exposure", "years"),
+                ("save", "visit nb"),
+                ("conf", "0.9"),
+            ],
+            &[("x", &["age", "arm"])],
+        );
+        assert!(
+            rate.starts_with(
+                "`visit nb` <- MASS::glm.nb(visits ~ age + arm + offset(log(years)), \
+                 data = `my data`)\n"
+            ),
+            "{rate}"
+        );
+        assert!(rate.ends_with("level = 0.9))))"), "{rate}");
+        assert!(message(
+            &NEGATIVE_BINOMIAL,
+            &[("y", "visits"), ("exposure", "visits")],
+            &[("x", &["age"])]
+        )
+        .contains("choose another"));
+        assert!(
+            message(&NEGATIVE_BINOMIAL, &[("y", "arm")], &[("x", &["age"])])
+                .contains("needs number")
+        );
+        assert!(message(
+            &NEGATIVE_BINOMIAL,
+            &[("y", "visits"), ("save", "my data")],
+            &[("x", &["age"])]
+        )
+        .contains("is the data frame"));
     }
 
     #[test]

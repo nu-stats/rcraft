@@ -136,7 +136,7 @@ impl PackageCheck {
         let names = list.join(", ");
         ui.label(
             RichText::new(format!(
-                "This code style needs the R package {names}, which is not installed."
+                "This dialog needs the R package {names}, which is not installed."
             ))
             .color(pal.warning),
         );

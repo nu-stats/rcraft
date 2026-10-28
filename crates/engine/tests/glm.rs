@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::generalised::{LOGISTIC, POISSON};
+use rcraft_catalog::generalised::{LOGISTIC, NEGATIVE_BINOMIAL, POISSON};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind, Widget};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -70,6 +70,7 @@ const MAKE: &str = "d <- data.frame(\
      won = c(0, 0, 0, 1, 0, 0, 1, 0, 1, 1, 1, 1), \
      three = factor(rep(c('a', 'b', 'c'), 4)), \
      n = c(1, 0, 2, 3, 2, 4, 5, 3, 6, 8, 7, 9), \
+     nb = c(0, 1, 0, 3, 2, 9, 1, 0, 12, 4, 2, 15), \
      e = rep(c(10, 20), 6), \
      grp = factor(rep(c('u', 'v'), each = 6)))";
 
@@ -82,6 +83,7 @@ fn context() -> Context {
             ("won", VarKind::Number),
             ("three", VarKind::Factor),
             ("n", VarKind::Number),
+            ("nb", VarKind::Number),
             ("e", VarKind::Number),
             ("grp", VarKind::Factor),
         ]
@@ -133,6 +135,8 @@ fn report(text: &str) -> Vec<String> {
             !(l.starts_with("Call:")
                 || l.starts_with("stats::")
                 || l.starts_with("glm(")
+                || l.starts_with("MASS::glm.nb(")
+                || l.starts_with("glm.nb(")
                 || l.starts_with("warning:"))
         })
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
@@ -250,5 +254,58 @@ fn poisson_model_is_the_glm_r_fits() {
         "inherits(rate, 'glm'), identical(rate$family$family, 'quasipoisson'), \
          isTRUE(all.equal(coef(rate), coef(glm(n ~ x + grp, family = quasipoisson, data = d, offset = log(e))))), \
          !isTRUE(isTRUE(all.equal(coef(rate), coef(glm(n ~ x + grp, family = quasipoisson, data = d)))))",
+    );
+}
+
+#[test]
+fn negative_binomial_model_is_the_glm_nb_r_fits() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let (have, _) = run(
+        &mut e,
+        Source::Typed,
+        "stopifnot(requireNamespace('MASS', quietly = TRUE))",
+    );
+    if have != Outcome::Ok {
+        eprintln!("skipped: the R package MASS is not installed");
+        return;
+    }
+
+    let (outcome, text) = dialog(
+        &mut e,
+        &NEGATIVE_BINOMIAL,
+        &[("y", "nb")],
+        &[("x", &["x"])],
+        &["ratios"],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "m <- MASS::glm.nb(nb ~ x, data = d); print(summary(m)); cat('\nRate ratios\n'); \
+         print(exp(cbind(rate_ratio = stats::coef(m), stats::confint(m, level = 0.95))))",
+    );
+    assert!(report(&expected).len() > 10, "{expected}");
+    assert_eq!(report(&text), report(&expected), "{text}");
+    holds(
+        &mut e,
+        "inherits(model, 'negbin'), is.finite(model$theta), \
+         isTRUE(all.equal(coef(model), coef(MASS::glm.nb(nb ~ x, data = d))))",
+    );
+
+    // an exposure becomes an offset, a categorical predictor another name
+    let (outcome, text) = dialog(
+        &mut e,
+        &NEGATIVE_BINOMIAL,
+        &[("y", "nb"), ("exposure", "e"), ("save", "nbrate")],
+        &[("x", &["x", "grp"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        "inherits(nbrate, 'negbin'), \
+         isTRUE(all.equal(coef(nbrate), coef(MASS::glm.nb(nb ~ x + grp + offset(log(e)), data = d)))), \
+         !isTRUE(isTRUE(all.equal(coef(nbrate), coef(MASS::glm.nb(nb ~ x + grp, data = d)))))",
     );
 }

@@ -90,6 +90,7 @@ pub const SUMMARY: Spec = Spec {
             hint: "Optional: a name for the table, so later commands can use it.",
         },
     ],
+    needs: &[],
     styles: BASE,
     check: summary_check,
     code: summary_code,
@@ -122,6 +123,7 @@ pub const FREQUENCY: Spec = Spec {
             hint: "",
         },
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -196,6 +198,7 @@ pub const CROSSTAB: Spec = Spec {
             hint: "R warns when some expected counts are small.",
         },
     ],
+    needs: &[],
     styles: BASE,
     check: |a| {
         if a.var_text("row") == a.var_text("col") {
@@ -297,6 +300,7 @@ pub const CORRELATION: Spec = Spec {
             hint: "Test of zero correlation for each pair. Not adjusted for the number of pairs.",
         },
     ],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -339,6 +343,7 @@ pub const MISSING: Spec = Spec {
         min: 0,
         hint: "Choose none to use every variable.",
     }],
+    needs: &[],
     styles: BASE,
     check: |a| {
         if a.vars_or_all("vars", &[]).is_empty() {
@@ -379,6 +384,7 @@ pub const NORMALITY: Spec = Spec {
         min: 1,
         hint: "A small p-value says the values are unlikely to be normal.",
     }],
+    needs: &[],
     styles: BASE,
     check: no_check,
     code: |a, _| {
@@ -417,6 +423,7 @@ pub const SPECS: &[&Spec] = &[
     &models::FACTORIAL,
     &generalised::LOGISTIC,
     &generalised::POISSON,
+    &generalised::NEGATIVE_BINOMIAL,
 ];
 
 #[cfg(test)]
