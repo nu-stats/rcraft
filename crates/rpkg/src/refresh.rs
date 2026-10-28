@@ -351,3 +351,63 @@ mod tests {
         assert_eq!(url("https://a.test", "x"), "https://a.test/x");
     }
 }
+
+/// Longest mirror address accepted.
+pub const MAX_MIRROR_LEN: usize = 300;
+
+/// Checks a mirror address a user typed: `https://` and a host, no spaces or
+/// control characters, at most [`MAX_MIRROR_LEN`] long. Returns it without a
+/// trailing slash. Plain `http://` is refused (the fetcher would refuse it too).
+pub fn validate_mirror(text: &str) -> std::result::Result<String, String> {
+    let t = text.trim().trim_end_matches('/');
+    let Some(rest) = t.strip_prefix("https://") else {
+        return Err("A mirror address starts with https://".into());
+    };
+    if t.len() > MAX_MIRROR_LEN {
+        return Err(format!("A mirror address is at most {MAX_MIRROR_LEN} characters"));
+    }
+    if t.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Err("A mirror address has no spaces".into());
+    }
+    let host = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if host.is_empty() || host.starts_with('.') || !host.chars().any(|c| c.is_alphanumeric()) {
+        return Err("A mirror address needs a host name after https://".into());
+    }
+    if rest.contains(['?', '#']) {
+        return Err("A mirror address has no query or fragment".into());
+    }
+    Ok(t.to_string())
+}
+
+#[cfg(test)]
+mod mirror_tests {
+    use super::*;
+
+    #[test]
+    fn mirrors_are_checked() {
+        assert_eq!(
+            validate_mirror("  https://cran.r-project.org/  "),
+            Ok("https://cran.r-project.org".to_string())
+        );
+        assert_eq!(
+            validate_mirror("https://mirror.example.edu/CRAN//"),
+            Ok("https://mirror.example.edu/CRAN".to_string())
+        );
+        for bad in [
+            "",
+            "cran.r-project.org",
+            "http://cran.r-project.org",
+            "https://",
+            "https:///x",
+            "https://a b.org",
+            "https://a.org/x?y=1",
+            "https://a.org/#top",
+            "ftp://a.org",
+            "https://.org",
+        ] {
+            assert!(validate_mirror(bad).is_err(), "{bad:?}");
+        }
+        assert!(validate_mirror(&format!("https://a.org/{}", "x".repeat(400))).is_err());
+        assert!(validate_mirror("https://a.org/\u{7}").is_err());
+    }
+}

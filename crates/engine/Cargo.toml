@@ -17,6 +17,7 @@ rcraft-rproto.workspace = true
 rcraft-rhost.workspace = true
 rcraft-rdata.workspace = true
 rcraft-rcodegen.workspace = true
+rcraft-rpkg.workspace = true
 rcraft-rgraph.workspace = true
 rcraft-report.workspace = true
 rcraft-catalog.workspace = true
