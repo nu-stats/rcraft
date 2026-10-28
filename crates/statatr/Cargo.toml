@@ -1,0 +1,17 @@
+[package]
+name = "rcraft-statatr"
+description = "Stata mode: reads Stata do-files and translates them to R."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.rcraft]
+layer = 3
+
+[dependencies]
+
+[lints]
+workspace = true

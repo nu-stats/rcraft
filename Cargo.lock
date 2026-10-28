@@ -2465,6 +2465,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcraft-statatr"
+version = "0.0.1"
+
+[[package]]
 name = "rcraft-ui-egui"
 version = "0.0.1"
 dependencies = [

@@ -133,12 +133,14 @@ exist on branch `p0/scaffold`.
   copy them here. That change is made in the StatCraft repository, so it is
   not done from this one and needs the maintainer's go-ahead.
   Done 2026-10-28 with that go-ahead, on StatCraft branch
-  `lang/shared-parsers` (not yet merged or pushed): `statcraft-lang` now
-  holds the do-file reader (`script`), the text-only command syntax
+  `lang/shared-parsers` (pull request nu-stats/statcraft#2): `statcraft-lang`
+  now holds the do-file reader (`script`), the text-only command syntax
   (`syntax`: `parts`, weights, `options`, `abbrev`, `wildcard`) and the
-  expression parser (`expr`), and depends only on `statcraft-core`. P2C.3
-  adds it as a git dependency once that branch is pushed; `statatr` (L3)
-  is the crate that uses it.
+  expression parser (`expr`), and depends only on `statcraft-core`.
+  **Changed 2026-10-28: RCraft copies these files and does not depend on
+  them.** StatCraft's repository is private and RCraft's is public, so a git
+  dependency would break every outside build and RCraft's own CI. See
+  "P2C.3 front end" below.
 - `rcraftstata` (the shipped R runtime package) lives in this repository
   under `r/rcraftstata/` and is installed into RCraft's own user library on
   first use, with the user's yes. Created when P2C.4 starts.
@@ -956,3 +958,31 @@ forms `rc install`, `rc search` and Tab completion (P1A.9); "has a binary for my
 filter; installing or updating on a click in the real window has not been done by hand
 (the flow is tested in real R and the screens are checked in pictures). The Packages
 window is not a catalog entry like the dialogs are.
+
+## P2C.3 front end (vendored from StatCraft), 2026-10-28
+
+New crate **`rcraft-statatr`** (layer L3, already in the `AGENTS.md` table). It has
+no dependencies and never starts R. Its first content is StatCraft's do-file
+language front end, **copied** from StatCraft commit `a245039` (branch
+`lang/shared-parsers`) because StatCraft is a private repository and RCraft a public
+one (a git dependency would fail for everyone else and in CI). The user chose
+vendoring over publishing `statcraft-lang` separately.
+
+- `lang/script.rs`: do-files into logical command lines (`///` continuations, `/* */`,
+  `//`, `*` comments, `#delimit`, doubled backslashes); each line keeps the physical
+  lines it came from.
+- `lang/syntax.rs`: a command line into main part, `if`, `in`, weight and options;
+  `options`, `abbrev`, `wildcard`.
+- `lang/expr.rs`: Stata expressions into a tree (`Expr`), with depth capped at 64;
+  date literals become `date()` calls; `.`, `.a` to `.z` are missing values.
+- `values/missing.rs`, `values/hex.rs`, `values/datetime/{mod,parse,leap}.rs`: the
+  part of StatCraft's core these need. The date-format part (`display`) is left out.
+- Only edits: paths (`statcraft_core::` to `crate::values::`) and the left-out part.
+  Their 16 unit tests came with them and pass; `tests/front_end.rs` (3) takes a small
+  do-file through all three steps and checks that bad input is an error.
+- **Keep the two copies in step:** a parser bug fixed in one place is fixed in the other.
+  The file `lang/script.rs` mentions `plan/stata/do-files.md`; that note is in StatCraft's
+  repository, not copied here (it is observations of Stata; nothing recorded from a licensed
+  Stata is committed here, AGENTS.md section 1).
+- Not started: P2B.1's own reader built on these (macros, `foreach`, `by:` prefixes),
+  P2B.2 expression translation to R, and everything after.

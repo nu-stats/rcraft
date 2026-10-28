@@ -13,3 +13,8 @@ language and is used only to describe what RCraft works with.
 Stata is a registered trademark of StataCorp LLC. RCraft is not affiliated
 with, endorsed by or sponsored by StataCorp LLC; the name is used only to
 describe the Stata-code translation feature.
+
+Parts of the `rcraft-statatr` crate (`crates/statatr/src/lang` and
+`crates/statatr/src/values`) are copied from StatCraft, another project of the
+same authors, which is licensed under the same two licences. The files and
+the commit they come from are listed at the top of `crates/statatr/src/lib.rs`.

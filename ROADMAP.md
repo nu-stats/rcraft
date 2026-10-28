@@ -233,6 +233,9 @@ skipped. It never gives a silent wrong answer.
   keep paths relative to the do-file, follow `do` and `include`
 - P2C.3 Front end: reuse StatCraft's do-file reader, command syntax and
   expression parsers (shared crate or vendored; see open questions)
+  (done: vendored into `statatr`, not a dependency, because StatCraft is private; the
+  reader, syntax and expression parsers work and are tested; the translation is not
+  started. P2C.3 is done)
 - P2C.4 `rcraftstata`, a small R package we ship that implements the Stata
   rules R does not share: missing values sorting high, variable
   abbreviations and wildcards, `_n`/`_N`, `by` state, `preserve`/`restore`,
