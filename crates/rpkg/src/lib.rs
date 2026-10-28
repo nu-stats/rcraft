@@ -26,6 +26,7 @@ pub mod http;
 pub mod index;
 pub mod lockfile;
 pub mod plan;
+pub mod provider;
 pub mod rds;
 pub mod refresh;
 pub mod search;
