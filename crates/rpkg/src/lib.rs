@@ -24,6 +24,7 @@ pub mod dcf;
 pub mod describe;
 pub mod http;
 pub mod index;
+pub mod plan;
 pub mod rds;
 pub mod refresh;
 pub mod search;
