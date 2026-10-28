@@ -19,10 +19,11 @@ use rcraft_rhost::library::app_data_dir;
 use rcraft_rhost::Env;
 use rcraft_rpkg::cache::Cache;
 use rcraft_rpkg::http::UreqFetcher;
-use rcraft_rpkg::index::{Index, DEFAULT_MAX_AGE};
+use rcraft_rpkg::index::{Index, Package, DEFAULT_MAX_AGE};
 use rcraft_rpkg::refresh::{
     self, validate_mirror, Control, Fetcher, Outcome, Progress, DEFAULT_MIRROR,
 };
+use rcraft_rpkg::search::{Filters, Hit, Searcher};
 
 /// What the service is doing.
 #[derive(Debug, Clone, PartialEq)]
@@ -41,8 +42,8 @@ pub enum Status {
 
 enum Msg {
     Progress(Progress),
-    Loaded(Result<Option<Index>, String>),
-    Refreshed(Result<Outcome, rcraft_rpkg::Error>),
+    Loaded(Result<Option<(Index, Searcher)>, String>),
+    Refreshed(Result<(Outcome, Searcher), rcraft_rpkg::Error>),
 }
 
 struct Job {
@@ -63,6 +64,8 @@ pub struct PackageIndexService {
     mirror_file: Option<PathBuf>,
     mirror: String,
     index: Option<Index>,
+    /// Prepared for `index` by the worker that read or fetched it.
+    searcher: Option<Searcher>,
     status: Status,
     /// A note from the last refresh (for example, that titles were missing).
     note: Option<String>,
@@ -104,6 +107,7 @@ impl PackageIndexService {
             mirror_file,
             mirror,
             index: None,
+            searcher: None,
             status: Status::Idle,
             note: None,
             job: None,
@@ -115,6 +119,18 @@ impl PackageIndexService {
 
     pub fn index(&self) -> Option<&Index> {
         self.index.as_ref()
+    }
+
+    /// The best matches for `query`, best first (see `rcraft_rpkg::search`). Empty
+    /// while there is no index.
+    pub fn search(&self, query: &str, filters: &Filters, limit: usize) -> Vec<(&Package, Hit)> {
+        let (Some(ix), Some(s)) = (&self.index, &self.searcher) else {
+            return Vec::new();
+        };
+        s.search(ix, query, filters, limit)
+            .into_iter()
+            .filter_map(|h| ix.packages().get(h.position).map(|p| (p, h)))
+            .collect()
     }
 
     pub fn status(&self) -> &Status {
@@ -183,7 +199,15 @@ impl PackageIndexService {
         });
         self.status = Status::Loading;
         thread::spawn(move || {
-            let r = cache.load().map_err(|e| e.to_string());
+            let r = cache
+                .load()
+                .map(|loaded| {
+                    loaded.map(|ix| {
+                        let s = Searcher::new(&ix);
+                        (ix, s)
+                    })
+                })
+                .map_err(|e| e.to_string());
             let _ = tx.send(Msg::Loaded(r));
         });
     }
@@ -222,6 +246,10 @@ impl PackageIndexService {
             if !keep_on_disk {
                 let _ = std::fs::remove_dir_all(cache_dir_of(&cache));
             }
+            let result = result.map(|out| {
+                let s = Searcher::new(&out.index);
+                (out, s)
+            });
             let _ = tx.send(Msg::Refreshed(result));
         });
     }
@@ -249,8 +277,9 @@ impl PackageIndexService {
                 }
                 Ok(Msg::Loaded(r)) => {
                     match r {
-                        Ok(Some(ix)) => {
+                        Ok(Some((ix, searcher))) => {
                             self.index = Some(ix);
+                            self.searcher = Some(searcher);
                             self.status = Status::Idle;
                         }
                         Ok(None) => self.status = Status::Idle,
@@ -265,8 +294,9 @@ impl PackageIndexService {
                 }
                 Ok(Msg::Refreshed(r)) => {
                     match r {
-                        Ok(out) => {
+                        Ok((out, searcher)) => {
                             self.index = Some(out.index);
+                            self.searcher = Some(searcher);
                             self.note = out.note;
                             self.status = Status::Idle;
                         }
@@ -544,6 +574,28 @@ mod tests {
         assert!(s.refresh_suggested());
         assert_eq!(s.status(), &Status::Idle);
         assert!(!s.is_busy());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn searching_uses_the_index_the_worker_prepared() {
+        let dir = temp("search");
+        let mut s = service(
+            &dir,
+            Canned::serving(Ok(PACKAGES_GZ.to_vec()), Ok(DB_V3.to_vec())),
+        );
+        assert!(s.search("made-up", &Filters::default(), 10).is_empty());
+        s.refresh();
+        finish(&mut s);
+        let found = s.search("made-up", &Filters::default(), 10);
+        assert_eq!(
+            found
+                .iter()
+                .map(|(p, _)| p.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["fakeone"]
+        );
+        assert_eq!(s.search("", &Filters::default(), 10).len(), 4);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
