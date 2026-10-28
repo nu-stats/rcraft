@@ -507,6 +507,7 @@ mod tests {
         };
         Context {
             dataset: "my data".into(),
+            frames: Vec::new(),
             columns: vec![
                 col("won game", VarKind::Logical),
                 col("age", VarKind::Number),

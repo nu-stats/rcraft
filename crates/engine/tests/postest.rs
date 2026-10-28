@@ -88,6 +88,7 @@ fn on_model(
 ) -> (Outcome, String) {
     let ctx = Context {
         dataset: model.into(),
+        frames: Vec::new(),
         columns: Vec::new(),
     };
     let mut values = spec.defaults(&ctx);

@@ -440,6 +440,7 @@ mod tests {
         };
         Context {
             dataset: "my data".into(),
+            frames: Vec::new(),
             columns: vec![
                 col("age", VarKind::Number),
                 col("home town", VarKind::Number),

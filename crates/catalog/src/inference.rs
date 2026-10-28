@@ -527,6 +527,7 @@ mod tests {
         };
         Context {
             dataset: "my data".into(),
+            frames: Vec::new(),
             columns: vec![
                 col("blood pressure", VarKind::Number),
                 col("after", VarKind::Number),

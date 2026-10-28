@@ -80,6 +80,7 @@ const MAKE: &str = "d <- data.frame(\
 fn context() -> Context {
     Context {
         dataset: "d".into(),
+        frames: Vec::new(),
         columns: [
             ("x", VarKind::Number),
             ("z", VarKind::Number),

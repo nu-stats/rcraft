@@ -705,3 +705,10 @@ cannot yet list the workspace's data frames), and its variables are matched by
 name. `engine/tests/combine.rs` runs each dialog in real R and checks the
 values; unit tests cover the refusals. Still to do for P3.6: a data-frame
 chooser widget, joins on differently named keys, and tidyverse styles.
+
+Data-frame chooser (follow-up to P3.6): `Widget::Frame` picks another data
+frame of the workspace from a list; `Context.frames` carries the workspace's
+other frames. Once one is chosen the window brings its table over (and lets go
+of it when the dialog closes), so Join also refuses a match variable that the
+other data frame lacks. Still to do: joins on differently named keys and
+tidyverse styles.

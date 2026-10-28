@@ -3,7 +3,7 @@
 
 use eframe::egui::{self, RichText};
 use rcraft_engine::Engine;
-use rcraft_rcodegen::dialog::{Context, Spec, Style, Values, Widget};
+use rcraft_rcodegen::dialog::{Context, Frame, Spec, Style, Values, Widget};
 use rcraft_rdata::Table;
 
 use crate::look::Palette;
@@ -46,18 +46,24 @@ pub struct SpecDialog {
 }
 
 /// The columns of `table` as a dialog sees them.
-pub fn context(dataset: &str, table: &Table) -> Context {
+pub fn context(dataset: &str, table: &Table, frames: Vec<Frame>) -> Context {
     Context {
         dataset: dataset.to_string(),
-        columns: table
-            .columns
-            .iter()
-            .map(|c| rcraft_rcodegen::dialog::ColumnInfo {
-                name: c.name.clone(),
-                kind: rcraft_rcodegen::dialog::VarKind::of(&c.data),
-            })
-            .collect(),
+        frames,
+        columns: columns_of(table),
     }
+}
+
+/// The columns of `table` as a dialog sees them.
+pub fn columns_of(table: &Table) -> Vec<rcraft_rcodegen::dialog::ColumnInfo> {
+    table
+        .columns
+        .iter()
+        .map(|c| rcraft_rcodegen::dialog::ColumnInfo {
+            name: c.name.clone(),
+            kind: rcraft_rcodegen::dialog::VarKind::of(&c.data),
+        })
+        .collect()
 }
 
 impl SpecDialog {
@@ -81,6 +87,21 @@ impl SpecDialog {
     /// The data frame the open dialog works on.
     pub fn dataset(&self) -> Option<&str> {
         self.open.as_ref().map(|o| o.ctx.dataset.as_str())
+    }
+
+    /// The other data frames the open dialog has chosen, so the window can bring
+    /// their columns over.
+    pub fn chosen_frames(&self) -> Vec<String> {
+        let Some(open) = &self.open else {
+            return Vec::new();
+        };
+        open.spec
+            .widgets
+            .iter()
+            .filter(|w| matches!(w, Widget::Frame { .. }))
+            .map(|w| open.values.text(w.id()).to_string())
+            .filter(|n| !n.is_empty())
+            .collect()
     }
 
     /// Takes in the data frame's columns again (a command may have changed
@@ -277,7 +298,8 @@ fn widget_row(
         Widget::Variable { label, hint, .. }
         | Widget::Variables { label, hint, .. }
         | Widget::Text { label, hint, .. }
-        | Widget::Choice { label, hint, .. } => (label, hint),
+        | Widget::Choice { label, hint, .. }
+        | Widget::Frame { label, hint, .. } => (label, hint),
         Widget::Check { hint, .. } => ("", hint),
     };
     ui.label(label);
@@ -378,6 +400,31 @@ fn widget_row(
             Widget::Check { id, label, .. } => {
                 ui.checkbox(open.values.flag_mut(id), label);
             }
+            Widget::Frame { id, .. } => {
+                let current = open.values.text(id).to_string();
+                if open.ctx.frames.is_empty() {
+                    ui.label(
+                        RichText::new("There is no other data frame yet; open or make one first.")
+                            .color(pal.warning),
+                    );
+                } else {
+                    let shown = if current.is_empty() {
+                        "(choose)"
+                    } else {
+                        current.as_str()
+                    };
+                    egui::ComboBox::from_id_salt(("spec-frame", id))
+                        .selected_text(shown)
+                        .width(240.0)
+                        .show_ui(ui, |ui| {
+                            for f in &open.ctx.frames {
+                                if ui.selectable_label(f.name == current, &f.name).clicked() {
+                                    open.values.set_text(id, &f.name);
+                                }
+                            }
+                        });
+                }
+            }
         }
         if !hint.is_empty() {
             ui.label(RichText::new(hint).small().color(pal.dim));
@@ -398,6 +445,7 @@ mod tests {
     fn ctx() -> Context {
         Context {
             dataset: "d".into(),
+            frames: Vec::new(),
             columns: vec![ColumnInfo {
                 name: "x".into(),
                 kind: VarKind::Number,

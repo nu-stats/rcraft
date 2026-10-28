@@ -80,6 +80,7 @@ fn dialog(
     assert_eq!(made, Outcome::Ok);
     let ctx = Context {
         dataset: "d".into(),
+        frames: Vec::new(),
         columns: [
             ("age", VarKind::Number),
             ("g", VarKind::Factor),

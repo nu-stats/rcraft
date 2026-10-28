@@ -56,16 +56,31 @@ pub struct ColumnInfo {
     pub kind: VarKind,
 }
 
-/// What a dialog knows about its data: the data frame's name and columns.
+/// Another data frame in the workspace. `columns` is empty until its table has
+/// been brought over.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Frame {
+    pub name: String,
+    pub columns: Vec<ColumnInfo>,
+}
+
+/// What a dialog knows about its data: the data frame's name and columns, and
+/// the workspace's other data frames.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Context {
     pub dataset: String,
     pub columns: Vec<ColumnInfo>,
+    pub frames: Vec<Frame>,
 }
 
 impl Context {
     pub fn column(&self, name: &str) -> Option<&ColumnInfo> {
         self.columns.iter().find(|c| c.name == name)
+    }
+
+    /// Another data frame of the workspace, by name.
+    pub fn frame(&self, name: &str) -> Option<&Frame> {
+        self.frames.iter().find(|f| f.name == name)
     }
 }
 
@@ -144,6 +159,12 @@ pub enum Widget {
         default: bool,
         hint: &'static str,
     },
+    /// Another data frame of the workspace (not the one being worked on).
+    Frame {
+        id: &'static str,
+        label: &'static str,
+        hint: &'static str,
+    },
 }
 
 impl Widget {
@@ -153,7 +174,8 @@ impl Widget {
             | Widget::Variables { id, .. }
             | Widget::Text { id, .. }
             | Widget::Choice { id, .. }
-            | Widget::Check { id, .. } => id,
+            | Widget::Check { id, .. }
+            | Widget::Frame { id, .. } => id,
         }
     }
 }
@@ -297,7 +319,7 @@ impl Spec {
         let mut values = Values::default();
         for w in self.widgets {
             match *w {
-                Widget::Variable { id, .. } => values.set_text(id, ""),
+                Widget::Variable { id, .. } | Widget::Frame { id, .. } => values.set_text(id, ""),
                 Widget::Text { id, default, .. } => values.set_text(
                     id,
                     match default {
@@ -464,6 +486,19 @@ fn widget_problem(w: &Widget, ctx: &Context, values: &Values) -> Option<Problem>
                 .then(|| Problem::new(id, "Pick one of the options."))
         }
         Widget::Check { .. } => None,
+        Widget::Frame { id, label, .. } => {
+            let name = values.text(id);
+            if name.is_empty() {
+                Some(Problem::new(id, format!("Choose {}.", lower(label))))
+            } else if ctx.frame(name).is_none() {
+                Some(Problem::new(
+                    id,
+                    format!("{name} is not another data frame in the workspace."),
+                ))
+            } else {
+                None
+            }
+        }
     }
 }
 
@@ -571,6 +606,12 @@ impl Args<'_> {
         (!v.is_empty()).then(|| r_string(v))
     }
 
+    /// The data frame chosen in a [`Widget::Frame`], when it is one of the
+    /// workspace's.
+    pub fn frame(&self, id: &str) -> Option<&Frame> {
+        self.ctx.frame(self.values.text(id))
+    }
+
     /// The raw column name chosen (for comparisons in checks).
     pub fn var_text(&self, id: &str) -> &str {
         self.values.text(id)
@@ -627,6 +668,7 @@ mod tests {
     fn ctx() -> Context {
         Context {
             dataset: "people".into(),
+            frames: Vec::new(),
             columns: vec![
                 ColumnInfo {
                     name: "age".into(),

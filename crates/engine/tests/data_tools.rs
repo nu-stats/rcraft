@@ -59,6 +59,7 @@ fn fetch(e: &mut Engine, name: &str) -> Option<Table> {
 fn context(name: &str, table: &Table) -> Context {
     Context {
         dataset: name.into(),
+        frames: Vec::new(),
         columns: table
             .columns
             .iter()

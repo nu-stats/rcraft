@@ -87,6 +87,8 @@ pub struct App {
     graph: GraphView,
     /// The data frame shown in Variables and Data.
     dataset: Option<String>,
+    /// Other data frames brought over only because a dialog chose them.
+    dialog_watch: Vec<String>,
     /// Sideways scroll of the Data grid, handed to its header.
     grid_x: f32,
     /// Whether the Data grid shows value labels, codes or both.
@@ -125,6 +127,7 @@ impl App {
             view: View::Results,
             graph: GraphView::default(),
             dataset: None,
+            dialog_watch: Vec::new(),
             grid_x: 0.0,
             label_view: LabelView::default(),
             side_tab: SideTab::Variables,
@@ -148,6 +151,50 @@ impl App {
             EngineState::Ready(e) => Some(&**e),
             _ => None,
         }
+    }
+
+    /// What a dialog working on the data frame `name` sees: its columns as last
+    /// brought over, and the workspace's other data frames (with columns once
+    /// a dialog has chosen one and it has arrived).
+    fn dialog_context(&self, name: &str) -> Option<rcraft_rcodegen::dialog::Context> {
+        let engine = self.engine()?;
+        let table = engine.table(name)?;
+        let frames = engine
+            .workspace()
+            .iter()
+            .filter(|w| w.is_data_frame() && w.name != name)
+            .map(|w| rcraft_rcodegen::dialog::Frame {
+                name: w.name.clone(),
+                columns: engine
+                    .table(&w.name)
+                    .map(spec_dialog::columns_of)
+                    .unwrap_or_default(),
+            })
+            .collect();
+        Some(spec_dialog::context(name, table, frames))
+    }
+
+    /// Brings over the other data frames an open dialog has chosen (to know
+    /// their variables), and lets go of those it no longer needs.
+    fn watch_chosen_frames(&mut self) {
+        let chosen = self.spec_dialog.chosen_frames();
+        let shown = self.dataset.clone();
+        let EngineState::Ready(engine) = &mut self.engine else {
+            return;
+        };
+        for name in &chosen {
+            if Some(name) != shown.as_ref() && !self.dialog_watch.contains(name) {
+                engine.watch(name);
+                self.dialog_watch.push(name.clone());
+            }
+        }
+        self.dialog_watch.retain(|name| {
+            let keep = chosen.contains(name);
+            if !keep && Some(name) != shown.as_ref() {
+                engine.unwatch(name);
+            }
+            keep
+        });
     }
 
     /// Takes in what R has produced and finishes starting up.
@@ -262,11 +309,10 @@ impl App {
                 self.import.open_empty();
             }
             Action::OpenSpec(spec) => {
-                let table = self.dataset.as_deref().and_then(|name| {
-                    self.engine()
-                        .and_then(|e| e.table(name))
-                        .map(|t| spec_dialog::context(name, t))
-                });
+                let table = self
+                    .dataset
+                    .as_deref()
+                    .and_then(|name| self.dialog_context(name));
                 match table {
                     Some(dialog_ctx) => self.spec_dialog.open(spec, dialog_ctx),
                     None => {
@@ -280,6 +326,7 @@ impl App {
                     spec,
                     rcraft_rcodegen::dialog::Context {
                         dataset: name,
+                        frames: Vec::new(),
                         columns: Vec::new(),
                     },
                 );
@@ -428,14 +475,14 @@ impl App {
         }
 
         // a catalog dialog sees the data frame's columns as they are now
-        let fresh = self.spec_dialog.dataset().and_then(|name| {
-            self.engine()
-                .and_then(|e| e.table(name))
-                .map(|t| spec_dialog::context(name, t))
-        });
+        let fresh = self
+            .spec_dialog
+            .dataset()
+            .and_then(|name| self.dialog_context(name));
         if let Some(fresh) = fresh {
             self.spec_dialog.refresh(fresh);
         }
+        self.watch_chosen_frames();
         let engine = match &mut self.engine {
             EngineState::Ready(e) => Some(&mut **e),
             _ => None,

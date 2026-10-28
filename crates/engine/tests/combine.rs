@@ -8,7 +8,7 @@ use rcraft_catalog::combine::{
     AGGREGATE, APPEND, DROP_MISSING, DUPLICATES, JOIN, LONG_TO_WIDE, SAMPLE, WIDE_TO_LONG,
 };
 use rcraft_engine::{Engine, Outcome, Source};
-use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind};
+use rcraft_rcodegen::dialog::{ColumnInfo, Context, Frame, Spec, Style, VarKind};
 use rcraft_rdata::display::cell_text;
 use rcraft_rdata::Table;
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -54,17 +54,22 @@ fn fetch(e: &mut Engine, name: &str) -> Option<Table> {
     table
 }
 
-fn context(name: &str, table: &Table) -> Context {
+fn columns_of(table: &Table) -> Vec<ColumnInfo> {
+    table
+        .columns
+        .iter()
+        .map(|c| ColumnInfo {
+            name: c.name.clone(),
+            kind: VarKind::of(&c.data),
+        })
+        .collect()
+}
+
+fn context(name: &str, table: &Table, frames: Vec<Frame>) -> Context {
     Context {
         dataset: name.into(),
-        columns: table
-            .columns
-            .iter()
-            .map(|c| ColumnInfo {
-                name: c.name.clone(),
-                kind: VarKind::of(&c.data),
-            })
-            .collect(),
+        frames,
+        columns: columns_of(table),
     }
 }
 
@@ -95,7 +100,15 @@ fn apply(
     assert_eq!(run(e, Source::Typed, make), Outcome::Ok, "{make}");
     let table = fetch(e, "d");
     assert!(table.is_some(), "R has no data frame d");
-    let ctx = context("d", &table?);
+    // the other data frames, as the window offers them: `e`, when R has one
+    let frames: Vec<Frame> = fetch(e, "e")
+        .map(|t| Frame {
+            name: "e".into(),
+            columns: columns_of(&t),
+        })
+        .into_iter()
+        .collect();
+    let ctx = context("d", &table?, frames);
     let mut values = spec.defaults(&ctx);
     for (id, text) in set {
         values.set_text(id, *text);

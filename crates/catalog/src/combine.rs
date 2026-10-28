@@ -28,12 +28,10 @@ fn columns(a: &Args, names: &[&str]) -> String {
     }
 }
 
-const OTHER: Widget = Widget::Text {
+const OTHER: Widget = Widget::Frame {
     id: "other",
     label: "Other data frame",
-    default: TextDefault::Empty,
-    rule: TextRule::Name,
-    hint: "The name of a data frame already in the workspace (see the Objects pane).",
+    hint: "Another data frame in the workspace (see the Objects pane).",
 };
 
 fn other_check(a: &Args) -> Vec<Problem> {
@@ -43,13 +41,26 @@ fn other_check(a: &Args) -> Vec<Problem> {
             "The result cannot replace the other data frame; choose another name.",
         )];
     }
-    if a.name_text("other") == a.ctx.dataset {
-        return vec![Problem::new(
-            "other",
-            "That is the data frame being worked on; name a different one.",
-        )];
-    }
     Vec::new()
+}
+
+/// Join also needs each match variable to be in the other data frame, once
+/// its columns are known.
+fn join_check(a: &Args) -> Vec<Problem> {
+    let mut out = other_check(a);
+    if let Some(other) = a.frame("other").filter(|f| !f.columns.is_empty()) {
+        if let Some(k) = a
+            .vars("keys")
+            .into_iter()
+            .find(|k| !other.columns.iter().any(|c| c.name == *k))
+        {
+            out.push(Problem::new(
+                "keys",
+                format!("{k} is not a variable of {}.", other.name),
+            ));
+        }
+    }
+    out
 }
 
 // ---- Join ----
@@ -96,7 +107,7 @@ pub const JOIN: Spec = Spec {
     ],
     needs: &[],
     styles: BASE,
-    check: other_check,
+    check: join_check,
     code: join_code,
 };
 
@@ -590,7 +601,7 @@ fn missing_code(a: &Args, _: Style) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rcraft_rcodegen::dialog::{ColumnInfo, Context};
+    use rcraft_rcodegen::dialog::{ColumnInfo, Context, Frame};
 
     fn ctx() -> Context {
         let col = |name: &str, kind| ColumnInfo {
@@ -599,6 +610,10 @@ mod tests {
         };
         Context {
             dataset: "d".into(),
+            frames: vec![Frame {
+                name: "e".into(),
+                columns: vec![col("k", VarKind::Number), col("y", VarKind::Number)],
+            }],
             columns: vec![
                 col("k", VarKind::Number),
                 col("g", VarKind::Factor),
@@ -647,6 +662,9 @@ mod tests {
     #[test]
     fn join_refuses_itself_and_no_keys() {
         assert!(refused(&JOIN, &[("other", "d")], &[("keys", &["k"])]));
+        assert!(refused(&JOIN, &[("other", "nope")], &[("keys", &["k"])]));
+        // x is not a variable of e
+        assert!(refused(&JOIN, &[("other", "e")], &[("keys", &["x"])]));
         assert!(refused(&JOIN, &[("other", "e")], &[]));
         assert!(refused(&JOIN, &[], &[("keys", &["k"])]));
     }

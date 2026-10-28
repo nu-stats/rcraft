@@ -558,6 +558,7 @@ mod tests {
     fn make(spec: &Spec, model: &str, set: &[(&str, &str)]) -> Result<String, Vec<Problem>> {
         let c = Context {
             dataset: model.into(),
+            frames: Vec::new(),
             columns: Vec::new(),
         };
         let mut v: Values = spec.defaults(&c);
