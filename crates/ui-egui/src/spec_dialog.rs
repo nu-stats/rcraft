@@ -3,7 +3,7 @@
 
 use eframe::egui::{self, RichText};
 use rcraft_engine::Engine;
-use rcraft_rcodegen::dialog::{Context, Frame, Spec, Style, Values, Widget};
+use rcraft_rcodegen::dialog::{Context, Frame, Spec, Style, TextRule, Values, Widget};
 use rcraft_rdata::Table;
 
 use crate::look::Palette;
@@ -286,6 +286,48 @@ impl SpecDialog {
     }
 }
 
+/// The file ending a save dialog is set to write, from its format or separator
+/// choice (or, for the two without one, the entry itself).
+fn suggested_extension(spec: &Spec, values: &Values) -> &'static str {
+    match (values.text("format"), values.text("sep")) {
+        ("rdata", _) => "RData",
+        ("dta", _) => "dta",
+        ("sav", _) => "sav",
+        ("zsav", _) => "zsav",
+        ("xpt", _) => "xpt",
+        ("rds", _) => "rds",
+        ("parquet", _) => "parquet",
+        ("feather", _) => "feather",
+        (_, "tab") => "tsv",
+        (_, "comma" | "semicolon") => "csv",
+        _ if spec.entry == "Excel workbook" => "xlsx",
+        _ => "RData",
+    }
+}
+
+/// Asks the system's save dialog where to write, and puts the path in the box.
+/// The system dialog has already asked about replacing a file that is there,
+/// so the dialog's own Replace box is ticked for it.
+fn browse_save(open: &mut Open, id: &str) {
+    let ext = suggested_extension(open.spec, &open.values);
+    let mut chooser = rfd::FileDialog::new()
+        .set_title("Save as")
+        .set_file_name(format!("{}.{ext}", open.ctx.dataset))
+        .add_filter(format!(".{ext} file"), &[ext])
+        .add_filter("All files", &["*"]);
+    let typed = open.values.text(id).trim().to_string();
+    if let Some(dir) = std::path::Path::new(&typed).parent().filter(|d| d.is_dir()) {
+        chooser = chooser.set_directory(dir);
+    }
+    if let Some(path) = chooser.save_file() {
+        if path.exists() && open.spec.widgets.iter().any(|w| w.id() == "replace") {
+            open.values.set_flag("replace", true);
+        }
+        open.values
+            .set_text(id, path.to_string_lossy().into_owned());
+    }
+}
+
 fn widget_row(
     ui: &mut egui::Ui,
     pal: &Palette,
@@ -416,6 +458,20 @@ fn widget_row(
                     });
                 }
             }
+            Widget::Text {
+                id,
+                rule: TextRule::SavePath,
+                ..
+            } => {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(open.values.text_mut(id)).desired_width(260.0),
+                    );
+                    if ui.button("Browse…").clicked() {
+                        browse_save(open, id);
+                    }
+                });
+            }
             Widget::Text { id, .. } => {
                 ui.add(egui::TextEdit::singleline(open.values.text_mut(id)).desired_width(320.0));
             }
@@ -479,6 +535,30 @@ fn widget_row(
 mod tests {
     use super::*;
     use rcraft_catalog::data::SORT;
+
+    #[test]
+    fn browse_suggests_the_ending_of_the_chosen_format() {
+        use rcraft_catalog::save::{
+            SAVE_EXCEL, SAVE_R, SAVE_STATISTICS, SAVE_TEXT, SAVE_WORKSPACE,
+        };
+        let with = |spec: &Spec, set: &[(&str, &str)]| {
+            let mut v = spec.defaults(&Context {
+                dataset: "d".into(),
+                frames: Vec::new(),
+                columns: Vec::new(),
+            });
+            for (id, t) in set {
+                v.set_text(id, *t);
+            }
+            suggested_extension(spec, &v)
+        };
+        assert_eq!(with(&SAVE_TEXT, &[]), "csv");
+        assert_eq!(with(&SAVE_TEXT, &[("sep", "tab")]), "tsv");
+        assert_eq!(with(&SAVE_EXCEL, &[]), "xlsx");
+        assert_eq!(with(&SAVE_STATISTICS, &[("format", "zsav")]), "zsav");
+        assert_eq!(with(&SAVE_R, &[("format", "rdata")]), "RData");
+        assert_eq!(with(&SAVE_WORKSPACE, &[]), "RData");
+    }
     use rcraft_rcodegen::dialog::{ColumnInfo, VarKind};
 
     fn ctx() -> Context {

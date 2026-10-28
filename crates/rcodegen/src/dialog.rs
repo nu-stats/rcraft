@@ -107,6 +107,9 @@ pub enum TextRule {
     /// One finite number, inserted as typed (so `1e3` and `.5` pass, `inf` and
     /// words do not).
     Number,
+    /// The path of a file to write; must not be empty. The window offers a
+    /// Browse button that opens the system's save dialog.
+    SavePath,
 }
 
 /// One option of a [`Widget::Choice`]: the value code functions see, and the
@@ -496,6 +499,16 @@ fn widget_problem(w: &Widget, ctx: &Context, values: &Values) -> Option<Problem>
                         Some(Problem::new(id, format!("Type {}.", lower(label))))
                     } else if !t.parse::<f64>().is_ok_and(f64::is_finite) {
                         Some(Problem::new(id, format!("{t} is not a number.")))
+                    } else {
+                        None
+                    }
+                }
+                TextRule::SavePath => {
+                    let path = text.trim();
+                    if path.is_empty() {
+                        Some(Problem::new(id, "Type where to save it, or use Browse."))
+                    } else if path.contains(['\n', '\r', '\0']) {
+                        Some(Problem::new(id, "A file path cannot have a line break."))
                     } else {
                         None
                     }

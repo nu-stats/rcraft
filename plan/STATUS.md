@@ -749,3 +749,34 @@ tidyverse styles.
   skipped. MASS and nnet come with R; sandwich, lmtest, marginaleffects,
   readxl, haven and arrow are not installed here, so the tests that need them
   skip locally (they print a note) and run in CI.
+
+## P3.7 Save and export, 2026-10-28
+
+`catalog::save`, six dialogs under **File** (a *Save data as* submenu and *Save
+workspace*), each with a *Save to* path box and a **Browse** button (the new
+`TextRule::SavePath`; the system's save dialog picks the file and, since it has
+already asked about replacing, ticks Replace):
+
+- *Text file*: comma, tab or semicolon, missing as `NA` or empty, optional row
+  names; UTF-8, quotes doubled (`write.table`, base R).
+- *Excel workbook* (`writexl`), *Stata, SPSS or SAS* (`haven`: `.dta`, `.sav`,
+  `.zsav`, `.xpt`), *Parquet or Feather* (`arrow`); each names its package in
+  `Spec::needs`, so the package panel offers the install.
+- *R data*: `.rds` (one object) or `.RData` (named), base R; *Save workspace*:
+  `save.image()` to an `.RData`.
+- A file is never written over by accident: unless **Replace** is ticked, the
+  code starts with `if (file.exists(...)) stop(...)`. The file name must end in
+  the format's own ending.
+- Not written: `.sas7bdat` and SPSS portable `.por` (haven cannot write them).
+  Stata, SPSS and SAS transport have no missing text, so a missing text value is
+  saved empty (the dialog says so).
+
+`engine/tests/save.rs` writes with each dialog and reads the file back in R
+(text in four variants, the overwrite guard leaving the old file untouched,
+`.rds`/`.RData`, the workspace cleared and loaded again, haven's four formats,
+an Excel sheet, Parquet and Feather). It found one real bug: the tab separator
+was written as a backslash and a `t`; fixed with a regression test. CI now also
+installs `writexl`. This machine now has every package CI installs, from the
+2025-03-15 snapshot (added 2026-10-28: dplyr, readxl, writexl, haven, arrow,
+sandwich, lmtest, marginaleffects), so `cargo xtask ci` runs all 369 tests here
+with none skipped for a missing package.

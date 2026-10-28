@@ -271,7 +271,11 @@ skipped. It never gives a silent wrong answer.
   frames, and join, append, aggregate, duplicates, random sample and drop missing values have
   a tidyverse style that gives the base style's table. The two reshape dialogs stay base R,
   as the tidyverse way needs tidyr. P3.6 is done)
-- P3.7 Save and export (the same formats), plus "save workspace"
+- P3.7 Save and export (the same formats), plus "save workspace" (done: File > Save data as
+  text (comma, tab or semicolon), Excel, Stata, SPSS and SAS transport, R data (.rds, .RData)
+  and Parquet or Feather, each read back in real R; nothing is overwritten unless Replace is
+  ticked; a Browse button opens the system's save dialog; File > Save workspace. Not
+  written: `.sas7bdat` and SPSS portable `.por`, which haven cannot write. P3.7 is done)
 - P3.8 Frames-style workspace: several data frames open at once with a
   switcher
 

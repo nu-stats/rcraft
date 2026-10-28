@@ -13,6 +13,7 @@ pub mod graphs;
 pub mod inference;
 pub mod models;
 pub mod postest;
+pub mod save;
 pub mod stats;
 
 /// Where an entry sits in the menus.
@@ -89,7 +90,12 @@ const fn planned(name: &'static str, area: Area) -> Entry {
 /// The inventory. Seeded from ROADMAP.md; grows with each phase.
 pub const ENTRIES: &[Entry] = &[
     partial("Use my file", Area::File),
-    planned("Save data", Area::File),
+    partial("Text file", Area::File),
+    partial("Excel workbook", Area::File),
+    partial("Stata, SPSS or SAS", Area::File),
+    partial("R data", Area::File),
+    partial("Parquet or Feather", Area::File),
+    partial("Save workspace", Area::File),
     partial("New variable", Area::Data),
     partial("Recode", Area::Data),
     partial("Convert type", Area::Data),

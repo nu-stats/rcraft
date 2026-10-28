@@ -6,14 +6,19 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 88 | 0 | 69 | 19 |
+| 93 | 0 | 75 | 18 |
 
 ## File
 
 | Entry | Status |
 |---|---|
 | Use my file | partial |
-| Save data | planned |
+| Text file | partial |
+| Excel workbook | partial |
+| Stata, SPSS or SAS | partial |
+| R data | partial |
+| Parquet or Feather | partial |
+| Save workspace | partial |
 | Save object | partial |
 
 ## Data
