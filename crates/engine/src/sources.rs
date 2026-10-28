@@ -64,27 +64,30 @@ pub enum Found {
     /// A GitHub repository's package, from its DESCRIPTION.
     Description {
         provider: Provider,
-        package: Package,
+        package: Box<Package>,
     },
     /// A list of packages (an r-universe, or Bioconductor's release `release`).
     List {
         provider: Provider,
         release: Option<String>,
-        index: Index,
-        searcher: Searcher,
+        index: Box<Index>,
+        searcher: Box<Searcher>,
     },
 }
 
 pub enum LookupState {
     Idle,
     Running(Lookup),
-    Done(Found),
+    Done(Box<Found>),
     Failed(String),
 }
 
+/// A lookup in flight: where its answer comes, and the flag that cancels it.
+type Job = (Receiver<Result<Found, String>>, Arc<AtomicBool>);
+
 pub struct SourceLookups {
     fetcher: Arc<dyn Fetcher + Send + Sync>,
-    job: Option<(Receiver<Result<Found, String>>, Arc<AtomicBool>)>,
+    job: Option<Job>,
     state: LookupState,
 }
 
@@ -144,7 +147,7 @@ fn work(fetcher: &dyn Fetcher, lookup: &Lookup, cancel: &AtomicBool) -> Result<F
                     repo: repo.clone(),
                     reference: reference.clone(),
                 },
-                package,
+                package: Box::new(package),
             })
         }
         Lookup::Universe(u) => {
@@ -158,8 +161,8 @@ fn work(fetcher: &dyn Fetcher, lookup: &Lookup, cancel: &AtomicBool) -> Result<F
             Ok(Found::List {
                 provider: Provider::Universe(u.clone()),
                 release: None,
-                index,
-                searcher,
+                index: Box::new(index),
+                searcher: Box::new(searcher),
             })
         }
         Lookup::Bioconductor { r_version } => {
@@ -173,8 +176,8 @@ fn work(fetcher: &dyn Fetcher, lookup: &Lookup, cancel: &AtomicBool) -> Result<F
             Ok(Found::List {
                 provider: Provider::Bioconductor,
                 release: Some(release),
-                index,
-                searcher,
+                index: Box::new(index),
+                searcher: Box::new(searcher),
             })
         }
     }
@@ -240,7 +243,7 @@ impl SourceLookups {
         match rx.try_recv() {
             Ok(r) => {
                 self.state = match r {
-                    Ok(found) => LookupState::Done(found),
+                    Ok(found) => LookupState::Done(Box::new(found)),
                     Err(e) if e.contains("cancelled") => LookupState::Idle,
                     Err(e) => LookupState::Failed(e),
                 };
@@ -324,7 +327,10 @@ mod tests {
             reference: "HEAD".into(),
         });
         finish(&mut s);
-        let LookupState::Done(Found::Description { provider, package }) = s.state() else {
+        let LookupState::Done(found) = s.state() else {
+            panic!("nothing found");
+        };
+        let Found::Description { provider, package } = &**found else {
             panic!("nothing found");
         };
         assert!(matches!(provider, Provider::GitHub { repo, .. } if repo == "madeup"));
@@ -343,14 +349,17 @@ mod tests {
         let mut s = served();
         s.start(Lookup::Universe("someone".into()));
         finish(&mut s);
-        let LookupState::Done(Found::List {
+        let LookupState::Done(found) = s.state() else {
+            panic!("nothing found");
+        };
+        let Found::List {
             index,
             searcher,
             provider,
             release,
-        }) = s.state()
+        } = &**found
         else {
-            panic!("nothing found");
+            panic!("not a list");
         };
         assert_eq!(*provider, Provider::Universe("someone".into()));
         assert_eq!(*release, None);
@@ -365,7 +374,10 @@ mod tests {
             r_version: "4.4.3".into(),
         });
         finish(&mut s);
-        let LookupState::Done(Found::List { index, release, .. }) = s.state() else {
+        let LookupState::Done(found) = s.state() else {
+            panic!("nothing found");
+        };
+        let Found::List { index, release, .. } = &**found else {
             panic!("nothing found");
         };
         assert_eq!(release.as_deref(), Some("3.20"));
