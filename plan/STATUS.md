@@ -553,6 +553,36 @@ reads together with the style's packages.
   the conda R used here, so it was installed from CRAN into a scratch library
   (`R_LIBS`) to run the multinomial test for real; CI installs MASS and nnet. P4.4 is done.
 
+## P4.5 Post-estimation (first part), 2026-10-27
+
+Decision recorded: there is no hidden "last model". A model is an object in R's workspace under
+the name its dialog saved it as (`model`, `anova`, ...), and right-clicking a model in the Objects
+pane (class `lm`, `glm`, `aov`, `negbin`, `polr` or `multinom`; `postest::is_model_class`) shows a
+*Model* submenu. The dialogs are specs in `catalog::postest::MODEL_SPECS` with menu paths under
+"Objects > Model", opened through the same object-dialog path as Rename and Save, so the model's
+name is the dialog's object and the R is shown and logged as usual.
+
+- *Fit statistics*: observations, log-likelihood, AIC, BIC; R-squared for linear models, null and
+  residual deviance for generalised ones.
+- *Compare models*: a table of df, log-likelihood, AIC and BIC for this model and others named in
+  the dialog, and, if ticked, an F or likelihood-ratio test of nested models (R refuses or warns
+  when they are not fitted to the same rows).
+- *Predicted values and residuals*: new variables in a named data frame, in place; predicted
+  values on the outcome's or the link scale; deviance, Pearson or raw residuals. Rows the model
+  dropped for missing values get missing, matched by row name; a data frame the model was not
+  fitted to is refused.
+- *Diagnostics*: Shapiro-Wilk of the residuals and a Koenker version of the Breusch-Pagan test
+  (linear models), Cook's distance and leverage counts and the five most influential rows (all
+  linear and generalised linear models). Worded as a "Koenker version" because it is not claimed
+  to equal any other program's default.
+- *Robust standard errors* (needs sandwich and lmtest): `lmtest::coeftest` and `coefci` with
+  `sandwich::vcovHC` HC0 to HC3. Not clustered yet.
+
+Tests: `engine/tests/postest.rs` fits models in R by hand and checks each dialog's output or
+added columns against what R gives directly (an NA row is checked to line up). The robust
+standard errors test skips where sandwich or lmtest is missing, which is the case on this
+machine, so it has only run in CI (which now installs both).
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

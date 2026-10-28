@@ -299,7 +299,12 @@ skipped. It never gives a silent wrong answer.
   P4.4 is done)
 - P4.5 Post-estimation context menu on the last model: predict, residuals,
   diagnostics, marginal effects, hypothesis tests, robust and clustered
-  standard errors, model comparison
+  standard errors, model comparison (first part done: a Model submenu in the Objects pane's
+  right-click menu on a fitted model, with fit statistics, comparison of models, predicted
+  values and residuals added to a data frame, diagnostics, and robust standard errors (needs
+  sandwich and lmtest). Still to do: marginal effects, hypothesis tests on coefficients,
+  clustered standard errors, odds-ratio and other transforms of any model, residual plots with
+  Phase 5)
 
 ## Phase 5: Graphs
 

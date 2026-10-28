@@ -622,7 +622,10 @@ pub const OBJECT_SPECS: &[&Spec] = &[&RENAME_OBJECT, &REMOVE_OBJECT, &SAVE_OBJEC
 
 /// Whether `menu` (as in [`Spec::menu`]) is one of the Objects pane's.
 pub fn is_object_menu(menu: &str) -> bool {
-    OBJECT_SPECS.iter().any(|s| s.menu == menu)
+    OBJECT_SPECS
+        .iter()
+        .chain(crate::postest::MODEL_SPECS)
+        .any(|s| s.menu == menu)
 }
 
 /// The Data menu's dialogs, in menu order.

@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 68 | 0 | 45 | 23 |
+| 73 | 0 | 50 | 23 |
 
 ## File
 
@@ -70,6 +70,11 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Negative binomial model | partial |
 | Ordinal model | partial |
 | Multinomial model | partial |
+| Model fit | partial |
+| Compare models | partial |
+| Predicted values and residuals | partial |
+| Model diagnostics | partial |
+| Robust standard errors | partial |
 
 ## Graphs
 

@@ -10,6 +10,7 @@ pub mod data_tools;
 pub mod generalised;
 pub mod inference;
 pub mod models;
+pub mod postest;
 pub mod stats;
 
 /// Where an entry sits in the menus.
@@ -133,6 +134,11 @@ pub const ENTRIES: &[Entry] = &[
     partial("Negative binomial model", Area::Statistics),
     partial("Ordinal model", Area::Statistics),
     partial("Multinomial model", Area::Statistics),
+    partial("Model fit", Area::Statistics),
+    partial("Compare models", Area::Statistics),
+    partial("Predicted values and residuals", Area::Statistics),
+    partial("Model diagnostics", Area::Statistics),
+    partial("Robust standard errors", Area::Statistics),
     planned("Histogram", Area::Graphs),
     planned("Scatter plot", Area::Graphs),
     planned("Model table", Area::Reports),

@@ -342,6 +342,18 @@ pub fn object_list(
                     ui.close_menu();
                 }
             }
+            // a fitted model has its own actions (P4.5)
+            if rcraft_catalog::postest::is_model_class(&item.class) {
+                ui.separator();
+                ui.menu_button("Model", |ui| {
+                    for spec in rcraft_catalog::postest::MODEL_SPECS {
+                        if ui.button(format!("{}…", spec.entry)).clicked() {
+                            out.push(ObjectClick::Dialog(spec, item.name.clone()));
+                            ui.close_menu();
+                        }
+                    }
+                });
+            }
         });
         let hint = if item.is_data_frame() {
             "Click to show this data frame in Variables and Data. Right-click for more."

@@ -1135,6 +1135,7 @@ impl App {
             .iter()
             .chain(rcraft_catalog::data::OBJECT_SPECS)
             .chain(rcraft_catalog::stats::SPECS)
+            .chain(rcraft_catalog::postest::MODEL_SPECS)
             .find(|s| s.entry.eq_ignore_ascii_case(entry))
             .ok_or_else(|| format!("no dialog called {entry}"))?;
         if rcraft_catalog::data::is_object_menu(spec.menu) {
