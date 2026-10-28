@@ -2414,6 +2414,7 @@ version = "0.0.1"
 dependencies = [
  "rcraft-core",
  "rcraft-rdata",
+ "rcraft-rpkg",
  "rcraft-rproto",
 ]
 
