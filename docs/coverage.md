@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 64 | 0 | 40 | 24 |
+| 65 | 0 | 42 | 23 |
 
 ## File
 
@@ -65,7 +65,8 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Linear model | partial |
 | One-way ANOVA | partial |
 | Factorial ANOVA | partial |
-| Logistic model | planned |
+| Logistic model | partial |
+| Poisson model | partial |
 
 ## Graphs
 

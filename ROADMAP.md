@@ -291,7 +291,10 @@ skipped. It never gives a silent wrong answer.
   under a chosen name. Still to do: Type II and III sums of squares and custom contrasts,
   which need a package, and diagnostics with P4.5)
 - P4.4 Generalised models: logit, probit, Poisson, negative binomial,
-  ordinal, multinomial
+  ordinal, multinomial (logistic with logit, probit or complementary log-log links and odds
+  ratios, and Poisson or quasi-Poisson with an exposure offset and rate ratios are done in
+  base R. Still to do: negative binomial (MASS), ordinal (MASS) and multinomial (nnet),
+  which need a per-dialog package requirement in the dialog-spec format)
 - P4.5 Post-estimation context menu on the last model: predict, residuals,
   diagnostics, marginal effects, hypothesis tests, robust and clustered
   standard errors, model comparison

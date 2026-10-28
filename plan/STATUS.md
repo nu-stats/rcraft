@@ -495,6 +495,31 @@ only an object in the workspace under the saved name; the menu will probably lis
 workspace's `lm`/`glm`/`aov` objects (the Objects pane already knows their classes)
 rather than track a hidden "last model".
 
+## P4.4 Logistic and Poisson models, 2026-10-27
+
+Two dialogs in `catalog::generalised`, under *Statistics > Generalised models*, base R
+(`stats::glm`). Each keeps the fitted model in the workspace under a chosen name (never the
+data frame's own), prints R's `summary` and, if ticked, the exponentiated coefficients with
+confidence intervals.
+
+- *Logistic model*: a yes/no outcome (number, logical, factor or text) with logit, probit
+  or complementary log-log link; odds ratios for the logit link. The generated R first
+  stops unless the outcome has exactly two different values, because `glm` would
+  otherwise treat a three-level factor as first-level-versus-the-rest without saying so.
+- *Poisson model*: a count outcome, Poisson or quasi-Poisson, an optional exposure that
+  becomes `offset = log(exposure)`, rate ratios.
+
+Tests: `engine/tests/glm.rs` requires the printed report (summary and ratio table) to equal
+R's for the call written by hand, and the saved model's coefficients to equal that call's
+(including links, a categorical predictor and the offset, which changes the coefficients);
+a three-level outcome is refused with the dialog's own message and no model is saved.
+
+Not done: negative binomial and ordinal (MASS) and multinomial (nnet) models. They come with
+most R installs as recommended packages but not all (conda's R lacks them), so each needs the
+package panel for its own dialog: `Spec` has no per-dialog package list yet, only the code
+style's (`Style::packages`). Next design step: a `needs` field on `Spec` that the panel
+reads together with the style's packages.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

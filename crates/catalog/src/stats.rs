@@ -10,6 +10,7 @@ use rcraft_rcodegen::dialog::{Style, Widget};
 use rcraft_rcodegen::r_string;
 
 use crate::data::BASE;
+use crate::generalised;
 use crate::inference;
 use crate::models;
 
@@ -414,6 +415,8 @@ pub const SPECS: &[&Spec] = &[
     &models::LINEAR,
     &models::ONE_WAY,
     &models::FACTORIAL,
+    &generalised::LOGISTIC,
+    &generalised::POISSON,
 ];
 
 #[cfg(test)]

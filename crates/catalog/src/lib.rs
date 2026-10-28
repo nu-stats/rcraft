@@ -7,6 +7,7 @@
 
 pub mod data;
 pub mod data_tools;
+pub mod generalised;
 pub mod inference;
 pub mod models;
 pub mod stats;
@@ -127,7 +128,8 @@ pub const ENTRIES: &[Entry] = &[
     partial("Linear model", Area::Statistics),
     partial("One-way ANOVA", Area::Statistics),
     partial("Factorial ANOVA", Area::Statistics),
-    planned("Logistic model", Area::Statistics),
+    partial("Logistic model", Area::Statistics),
+    partial("Poisson model", Area::Statistics),
     planned("Histogram", Area::Graphs),
     planned("Scatter plot", Area::Graphs),
     planned("Model table", Area::Reports),
