@@ -8,9 +8,9 @@ confirmed against the service's public documentation when its task is built.
 | Purpose | Service | Task |
 |---|---|---|
 | CRAN package index, task views, binaries | CRAN mirror chosen by the user (default the cloud mirror): `src/contrib/PACKAGES.gz`, `web/packages/packages.rds` and `src/contrib/Views.rds` (the task views, about 70 KB) for the index (all exist, checked 2026-10-28) | P1A.1, P1A.3, P1A.5, P3.2 (the "Install" button in Use my file, for readxl and haven) |
-| Bioconductor packages | Bioconductor repositories | P1A.5 |
-| r-universe packages | `<universe>.r-universe.dev` | P1A.2, P1A.5 |
-| GitHub installs | github.com, only for an `owner/repo` the user typed | P1A.5 |
+| Bioconductor packages | `bioconductor.org`: `config.yaml` (which release is for this R) and `packages/<release>/bioc/VIEWS` (the list), when the user looks Bioconductor up; then BiocManager's own requests during an install the user said yes to | P1A providers |
+| r-universe packages | `<universe>.r-universe.dev`, only for a universe the user typed: `src/contrib/PACKAGES.gz`, then R's install from it | P1A providers |
+| GitHub installs | only for an `owner/repo` the user typed: `raw.githubusercontent.com` (its DESCRIPTION), then, after the yes, `github.com/<owner>/<repo>/archive/<ref>.tar.gz` (which redirects to `codeload.github.com`), fetched by R | P1A providers |
 | Download counts (optional) | public CRAN download-logs service | P1A.3 |
 | Portable R download | the R project's download site | P1.2 |
 
