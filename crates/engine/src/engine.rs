@@ -196,6 +196,33 @@ impl Engine {
         Ok(id)
     }
 
+    /// Records a command that RCraft answered itself, without R (the `rc`
+    /// commands): `shown` is the line the user typed, `text` what to show under
+    /// it. It appears in History, Results and the log like any command; in the
+    /// script it is a comment, so a saved script stays valid R.
+    pub fn echo(&mut self, shown: &str, text: &str, outcome: Outcome) -> CommandId {
+        let id = self.history.push(Source::Typed, shown);
+        self.results.begin(id);
+        self.transcript.command(shown);
+        if !text.is_empty() {
+            let item = Item::Text {
+                stream: Stream::Stdout,
+                text: if text.ends_with('\n') {
+                    text.to_string()
+                } else {
+                    format!("{text}\n")
+                },
+            };
+            self.transcript.item(&item);
+            self.results.add(id, item);
+        }
+        self.history.set_outcome(id, outcome);
+        self.results.finish(id, outcome);
+        let comment = format!("# {}", shown.trim().replace('\n', "\n# "));
+        self.transcript.finished(&Source::Typed, &comment, outcome);
+        id
+    }
+
     /// Takes in what R has produced, waiting up to `wait` for the first
     /// event.
     pub fn poll(&mut self, wait: Duration) -> Polled {

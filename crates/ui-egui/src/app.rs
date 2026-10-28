@@ -6,9 +6,12 @@ use std::time::Duration;
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
 use rcraft_engine::{Engine, History, Item, Outcome, PackageIndexService, Recall, Source};
 use rcraft_rcodegen::dialog::Spec;
+use rcraft_rcodegen::rc::{self, Rc};
 use rcraft_rdata::display::LabelView;
 use rcraft_rhost::recent::Recent;
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
+use rcraft_rpkg::describe::{describe, summary_line};
+use rcraft_rpkg::search::Filters;
 
 use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
 use crate::graph_view::GraphView;
@@ -56,6 +59,10 @@ enum Action {
     /// Show this data frame as soon as R lists it (after an import).
     ShowWhenListed(String),
     OpenImport,
+    /// A typed `rc` command, with the line as typed.
+    Rc(Rc, String),
+    /// A typed `rc` line that is wrong, with what is wrong.
+    RcError(String, String),
     /// Open the Packages window on this tab.
     OpenPackages(PackagesTab),
     /// Open a catalog dialog on the data frame shown in Variables.
@@ -110,6 +117,8 @@ pub struct App {
     /// The CRAN package list, cached on this computer.
     package_index: PackageIndexService,
     packages_window: PackagesWindow,
+    /// What Tab could complete the `rc` line to, when it was more than one word.
+    completions: Vec<String>,
 }
 
 impl App {
@@ -146,6 +155,7 @@ impl App {
             recent,
             package_index: PackageIndexService::for_machine(&Env::from_process()),
             packages_window: PackagesWindow::default(),
+            completions: Vec::new(),
         }
     }
 
@@ -315,6 +325,12 @@ impl App {
             Action::SetSideTab(tab) => self.side_tab = tab,
             Action::SetTypeFilter(filter) => self.type_filter = filter,
             Action::OpenPackages(tab) => self.packages_window.open_on(tab),
+            Action::Rc(command, line) => self.run_rc(command, &line),
+            Action::RcError(why, line) => {
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    engine.echo(&line, &why, Outcome::Error);
+                }
+            }
             Action::OpenImport => {
                 self.import.set_recent(self.recent.paths());
                 self.import.open_empty();
@@ -404,6 +420,131 @@ impl App {
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.ui(ctx);
+    }
+}
+
+impl App {
+    /// What Tab does on an `rc` line: the line completed as far as it can be,
+    /// and, when several words fit, the choices shown above the line.
+    fn complete_rc(&mut self) -> Option<String> {
+        let cran = |p: &str| -> Vec<String> {
+            self.package_index
+                .index()
+                .map(|ix| {
+                    ix.with_prefix(p)
+                        .iter()
+                        .take(60)
+                        .map(|q| q.name.clone())
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let mine = |p: &str| -> Vec<String> {
+            self.packages_window
+                .installed_names()
+                .into_iter()
+                .filter(|n| n.starts_with(p))
+                .collect()
+        };
+        let c = rc::complete(&self.command, &cran, &mine)?;
+        if c.options.is_empty() {
+            self.completions.clear();
+            return None;
+        }
+        let typed = self.command.get(c.from..).unwrap_or("").to_string();
+        let common = rc::common_prefix(&c.options);
+        let mut line = self.command.get(..c.from).unwrap_or("").to_string();
+        line.push_str(if common.len() > typed.len() {
+            &common
+        } else {
+            &typed
+        });
+        if let [only] = c.options.as_slice() {
+            if !only.ends_with('(') {
+                line.push(' ');
+            }
+            self.completions.clear();
+        } else {
+            self.completions = c.options;
+        }
+        Some(line)
+    }
+
+    /// Carries out a typed `rc` command. The ones that change packages open the
+    /// Packages window with the list to say yes to; the others answer here, in
+    /// Results, and are recorded in the log and the history like any command.
+    fn run_rc(&mut self, command: Rc, line: &str) {
+        let EngineState::Ready(engine) = &mut self.engine else {
+            self.message = Some("Wait until R has started, then type the command again.".into());
+            return;
+        };
+        self.package_index.ensure_loaded();
+        let loading = matches!(
+            self.package_index.status(),
+            rcraft_engine::IndexStatus::Loading
+        );
+        let no_list = "The CRAN package list is not on this computer yet. Open Packages > Find \
+                       and install and press \"Download the package list\" (about 15 MB); \
+                       searching then works offline.";
+        let reading = "The saved package list is being read. Type the command again in a second.";
+        match command {
+            Rc::Help => {
+                engine.echo(line, rcraft_rcodegen::rc::HELP, Outcome::Ok);
+            }
+            Rc::Search { words } => {
+                let text = match self.package_index.index() {
+                    None => (if loading { reading } else { no_list }).to_string(),
+                    Some(_) => {
+                        let hits = self.package_index.search(&words, &Filters::default(), 15);
+                        if hits.is_empty() {
+                            format!("No package on CRAN matches \"{words}\".")
+                        } else {
+                            let mut text = format!("Best matches for \"{words}\":\n");
+                            for (p, _) in &hits {
+                                text.push_str(&format!("  {}\n", summary_line(p)));
+                            }
+                            text.push_str("rc describe NAME tells more; rc install NAME installs.");
+                            text
+                        }
+                    }
+                };
+                let ok = self.package_index.index().is_some();
+                engine.echo(line, &text, if ok { Outcome::Ok } else { Outcome::Error });
+            }
+            Rc::Describe { package } => {
+                let (text, ok) = match self.package_index.index() {
+                    None => ((if loading { reading } else { no_list }).to_string(), false),
+                    Some(ix) => match describe(ix, &package) {
+                        Some(d) => (d.to_text(), true),
+                        None => match ix.get_ignoring_case(&package) {
+                            Some(p) => (
+                                format!(
+                                    "No package \"{package}\" on CRAN. Did you mean \"{}\"?",
+                                    p.name
+                                ),
+                                false,
+                            ),
+                            None => (format!("No package \"{package}\" on CRAN."), false),
+                        },
+                    },
+                };
+                engine.echo(line, &text, if ok { Outcome::Ok } else { Outcome::Error });
+            }
+            Rc::Installed { filter } => {
+                let code = rc::installed_code(line, &filter);
+                if let Err(e) = engine.submit(Source::Typed, &code) {
+                    self.message = Some(e.to_string());
+                }
+            }
+            Rc::Install { .. } | Rc::Update { .. } | Rc::Remove { .. } => {
+                engine.echo(
+                    line,
+                    "Opening the Packages window with the list. Nothing happens until you say yes there.",
+                    Outcome::Ok,
+                );
+                self.packages_window.start_rc(command);
+            }
+        }
     }
 }
 
@@ -1006,6 +1147,14 @@ impl App {
                     .color(pal.dim),
             );
         });
+        if !self.completions.is_empty() {
+            ui.label(
+                RichText::new(self.completions.join("   "))
+                    .monospace()
+                    .small()
+                    .color(pal.accent),
+            );
+        }
         let id = egui::Id::new(COMMAND_ID);
         // the recall keys, taken before the text box can use them
         let has_focus = ui.memory(|m| m.has_focus(id));
@@ -1025,6 +1174,15 @@ impl App {
                 } else if forward {
                     recalled = self.recall.next(engine.history());
                 }
+            }
+        }
+        // Tab completes an `rc` line (commands, CRAN package names, options)
+        if has_focus
+            && self.command.trim_start().starts_with("rc")
+            && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab))
+        {
+            if let Some(done) = self.complete_rc() {
+                recalled = Some(done);
             }
         }
         let mut submit = false;
@@ -1064,7 +1222,12 @@ impl App {
         if submit && !self.command.trim().is_empty() && !busy {
             let code = std::mem::take(&mut self.command);
             self.recall.reset();
-            out.push(Action::Submit(Source::Typed, code));
+            self.completions.clear();
+            out.push(match rc::parse(&code) {
+                Some(Ok(command)) => Action::Rc(command, code),
+                Some(Err(why)) => Action::RcError(why, code),
+                None => Action::Submit(Source::Typed, code),
+            });
         }
         if self.focus_command {
             ui.memory_mut(|m| m.request_focus(id));
@@ -1407,9 +1570,19 @@ impl App {
     }
 
     pub fn submit_typed(&mut self, code: &str) {
-        if let EngineState::Ready(engine) = &mut self.engine {
-            if let Err(e) = engine.submit(Source::Typed, code) {
-                self.message = Some(e.to_string());
+        match rc::parse(code) {
+            Some(Ok(command)) => self.run_rc(command, code),
+            Some(Err(why)) => {
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    engine.echo(code, &why, Outcome::Error);
+                }
+            }
+            None => {
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    if let Err(e) = engine.submit(Source::Typed, code) {
+                        self.message = Some(e.to_string());
+                    }
+                }
             }
         }
     }
@@ -1814,5 +1987,122 @@ mod tests {
             .installed_names()
             .iter()
             .any(|n| n == "stats")));
+    }
+
+    /// The text of the newest Results block.
+    fn newest_text(app: &App) -> String {
+        let Some(engine) = app.engine() else {
+            return String::new();
+        };
+        let mut out = String::new();
+        if let Some(block) = engine.results().blocks().last() {
+            for item in &block.items {
+                if let Item::Text { text, .. } = item {
+                    out.push_str(text);
+                }
+            }
+        }
+        out
+    }
+
+    fn app_with_sample_index(ctx: &egui::Context) -> App {
+        let mut app = App::new(ctx);
+        app.package_index = PackageIndexService::in_memory(rcraft_rpkg::index::sample());
+        app
+    }
+
+    #[test]
+    fn rc_search_and_describe_answer_in_results_without_r_running_them() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_sample_index(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.submit_typed("rc search robust");
+        let text = newest_text(&app);
+        assert!(text.contains("sandwich"), "{text}");
+        assert!(text.contains("rc describe NAME"), "{text}");
+        app.submit_typed("rc describe fixest");
+        let text = newest_text(&app);
+        assert!(text.starts_with("fixest 0.12.1"), "{text}");
+        assert!(text.contains("Imports: Rcpp (>= 1.0)"), "{text}");
+        // a name that differs only in case is suggested
+        app.submit_typed("rc describe FIXEST");
+        assert!(newest_text(&app).contains("Did you mean \"fixest\""));
+        // they are in the history and the log, and a comment in the script
+        let e = app.engine();
+        let history: Vec<&str> = e
+            .map(|e| {
+                e.history()
+                    .entries()
+                    .iter()
+                    .map(|h| h.code.as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(history.contains(&"rc search robust"), "{history:?}");
+        let script = e.map(|e| e.script_text()).unwrap_or_default();
+        assert!(script.contains("# rc search robust"), "{script}");
+        assert!(!script.contains("\nrc search"), "{script}");
+    }
+
+    #[test]
+    fn a_wrong_rc_line_says_what_is_wrong_and_other_lines_go_to_r() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_sample_index(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.submit_typed("rc install");
+        assert!(newest_text(&app).contains("needs a package name"));
+        app.submit_typed("rc help");
+        assert!(newest_text(&app).contains("rc install PACKAGE"));
+        // R code that begins with rc is R
+        app.submit_typed("rc <- 41 + 1");
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        app.submit_typed("cat(rc)");
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        assert_eq!(newest_text(&app).trim(), "42");
+    }
+
+    #[test]
+    fn rc_install_opens_the_list_to_say_yes_to_and_runs_nothing() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_sample_index(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let before = app.engine().map(|e| e.history().len()).unwrap_or(0);
+        app.submit_typed("rc install fixest");
+        assert!(app.packages_window.open);
+        // once R has listed its packages the list is there, waiting
+        assert!(frames_until(&mut app, &ctx, |a| a
+            .packages_window
+            .has_confirmation()));
+        let after = app.engine().map(|e| e.history().len()).unwrap_or(0);
+        assert_eq!(after, before + 1, "only the typed line was recorded");
+        let code = app.packages_window.confirmation_code().unwrap_or_default();
+        assert!(code.contains("install.packages(\"fixest\""), "{code}");
+    }
+
+    #[test]
+    fn tab_completes_rc_lines() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_sample_index(&ctx);
+        app.command = "rc ins".into();
+        let done = app.complete_rc();
+        assert_eq!(done.as_deref(), Some("rc install"));
+        assert_eq!(app.completions, vec!["install", "installed"]);
+        app.command = "rc install fixe".into();
+        assert_eq!(app.complete_rc().as_deref(), Some("rc install fixest "));
+        assert!(app.completions.is_empty());
+        app.command = "plot(".into();
+        assert_eq!(app.complete_rc(), None);
     }
 }

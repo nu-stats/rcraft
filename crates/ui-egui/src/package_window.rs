@@ -15,6 +15,7 @@ use rcraft_rcodegen::packages::{
     loaded_packages_code, parse_installed, parse_loaded, remove_code, restore_code, where_code,
     InstallFrom, Installed,
 };
+use rcraft_rcodegen::rc::Rc;
 use rcraft_rhost::Platform;
 use rcraft_rpkg::describe::{describe, Source};
 use rcraft_rpkg::index::Package;
@@ -148,6 +149,10 @@ pub struct PackagesWindow {
     lock_note: Option<String>,
     /// Save only what RCraft's own library holds, not every loaded package.
     lock_library_only: bool,
+    /// An `rc` command waiting for R to have listed its packages.
+    pending_rc: Option<Rc>,
+    /// What the last `rc` command could not do, in words.
+    rc_note: Option<String>,
     /// This R's version number, such as 4.4.3, once the engine has said.
     r_version_number: String,
     mirror_text: String,
@@ -181,6 +186,8 @@ impl Default for PackagesWindow {
             lock: None,
             lock_note: None,
             lock_library_only: false,
+            pending_rc: None,
+            rc_note: None,
             r_version_number: String::new(),
             mirror_text: String::new(),
             mirror_note: None,
@@ -223,8 +230,22 @@ fn same_folder(a: &str, b: &str) -> bool {
 }
 
 impl PackagesWindow {
-    /// The names of the installed packages R last listed.
+    /// Whether a list is waiting for the user's yes.
     #[cfg(test)]
+    pub(crate) fn has_confirmation(&self) -> bool {
+        self.confirm.is_some()
+    }
+
+    /// The R code of the install list waiting for a yes.
+    #[cfg(test)]
+    pub(crate) fn confirmation_code(&self) -> Option<String> {
+        match &self.confirm {
+            Some(Confirm::Install { code: Ok(c), .. }) => Some(c.clone()),
+            _ => None,
+        }
+    }
+
+    /// The names of the installed packages R last listed.
     pub(crate) fn installed_names(&self) -> Vec<String> {
         self.r.installed.iter().map(|i| i.name.clone()).collect()
     }
@@ -277,6 +298,161 @@ installation of package 'fixest' had non-zero exit status"
             version_note: None,
         });
         Ok(())
+    }
+
+    /// An `rc install`, `rc update` or `rc remove` typed in the Command window:
+    /// opens this window and, once R has said what is installed, shows the list
+    /// to say yes to. Nothing runs before that.
+    pub fn start_rc(&mut self, rc: Rc) {
+        self.open = true;
+        self.tab = match rc {
+            Rc::Install { .. } => Tab::Find,
+            _ => Tab::Installed,
+        };
+        self.rc_note = None;
+        self.confirm = None;
+        self.r.stale = true;
+        self.pending_rc = Some(rc);
+    }
+
+    /// Carries out a waiting `rc` command when what it needs is known.
+    fn apply_pending_rc(&mut self, index: &PackageIndexService, r_present: bool) {
+        if self.pending_rc.is_none() {
+            return;
+        }
+        // the saved package list is still being read, or R has not listed its packages
+        if matches!(index.status(), IndexStatus::Loading)
+            || (r_present && (!self.r.known || self.r.stale || self.r.asked.is_some()))
+        {
+            return;
+        }
+        let Some(rc) = self.pending_rc.take() else {
+            return;
+        };
+        if index.index().is_none() {
+            self.rc_note = Some(
+                "The CRAN package list has not been downloaded yet. Press \"Download the \
+                 package list\" under Find on CRAN, then type the command again."
+                    .to_string(),
+            );
+            return;
+        }
+        let installed = self.installed_map();
+        let own = library_dir();
+        match rc {
+            Rc::Install {
+                packages,
+                version,
+                from,
+            } => {
+                self.selected = packages.first().cloned();
+                if let (Some(v), [one]) = (&version, packages.as_slice()) {
+                    self.begin_older_version(index, one, v);
+                } else {
+                    let note = (from == InstallFrom::Source).then(|| {
+                        "Built from source: packages with compiled code need a compiler."
+                            .to_string()
+                    });
+                    self.begin_install_of(
+                        index,
+                        &packages,
+                        &installed,
+                        from,
+                        "Packages > Install",
+                        note,
+                    );
+                }
+            }
+            Rc::Update { packages } => {
+                let ours: Vec<String> = self
+                    .r
+                    .installed
+                    .iter()
+                    .filter(|i| own.as_deref().is_some_and(|o| same_folder(&i.library, o)))
+                    .map(|i| i.name.clone())
+                    .collect();
+                let names: Vec<String> = if packages.is_empty() {
+                    index
+                        .index()
+                        .map(|ix| {
+                            updates(ix, &installed)
+                                .into_iter()
+                                .map(|u| u.name)
+                                .filter(|n| ours.contains(n))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    packages
+                };
+                if names.is_empty() {
+                    self.rc_note = Some(
+                        "Nothing to update: no package in RCraft's library has a newer version \
+                         on CRAN."
+                            .to_string(),
+                    );
+                    return;
+                }
+                let not_ours: Vec<&String> = names.iter().filter(|n| !ours.contains(n)).collect();
+                if !not_ours.is_empty() {
+                    self.rc_note = Some(format!(
+                        "Left out, because they are not in RCraft's own library: {}.",
+                        not_ours
+                            .iter()
+                            .map(|n| n.as_str())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                let names: Vec<String> = names.into_iter().filter(|n| ours.contains(n)).collect();
+                if names.is_empty() {
+                    return;
+                }
+                self.begin_install_of(
+                    index,
+                    &names,
+                    &installed,
+                    InstallFrom::Default,
+                    "Packages > Update",
+                    None,
+                );
+            }
+            Rc::Remove { packages } => {
+                let mine: Vec<&String> = packages
+                    .iter()
+                    .filter(|p| {
+                        self.r.installed.iter().any(|i| {
+                            &i.name == *p
+                                && own.as_deref().is_some_and(|o| same_folder(&i.library, o))
+                                && !matches!(i.priority.as_str(), "base" | "recommended")
+                        })
+                    })
+                    .collect();
+                if mine.len() != packages.len() {
+                    let left: Vec<&str> = packages
+                        .iter()
+                        .filter(|p| !mine.contains(p))
+                        .map(String::as_str)
+                        .collect();
+                    self.rc_note = Some(format!(
+                        "Not removed here, because they are not in RCraft's own library or come \
+                         with R: {}.",
+                        left.join(", ")
+                    ));
+                }
+                if mine.is_empty() {
+                    return;
+                }
+                let names: Vec<String> = mine.into_iter().cloned().collect();
+                let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                self.confirm = Some(Confirm::Remove {
+                    code: remove_code(&refs, own.as_deref()),
+                    names,
+                });
+            }
+            // the other forms are answered in the Command window
+            _ => {}
+        }
     }
 
     pub fn open_on(&mut self, tab: Tab) {
@@ -468,6 +644,7 @@ installation of package 'fixest' had non-zero exit status"
         let r_ready = engine.as_ref().is_some_and(|e| !e.is_busy());
         let r_present = engine.is_some();
         self.service(engine);
+        self.apply_pending_rc(index, r_present);
         let mut open = self.open;
         let mut run = None;
         self.list_height = (ctx.screen_rect().height() - 250.0).clamp(160.0, 520.0);
@@ -481,6 +658,9 @@ installation of package 'fixest' had non-zero exit status"
                 self.toolbar(ui, pal, index);
                 ui.separator();
                 self.failure_banner(ui, pal, index, r_ready);
+                if let Some(note) = &self.rc_note {
+                    ui.label(RichText::new(note).small().color(pal.warning));
+                }
                 if index.index().is_none() && self.tab == Tab::Find {
                     self.no_index(ui, pal, index);
                     return;

@@ -226,6 +226,27 @@ impl Description {
     }
 }
 
+/// One line about a package for a list of search results:
+/// `name version  title (published 2026-06-26, used by 26)`.
+pub fn summary_line(p: &Package) -> String {
+    let mut line = format!("{} {}", p.name, p.version);
+    if !p.title.is_empty() {
+        line.push_str(&format!("  {}", p.title));
+    }
+    let mut notes = Vec::new();
+    if !p.published.is_empty() {
+        notes.push(format!("published {}", p.published));
+    }
+    let used = p.used_by_count();
+    if used > 0 {
+        notes.push(format!("used by {used}"));
+    }
+    if !notes.is_empty() {
+        line.push_str(&format!(" ({})", notes.join(", ")));
+    }
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -350,5 +371,32 @@ mod tests {
             .unwrap_or_default();
         assert!(t.contains("50 packages need this one: u00,"), "{t}");
         assert!(t.contains("and 30 more"), "{t}");
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::*;
+
+    #[test]
+    fn a_search_line_has_name_version_title_date_and_users() {
+        let p = Package {
+            name: "fixest".into(),
+            version: "0.14.2".into(),
+            title: "Fast Fixed-Effects Estimations".into(),
+            published: "2026-06-26".into(),
+            used_by: "a, b, c".into(),
+            ..Package::default()
+        };
+        assert_eq!(
+            summary_line(&p),
+            "fixest 0.14.2  Fast Fixed-Effects Estimations (published 2026-06-26, used by 3)"
+        );
+        let bare = Package {
+            name: "x".into(),
+            version: "1".into(),
+            ..Package::default()
+        };
+        assert_eq!(summary_line(&bare), "x 1");
     }
 }

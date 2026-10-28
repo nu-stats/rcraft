@@ -95,6 +95,8 @@ Tasks:
 - P1A.9 Command forms in the Command window, for example `rc install
   fixest`, `rc search panel data`, `rc describe fixest`, `rc update`,
   `rc installed`; Tab completion over the index
+  (done: install, remove and update open the usual list to say yes to; search, describe and help
+  answer in Results; installed runs R; Tab completes. Not in the Script pane. P1A.9 is done)
 - P1A.10 "Package needed" prompt: when a menu entry or command needs a
   package that is not installed, offer to install it, with the same
   confirmation as P1A.5

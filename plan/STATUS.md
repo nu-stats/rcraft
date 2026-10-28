@@ -1080,3 +1080,38 @@ reproduce the whole dependency tree's versions unless every package is in the li
 loaded packages includes the dependencies that are loaded). There is no `renv`-style isolation. Not
 done: a list kept automatically with the session, the list in the saved R script's header, and
 `rc` command forms (P1A.9).
+
+## P1A.9 `rc` commands in the Command window, 2026-10-28
+
+Typed forms of what the Packages window does. A line is an `rc` command only when `rc` is
+followed by one of the command words, so `rc <- 3`, `rc(1)` and `rc$x` still go to R
+(`rcodegen::rc::parse` returns nothing for them and the line is sent to R as before).
+
+- `rc install PKG [PKG ...] [, version(1.2.3) from(source|binary) provider(cran)]`,
+  `rc remove PKG ...`, `rc update [PKG ...]`: open the Packages window with the same list to say
+  yes to (versions, why, mirror host, the exact R call). Nothing is installed, updated or removed
+  until the yes. `version()` takes one package and uses CRAN's archive. `provider()` accepts only
+  `cran` for now and says so. `rc update` with no names updates what has an update in RCraft's own
+  library; a package in another library is named and left alone.
+- `rc search WORDS`, `rc describe PKG`, `rc help`: answered at once in Results, from the package
+  list on this computer (no R, no network). `rc describe` of a name that differs only in case says
+  "Did you mean ...". With no list downloaded they say where to get it.
+- `rc installed [PART OF A NAME]`: sent to R as ordinary `installed.packages()` code, with the typed
+  line as a comment above it, so Results, the log and the script show what ran.
+- A wrong line (`rc install` with no name, a bad version, an unknown option) says what is wrong, in
+  Results, marked as an error.
+- Tab on an `rc` line completes the command word, a CRAN package name (from the list, ignoring
+  nothing: case matters), an installed package name after `rc remove` and `rc update`, and the
+  options after a comma. One choice fills in; several fill in their common start and are listed
+  above the line. Tab on other lines is untouched.
+- `Engine::echo` records a command RCraft answered itself: History, Results and the log as usual,
+  and in the script as a comment, so a saved script stays valid R.
+
+Tests: `rcodegen::rc` (parser, R-code lookalikes, completion), four app tests against a real R
+(search and describe in Results and as a script comment, wrong lines and `rc <- 41 + 1` going to
+R, `rc install` opening a confirmation and recording only the typed line, Tab on rc lines).
+
+Not done: the completion of installed names works only after the Packages window has asked R once;
+`rc` lines in the Script pane's Run are not intercepted (only the Command window and the demo
+runner); no `rc which` (which package a function comes from) form; a mistyped command word
+(`rc instal`) goes to R and fails there.
