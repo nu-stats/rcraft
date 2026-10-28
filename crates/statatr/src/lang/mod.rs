@@ -3,6 +3,7 @@
 //! expressions (`expr`). Pure text in, structures out. Vendored; see the
 //! crate's `lib.rs`.
 
+pub mod commands;
 pub mod expr;
 pub mod script;
 pub mod syntax;

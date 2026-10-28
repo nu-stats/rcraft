@@ -22,4 +22,5 @@
 //! and hold for this copy: nothing here comes from Stata's program files.
 
 pub mod lang;
+pub mod reader;
 pub mod values;

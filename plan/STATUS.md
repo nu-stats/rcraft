@@ -1224,3 +1224,38 @@ kept in memory, not cached; package lists record these packages as `other`.
   failed to open meant `dev.off()` closed the Graph tab's own capture device. A test checks that a
   failed export leaves the Graph tab drawing, and the tests probe SVG by drawing one, not by asking
   `capabilities()`.
+
+## P2B.1 Stata syntax reader (first part), 2026-10-28
+
+`statatr::reader::read(text) -> Program`: a do-file read into a tree, on top of the vendored
+StatCraft front end (its do-file reader, command syntax and the command-name table, also vendored now:
+`lang/commands.rs` from `crates/engine/src/commands/mod.rs` at `a245039`).
+
+- **Commands**: the word as written and its full name (`reg` is `regress`; a word the table lacks is
+  kept and marked unknown), the main part, `if`, `in`, weight, options, `using` taken out of the main
+  part, the line as read, and its line, column and number of physical lines.
+- **Prefixes**, in order: `by varlist[, sort]:`, `bysort`, `capture`, `quietly`, `noisily` (with or
+  without a colon) and `frame name:`.
+- **Blocks**: `foreach x in|of varlist|newlist|numlist|local|global ... {`, `forvalues i = range {`,
+  `while cond {`, `if cond {` with `} else {`, `} else if ... {` and `else` on its own line after the `}`
+  (as Stata's manual writes it) or `else command`, `capture {` / `quietly {`, `frame name {`,
+  `program [define] name` ... `end` (the body read as commands), and `mata`/`mata:`, `python` and
+  `input varlist` ... `end`, whose lines are kept as written (they are not Stata commands). The
+  one-line programming `if exp command` stays a command.
+- **Macros**: the locals (`` `name' ``, nested ones by their simple parts) and globals (`$name`,
+  `${name}`) each line refers to; nothing is expanded, since values exist only when the file runs.
+- **Problems** never stop the reading: a `}` with nothing to close, a block left open (the line it
+  opened on), a loop line without `{`, `foreach` without `in`/`of`, `forvalues` without `=`, `while`
+  without a condition, `else` with no `if`, `by` without a colon, a stray `end`, blocks nested deeper
+  than 64, each with its line and column. Hostile input (deep nesting, unbalanced quotes, control
+  characters) is tested not to panic.
+
+Tried on StatCraft's 230 probe do-files (ours, on made-up data; `tests/many_dofiles.rs`, opt in with
+`RCRAFT_DOFILES_DIR`): 17,527 commands, no problems, after adding the program, mata, input and frame
+blocks the first run showed were missing (46 problems before).
+
+Not done in P2B.1: expanding macros, `#delimit` inside blocks is only what the vendored reader does,
+`include` and `do` of other files (P2C.2), abbreviated variable names (they need the data: the R runtime
+package, P2C.4), and the translation itself (P2B.2 onwards). The command table holds the 53 commands
+StatCraft's engine needs plus prefixes and loops; commands outside it are read with their names as
+written, which is right for any command Stata does not let you shorten.

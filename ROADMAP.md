@@ -186,6 +186,9 @@ Tasks:
   (`reg`, `gen`, `sum`), local and global macros, comments and line
   continuation (`///`), `foreach`, `forvalues`, `capture`, `quietly`. Never
   crashes on bad input; reports line and column.
+  (done: `statatr::reader`, also `while`, `if`/`else`, `frame`, `program`, `mata`, `python` and
+  `input` blocks; macros recorded, not expanded; reads all 230 of StatCraft's probe do-files with
+  no problems. P2B.1 is done)
 - P2B.2 Expressions: Stata operators and functions to R (`==`, `&`, `|`,
   `!`, `inrange`, `inlist`, `missing()`, string, date and math functions),
   Stata missing values `.` and `.a`-`.z` mapped to `NA` (the extended
