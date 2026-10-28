@@ -20,6 +20,7 @@
 //! --packages-query TEXT   ... with this search typed in ...
 //! --packages-select NAME  ... and this package selected ...
 //! --packages-confirm      ... and the install list for it showing
+//! --packages-failure KIND  ... or a made-up install failure: compiler, newer-r, network
 //! --packages-from FILE    ... over a downloaded packages.rds (default: a tiny made-up list)
 //! --accent NAME    Blue, Indigo, Teal, Plum, Forest, Amber or Rose
 //! --size WxH       size in points (default 1240x780)
@@ -76,6 +77,9 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
                 options.packages_select = Some(value("--packages-select")?.clone())
             }
             "--packages-confirm" => options.packages_confirm = true,
+            "--packages-failure" => {
+                options.packages_failure = Some(value("--packages-failure")?.clone())
+            }
             "--packages-from" => {
                 options.packages_from = Some(PathBuf::from(value("--packages-from")?))
             }

@@ -1277,6 +1277,11 @@ impl App {
         self.import.open_with(path);
     }
 
+    /// For pictures: the Packages window with a made-up install failure showing.
+    pub fn show_packages_failure(&mut self, kind: &str) -> Result<(), String> {
+        self.packages_window.preset_failure(kind)
+    }
+
     /// Opens the Packages window for a picture: over a package list read from
     /// `from` (a downloaded `packages.rds`) or a tiny made-up one, never over the
     /// user's cache or the network.

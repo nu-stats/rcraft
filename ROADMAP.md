@@ -84,6 +84,9 @@ Tasks:
   remove, where a function comes from)
 - P1A.7 Failures made readable: missing compiler or system library, with
   the platform-specific fix named; retry from binary or older version
+  (done: compiler, system library, newer R, unreachable mirror, missing dependency and more,
+  with retries; the Windows messages were recorded from real R, the macOS and Linux ones
+  are not yet checked against real output. P1A.7 is done)
 - P1A.8 Reproducibility: record installed packages and versions in the
   session and project lockfile; install a project's packages in one step
 - P1A.9 Command forms in the Command window, for example `rc install

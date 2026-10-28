@@ -9,13 +9,16 @@ use std::collections::HashMap;
 
 use eframe::egui::{self, RichText};
 use rcraft_engine::{Engine, IndexStatus, PackageIndexService, QueryId};
+use rcraft_rcodegen::failure::{diagnose, Diagnosis, Os, Retry};
 use rcraft_rcodegen::packages::{
-    install_code, installed_packages_code, installed_versions, loaded_packages_code,
-    parse_installed, parse_loaded, remove_code, where_code, Installed,
+    install_code, install_version_code, installed_packages_code, installed_versions,
+    loaded_packages_code, parse_installed, parse_loaded, remove_code, where_code, InstallFrom,
+    Installed,
 };
+use rcraft_rhost::Platform;
 use rcraft_rpkg::describe::{describe, Source};
 use rcraft_rpkg::index::Package;
-use rcraft_rpkg::plan::{plan, updates, Plan, Why};
+use rcraft_rpkg::plan::{compare_versions, plan, updates, Plan, Step, Why};
 use rcraft_rpkg::refresh::Stage;
 use rcraft_rpkg::search::Filters;
 
@@ -51,11 +54,60 @@ enum Confirm {
         plan: Plan,
         code: Result<String, String>,
         menu: &'static str,
+        /// A caution to show with the list (an older version is built from source).
+        note: Option<String>,
     },
     Remove {
         names: Vec<String>,
         code: Result<String, String>,
     },
+}
+
+/// Why the last install did not work, in words, and what can be tried.
+struct Failure {
+    diagnoses: Vec<Diagnosis>,
+    /// The packages that were asked for, with the version each should now have.
+    expected: Vec<(String, String)>,
+    /// The version typed for "install an older version".
+    version_text: String,
+    version_note: Option<String>,
+}
+
+fn this_os() -> Os {
+    match Platform::current() {
+        Platform::Windows => Os::Windows,
+        Platform::MacOs => Os::MacOs,
+        Platform::Linux => Os::Linux,
+    }
+}
+
+/// `4.4.3` from R's `R version 4.4.3 (2025-02-28 ...)`.
+fn r_number(full: &str) -> String {
+    full.split_whitespace()
+        .skip_while(|w| *w != "version")
+        .nth(1)
+        .unwrap_or("")
+        .to_string()
+}
+
+/// Everything R printed for the newest command: its output, warnings and errors.
+fn newest_output(engine: &Engine) -> String {
+    use rcraft_engine::Item;
+    let Some(block) = engine.results().blocks().last() else {
+        return String::new();
+    };
+    let mut out = String::new();
+    for item in &block.items {
+        match item {
+            Item::Text { text, .. } => out.push_str(text),
+            Item::Warning(w) => out.push_str(w),
+            Item::Error { message, .. } => out.push_str(message),
+            Item::Notice(n) => out.push_str(n),
+            Item::Plot { .. } => {}
+        }
+        out.push('\n');
+    }
+    out
 }
 
 /// What R has said about the installed packages.
@@ -80,6 +132,9 @@ pub struct PackagesWindow {
     installed_filter: String,
     r: RState,
     confirm: Option<Confirm>,
+    /// The packages of the install now running (set when the user said yes).
+    last_install: Option<Vec<(String, String)>>,
+    failure: Option<Failure>,
     mirror_text: String,
     mirror_note: Option<String>,
     show_mirror: bool,
@@ -106,6 +161,8 @@ impl Default for PackagesWindow {
             installed_filter: String::new(),
             r: RState::default(),
             confirm: None,
+            last_install: None,
+            failure: None,
             mirror_text: String::new(),
             mirror_note: None,
             show_mirror: false,
@@ -168,6 +225,41 @@ impl PackagesWindow {
         }
     }
 
+    /// Shows the "did not work" banner for a made-up failure, for pictures:
+    /// `compiler`, `newer-r` or `network`, as R prints them on Windows.
+    pub fn preset_failure(&mut self, kind: &str) -> Result<(), String> {
+        let text = match kind {
+            "compiler" => {
+                "* installing *source* package 'fixest' ...
+** libs
+Error in system(paste(MAKE, p1(paste(\"-f\", shQuote(makefiles))), \"compilers\"),  : 
+  'make' not found
+installation of package 'fixest' had non-zero exit status"
+            }
+            "newer-r" => {
+                "package 'fixest' is not available for this version of R
+'fixest' version 0.14.2 is in the repositories but depends on R (>= 4.6.0)"
+            }
+            "network" => {
+                "unable to access index for repository https://cloud.r-project.org/src/contrib:
+  cannot open URL 'https://cloud.r-project.org/src/contrib/PACKAGES'"
+            }
+            other => {
+                return Err(format!(
+                    "unknown failure {other}; use compiler, newer-r or network"
+                ))
+            }
+        };
+        let diagnoses = diagnose(text, Os::Windows, "4.4.3");
+        self.failure = Some(Failure {
+            diagnoses,
+            expected: vec![("fixest".to_string(), "0.14.2".to_string())],
+            version_text: String::new(),
+            version_note: None,
+        });
+        Ok(())
+    }
+
     pub fn open_on(&mut self, tab: Tab) {
         self.open = true;
         self.tab = tab;
@@ -187,6 +279,20 @@ impl PackagesWindow {
                 self.r.waiting_for_run = false;
                 self.r.seen_busy = false;
                 self.r.stale = true;
+                // an install that did not work: say why, in words
+                if let Some(expected) = self.last_install.take() {
+                    let diagnoses = diagnose(
+                        &newest_output(engine),
+                        this_os(),
+                        &r_number(engine.r_version()),
+                    );
+                    self.failure = (!diagnoses.is_empty()).then(|| Failure {
+                        diagnoses,
+                        expected,
+                        version_text: String::new(),
+                        version_note: None,
+                    });
+                }
             }
         }
         if let Some((a, b)) = self.r.asked {
@@ -194,6 +300,19 @@ impl PackagesWindow {
                 if ia.ok {
                     self.r.installed = parse_installed(&ia.text);
                     self.r.known = true;
+                    // the install the banner is about did in fact work: no banner
+                    let have = installed_versions(&self.r.installed);
+                    if let Some(f) = &self.failure {
+                        let worked = !f.expected.is_empty()
+                            && f.expected.iter().all(|(n, v)| {
+                                have.get(n).is_some_and(|h| {
+                                    compare_versions(h, v) != std::cmp::Ordering::Less
+                                })
+                            });
+                        if worked {
+                            self.failure = None;
+                        }
+                    }
                 }
                 if lb.ok {
                     self.r.loaded = parse_loaded(&lb.text);
@@ -238,22 +357,73 @@ impl PackagesWindow {
         name: &str,
         installed: &HashMap<String, String>,
     ) {
+        self.begin_install_of(
+            index,
+            &[name.to_string()],
+            installed,
+            InstallFrom::Default,
+            "Packages > Install",
+            None,
+        );
+    }
+
+    /// The same for several packages, built the way `from` says, run under the
+    /// menu name `menu`. Packages already there up to date are installed again
+    /// (the user asked for them).
+    fn begin_install_of(
+        &mut self,
+        index: &PackageIndexService,
+        names: &[String],
+        installed: &HashMap<String, String>,
+        from: InstallFrom,
+        menu: &'static str,
+        note: Option<String>,
+    ) {
         let Some(ix) = index.index() else {
             return;
         };
-        // asking for a package that is there up to date still reinstalls it
         let mut have_now = installed.clone();
-        have_now.remove(name);
-        let pl = plan(ix, &have_now, &[name]);
+        for n in names {
+            have_now.remove(n);
+        }
+        let asked: Vec<&str> = names.iter().map(String::as_str).collect();
+        let pl = plan(ix, &have_now, &asked);
         let code = if pl.problems.is_empty() {
-            install_code(&pl.asked(), library_dir().as_deref(), index.mirror(), false)
+            install_code(&pl.asked(), library_dir().as_deref(), index.mirror(), from)
         } else {
             Err("fix the problems first".into())
         };
         self.confirm = Some(Confirm::Install {
             plan: pl,
             code,
+            menu,
+            note,
+        });
+    }
+
+    /// An older version of `package`, from CRAN's archive, built from source.
+    fn begin_older_version(&mut self, index: &PackageIndexService, package: &str, version: &str) {
+        let code = install_version_code(package, version, library_dir().as_deref(), index.mirror());
+        let plan = Plan {
+            steps: vec![Step {
+                name: package.to_string(),
+                version: version.to_string(),
+                replaces: None,
+                why: Why::Asked,
+                needs_compilation: None,
+            }],
+            ..Plan::default()
+        };
+        self.confirm = Some(Confirm::Install {
+            plan,
+            code,
             menu: "Packages > Install",
+            note: Some(
+                "An older version is built from source. If the package has compiled code this \
+                 needs a compiler, and its own dependencies are installed as usual. R tells you \
+                 if the archive has no such version."
+                    .to_string(),
+            ),
         });
     }
 
@@ -288,6 +458,7 @@ impl PackagesWindow {
             .show(ctx, |ui| {
                 self.toolbar(ui, pal, index);
                 ui.separator();
+                self.failure_banner(ui, pal, index, r_ready);
                 if index.index().is_none() && self.tab == Tab::Find {
                     self.no_index(ui, pal, index);
                     return;
@@ -300,10 +471,174 @@ impl PackagesWindow {
         self.open = open;
         if run.is_some() {
             self.r.waiting_for_run = true;
+            self.failure = None;
+            self.last_install = match &self.confirm {
+                Some(Confirm::Install { plan, .. }) => Some(
+                    plan.steps
+                        .iter()
+                        .filter(|s| s.why == Why::Asked)
+                        .map(|s| (s.name.clone(), s.version.clone()))
+                        .collect(),
+                ),
+                _ => None,
+            };
             self.r.seen_busy = false;
             self.confirm = None;
         }
         run
+    }
+
+    /// What went wrong with the last install, in words, with what to do and
+    /// the retries that can be offered. A retry only builds the list to say yes
+    /// to; nothing runs until the user does.
+    fn failure_banner(
+        &mut self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        index: &PackageIndexService,
+        r_ready: bool,
+    ) {
+        let Some(failure) = &mut self.failure else {
+            return;
+        };
+        let mut retry: Option<Retry> = None;
+        let mut older: Option<(String, String)> = None;
+        let mut close = false;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("The last install did not work")
+                        .strong()
+                        .color(pal.error),
+                );
+                if ui.small_button("Close").clicked() {
+                    close = true;
+                }
+            });
+            for d in &failure.diagnoses {
+                ui.add_space(2.0);
+                ui.label(&d.summary);
+                for step in &d.steps {
+                    ui.label(RichText::new(format!("• {step}")).small().color(pal.dim));
+                }
+                ui.horizontal_wrapped(|ui| {
+                    for r in &d.retry {
+                        match r {
+                            Retry::Again => {
+                                if ui
+                                    .add_enabled(r_ready, egui::Button::new("Try again…"))
+                                    .clicked()
+                                {
+                                    retry = Some(Retry::Again);
+                                }
+                            }
+                            Retry::BinaryOnly => {
+                                if ui
+                                    .add_enabled(r_ready, egui::Button::new("Binary only…"))
+                                    .on_hover_text(
+                                        "Ask for a ready-built package; no compiler needed",
+                                    )
+                                    .clicked()
+                                {
+                                    retry = Some(Retry::BinaryOnly);
+                                }
+                            }
+                            Retry::FromSource => {
+                                if ui
+                                    .add_enabled(r_ready, egui::Button::new("Build from source…"))
+                                    .clicked()
+                                {
+                                    retry = Some(Retry::FromSource);
+                                }
+                            }
+                            Retry::ChangeMirror => {
+                                if ui.button("Change mirror…").clicked() {
+                                    retry = Some(Retry::ChangeMirror);
+                                }
+                            }
+                            Retry::OlderVersion(pkg) => {
+                                ui.label(format!("An older {pkg}, version:"));
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut failure.version_text)
+                                        .desired_width(70.0)
+                                        .hint_text("e.g. 1.2.3"),
+                                );
+                                if ui
+                                    .add_enabled(
+                                        r_ready && !failure.version_text.trim().is_empty(),
+                                        egui::Button::new("Install it…"),
+                                    )
+                                    .on_hover_text(
+                                        "CRAN keeps old versions under src/contrib/Archive",
+                                    )
+                                    .clicked()
+                                {
+                                    older = Some((
+                                        pkg.clone(),
+                                        failure.version_text.trim().to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            if let Some(n) = &failure.version_note {
+                ui.label(RichText::new(n).small().color(pal.error));
+            }
+            ui.label(
+                RichText::new("R's own messages are in Results.")
+                    .small()
+                    .color(pal.dim),
+            );
+        });
+        let names: Vec<String> = failure.expected.iter().map(|(n, _)| n.clone()).collect();
+        if close {
+            self.failure = None;
+            return;
+        }
+        let installed = self.installed_map();
+        if let Some(r) = retry {
+            match r {
+                Retry::Again => self.begin_install_of(
+                    index,
+                    &names,
+                    &installed,
+                    InstallFrom::Default,
+                    "Packages > Install",
+                    None,
+                ),
+                Retry::BinaryOnly => self.begin_install_of(
+                    index,
+                    &names,
+                    &installed,
+                    InstallFrom::Binary,
+                    "Packages > Install",
+                    None,
+                ),
+                Retry::FromSource => self.begin_install_of(
+                    index,
+                    &names,
+                    &installed,
+                    InstallFrom::Source,
+                    "Packages > Install",
+                    Some(
+                        "Built from source: packages with compiled code need a compiler."
+                            .to_string(),
+                    ),
+                ),
+                Retry::ChangeMirror => {
+                    self.show_mirror = true;
+                    self.mirror_text = index.mirror().to_string();
+                    self.mirror_note = None;
+                    self.tab = Tab::Find;
+                }
+                Retry::OlderVersion(_) => {}
+            }
+        }
+        if let Some((pkg, version)) = older {
+            self.begin_older_version(index, &pkg, &version);
+        }
     }
 
     fn toolbar(&mut self, ui: &mut egui::Ui, pal: &Palette, index: &mut PackageIndexService) {
@@ -758,30 +1093,15 @@ impl PackagesWindow {
                     })
                     .clicked()
                 {
-                    if let Some(ix) = index.index() {
-                        let names: Vec<&str> = outdated.iter().map(|u| u.name.as_str()).collect();
-                        // plan against what is installed, but treat these as needing install
-                        let mut have = installed.clone();
-                        for n in &names {
-                            have.remove(*n);
-                        }
-                        let pl = plan(ix, &have, &names);
-                        let code = if pl.problems.is_empty() {
-                            install_code(
-                                &pl.asked(),
-                                library_dir().as_deref(),
-                                index.mirror(),
-                                false,
-                            )
-                        } else {
-                            Err("fix the problems first".into())
-                        };
-                        self.confirm = Some(Confirm::Install {
-                            plan: pl,
-                            code,
-                            menu: "Packages > Update",
-                        });
-                    }
+                    let names: Vec<String> = outdated.iter().map(|u| u.name.clone()).collect();
+                    self.begin_install_of(
+                        index,
+                        &names,
+                        &installed,
+                        InstallFrom::Default,
+                        "Packages > Update",
+                        None,
+                    );
                 }
             });
             if ui.button("Look again").clicked() {
@@ -984,7 +1304,9 @@ fn confirm_panel(
     let mut go = false;
     let mut cancel = false;
     match confirm {
-        Confirm::Install { plan, code, .. } => {
+        Confirm::Install {
+            plan, code, note, ..
+        } => {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("This will install").strong());
                 let can = plan.can_run() && code.is_ok() && r_ready;
@@ -1044,6 +1366,9 @@ fn confirm_panel(
                     .small()
                     .color(pal.warning),
                 );
+                if let Some(note) = note {
+                    ui.label(RichText::new(note).small().color(pal.warning));
+                }
             }
             ui.label(
                 RichText::new(
@@ -1178,7 +1503,10 @@ mod window_tests {
     fn asking_to_install_shows_the_plan_and_the_exact_call_before_anything_runs() {
         let (mut w, s) = window_and_service();
         w.begin_install(&s, "fixest", &HashMap::new());
-        let Some(Confirm::Install { plan, code, menu }) = &w.confirm else {
+        let Some(Confirm::Install {
+            plan, code, menu, ..
+        }) = &w.confirm
+        else {
             panic!("no confirmation");
         };
         let steps: Vec<&str> = plan.steps.iter().map(|s| s.name.as_str()).collect();
@@ -1235,5 +1563,84 @@ mod window_tests {
             code: remove_code(&["x y"], None),
         };
         assert!(bad.run_for().is_none());
+    }
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    use rcraft_rpkg::index::sample;
+
+    #[test]
+    fn a_binary_only_retry_asks_r_for_binaries_and_a_source_retry_adds_a_caution() {
+        let mut w = PackagesWindow::default();
+        let s = PackageIndexService::in_memory(sample());
+        let names = vec!["fixest".to_string()];
+        w.begin_install_of(
+            &s,
+            &names,
+            &HashMap::new(),
+            InstallFrom::Binary,
+            "Packages > Install",
+            None,
+        );
+        let Some(Confirm::Install { code, note, .. }) = &w.confirm else {
+            panic!("no confirmation");
+        };
+        let code = code.as_ref().map(String::as_str).unwrap_or("");
+        assert!(code.contains(", type = \"binary\")"), "{code}");
+        assert!(note.is_none());
+        w.begin_install_of(
+            &s,
+            &names,
+            &HashMap::new(),
+            InstallFrom::Source,
+            "Packages > Install",
+            Some("Built from source".into()),
+        );
+        let Some(Confirm::Install { code, note, .. }) = &w.confirm else {
+            panic!("no confirmation");
+        };
+        assert!(code.as_ref().is_ok_and(|c| c.contains("type = \"source\"")));
+        assert!(note.is_some());
+    }
+
+    #[test]
+    fn an_older_version_comes_from_the_archive_with_a_source_caution_and_bad_versions_are_refused()
+    {
+        let mut w = PackagesWindow::default();
+        let s = PackageIndexService::in_memory(sample());
+        w.begin_older_version(&s, "fixest", "0.11.2");
+        let Some(Confirm::Install {
+            plan, code, note, ..
+        }) = &w.confirm
+        else {
+            panic!("no confirmation");
+        };
+        let c = code.as_ref().map(String::as_str).unwrap_or("");
+        assert!(
+            c.contains("/src/contrib/Archive/fixest/fixest_0.11.2.tar.gz"),
+            "{c}"
+        );
+        assert!(c.contains("type = \"source\""));
+        assert_eq!(plan.steps.len(), 1);
+        assert!(plan.can_run());
+        assert!(note.as_deref().is_some_and(|n| n.contains("source")));
+        // a version that is not one gives no command
+        w.begin_older_version(&s, "fixest", "1.0/../../x");
+        let Some(Confirm::Install { code, .. }) = &w.confirm else {
+            panic!("no confirmation");
+        };
+        assert!(code.is_err());
+        assert!(w.confirm.as_ref().and_then(Confirm::run_for).is_none());
+    }
+
+    #[test]
+    fn the_r_version_number_is_taken_from_the_banner_line() {
+        assert_eq!(
+            r_number("R version 4.4.3 (2025-02-28 ucrt) -- \"Trophy Case\""),
+            "4.4.3"
+        );
+        assert_eq!(r_number("nonsense"), "");
     }
 }

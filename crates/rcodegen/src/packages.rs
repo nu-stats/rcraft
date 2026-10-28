@@ -23,6 +23,29 @@ pub fn is_version(s: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
 }
 
+/// Which kind of package to ask R for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum InstallFrom {
+    /// R chooses: a binary where the system has one (Windows, macOS), else source.
+    #[default]
+    Default,
+    /// Source packages, built here.
+    Source,
+    /// Binary packages only.
+    Binary,
+}
+
+impl InstallFrom {
+    /// The `type` argument for `install.packages`, with its leading comma.
+    fn argument(self) -> &'static str {
+        match self {
+            InstallFrom::Default => "",
+            InstallFrom::Source => ", type = \"source\"",
+            InstallFrom::Binary => ", type = \"binary\"",
+        }
+    }
+}
+
 fn check_names(packages: &[&str]) -> Result<(), String> {
     if packages.is_empty() {
         return Err("no package named".into());
@@ -60,13 +83,14 @@ fn lib_argument(library: Option<&str>) -> String {
 
 /// R code that installs `packages` (and what they need) from the repository at
 /// `repo`, into `library` when given. R prefers binary packages where the
-/// platform has them; `from_source` asks for source packages (built here, so
-/// a package with compiled code needs the tools to compile it).
+/// platform has them; `from_how` can ask for source packages (built here, so
+/// a package with compiled code needs the tools to compile it) or for binary
+/// packages only (Windows and macOS).
 pub fn install_code(
     packages: &[&str],
     library: Option<&str>,
     repo: &str,
-    from_source: bool,
+    from_how: InstallFrom,
 ) -> Result<String, String> {
     check_names(packages)?;
     Ok(format!(
@@ -75,11 +99,7 @@ pub fn install_code(
         names_vector(packages),
         lib_argument(library),
         r_string(repo),
-        if from_source {
-            ", type = \"source\""
-        } else {
-            ""
-        }
+        from_how.argument()
     ))
 }
 
@@ -213,14 +233,19 @@ mod tests {
     #[test]
     fn install_code_quotes_and_names_the_library_and_repository() {
         assert_eq!(
-            install_code(&["fixest"], None, "https://cloud.r-project.org", false),
+            install_code(
+                &["fixest"],
+                None,
+                "https://cloud.r-project.org",
+                InstallFrom::Default
+            ),
             Ok("install.packages(\"fixest\", repos = \"https://cloud.r-project.org\")".into())
         );
         let code = install_code(
             &["a", "b.c"],
             Some("C:/Users/me/R lib"),
             "https://m.example.org/cran",
-            false,
+            InstallFrom::Default,
         );
         assert_eq!(
             code,
@@ -236,7 +261,7 @@ mod tests {
     #[test]
     fn from_source_is_asked_for_in_the_call() {
         assert_eq!(
-            install_code(&["a"], None, "https://x.org", true),
+            install_code(&["a"], None, "https://x.org", InstallFrom::Source),
             Ok("install.packages(\"a\", repos = \"https://x.org\", type = \"source\")".into())
         );
     }
@@ -245,13 +270,19 @@ mod tests {
     fn a_name_that_is_not_a_package_name_is_refused_not_quoted() {
         for bad in ["", "9lives", "a b", "a\";system(\"x\")", "a-b", "a_b", "é"] {
             assert!(
-                install_code(&[bad], None, "https://x.org", false).is_err(),
+                install_code(&[bad], None, "https://x.org", InstallFrom::Default).is_err(),
                 "{bad:?}"
             );
             assert!(remove_code(&[bad], None).is_err(), "{bad:?}");
         }
-        assert!(install_code(&[], None, "https://x.org", false).is_err());
-        assert!(install_code(&["ok", "not ok"], None, "https://x.org", false).is_err());
+        assert!(install_code(&[], None, "https://x.org", InstallFrom::Default).is_err());
+        assert!(install_code(
+            &["ok", "not ok"],
+            None,
+            "https://x.org",
+            InstallFrom::Default
+        )
+        .is_err());
     }
 
     #[test]

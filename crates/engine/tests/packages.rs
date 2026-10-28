@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use rcraft_engine::{Engine, Outcome, Source};
 use rcraft_rcodegen::packages::{
     install_code, installed_packages_code, installed_versions, parse_installed, remove_code,
+    InstallFrom,
 };
 use rcraft_rhost::{find_installs, Env, SessionConfig};
 use rcraft_rpkg::dcf;
@@ -164,7 +165,8 @@ fn a_package_and_what_it_imports_are_planned_installed_listed_and_removed() {
     assert_eq!(steps, vec![("rcrafttesta", true), ("rcrafttestb", false)]);
 
     // 5. the install code, run in R, installs both from the repository
-    let code = install_code(&pl.asked(), Some(&lib), &repo_url, true).unwrap_or_default();
+    let code =
+        install_code(&pl.asked(), Some(&lib), &repo_url, InstallFrom::Source).unwrap_or_default();
     assert!(code.contains("install.packages(\"rcrafttesta\""), "{code}");
     assert_eq!(run(&mut e, &code), Outcome::Ok);
     let got = ask(
@@ -198,7 +200,13 @@ fn installing_a_name_the_repository_lacks_fails_in_r_with_its_message() {
     let lib = dir.path("lib");
     assert_eq!(run(&mut e, &build_repository(&root)), Outcome::Ok);
     let repo_url = format!("file:///{}/repo", root.trim_start_matches('/'));
-    let code = install_code(&["rcraftnotthere"], Some(&lib), &repo_url, true).unwrap_or_default();
+    let code = install_code(
+        &["rcraftnotthere"],
+        Some(&lib),
+        &repo_url,
+        InstallFrom::Source,
+    )
+    .unwrap_or_default();
     // R warns that the package is not available; nothing is installed
     run(&mut e, &code);
     let n = ask(

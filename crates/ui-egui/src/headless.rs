@@ -49,6 +49,8 @@ pub struct HeadlessOptions {
     pub packages_select: Option<String>,
     /// ... and the install list for it showing, waiting for a yes ...
     pub packages_confirm: bool,
+    /// ... or a made-up install failure (`compiler`, `newer-r`, `network`) ...
+    pub packages_failure: Option<String>,
     /// ... over the package list read from this downloaded `packages.rds` (a
     /// small made-up list when none). A picture never reaches the network or
     /// reads the user's own cache.
@@ -76,6 +78,7 @@ impl HeadlessOptions {
             packages_query: String::new(),
             packages_select: None,
             packages_confirm: false,
+            packages_failure: None,
             packages_from: None,
             accent: Accent::default(),
             size: [1240, 780],
@@ -128,6 +131,9 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
             options.packages_confirm,
             options.packages_from.as_deref(),
         )?;
+        if let Some(kind) = &options.packages_failure {
+            app.show_packages_failure(kind)?;
+        }
     }
 
     let screen = Rect::from_min_size(

@@ -28,8 +28,13 @@ pub(crate) fn install_code(packages: &[&str], library: Option<&str>) -> String {
 
 /// R code that installs `packages` into `library` from `mirror`.
 pub(crate) fn install_code_from(packages: &[&str], library: Option<&str>, mirror: &str) -> String {
-    rcraft_rcodegen::packages::install_code(packages, library, mirror, false)
-        .unwrap_or_else(|why| format!("stop({})", r_string(&why)))
+    rcraft_rcodegen::packages::install_code(
+        packages,
+        library,
+        mirror,
+        rcraft_rcodegen::packages::InstallFrom::Default,
+    )
+    .unwrap_or_else(|why| format!("stop({})", r_string(&why)))
 }
 
 #[derive(Default)]

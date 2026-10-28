@@ -986,3 +986,54 @@ vendoring over publishing `statcraft-lang` separately.
   Stata is committed here, AGENTS.md section 1).
 - Not started: P2B.1's own reader built on these (macros, `foreach`, `by:` prefixes),
   P2B.2 expression translation to R, and everything after.
+
+## P1A.7 Install failures made readable, 2026-10-28
+
+When an install, update or older-version install run from the Packages window ends,
+the window reads what R printed for it (output, warnings, errors) and, if it
+recognises the failure, shows a banner above the lists: what went wrong in a sentence,
+what to do about it on this system, and buttons that build a new list to say yes to
+(nothing runs until the user does). The banner goes away when the packages asked for
+are in the installed list at the version CRAN offered, so a warning on a run that
+worked does not leave a banner.
+
+`rcodegen::failure::diagnose(text, os, r_version)` finds:
+
+- **No compiler or `make`**: Windows names the Rtools for this R (R 4.4 is Rtools44)
+  and its address, and offers *Binary only*; macOS says `xcode-select --install` (and
+  gfortran from the R project's tools page); Linux gives the apt and dnf commands.
+- **A missing system library**: a table of 25 common libraries (libcurl, libxml2,
+  OpenSSL, libpng, freetype, HarfBuzz, GDAL, PROJ, GEOS and others) gives the apt,
+  dnf and Homebrew package; an unknown library is still named from the configure
+  message; on Windows the advice is *Binary only*.
+- **The package needs a newer R**: says which R is needed, and offers to install an
+  older version (a version box, then the usual list to say yes to; built from source,
+  with a caution).
+- **A needed package is not offered**, **only a source package exists**, **a name CRAN
+  does not have**, **the library cannot be written to**, **the mirror cannot be
+  reached** (an unreachable mirror is blamed before the "not available" lines that follow
+  it, and offers *Change mirror*), and a plain "R stopped installing X" when nothing
+  clearer is found.
+- Retries: *Try again*, *Binary only* (`type = "binary"`), *Build from source*
+  (`type = "source"`), an older version, *Change mirror*. `InstallFrom` in
+  `rcodegen::packages` replaces the old yes/no source flag.
+
+Recorded from real R 4.4.3 on Windows (this machine has no Rtools, so the compiler case
+is real): `'make' not found`, `unable to access index for repository`, `is not available
+for this version of R` with `depends on R (>= 99.0)`, `dependency 'x' is not available for
+package 'y'`, `'lib = ...' is not writable`. `engine/tests/package_failures.rs` makes
+each of these happen in a real R against a repository built on the spot and checks the
+diagnosis; the compiler case runs only where R has no `make`. It also caught a bug: the
+dependency name was read from the wrong line when R printed it twice.
+
+**Not verified against real output:** the macOS and Linux messages and the "available
+as a source package but not as a binary" message follow what R, make, gcc and configure
+scripts print there, written from knowledge and not recorded on those systems. They are
+unit-tested with strings in that form only. Run an install that fails on a Mac and a
+Linux machine and compare before relying on them.
+
+Seen in a picture: `rcraft-desktop --picture out.png --packages find --packages-select
+fixest --packages-failure compiler` (also `newer-r` and `network`).
+
+Not done: a failure of an update through *Update all* offers *Try again* only for the
+names of the plan; there is no per-package retry. Removal failures are not diagnosed.
