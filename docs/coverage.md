@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 82 | 0 | 61 | 21 |
+| 88 | 0 | 69 | 19 |
 
 ## File
 
@@ -39,8 +39,14 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Labelled to factor | partial |
 | Rename object | partial |
 | Remove object | partial |
-| Join | planned |
-| Reshape | planned |
+| Join | partial |
+| Append | partial |
+| Aggregate | partial |
+| Wide to long | partial |
+| Long to wide | partial |
+| Duplicates | partial |
+| Random sample | partial |
+| Drop missing values | partial |
 
 ## Statistics
 

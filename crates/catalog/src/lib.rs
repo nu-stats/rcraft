@@ -5,6 +5,7 @@
 //! Entries with a dialog have a [`rcraft_rcodegen::dialog::Spec`] in an area
 //! module ([`data`]).
 
+pub mod combine;
 pub mod data;
 pub mod data_tools;
 pub mod generalised;
@@ -109,8 +110,14 @@ pub const ENTRIES: &[Entry] = &[
     partial("Rename object", Area::Data),
     partial("Remove object", Area::Data),
     partial("Save object", Area::File),
-    planned("Join", Area::Data),
-    planned("Reshape", Area::Data),
+    partial("Join", Area::Data),
+    partial("Append", Area::Data),
+    partial("Aggregate", Area::Data),
+    partial("Wide to long", Area::Data),
+    partial("Long to wide", Area::Data),
+    partial("Duplicates", Area::Data),
+    partial("Random sample", Area::Data),
+    partial("Drop missing values", Area::Data),
     partial("Summary statistics", Area::Statistics),
     partial("Frequency table", Area::Statistics),
     partial("Cross-tabulation", Area::Statistics),

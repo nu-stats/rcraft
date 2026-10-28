@@ -647,6 +647,14 @@ pub const SPECS: &[&Spec] = &[
     &data_tools::EXTRACT_TEXT,
     &data_tools::TEXT_TO_DATE,
     &data_tools::DATE_PART,
+    &crate::combine::JOIN,
+    &crate::combine::APPEND,
+    &crate::combine::AGGREGATE,
+    &crate::combine::WIDE_TO_LONG,
+    &crate::combine::LONG_TO_WIDE,
+    &crate::combine::DUPLICATES,
+    &crate::combine::SAMPLE,
+    &crate::combine::DROP_MISSING,
 ];
 
 #[cfg(test)]

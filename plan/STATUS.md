@@ -685,3 +685,23 @@ in `rhost/tests/session.rs` (or a unit test for the output reader).
 - `closeAllConnections()` in user code no longer ends the session (the
   request connection is checked by id and reopened).
 - Cleanup: unused `current_id` removed; an idle R gets 0.5 s to quit on QUIT.
+
+## P3.6 combine and reshape, 2026-10-27
+
+`catalog::combine`, eight Data dialogs, base R only (`merge`, `aggregate`,
+`reshape`), so none needs a package:
+
+- Join (inner, left, right, full, on same-named variables), Append (a variable
+  missing from one side is filled with NA), Aggregate (mean, sum, median,
+  smallest, largest, standard deviation, count of values present).
+- Wide to long and Long to wide, with the `reshape` bookkeeping attributes and
+  row names removed; wide to long without identifiers numbers the cases in `id`
+  and refuses when the data already has an `id`.
+- Duplicates (drop, keep only repeats, or mark), Random sample (rows or
+  percent, optional seed), Drop missing values (drop or keep the incomplete rows).
+
+The other data frame of Join and Append is named in a text box (the dialog
+cannot yet list the workspace's data frames), and its variables are matched by
+name. `engine/tests/combine.rs` runs each dialog in real R and checks the
+values; unit tests cover the refusals. Still to do for P3.6: a data-frame
+chooser widget, joins on differently named keys, and tidyverse styles.
