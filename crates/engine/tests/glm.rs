@@ -5,7 +5,7 @@
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::generalised::{LOGISTIC, NEGATIVE_BINOMIAL, POISSON};
+use rcraft_catalog::generalised::{LOGISTIC, MULTINOMIAL, NEGATIVE_BINOMIAL, ORDINAL, POISSON};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind, Widget};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -71,6 +71,8 @@ const MAKE: &str = "d <- data.frame(\
      three = factor(rep(c('a', 'b', 'c'), 4)), \
      n = c(1, 0, 2, 3, 2, 4, 5, 3, 6, 8, 7, 9), \
      nb = c(0, 1, 0, 3, 2, 9, 1, 0, 12, 4, 2, 15), \
+     sat = factor(c('low', 'low', 'mid', 'low', 'mid', 'low', 'mid', 'high', 'mid', 'high', \
+                    'high', 'high'), levels = c('low', 'mid', 'high')), \
      e = rep(c(10, 20), 6), \
      grp = factor(rep(c('u', 'v'), each = 6)))";
 
@@ -84,6 +86,7 @@ fn context() -> Context {
             ("three", VarKind::Factor),
             ("n", VarKind::Number),
             ("nb", VarKind::Number),
+            ("sat", VarKind::Factor),
             ("e", VarKind::Number),
             ("grp", VarKind::Factor),
         ]
@@ -137,6 +140,10 @@ fn report(text: &str) -> Vec<String> {
                 || l.starts_with("glm(")
                 || l.starts_with("MASS::glm.nb(")
                 || l.starts_with("glm.nb(")
+                || l.starts_with("MASS::polr(")
+                || l.starts_with("polr(")
+                || l.starts_with("nnet::multinom(")
+                || l.starts_with("multinom(")
                 || l.starts_with("warning:"))
         })
         .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
@@ -308,4 +315,139 @@ fn negative_binomial_model_is_the_glm_nb_r_fits() {
          isTRUE(all.equal(coef(nbrate), coef(MASS::glm.nb(nb ~ x + grp + offset(log(e)), data = d)))), \
          !isTRUE(isTRUE(all.equal(coef(nbrate), coef(MASS::glm.nb(nb ~ x + grp, data = d)))))",
     );
+}
+
+/// Whether R can load `package`; says so and returns false when it cannot.
+fn have_package(e: &mut Engine, package: &str) -> bool {
+    let (outcome, _) = run(
+        e,
+        Source::Typed,
+        &format!("stopifnot(requireNamespace('{package}', quietly = TRUE))"),
+    );
+    if outcome != Outcome::Ok {
+        eprintln!("skipped: the R package {package} is not installed");
+    }
+    outcome == Outcome::Ok
+}
+
+#[test]
+fn ordinal_model_is_the_polr_r_fits() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !have_package(&mut e, "MASS") {
+        return;
+    }
+
+    let (outcome, text) = dialog(
+        &mut e,
+        &ORDINAL,
+        &[("y", "sat")],
+        &[("x", &["x"])],
+        &["ratios", "pvalues"],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "m <- MASS::polr(ordered(sat) ~ x, data = d, method = 'logistic', Hess = TRUE); \
+         cat('Outcome order, lowest first: ', paste(levels(ordered(d$sat)), collapse = ' < '), '\n', sep = ''); \
+         print(summary(m)); cat('\nCoefficients with p-values\n'); \
+         ct <- coef(summary(m)); print(cbind(ct, 'p value' = 2 * pnorm(abs(ct[, 't value']), lower.tail = FALSE))); \
+         cat('\nOdds ratios\n'); print(exp(cbind(odds_ratio = coef(m), confint(m, level = 0.95))))",
+    );
+    assert!(report(&expected).len() > 12, "{expected}");
+    assert!(
+        text.contains("low < mid < high"),
+        "the order used is printed: {text}"
+    );
+    assert_eq!(report(&text), report(&expected), "{text}");
+    holds(
+        &mut e,
+        "inherits(model, 'polr'), \
+         isTRUE(all.equal(coef(model), coef(MASS::polr(ordered(sat) ~ x, data = d, Hess = TRUE))))",
+    );
+
+    // a different link and a categorical predictor give no odds ratios
+    let (outcome, text) = dialog(
+        &mut e,
+        &ORDINAL,
+        &[("y", "sat"), ("link", "probit"), ("save", "pr")],
+        &[("x", &["x", "grp"])],
+        &["ratios"],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(!text.contains("Odds ratios"), "{text}");
+    holds(
+        &mut e,
+        "identical(pr$method, 'probit'), \
+         isTRUE(all.equal(coef(pr), coef(MASS::polr(ordered(sat) ~ x + grp, data = d, method = 'probit', Hess = TRUE))))",
+    );
+}
+
+#[test]
+fn multinomial_model_is_the_multinom_r_fits() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !have_package(&mut e, "nnet") {
+        return;
+    }
+
+    let (outcome, text) = dialog(
+        &mut e,
+        &MULTINOMIAL,
+        &[("y", "three")],
+        &[("x", &["x", "z"])],
+        &["ratios", "pvalues"],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "m <- nnet::multinom(factor(three) ~ x + z, data = d, trace = FALSE); print(summary(m)); \
+         cat('\np-values\n'); \
+         print(2 * pnorm(abs(summary(m)$coefficients / summary(m)$standard.errors), lower.tail = FALSE)); \
+         cat('\nRelative risk ratios\n'); print(exp(coef(m))); \
+         cat('\nConfidence intervals for the ratios\n'); print(exp(confint(m, level = 0.95)))",
+    );
+    assert!(report(&expected).len() > 12, "{expected}");
+    assert_eq!(report(&text), report(&expected), "{text}");
+    holds(
+        &mut e,
+        "inherits(model, 'multinom'), identical(rownames(coef(model)), c('b', 'c')), \
+         isTRUE(all.equal(coef(model), coef(nnet::multinom(factor(three) ~ x + z, data = d, trace = FALSE))))",
+    );
+
+    // another reference category changes the rows and the coefficients
+    let (outcome, text) = dialog(
+        &mut e,
+        &MULTINOMIAL,
+        &[("y", "three"), ("reference", "c"), ("save", "mref")],
+        &[("x", &["x"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        "identical(rownames(coef(mref)), c('a', 'b')), \
+         isTRUE(all.equal(coef(mref), coef(nnet::multinom(relevel(factor(three), ref = 'c') ~ x, data = d, trace = FALSE))))",
+    );
+
+    // a reference that is not a category is refused by R; two categories are refused first
+    let (outcome, text) = dialog(
+        &mut e,
+        &MULTINOMIAL,
+        &[("y", "three"), ("reference", "zzz"), ("save", "bad")],
+        &[("x", &["x"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    let (outcome, text) = dialog(
+        &mut e,
+        &MULTINOMIAL,
+        &[("y", "grp"), ("save", "two")],
+        &[("x", &["x"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("at least three"), "{text}");
 }

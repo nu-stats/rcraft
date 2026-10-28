@@ -424,6 +424,8 @@ pub const SPECS: &[&Spec] = &[
     &generalised::LOGISTIC,
     &generalised::POISSON,
     &generalised::NEGATIVE_BINOMIAL,
+    &generalised::ORDINAL,
+    &generalised::MULTINOMIAL,
 ];
 
 #[cfg(test)]

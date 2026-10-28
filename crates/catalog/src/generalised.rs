@@ -318,8 +318,182 @@ pub const NEGATIVE_BINOMIAL: Spec = Spec {
     },
 };
 
+// ---- Ordinal model ----
+
+const ORDINAL_LINKS: &[Opt] = &[
+    Opt {
+        value: "logistic",
+        label: "Logit (proportional odds)",
+    },
+    Opt {
+        value: "probit",
+        label: "Probit",
+    },
+    Opt {
+        value: "cloglog",
+        label: "Complementary log-log",
+    },
+];
+
+pub const ORDINAL: Spec = Spec {
+    entry: "Ordinal model",
+    menu: "Statistics > Generalised models > Ordinal model",
+    about: "Model an outcome with ordered categories (for example low, middle, high) from one or \
+            more predictors, with MASS::polr. The categories are put in the order of the \
+            variable's levels, lowest first; text is ordered alphabetically and numbers by size, \
+            and the order used is printed. Rows missing any variable used are left out.",
+    widgets: &[
+        Widget::Variable {
+            id: "y",
+            label: "Outcome (ordered categories)",
+            kinds: &[VarKind::Factor, VarKind::Text, VarKind::Number],
+            required: true,
+            hint:
+                "For a factor, set the order of its levels first (Data > Factor > Reorder levels).",
+        },
+        PREDICTOR_LIST,
+        Widget::Choice {
+            id: "link",
+            label: "Link",
+            options: ORDINAL_LINKS,
+            default: "logistic",
+            hint: "",
+        },
+        Widget::Check {
+            id: "ratios",
+            label: "Show odds ratios with confidence intervals",
+            default: true,
+            hint: "Only for the logit link.",
+        },
+        Widget::Check {
+            id: "pvalues",
+            label: "Show p-values",
+            default: true,
+            hint: "From the normal approximation to each t value.",
+        },
+        CONFIDENCE,
+        SAVE,
+    ],
+    needs: &["MASS"],
+    styles: BASE,
+    check: common_check,
+    code: |a, _| {
+        let (data, model) = (a.data(), a.name("save"));
+        let (y, link) = (a.var("y").unwrap_or_default(), a.choice("link"));
+        let ys = a.var_string("y").unwrap_or_default();
+        let mut code = format!(
+            "{model} <- MASS::polr(ordered({y}) ~ {}, data = {data}, method = {}, Hess = TRUE)\n\
+             cat(\"Outcome order, lowest first: \", \
+             paste(levels(ordered({data}[[{ys}]])), collapse = \" < \"), \"\\n\", sep = \"\")\n\
+             print(summary({model}))",
+            rhs(a),
+            r_string(link),
+        );
+        if a.flag("pvalues") {
+            code.push_str(&format!(
+                "\ncat(\"\\nCoefficients with p-values\\n\")\n\
+                 print(cbind(stats::coef(summary({model})), \"p value\" = 2 * stats::pnorm(\
+                 abs(stats::coef(summary({model}))[, \"t value\"]), lower.tail = FALSE)))"
+            ));
+        }
+        if link == "logistic" && a.flag("ratios") {
+            code.push_str(&format!(
+                "\ncat(\"\\nOdds ratios\\n\")\nprint(exp(cbind(odds_ratio = stats::coef({model}), \
+                 stats::confint({model}, level = {}))))",
+                a.choice("conf")
+            ));
+        }
+        code
+    },
+};
+
+// ---- Multinomial model ----
+
+pub const MULTINOMIAL: Spec = Spec {
+    entry: "Multinomial model",
+    menu: "Statistics > Generalised models > Multinomial model",
+    about: "Model an outcome with three or more unordered categories from one or more \
+            predictors, with nnet::multinom. Each category other than the reference gets its own \
+            set of coefficients, compared with the reference. Rows missing any variable used \
+            are left out.",
+    widgets: &[
+        Widget::Variable {
+            id: "y",
+            label: "Outcome (categories)",
+            kinds: &[VarKind::Factor, VarKind::Text],
+            required: true,
+            hint: "",
+        },
+        PREDICTOR_LIST,
+        Widget::Text {
+            id: "reference",
+            label: "Reference category",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Optional: the category the others are compared with. Leave empty to use the \
+                   first level. R refuses a category that is not there.",
+        },
+        Widget::Check {
+            id: "ratios",
+            label: "Show relative risk ratios with confidence intervals",
+            default: true,
+            hint: "",
+        },
+        Widget::Check {
+            id: "pvalues",
+            label: "Show p-values",
+            default: true,
+            hint: "From the normal approximation to each z value.",
+        },
+        CONFIDENCE,
+        SAVE,
+    ],
+    needs: &["nnet"],
+    styles: BASE,
+    check: common_check,
+    code: |a, _| {
+        let (data, model) = (a.data(), a.name("save"));
+        let outcome = a.var_string("y").unwrap_or_default();
+        let y = a.var("y").unwrap_or_default();
+        let reference = a.values.text("reference").trim();
+        let response = if reference.is_empty() {
+            format!("factor({y})")
+        } else {
+            format!("stats::relevel(factor({y}), ref = {})", r_string(reference))
+        };
+        let mut code = format!(
+            "stopifnot(\"the outcome must have at least three different values\" = \
+             length(unique(stats::na.omit({data}[[{outcome}]]))) >= 3)\n\
+             {model} <- nnet::multinom({response} ~ {}, data = {data}, trace = FALSE)\n\
+             print(summary({model}))",
+            rhs(a),
+        );
+        if a.flag("pvalues") {
+            code.push_str(&format!(
+                "\ncat(\"\\np-values\\n\")\nprint(2 * stats::pnorm(abs(summary({model})$coefficients / \
+                 summary({model})$standard.errors), lower.tail = FALSE))"
+            ));
+        }
+        if a.flag("ratios") {
+            code.push_str(&format!(
+                "\ncat(\"\\nRelative risk ratios\\n\")\nprint(exp(stats::coef({model})))\n\
+                 cat(\"\\nConfidence intervals for the ratios\\n\")\n\
+                 print(exp(stats::confint({model}, level = {})))",
+                a.choice("conf")
+            ));
+        }
+        code
+    },
+};
+
 /// The dialogs of this module, in menu order.
-pub const SPECS: &[&Spec] = &[&LOGISTIC, &POISSON, &NEGATIVE_BINOMIAL];
+pub const SPECS: &[&Spec] = &[
+    &LOGISTIC,
+    &POISSON,
+    &NEGATIVE_BINOMIAL,
+    &ORDINAL,
+    &MULTINOMIAL,
+];
 
 #[cfg(test)]
 mod tests {
@@ -500,6 +674,69 @@ mod tests {
         assert!(message(
             &NEGATIVE_BINOMIAL,
             &[("y", "visits"), ("save", "my data")],
+            &[("x", &["age"])]
+        )
+        .contains("is the data frame"));
+    }
+
+    #[test]
+    fn ordinal_orders_the_outcome_explicitly_and_shows_ratios_for_the_logit_link() {
+        assert_eq!(ORDINAL.packages(Style::Base), vec!["MASS"]);
+        let out = code(&ORDINAL, &[("y", "visits")], &[("x", &["age", "arm"])]);
+        assert!(
+            out.starts_with(
+                "model <- MASS::polr(ordered(visits) ~ age + arm, data = `my data`, \
+                 method = \"logistic\", Hess = TRUE)\n"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("paste(levels(ordered(`my data`[[\"visits\"]])), collapse = \" < \")"),
+            "{out}"
+        );
+        assert!(out.contains("Coefficients with p-values"), "{out}");
+        assert!(out.ends_with("level = 0.95))))"), "{out}");
+        let probit = code(
+            &ORDINAL,
+            &[("y", "visits"), ("link", "probit")],
+            &[("x", &["age"])],
+        );
+        assert!(probit.contains("method = \"probit\""), "{probit}");
+        assert!(!probit.contains("Odds ratios"), "{probit}");
+        assert!(
+            message(&ORDINAL, &[("y", "visits")], &[("x", &["visits"])]).contains("cannot also")
+        );
+        assert!(message(&ORDINAL, &[("y", "born")], &[("x", &["age"])]).contains("date"));
+    }
+
+    #[test]
+    fn multinomial_needs_nnet_three_categories_and_a_reference() {
+        assert_eq!(MULTINOMIAL.packages(Style::Base), vec!["nnet"]);
+        let out = code(&MULTINOMIAL, &[("y", "arm")], &[("x", &["age"])]);
+        assert!(
+            out.contains("length(unique(stats::na.omit(`my data`[[\"arm\"]]))) >= 3)"),
+            "{out}"
+        );
+        assert!(
+            out.contains(
+                "model <- nnet::multinom(factor(arm) ~ age, data = `my data`, trace = FALSE)"
+            ),
+            "{out}"
+        );
+        assert!(out.contains("Relative risk ratios"), "{out}");
+        let with_reference = code(
+            &MULTINOMIAL,
+            &[("y", "arm"), ("reference", "control")],
+            &[("x", &["age"])],
+        );
+        assert!(
+            with_reference.contains("stats::relevel(factor(arm), ref = \"control\") ~ age"),
+            "{with_reference}"
+        );
+        assert!(message(&MULTINOMIAL, &[("y", "visits")], &[("x", &["age"])]).contains("needs"));
+        assert!(message(
+            &MULTINOMIAL,
+            &[("y", "arm"), ("save", "my data")],
             &[("x", &["age"])]
         )
         .contains("is the data frame"));

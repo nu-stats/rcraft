@@ -535,6 +535,24 @@ reads together with the style's packages.
   packages so it runs there. MASS is present in the R used here (4.4.3). nnet is not, which
   matters for the multinomial dialog next.
 
+## P4.4 ordinal and multinomial models, 2026-10-27
+
+- *Ordinal model* (needs MASS): `MASS::polr(ordered(outcome) ~ ..., Hess = TRUE)` with logit,
+  probit or complementary log-log link. Wrapping the outcome in `ordered()` makes the order
+  explicit: a factor keeps its level order, text is alphabetical, numbers go by size. The
+  generated R prints "Outcome order, lowest first: low < mid < high" so the order used is never
+  silent. Optional p-values (normal approximation to each t value) and, for the logit link,
+  odds ratios with profile confidence intervals.
+- *Multinomial model* (needs nnet): `nnet::multinom(factor(outcome) ~ ..., trace = FALSE)`, an
+  optional reference category (`relevel`; R refuses one that is not a category), p-values and
+  relative risk ratios with confidence intervals. The generated R first stops unless the outcome
+  has at least three different values.
+- `engine/tests/glm.rs` requires each printed report to equal R's for the same call written by
+  hand and each saved model's coefficients to equal that call's, plus the reference category's
+  effect on the rows. The tests skip with a note where MASS or nnet is missing. nnet is not in
+  the conda R used here, so it was installed from CRAN into a scratch library
+  (`R_LIBS`) to run the multinomial test for real; CI installs MASS and nnet. P4.4 is done.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

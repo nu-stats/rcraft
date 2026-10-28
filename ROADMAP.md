@@ -294,8 +294,9 @@ skipped. It never gives a silent wrong answer.
   ordinal, multinomial (logistic with logit, probit or complementary log-log links and odds
   ratios, and Poisson or quasi-Poisson with an exposure offset and rate ratios are done in
   base R; negative binomial through MASS, the first dialog with a package requirement of its
-  own (`Spec::needs`, which the package panel reads). Still to do: ordinal (MASS) and
-  multinomial (nnet))
+  own (`Spec::needs`, which the package panel reads); ordinal (MASS::polr, with the outcome's
+  order printed) and multinomial (nnet::multinom, with a chosen reference category) models.
+  P4.4 is done)
 - P4.5 Post-estimation context menu on the last model: predict, residuals,
   diagnostics, marginal effects, hypothesis tests, robust and clustered
   standard errors, model comparison

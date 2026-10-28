@@ -131,6 +131,8 @@ pub const ENTRIES: &[Entry] = &[
     partial("Logistic model", Area::Statistics),
     partial("Poisson model", Area::Statistics),
     partial("Negative binomial model", Area::Statistics),
+    partial("Ordinal model", Area::Statistics),
+    partial("Multinomial model", Area::Statistics),
     planned("Histogram", Area::Graphs),
     planned("Scatter plot", Area::Graphs),
     planned("Model table", Area::Reports),
