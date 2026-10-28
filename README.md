@@ -22,3 +22,22 @@ from clicking to scripting at any time.
 Dual-licensed under MIT or Apache-2.0, at your option (licence files to be
 added in P0.2). RCraft is an independent project, not affiliated with the R
 Foundation or Posit.
+
+## Running it with Pinokio
+
+The repository is also a [Pinokio](https://pinokio.computer) launcher (`pinokio.js` and the
+scripts beside it). In Pinokio, a copy of this repository under `api/rcraft` shows these buttons:
+
+- **Install**: installs a private Rust toolchain in `.rust/` (your own Rust, if any, is not
+  touched) and builds the window and the console into `target/release`. It takes several minutes
+  the first time. On Windows the Visual Studio C++ build tools are needed, as for any Rust program.
+- **Start**: opens the RCraft window. The script ends when the window closes.
+- **Console**: the `rcraft-cli` console in Pinokio's terminal; `rcraft-cli --find-r` lists the R
+  installations RCraft can see.
+- **Update**: `git pull`, then brings the toolchain up to date and rebuilds.
+- **Reset**: removes the toolchain and the build; the source is kept.
+
+RCraft drives a real R, which it finds by itself (R's usual install places, `R_HOME`, conda
+environments including Pinokio's). If none is found the window says so and Start still opens it.
+There is no web page and no API: RCraft is a desktop program, and everything it does is R code you
+can copy from its Results.

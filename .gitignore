@@ -13,3 +13,8 @@
 .idea/
 .DS_Store
 Thumbs.db
+
+# Pinokio runtime files (pinokio.js and the scripts beside it)
+/.rust/
+logs/
+cache/
