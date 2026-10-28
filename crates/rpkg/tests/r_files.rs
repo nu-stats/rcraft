@@ -116,3 +116,81 @@ fn the_plain_text_list_reads_and_merges_with_the_database() {
     // offline search works on what was read
     assert_eq!(ix.with_prefix("FAKET").len(), 2);
 }
+
+/// Reads the real `packages.rds` from CRAN when `RCRAFT_REAL_PACKAGES_RDS` names
+/// a downloaded copy (skipped with a note otherwise; CI needs no network).
+#[test]
+fn the_real_cran_database_reads_when_a_copy_is_given() {
+    let Ok(path) = std::env::var("RCRAFT_REAL_PACKAGES_RDS") else {
+        eprintln!("skipped: set RCRAFT_REAL_PACKAGES_RDS to a downloaded packages.rds");
+        return;
+    };
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let started = std::time::Instant::now();
+    let node = rds::read(&bytes).unwrap_or_else(|e| panic!("reading: {e}"));
+    let read_time = started.elapsed();
+    let t = table::from_node(&node, DB_COLUMNS).unwrap_or_else(|e| panic!("table: {e}"));
+    eprintln!(
+        "{} rows, columns {:?}, read in {read_time:?}",
+        t.rows, t.names
+    );
+    assert!(t.rows > 15_000, "only {} rows", t.rows);
+    let ix = Index::from_tables(Some(&t), None, 0);
+    assert_eq!(ix.detail, Detail::Full);
+    assert!(ix.len() > 15_000);
+    for name in ["survival", "Rcpp", "fixest", "ggplot2"] {
+        let p = ix.get(name);
+        assert!(p.is_some(), "{name} missing");
+        eprintln!(
+            "{name}: {:?}",
+            p.map(|p| (
+                &p.version,
+                &p.title,
+                &p.published,
+                p.needs_compilation,
+                &p.imports
+            ))
+        );
+    }
+    let titled = ix.packages().iter().filter(|p| !p.title.is_empty()).count();
+    assert!(titled * 100 > ix.len() * 99, "only {titled} have titles");
+    let (dated, versioned) = (
+        ix.packages()
+            .iter()
+            .filter(|p| p.published.len() == 10)
+            .count(),
+        ix.packages()
+            .iter()
+            .filter(|p| !p.version.is_empty())
+            .count(),
+    );
+    eprintln!(
+        "{} packages, {titled} titled, {dated} dated, {versioned} versioned",
+        ix.len()
+    );
+    assert!(dated * 100 > ix.len() * 95, "only {dated} have a date");
+}
+
+/// The same real file through the cache: size on disk and time to load back.
+#[test]
+fn the_real_database_survives_the_cache_when_a_copy_is_given() {
+    let Ok(path) = std::env::var("RCRAFT_REAL_PACKAGES_RDS") else {
+        eprintln!("skipped: set RCRAFT_REAL_PACKAGES_RDS to a downloaded packages.rds");
+        return;
+    };
+    let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let node = rds::read(&bytes).unwrap_or_else(|e| panic!("reading: {e}"));
+    let t = table::from_node(&node, DB_COLUMNS).unwrap_or_else(|e| panic!("table: {e}"));
+    let ix = Index::from_tables(Some(&t), None, 5);
+    let dir = std::env::temp_dir().join(format!("rcraft-rpkg-real-{}", std::process::id()));
+    let cache = rcraft_rpkg::cache::Cache::new(&dir);
+    assert_eq!(cache.store(&ix), Ok(()));
+    let size = std::fs::metadata(cache.path())
+        .map(|m| m.len())
+        .unwrap_or(0);
+    let started = std::time::Instant::now();
+    let back = cache.load();
+    eprintln!("cache {size} bytes, loaded in {:?}", started.elapsed());
+    assert_eq!(back, Ok(Some(ix)));
+    let _ = std::fs::remove_dir_all(&dir);
+}

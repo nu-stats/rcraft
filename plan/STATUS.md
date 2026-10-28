@@ -848,12 +848,19 @@ Tests: 40 in the crate. `tests/r_files.rs` reads files R 4.4.3 wrote itself
 frame, xz and a function (both refused), every prefix of the plain and the gzip
 file (all errors), and every single-byte change of the plain file (none panics).
 
+**Checked against the real file (2026-10-28, downloaded once with the user's
+go-ahead, 12,695,362 bytes, gzip):** it is a gzip text matrix with the expected
+column names. It reads to 25,611 rows (25,581 packages after the index drops
+unnamed and duplicate rows); every one has a title, a version and a date. Reading
+takes about 1.5 s and loading the cache about 1 s in a debug build. The trimmed
+cache is 22 MB (the descriptions are most of it). `Rcpp(>= 1.0.5)` with no space
+before the bracket parses. Base packages such as `stats` are not in CRAN's
+database, so "installed but not on CRAN" has to be handled by P1A.6. The two
+tests that use the file (`the_real_*` in `tests/r_files.rs`) run only when
+`RCRAFT_REAL_PACKAGES_RDS` names a downloaded copy, so CI needs no network.
+
 **Not done, so P1A.1 is not finished:**
 
-- The real database has not been read. The shape (a text matrix with column
-  names) comes from R's own source and documentation, and the reader accepts a
-  data frame too, but the 12.7 MB `packages.rds` on CRAN has not been downloaded
-  to check it. Do that once, with the user's go-ahead, before relying on it.
 - No HTTP client yet. `ureq` with rustls is the candidate; its dependency tree
   needs a licence check first, in a commit of its own, and `docs/network.md` gets
   the exact paths in the same commit as the first real fetch.
