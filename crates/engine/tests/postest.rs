@@ -6,7 +6,8 @@
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::postest::{
-    COMPARE_MODELS, DIAGNOSTICS, MARGINAL_EFFECTS, MODEL_FIT, PREDICTED, ROBUST, TEST_TERMS,
+    COMPARE_MODELS, DIAGNOSTICS, DIAGNOSTIC_PLOTS, MARGINAL_EFFECTS, MODEL_FIT, PREDICTED, ROBUST,
+    TEST_TERMS,
 };
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{Context, Spec, Style, Widget};
@@ -440,4 +441,37 @@ fn clustered_standard_errors_line_up_with_the_rows_the_model_kept() {
          print(lmtest::coefci(m1, vcov. = v, level = 0.95))",
     );
     assert_eq!(tidy(&text), tidy(&expected), "{text}");
+}
+
+#[test]
+fn diagnostic_plots_draw_one_page_of_four_panels() {
+    let Some(mut e) = started() else { return };
+    for model in ["m1", "g1"] {
+        let (outcome, text) = on_model(&mut e, &DIAGNOSTIC_PLOTS, model, &[], &[]);
+        assert_eq!(outcome, Outcome::Ok, "{model}: {text}");
+        let plots = e
+            .results()
+            .blocks()
+            .last()
+            .map(|b| {
+                b.items
+                    .iter()
+                    .filter(|i| matches!(i, Item::Plot { .. }))
+                    .count()
+            })
+            .unwrap_or(0);
+        assert_eq!(plots, 1, "{model}: four panels are one page");
+    }
+    // a plain object is refused
+    let (outcome, _) = run(&mut e, Source::Typed, "notmodel <- 1:3; 0");
+    assert_eq!(outcome, Outcome::Ok);
+    let (outcome, _) = on_model(&mut e, &DIAGNOSTIC_PLOTS, "notmodel", &[], &[]);
+    assert_eq!(outcome, Outcome::Error);
+    // the layout is put back: the next plot is a single panel
+    let (outcome, text) = run(
+        &mut e,
+        Source::Typed,
+        "stopifnot(identical(par('mfrow'), c(1L, 1L)))",
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
 }

@@ -314,7 +314,11 @@ skipped. It never gives a silent wrong answer.
   pane, and Save as PNG. Still to do: zoom, and copy to the clipboard)
 - P5.2 ggplot2 builder: pick data, geoms and aesthetics; facets and themes
 - P5.3 Plot menus: histogram, density, box, bar, scatter with fit, line,
-  heatmap, QQ, diagnostics, survival curves
+  heatmap, QQ, diagnostics, survival curves (done in base graphics under Graphs: histogram,
+  density, box plot, bar chart, normal Q-Q, scatter with a fit and smooth, line plot and a
+  scatter plot matrix, each run against real R and required to draw exactly one picture; and a
+  four-panel diagnostic plot for a fitted model in the Objects pane's Model menu. Still to do:
+  heatmap and survival curves)
 - P5.4 Export: SVG, PDF, PNG at chosen size and dpi
 
 ## Phase 6: Depth modules

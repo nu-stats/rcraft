@@ -667,3 +667,32 @@ fn a_file_device_the_user_opens_is_left_alone() {
     assert!(std::path::Path::new(&file).is_file());
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn par_before_the_first_plot_does_not_make_a_blank_page() {
+    let Some(mut s) = session() else { return };
+    // barplot() calls par() before plot.new(), which opens the device first
+    let (plots, status) = plots_of(&mut s, "barplot(c(a = 1, b = 2))");
+    assert_eq!(status, RunStatus::Ok);
+    assert_eq!(plots.len(), 1, "{plots:?}");
+    // and so does an earlier plot followed by a par() call and a new plot
+    let (again, _) = plots_of(&mut s, "op <- par(yaxs = 'i')\nplot(1:3)");
+    assert_eq!(again.len(), 1, "{again:?}");
+}
+
+#[test]
+fn the_panels_of_one_page_are_one_plot() {
+    let Some(mut s) = session() else { return };
+    let (plots, status) = plots_of(&mut s, "par(mfrow = c(2, 2))\nfor (i in 1:4) plot(i)");
+    assert_eq!(status, RunStatus::Ok);
+    assert_eq!(plots.len(), 1, "{plots:?}");
+    // a scatter plot matrix draws a grid of panels
+    let (matrix, _) = plots_of(
+        &mut s,
+        "par(mfrow = c(1, 1))\npairs(data.frame(a = 1:5, b = c(2, 1, 4, 3, 5), c = 5:1))",
+    );
+    assert_eq!(matrix.len(), 1, "{matrix:?}");
+    // a command that only changes the layout is not a plot
+    let (layout, _) = plots_of(&mut s, "par(mfrow = c(2, 1))");
+    assert!(layout.is_empty(), "{layout:?}");
+}

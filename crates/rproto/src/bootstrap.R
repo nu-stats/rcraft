@@ -23,12 +23,20 @@ local({
   live_dev <- NA_integer_
   last_dl <- NULL
   cur_run <- ""
+  page_started <- FALSE
   page_no <- 0L
+  # what a page shows: its recorded drawing calls, without par() settings, which
+  # change the record but not the picture
+  drawing <- function(dl) {
+    Filter(function(e) {
+      !identical(tryCatch(e[[2L]][[1L]]$name, error = function(err) ""), "C_par")
+    }, dl)
+  }
   snap <- function() {
-    if (is.na(live_dev) || !identical(unname(grDevices::dev.cur()), live_dev)) {
+    if (!page_started || is.na(live_dev) || !identical(unname(grDevices::dev.cur()), live_dev)) {
       return(invisible())
     }
-    dl <- tryCatch(grDevices::recordPlot()[[1L]], error = function(e) NULL)
+    dl <- tryCatch(drawing(grDevices::recordPlot()[[1L]]), error = function(e) NULL)
     if (is.null(dl) || length(dl) == 0L || identical(dl, last_dl)) return(invisible())
     page_no <<- page_no + 1L
     file <- file.path(plot_dir, sprintf("%s-%03d.png", cur_run, page_no))
@@ -49,9 +57,19 @@ local({
       grDevices::dev.control("enable")
       live_dev <<- unname(grDevices::dev.cur())
       last_dl <<- NULL
+      page_started <<- FALSE
     })
-    setHook("before.plot.new", function(...) snap())
+    # plot.new() starts a new page, or the next figure of a multi-figure page
+    # (pairs(), par(mfrow = ...)); only a new page ends the page being drawn
+    setHook("before.plot.new", function(...) {
+      mfg <- graphics::par("mfg")
+      if (length(mfg) == 4L && (prod(mfg[3:4]) == 1L || all(mfg[1:2] == mfg[3:4]))) snap()
+    })
     setHook("before.grid.newpage", function(...) snap())
+    # a page counts only once plot.new() or grid.newpage() has begun it: par() and
+    # similar calls open the device before that, and a blank page is not a plot
+    setHook("plot.new", function(...) page_started <<- TRUE)
+    setHook("grid.newpage", function(...) page_started <<- TRUE)
   }
 
   # closeAllConnections() in the user's code closes `con` too, and R may give

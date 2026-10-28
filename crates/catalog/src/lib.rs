@@ -8,6 +8,7 @@
 pub mod data;
 pub mod data_tools;
 pub mod generalised;
+pub mod graphs;
 pub mod inference;
 pub mod models;
 pub mod postest;
@@ -138,11 +139,18 @@ pub const ENTRIES: &[Entry] = &[
     partial("Compare models", Area::Statistics),
     partial("Predicted values and residuals", Area::Statistics),
     partial("Model diagnostics", Area::Statistics),
+    partial("Diagnostic plots", Area::Statistics),
     partial("Robust standard errors", Area::Statistics),
     partial("Test terms", Area::Statistics),
     partial("Average marginal effects", Area::Statistics),
-    planned("Histogram", Area::Graphs),
-    planned("Scatter plot", Area::Graphs),
+    partial("Histogram", Area::Graphs),
+    partial("Density plot", Area::Graphs),
+    partial("Box plot", Area::Graphs),
+    partial("Bar chart", Area::Graphs),
+    partial("Normal Q-Q plot", Area::Graphs),
+    partial("Scatter plot", Area::Graphs),
+    partial("Line plot", Area::Graphs),
+    partial("Scatter plot matrix", Area::Graphs),
     planned("Model table", Area::Reports),
     planned("Search packages", Area::Packages),
     planned("Browse task views", Area::Packages),

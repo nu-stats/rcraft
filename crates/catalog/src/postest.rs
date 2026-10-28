@@ -288,6 +288,28 @@ pub const DIAGNOSTICS: Spec = Spec {
     },
 };
 
+// ---- Diagnostic plots ----
+
+pub const DIAGNOSTIC_PLOTS: Spec = Spec {
+    entry: "Diagnostic plots",
+    menu: "Objects > Model > Diagnostic plots",
+    about: "The four standard plots for a linear or generalised linear model on one page: \
+            residuals against fitted values, a normal Q-Q plot of the residuals, spread \
+            against fitted values, and residuals against leverage.",
+    widgets: &[],
+    needs: &[],
+    styles: BASE,
+    check: |_| Vec::new(),
+    code: |a, _| {
+        let m = a.data();
+        format!(
+            "{}\n(function(m) {{\n  op <- graphics::par(mfrow = c(2, 2))\n  \
+             on.exit(graphics::par(op))\n  plot(m)\n}})({m})",
+            linear_guard(&m)
+        )
+    },
+};
+
 // ---- Robust standard errors ----
 
 const ROBUST_TYPES: &[Opt] = &[
@@ -522,6 +544,7 @@ pub const MODEL_SPECS: &[&Spec] = &[
     &COMPARE_MODELS,
     &PREDICTED,
     &DIAGNOSTICS,
+    &DIAGNOSTIC_PLOTS,
     &ROBUST,
     &TEST_TERMS,
     &MARGINAL_EFFECTS,

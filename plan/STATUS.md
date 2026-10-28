@@ -636,6 +636,30 @@ of the session protocol):
   CI on Linux and macOS is the first run of the png device there; if a runner has no graphics
   capability for `png()` the tests will say so.
 
+## P5.3 Graphs menu, and two bugs in the capture, 2026-10-27
+
+Eight dialogs in `catalog::graphs` under *Graphs* (submenus One variable, Two variables, Several
+variables), base graphics only: *Histogram* (R's rule, Scott, Freedman-Diaconis, or a number of
+bars; optional density curve), *Density plot* (one curve, or one per group), *Box plot* (optionally
+by group), *Bar chart* (counts or percent), *Normal Q-Q plot*, *Scatter plot* (optional colour by
+group, straight-line fit, lowess smooth), *Line plot* (a date or number against a number) and
+*Scatter plot matrix*. A title is optional and defaults to a plain one naming the variables.
+*Diagnostic plots* (four panels on one page, the layout put back afterwards) is in the Objects
+pane's Model menu, which finishes P4.5. Not done: heatmap, survival curves.
+
+`engine/tests/graphs.rs` runs every dialog (with and without its options) in real R and requires it
+to draw **exactly one** plot, a real PNG, and to survive missing values; a typed `abline()` after a
+scatter dialog finds the plot. Those tests found two real bugs in the capture, fixed in
+`bootstrap.R` with a regression test each:
+
+- `barplot()` calls `par()` before `plot.new()`, which opens the device, so the "a new page is
+  about to replace this one" hook snapshotted a blank page first. A page now counts only once
+  `plot.new()` or `grid.newpage()` has begun it (hooks `plot.new` and `grid.newpage`), and the page
+  signature ignores `par()` entries, which change the record but not the picture.
+- `pairs()` and `par(mfrow = ...)` call `plot.new()` for each panel without starting a new page, so
+  every panel was snapshotted half-drawn (nine files for one scatter plot matrix). The hook now
+  fires only when `par("mfg")` says the next call begins a new page.
+
 ## Session protocol review fixes, 2026-10-27
 
 Review of `rproto` and `rhost/src/session.rs`; each fix has a regression test

@@ -548,11 +548,16 @@ impl App {
                     .is_some_and(|name| self.engine().is_some_and(|e| e.table(name).is_some()));
                 spec_menu(ui, has_data, rcraft_catalog::stats::SPECS, out);
             });
-            for title in ["Graphs", "Packages"] {
-                ui.menu_button(title, |ui| {
-                    ui.add_enabled(false, egui::Button::new("Coming in a later phase"));
-                });
-            }
+            ui.menu_button("Graphs", |ui| {
+                let has_data = self
+                    .dataset
+                    .as_deref()
+                    .is_some_and(|name| self.engine().is_some_and(|e| e.table(name).is_some()));
+                spec_menu(ui, has_data, rcraft_catalog::graphs::SPECS, out);
+            });
+            ui.menu_button("Packages", |ui| {
+                ui.add_enabled(false, egui::Button::new("Coming in a later phase"));
+            });
             ui.menu_button("Session", |ui| {
                 if ui.button("Stop the running command").clicked() {
                     out.push(Action::Interrupt);
@@ -1167,6 +1172,7 @@ impl App {
             .iter()
             .chain(rcraft_catalog::data::OBJECT_SPECS)
             .chain(rcraft_catalog::stats::SPECS)
+            .chain(rcraft_catalog::graphs::SPECS)
             .chain(rcraft_catalog::postest::MODEL_SPECS)
             .find(|s| s.entry.eq_ignore_ascii_case(entry))
             .ok_or_else(|| format!("no dialog called {entry}"))?;
