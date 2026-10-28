@@ -2406,6 +2406,7 @@ dependencies = [
  "rcraft-rhost",
  "rcraft-rpkg",
  "rcraft-rproto",
+ "rcraft-statatr",
 ]
 
 [[package]]

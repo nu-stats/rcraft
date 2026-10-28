@@ -194,6 +194,9 @@ Tasks:
   Stata missing values `.` and `.a`-`.z` mapped to `NA` (the extended
   missings kept as an attribute where it matters), `_n` and `_N` inside
   `by`, `[_n-1]` lags, and the rule that missing sorts high in comparisons.
+  (done: `statatr::expr_r`, for dplyr's `mutate()`/`filter()`; 42 expressions give Stata's answers
+  in real R. The extended missings get a caveat instead of an attribute; `_b[]`, `e()` and `r()` wait
+  for P2B.6. P2B.2 is done)
 - P2B.3 Data commands: `use`, `save`, `import delimited`, `import excel`,
   `generate`, `replace`, `drop`, `keep`, `rename`, `recode`, `label`,
   `sort`, `gsort`, `egen`, `merge`, `append`, `reshape`, `collapse`,

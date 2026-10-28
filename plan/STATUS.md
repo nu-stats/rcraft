@@ -1259,3 +1259,39 @@ Not done in P2B.1: expanding macros, `#delimit` inside blocks is only what the v
 package, P2C.4), and the translation itself (P2B.2 onwards). The command table holds the 53 commands
 StatCraft's engine needs plus prefixes and loops; commands outside it are read with their names as
 written, which is right for any command Stata does not let you shorten.
+
+## P2B.2 Stata expressions in R, 2026-10-28
+
+`statatr::expr_r::translate(text, kind_of, use) -> Result<RExpr, Untranslated>`: an expression parsed by
+the vendored StatCraft parser and written as R for a dplyr data-masking context (inside `mutate()` or
+`filter()`, after `group_by()` for `by:`). `kind_of` gives a variable's type when the data is known;
+`use` says whether a value (true and false become 1 and 0) or a condition (TRUE/FALSE, never NA) is
+wanted. `RExpr` carries the code, its kind and caveats; `Untranslated` says why, and nothing is guessed.
+
+- **Missing is larger than every number**: `x > 5` is `(is.na(x) | x > 5)`, `x < 5` is
+  `(!is.na(x) & x < 5)`, `x < .` is `!is.na(x)`, and two variables compare with
+  `dplyr::coalesce(., Inf)` on both sides.
+- **Truth**: anything not zero is true, missing included (`(is.na(x) | x != 0)`); `&`, `|` and `!`
+  work on that.
+- **Arithmetic**: `x / y` divides by `dplyr::na_if(y, 0)` (Stata gives missing, R `Inf`) unless the
+  divisor is a number written out; `+` on strings is `paste0`.
+- **Rows**: `_n`, `_N`, `x[_n-k]` and `x[_n+k]` (`dplyr::lag`/`lead`), `x[1]` and `x[_N]`
+  (`first`/`last`), all per group after `group_by()`.
+- **Functions**, with StatCraft's checked rules: `round` (halfway up with Stata's allowance, so 2.345
+  is 2.35), `mod` (missing for a divisor of 0 or less), `max`/`min` (skip missing), `missing`,
+  `inrange`, `inlist`, `cond` (3 and 4 arguments), `sum` (running), math (`ln`, `ceil`, `int`, ...),
+  strings (`strlen`, `upper`, `lower`, `trim`, `substr`, `strpos`, `subinstr`, `regexm`, `real`,
+  `string`) and dates as days since 1 January 1960 (`mdy`, `year`, `month`, `day`, `dow`, `doy`;
+  `td(...)` and `date()` of text written out are worked out here with the vendored date parser).
+- **Caveats**: `.a` to `.z` all become `NA`; regular-expression dialects differ; `string()` formats
+  numbers as R does; `round(x, y)` with `y` not written out (y = 0).
+
+Checked in real R (`crates/engine/tests/stata_expressions.rs`, R 4.4.3 with dplyr 1.1.4): 42
+expressions run through `dplyr::mutate()` on data with missing values, with and without `group_by()`,
+each giving the values Stata's rules give. The first run found one bug: `strpos` kept `regexpr`'s
+match attributes; fixed.
+
+Not done in P2B.2: `_b[]`, `_se[]`, `e()` and `r()` (P2B.6), `substr` counting from the end or with
+positions known only when the file runs, `date()` of a variable, `subinstr` with a count other than 1
+or all, and functions outside the list above (each says so by name). Keeping the extended missings as
+an attribute, as the roadmap suggested, is left until a command needs them.

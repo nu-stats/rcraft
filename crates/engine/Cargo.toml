@@ -22,5 +22,8 @@ rcraft-rgraph.workspace = true
 rcraft-report.workspace = true
 rcraft-catalog.workspace = true
 
+[dev-dependencies]
+rcraft-statatr.workspace = true
+
 [lints]
 workspace = true
