@@ -861,11 +861,15 @@ tests that use the file (`the_real_*` in `tests/r_files.rs`) run only when
 
 **Not done, so P1A.1 is not finished:**
 
-- No live HTTPS fetch has been run. The HTTP client is in (below) and its six
-  tests run against a local plain-HTTP server (body and progress, error status,
-  cap with and without Content-Length, cancel, a cut-short connection, plain HTTP
-  refused by the app's fetcher), so the TLS handshake with the real mirror is
-  untested until the user allows one small live request.
+- The two index files have not been fetched live through the app's fetcher (the
+  database was downloaded once by hand to check the reader). The HTTP client is
+  in (below); its six tests run against a local plain-HTTP server (body and
+  progress, error status, cap with and without Content-Length, cancel, a
+  cut-short connection, plain HTTP refused by the app's fetcher). One live HTTPS
+  request, made with the user's go-ahead on 2026-10-28 to
+  `https://cloud.r-project.org/web/views/` (10,248 bytes), succeeded: the TLS
+  handshake and certificate check against the real mirror work on the work
+  computer's network. `tests/live.rs` repeats it when `RCRAFT_LIVE_URL` is set.
 - No UI, no mirror setting, no command in the engine.
 
 **HTTP client (2026-10-28).** `ureq` 3.5.0 with default features off and only
