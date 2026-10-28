@@ -4,6 +4,7 @@ pub mod engine;
 pub mod history;
 pub mod package_index;
 pub mod results;
+pub mod sources;
 pub mod transcript;
 pub mod workspace;
 
