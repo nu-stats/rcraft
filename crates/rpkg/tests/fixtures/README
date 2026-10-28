@@ -1,0 +1,6 @@
+Small files written by R 4.4.3 for the tests in ../r_files.rs and src/refresh.rs.
+Every package in them is made up (fakeone, fakethree, Faketwo, onlyindcf); nothing is
+copied from CRAN. They were made with saveRDS() and gzfile() on a 3-row text matrix with
+the same columns as tools::CRAN_package_db(): default gzip version 3, version 2 uncompressed,
+a data frame, xz-compressed (which the reader refuses), and an object holding a function
+(which it refuses), plus a PACKAGES.gz of four records.

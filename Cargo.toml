@@ -5,6 +5,7 @@ members = [
     "crates/rproto",
     "crates/rhost",
     "crates/rdata",
+    "crates/rpkg",
     "crates/rcodegen",
     "crates/rgraph",
     "crates/report",
@@ -29,6 +30,7 @@ rcraft-core = { path = "crates/core" }
 rcraft-rproto = { path = "crates/rproto" }
 rcraft-rhost = { path = "crates/rhost" }
 rcraft-rdata = { path = "crates/rdata" }
+rcraft-rpkg = { path = "crates/rpkg" }
 rcraft-rcodegen = { path = "crates/rcodegen" }
 rcraft-rgraph = { path = "crates/rgraph" }
 rcraft-report = { path = "crates/report" }

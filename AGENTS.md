@@ -89,7 +89,7 @@ layer. `cargo xtask layers` enforces this from `[package.metadata.rcraft]`.
 |---|---|
 | L0 | `core` |
 | L1 | `rproto` |
-| L2 | `rhost`, `rdata` |
+| L2 | `rhost`, `rdata`, `rpkg` |
 | L3 | `rcodegen`, `rgraph`, `report`, `statatr` (Stata to R translator) |
 | L4 | `catalog` |
 | L5 | `engine` |
@@ -100,6 +100,8 @@ layer. `cargo xtask layers` enforces this from `[package.metadata.rcraft]`.
 - `rhost`: finds, installs and supervises R, and manages the package library.
 - `rdata`: moves data frames between R and RCraft (Arrow IPC), without
   copying whole tables into the UI.
+- `rpkg`: the CRAN package index (fetch, cache, offline search). It never
+  starts R; installing stays with R through `rhost`.
 - `rcodegen`: turns dialog specs into R code and parses R output.
 - `rgraph`: captures R graphics devices for the Graph window.
 - Nothing below L6 may depend on `egui`, `eframe`, `winit`, `wgpu` or `rfd`.

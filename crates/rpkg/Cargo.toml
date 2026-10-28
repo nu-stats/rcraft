@@ -1,0 +1,19 @@
+[package]
+name = "rcraft-rpkg"
+description = "The CRAN package index: read, cache and search offline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[package.metadata.rcraft]
+layer = 2
+
+[dependencies]
+rcraft-core.workspace = true
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+
+[lints]
+workspace = true

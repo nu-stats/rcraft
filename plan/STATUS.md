@@ -809,3 +809,52 @@ Not done: viewing the dialog and the Export button in a rendered picture of the
 window (the logic and the app test pass; how it looks has not been checked).
 Limits: a recording replays on a differently sized device, which is right for
 base and grid graphics, but a plot that fixes its own size in pixels may not scale.
+
+## P1A.1 Package index (first part), 2026-10-28
+
+New crate **`rcraft-rpkg`** (layer L2, listed in `AGENTS.md`; depends on `core` and
+`flate2` with its pure-Rust backend). It never starts R and never touches the
+network except through the `Fetcher` trait, so every test is offline. Plan and
+reasons: `plan/packages.md`.
+
+- `unpack`: gzip with a size cap (512 MB unpacked), so a small hostile file cannot
+  fill memory.
+- `rds`: a reader for R's `saveRDS` files, XDR format versions 2 and 3, plain or
+  gzip. It handles text, number and logical vectors, lists, pairlists (the
+  attributes), symbols, and the compact-sequence and wrapper ALTREP forms; any
+  other object (environments, functions) or compression (xz, bzip2) is an error
+  naming what it is, not a guess. Every length is checked against the bytes left
+  before anything is allocated; nesting is capped at 64 and elements at 200
+  million.
+- `table`: a text matrix with column names (what `tools::CRAN_package_db()`
+  returns) or a list of text columns (a data frame) reduced to the columns RCraft
+  uses; that is the whole "trimmed copy".
+- `dcf`: `PACKAGES.gz` (Debian control format, with continuation lines and CRLF).
+- `index`: `Package` (17 fields), `Index` sorted by name ignoring case with exact,
+  ignoring-case and prefix lookup, `Dependency` parsing, a merge that prefers the
+  database and fills gaps from `PACKAGES.gz` (and adds packages only it lists),
+  staleness against a clock passed in (default one week), and `sample()`, a small
+  made-up index for other crates' tests.
+- `cache`: one text file `cran-index.txt` in a folder the caller names; count and
+  per-line field count checked, written to a `.tmp` name and renamed, so a failed
+  write leaves the old cache.
+- `refresh`: fetches `PACKAGES.gz` then `packages.rds` from a mirror
+  (`https://cloud.r-project.org` by default). A failure or cancel changes nothing;
+  a missing database gives a names-only index only when there is no full cache to
+  lose; an empty list is never stored.
+
+Tests: 40 in the crate. `tests/r_files.rs` reads files R 4.4.3 wrote itself
+(`tests/fixtures`, made-up packages): default gzip v3, v2 uncompressed, a data
+frame, xz and a function (both refused), every prefix of the plain and the gzip
+file (all errors), and every single-byte change of the plain file (none panics).
+
+**Not done, so P1A.1 is not finished:**
+
+- The real database has not been read. The shape (a text matrix with column
+  names) comes from R's own source and documentation, and the reader accepts a
+  data frame too, but the 12.7 MB `packages.rds` on CRAN has not been downloaded
+  to check it. Do that once, with the user's go-ahead, before relying on it.
+- No HTTP client yet. `ureq` with rustls is the candidate; its dependency tree
+  needs a licence check first, in a commit of its own, and `docs/network.md` gets
+  the exact paths in the same commit as the first real fetch.
+- No UI, no mirror setting, no command in the engine.

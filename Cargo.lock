@@ -2409,6 +2409,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "rcraft-rpkg"
+version = "0.0.1"
+dependencies = [
+ "flate2",
+ "rcraft-core",
+]
+
+[[package]]
 name = "rcraft-rproto"
 version = "0.0.1"
 dependencies = [
