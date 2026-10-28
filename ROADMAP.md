@@ -266,9 +266,11 @@ skipped. It never gives a silent wrong answer.
   install it); CI installs dplyr and checks the tidyverse styles give the base styles'
   tables. Still to do: the per-factor level list in the Variables pane (P3.4))
 - P3.6 Combine and reshape: join, append, pivot long/wide, aggregate, sample,
-  duplicates and missing-value tools (done in base R, each run against real R; the other
-  data frame is typed by name. Still to do: a data-frame chooser, joins on differently
-  named keys, tidyverse styles)
+  duplicates and missing-value tools (done, each run against real R: the other data frame is
+  chosen from a list, joins can match variables that have different names in the two data
+  frames, and join, append, aggregate, duplicates, random sample and drop missing values have
+  a tidyverse style that gives the base style's table. The two reshape dialogs stay base R,
+  as the tidyverse way needs tidyr. P3.6 is done)
 - P3.7 Save and export (the same formats), plus "save workspace"
 - P3.8 Frames-style workspace: several data frames open at once with a
   switcher

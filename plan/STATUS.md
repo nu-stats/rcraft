@@ -132,6 +132,13 @@ exist on branch `p0/scaffold`.
   parsers into a shared crate when P2C.3 starts, and depend on that; do not
   copy them here. That change is made in the StatCraft repository, so it is
   not done from this one and needs the maintainer's go-ahead.
+  Done 2026-10-28 with that go-ahead, on StatCraft branch
+  `lang/shared-parsers` (not yet merged or pushed): `statcraft-lang` now
+  holds the do-file reader (`script`), the text-only command syntax
+  (`syntax`: `parts`, weights, `options`, `abbrev`, `wildcard`) and the
+  expression parser (`expr`), and depends only on `statcraft-core`. P2C.3
+  adds it as a git dependency once that branch is pushed; `statatr` (L3)
+  is the crate that uses it.
 - `rcraftstata` (the shipped R runtime package) lives in this repository
   under `r/rcraftstata/` and is installed into RCraft's own user library on
   first use, with the user's yes. Created when P2C.4 starts.
@@ -712,3 +719,33 @@ other frames. Once one is chosen the window brings its table over (and lets go
 of it when the dialog closes), so Join also refuses a match variable that the
 other data frame lacks. Still to do: joins on differently named keys and
 tidyverse styles.
+
+## P3.6 finished: differently named keys and tidyverse styles, 2026-10-28
+
+- `Widget::FrameVariables` (in the dialog-spec format): several columns of the
+  data frame chosen in a `Widget::Frame`, offered only once that frame is chosen.
+  Join uses it for **Match with, in the other data frame**: the partners of the
+  match variables, in the same order (`merge(by.x, by.y)`, or
+  `dplyr::*_join(by = c("k" = "id"))`). Left empty, the names must be the same,
+  as before. The dialog refuses a different count and partners the other frame
+  lacks.
+- Tidyverse style (dplyr, written to give the base style's table, down to the
+  order of rows and columns) for Join, Append, Aggregate, Duplicates, Random
+  sample and Drop missing values. Join relocates and sorts by the match
+  variables as `merge` does; Aggregate drops rows with a missing group, orders
+  by the last group slowest and returns a plain data frame. Wide to long and
+  Long to wide stay base R (the tidyverse way needs tidyr).
+- `engine/tests/combine.rs` has a test for differently named keys and one that
+  runs twelve dialog settings in both styles and requires the same tables
+  (a random sample by size only, as its rows are numbered afresh).
+- Known differences, not tested: text keys and group names sort in the C locale
+  under dplyr and in R's locale under base R; appending a number column to a text
+  column is an error in the tidyverse style and a coercion in the base style;
+  many-to-many joins may order tied rows differently.
+- This machine had no R, so on 2026-10-28 R 4.4.3 (signed installer from CRAN)
+  was installed for the user at `%LOCALAPPDATA%\Programs\R\R-4.4.3`, and dplyr
+  1.1.4 with its dependencies from the 2025-03-15 snapshot into R's user library.
+  `cargo xtask ci` passes here with them, so the R-backed tests ran rather than
+  skipped. MASS and nnet come with R; sandwich, lmtest, marginaleffects,
+  readxl, haven and arrow are not installed here, so the tests that need them
+  skip locally (they print a note) and run in CI.

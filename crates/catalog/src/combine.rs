@@ -1,8 +1,12 @@
 //! Data menu dialogs for combining and reshaping data frames (P3.6): join,
 //! append, aggregate, reshape wide and long, duplicates, random sample and
-//! dropping missing values. Base R only (`merge`, `aggregate`, `reshape`), so
-//! each runs against any R. A second data frame is named in a text box; its
-//! variables are matched by name, as `merge` does.
+//! dropping missing values. The base style (`merge`, `aggregate`, `reshape`)
+//! runs against any R; join, append, aggregate, duplicates, random sample and
+//! dropping missing values also have a tidyverse style (dplyr), written to give
+//! the table the base style gives, down to the order of rows and columns. The
+//! two reshape dialogs stay base R, as the tidyverse way needs tidyr. A second
+//! data frame is chosen from the workspace; its match variables may be named
+//! differently from this one's.
 
 use rcraft_rcodegen::dialog::{
     no_check, Args, Opt, Problem, Spec, Style, TextDefault, TextRule, VarKind, Widget,
@@ -12,6 +16,7 @@ use rcraft_rcodegen::r_string;
 use crate::data::{copy_line, RESULT};
 
 const BASE: &[Style] = &[Style::Base];
+const BOTH: &[Style] = &[Style::Base, Style::Tidyverse];
 
 /// `c("a", "b")` for the chosen names.
 fn cvec(names: &[&str]) -> String {
@@ -44,32 +49,13 @@ fn other_check(a: &Args) -> Vec<Problem> {
     Vec::new()
 }
 
-/// Join also needs each match variable to be in the other data frame, once
-/// its columns are known.
-fn join_check(a: &Args) -> Vec<Problem> {
-    let mut out = other_check(a);
-    if let Some(other) = a.frame("other").filter(|f| !f.columns.is_empty()) {
-        if let Some(k) = a
-            .vars("keys")
-            .into_iter()
-            .find(|k| !other.columns.iter().any(|c| c.name == *k))
-        {
-            out.push(Problem::new(
-                "keys",
-                format!("{k} is not a variable of {}.", other.name),
-            ));
-        }
-    }
-    out
-}
-
 // ---- Join ----
 
 pub const JOIN: Spec = Spec {
     entry: "Join",
     menu: "Data > Combine > Join",
-    about: "Add the columns of another data frame to this one, matching rows on variables \
-            with the same names in both. The rows come out ordered by the match variables.",
+    about: "Add the columns of another data frame to this one, matching rows on one or more \
+            variables. The rows come out ordered by the match variables.",
     widgets: &[
         OTHER,
         Widget::Variables {
@@ -77,7 +63,16 @@ pub const JOIN: Spec = Spec {
             label: "Match on",
             kinds: &[],
             min: 1,
-            hint: "Each must also be a variable of the other data frame.",
+            hint: "Variables of this data frame. Unless you choose different ones below, each \
+                   must have the same name in the other data frame.",
+        },
+        Widget::FrameVariables {
+            id: "otherkeys",
+            label: "Match with, in the other data frame",
+            frame: "other",
+            min: 0,
+            hint: "Only when the names differ: choose as many as above, in the same order, and \
+                   the first pairs with the first.",
         },
         Widget::Choice {
             id: "keep",
@@ -106,24 +101,91 @@ pub const JOIN: Spec = Spec {
         RESULT,
     ],
     needs: &[],
-    styles: BASE,
+    styles: BOTH,
     check: join_check,
     code: join_code,
 };
 
-fn join_code(a: &Args, _: Style) -> String {
+/// Join also needs each match variable to be in the other data frame, once
+/// its columns are known; with a second list the two must pair up.
+fn join_check(a: &Args) -> Vec<Problem> {
+    let mut out = other_check(a);
+    let keys = a.vars("keys");
+    let others = a.vars("otherkeys");
+    if !others.is_empty() && others.len() != keys.len() {
+        out.push(Problem::new(
+            "otherkeys",
+            format!(
+                "Choose {} to pair with the {} above (or none, when the names are the same).",
+                count(keys.len(), "variable"),
+                count(keys.len(), "match variable"),
+            ),
+        ));
+    } else if others.is_empty() {
+        if let Some(other) = a.frame("other").filter(|f| !f.columns.is_empty()) {
+            if let Some(k) = keys
+                .iter()
+                .find(|k| !other.columns.iter().any(|c| c.name == **k))
+            {
+                out.push(Problem::new(
+                    "keys",
+                    format!(
+                        "{k} is not a variable of {}; choose its partner below.",
+                        other.name
+                    ),
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// `1 variable`, `2 variables`.
+fn count(n: usize, what: &str) -> String {
+    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
+fn join_code(a: &Args, style: Style) -> String {
     let keep = a.choice("keep");
-    let x = matches!(keep, "left" | "full");
-    let y = matches!(keep, "right" | "full");
-    format!(
-        "{} <- merge({}, {}, by = {}, all.x = {}, all.y = {})",
-        a.name("result"),
-        a.data(),
-        a.name("other"),
-        cvec(&a.vars("keys")),
-        if x { "TRUE" } else { "FALSE" },
-        if y { "TRUE" } else { "FALSE" },
-    )
+    let keys = a.vars("keys");
+    let others = a.vars("otherkeys");
+    let (res, data, other) = (a.name("result"), a.data(), a.name("other"));
+    match style {
+        Style::Base => {
+            let x = matches!(keep, "left" | "full");
+            let y = matches!(keep, "right" | "full");
+            let by = if others.is_empty() {
+                format!("by = {}", cvec(&keys))
+            } else {
+                format!("by.x = {}, by.y = {}", cvec(&keys), cvec(&others))
+            };
+            format!(
+                "{res} <- merge({data}, {other}, {by}, all.x = {}, all.y = {})",
+                if x { "TRUE" } else { "FALSE" },
+                if y { "TRUE" } else { "FALSE" },
+            )
+        }
+        // merge() puts the match variables first and sorts by them; a dplyr
+        // join keeps the order of the rows and the columns, so both are set.
+        Style::Tidyverse => {
+            let by = if others.is_empty() {
+                cvec(&keys)
+            } else {
+                let pairs: Vec<String> = keys
+                    .iter()
+                    .zip(&others)
+                    .map(|(k, o)| format!("{} = {}", r_string(k), r_string(o)))
+                    .collect();
+                format!("c({})", pairs.join(", "))
+            };
+            let all = format!("dplyr::all_of({})", cvec(&keys));
+            format!(
+                "{res} <- dplyr::{keep}_join({data}, {other}, by = {by})\n\
+                 {res} <- dplyr::relocate({res}, {all})\n\
+                 {res} <- dplyr::arrange({res}, dplyr::across({all}))"
+            )
+        }
+    }
 }
 
 // ---- Append ----
@@ -135,19 +197,27 @@ pub const APPEND: Spec = Spec {
             one of them is filled with missing values.",
     widgets: &[OTHER, RESULT],
     needs: &[],
-    styles: BASE,
+    styles: BOTH,
     check: other_check,
     code: append_code,
 };
 
-fn append_code(a: &Args, _: Style) -> String {
-    format!(
-        "{} <- (function(x, y) {{\n  for (n in setdiff(names(y), names(x))) x[[n]] <- NA\n  \
-         for (n in setdiff(names(x), names(y))) y[[n]] <- NA\n  rbind(x, y[names(x)])\n}})({}, {})",
-        a.name("result"),
-        a.data(),
-        a.name("other"),
-    )
+fn append_code(a: &Args, style: Style) -> String {
+    match style {
+        Style::Base => format!(
+            "{} <- (function(x, y) {{\n  for (n in setdiff(names(y), names(x))) x[[n]] <- NA\n  \
+             for (n in setdiff(names(x), names(y))) y[[n]] <- NA\n  rbind(x, y[names(x)])\n}})({}, {})",
+            a.name("result"),
+            a.data(),
+            a.name("other"),
+        ),
+        Style::Tidyverse => format!(
+            "{} <- dplyr::bind_rows({}, {})",
+            a.name("result"),
+            a.data(),
+            a.name("other"),
+        ),
+    }
 }
 
 // ---- Aggregate ----
@@ -211,7 +281,7 @@ pub const AGGREGATE: Spec = Spec {
         RESULT,
     ],
     needs: &[],
-    styles: BASE,
+    styles: BOTH,
     check: aggregate_check,
     code: aggregate_code,
 };
@@ -226,17 +296,38 @@ fn aggregate_check(a: &Args) -> Vec<Problem> {
         .collect()
 }
 
-fn aggregate_code(a: &Args, _: Style) -> String {
+fn aggregate_code(a: &Args, style: Style) -> String {
     let f = match a.choice("how") {
         "count" => "sum(!is.na(x))".to_string(),
         other => format!("{other}(x, na.rm = TRUE)"),
     };
-    format!(
-        "{} <- aggregate({}, by = {}, FUN = function(x) {f})",
-        a.name("result"),
-        columns(a, &a.vars("values")),
-        columns(a, &a.vars("groups")),
-    )
+    match style {
+        Style::Base => format!(
+            "{} <- aggregate({}, by = {}, FUN = function(x) {f})",
+            a.name("result"),
+            columns(a, &a.vars("values")),
+            columns(a, &a.vars("groups")),
+        ),
+        // aggregate() leaves out rows with a missing group, varies the first
+        // group fastest and gives a plain data frame; the steps below do the same.
+        Style::Tidyverse => {
+            let groups = a.vars("groups");
+            let backwards: Vec<&str> = groups.iter().rev().copied().collect();
+            let res = a.name("result");
+            format!(
+                "{res} <- dplyr::filter({}, dplyr::if_all(dplyr::all_of({}), function(x) !is.na(x)))\n\
+                 {res} <- dplyr::group_by({res}, dplyr::across(dplyr::all_of({})))\n\
+                 {res} <- dplyr::summarise({res}, dplyr::across(dplyr::all_of({}), function(x) {f}), \
+                 .groups = \"drop\")\n\
+                 {res} <- as.data.frame(dplyr::arrange({res}, dplyr::across(dplyr::all_of({}))))",
+                a.data(),
+                cvec(&groups),
+                cvec(&groups),
+                cvec(&a.vars("values")),
+                cvec(&backwards),
+            )
+        }
+    }
 }
 
 // ---- Wide to long ----
@@ -440,25 +531,53 @@ pub const DUPLICATES: Spec = Spec {
         RESULT,
     ],
     needs: &[],
-    styles: BASE,
+    styles: BOTH,
     check: no_check,
     code: duplicates_code,
 };
 
-fn duplicates_code(a: &Args, _: Style) -> String {
+fn duplicates_code(a: &Args, style: Style) -> String {
     let keys = columns(a, &a.vars("vars"));
     let res = a.name("result");
     let data = a.data();
-    match a.choice("action") {
-        "only" => format!(
-            "{res} <- {data}[duplicated({keys}) | duplicated({keys}, fromLast = TRUE), , drop = FALSE]"
-        ),
-        "mark" => format!(
-            "{}{res}[[{}]] <- duplicated({keys}) | duplicated({keys}, fromLast = TRUE)",
+    let repeats = format!("duplicated({keys}) | duplicated({keys}, fromLast = TRUE)");
+    // inside filter() and mutate() the columns are picked, so a column named
+    // like the data frame cannot get in the way
+    let picked = {
+        let vars = a.vars("vars");
+        let look = if vars.is_empty() {
+            "dplyr::everything()".to_string()
+        } else {
+            format!("dplyr::all_of({})", cvec(&vars))
+        };
+        let keys = format!("dplyr::pick({look})");
+        format!("duplicated({keys}) | duplicated({keys}, fromLast = TRUE)")
+    };
+    match (a.choice("action"), style) {
+        ("only", Style::Base) => format!("{res} <- {data}[{repeats}, , drop = FALSE]"),
+        ("only", Style::Tidyverse) => format!("{res} <- dplyr::filter({data}, {picked})"),
+        ("mark", Style::Base) => format!(
+            "{}{res}[[{}]] <- {repeats}",
             copy_line(a),
             a.name_string("into"),
         ),
-        _ => format!("{res} <- {data}[!duplicated({keys}), , drop = FALSE]"),
+        ("mark", Style::Tidyverse) => format!(
+            "{res} <- dplyr::mutate({data}, {} = {picked})",
+            a.name("into"),
+        ),
+        (_, Style::Base) => format!("{res} <- {data}[!duplicated({keys}), , drop = FALSE]"),
+        (_, Style::Tidyverse) => {
+            let vars = a.vars("vars");
+            if vars.is_empty() {
+                format!("{res} <- dplyr::distinct({data})")
+            } else {
+                format!(
+                    "{res} <- dplyr::distinct({data}, dplyr::across(dplyr::all_of({})), \
+                     .keep_all = TRUE)",
+                    cvec(&vars)
+                )
+            }
+        }
     }
 }
 
@@ -502,7 +621,7 @@ pub const SAMPLE: Spec = Spec {
         RESULT,
     ],
     needs: &[],
-    styles: BASE,
+    styles: BOTH,
     check: sample_check,
     code: sample_code,
 };
@@ -530,7 +649,7 @@ fn sample_check(a: &Args) -> Vec<Problem> {
     out
 }
 
-fn sample_code(a: &Args, _: Style) -> String {
+fn sample_code(a: &Args, style: Style) -> String {
     let data = a.data();
     let size = if a.choice("how") == "percent" {
         format!("round(nrow({data}) * {} / 100)", a.number("amount"))
@@ -543,10 +662,16 @@ fn sample_code(a: &Args, _: Style) -> String {
     } else {
         format!("set.seed({seed})\n")
     };
-    format!(
-        "{set}{} <- {data}[sample(nrow({data}), {size}), , drop = FALSE]",
-        a.name("result")
-    )
+    match style {
+        Style::Base => format!(
+            "{set}{} <- {data}[sample(nrow({data}), {size}), , drop = FALSE]",
+            a.name("result")
+        ),
+        Style::Tidyverse => format!(
+            "{set}{} <- dplyr::slice_sample({data}, n = {size})",
+            a.name("result")
+        ),
+    }
 }
 
 // ---- Drop missing values ----
@@ -583,19 +708,34 @@ pub const DROP_MISSING: Spec = Spec {
         RESULT,
     ],
     needs: &[],
-    styles: BASE,
+    styles: BOTH,
     check: no_check,
     code: missing_code,
 };
 
-fn missing_code(a: &Args, _: Style) -> String {
+fn missing_code(a: &Args, style: Style) -> String {
     let not = if a.choice("which") == "keep" { "!" } else { "" };
-    format!(
-        "{} <- {}[{not}complete.cases({}), , drop = FALSE]",
-        a.name("result"),
-        a.data(),
-        columns(a, &a.vars("vars")),
-    )
+    match style {
+        Style::Base => format!(
+            "{} <- {}[{not}complete.cases({}), , drop = FALSE]",
+            a.name("result"),
+            a.data(),
+            columns(a, &a.vars("vars")),
+        ),
+        Style::Tidyverse => {
+            let vars = a.vars("vars");
+            let look = if vars.is_empty() {
+                "dplyr::everything()".to_string()
+            } else {
+                format!("dplyr::all_of({})", cvec(&vars))
+            };
+            format!(
+                "{} <- dplyr::filter({}, {not}stats::complete.cases(dplyr::pick({look})))",
+                a.name("result"),
+                a.data(),
+            )
+        }
+    }
 }
 
 #[cfg(test)]
@@ -657,6 +797,117 @@ mod tests {
             c,
             "j <- merge(d, e, by = c(\"k\"), all.x = TRUE, all.y = FALSE)"
         );
+    }
+
+    #[test]
+    fn join_on_differently_named_keys_pairs_them_in_order() {
+        let c = code(
+            &JOIN,
+            &[("other", "e"), ("result", "j")],
+            &[("keys", &["k", "g"]), ("otherkeys", &["y", "k"])],
+        );
+        assert_eq!(
+            c,
+            "j <- merge(d, e, by.x = c(\"k\", \"g\"), by.y = c(\"y\", \"k\"), \
+             all.x = FALSE, all.y = FALSE)"
+        );
+        let t = code(
+            &JOIN,
+            &[("other", "e"), ("keep", "full"), ("result", "j")],
+            &[("keys", &["x"]), ("otherkeys", &["y"])],
+        );
+        let tidy = {
+            let c = ctx();
+            let mut v = JOIN.defaults(&c);
+            v.set_text("other", "e");
+            v.set_text("keep", "full");
+            v.set_text("result", "j");
+            v.set_list("keys", vec!["x".into()]);
+            v.set_list("otherkeys", vec!["y".into()]);
+            JOIN.generate(&c, &v, Style::Tidyverse).unwrap_or_default()
+        };
+        assert!(t.contains("by.x = c(\"x\"), by.y = c(\"y\")"), "{t}");
+        assert!(
+            tidy.starts_with("j <- dplyr::full_join(d, e, by = c(\"x\" = \"y\"))\n"),
+            "{tidy}"
+        );
+        assert!(
+            tidy.contains("dplyr::relocate(j, dplyr::all_of(c(\"x\")))"),
+            "{tidy}"
+        );
+    }
+
+    #[test]
+    fn join_refuses_keys_that_do_not_pair_up() {
+        // two match variables, one partner
+        assert!(refused(
+            &JOIN,
+            &[("other", "e")],
+            &[("keys", &["k", "g"]), ("otherkeys", &["y"])]
+        ));
+        // a partner that is not in the other data frame
+        assert!(refused(
+            &JOIN,
+            &[("other", "e")],
+            &[("keys", &["k"]), ("otherkeys", &["zzz"])]
+        ));
+        // x is not in e, but a partner makes up for it
+        assert!(!refused(
+            &JOIN,
+            &[("other", "e")],
+            &[("keys", &["x"]), ("otherkeys", &["y"])]
+        ));
+    }
+
+    #[test]
+    fn frame_variables_are_offered_only_once_the_frame_is_chosen() {
+        let c = ctx();
+        let mut v = JOIN.defaults(&c);
+        let widget = JOIN.widgets.iter().find(|w| w.id() == "otherkeys");
+        let offered = |v: &rcraft_rcodegen::dialog::Values| {
+            widget
+                .map(|w| JOIN.frame_choices(w, &c, v).len())
+                .unwrap_or(99)
+        };
+        assert_eq!(offered(&v), 0);
+        v.set_text("other", "e");
+        assert_eq!(offered(&v), 2);
+        v.set_text("other", "nope");
+        assert_eq!(offered(&v), 0);
+    }
+
+    #[test]
+    fn tidyverse_styles_name_dplyr_and_the_base_ones_do_not() {
+        let c = ctx();
+        let styled = |spec: &Spec, set: &[(&str, &str)], lists: &[(&str, &[&str])]| {
+            let mut v = spec.defaults(&c);
+            for (id, t) in set {
+                v.set_text(id, *t);
+            }
+            for (id, l) in lists {
+                v.set_list(id, l.iter().map(|s| s.to_string()).collect());
+            }
+            (
+                spec.generate(&c, &v, Style::Base).unwrap_or_default(),
+                spec.generate(&c, &v, Style::Tidyverse).unwrap_or_default(),
+            )
+        };
+        let cases = [
+            styled(&APPEND, &[("other", "e")], &[]),
+            styled(&AGGREGATE, &[], &[("groups", &["g"]), ("values", &["x"])]),
+            styled(&DUPLICATES, &[], &[("vars", &["g"])]),
+            styled(&DUPLICATES, &[("action", "only")], &[]),
+            styled(&DUPLICATES, &[("action", "mark")], &[]),
+            styled(&SAMPLE, &[("seed", "3")], &[]),
+            styled(&DROP_MISSING, &[], &[]),
+        ];
+        for (base, tidy) in cases {
+            assert!(!base.contains("dplyr"), "{base}");
+            assert!(tidy.contains("dplyr::"), "{tidy}");
+        }
+        // reshaping stays base R
+        assert_eq!(WIDE_TO_LONG.styles, &[Style::Base]);
+        assert_eq!(LONG_TO_WIDE.styles, &[Style::Base]);
     }
 
     #[test]

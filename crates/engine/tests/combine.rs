@@ -88,14 +88,26 @@ fn list(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
 
-/// Builds the data frames in `make`, runs `spec` on `d` with these values and
-/// returns the table it leaves in `result`.
+/// Builds the data frames in `make`, runs `spec` on `d` in the base style with
+/// these values and returns the table it leaves in `result`.
 fn apply(
     e: &mut Engine,
     make: &str,
     spec: &Spec,
     set: &[(&str, &str)],
     lists: &[(&str, &[&str])],
+) -> Option<Table> {
+    apply_in(e, make, spec, set, lists, Style::Base)
+}
+
+/// As [`apply`], in the given code style.
+fn apply_in(
+    e: &mut Engine,
+    make: &str,
+    spec: &Spec,
+    set: &[(&str, &str)],
+    lists: &[(&str, &[&str])],
+    style: Style,
 ) -> Option<Table> {
     assert_eq!(run(e, Source::Typed, make), Outcome::Ok, "{make}");
     let table = fetch(e, "d");
@@ -116,7 +128,7 @@ fn apply(
     for (id, items) in lists {
         values.set_list(id, list(items));
     }
-    let code = spec.generate(&ctx, &values, Style::Base);
+    let code = spec.generate(&ctx, &values, style);
     assert!(code.is_ok(), "{code:?}");
     let code = code.unwrap_or_default();
     assert_eq!(
@@ -358,4 +370,182 @@ fn drop_missing_drops_or_keeps_rows() {
         &[],
     );
     assert_eq!(kept.map(|t| column(&t, "a")), Some(list(&["NA", "3"])));
+}
+
+#[test]
+fn join_matches_variables_that_have_different_names() {
+    let Some(mut e) = engine() else { return };
+    let make = "d <- data.frame(k = c(1, 2, 3, 4), x = c('a', 'b', 'c', 'd')); \
+                e <- data.frame(id = c(2, 3, 5), y = c(20, 30, 50))";
+    let joined = |e: &mut Engine, keep: &str| {
+        apply(
+            e,
+            make,
+            &JOIN,
+            &[("other", "e"), ("keep", keep), ("result", "j")],
+            &[("keys", &["k"]), ("otherkeys", &["id"])],
+        )
+    };
+    let inner = joined(&mut e, "inner");
+    assert_eq!(inner.as_ref().map(names), Some(list(&["k", "x", "y"])));
+    assert_eq!(inner.as_ref().map(column_k), Some(list(&["2", "3"])));
+    assert_eq!(inner.map(|t| column(&t, "y")), Some(list(&["20", "30"])));
+    // an unmatched row of the other data frame brings its own key value
+    let full = joined(&mut e, "full");
+    assert_eq!(
+        full.map(|t| column(&t, "k")),
+        Some(list(&["1", "2", "3", "4", "5"]))
+    );
+}
+
+/// Every column with its values, in order: two tables are the same when these are.
+fn shown(table: &Table) -> Vec<(String, Vec<String>)> {
+    table
+        .columns
+        .iter()
+        .map(|c| (c.name.clone(), column(table, &c.name)))
+        .collect()
+}
+
+/// The tidyverse style must give the very table the base style gives. Needs
+/// dplyr, which CI installs; skipped with a note where it is missing. A random
+/// sample is compared by size only, as its rows are numbered afresh.
+#[test]
+fn tidyverse_style_gives_the_same_tables_as_base_style() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let have = run(
+        &mut e,
+        Source::Typed,
+        "stopifnot(requireNamespace(\"dplyr\", quietly = TRUE))",
+    );
+    if have != Outcome::Ok {
+        eprintln!("skipped: the R package dplyr is not installed");
+        return;
+    }
+    type Case<'a> = (
+        &'a str,
+        &'a Spec,
+        Vec<(&'a str, &'a str)>,
+        Vec<(&'a str, &'a [&'a str])>,
+        &'a str,
+    );
+    // the match variable is not the first column of d, and the rows are not in order
+    let join_make = "d <- data.frame(x = c('d', 'a', 'c', 'b'), k = c(4, 1, 3, 2)); \
+                     e <- data.frame(id = c(5, 3, 2), y = c(50, 30, 20))";
+    let append_make = "d <- data.frame(a = c(1, 2), b = c('x', 'y')); \
+                       e <- data.frame(b = c('z'), c = c(TRUE))";
+    let agg_make = "d <- data.frame(g = c('b', 'a', 'b', 'a', 'b', NA), \
+                    h = c('p', 'p', 'q', 'q', 'q', 'p'), x = c(1, 3, 10, NA, 20, 99))";
+    let missing_make = "d <- data.frame(a = c(1, NA, 3, 4), b = c('x', 'y', NA, 'w'))";
+    let cases: Vec<Case> = vec![
+        (
+            join_make,
+            &JOIN,
+            vec![("other", "e"), ("keep", "inner"), ("result", "j")],
+            vec![("keys", &["k"]), ("otherkeys", &["id"])],
+            "j",
+        ),
+        (
+            join_make,
+            &JOIN,
+            vec![("other", "e"), ("keep", "full"), ("result", "j")],
+            vec![("keys", &["k"]), ("otherkeys", &["id"])],
+            "j",
+        ),
+        (
+            join_make,
+            &JOIN,
+            vec![("other", "e"), ("keep", "left"), ("result", "j")],
+            vec![("keys", &["k"]), ("otherkeys", &["id"])],
+            "j",
+        ),
+        (
+            append_make,
+            &APPEND,
+            vec![("other", "e"), ("result", "a")],
+            vec![],
+            "a",
+        ),
+        (
+            agg_make,
+            &AGGREGATE,
+            vec![("how", "mean"), ("result", "s")],
+            vec![("groups", &["g", "h"]), ("values", &["x"])],
+            "s",
+        ),
+        (
+            agg_make,
+            &AGGREGATE,
+            vec![("how", "count"), ("result", "s")],
+            vec![("groups", &["g"]), ("values", &["x"])],
+            "s",
+        ),
+        (
+            DUPS,
+            &DUPLICATES,
+            vec![("action", "drop"), ("result", "r")],
+            vec![],
+            "r",
+        ),
+        (
+            DUPS,
+            &DUPLICATES,
+            vec![("action", "drop"), ("result", "r")],
+            vec![("vars", &["k"])],
+            "r",
+        ),
+        (
+            DUPS,
+            &DUPLICATES,
+            vec![("action", "only"), ("result", "r")],
+            vec![],
+            "r",
+        ),
+        (
+            DUPS,
+            &DUPLICATES,
+            vec![("action", "mark"), ("result", "r")],
+            vec![("vars", &["k"])],
+            "r",
+        ),
+        (
+            missing_make,
+            &DROP_MISSING,
+            vec![("result", "r")],
+            vec![],
+            "r",
+        ),
+        (
+            missing_make,
+            &DROP_MISSING,
+            vec![("which", "keep"), ("result", "r")],
+            vec![("vars", &["b"])],
+            "r",
+        ),
+    ];
+    for (make, spec, set, lists, result) in cases {
+        let base = apply_in(&mut e, make, spec, &set, &lists, Style::Base);
+        let tidy = apply_in(&mut e, make, spec, &set, &lists, Style::Tidyverse);
+        assert!(base.is_some(), "{} gave no table in base style", spec.entry);
+        assert_eq!(
+            tidy.as_ref().map(shown),
+            base.as_ref().map(shown),
+            "{} differs between the styles: {set:?} {lists:?} (result {result})",
+            spec.entry
+        );
+    }
+    // a random sample: the same size, and the same rows with a seed
+    let make = "d <- data.frame(n = 1:10)";
+    for (how, amount) in [("count", "3"), ("percent", "40")] {
+        let set = [
+            ("how", how),
+            ("amount", amount),
+            ("seed", "5"),
+            ("result", "s"),
+        ];
+        let base = apply_in(&mut e, make, &SAMPLE, &set, &[], Style::Base);
+        let tidy = apply_in(&mut e, make, &SAMPLE, &set, &[], Style::Tidyverse);
+        assert_eq!(tidy.map(|t| t.nrow), base.map(|t| t.nrow), "{how}");
+    }
 }

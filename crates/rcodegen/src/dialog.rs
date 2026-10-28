@@ -165,6 +165,16 @@ pub enum Widget {
         label: &'static str,
         hint: &'static str,
     },
+    /// Several columns of the data frame chosen in the [`Widget::Frame`] called
+    /// `frame`, in the order chosen: at least `min` of them. Nothing is offered
+    /// until that frame is chosen and its columns are known.
+    FrameVariables {
+        id: &'static str,
+        label: &'static str,
+        frame: &'static str,
+        min: usize,
+        hint: &'static str,
+    },
 }
 
 impl Widget {
@@ -175,7 +185,8 @@ impl Widget {
             | Widget::Text { id, .. }
             | Widget::Choice { id, .. }
             | Widget::Check { id, .. }
-            | Widget::Frame { id, .. } => id,
+            | Widget::Frame { id, .. }
+            | Widget::FrameVariables { id, .. } => id,
         }
     }
 }
@@ -330,10 +341,28 @@ impl Spec {
                 ),
                 Widget::Choice { id, default, .. } => values.set_text(id, default),
                 Widget::Check { id, default, .. } => values.set_flag(id, default),
-                Widget::Variables { id, .. } => values.set_list(id, Vec::new()),
+                Widget::Variables { id, .. } | Widget::FrameVariables { id, .. } => {
+                    values.set_list(id, Vec::new())
+                }
             }
         }
         values
+    }
+
+    /// The columns a [`Widget::FrameVariables`] offers: those of the data frame
+    /// chosen in the widget it points at; none until one is chosen.
+    pub fn frame_choices<'a>(
+        &self,
+        widget: &Widget,
+        ctx: &'a Context,
+        values: &Values,
+    ) -> Vec<&'a ColumnInfo> {
+        let Widget::FrameVariables { frame, .. } = widget else {
+            return Vec::new();
+        };
+        ctx.frame(values.text(frame))
+            .map(|f| f.columns.iter().collect())
+            .unwrap_or_default()
     }
 
     /// The columns a variable widget offers.
@@ -486,6 +515,33 @@ fn widget_problem(w: &Widget, ctx: &Context, values: &Values) -> Option<Problem>
                 .then(|| Problem::new(id, "Pick one of the options."))
         }
         Widget::Check { .. } => None,
+        Widget::FrameVariables {
+            id,
+            label,
+            frame,
+            min,
+            ..
+        } => {
+            let names = values.list(id);
+            if names.len() < min {
+                return Some(Problem::new(
+                    id,
+                    format!(
+                        "Choose at least {min} variable{} for {}.",
+                        if min == 1 { "" } else { "s" },
+                        lower(label)
+                    ),
+                ));
+            }
+            // once the frame's columns are known, every name must be one of them
+            let other = ctx
+                .frame(values.text(frame))
+                .filter(|f| !f.columns.is_empty())?;
+            names
+                .iter()
+                .find(|n| !other.columns.iter().any(|c| c.name == **n))
+                .map(|n| Problem::new(id, format!("{n} is not a variable of {}.", other.name)))
+        }
         Widget::Frame { id, label, .. } => {
             let name = values.text(id);
             if name.is_empty() {
