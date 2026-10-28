@@ -861,7 +861,25 @@ tests that use the file (`the_real_*` in `tests/r_files.rs`) run only when
 
 **Not done, so P1A.1 is not finished:**
 
-- No HTTP client yet. `ureq` with rustls is the candidate; its dependency tree
-  needs a licence check first, in a commit of its own, and `docs/network.md` gets
-  the exact paths in the same commit as the first real fetch.
+- No live HTTPS fetch has been run. The HTTP client is in (below) and its six
+  tests run against a local plain-HTTP server (body and progress, error status,
+  cap with and without Content-Length, cancel, a cut-short connection, plain HTTP
+  refused by the app's fetcher), so the TLS handshake with the real mirror is
+  untested until the user allows one small live request.
 - No UI, no mirror setting, no command in the engine.
+
+**HTTP client (2026-10-28).** `ureq` 3.5.0 with default features off and only
+`rustls` (dbbd5c2, its own commit). Licence check of its 36-crate tree, done
+before adding: MIT or Apache-2.0 (or both) for all but ring (Apache-2.0 and ISC,
+no OpenSSL-licensed files), rustls-webpki and untrusted (ISC), subtle (BSD-3),
+rustls (Apache-2.0 or ISC or MIT), wasi (Apache-2.0 with LLVM exception or
+Apache-2.0 or MIT) and webpki-roots (CDLA-Permissive-2.0: Mozilla's CA list as
+data, which wants its notice kept). It builds on Windows with no extra tools
+(ring compiles its own C and assembly). `http::UreqFetcher` is the `Fetcher`:
+HTTPS only (redirects too, at most 5), 20 s to connect, 15 min overall,
+User-Agent `RCraft/<version>` with the repository URL, proxy settings from the
+environment honoured, nothing else sent. Known limit: rustls trusts the bundled
+Mozilla roots, not the operating system's store, so a network that inspects TLS
+with its own certificate (some campus and company proxies) will fail the
+handshake; ureq's `platform-verifier` feature would use the system store and is
+the fix if that is reported.
