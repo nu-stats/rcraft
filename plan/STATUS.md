@@ -1,10 +1,10 @@
 # Status
 
-Last updated: 2026-10-26.
+Last updated: 2026-10-29.
 
-**Phase 0 (setup): scaffolded, not yet committed.** The Cargo workspace,
-layered crates, licence files, `NOTICE`, `cargo xtask ci` and the CI workflow
-exist on branch `p0/scaffold`.
+**Where things are:** Phases 0, 1 (except P1.2 and P1.6), 1A, 3 and 4 are built; Phase 5 and the
+first three Stata translator tasks (P2B.1 to P2B.3) too. `plan/AUDIT.md` (2026-10-29) lists every
+roadmap task against the code and what is left. The sections below are a dated log, oldest first.
 
 ## Done
 
