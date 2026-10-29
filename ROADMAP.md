@@ -162,6 +162,16 @@ menu, `help topic` in the Command window, and F1 on a word or a dialog.
 - P2A.6 RCraft manual: getting started, the menus, the Command window,
   Packages, projects and reporting, as pages inside the app, searchable
   from the same box as R help
+- P2A.10 RCraft's own manuals as PDF (the user asked 2026-10-29: our own, catered to RCraft, not
+  CRAN's). RCraft lays out its own PDF with no LaTeX and no other program: the RCraft manual
+  (P2A.6) and a **reference manual for any installed package**, built from R's own help text for
+  that package (as shown in the Help window) in RCraft's style. Catered to RCraft means: each
+  function's entry says which RCraft dialogs write it (Statistics > Linear model and so on, from
+  `dialog_help`), the examples are marked as runnable from the Help window, and the front matter says
+  which RCraft version and R version and package versions it was made from. Needs a PDF writer with
+  embedded fonts under a licence we can ship (MIT, Apache or our own code; fonts attributed in
+  `NOTICE`), page layout (headings, text, code, tables of arguments, a contents page and a topic
+  index), and a **Save as PDF** button on the Help window's package page and on the manual.
 - P2A.7 Help for missing things: if the topic is in a package that is not
   installed, say so and offer Phase 1A's install and search
 - P2A.8 Offline by default: installed packages' help works with no

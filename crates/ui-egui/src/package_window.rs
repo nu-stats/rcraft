@@ -992,12 +992,14 @@ installation of package 'fixest' had non-zero exit status"
             ui.selectable_value(&mut self.tab, Tab::Installed, "Installed");
             ui.selectable_value(&mut self.tab, Tab::Sources, "Other sources");
             ui.selectable_value(&mut self.tab, Tab::List, "Project list");
-            if ui.small_button("Help").clicked() {
-                self.wants_help = true;
-            }
-            ui.with_layout(
-                egui::Layout::right_to_left(egui::Align::Center),
-                |ui| match index.status().clone() {
+            let wants_help = &mut self.wants_help;
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                // first in a right-to-left row is the far right: Help stays clear of
+                // the package count and the Refresh button
+                if ui.small_button("Help").clicked() {
+                    *wants_help = true;
+                }
+                match index.status().clone() {
                     IndexStatus::Refreshing { progress } => {
                         if ui.button("Cancel").clicked() {
                             index.cancel();
@@ -1030,21 +1032,23 @@ installation of package 'fixest' had non-zero exit status"
                         {
                             index.refresh();
                         }
-                        if let Some(ix) = index.index() {
-                            let age = ix.age(rcraft_engine::package_index::unix_now());
-                            ui.label(
-                                RichText::new(format!(
-                                    "{} packages, fetched {}",
-                                    ix.len(),
-                                    ago(age)
-                                ))
-                                .color(pal.dim),
-                            );
-                        }
                     }
-                },
-            );
+                }
+            });
         });
+        if !matches!(
+            index.status(),
+            IndexStatus::Refreshing { .. } | IndexStatus::Loading
+        ) {
+            if let Some(ix) = index.index() {
+                let age = ix.age(rcraft_engine::package_index::unix_now());
+                ui.label(
+                    RichText::new(format!("{} packages, fetched {}", ix.len(), ago(age)))
+                        .small()
+                        .color(pal.dim),
+                );
+            }
+        }
         if let IndexStatus::Failed(why) = index.status() {
             ui.label(RichText::new(why).color(pal.error));
         }

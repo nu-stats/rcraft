@@ -1465,6 +1465,6 @@ window), so they match what is installed here and work with no network.
   installed packages' vignettes, and MASS's NEWS.
 - Found by the tests: an empty package name made R fail ("zero-length variable name"); the code
   builders now check names first.
-- **Not done:** PDF reference manuals (R packages do not install them; building one needs LaTeX), links
+- **Not done:** PDF reference manuals. R packages do not install them and R's own builder needs LaTeX, so RCraft will make its own, catered to RCraft (ROADMAP P2A.10, asked for 2026-10-29); links
   inside the text of a NEWS file or vignette, rendering HTML vignettes inside RCraft (the system opens
   them), and opening a vignette's PDF has not been tried by hand in the live window.
