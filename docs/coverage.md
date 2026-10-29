@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 94 | 0 | 76 | 18 |
+| 94 | 0 | 82 | 12 |
 
 ## File
 
@@ -114,12 +114,12 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| Search packages | planned |
-| Browse task views | planned |
-| Describe package | planned |
-| Install package | planned |
-| Installed packages | planned |
-| Update packages | planned |
+| Search packages | partial |
+| Browse task views | partial |
+| Describe package | partial |
+| Install package | partial |
+| Installed packages | partial |
+| Update packages | partial |
 
 ## Stata mode
 
