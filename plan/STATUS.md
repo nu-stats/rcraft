@@ -1345,3 +1345,26 @@ whole (Stata's `%12.0g`), weights in collapse, `duplicates list`, frames, and bl
 `if`, programs: Phase 2C). `describe`, `list` and `count` print in R's layout. Abbreviated variable
 names are taken as written (they need the data). A value label that comes from the data file rather
 than a `label define` in the do-file is not available by name in R.
+
+## P2.2 Tab completion, 2026-10-29
+
+Tab in the Command window now completes any R line, not only `rc` ones. R does the
+completing: `rcodegen::tab::completion_code` sends R's own console completion (`utils`) the
+line as a hidden query (nothing reaches Results, the log or the history), and
+`parse_answer` reads back the word being typed and its choices. So Tab offers what R's own
+console would: objects and functions (a function ends in `(`), columns after `$`,
+`package::name`, package names inside `library(`, and file names inside quotes, relative to
+the session's working directory.
+
+- The word is completed as far as the choices agree; several choices are shown above the line
+  (at most 60, sorted). No space is added after a single choice.
+- It completes the end of the line (the text box's cursor is not used), as `rc` lines do.
+- An answer is used only if the line has not changed since Tab; nothing is asked while R is
+  busy or the line is empty. A line R cannot complete changes nothing.
+- `rc` lines still complete their own way (commands, CRAN and installed package names).
+- Tests: `rcodegen::tab` (6 unit tests) and `engine/tests/tab.rs` in real R (an object, a
+  column, a function, `stats::rnorm`, `library(tool`, two files that share a start, a line
+  with nothing to offer, and odd lines such as an open quote or a lone backslash that must not
+  upset the session).
+- Not done: completing at the cursor rather than the end, argument names inside a call
+  (`lm(alp` gives none), and column names inside `[["` or `df[, "`. Not yet seen in the window.

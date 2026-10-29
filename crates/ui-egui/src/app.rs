@@ -4,9 +4,10 @@ use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::time::Duration;
 
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
-use rcraft_engine::{Engine, History, Item, Outcome, PackageIndexService, Recall, Source};
+use rcraft_engine::{Engine, History, Item, Outcome, PackageIndexService, QueryId, Recall, Source};
 use rcraft_rcodegen::dialog::Spec;
 use rcraft_rcodegen::rc::{self, Rc};
+use rcraft_rcodegen::tab;
 use rcraft_rdata::display::LabelView;
 use rcraft_rhost::recent::Recent;
 use rcraft_rhost::{find_installs, Env, InterruptOutcome, SessionConfig, Stream, MIN_VERSION};
@@ -119,6 +120,9 @@ pub struct App {
     packages_window: PackagesWindow,
     /// What Tab could complete the `rc` line to, when it was more than one word.
     completions: Vec<String>,
+    /// A completion asked of R and not yet answered: the question, and the
+    /// line it was asked for (an answer is used only if the line is unchanged).
+    tab_pending: Option<(QueryId, String)>,
 }
 
 impl App {
@@ -156,6 +160,7 @@ impl App {
             package_index: PackageIndexService::for_machine(&Env::from_process()),
             packages_window: PackagesWindow::default(),
             completions: Vec::new(),
+            tab_pending: None,
         }
     }
 
@@ -1184,13 +1189,42 @@ impl App {
                 }
             }
         }
-        // Tab completes an `rc` line (commands, CRAN package names, options)
-        if has_focus
-            && self.command.trim_start().starts_with("rc")
-            && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab))
-        {
-            if let Some(done) = self.complete_rc() {
-                recalled = Some(done);
+        // R's answer to an earlier Tab, if it has come and the line is the same
+        if let Some((id, line)) = self.tab_pending.clone() {
+            let answer = self
+                .engine()
+                .and_then(|e| e.query_result(id))
+                .map(|r| (r.ok, r.text.clone()));
+            match answer {
+                Some((ok, text)) => {
+                    self.tab_pending = None;
+                    if ok && self.command == line {
+                        if let Some(c) = tab::parse_answer(&line, &text) {
+                            let (done, shown) = tab::apply(&line, &c);
+                            self.completions = shown;
+                            recalled = Some(done);
+                        } else {
+                            self.completions.clear();
+                        }
+                    }
+                }
+                None => ui.ctx().request_repaint_after(Duration::from_millis(30)),
+            }
+        }
+        // Tab completes an `rc` line (commands, CRAN package names, options);
+        // any other line is completed by R itself (names, columns, files)
+        if has_focus && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab)) {
+            let t = self.command.trim_start();
+            if t == "rc" || t.starts_with("rc ") || t.starts_with("rc	") {
+                if let Some(done) = self.complete_rc() {
+                    recalled = Some(done);
+                }
+            } else if !busy && !self.command.trim().is_empty() && self.tab_pending.is_none() {
+                let line = self.command.clone();
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    let id = engine.query(&tab::completion_code(&line));
+                    self.tab_pending = Some((id, line));
+                }
             }
         }
         let mut submit = false;

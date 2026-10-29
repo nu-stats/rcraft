@@ -7,6 +7,7 @@ pub mod import;
 pub mod packages;
 pub mod rc;
 pub mod sources;
+pub mod tab;
 
 pub use files::{
     is_cell_range, missing_packages_code, package_check_code, sheets_code, ArrowFormat,

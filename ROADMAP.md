@@ -124,6 +124,8 @@ Limits:
   History entry to put it back
 - P2.2 Tab completion: functions, objects, data-frame columns, file names,
   package names; a second Tab lists the choices
+  (done 2026-10-29: R completes the end of the line itself; see STATUS. Still to do: completion
+  at the cursor, argument names, and columns inside `[[`)
 - P2.3 Results window: text output, errors and warnings with the failing
   call, rich tables, copy and export
 - P2.4 Session log and script: every command and menu action recorded as R
