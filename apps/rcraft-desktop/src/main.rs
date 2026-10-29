@@ -12,6 +12,7 @@
 //! --data           show the Data tab instead of Results
 //! --objects        show the Objects list instead of Variables
 //! --filter TYPE    list only one type of variable (Numbers, Text, Factors, ...)
+//! --dialog-help NAME   show the Help window on this dialog's page (a menu entry, or `Use my file`, or `Packages`)
 //! --dialog NAME    after the demo, open a Data menu dialog ("Sort rows")
 //! --set ID=VALUE   set one of that dialog's values (repeatable)
 //! --import FILE    open "Use my file" on FILE
@@ -68,6 +69,7 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
             "--objects" => options.show_objects = true,
             "--filter" => options.filter = Some(value("--filter")?.clone()),
             "--dialog" => options.dialog = Some(value("--dialog")?.clone()),
+            "--dialog-help" => options.dialog_help = Some(value("--dialog-help")?.clone()),
             "--set" => {
                 let pair = value("--set")?;
                 let (id, v) = pair.split_once('=').ok_or("--set is ID=VALUE")?;

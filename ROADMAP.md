@@ -154,6 +154,8 @@ menu, `help topic` in the Command window, and F1 on a word or a dialog.
 - P2A.5 Dialog help: every dialog has a Help button opening a page that
   says what it does, what R it generates, which package it needs, and
   links to the R functions' help pages; written for RCraft, not copied
+  (done 2026-10-29: a Help button on every dialog, Use my file and Packages; each page is made
+  from the dialog's own spec with the R it writes and links to R's help for its functions)
 - P2A.6 RCraft manual: getting started, the menus, the Command window,
   Packages, projects and reporting, as pages inside the app, searchable
   from the same box as R help
@@ -163,6 +165,8 @@ menu, `help topic` in the Command window, and F1 on a word or a dialog.
   network; online links open in the user's browser only on click
 - P2A.9 Tests: help rendering on made-up Rd pages built in code; search
   ranking; dialog pages checked for broken function links
+  (dialog pages done: every dialog has a page, an example, and function links that R has pages for;
+  Rd rendering and search ranking tested with the Help window)
 
 ## Phase 2B: Stata mode (Stata code in, R code out, R runs)
 

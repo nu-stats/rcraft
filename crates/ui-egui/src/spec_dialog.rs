@@ -30,6 +30,8 @@ pub enum SpecAction {
     Install {
         code: String,
     },
+    /// Show the help page of this dialog.
+    Help(&'static Spec),
 }
 
 struct Open {
@@ -170,6 +172,7 @@ impl SpecDialog {
         let mut run = None;
         let mut install = None;
         let mut cancel = false;
+        let mut help = false;
         egui::Window::new(open.spec.entry)
             .open(&mut keep)
             .collapsible(false)
@@ -276,10 +279,17 @@ impl SpecDialog {
                     if ui.button("Cancel").clicked() {
                         cancel = true;
                     }
+                    if ui.button("Help").clicked() {
+                        help = true;
+                    }
                 });
             });
+        let spec = open.spec;
         if !keep || cancel || run.is_some() {
             self.open = None;
+        }
+        if help {
+            return Some(SpecAction::Help(spec));
         }
         run.map(SpecAction::Run)
             .or_else(|| install.map(|code| SpecAction::Install { code }))

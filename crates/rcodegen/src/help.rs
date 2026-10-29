@@ -44,8 +44,8 @@ fn is_package(s: &str) -> bool {
         && s.chars().next().is_some_and(char::is_alphabetic)
 }
 
-/// `pkg::name` or `name`, as a page request.
-fn page_of(word: &str) -> Option<HelpCommand> {
+/// `pkg::name` or `name`, as a page request (a help link on a dialog page).
+pub fn page_of(word: &str) -> Option<HelpCommand> {
     if let Some((pkg, topic)) = word.split_once("::") {
         let topic = topic.strip_prefix(':').unwrap_or(topic);
         return (is_package(pkg) && is_topic(topic)).then(|| HelpCommand::Page {

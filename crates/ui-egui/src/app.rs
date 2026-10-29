@@ -6,6 +6,7 @@ use std::time::Duration;
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
 use rcraft_engine::{Engine, History, Item, Outcome, PackageIndexService, QueryId, Recall, Source};
 use rcraft_rcodegen::dialog::Spec;
+use rcraft_rcodegen::dialog_help;
 use rcraft_rcodegen::help::{self, HelpCommand};
 use rcraft_rcodegen::rc::{self, Rc};
 use rcraft_rcodegen::tab;
@@ -652,6 +653,7 @@ impl App {
                     actions.push(Action::ShowWhenListed(name));
                 }
             }
+            Some(DialogAction::Help) => self.help_window.show_dialog(dialog_help::use_my_file()),
             Some(DialogAction::Install { code }) => {
                 // the install runs as an ordinary command, so its progress is
                 // in Results and it is in the log; the dialog stays open and
@@ -664,6 +666,9 @@ impl App {
             None => {}
         }
 
+        if std::mem::take(&mut self.packages_window.wants_help) {
+            self.help_window.show_dialog(dialog_help::packages_window());
+        }
         // the package list: what its worker has reported, then the window
         if self.package_index.poll() {
             ctx.request_repaint();
@@ -725,6 +730,9 @@ impl App {
                 if !run.replaces && follow {
                     actions.push(Action::ShowWhenListed(run.result));
                 }
+            }
+            Some(SpecAction::Help(spec)) => {
+                self.help_window.show_dialog(dialog_help::for_spec(spec))
             }
             Some(SpecAction::Install { code }) => {
                 actions.push(Action::Submit(
@@ -1617,6 +1625,24 @@ impl App {
 
     /// Opens a Data menu dialog by its name (case does not matter) on the
     /// data frame shown in Variables, with some values already set.
+    /// Shows the Help window on the page of a dialog, by menu entry name (or
+    /// `Use my file` or `Packages`).
+    pub fn show_dialog_help(&mut self, entry: &str) -> Result<(), String> {
+        let page = if entry.eq_ignore_ascii_case("Use my file") {
+            dialog_help::use_my_file()
+        } else if entry.eq_ignore_ascii_case("Packages") {
+            dialog_help::packages_window()
+        } else {
+            let spec = rcraft_catalog::all_specs()
+                .into_iter()
+                .find(|s| s.entry.eq_ignore_ascii_case(entry))
+                .ok_or_else(|| format!("no dialog called {entry}"))?;
+            dialog_help::for_spec(spec)
+        };
+        self.help_window.show_dialog(page);
+        Ok(())
+    }
+
     pub fn open_dialog(
         &mut self,
         ctx: &egui::Context,
@@ -2073,6 +2099,23 @@ mod tests {
         assert!(frames_until(&mut app, &ctx, |a| !listed(a, "frame1")
             && a.dataset.is_none()
             && a.is_settled()));
+    }
+
+    #[test]
+    fn a_dialogs_help_page_opens_in_the_help_window() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(app.show_dialog_help("no such dialog").is_err());
+        assert!(!app.help_window.open);
+        for name in ["Join", "Linear model", "Use my file", "Packages"] {
+            assert!(app.show_dialog_help(name).is_ok(), "{name}");
+            assert!(app.help_window.open);
+        }
+        // it stays up through frames, with no R needed for these pages
+        for _ in 0..3 {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| app.ui(ctx));
+        }
+        assert!(app.help_window.open);
     }
 
     #[test]

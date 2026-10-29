@@ -30,6 +30,8 @@ pub enum DialogAction {
     },
     /// Run this R code to install a package, as a menu command.
     Install { code: String },
+    /// Show the help page of this dialog.
+    Help,
 }
 
 /// What is known about an answer from R.
@@ -522,6 +524,9 @@ impl ImportDialog {
                         file: footer.file.clone(),
                     });
                 }
+            }
+            if ui.button("Help").clicked() {
+                *action = Some(DialogAction::Help);
             }
             if ui.button("Cancel").clicked() {
                 *close = true;

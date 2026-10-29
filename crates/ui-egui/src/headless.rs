@@ -35,6 +35,8 @@ pub struct HeadlessOptions {
     pub filter: Option<String>,
     /// After the demo, open this Data menu dialog (`"Sort rows"`) ...
     pub dialog: Option<String>,
+    /// After the demo, show the Help window on this dialog's page instead.
+    pub dialog_help: Option<String>,
     /// ... with these values set, as (widget id, value).
     pub set: Vec<(String, String)>,
     /// Open "Use my file" on this file.
@@ -78,6 +80,7 @@ impl HeadlessOptions {
             show_objects: false,
             filter: None,
             dialog: None,
+            dialog_help: None,
             set: Vec::new(),
             import: None,
             recent: Vec::new(),
@@ -187,6 +190,10 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
                 None if !dialog_opened && settled >= SETTLE_FRAMES / 2 => {
                     if let Some(entry) = &options.dialog {
                         app.open_dialog(&ctx, entry, &options.set)?;
+                        settled = 0;
+                    }
+                    if let Some(entry) = &options.dialog_help {
+                        app.show_dialog_help(entry)?;
                         settled = 0;
                     }
                     dialog_opened = true;

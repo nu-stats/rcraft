@@ -156,6 +156,9 @@ struct RState {
 
 pub struct PackagesWindow {
     pub open: bool,
+    /// The Help button was pressed; the application opens the Help window on
+    /// this window's page and clears it.
+    pub wants_help: bool,
     tab: Tab,
     query: String,
     licence: String,
@@ -218,6 +221,7 @@ impl Default for PackagesWindow {
     fn default() -> PackagesWindow {
         PackagesWindow {
             open: false,
+            wants_help: false,
             tab: Tab::Find,
             query: String::new(),
             licence: String::new(),
@@ -988,6 +992,9 @@ installation of package 'fixest' had non-zero exit status"
             ui.selectable_value(&mut self.tab, Tab::Installed, "Installed");
             ui.selectable_value(&mut self.tab, Tab::Sources, "Other sources");
             ui.selectable_value(&mut self.tab, Tab::List, "Project list");
+            if ui.small_button("Help").clicked() {
+                self.wants_help = true;
+            }
             ui.with_layout(
                 egui::Layout::right_to_left(egui::Align::Center),
                 |ui| match index.status().clone() {

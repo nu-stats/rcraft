@@ -88,6 +88,27 @@ const fn planned(name: &'static str, area: Area) -> Entry {
     }
 }
 
+/// Every dialog of the catalog, once each (a spec listed in two menus is not
+/// repeated).
+pub fn all_specs() -> Vec<&'static rcraft_rcodegen::dialog::Spec> {
+    let lists: [&[&'static rcraft_rcodegen::dialog::Spec]; 7] = [
+        data::SPECS,
+        data::OBJECT_SPECS,
+        stats::SPECS,
+        graphs::SPECS,
+        postest::MODEL_SPECS,
+        save::SPECS,
+        plot_export::PLOT_SPECS,
+    ];
+    let mut out: Vec<&'static rcraft_rcodegen::dialog::Spec> = Vec::new();
+    for spec in lists.iter().flat_map(|l| l.iter()) {
+        if !out.iter().any(|s| s.menu == spec.menu) {
+            out.push(spec);
+        }
+    }
+    out
+}
+
 /// The inventory. Seeded from ROADMAP.md; grows with each phase.
 pub const ENTRIES: &[Entry] = &[
     partial("Use my file", Area::File),
@@ -189,6 +210,35 @@ pub const ENTRIES: &[Entry] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_dialog_has_a_help_page_with_an_example_and_function_links() {
+        let specs = all_specs();
+        assert!(specs.len() > 60, "{} dialogs", specs.len());
+        let mut without_example: Vec<&str> = Vec::new();
+        for spec in specs {
+            let page = rcraft_rcodegen::dialog_help::for_spec(spec);
+            assert!(!page.about.is_empty(), "{}: no about", spec.entry);
+            assert_eq!(page.options.len(), spec.widgets.len(), "{}", spec.entry);
+            assert!(
+                page.options.iter().all(|o| !o.label.is_empty()),
+                "{}: an option has no label",
+                spec.entry
+            );
+            if page.example.is_none() {
+                without_example.push(spec.entry);
+            }
+            assert!(
+                !page.functions.is_empty() || page.example.is_none(),
+                "{}: code with no function calls",
+                spec.entry
+            );
+        }
+        assert!(
+            without_example.is_empty(),
+            "no example could be made for: {without_example:?}"
+        );
+    }
 
     #[test]
     fn names_are_unique() {

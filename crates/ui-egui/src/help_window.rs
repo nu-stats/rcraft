@@ -10,8 +10,9 @@ use std::time::Duration;
 
 use eframe::egui::{self, RichText, TextStyle};
 use rcraft_engine::{Engine, QueryId};
+use rcraft_rcodegen::dialog_help::DialogHelp;
 use rcraft_rcodegen::help::{
-    page_code, parse_page, parse_search, search_code, HelpCommand, Hit, Page, PageAnswer,
+    page_code, page_of, parse_page, parse_search, search_code, HelpCommand, Hit, Page, PageAnswer,
 };
 
 use crate::look::Palette;
@@ -38,6 +39,8 @@ enum Content {
         hits: Vec<Hit>,
     },
     Message(String),
+    /// The help page of one of RCraft's own dialogs.
+    Dialog(Box<DialogHelp>),
 }
 
 #[derive(Default)]
@@ -64,6 +67,12 @@ impl HelpWindow {
             self.query = words.clone();
         }
         self.queued = Some(command);
+    }
+
+    /// Opens the window on the help page of a dialog. Nothing is asked of R.
+    pub fn show_dialog(&mut self, page: DialogHelp) {
+        self.open = true;
+        self.push(Content::Dialog(Box::new(page)));
     }
 
     /// Opens the window at the search box.
@@ -294,7 +303,101 @@ impl HelpWindow {
                 });
             }
             Some(Content::Page(page)) => self.page(ui, pal, ctx, page, next, out),
+            Some(Content::Dialog(page)) => self.dialog_page(ui, pal, ctx, page, next),
         }
+    }
+
+    /// The help page of one of RCraft's dialogs: what it does, its options,
+    /// the packages it needs, an example of the R it writes, and links to R's
+    /// help for the functions that R calls.
+    fn dialog_page(
+        &self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        ctx: &egui::Context,
+        page: &DialogHelp,
+        next: &mut Option<HelpCommand>,
+    ) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.label(RichText::new(&page.title).strong().size(17.0));
+                ui.label(RichText::new(&page.menu).small().color(pal.dim));
+                ui.add_space(4.0);
+                ui.label(&page.about);
+                for note in &page.notes {
+                    ui.add_space(4.0);
+                    ui.label(note);
+                }
+                if !page.options.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("What you can set").strong().color(pal.dim));
+                    egui::Grid::new("dialog-help-options")
+                        .num_columns(2)
+                        .spacing([12.0, 4.0])
+                        .show(ui, |ui| {
+                            for o in &page.options {
+                                ui.label(RichText::new(&o.label).strong());
+                                ui.label(&o.text);
+                                ui.end_row();
+                            }
+                        });
+                }
+                if !page.needs.is_empty() || page.other_style.is_some() {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("R packages").strong().color(pal.dim));
+                    if page.needs.is_empty() {
+                        ui.label("Needs no package beyond R itself.");
+                    } else {
+                        ui.label(format!("Needs {}.", page.needs.join(", ")));
+                    }
+                    if let Some((style, packages)) = &page.other_style {
+                        if packages.is_empty() {
+                            ui.label(format!("{style} needs no package either."));
+                        } else {
+                            ui.label(format!("{style} needs {}.", packages.join(", ")));
+                        }
+                    }
+                    ui.label(
+                        RichText::new(
+                            "A missing package is offered for install in the dialog; nothing installs without your yes.",
+                        )
+                        .small()
+                        .color(pal.dim),
+                    );
+                }
+                if let Some(example) = &page.example {
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new("The R it writes (an example)")
+                            .strong()
+                            .color(pal.dim),
+                    );
+                    egui::Frame::group(ui.style()).show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        ui.add(egui::Label::new(RichText::new(example).monospace()).selectable(true));
+                    });
+                    if ui.small_button("Copy").clicked() {
+                        ctx.copy_text(example.clone());
+                    }
+                    ui.label(
+                        RichText::new("The dialog shows the exact R for your choices before it runs, and it goes into the Results, log and script.")
+                            .small()
+                            .color(pal.dim),
+                    );
+                }
+                if !page.functions.is_empty() {
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("R functions it uses (click for R's help)").strong().color(pal.dim));
+                    ui.horizontal_wrapped(|ui| {
+                        for f in &page.functions {
+                            if ui.link(f).clicked() {
+                                *next = page_of(f);
+                            }
+                        }
+                    });
+                }
+            });
     }
 
     fn page(

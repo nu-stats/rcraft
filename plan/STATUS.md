@@ -1402,3 +1402,34 @@ session for the page, so it matches the packages installed here and works with n
   RCraft manual (P2A.6), a page for a package that is not installed beyond the Packages search
   (P2A.7), clickable links inside the text of a page (only "See also" links), and Rd
   formatting beyond R's plain text. A very long page is one selectable text block.
+
+## P2A.5 and P2A.9 (dialog pages) Help on every dialog, 2026-10-29
+
+Every dialog has a **Help** button (next to Run and Cancel; in Use my file next to Import; in the
+Packages window beside its tabs) that opens the Help window on a page for that dialog. A page is
+made from the dialog's own spec (`rcodegen::dialog_help::for_spec`), so it cannot disagree with its
+dialog and a dialog added tomorrow has a page the day it exists. Nothing is asked of R to show it.
+
+- **What it holds:** the dialog's name and menu path, what it does, each option with its words
+  (a variable box says which kinds it takes and how many; a list says its choices), the R packages
+  it needs in each style (and that nothing installs without a yes), **the R it writes**, and **the R
+  functions it uses**, each a link to R's own help page for it (`stats::lm`, `merge`, `dplyr::inner_join`).
+- **The example R** is the real code the spec writes, for invented variables (`x`, `y`, `group`, a
+  data frame `other`): the first values for which the dialog accepts its choices (it tries each
+  starting column and a few file names, so a dialog that refuses `x` for both boxes gets two
+  different ones). The functions are read from that code, outside strings and comments, without R's
+  grammar words and the functions the code defines itself.
+- **Use my file and Packages** are not catalog dialogs, so their pages are written by hand
+  (`use_my_file()`, `packages_window()`), with notes on how they work.
+- **Tests:** unit tests for the function finder (strings, escapes, comments, `pkg::name`, defined
+  functions), the page of a made-up dialog, and the two hand-made pages; `catalog` checks that **every
+  one of the ~80 dialogs** (`catalog::all_specs()`, new) gets a page, an example and function links;
+  `engine/tests/dialog_help.rs` runs R and requires **every linked function to have a help page in R**
+  (functions of packages not installed on the machine are skipped and listed; CI has them); the window
+  opens the page for four kinds of dialog and stays up through frames. Seen in pictures over real R:
+  Linear model, Join, Use my file (`--dialog-help NAME`).
+- Found while building: `help()` treats a package held in a variable as the variable's name, so the
+  app passes the package as a literal (as it always did) and the test looks up by value.
+- **Not done:** the RCraft manual (P2A.6), vignettes and manuals (P2A.4), F1 inside a dialog, and
+  hand-written longer explanations per dialog (the pages are generated, so they are as good as each
+  dialog's own `about` and hints).
