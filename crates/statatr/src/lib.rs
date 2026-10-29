@@ -21,6 +21,7 @@
 //! says so. The clean-room rules (AGENTS.md section 1) held for the original
 //! and hold for this copy: nothing here comes from Stata's program files.
 
+pub mod data_r;
 pub mod expr_r;
 pub mod lang;
 pub mod reader;

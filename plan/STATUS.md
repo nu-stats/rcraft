@@ -1295,3 +1295,54 @@ Not done in P2B.2: `_b[]`, `_se[]`, `e()` and `r()` (P2B.6), `substr` counting f
 positions known only when the file runs, `date()` of a variable, `subinstr` with a count other than 1
 or all, and functions outside the list above (each says so by name). Keeping the extended missings as
 an attribute, as the roadmap suggested, is left until a command needs them.
+
+## P2B.3 Stata's data commands in R, 2026-10-29
+
+`statatr::data_r::translate(program) -> Translation`: a do-file read by P2B.1, translated command by
+command into R that works on one data frame the way Stata works on the data in memory (`use
+study.dta` makes `study`; the commands after it change `study`). Each line is R plus caveats and the
+packages it needs, or the reason it is not translated; `Translation::script()` writes the whole R
+script with each Stata line as a comment above its R, and the small helpers the lines call (float
+storage, Stata's statistics rules, destring, tostring, Excel column names) defined once at the top.
+
+Translated: `use` (varlist, if/in, nolabel), `save` (replace guard, `.dta` added), `import delimited`
+(delimiters, varnames, case, encoding; empty cells missing, "NA" kept as text, names lowercased) and
+`import excel` (sheet, cellrange, firstrow, allstring, case; columns named A, B, ... without firstrow),
+`generate` (float storage by default, so `gen f = 0.1` holds 0.100000001490116; byte/int/long
+truncate; `str#` keeps # characters; rows outside if/in get `.` or `""`; an existing name stops),
+`replace` (rows outside if/in keep their value; a missing name stops), `drop`/`keep` (variables, with
+`keep` keeping the data's order, or rows, where a missing condition counts as true), `rename`
+(single, group, lower/upper), `recode` (first matching rule wins; ranges never match missing; min/max
+over all rows; generate/prefix/copyrest), `label` (variable, define with add/modify/replace, values,
+drop, list; labels kept as haven labelled columns), `sort` (stable), `gsort` (missing last even in
+descending order), `egen` (mean, sd, min, max, total, count, median, pctile, iqr, std, rank with
+field/track/unique, group and tag with missing, rowtotal, rowmean, rowmax, rowmin, rownonmiss,
+rowmiss; floats by default; by() and the by prefix), `merge` 1:1, m:1 and 1:m (uniqueness checked
+like Stata, master values kept in matched rows, `_merge` labelled 1/2/3, rows ordered master by key
+then using-only by key, keep(), generate(), nogenerate, keepusing()), `append` (generate() labelled
+Master / Appended dataset k), `reshape` long and wide (tidyr; rows by i then j, wide variables j by j,
+Stata's errors for repeated or non-constant i), `collapse` (mean, median, p1-p99, sd, semean, sum,
+rawsum, count, percent, max, min, iqr, first, last, firstnm, lastnm; by() sorted, missing groups
+last; `(stat) x` labels; cw), `duplicates` (drop keeping the first row, tag, report), `encode` (byte
+order codes, `""` missing), `destring` (Stata's idea of a number; without force a variable with text
+is left alone with Stata's message), `tostring` (whole numbers), `order` (first, last, before, after,
+alphabetic), `describe`, `list`, `count`, `set seed`, `clear`, and the prefixes `by`, `bysort`,
+`capture` (as `try`) and `quietly`.
+
+Checked in real R (`crates/engine/tests/stata_data_commands.rs`): 18 do-files over made-up data run
+with every line translated. With `RCRAFT_STATCRAFT` set to a StatCraft executable (whose data
+commands match Stata line for line), each do-file also runs there and the two saved datasets must have
+the same variables, rows and values in the same order: all 18 match (StatCraft build of Oct 26). The
+first run found one real difference, now fixed: in `merge`, a variable in both files keeps the using
+file's value in rows only the using file has. It also showed that this StatCraft build needs `using`
+in `import excel` (Stata does not); the test writes `using`.
+
+Not done in P2B.3, each saying so when met: `reshape` not yet compared with StatCraft here (tidyr is
+not installed on the work computer; CI installs it and runs the cases), `merge m:m` (Stata pairs the
+k-th rows of a key), merge `update`/`replace`/`assert()`, `replace` that reads its own earlier rows
+(`replace x = x[_n-1] if missing(x)` runs row by row in Stata), wildcard `rename`, recode rules with
+value labels, egen `mode`, `concat`, `seq`, `cut` and the rest, `tostring` of numbers that are not
+whole (Stata's `%12.0g`), weights in collapse, `duplicates list`, frames, and blocks (`foreach`,
+`if`, programs: Phase 2C). `describe`, `list` and `count` print in R's layout. Abbreviated variable
+names are taken as written (they need the data). A value label that comes from the data file rather
+than a `label define` in the do-file is not available by name in R.

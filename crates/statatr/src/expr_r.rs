@@ -140,7 +140,7 @@ pub fn r_name(name: &str) -> String {
 }
 
 /// A string as an R literal.
-fn r_text(s: &str) -> String {
+pub fn r_text(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('"');
     for c in s.chars() {
@@ -158,7 +158,7 @@ fn r_text(s: &str) -> String {
 }
 
 /// A number as R writes it.
-fn r_number(v: f64) -> String {
+pub fn r_number(v: f64) -> String {
     if v.fract() == 0.0 && v.abs() < 1e15 {
         format!("{}", v as i64)
     } else {
