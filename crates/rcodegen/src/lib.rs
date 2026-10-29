@@ -3,6 +3,7 @@
 pub mod dialog;
 pub mod failure;
 pub mod files;
+pub mod help;
 pub mod import;
 pub mod packages;
 pub mod rc;

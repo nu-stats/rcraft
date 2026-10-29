@@ -11,6 +11,7 @@ mod app;
 mod data_view;
 mod graph_view;
 mod headless;
+mod help_window;
 mod import_dialog;
 pub mod look;
 mod package_window;

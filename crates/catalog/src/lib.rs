@@ -180,8 +180,8 @@ pub const ENTRIES: &[Entry] = &[
     planned("Do-file dry-run report", Area::Stata),
     planned("Stata and R side by side", Area::Stata),
     planned("Stata differences guide", Area::Stata),
-    planned("Help topic", Area::Help),
-    planned("Search help", Area::Help),
+    partial("Help topic", Area::Help),
+    partial("Search help", Area::Help),
     planned("Vignettes", Area::Help),
     planned("RCraft manual", Area::Help),
 ];

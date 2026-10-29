@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 94 | 0 | 82 | 12 |
+| 94 | 0 | 84 | 10 |
 
 ## File
 
@@ -137,7 +137,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| Help topic | planned |
-| Search help | planned |
+| Help topic | partial |
+| Search help | partial |
 | Vignettes | planned |
 | RCraft manual | planned |

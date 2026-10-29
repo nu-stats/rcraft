@@ -1368,3 +1368,37 @@ the session's working directory.
   upset the session).
 - Not done: completing at the cursor rather than the end, argument names inside a call
   (`lm(alp` gives none), and column names inside `[["` or `df[, "`. Not yet seen in the window.
+
+## P2A.1 to P2A.3, P2A.7, P2A.8 Help window, 2026-10-29
+
+R's own help for the installed packages, in a **Help window** (`ui-egui::help_window`), with the
+code and readers in `rcodegen::help`. Nothing is copied into RCraft: a hidden query asks the
+session for the page, so it matches the packages installed here and works with no network.
+
+- **Ways in:** the typed forms `?mean`, `?pkg::name`, `??words`, `help(mean)`,
+  `help("lm", package = "stats")`, `help mean`, `help pkg::name` and `help search words` (any
+  other line, such as `help <- 3`, is ordinary R); **F1** in the Command window on the word at
+  the end of the line (the search box when there is none); **Help > Search R help**. The typed
+  line is recorded in the history and says it opened the window.
+- **A page** (`utils::help`, `tools::Rd2txt`, `tools::Rd2ex`): topic, package, title, R's text
+  (description, usage, arguments, value, details, references, see also, examples), a **See also**
+  row of links, **Also in** buttons when several packages have the topic, **Run examples** (sends
+  the examples to the session as a typed command; the output is in Results) and **Copy examples**.
+  Back and Forward walk what was shown.
+- **Search** (`help.search`): each word is looked up in names, titles and keywords and a page must
+  match all the words ("linear regression" finds `lm`); a topic equal to the words comes first, then
+  names that start with or contain them, then base/stats/utils/graphics/methods/datasets pages, then
+  the rest. At most 100 results. Words that are not valid patterns (`c++`, `(`) give an empty list,
+  not an error.
+- **A topic R lacks** (P2A.7, first part): the page says so, lists names that contain it, and has
+  **Find a package for this…**, which opens the Packages window on a CRAN search for it.
+- **Tests:** `rcodegen::help` (7 unit tests: the typed forms and what must stay ordinary R, the word
+  for F1, quoting, reading a page, a missing topic and broken answers, ranking), `ui-egui::help_window`
+  (3), and `engine/tests/help.rs` in real R: the `mean` page (text, examples that run, links), a
+  page in one package, a symbol topic (`[`), a topic in the wrong package, odd topics, search and its
+  ranking. Seen in pictures over real R: the `lm` page, a search, and a topic that does not exist.
+- Found by the tests: an unknown package name makes R's `help()` an error, now a "not found".
+- **Not done:** vignettes and package manuals (P2A.4), the Help button on every dialog (P2A.5), the
+  RCraft manual (P2A.6), a page for a package that is not installed beyond the Packages search
+  (P2A.7), clickable links inside the text of a page (only "See also" links), and Rd
+  formatting beyond R's plain text. A very long page is one selectable text block.

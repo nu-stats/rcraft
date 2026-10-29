@@ -6,6 +6,7 @@ use std::time::Duration;
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
 use rcraft_engine::{Engine, History, Item, Outcome, PackageIndexService, QueryId, Recall, Source};
 use rcraft_rcodegen::dialog::Spec;
+use rcraft_rcodegen::help::{self, HelpCommand};
 use rcraft_rcodegen::rc::{self, Rc};
 use rcraft_rcodegen::tab;
 use rcraft_rdata::display::LabelView;
@@ -16,6 +17,7 @@ use rcraft_rpkg::search::Filters;
 
 use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
 use crate::graph_view::GraphView;
+use crate::help_window::{HelpOut, HelpWindow};
 use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 use crate::package_window::{PackagesWindow, Tab as PackagesTab};
@@ -64,6 +66,12 @@ enum Action {
     Rc(Rc, String),
     /// A typed `rc` line that is wrong, with what is wrong.
     RcError(String, String),
+    /// A typed help request (`?mean`, `help mean`), with the line as typed.
+    Help(HelpCommand, String),
+    /// Open the Help window at its search box.
+    OpenHelp,
+    /// Look for a package for this topic, in the Packages window.
+    FindPackagesFor(String),
     /// Open the Packages window on this tab.
     OpenPackages(PackagesTab),
     /// Open a catalog dialog on the data frame shown in Variables.
@@ -118,6 +126,7 @@ pub struct App {
     /// The CRAN package list, cached on this computer.
     package_index: PackageIndexService,
     packages_window: PackagesWindow,
+    help_window: HelpWindow,
     /// What Tab could complete the `rc` line to, when it was more than one word.
     completions: Vec<String>,
     /// A completion asked of R and not yet answered: the question, and the
@@ -159,6 +168,7 @@ impl App {
             recent,
             package_index: PackageIndexService::for_machine(&Env::from_process()),
             packages_window: PackagesWindow::default(),
+            help_window: HelpWindow::default(),
             completions: Vec::new(),
             tab_pending: None,
         }
@@ -331,6 +341,16 @@ impl App {
             Action::SetTypeFilter(filter) => self.type_filter = filter,
             Action::OpenPackages(tab) => self.packages_window.open_on(tab),
             Action::Rc(command, line) => self.run_rc(command, &line),
+            Action::Help(command, line) => {
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    engine.echo(&line, "Opening the Help window.", Outcome::Ok);
+                }
+                self.help_window.request(command);
+            }
+            Action::OpenHelp => self.help_window.open_search(),
+            Action::FindPackagesFor(topic) => {
+                self.packages_window.start_rc(Rc::Search { words: topic });
+            }
             Action::RcError(why, line) => {
                 if let EngineState::Ready(engine) = &mut self.engine {
                     engine.echo(&line, &why, Outcome::Error);
@@ -662,6 +682,16 @@ impl App {
             actions.push(Action::Submit(Source::Menu(run.menu.into()), run.code));
         }
 
+        let engine = match &mut self.engine {
+            EngineState::Ready(e) => Some(&mut **e),
+            _ => None,
+        };
+        match self.help_window.show(ctx, &pal, engine) {
+            Some(HelpOut::Run(code)) => actions.push(Action::Submit(Source::Typed, code)),
+            Some(HelpOut::FindPackages(topic)) => actions.push(Action::FindPackagesFor(topic)),
+            None => {}
+        }
+
         // a plot that has just been drawn is shown in the Graph tab
         if let EngineState::Ready(engine) = &self.engine {
             if self.graph.note_new(engine) {
@@ -840,6 +870,11 @@ impl App {
                 }
             });
             ui.menu_button("Help", |ui| {
+                if ui.button("Search R help…").clicked() {
+                    out.push(Action::OpenHelp);
+                    ui.close_menu();
+                }
+                ui.separator();
                 ui.label(format!(
                     "{} {}",
                     rcraft_core::PRODUCT,
@@ -1189,6 +1224,19 @@ impl App {
                 }
             }
         }
+        // F1 asks for help on the word at the end of the line, or opens the search
+        if has_focus && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F1)) {
+            out.push(match help::word_at_end(&self.command) {
+                Some(word) => {
+                    let line = format!("?{word}");
+                    match help::parse_command(&line) {
+                        Some(request) => Action::Help(request, line),
+                        None => Action::OpenHelp,
+                    }
+                }
+                None => Action::OpenHelp,
+            });
+        }
         // R's answer to an earlier Tab, if it has come and the line is the same
         if let Some((id, line)) = self.tab_pending.clone() {
             let answer = self
@@ -1268,7 +1316,10 @@ impl App {
             out.push(match rc::parse(&code) {
                 Some(Ok(command)) => Action::Rc(command, code),
                 Some(Err(why)) => Action::RcError(why, code),
-                None => Action::Submit(Source::Typed, code),
+                None => match help::parse_command(&code) {
+                    Some(request) => Action::Help(request, code),
+                    None => Action::Submit(Source::Typed, code),
+                },
             });
         }
         if self.focus_command {
@@ -1467,7 +1518,7 @@ impl App {
     /// R is ready and nothing is running (or R could not start).
     pub fn is_settled(&self) -> bool {
         match &self.engine {
-            EngineState::Ready(e) => !e.is_working(),
+            EngineState::Ready(e) => !e.is_working() && !self.help_window.is_busy(),
             EngineState::Failed(_) => true,
             EngineState::Starting(_) => false,
         }
@@ -1641,13 +1692,21 @@ impl App {
                     engine.echo(code, &why, Outcome::Error);
                 }
             }
-            None => {
-                if let EngineState::Ready(engine) = &mut self.engine {
-                    if let Err(e) = engine.submit(Source::Typed, code) {
-                        self.message = Some(e.to_string());
+            None => match help::parse_command(code) {
+                Some(request) => {
+                    if let EngineState::Ready(engine) = &mut self.engine {
+                        engine.echo(code, "Opening the Help window.", Outcome::Ok);
+                    }
+                    self.help_window.request(request);
+                }
+                None => {
+                    if let EngineState::Ready(engine) = &mut self.engine {
+                        if let Err(e) = engine.submit(Source::Typed, code) {
+                            self.message = Some(e.to_string());
+                        }
                     }
                 }
-            }
+            },
         }
     }
 }

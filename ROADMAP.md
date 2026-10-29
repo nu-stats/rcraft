@@ -138,12 +138,17 @@ menu, `help topic` in the Command window, and F1 on a word or a dialog.
 - P2A.1 R help pages: render a function's help (the Rd page) in a Help
   window with usage, arguments, value, details, examples, links and "see
   also"; back and forward; open from `?topic`, `help(topic)`, F1 on a word,
-  or a link
+  or a link (done 2026-10-29: the Help window shows R's own text for a page, with See also links,
+  back and forward, `?topic`, `help topic`, F1; links inside the text are still to do)
 - P2A.2 Examples: a **Run example** button on each help page, copy to the
   Command window, and output in Results
+  (done 2026-10-29: Run examples and Copy examples; the examples go to the session as one typed
+  command)
 - P2A.3 Search help: `help search words` over installed packages' help
   titles, aliases and keywords (the `search` equivalent), plus function-name
   search (`apropos`) and a topic index
+  (done 2026-10-29 for installed packages: each word must match a name, title or keyword;
+  `help search words`, `??words`; no topic index yet)
 - P2A.4 Vignettes and manuals: list and open a package's vignettes
   (HTML/PDF) and its news file, from the package page or the Help menu
 - P2A.5 Dialog help: every dialog has a Help button opening a page that
@@ -220,6 +225,12 @@ Tasks:
 - P2B.6 Estimates and returned values: `e()`, `r()` and `_b[]`/`_se[]`
   after a translated command, with `estimates store` and `esttab`/`outreg2`
   style tables going to Phase 7.
+- P2B.12 Tab completion in Stata mode (the user asked 2026-10-29: it must work there too):
+  Stata command names and their abbreviations, `if`/`in`/`by` and option words per command,
+  variable names of the open dataset (with Stata's abbreviation rules, wildcards and
+  `varlist` ranges), local and global macro names, value-label names and file names after
+  `using`; the same Tab behaviour as for R lines (complete as far as the choices agree, a
+  second Tab lists them); tested against the translator's own command table
 - P2B.7 The two-pane view: Stata on the left, generated R on the right,
   line by line, with a mapping so a click on either highlights the other; a
   note on each line that has a known difference from Stata.
