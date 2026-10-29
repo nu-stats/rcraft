@@ -26,6 +26,7 @@
 //! without the data and are taken as written.
 
 mod more;
+mod stats;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -174,6 +175,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_stats" => more::STAT_HELPERS,
         "stata_destring" => more::DESTRING_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
+        "stata_models" => stats::MODEL_HELPERS,
         _ => FLOAT_HELPER,
     }
 }
@@ -190,6 +192,9 @@ struct Session {
     /// Value label sets defined so far: name -> (value, text).
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
     helpers: BTreeSet<&'static str>,
+    /// The last estimation command translated (`regress`, `logit`, ...), for
+    /// `predict`, `test` and `lincom`.
+    estimates: Option<&'static str>,
 }
 
 /// Collects one command's R.
@@ -549,6 +554,16 @@ impl Session {
             "encode" => self.encode(c, &opts, out),
             "destring" => self.destring(c, &opts, out),
             "tostring" => self.tostring(c, &opts, out),
+            "summarize" => self.summarize(c, &opts, out),
+            "tabulate" => self.tabulate(c, &opts, out),
+            "correlate" => self.correlate(c, &opts, out),
+            "ttest" => self.ttest(c, &opts, out),
+            "regress" => self.regress(c, &opts, out),
+            "logit" | "probit" | "poisson" => self.ml_model(c, &opts, out),
+            "predict" => self.predict(c, &opts, out),
+            "test" => self.test(c, &opts, out),
+            "lincom" => self.lincom(c, &opts, out),
+            "estat" => self.estat(c, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1525,7 +1540,10 @@ mod tests {
     #[test]
     fn what_is_not_translated_says_why() {
         for (src, why) in [
-            ("use s\nregress y x", "regress is not translated yet"),
+            ("use s\nmixed y x || g:", "mixed is not translated yet"),
+            ("use s\nregress y x, beta", "the option beta"),
+            ("use s\npredict p", "needs an estimation command"),
+            ("use s\nregress y x*", "not patterns"),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
             ("use s\nsummarize x [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),
