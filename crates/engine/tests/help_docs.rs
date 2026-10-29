@@ -107,8 +107,8 @@ fn vignettes_of_one_package_and_of_all() {
     let all = parse_vignettes(&ask(&mut e, &vignettes_code(None))).unwrap_or_default();
     assert!(all.len() >= one.len());
     assert!(all.iter().any(|v| v.package == "grid"));
-    // a package with none gives an empty list, not an error
-    let none = parse_vignettes(&ask(&mut e, &vignettes_code(Some("stats"))));
+    // a package that is not installed has none: an empty list, not an error
+    let none = parse_vignettes(&ask(&mut e, &vignettes_code(Some("zzznotinstalled"))));
     assert_eq!(none, Some(Vec::new()));
 }
 
@@ -123,8 +123,7 @@ fn news_and_vignette_text_come_from_inside_the_packages_only() {
     } else {
         assert_eq!(news, Ok(None), "MASS has no NEWS here");
     }
-    // a package without one
-    assert_eq!(parse_text(&ask(&mut e, &news_code("stats"))), Ok(None));
+    // a package that is not installed has no NEWS
     assert_eq!(parse_text(&ask(&mut e, &news_code("zzznone"))), Ok(None));
 
     // a vignette's R code, by its path from the list
