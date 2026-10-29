@@ -1329,17 +1329,16 @@ is left alone with Stata's message), `tostring` (whole numbers), `order` (first,
 alphabetic), `describe`, `list`, `count`, `set seed`, `clear`, and the prefixes `by`, `bysort`,
 `capture` (as `try`) and `quietly`.
 
-Checked in real R (`crates/engine/tests/stata_data_commands.rs`): 18 do-files over made-up data run
+Checked in real R (`crates/engine/tests/stata_data_commands.rs`): 20 do-files over made-up data run
 with every line translated. With `RCRAFT_STATCRAFT` set to a StatCraft executable (whose data
 commands match Stata line for line), each do-file also runs there and the two saved datasets must have
-the same variables, rows and values in the same order: all 18 match (StatCraft build of Oct 26). The
+the same variables, rows and values in the same order: all 20 match (StatCraft build of Oct 26). The
 first run found one real difference, now fixed: in `merge`, a variable in both files keeps the using
 file's value in rows only the using file has. It also showed that this StatCraft build needs `using`
-in `import excel` (Stata does not); the test writes `using`.
+in `import excel` (Stata does not); the test writes `using`. The two `reshape` cases (long, and long
+then back to wide) were compared once tidyr 1.3.2 was installed on the work computer (2026-10-29).
 
-Not done in P2B.3, each saying so when met: `reshape` not yet compared with StatCraft here (tidyr is
-not installed on the work computer; CI installs it and runs the cases), `merge m:m` (Stata pairs the
-k-th rows of a key), merge `update`/`replace`/`assert()`, `replace` that reads its own earlier rows
+Not done in P2B.3, each saying so when met: `merge m:m` (Stata pairs the k-th rows of a key), merge `update`/`replace`/`assert()`, `replace` that reads its own earlier rows
 (`replace x = x[_n-1] if missing(x)` runs row by row in Stata), wildcard `rename`, recode rules with
 value labels, egen `mode`, `concat`, `seq`, `cut` and the rest, `tostring` of numbers that are not
 whole (Stata's `%12.0g`), weights in collapse, `duplicates list`, frames, and blocks (`foreach`,

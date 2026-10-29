@@ -203,10 +203,9 @@ Tasks:
   `duplicates`, `encode`, `destring`, `tostring`, `order`, `describe`,
   `list`, `count`, `set seed`. Variable and value labels kept as labelled
   columns.
-  (done: `statatr::data_r`; 18 do-files of these commands give the same data as StatCraft, row for
-  row, in real R. `reshape` waits for tidyr on the work computer to be checked the same way; `merge
-  m:m`, `replace` that reads its own earlier rows and a few options say why they are not translated.
-  P2B.3 is done)
+  (done: `statatr::data_r`; 20 do-files of these commands give the same data as StatCraft, row for
+  row, in real R. `merge m:m`, `replace` that reads its own earlier rows and a few options say why
+  they are not translated. P2B.3 is done)
 - P2B.4 Statistics commands: `summarize`, `tabulate`, `correlate`, `ttest`,
   `regress` (with `robust` and `cluster()`), `logit`, `probit`, `poisson`,
   `nbreg`, `ologit`, `mlogit`, `anova`, `predict`, `test`, `lincom`,
