@@ -162,8 +162,8 @@ menu, `help topic` in the Command window, and F1 on a word or a dialog.
 - P2A.6 RCraft manual: getting started, the menus, the Command window,
   Packages, projects and reporting, as pages inside the app, searchable
   from the same box as R help
-- P2A.10 RCraft's own manuals as PDF (the user asked 2026-10-29: our own, catered to RCraft, not
-  CRAN's). RCraft lays out its own PDF with no LaTeX and no other program: the RCraft manual
+- P2A.10 RCraft's own manuals as PDF (the user asked 2026-10-29 for our own, catered to RCraft;
+  *down the road* — until then the package page opens CRAN's PDF reference manual, see P2A.4). RCraft lays out its own PDF with no LaTeX and no other program: the RCraft manual
   (P2A.6) and a **reference manual for any installed package**, built from R's own help text for
   that package (as shown in the Help window) in RCraft's style. Catered to RCraft means: each
   function's entry says which RCraft dialogs write it (Statistics > Linear model and so on, from

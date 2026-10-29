@@ -694,6 +694,10 @@ impl App {
             EngineState::Ready(e) => Some(&mut **e),
             _ => None,
         };
+        let shown = self.help_window.shown_package().map(str::to_string);
+        let on_cran = shown.and_then(|n| self.package_index.index().map(|ix| ix.get(&n).is_some()));
+        let mirror = self.package_index.mirror().to_string();
+        self.help_window.set_cran(&mirror, on_cran);
         match self.help_window.show(ctx, &pal, engine) {
             Some(HelpOut::Run(code)) => actions.push(Action::Submit(Source::Typed, code)),
             Some(HelpOut::FindPackages(topic)) => actions.push(Action::FindPackagesFor(topic)),

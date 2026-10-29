@@ -112,6 +112,28 @@ pub enum PackageAnswer {
     NotInstalled,
 }
 
+/// Whether a package's DESCRIPTION (as R prints it) says it is a base package
+/// (`Priority: base`): stats, utils, grid and the rest that come with R. Their
+/// reference is part of R's own manual, not a PDF of their own on CRAN.
+pub fn is_base_package(description: &str) -> bool {
+    description.lines().any(|l| {
+        l.split_once(':')
+            .is_some_and(|(k, v)| k.trim() == "Priority" && v.trim() == "base")
+    })
+}
+
+/// Where CRAN keeps the reference manual (a PDF) of `package`, on `mirror`;
+/// for a base package, R's full reference manual, which covers it. The
+/// address is opened by the user's browser on a click; RCraft sends nothing.
+pub fn manual_url(mirror: &str, package: &str, base: bool) -> String {
+    let root = mirror.trim_end_matches('/');
+    if base {
+        format!("{root}/doc/manuals/r-release/fullrefman.pdf")
+    } else {
+        format!("{root}/web/packages/{package}/{package}.pdf")
+    }
+}
+
 /// R code that prints the vignettes of `package` (or of every installed
 /// package) as `@@VIG\tpackage\titem\ttitle` with one `@@VFILE\tpath` line per
 /// file, then `@@DONE`. Shared by the package page and the vignette list.
@@ -307,6 +329,13 @@ fn read_index(lines: &[&str]) -> Vec<Topic> {
             });
         }
     }
+    // section headings some packages put in their index (`Functions:`, `=====`)
+    // are not topics
+    out.retain(|t| {
+        let heading = t.title.is_empty()
+            && (t.name.ends_with(':') || t.name.chars().all(|c| matches!(c, '=' | '-' | '_')));
+        !heading
+    });
     out
 }
 
@@ -379,6 +408,32 @@ mod tests {
     }
 
     #[test]
+    fn the_cran_manual_address_and_base_packages() {
+        assert_eq!(
+            manual_url("https://cloud.r-project.org/", "MASS", false),
+            "https://cloud.r-project.org/web/packages/MASS/MASS.pdf"
+        );
+        assert_eq!(
+            manual_url("https://cran.example.org", "grid", true),
+            "https://cran.example.org/doc/manuals/r-release/fullrefman.pdf"
+        );
+        assert!(is_base_package(
+            "Package:  grid
+Priority: base
+Version: 4.4.3"
+        ));
+        assert!(!is_base_package(
+            "Package: MASS
+Priority: recommended"
+        ));
+        assert!(!is_base_package(
+            "Package: x
+Title: Priority: base things"
+        ));
+        assert!(!is_base_package(""));
+    }
+
+    #[test]
     fn code_names_the_package_as_a_string() {
         let code = package_code("stats");
         assert!(code.contains(r#"utils::help(package = "stats")"#), "{code}");
@@ -429,6 +484,26 @@ mod tests {
         assert_eq!(p.vignettes.len(), 1);
         assert_eq!(p.vignettes[0].title, "An Introduction");
         assert_eq!(p.vignettes[0].files.len(), 3, "the .xyz file is not kept");
+    }
+
+    #[test]
+    fn index_headings_are_not_topics() {
+        let answer = "@@PACKAGE	p
+@@INDEX
+|Functions:
+|=========
+|alpha  First
+|---
+|Data:
+|beta   Second
+@@END
+@@DONE
+";
+        let Some(PackageAnswer::Found(p)) = parse_package(answer) else {
+            panic!("not a package");
+        };
+        let names: Vec<&str> = p.topics.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, vec!["alpha", "beta"]);
     }
 
     #[test]

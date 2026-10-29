@@ -1468,3 +1468,18 @@ window), so they match what is installed here and work with no network.
 - **Not done:** PDF reference manuals. R packages do not install them and R's own builder needs LaTeX, so RCraft will make its own, catered to RCraft (ROADMAP P2A.10, asked for 2026-10-29); links
   inside the text of a NEWS file or vignette, rendering HTML vignettes inside RCraft (the system opens
   them), and opening a vignette's PDF has not been tried by hand in the live window.
+
+## P2A.4 reference manuals: CRAN's editions, 2026-10-29
+
+A package page has **Reference manual (PDF)**. It opens CRAN's own PDF for the package in the user's browser,
+on a click only: `<mirror>/web/packages/<package>/<package>.pdf` on the mirror chosen in the Packages window.
+A package that comes with R (`Priority: base`: stats, utils, grid and so on) has no PDF of its own on CRAN, so the
+button opens R's full reference manual, `<mirror>/doc/manuals/r-release/fullrefman.pdf`, which covers it. When the
+package list is loaded and does not know the package (GitHub, a local file), the button is off and says why.
+RCraft sends nothing; the addresses are in `docs/network.md` (both checked 2026-10-29: MASS's PDF and the full
+manual exist; `grid`'s own address is a 404, which is why base packages are different).
+
+RCraft's own manuals, catered to RCraft, are down the road (ROADMAP P2A.10; the user chose CRAN's editions for
+now). Found in the walkthrough: some packages' help index has section headings (`Functions:`, `=====`), which
+are no longer listed as topics; the Packages window's Help button and package count no longer overlap the tabs.
+Not tried by hand: clicking the button in the live window (the address is built and tested; the browser opens it).

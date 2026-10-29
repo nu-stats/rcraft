@@ -15,8 +15,9 @@ use rcraft_rcodegen::help::{
     page_code, page_of, parse_page, parse_search, search_code, HelpCommand, Hit, Page, PageAnswer,
 };
 use rcraft_rcodegen::help_docs::{
-    extension, file_text_code, file_url, kind_of, news_code, package_code, parse_package,
-    parse_text, parse_vignettes, vignettes_code, FileKind, PackageAnswer, PackageDoc, Vignette,
+    extension, file_text_code, file_url, is_base_package, kind_of, manual_url, news_code,
+    package_code, parse_package, parse_text, parse_vignettes, vignettes_code, FileKind,
+    PackageAnswer, PackageDoc, Vignette,
 };
 
 use crate::look::Palette;
@@ -79,6 +80,11 @@ pub struct HelpWindow {
     pending: Option<(QueryId, HelpCommand)>,
     /// Ask for the search box to take the keyboard.
     focus_query: bool,
+    /// The CRAN mirror the Packages window uses, for a reference manual's address.
+    mirror: String,
+    /// Whether the package shown is on CRAN, when the package list says (it may
+    /// not be loaded).
+    on_cran: Option<bool>,
 }
 
 impl HelpWindow {
@@ -101,6 +107,21 @@ impl HelpWindow {
     pub fn open_search(&mut self) {
         self.open = true;
         self.focus_query = true;
+    }
+
+    /// The package whose page is showing, if one is.
+    pub fn shown_package(&self) -> Option<&str> {
+        match self.current() {
+            Some(Content::Package(doc)) => Some(doc.package.as_str()),
+            _ => None,
+        }
+    }
+
+    /// What the application knows about CRAN: the mirror, and whether the
+    /// package on show is there (`None` when the package list is not loaded).
+    pub fn set_cran(&mut self, mirror: &str, on_cran: Option<bool>) {
+        self.mirror = mirror.to_string();
+        self.on_cran = on_cran;
     }
 
     /// True while a request waits for R or R is answering it.
@@ -442,6 +463,23 @@ impl HelpWindow {
                         *next = Some(HelpCommand::Vignettes {
                             package: Some(doc.package.clone()),
                         });
+                    }
+                    let base = is_base_package(&doc.description);
+                    let on_cran = base || self.on_cran != Some(false);
+                    let manual = ui
+                        .add_enabled(on_cran, egui::Button::new("Reference manual (PDF)"))
+                        .on_hover_text(if base {
+                            "This package comes with R: opens R's full reference manual (a PDF on CRAN) in your browser"
+                        } else {
+                            "Opens the package's reference manual (a PDF on CRAN) in your browser. RCraft sends nothing."
+                        })
+                        .on_disabled_hover_text("This package is not on CRAN, so it has no CRAN manual");
+                    if manual.clicked() && !self.mirror.is_empty() {
+                        ctx.open_url(egui::OpenUrl::new_tab(manual_url(
+                            &self.mirror,
+                            &doc.package,
+                            base,
+                        )));
                     }
                     if ui
                         .add_enabled(doc.has_news, egui::Button::new("News"))
