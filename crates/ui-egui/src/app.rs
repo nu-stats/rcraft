@@ -71,6 +71,8 @@ enum Action {
     Help(HelpCommand, String),
     /// Open the Help window at its search box.
     OpenHelp,
+    /// Open the Help window on a package, vignettes or NEWS request (from a menu).
+    HelpRequest(HelpCommand),
     /// Look for a package for this topic, in the Packages window.
     FindPackagesFor(String),
     /// Open the Packages window on this tab.
@@ -349,6 +351,7 @@ impl App {
                 self.help_window.request(command);
             }
             Action::OpenHelp => self.help_window.open_search(),
+            Action::HelpRequest(command) => self.help_window.request(command),
             Action::FindPackagesFor(topic) => {
                 self.packages_window.start_rc(Rc::Search { words: topic });
             }
@@ -880,6 +883,12 @@ impl App {
             ui.menu_button("Help", |ui| {
                 if ui.button("Search R help…").clicked() {
                     out.push(Action::OpenHelp);
+                    ui.close_menu();
+                }
+                if ui.button("Vignettes and package manuals…").clicked() {
+                    out.push(Action::HelpRequest(HelpCommand::Vignettes {
+                        package: None,
+                    }));
                     ui.close_menu();
                 }
                 ui.separator();

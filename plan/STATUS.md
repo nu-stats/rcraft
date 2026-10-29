@@ -1433,3 +1433,38 @@ dialog and a dialog added tomorrow has a page the day it exists. Nothing is aske
 - **Not done:** the RCraft manual (P2A.6), vignettes and manuals (P2A.4), F1 inside a dialog, and
   hand-written longer explanations per dialog (the pages are generated, so they are as good as each
   dialog's own `about` and hints).
+
+## P2A.4 Vignettes, package pages and NEWS, 2026-10-29
+
+A package's own documents, from the installed package (`rcodegen::help_docs`, shown by the Help
+window), so they match what is installed here and work with no network.
+
+- **Ways in:** `help package NAME` or `help(package = "NAME")` (also `help manual NAME`), `help
+  vignettes [NAME]` or `browseVignettes()` / `browseVignettes("NAME")`, `help news NAME`; **Help >
+  Vignettes and package manuals**; a **Package page** button on every help page; the package names in
+  the vignette list. Other lines (`vignette(...)`, `news()`) stay ordinary R.
+- **A package page:** the DESCRIPTION fields (folded away until asked), **Vignettes (n)** and **News**
+  buttons, the vignettes, and the **index of help topics** (name and title, a click opens that page
+  in that package), with a box to narrow it (300 shown at a time).
+- **Vignettes:** one row per vignette with a button for each file R has for it. A rendered PDF or
+  HTML is opened by the system, on the click only (`file:///` address, spaces and non-ASCII escaped);
+  the **R code** and the **source** (`.Rmd`, `.Rnw`, `.qmd`) are shown in the window, the code with
+  **Run code**, which sends it to the session like a typed command. The list of all installed packages'
+  vignettes is grouped by package.
+- **NEWS:** `NEWS.md`, `NEWS` or `NEWS.Rd` (rendered to text by R), whichever the package has, cut at
+  4000 lines.
+- **Safe by construction:** a package name that is not a package name never reaches R (the code
+  builders answer "not installed"); a file's text is read only when its path is inside an installed
+  package's folder (checked in R, and the path comes from R's own vignette list, never typed).
+- **Tests:** `rcodegen::help_docs` (file kinds and addresses, the code builders, reading a package page,
+  missing and broken answers, titles, texts), the new typed forms in `rcodegen::help`, the window
+  (every kind of answer becomes the right content), and `engine/tests/help_docs.rs` in real R: `grid`'s
+  page (description, topics including `viewport`, 13 vignettes with PDF, code and source), a package that
+  is not installed and odd names, the vignette list of one package and of all, a NEWS file (MASS), and a
+  file outside the packages refused. Seen in pictures over real R: `grid`'s page, the list of all
+  installed packages' vignettes, and MASS's NEWS.
+- Found by the tests: an empty package name made R fail ("zero-length variable name"); the code
+  builders now check names first.
+- **Not done:** PDF reference manuals (R packages do not install them; building one needs LaTeX), links
+  inside the text of a NEWS file or vignette, rendering HTML vignettes inside RCraft (the system opens
+  them), and opening a vignette's PDF has not been tried by hand in the live window.

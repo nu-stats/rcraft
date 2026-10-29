@@ -5,6 +5,7 @@ pub mod dialog_help;
 pub mod failure;
 pub mod files;
 pub mod help;
+pub mod help_docs;
 pub mod import;
 pub mod packages;
 pub mod rc;

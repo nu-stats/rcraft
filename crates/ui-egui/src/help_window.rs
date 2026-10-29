@@ -14,8 +14,15 @@ use rcraft_rcodegen::dialog_help::DialogHelp;
 use rcraft_rcodegen::help::{
     page_code, page_of, parse_page, parse_search, search_code, HelpCommand, Hit, Page, PageAnswer,
 };
+use rcraft_rcodegen::help_docs::{
+    extension, file_text_code, file_url, kind_of, news_code, package_code, parse_package,
+    parse_text, parse_vignettes, vignettes_code, FileKind, PackageAnswer, PackageDoc, Vignette,
+};
 
 use crate::look::Palette;
+
+/// Most help topics listed on a package's page at once.
+const TOPICS_SHOWN: usize = 300;
 
 /// What the window asks the application to do.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +48,21 @@ enum Content {
     Message(String),
     /// The help page of one of RCraft's own dialogs.
     Dialog(Box<DialogHelp>),
+    /// A package's own page.
+    Package(Box<PackageDoc>),
+    /// This package is not installed.
+    NoPackage(String),
+    /// The vignettes of one package, or of all.
+    Vignettes {
+        package: Option<String>,
+        list: Vec<Vignette>,
+    },
+    /// A NEWS file or a vignette's source or code. `runnable` is for R code.
+    Text {
+        title: String,
+        text: String,
+        runnable: bool,
+    },
 }
 
 #[derive(Default)]
@@ -118,6 +140,36 @@ impl HelpWindow {
                     },
                     None => Content::Message("The search did not finish.".into()),
                 },
+                HelpCommand::Package { package } => match parse_package(text) {
+                    Some(PackageAnswer::Found(doc)) => Content::Package(doc),
+                    Some(PackageAnswer::NotInstalled) => Content::NoPackage(package.clone()),
+                    None => Content::Message("R's answer could not be read.".into()),
+                },
+                HelpCommand::Vignettes { package } => match parse_vignettes(text) {
+                    Some(list) => Content::Vignettes {
+                        package: package.clone(),
+                        list,
+                    },
+                    None => Content::Message("R's answer could not be read.".into()),
+                },
+                HelpCommand::News { package } => match parse_text(text) {
+                    Ok(Some(doc)) => Content::Text {
+                        title: doc.title,
+                        text: doc.text,
+                        runnable: false,
+                    },
+                    Ok(None) => Content::Message(format!("{package} has no NEWS file.")),
+                    Err(()) => Content::Message("R's answer could not be read.".into()),
+                },
+                HelpCommand::File { path } => match parse_text(text) {
+                    Ok(Some(doc)) => Content::Text {
+                        title: doc.title,
+                        text: doc.text,
+                        runnable: extension(path) == "r",
+                    },
+                    Ok(None) => Content::Message("That file could not be shown.".into()),
+                    Err(()) => Content::Message("R's answer could not be read.".into()),
+                },
             }
         };
         self.push(content);
@@ -138,6 +190,10 @@ impl HelpWindow {
                 let code = match &request {
                     HelpCommand::Page { topic, package } => page_code(topic, package.as_deref()),
                     HelpCommand::Search { words } => search_code(words),
+                    HelpCommand::Package { package } => package_code(package),
+                    HelpCommand::Vignettes { package } => vignettes_code(package.as_deref()),
+                    HelpCommand::News { package } => news_code(package),
+                    HelpCommand::File { path } => file_text_code(path),
                 };
                 self.pending = Some((engine.query(&code), request));
             }
@@ -304,7 +360,240 @@ impl HelpWindow {
             }
             Some(Content::Page(page)) => self.page(ui, pal, ctx, page, next, out),
             Some(Content::Dialog(page)) => self.dialog_page(ui, pal, ctx, page, next),
+            Some(Content::Package(doc)) => self.package_page(ui, pal, ctx, doc, next),
+            Some(Content::NoPackage(package)) => {
+                ui.label(
+                    RichText::new(format!("The package \"{package}\" is not installed here."))
+                        .strong(),
+                );
+                if ui.button("Find it in Packages…").clicked() {
+                    *out = Some(HelpOut::FindPackages(package.clone()));
+                }
+            }
+            Some(Content::Vignettes { package, list }) => {
+                self.vignettes_page(ui, pal, ctx, package.as_deref(), list, next);
+            }
+            Some(Content::Text {
+                title,
+                text,
+                runnable,
+            }) => self.text_page(ui, pal, ctx, title, text, *runnable, out),
         }
+    }
+
+    /// One vignette: its title and a button for each file R has for it. A
+    /// rendered document is opened by the system (only on this click); R code
+    /// and source are shown here, the code with a button to run it.
+    fn vignette_row(
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        ctx: &egui::Context,
+        v: &Vignette,
+        show_package: bool,
+        next: &mut Option<HelpCommand>,
+    ) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(&v.title).strong());
+            if show_package {
+                ui.label(RichText::new(format!("({})", v.package)).color(pal.dim));
+            }
+            for path in &v.files {
+                let Some(kind) = kind_of(path) else { continue };
+                let label = match kind {
+                    FileKind::Document => format!("Open {}", extension(path).to_uppercase()),
+                    other => other.label().to_string(),
+                };
+                if ui.small_button(label).clicked() {
+                    match kind {
+                        FileKind::Document => ctx.open_url(egui::OpenUrl::new_tab(file_url(path))),
+                        FileKind::Code | FileKind::Source => {
+                            *next = Some(HelpCommand::File { path: path.clone() });
+                        }
+                    }
+                }
+            }
+            if v.files.is_empty() {
+                ui.label(RichText::new("no file to open").small().color(pal.dim));
+            }
+        });
+    }
+
+    /// A package's page: its description, vignettes, NEWS and help index.
+    fn package_page(
+        &self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        ctx: &egui::Context,
+        doc: &PackageDoc,
+        next: &mut Option<HelpCommand>,
+    ) {
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(&doc.package).strong().size(17.0));
+                    if ui
+                        .add_enabled(
+                            !doc.vignettes.is_empty(),
+                            egui::Button::new(format!("Vignettes ({})", doc.vignettes.len())),
+                        )
+                        .clicked()
+                    {
+                        *next = Some(HelpCommand::Vignettes {
+                            package: Some(doc.package.clone()),
+                        });
+                    }
+                    if ui
+                        .add_enabled(doc.has_news, egui::Button::new("News"))
+                        .on_disabled_hover_text("This package has no NEWS file")
+                        .clicked()
+                    {
+                        *next = Some(HelpCommand::News {
+                            package: doc.package.clone(),
+                        });
+                    }
+                });
+                egui::CollapsingHeader::new("About this package")
+                    .id_salt(("help-about", &doc.package))
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(&doc.description).monospace().small())
+                                .selectable(true),
+                        );
+                    });
+                if !doc.vignettes.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(RichText::new("Vignettes").strong().color(pal.dim));
+                    for v in &doc.vignettes {
+                        Self::vignette_row(ui, pal, ctx, v, false, next);
+                    }
+                }
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(format!("Help topics ({})", doc.topics.len()))
+                        .strong()
+                        .color(pal.dim),
+                );
+                let id = ui.make_persistent_id(("help-topic-filter", &doc.package));
+                let mut filter: String = ui.data_mut(|d| d.get_temp(id)).unwrap_or_default();
+                ui.add(
+                    egui::TextEdit::singleline(&mut filter)
+                        .hint_text("Narrow the list")
+                        .desired_width(220.0),
+                );
+                ui.data_mut(|d| d.insert_temp(id, filter.clone()));
+                let needle = filter.trim().to_lowercase();
+                let shown: Vec<_> = doc
+                    .topics
+                    .iter()
+                    .filter(|t| {
+                        needle.is_empty()
+                            || t.name.to_lowercase().contains(&needle)
+                            || t.title.to_lowercase().contains(&needle)
+                    })
+                    .collect();
+                for t in shown.iter().take(TOPICS_SHOWN) {
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.link(RichText::new(&t.name).strong()).clicked() {
+                            *next = Some(HelpCommand::Page {
+                                topic: t.name.clone(),
+                                package: Some(doc.package.clone()),
+                            });
+                        }
+                        ui.label(&t.title);
+                    });
+                }
+                if shown.len() > TOPICS_SHOWN {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} more; type in the box to narrow the list.",
+                            shown.len() - TOPICS_SHOWN
+                        ))
+                        .color(pal.dim),
+                    );
+                }
+                if shown.is_empty() {
+                    ui.label(RichText::new("No topic matches.").color(pal.dim));
+                }
+            });
+    }
+
+    /// The vignettes of one package, or of every installed one by package.
+    fn vignettes_page(
+        &self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        ctx: &egui::Context,
+        package: Option<&str>,
+        list: &[Vignette],
+        next: &mut Option<HelpCommand>,
+    ) {
+        let heading = match package {
+            Some(p) => format!("Vignettes of {p}"),
+            None => format!("Vignettes of the installed packages ({})", list.len()),
+        };
+        ui.label(RichText::new(heading).strong().size(15.0));
+        if list.is_empty() {
+            ui.label("None found. Vignettes are long-form guides some packages ship with.");
+            return;
+        }
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let mut last: Option<&str> = None;
+                for v in list {
+                    if package.is_none() && last != Some(v.package.as_str()) {
+                        last = Some(v.package.as_str());
+                        ui.add_space(6.0);
+                        if ui.link(RichText::new(&v.package).strong()).clicked() {
+                            *next = Some(HelpCommand::Package {
+                                package: v.package.clone(),
+                            });
+                        }
+                    }
+                    Self::vignette_row(ui, pal, ctx, v, false, next);
+                }
+            });
+    }
+
+    /// A text: a NEWS file, or a vignette's source or R code.
+    #[allow(clippy::too_many_arguments)]
+    fn text_page(
+        &self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        ctx: &egui::Context,
+        title: &str,
+        text: &str,
+        runnable: bool,
+        out: &mut Option<HelpOut>,
+    ) {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(title).strong().size(15.0));
+            if runnable
+                && ui
+                    .add(
+                        egui::Button::new(RichText::new("Run code").strong().color(pal.on_accent))
+                            .fill(pal.accent),
+                    )
+                    .on_hover_text("Runs this R code in the session; the output shows in Results")
+                    .clicked()
+            {
+                *out = Some(HelpOut::Run(text.to_string()));
+            }
+            if ui.button("Copy").clicked() {
+                ctx.copy_text(text.to_string());
+            }
+        });
+        ui.separator();
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.add(
+                    egui::Label::new(RichText::new(text).text_style(TextStyle::Monospace))
+                        .selectable(true),
+                );
+            });
     }
 
     /// The help page of one of RCraft's dialogs: what it does, its options,
@@ -412,6 +701,11 @@ impl HelpWindow {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new(&page.topic).strong().size(17.0));
             ui.label(RichText::new(format!("{{{}}}", page.package)).color(pal.dim));
+            if ui.small_button("Package page").clicked() {
+                *next = Some(HelpCommand::Package {
+                    package: page.package.clone(),
+                });
+            }
             ui.label(&page.title);
         });
         if !page.also_in.is_empty() {
@@ -522,6 +816,93 @@ mod tests {
         assert!(matches!(w.current(), Some(Content::Message(_))));
         w.apply_answer(&page_request("x"), false, "boom");
         assert!(matches!(w.current(), Some(Content::Message(m)) if m.contains("boom")));
+    }
+
+    #[test]
+    fn package_vignette_news_and_file_answers_become_content() {
+        let mut w = HelpWindow::default();
+        let package = HelpCommand::Package {
+            package: "demo".into(),
+        };
+        let page = "@@PACKAGE	demo
+@@DESC
+|Package: demo
+@@END
+@@INDEX
+|alpha  First
+@@END
+@@NEWS
+@@DONE
+";
+        w.apply_answer(&package, true, page);
+        assert!(
+            matches!(w.current(), Some(Content::Package(d)) if d.has_news && d.topics.len() == 1)
+        );
+        w.apply_answer(
+            &package,
+            true,
+            "@@NONE
+@@DONE
+",
+        );
+        assert!(matches!(w.current(), Some(Content::NoPackage(p)) if p == "demo"));
+        let vignettes = HelpCommand::Vignettes { package: None };
+        w.apply_answer(
+            &vignettes,
+            true,
+            "@@VIG	a	b	Title (source, pdf)
+@@VFILE	C:/l/b.pdf
+@@DONE
+",
+        );
+        assert!(
+            matches!(w.current(), Some(Content::Vignettes { list, .. }) if list.len() == 1 && list[0].files.len() == 1)
+        );
+        w.apply_answer(&vignettes, true, "half");
+        assert!(matches!(w.current(), Some(Content::Message(_))));
+        let news = HelpCommand::News {
+            package: "demo".into(),
+        };
+        w.apply_answer(
+            &news, true, "@@NONE
+",
+        );
+        assert!(matches!(w.current(), Some(Content::Message(m)) if m.contains("no NEWS")));
+        w.apply_answer(
+            &news,
+            true,
+            "@@TITLE	News for demo
+@@TEXT
+|- fixed
+@@END
+",
+        );
+        assert!(matches!(
+            w.current(),
+            Some(Content::Text {
+                runnable: false,
+                ..
+            })
+        ));
+        let file = |p: &str| HelpCommand::File { path: p.into() };
+        let text = "@@TITLE	b.R
+@@TEXT
+|x <- 1
+@@END
+";
+        w.apply_answer(&file("C:/l/b.R"), true, text);
+        assert!(matches!(
+            w.current(),
+            Some(Content::Text { runnable: true, .. })
+        ));
+        w.apply_answer(&file("C:/l/b.Rmd"), true, text);
+        assert!(matches!(
+            w.current(),
+            Some(Content::Text {
+                runnable: false,
+                ..
+            })
+        ));
     }
 
     #[test]

@@ -25,6 +25,17 @@ pub enum HelpCommand {
     },
     /// A search over the installed packages' help.
     Search { words: String },
+    /// One package's page: its description, the index of its help topics, its
+    /// vignettes and whether it has a NEWS file.
+    Package { package: String },
+    /// The vignettes of one installed package, or of all of them.
+    Vignettes { package: Option<String> },
+    /// One package's NEWS file.
+    News { package: String },
+    /// The text of a vignette file, by its path. Never typed: only the window
+    /// asks for it, with a path from a vignette list, and R refuses a file that
+    /// is not inside an installed package.
+    File { path: String },
 }
 
 fn is_topic(s: &str) -> bool {
@@ -37,7 +48,7 @@ fn is_topic(s: &str) -> bool {
             .any(|c| c.is_whitespace() || c == '"' || c == '\'')
 }
 
-fn is_package(s: &str) -> bool {
+pub(crate) fn is_package(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 100
         && s.chars().all(|c| c.is_alphanumeric() || c == '.')
@@ -85,6 +96,9 @@ pub fn parse_command(line: &str) -> Option<HelpCommand> {
         let rest = unquote(rest);
         return page_of(rest);
     }
+    if let Some(command) = browse_vignettes(t) {
+        return Some(command);
+    }
     let rest = t.strip_prefix("help")?;
     if let Some(args) = rest.trim_start().strip_prefix('(') {
         let args = args.trim_end().strip_suffix(')')?;
@@ -105,7 +119,11 @@ pub fn parse_command(line: &str) -> Option<HelpCommand> {
                 None => return None,
             }
         }
-        let topic = topic?;
+        let Some(topic) = topic else {
+            return package
+                .filter(|p| is_package(p))
+                .map(|package| HelpCommand::Package { package });
+        };
         if !is_topic(&topic) || package.as_deref().is_some_and(|p| !is_package(p)) {
             return None;
         }
@@ -116,6 +134,24 @@ pub fn parse_command(line: &str) -> Option<HelpCommand> {
         return None;
     }
     let rest = rest.trim();
+    for (word, make) in [
+        (
+            "package",
+            package_command as fn(&str) -> Option<HelpCommand>,
+        ),
+        ("manual", package_command),
+        ("news", news_command),
+        ("vignettes", vignettes_command),
+    ] {
+        if rest == word && word == "vignettes" {
+            return Some(HelpCommand::Vignettes { package: None });
+        }
+        if let Some(arg) = rest.strip_prefix(word) {
+            if arg.starts_with(char::is_whitespace) {
+                return make(unquote(arg.trim()));
+            }
+        }
+    }
     if let Some(words) = rest.strip_prefix("search") {
         if words.starts_with(char::is_whitespace) && !words.trim().is_empty() {
             return Some(HelpCommand::Search {
@@ -127,6 +163,43 @@ pub fn parse_command(line: &str) -> Option<HelpCommand> {
         return None;
     }
     page_of(unquote(rest))
+}
+
+fn package_command(arg: &str) -> Option<HelpCommand> {
+    is_package(arg).then(|| HelpCommand::Package {
+        package: arg.to_string(),
+    })
+}
+
+fn news_command(arg: &str) -> Option<HelpCommand> {
+    is_package(arg).then(|| HelpCommand::News {
+        package: arg.to_string(),
+    })
+}
+
+fn vignettes_command(arg: &str) -> Option<HelpCommand> {
+    is_package(arg).then(|| HelpCommand::Vignettes {
+        package: Some(arg.to_string()),
+    })
+}
+
+/// `browseVignettes()`, `browseVignettes("pkg")` or `browseVignettes(package = "pkg")`.
+fn browse_vignettes(t: &str) -> Option<HelpCommand> {
+    let args = t
+        .strip_prefix("browseVignettes")?
+        .trim_start()
+        .strip_prefix('(')?
+        .trim_end()
+        .strip_suffix(')')?
+        .trim();
+    if args.is_empty() {
+        return Some(HelpCommand::Vignettes { package: None });
+    }
+    let arg = args
+        .strip_prefix("package")
+        .and_then(|a| a.trim_start().strip_prefix('='))
+        .unwrap_or(args);
+    vignettes_command(unquote(arg.trim()))
 }
 
 /// The topic under the end of `line`, for F1: the last word of identifier
@@ -411,6 +484,48 @@ mod tests {
         );
         assert_eq!(parse_command("?`[`"), None);
         assert_eq!(parse_command("?\"[\""), page("[", None));
+    }
+
+    #[test]
+    fn package_vignette_and_news_forms_are_understood() {
+        let package = |p: &str| Some(HelpCommand::Package { package: p.into() });
+        let vignettes = |p: Option<&str>| {
+            Some(HelpCommand::Vignettes {
+                package: p.map(str::to_string),
+            })
+        };
+        assert_eq!(parse_command("help(package = \"stats\")"), package("stats"));
+        assert_eq!(parse_command("help(package = stats)"), package("stats"));
+        assert_eq!(parse_command("help package stats"), package("stats"));
+        assert_eq!(parse_command("help manual stats"), package("stats"));
+        assert_eq!(parse_command("help vignettes"), vignettes(None));
+        assert_eq!(
+            parse_command("help vignettes grid"),
+            vignettes(Some("grid"))
+        );
+        assert_eq!(parse_command("browseVignettes()"), vignettes(None));
+        assert_eq!(
+            parse_command("browseVignettes(\"grid\")"),
+            vignettes(Some("grid"))
+        );
+        assert_eq!(
+            parse_command("browseVignettes(package = \"grid\")"),
+            vignettes(Some("grid"))
+        );
+        assert_eq!(
+            parse_command("help news survival"),
+            Some(HelpCommand::News {
+                package: "survival".into()
+            })
+        );
+        // a topic that happens to be called one of these words is still a topic
+        assert_eq!(parse_command("help(\"package\")"), page("package", None));
+        assert_eq!(parse_command("help package"), page("package", None));
+        assert_eq!(parse_command("help news"), page("news", None));
+        assert_eq!(parse_command("help package a b"), None);
+        assert_eq!(parse_command("help(package = 3)"), None);
+        assert_eq!(parse_command("browseVignettes(x)"), vignettes(Some("x")));
+        assert_eq!(parse_command("browseVignettes(f(x))"), None);
     }
 
     #[test]

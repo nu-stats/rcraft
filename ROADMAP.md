@@ -151,6 +151,9 @@ menu, `help topic` in the Command window, and F1 on a word or a dialog.
   `help search words`, `??words`; no topic index yet)
 - P2A.4 Vignettes and manuals: list and open a package's vignettes
   (HTML/PDF) and its news file, from the package page or the Help menu
+  (done 2026-10-29: package pages with a help-topic index, vignettes with Open PDF/HTML, R code and
+  source, and NEWS; R packages do not install PDF reference manuals, so the topic index stands in
+  for the manual)
 - P2A.5 Dialog help: every dialog has a Help button opening a page that
   says what it does, what R it generates, which package it needs, and
   links to the R functions' help pages; written for RCraft, not copied
