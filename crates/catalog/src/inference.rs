@@ -632,6 +632,173 @@ pub const KAPPA: Spec = Spec {
     },
 };
 
+/// Fleiss' kappa in base R, for the same number of ratings of every row by
+/// several raters (the columns). Rows missing any rating are left out. The
+/// test of kappa = 0 uses Fleiss' (1971) standard error under that hypothesis;
+/// the per-category kappas are his too.
+const FLEISS_R: &str = r#"(function(r) {
+  r <- r[stats::complete.cases(r), , drop = FALSE]
+  N <- nrow(r)
+  m <- ncol(r)
+  if (N < 2) stop("At least two rows with every rating present are needed.")
+  order_of <- function(x) if (is.factor(x)) levels(x) else as.character(sort(unique(x)))
+  lv <- unique(unlist(lapply(r, order_of)))
+  ch <- as.matrix(as.data.frame(lapply(r, as.character), stringsAsFactors = FALSE))
+  counts <- vapply(lv, function(l) rowSums(ch == l), numeric(N))
+  counts <- matrix(counts, nrow = N, dimnames = list(NULL, lv))
+  counts <- counts[, colSums(counts) > 0, drop = FALSE]
+  k <- ncol(counts)
+  if (k < 2) stop("Kappa is not defined: every rating falls in one category.")
+  pj <- colSums(counts) / (N * m)
+  Pbar <- mean((rowSums(counts^2) - m) / (m * (m - 1)))
+  Pe <- sum(pj^2)
+  kappa <- (Pbar - Pe) / (1 - Pe)
+  qj <- 1 - pj
+  kj <- 1 - colSums(counts * (m - counts)) / (N * m * (m - 1) * pj * qj)
+  var0 <- 2 / (N * m * (m - 1)) * (sum(pj * qj)^2 - sum(pj * qj * (qj - pj))) / sum(pj * qj)^2
+  z <- kappa / sqrt(var0)
+  num <- function(x) formatC(x, digits = 4, format = "f")
+  line <- function(what, value) cat(sprintf("%-30s %s\n", what, value))
+  cat("Agreement of ", m, " raters on ", N, " rows with every rating present\n\n", sep = "")
+  print(data.frame(Category = colnames(counts), Ratings = colSums(counts), Share = round(pj, 4),
+                   Kappa = round(kj, 4), row.names = NULL))
+  cat("\n")
+  line("Observed agreement", num(Pbar))
+  line("Agreement expected by chance", num(Pe))
+  line("Fleiss' kappa", num(kappa))
+  line("z (kappa = 0)", num(z))
+  line("p-value", format.pval(2 * stats::pnorm(-abs(z)), digits = 3))
+  invisible(kappa)
+})"#;
+
+pub const FLEISS: Spec = Spec {
+    entry: "Agreement of several raters (Fleiss' kappa)",
+    menu: "Statistics > Tests and intervals > Agreement of several raters",
+    about: "How well three or more raters agree on the same rows: Fleiss' kappa, with the \
+            kappa of each category. One column for each rater; every rater uses the same \
+            categories.",
+    widgets: &[Widget::Variables {
+        id: "raters",
+        label: "Raters",
+        kinds: RATINGS,
+        min: 2,
+        hint: "One variable per rater, all of categories. Rows missing any rating are left \
+               out.",
+    }],
+    needs: &[],
+    styles: BASE,
+    check: no_check,
+    code: |a, _| {
+        let cols: Vec<String> = a.vars("raters").iter().map(|v| r_string(v)).collect();
+        format!(
+            "{FLEISS_R}({d}[c({cols})])",
+            d = a.data(),
+            cols = cols.join(", ")
+        )
+    },
+};
+
+/// The six intraclass correlations of Shrout and Fleiss (1979) in base R, from
+/// the two-way analysis of variance of subjects (rows) by raters (columns):
+/// mean squares for subjects (BMS), raters (JMS), residual (EMS) and within
+/// subjects (WMS). Intervals are the F-based ones of Shrout and Fleiss and
+/// McGraw and Wong (1996), the same as the `psych` package gives.
+const ICC_R: &str = r#"(function(r, level) {
+  r <- as.matrix(r[stats::complete.cases(r), , drop = FALSE])
+  n <- nrow(r)
+  k <- ncol(r)
+  if (n < 3) stop("At least three rows with every rating present are needed.")
+  grand <- mean(r)
+  ss_total <- sum((r - grand)^2)
+  ss_rows <- k * sum((rowMeans(r) - grand)^2)
+  ss_cols <- n * sum((colMeans(r) - grand)^2)
+  ss_err <- ss_total - ss_rows - ss_cols
+  bms <- ss_rows / (n - 1)
+  jms <- ss_cols / (k - 1)
+  ems <- ss_err / ((n - 1) * (k - 1))
+  wms <- (ss_cols + ss_err) / (n * (k - 1))
+  a <- 1 - level
+  fq <- function(p, d1, d2) stats::qf(p, d1, d2)
+  # one-way random effects
+  f1 <- bms / wms
+  d2_1 <- n * (k - 1)
+  f1l <- f1 / fq(1 - a / 2, n - 1, d2_1)
+  f1u <- f1 * fq(1 - a / 2, d2_1, n - 1)
+  # two-way, consistency (ICC3) and absolute agreement (ICC2)
+  f3 <- bms / ems
+  d2_3 <- (n - 1) * (k - 1)
+  f3l <- f3 / fq(1 - a / 2, n - 1, d2_3)
+  f3u <- f3 * fq(1 - a / 2, d2_3, n - 1)
+  icc1 <- (bms - wms) / (bms + (k - 1) * wms)
+  icc2 <- (bms - ems) / (bms + (k - 1) * ems + k * (jms - ems) / n)
+  icc3 <- (bms - ems) / (bms + (k - 1) * ems)
+  fj <- jms / ems
+  vn <- (k - 1) * (n - 1) * (k * icc2 * fj + n * (1 + (k - 1) * icc2) - k * icc2)^2
+  vd <- (n - 1) * k^2 * icc2^2 * fj^2 + (n * (1 + (k - 1) * icc2) - k * icc2)^2
+  v <- vn / vd
+  f2u <- fq(1 - a / 2, n - 1, v)
+  f2l <- fq(1 - a / 2, v, n - 1)
+  low2 <- n * (bms - f2u * ems) / (f2u * (k * jms + (k * n - k - n) * ems) + n * bms)
+  up2 <- n * (f2l * bms - ems) / (k * jms + (k * n - k - n) * ems + n * f2l * bms)
+  avg <- function(x) k * x / (1 + (k - 1) * x)
+  tab <- data.frame(
+    Type = c("ICC(1,1)", "ICC(2,1)", "ICC(3,1)", "ICC(1,k)", "ICC(2,k)", "ICC(3,k)"),
+    ICC = c(icc1, icc2, icc3, 1 - 1 / f1, avg(icc2), 1 - 1 / f3),
+    F = c(f1, f3, f3, f1, f3, f3),
+    df1 = n - 1,
+    df2 = c(d2_1, d2_3, d2_3, d2_1, d2_3, d2_3),
+    p = NA_real_,
+    lower = c((f1l - 1) / (f1l + k - 1), low2, (f3l - 1) / (f3l + k - 1), 1 - 1 / f1l, avg(low2), 1 - 1 / f3l),
+    upper = c((f1u - 1) / (f1u + k - 1), up2, (f3u - 1) / (f3u + k - 1), 1 - 1 / f1u, avg(up2), 1 - 1 / f3u))
+  tab$p <- stats::pf(tab$F, tab$df1, tab$df2, lower.tail = FALSE)
+  names(tab)[7:8] <- paste0(c("lower ", "upper "), format(100 * level), "%")
+  cat("Intraclass correlation of ", k, " raters on ", n, " rows with every rating present\n\n", sep = "")
+  cat("Mean squares: subjects ", format(bms, digits = 4), ", raters ", format(jms, digits = 4),
+      ", residual ", format(ems, digits = 4), ", within subjects ", format(wms, digits = 4), "\n\n", sep = "")
+  print(tab, digits = 3, row.names = FALSE)
+  cat("
+ICC(1,.): each subject rated by a different set of raters (one-way random effects)
+",
+      "ICC(2,.): the same raters for every subject, chosen at random: absolute agreement
+",
+      "ICC(3,.): the same raters for every subject, the only ones of interest: consistency
+",
+      "ICC(.,1): the reliability of a single rater; ICC(.,k): of the mean of the k raters
+", sep = "")
+  invisible(tab)
+})"#;
+
+pub const ICC: Spec = Spec {
+    entry: "Reliability (intraclass correlation)",
+    menu: "Statistics > Tests and intervals > Reliability (intraclass correlation)",
+    about: "How consistent number ratings of the same rows are across raters, or across \
+            repeated measurements: the six intraclass correlations of Shrout and Fleiss, \
+            with F tests and confidence intervals. One column for each rater.",
+    widgets: &[
+        Widget::Variables {
+            id: "raters",
+            label: "Raters",
+            kinds: NUMBERS,
+            min: 2,
+            hint: "One number variable per rater or measurement. Rows missing any rating are \
+                   left out.",
+        },
+        CONFIDENCE,
+    ],
+    needs: &[],
+    styles: BASE,
+    check: no_check,
+    code: |a, _| {
+        let cols: Vec<String> = a.vars("raters").iter().map(|v| r_string(v)).collect();
+        format!(
+            "{ICC_R}({d}[c({cols})], {conf})",
+            d = a.data(),
+            cols = cols.join(", "),
+            conf = a.choice("conf"),
+        )
+    },
+};
+
 /// The dialogs of this module, in menu order.
 pub const SPECS: &[&Spec] = &[
     &ONE_T,
@@ -645,6 +812,8 @@ pub const SPECS: &[&Spec] = &[
     &KRUSKAL,
     &VARIANCE,
     &KAPPA,
+    &FLEISS,
+    &ICC,
 ];
 
 #[cfg(test)]

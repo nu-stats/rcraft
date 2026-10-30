@@ -359,11 +359,11 @@ skipped. It never gives a silent wrong answer.
   tests, exact tests, agreement measures (done in base R, each checked against R's own
   report: one-sample, two-sample and paired t-tests, test of proportions, exact binomial,
   Fisher's exact, Mann-Whitney, Wilcoxon signed-rank, Kruskal-Wallis, variance tests. Cohen's kappa, weighted or not, was added 2026-10-30;
-  Fleiss' kappa and intraclass correlation are still to do)
+  Fleiss' kappa and the intraclass correlations were added 2026-10-30)
 - P4.3 ANOVA and linear models: `lm`, anova tables, contrasts, post-hoc (done in base R:
   linear model with categorical predictors, interactions, weights and confidence
   intervals; one-way and factorial ANOVA with Tukey comparisons; each saves its model
-  under a chosen name. Type II and III sums of squares were added 2026-10-30, in base R, in the Objects pane's Model menu. Still to do: custom contrasts)
+  under a chosen name. Type II and III sums of squares were added 2026-10-30, in base R, in the Objects pane's Model menu. Custom contrasts, for one factor of a linear model, were added 2026-10-30)
 - P4.4 Generalised models: logit, probit, Poisson, negative binomial,
   ordinal, multinomial (logistic with logit, probit or complementary log-log links and odds
   ratios, and Poisson or quasi-Poisson with an exposure offset and rate ratios are done in

@@ -201,6 +201,8 @@ fn sample_text(id: &str, rule: TextRule) -> Option<&'static str> {
         "levels" => Some("low, medium, high"),
         "find" => Some("old"),
         "others" => Some("fit2"),
+        "factor" => Some("group"),
+        "contrasts" => Some("a = 1, b = -1"),
         _ => match rule {
             TextRule::Name => Some("new_name"),
             TextRule::Number => Some("1"),

@@ -251,3 +251,36 @@ fn a_model_that_is_not_linear_or_has_redundant_terms_is_refused_in_words() {
     let _ = outcome;
     ok(&mut e, "cat(1 + 1)");
 }
+
+#[test]
+fn both_types_agree_with_the_car_package_when_it_is_installed() {
+    let Some(mut e) = engine() else { return };
+    let have = ok(&mut e, "cat(requireNamespace('car', quietly = TRUE))");
+    if have.trim() != "TRUE" {
+        eprintln!("skipped: the R package car is not installed (CI has it)");
+        return;
+    }
+    ok(&mut e, MAKE);
+    ok(&mut e, &format!("two <- {}", dialog_code("fit", "2")));
+    ok(&mut e, &format!("three <- {}", dialog_code("fit", "3")));
+    ok(
+        &mut e,
+        "m3 <- lm(y ~ A * B, data = d, contrasts = list(A = 'contr.sum', B = 'contr.sum')); \
+         c2 <- car::Anova(fit, type = 2); c3 <- car::Anova(m3, type = 3)",
+    );
+    compare(
+        &mut e,
+        "two[c('A', 'B', 'A:B', 'Residuals'), 'Sum Sq']",
+        "c2[c('A', 'B', 'A:B', 'Residuals'), 'Sum Sq']",
+    );
+    compare(
+        &mut e,
+        "three[c('(Intercept)', 'A', 'B', 'A:B', 'Residuals'), 'Sum Sq']",
+        "c3[c('(Intercept)', 'A', 'B', 'A:B', 'Residuals'), 'Sum Sq']",
+    );
+    compare(
+        &mut e,
+        "three[c('A', 'B', 'A:B'), 'Pr(>F)']",
+        "c3[c('A', 'B', 'A:B'), 'Pr(>F)']",
+    );
+}

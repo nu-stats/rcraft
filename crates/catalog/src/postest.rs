@@ -631,6 +631,158 @@ pub const SUMS_OF_SQUARES: Spec = Spec {
     code: |a, _| format!("{SS_R}({m}, {t}L)", m = a.data(), t = a.choice("type")),
 };
 
+// ---- Custom contrasts ----
+
+const ADJUSTMENTS: &[Opt] = &[
+    Opt {
+        value: "none",
+        label: "None: each comparison on its own",
+    },
+    Opt {
+        value: "holm",
+        label: "Holm: for several comparisons at once",
+    },
+    Opt {
+        value: "bonferroni",
+        label: "Bonferroni: for several comparisons at once",
+    },
+];
+
+/// Planned comparisons between the levels of one factor of a linear model, in
+/// base R. The estimated mean of each level is the model's prediction averaged
+/// over every combination of the model's other factors (equal weights), with
+/// number variables held at their means; a comparison is a sum of those means
+/// with weights that add up to zero. Its standard error comes from the model's
+/// covariance matrix, so it is the usual one for the model, with the model's
+/// residual degrees of freedom. Models that bend a number variable (`poly()`,
+/// `log()`, `I(x^2)`) are refused, because "held at its mean" would be unclear.
+const CONTRASTS_R: &str = r#"(function(m, fac, spec, adjust, level) {
+  if (!inherits(m, "lm") || inherits(m, "glm")) stop("This needs a model fitted with the Linear model dialog (lm).")
+  if (anyNA(stats::coef(m))) stop("The model has terms that are redundant with each other (a coefficient is NA); take one of them out first.")
+  lv <- m$xlevels[[fac]]
+  if (is.null(lv)) stop(paste0("'", fac, "' is not a factor in the model. The factors are: ", paste(names(m$xlevels), collapse = ", "), "."))
+  mf <- stats::model.frame(m)
+  used <- names(mf)[-1L]
+  used <- used[!startsWith(used, "(")]
+  if (!all(used %in% all.vars(stats::formula(m)[[3L]]))) stop("Comparisons need a model whose number variables enter as they are (no poly(), log(), I(x^2) and the like).")
+  tt <- stats::delete.response(stats::terms(m))
+  others <- setdiff(names(m$xlevels), fac)
+  grid <- if (length(others)) expand.grid(m$xlevels[others], stringsAsFactors = FALSE) else data.frame(row = 1)
+  base <- mf[rep(1L, nrow(grid)), used, drop = FALSE]
+  for (v in used) if (!(v %in% names(m$xlevels))) base[[v]] <- mean(mf[[v]])
+  for (v in others) base[[v]] <- factor(grid[[v]], levels = m$xlevels[[v]])
+  rows <- t(vapply(lv, function(l) {
+    nd <- base
+    nd[[fac]] <- factor(rep(l, nrow(nd)), levels = lv)
+    colMeans(stats::model.matrix(tt, nd, contrasts.arg = m$contrasts))
+  }, numeric(length(stats::coef(m)))))
+  rownames(rows) <- lv
+  b <- stats::coef(m)
+  v <- stats::vcov(m)
+  df <- m$df.residual
+  parts <- trimws(strsplit(spec, ";", fixed = TRUE)[[1L]])
+  parts <- parts[nzchar(parts)]
+  if (!length(parts)) stop("Type at least one comparison.")
+  est <- se <- numeric(length(parts))
+  for (i in seq_along(parts)) {
+    pieces <- trimws(strsplit(parts[i], ",", fixed = TRUE)[[1L]])
+    w <- stats::setNames(numeric(length(lv)), lv)
+    for (p in pieces[nzchar(pieces)]) {
+      kv <- trimws(strsplit(p, "=", fixed = TRUE)[[1L]])
+      weight <- suppressWarnings(as.numeric(kv[2L]))
+      if (length(kv) != 2L || is.na(weight) || !is.finite(weight)) stop(paste0("'", p, "' should be a level, an equals sign and a weight, such as: Treated = 1."))
+      if (!(kv[1L] %in% lv)) stop(paste0("'", kv[1L], "' is not a level of ", fac, ". The levels are: ", paste(lv, collapse = ", "), "."))
+      w[kv[1L]] <- w[kv[1L]] + weight
+    }
+    if (abs(sum(w)) > 1e-8) stop(paste0("The weights of '", parts[i], "' add up to ", format(sum(w)), ", not 0, so it does not compare levels."))
+    cvec <- as.vector(w %*% rows)
+    est[i] <- sum(cvec * b)
+    se[i] <- sqrt(drop(t(cvec) %*% v %*% cvec))
+  }
+  num <- function(x) formatC(x, digits = 4, format = "f")
+  mean_est <- as.vector(rows %*% b)
+  mean_se <- sqrt(rowSums((rows %*% v) * rows))
+  cat("Estimated means of ", fac, " (other factors averaged, number variables at their means)\n", sep = "")
+  print(data.frame(Level = lv, Mean = round(mean_est, 4), `Std. Error` = round(mean_se, 4), check.names = FALSE), row.names = FALSE)
+  tval <- est / se
+  p_raw <- 2 * stats::pt(-abs(tval), df)
+  crit <- stats::qt(1 - (1 - level) / 2, df)
+  tab <- data.frame(Comparison = parts, Estimate = est, `Std. Error` = se, t = tval, df = df,
+                    p = stats::p.adjust(p_raw, adjust),
+                    lower = est - crit * se, upper = est + crit * se, check.names = FALSE)
+  names(tab)[6] <- if (adjust == "none") "p" else paste0("p (", adjust, ")")
+  names(tab)[7:8] <- paste0(c("lower ", "upper "), format(100 * level), "%")
+  cat("\nComparisons (intervals are not adjusted)\n")
+  print(tab, digits = 4, row.names = FALSE)
+  invisible(tab)
+})"#;
+
+pub const CONTRASTS: Spec = Spec {
+    entry: "Custom contrasts",
+    menu: "Objects > Model > Custom contrasts",
+    about: "Compare the levels of one factor in a linear model with comparisons you choose \
+            (a level against another, or against the mean of several), with an estimate, \
+            standard error, test and interval for each. The model is not changed.",
+    widgets: &[
+        Widget::Text {
+            id: "factor",
+            label: "Factor",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "The factor whose levels you compare, named as in the model.",
+        },
+        Widget::Text {
+            id: "contrasts",
+            label: "Comparisons",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Levels with weights that add up to zero, a comparison per group, groups \
+                   separated by semicolons. For example: Treated = 1, Control = -1; \
+                   Treated = 1, Low = -0.5, Control = -0.5. Level names must not contain \
+                   commas, semicolons or equals signs.",
+        },
+        Widget::Choice {
+            id: "adjust",
+            label: "p-values",
+            options: ADJUSTMENTS,
+            default: "none",
+            hint: "",
+        },
+        Widget::Choice {
+            id: "conf",
+            label: "Confidence level",
+            options: LEVELS,
+            default: "0.95",
+            hint: "",
+        },
+    ],
+    needs: &[],
+    styles: BASE,
+    check: |a| {
+        let mut out = Vec::new();
+        if a.name_text("factor").is_empty() {
+            out.push(Problem::new("factor", "Type the factor to compare."));
+        }
+        if a.values.text("contrasts").trim().is_empty() {
+            out.push(Problem::new(
+                "contrasts",
+                "Type at least one comparison, such as: A = 1, B = -1.",
+            ));
+        }
+        out
+    },
+    code: |a, _| {
+        format!(
+            "{CONTRASTS_R}({m}, {fac}, {spec}, {adjust}, {conf})",
+            m = a.data(),
+            fac = r_string(a.name_text("factor")),
+            spec = r_string(a.values.text("contrasts").trim()),
+            adjust = r_string(a.choice("adjust")),
+            conf = a.choice("conf"),
+        )
+    },
+};
+
 /// The dialogs offered on a model object, in menu order.
 pub const MODEL_SPECS: &[&Spec] = &[
     &MODEL_FIT,
@@ -641,6 +793,7 @@ pub const MODEL_SPECS: &[&Spec] = &[
     &ROBUST,
     &TEST_TERMS,
     &SUMS_OF_SQUARES,
+    &CONTRASTS,
     &MARGINAL_EFFECTS,
 ];
 

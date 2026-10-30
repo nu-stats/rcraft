@@ -337,9 +337,9 @@ fn level_list(
                 let text = level.as_deref().unwrap_or("NA");
                 let n = counts.get(i).copied().unwrap_or(0);
                 ui.horizontal(|ui| {
-                    let shown = format!("{}  {text}", i + 1);
+                    ui.label(RichText::new(format!("{}.", i + 1)).small().color(pal.dim));
                     let r = ui
-                        .selectable_label(false, RichText::new(shown).monospace().small())
+                        .selectable_label(false, RichText::new(text).monospace().small())
                         .on_hover_text(if i == 0 {
                             "The first level: the one a model compares the others with. Click to put it in the Command line."
                         } else {

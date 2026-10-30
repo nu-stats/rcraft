@@ -419,6 +419,8 @@ pub const SPECS: &[&Spec] = &[
     &inference::KRUSKAL,
     &inference::VARIANCE,
     &inference::KAPPA,
+    &inference::FLEISS,
+    &inference::ICC,
     &models::LINEAR,
     &models::ONE_WAY,
     &models::FACTORIAL,

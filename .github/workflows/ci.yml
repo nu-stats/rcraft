@@ -56,9 +56,9 @@ jobs:
             export REPO="https://packagemanager.posit.co/cran/$SNAPSHOT"
           fi
           echo "package repository: $REPO"
-          Rscript -e 'install.packages(c("readxl", "writexl", "haven", "arrow", "dplyr", "MASS", "nnet", "sandwich", "lmtest", "marginaleffects", "readr", "tidyr"), repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("writexl"), requireNamespace("haven"), requireNamespace("arrow"), requireNamespace("dplyr"), requireNamespace("MASS"), requireNamespace("nnet"), requireNamespace("sandwich"), requireNamespace("lmtest"), requireNamespace("marginaleffects"), requireNamespace("readr"), requireNamespace("tidyr"))' 2>&1 | tee pkgs.log || {
+          Rscript -e 'install.packages(c("readxl", "writexl", "haven", "arrow", "dplyr", "MASS", "nnet", "sandwich", "lmtest", "marginaleffects", "readr", "tidyr", "car"), repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("writexl"), requireNamespace("haven"), requireNamespace("arrow"), requireNamespace("dplyr"), requireNamespace("MASS"), requireNamespace("nnet"), requireNamespace("sandwich"), requireNamespace("lmtest"), requireNamespace("marginaleffects"), requireNamespace("readr"), requireNamespace("tidyr"), requireNamespace("car"))' 2>&1 | tee pkgs.log || {
             tail -n 25 pkgs.log | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > pkgs-tail.txt
-            echo "::error title=installing readxl, writexl, haven, arrow, dplyr, MASS, nnet, sandwich, lmtest and marginaleffects failed::$(cat pkgs-tail.txt)"
+            echo "::error title=installing readxl, writexl, haven, arrow, dplyr, MASS, nnet, sandwich, lmtest, marginaleffects, tidyr and car failed::$(cat pkgs-tail.txt)"
             exit 1
           }
       - name: Run cargo xtask ci

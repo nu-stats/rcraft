@@ -37,6 +37,10 @@ pub struct HeadlessOptions {
     pub dialog: Option<String>,
     /// After the demo, show the Help window on this dialog's page instead.
     pub dialog_help: Option<String>,
+    /// After everything else has settled, press the primary mouse button at
+    /// each of these points (in points, from the top left), one after the
+    /// other, letting the window settle between them.
+    pub clicks: Vec<[f32; 2]>,
     /// ... with these values set, as (widget id, value).
     pub set: Vec<(String, String)>,
     /// Open "Use my file" on this file.
@@ -81,6 +85,7 @@ impl HeadlessOptions {
             filter: None,
             dialog: None,
             dialog_help: None,
+            clicks: Vec::new(),
             set: Vec::new(),
             import: None,
             recent: Vec::new(),
@@ -167,12 +172,16 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     let started = Instant::now();
     let (mut next, mut settled) = (0usize, 0u32);
     let mut dialog_opened = false;
+    let mut clicks = options.clicks.iter();
+    let mut pending: std::collections::VecDeque<Vec<egui::Event>> =
+        std::collections::VecDeque::new();
     let mut shapes: Vec<egui::epaint::ClippedShape>;
     loop {
         let raw = egui::RawInput {
             screen_rect: Some(screen),
             time: Some(started.elapsed().as_secs_f64()),
             focused: true,
+            events: pending.pop_front().unwrap_or_default(),
             ..Default::default()
         };
         let output = ctx.run(raw, |ctx| app.ui(ctx));
@@ -201,8 +210,23 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
                 _ => settled += 1,
             }
         }
-        if settled >= SETTLE_FRAMES {
-            break;
+        if settled >= SETTLE_FRAMES && pending.is_empty() {
+            // the next click, as three frames: the pointer arrives, presses, lets go
+            if let Some(&[x, y]) = clicks.next() {
+                let pos = Pos2::new(x, y);
+                let button = |pressed| egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                };
+                pending.push_back(vec![egui::Event::PointerMoved(pos)]);
+                pending.push_back(vec![button(true)]);
+                pending.push_back(vec![button(false)]);
+                settled = 0;
+            } else {
+                break;
+            }
         }
         if started.elapsed() > GIVE_UP {
             return Err("the window did not settle within 90 seconds".into());

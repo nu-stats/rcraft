@@ -1508,3 +1508,37 @@ Not tried by hand: clicking the button in the live window (the address is built 
   checked against the `car` package, which is not installed here; this machine's R is the only one used.
 - Still to do from these three: custom contrasts (P4.3), a stronger agreement family (Fleiss' kappa for more than two
   raters, intraclass correlation), and the opened level list in a picture.
+
+## Leftovers cleared: Fleiss' kappa, intraclass correlation, custom contrasts, car check, 2026-10-30
+
+All in base R (no new package), each checked against published or independently computed figures.
+
+- **Agreement of several raters (Fleiss' kappa)**, `Statistics > Tests and intervals`: one column per rater,
+  rows missing any rating left out. Prints the categories with their share and their own kappa, observed and
+  chance agreement, Fleiss' kappa and the z test of kappa = 0 (his 1971 standard error under that hypothesis).
+  `engine/tests/reliability.rs` runs Fleiss's own example (10 subjects, 14 raters, 5 categories): kappa .2099
+  (published .210), and recomputes kappa and z from the table of counts by a separate route.
+- **Reliability (intraclass correlation)**: the six Shrout and Fleiss (1979) intraclass correlations from the
+  two-way analysis of variance, each with its F test and an interval at 90, 95 or 99% (the F-based intervals
+  of Shrout and Fleiss and McGraw and Wong, as the `psych` package gives), and the four mean squares. On the
+  paper's 6 judges-by-4 targets table: mean squares 11.24, 32.49, 1.02, 6.26; ICC(1,1) .17, (2,1) .29, (3,1)
+  .71, (1,k) .44, (2,k) .62, (3,k) .91, and every interval equal to psych's to two places (for example ICC(2,1)
+  .019 to .76, ICC(2,k) .071 to .93). The table is one line per type with a legend below it, so it does not wrap.
+- **Custom contrasts**, in the Objects pane's Model menu on a linear model: planned comparisons between the
+  levels of one factor ("Treated = 1, Control = -1; Treated = 1, Low = -0.5, Control = -0.5"). The estimated mean
+  of a level is the prediction averaged over every combination of the other factors (equal weights) with number
+  variables at their means; a comparison's standard error comes from the model's covariance matrix and the
+  residual degrees of freedom. Prints the estimated means (with standard errors) and the comparisons with
+  estimate, standard error, t, df, p (unadjusted, Holm or Bonferroni) and an interval (not adjusted). Weights
+  that do not add up to zero, a level the factor lacks, a name that is not a factor, a curved number variable
+  (`poly`, `log`, `I(x^2)`) and a generalised model are each refused in words. `engine/tests/contrasts.rs`:
+  one factor against the textbook `sqrt(MSE * sum(w^2 / n))`; additive models against `summary()`
+  coefficients; an interaction model against `predict()` averaged over the other factor; adjusted p-values
+  against `p.adjust`.
+- **Type II/III against `car`**: CI now installs `car`, and `sums_of_squares.rs` compares both types with
+  `car::Anova` (this machine has no `car`, so the test skips here and runs in CI).
+- **Picture mode can click** (`--click X,Y`, repeatable): it presses the mouse at a point once everything has
+  settled, so a picture can show a folded list opened or a menu used. First use: the opened factor level list
+  (the position is now a dimmed number apart from the level so "1  4" no longer reads as fourteen).
+- Still to do from this: a Bayesian or weighted version of agreement, contrasts of means across several
+  factors at once (this takes one factor), and contrasts for generalised models.
