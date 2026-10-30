@@ -231,8 +231,15 @@ impl Session {
         match fit {
             Fit::Logit | Fit::Probit => {
                 let link = if fit == Fit::Logit { "logit" } else { "probit" };
+                // the first fit only finds the rows and terms; stata_perfect
+                // applies Stata's check for perfect prediction and fits again
                 out.line(format!(
-                    "stata_estimates <- stats::glm(as.numeric({dep} != 0) ~ {right}, family = stats::binomial(link = \"{link}\"), data = {src}, {control})"
+                    "stata_estimates <- suppressWarnings(stats::glm(as.numeric({dep} != 0) ~ {right}, family = stats::binomial(link = \"{link}\"), data = {src}, {control}))"
+                ));
+                self.helpers.insert("stata_perfect");
+                out.line(format!(
+                    "stata_estimates <- stata_perfect(stata_estimates{})",
+                    if Self::quiet(c) { ", notes = FALSE" } else { "" }
                 ));
                 if fit == Fit::Probit {
                     self.helpers.insert("stata_probit_newton");
@@ -240,8 +247,8 @@ impl Session {
                 }
                 out.caveat("the outcome is 1 where it is not 0 (and not missing), as Stata takes it");
                 out.caveat(
-                    "a variable that predicts the outcome perfectly is not dropped as Stata drops \
-                     it: R warns and gives a very large coefficient",
+                    "a variable that predicts the outcome perfectly is dealt with as Stata does: \
+                     omitted with the rows it decides, or the fit stops with Stata's message",
                 );
             }
             Fit::Poisson => out.line(format!(
@@ -405,3 +412,103 @@ impl Session {
 pub(super) fn no_missing_cluster() -> &'static str {
     "if (anyNA(stata_cluster)) stop(\"the cluster variable is missing in rows the model uses; Stata would leave those rows out\")"
 }
+
+/// Stata's check for perfect prediction before `logit` and `probit`, decoded
+/// in Stata 19 (see the P2B.4 notes). Each regressor in turn, on the rows still
+/// left (a factor variable as one indicator per level, the base included, in
+/// the order of the values), is tested for a cut c:
+///
+/// - the outcome is 1 below some value and 0 above it, or the other way round,
+///   with no value in common: Stata stops, `outcome = x <= 4 predicts data
+///   perfectly` (r(2000));
+/// - the outcome is determined on both sides of c and mixed at c: the
+///   variable is omitted and only the rows at c are kept (`... except for
+///   x == 4 subsample`);
+/// - determined on one side of c only: the same, worded `x != c predicts
+///   success|failure perfectly`.
+///
+/// A factor left with one level, and the interactions it is in, are then
+/// omitted as Stata omits them for collinearity. The stop is an R error of
+/// class `stata_r2000`, which a `by` loop passes over as Stata's `by` does.
+pub(super) const PERFECT_HELPER: &str = r#"stata_perfect <- function(fit, notes = TRUE) {
+  env <- parent.frame()
+  r2000 <- function(m) stop(structure(class = c("stata_r2000", "error", "condition"),
+                                      list(message = m, call = NULL)))
+  say <- function(...) if (notes) cat(..., "\n", sep = "")
+  num <- function(v) format(v, digits = 15)
+  mf <- stats::model.frame(fit)
+  y <- stats::model.response(mf)
+  if (length(unique(y)) < 2) {
+    r2000("outcome does not vary; remember:\n                                  0 = negative outcome,\n        all other nonmissing values = positive outcome")
+  }
+  keep <- rep(TRUE, nrow(mf))
+  labs <- attr(stats::terms(fit), "term.labels")
+  gone <- character(0)
+  for (t in labs) {
+    v <- mf[[t]]
+    if (is.null(v)) next
+    if (is.factor(v)) {
+      name <- all.vars(stats::as.formula(paste("~", t)))[1]
+      lv <- levels(v)
+      o <- suppressWarnings(order(as.numeric(lv), lv))
+      cols <- lapply(lv[o], function(l) list(name = paste0(l, ".", name), x = as.numeric(v == l)))
+    } else if (is.numeric(v) && is.null(dim(v))) {
+      cols <- list(list(name = t, x = as.numeric(v)))
+    } else {
+      next
+    }
+    for (cl in cols) {
+      x <- cl$x[keep]
+      yy <- y[keep]
+      if (length(unique(x)) < 2) next
+      lo1 <- min(x[yy == 1]); hi1 <- max(x[yy == 1])
+      lo0 <- min(x[yy == 0]); hi0 <- max(x[yy == 0])
+      n <- cl$name
+      if (hi1 < lo0) r2000(paste0("outcome = ", n, " <= ", num(hi1), " predicts data perfectly"))
+      if (hi0 < lo1) r2000(paste0("outcome = ", n, " > ", num(hi0), " predicts data perfectly"))
+      if (hi1 == lo0) {
+        cut <- hi1; below <- "success"; above <- "failure"; sign <- " < "
+      } else if (hi0 == lo1) {
+        cut <- hi0; below <- "failure"; above <- "success"; sign <- " > "
+      } else {
+        next
+      }
+      nb <- sum(x < cut)
+      na <- sum(x > cut)
+      if (nb > 0 && na > 0) {
+        say("note: outcome = ", n, sign, num(cut), " predicts data perfectly except for\n      ",
+            n, " == ", num(cut), " subsample:\n      ", n, " omitted and ", nb + na, " obs not used.")
+      } else {
+        say("note: ", n, " != ", num(cut), " predicts ", if (nb > 0) below else above,
+            " perfectly;\n      ", n, " omitted and ", nb + na, " obs not used.")
+      }
+      keep[which(keep)[x != cut]] <- FALSE
+      if (!is.factor(v)) gone <- c(gone, t)
+    }
+  }
+  # the first fit was only for its rows and terms: fit again where the warnings show
+  if (all(keep) && length(gone) == 0) return(eval(fit$call, env))
+  # a factor left with one level goes, with every term it is in
+  for (t in labs) {
+    v <- mf[[t]]
+    if (is.factor(v) && length(unique(v[keep])) < 2) {
+      fac <- all.vars(stats::as.formula(paste("~", t)))[1]
+      for (l in levels(v)[-1]) say("note: ", l, ".", fac, " omitted because of collinearity.")
+      gone <- c(gone, labs[vapply(labs, function(l) fac %in% all.vars(stats::as.formula(paste("~", l))), TRUE)])
+    }
+  }
+  gone <- unique(gone)
+  tt <- stats::terms(fit)
+  f <- if (length(gone) == length(labs)) {
+    stats::update(stats::formula(fit), . ~ 1)
+  } else if (length(gone) > 0) {
+    stats::formula(stats::drop.terms(tt, dropx = which(labs %in% gone), keep.response = TRUE))
+  } else {
+    stats::formula(fit)
+  }
+  d <- as.data.frame(fit$data)
+  d <- d[match(rownames(mf)[keep], rownames(d)), , drop = FALSE]
+  call <- stats::update(fit, formula. = f, evaluate = FALSE)
+  call$data <- d
+  eval(call, env)
+}"#;

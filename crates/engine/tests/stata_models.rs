@@ -1328,3 +1328,152 @@ fn ttest_intervals_at_other_levels_agree_with_stata_19() {
         near_stata(&got, &[lo, hi], 5e-7, cmd);
     }
 }
+
+/// Twelve rows on which a regressor predicts the outcome perfectly in each of
+/// the ways Stata tells apart, as in the Stata 19 probe (see the P2B.4 notes).
+fn separation_fixture(e: &mut Engine) -> String {
+    let dir = std::env::temp_dir().join(format!(
+        "rcraft-stata-perfect-{}-{}",
+        std::process::id(),
+        fresh()
+    ));
+    let _ = std::fs::create_dir_all(&dir);
+    let d = dir.display().to_string().replace('\\', "/");
+    ok(
+        e,
+        &format!(
+            "local({{
+  y <- c(1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1, 0)
+  x <- c(1, 2, 3, 4, 4, 5, 6, 7, 8, 9, 10, 11)
+  d <- c(0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 1, 0)
+  w <- c(3, 1, 4, 1, 5, 9, 2, 6, 5, 3, 5, 8)
+  k <- c(1, 2, 3, 1, 2, 3, 1, 2, 3, 1, 3, 3)
+  y3 <- as.numeric(x > 4); y3[4] <- 1
+  haven::write_dta(data.frame(y, x, d, w, k,
+    y2 = as.numeric(x <= 4), y3,
+    y4 = ifelse(d == 1, 1, y), y5 = ifelse(d == 1, 0, y), y6 = ifelse(d == 0, 0, y),
+    y7 = ifelse(k == 2, 0, y), y8 = as.numeric(x > 6)), '{d}/sep.dta')
+}})"
+        ),
+    );
+    d
+}
+
+#[test]
+fn perfect_prediction_is_dealt_with_as_stata_19_deals_with_it() {
+    let Some(mut e) = engine() else { return };
+    let dir = separation_fixture(&mut e);
+    let use_ = format!("use \"{dir}/sep.dta\"\n");
+    let fitted = |e: &mut Engine, cmd: &str| -> (String, Vec<f64>) {
+        let text = ok(e, &script(&format!("{use_}{cmd}\n")));
+        let v = numbers(e, "0", "stata_b, nobs(stata_estimates)");
+        (text, v)
+    };
+
+    // a dummy that decides one outcome: omitted with its rows, the rest fitted
+    // on the others; Stata 19's e(b) and e(N) (the zero for the omitted
+    // variable is left out here)
+    let stata = [-0.32934464815365411, 0.90411677071097207];
+    for (cmd, note) in [
+        ("logit y4 d w", "note: d != 0 predicts success perfectly;"),
+        ("logit y5 d w", "note: d != 0 predicts failure perfectly;"),
+        ("logit y4 w d", "note: d != 0 predicts success perfectly;"),
+        (
+            "logit y4 i.d w",
+            "note: 0.d != 1 predicts success perfectly;",
+        ),
+        (
+            "logit y4 c.w##i.d",
+            "note: 0.d != 1 predicts success perfectly;",
+        ),
+    ] {
+        let (text, v) = fitted(&mut e, cmd);
+        assert!(text.contains(note), "{cmd}: {text}");
+        assert!(
+            text.contains("omitted and 4 obs not used."),
+            "{cmd}: {text}"
+        );
+        let (cons, w) = (at(&v, 0), at(&v, 1));
+        near_stata(&[w, cons], &stata, 1e-9, cmd);
+        assert_eq!(at(&v, v.len() - 1), 8.0, "{cmd}: e(N)");
+    }
+    let (text, v) = fitted(&mut e, "logit y7 i.k w");
+    assert!(
+        text.contains("note: 2.k != 0 predicts failure perfectly;")
+            && text.contains("3 obs not used."),
+        "{text}"
+    );
+    // the factor keeps its levels 1 and 3, so 3.k is still estimated
+    near_stata(
+        &v[..3],
+        &[2.9785114719954278, 3.8139418395161799, -1.3030142870170742],
+        1e-9,
+        "logit y7 i.k w",
+    );
+    assert_eq!(at(&v, 3), 9.0, "e(N)");
+
+    // the quasi-complete cases: only the rows at the cut are kept
+    let (text, v) = fitted(&mut e, "logit y3 x");
+    assert!(
+        text.contains("note: outcome = x > 4 predicts data perfectly except for")
+            && text.contains("x == 4 subsample:")
+            && text.contains("x omitted and 10 obs not used."),
+        "{text}"
+    );
+    near_stata(&v, &[0.0, 2.0], 1e-9, "logit y3 x: a constant on two rows");
+    let (text, v) = fitted(&mut e, "logit y x if x <= 4 | x >= 5 & y == 0");
+    assert!(
+        text.contains("note: outcome = x < 4 predicts data perfectly except for")
+            && text.contains("x omitted and 8 obs not used."),
+        "{text}"
+    );
+    near_stata(&v, &[0.0, 2.0], 1e-9, "the same with an if");
+    let (text, v) = fitted(&mut e, "logit y6 d w");
+    assert!(
+        text.contains("note: d != 1 predicts failure perfectly;")
+            && text.contains("note: w != 5 predicts success perfectly;")
+            && text.contains("w omitted and 2 obs not used."),
+        "two in turn, the second on the rows the first left: {text}"
+    );
+    near_stata(&v, &[0.0, 2.0], 1e-9, "logit y6 d w");
+
+    // complete separation stops, in Stata's words, for probit too
+    for (cmd, message) in [
+        ("logit y2 x", "outcome = x <= 4 predicts data perfectly"),
+        ("logit y2 x w", "outcome = x <= 4 predicts data perfectly"),
+        ("probit y2 x", "outcome = x <= 4 predicts data perfectly"),
+        ("logit y8 w x", "outcome = x > 6 predicts data perfectly"),
+        ("logit y3 x w", "outcome = w <= 1 predicts data perfectly"),
+    ] {
+        let (outcome, text) = run(&mut e, &script(&format!("{use_}{cmd}\n")));
+        assert_eq!(outcome, Outcome::Error, "{cmd}: {text}");
+        assert!(text.contains(message), "{cmd}: {text}");
+    }
+
+    // and the ordinary fits are untouched: no note, the same estimates as glm
+    let (text, v) = fitted(&mut e, "logit y w");
+    assert!(!text.contains("note:"), "{text}");
+    let g = numbers(
+        &mut e,
+        "0",
+        "stats::coef(stats::glm(y ~ w, family = stats::binomial(), data = sep, control = stats::glm.control(epsilon = 1e-12)))",
+    );
+    near_stata(&v[..2], &g, 1e-9, "logit y w against glm");
+}
+
+#[test]
+fn by_goes_on_past_a_group_that_stata_cannot_fit() {
+    let Some(mut e) = engine() else { return };
+    let dir = separation_fixture(&mut e);
+    // in Stata 19 `by` reports r(2000) for the group and goes on to the next
+    let code = script(&format!(
+        "use \"{dir}/sep.dta\"\nsort d\nby d: logit y2 x\nby d: logit y w\n"
+    ));
+    let text = ok(&mut e, &code);
+    assert_eq!(
+        text.matches("predicts data perfectly").count(),
+        2,
+        "both groups, then the next command: {text}"
+    );
+    assert!(text.contains("-> d = 1"), "{text}");
+}

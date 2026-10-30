@@ -1904,3 +1904,40 @@ first on the statistics tests' own data, so the rules below are Stata's and not 
   four fits and the meanonly results against Stata 19's numbers to 12 digits; the p-value against `cor.test`, Sidak's
   and beta by their definitions; `star()`/`print()` in the printed table; the Stata messages. P2B.4 has 58 real-R
   cases.
+
+## P2B.4 by with the statistics commands and the models, 2026-10-30
+
+`by varlist:`, `bysort varlist:`, `by varlist, sort:` and `bysort g (h):` before `summarize`, `tabulate`, `tab1`, `tab2`,
+`correlate`, `pwcorr`, `ttest`, `regress`, `logit`, `probit`, `poisson`, `nbreg`, `ologit`, `oprobit`, `mlogit`,
+`anova`, `xtreg` and `ivregress` (`Session::by_each` in `statatr/src/data_r.rs`, `stata_by_groups` in `stats.rs`).
+The data commands keep their own `by` through `dplyr::group_by`.
+
+- **How.** The command is translated once, against a frame `stata_d`, and the R runs it in a loop at the top level over
+  the groups, so after a model `stata_b`, `stata_vcov`, `stata_df` and `stata_data` are the last group's, which is
+  Stata's `e()` after `by` (checked: `bysort g: regress z x` leaves the second group's b, se and N).
+- **Stata's rules, from Stata 19.** The groups come in sorted order with a missing value last as a group of its own
+  (`-> g = .`), strings by their bytes; the heading shows value labels (`-> g = low`) and every variable
+  (`-> g = low, b = 0`); `quietly` hides the headings too. `bysort` sorts the data in memory. Plain `by` on rows out
+  of order is Stata's `not sorted`; Stata decides that from the dataset's sort flag, so a file saved unsorted fails
+  there even when its rows are in order, while the R checks the rows themselves and so runs the do-files that run in
+  Stata. `in` is refused in Stata's words (`'in' may not be combined with 'by'`), as is any `by` option but `sort`
+  (`rc0`), and a varlist that is not plain names.
+- **Tests** (`by_runs_each_group_in_turn_as_stata_19_does`, real R): the headings and their order in all those cases,
+  each group's figures against the same command on that group alone, Stata 19's chi-squareds, correlations, `(obs=)`
+  and t inside `by`, and the last group's regress and logit estimates. The logit holds to 6 digits: on its five rows
+  Stata stops with a score of about 4e-7, R's estimates have one of about 1e-15. P2B.4 has 61 real-R cases.
+- **Found on the way, and done: Stata's check for perfect prediction** (`stata_perfect`, `ml.rs`). `by g: logit b x`
+  on this data gives `outcome = x <= 4 predicts data perfectly` in Stata, where R's `glm` warns and prints huge
+  coefficients. Decoded in Stata 19 on twelve rows built for it: before `logit` and `probit`, each regressor in turn
+  (a factor variable as one indicator per level, the base included, in value order), on the rows still left, is
+  tested for a cut c. The outcome 1 below and 0 above, or the reverse, with no value shared: Stata stops,
+  `outcome = x <= 4 predicts data perfectly` (or `x > 8`; r(2000)). Determined on both sides and mixed at c: the
+  variable is omitted and only the rows at c kept (`note: outcome = x > 4 predicts data perfectly except for x == 4
+  subsample: x omitted and 10 obs not used.`). Determined on one side only: the same, worded
+  `note: d != 0 predicts success perfectly; d omitted and 4 obs not used.` (`0.d != 1` for a factor's base). A factor
+  left with one level, and its interactions, then go for collinearity. The translation does all of this and fits
+  again on what is left; a `by` loop goes on past a group's r(2000), as Stata's `by` does. Tests
+  (`stata_models.rs`, 2 cases): all eleven of the probe's fits, the kept coefficients and e(N) against Stata 19's to
+  10 digits and every note and message word for word, and an ordinary logit against `glm`. Still not translated:
+  the zero Stata keeps in e(b) for an omitted variable (R's coefficients leave it out).
+- **Not done:** `by` with `margins`, `predict`, `test`, `lincom`, `estat`; `by`'s `rc0`.

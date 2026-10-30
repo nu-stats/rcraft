@@ -259,7 +259,7 @@ Tasks:
   and nbreg differ from R's own), `N / (N - 1)` for robust likelihood models,
   the most frequent outcome as mlogit's base, Wald intervals, predictions in
   every row as floats, `estat ic` counting only coefficients. Still to do:
-  `stset`/`stcox`, weights and `by`. `tab1`, `tab2` (`firstonly`, `chi2`), `pwcorr` (`sig`, `obs`, `star()`, `print()`, `bonferroni`, `sidak`, `listwise`), `summarize, meanonly` and `regress, beta` are done and match Stata 19. `ivregress` is done
+  `stset`/`stcox` and weights. `by` (and `bysort`) before the statistics commands and the models is done, as is Stata's check for perfect prediction before `logit`/`probit`. `tab1`, `tab2` (`firstonly`, `chi2`), `pwcorr` (`sig`, `obs`, `star()`, `print()`, `bonferroni`, `sidak`, `listwise`), `summarize, meanonly` and `regress, beta` are done and match Stata 19. `ivregress` is done
   (`2sls`, `liml`, `gmm`, `small`, `vce(robust|cluster)` for 2sls, `first`,
   `estat endogenous` and `overid`, `predict`, `test`), matching Stata 19 to
   10 digits; not yet robust `liml`, `gmm` with its own `vce()`/`wmatrix()`,

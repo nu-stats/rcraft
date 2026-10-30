@@ -163,6 +163,29 @@ fn opener_text(o: &Opener) -> String {
     }
 }
 
+/// The commands a `by` prefix runs group by group (data commands have their
+/// own `by`, through `dplyr::group_by`).
+const BY_EACH: &[&str] = &[
+    "summarize",
+    "tabulate",
+    "tab1",
+    "tab2",
+    "correlate",
+    "pwcorr",
+    "ttest",
+    "regress",
+    "logit",
+    "probit",
+    "poisson",
+    "nbreg",
+    "ologit",
+    "oprobit",
+    "mlogit",
+    "anova",
+    "xtreg",
+    "ivregress",
+];
+
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
     "regress",
@@ -234,6 +257,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tab1" => stats::TAB1_HELPER,
         "stata_tab2" => stats::TAB2_HELPER,
         "stata_pwcorr" => stats::PWCORR_HELPER,
+        "stata_by_groups" => stats::BY_GROUPS_HELPER,
         "stata_coefs" => model::COEFS_HELPER,
         "stata_ib" => model::IB_HELPER,
         "stata_glm_vcov" => ml::GLM_VCOV_HELPER,
@@ -241,6 +265,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ml_header" => ml::ML_HEADER_HELPER,
         "stata_multinom_b" => ml::MULTINOM_B_HELPER,
         "stata_probit_newton" => ml::PROBIT_NEWTON_HELPER,
+        "stata_perfect" => ml::PERFECT_HELPER,
         "stata_outcome_probs" => post::OUTCOME_PROBS_HELPER,
         "stata_test" => post::TEST_HELPER,
         "stata_lincom" => post::LINCOM_HELPER,
@@ -584,6 +609,114 @@ impl Session {
         Ok(())
     }
 
+    /// `by g: command` for the statistics commands and the models: the command
+    /// translated once against `stata_d`, then run on each group in turn in a
+    /// loop at the top level, so that after a model `stata_b` and the rest are
+    /// the last group's, which is Stata's `e()` after `by`.
+    fn by_each(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let Some((varlist, sort, options)) = c.prefixes.iter().find_map(|p| match p {
+            Prefix::By {
+                varlist,
+                sort,
+                options,
+            } => Some((varlist.clone(), *sort, options.clone())),
+            _ => None,
+        }) else {
+            return self.dispatch(c, out);
+        };
+        // `sort` is already in `sort`; `rc0` and the rest are not translated
+        if let Some(o) = options
+            .split([',', ' '])
+            .map(str::trim)
+            .find(|o| !o.is_empty() && *o != "sort")
+        {
+            return Err(no(format!("by with the option {o} is not translated yet")));
+        }
+        if c.parts.in_range.is_some() {
+            return Err(no("'in' may not be combined with 'by'"));
+        }
+        let (group, within) = match varlist.split_once('(') {
+            Some((g, w)) => (g.to_string(), w.trim_end_matches(')').to_string()),
+            None => (varlist.clone(), String::new()),
+        };
+        let names = |s: &str| -> Result<Vec<String>, Untranslated> {
+            s.split_whitespace()
+                .map(|w| {
+                    if is_name(w) {
+                        Ok(w.to_string())
+                    } else {
+                        Err(no(format!(
+                            "by {w}: only variable names written out are translated in a by prefix"
+                        )))
+                    }
+                })
+                .collect()
+        };
+        let (group, within) = (names(&group)?, names(&within)?);
+        if group.is_empty() {
+            return Err(no("by needs a variable"));
+        }
+        let d = self.data()?;
+        let mut inner = c.clone();
+        inner.prefixes.retain(|p| !matches!(p, Prefix::By { .. }));
+        let saved = self.data.replace("stata_d".into());
+        let mut body = Out::default();
+        let done = self.dispatch(&inner, &mut body);
+        self.data = saved;
+        done?;
+        let vector = |v: &[String]| {
+            let v: Vec<String> = v.iter().map(|x| r_text(x)).collect();
+            format!("c({})", v.join(", "))
+        };
+        if sort {
+            out.package("dplyr");
+            let all: Vec<String> = group.iter().chain(&within).map(|v| r_name(v)).collect();
+            out.line(format!("{d} <- dplyr::arrange({d}, {})", all.join(", ")));
+        }
+        self.helpers.insert("stata_by_groups");
+        let mut args = vec![d.clone(), vector(&group)];
+        if !within.is_empty() {
+            args.push(format!("within = {}", vector(&within)));
+        }
+        if sort {
+            args.push("sorted = TRUE".into());
+        }
+        out.line(format!(
+            "for (stata_g in stata_by_groups({})) {{",
+            args.join(", ")
+        ));
+        if !Self::quiet(c) {
+            out.line("cat(\"\\n-> \", stata_g$label, \"\\n\", sep = \"\")");
+        }
+        out.line(format!("stata_d <- {d}[stata_g$rows, , drop = FALSE]"));
+        if body.code.iter().any(|l| l.contains("stata_perfect(")) {
+            // Stata's by goes on to the next group after r(2000)
+            out.line("tryCatch({");
+            out.code.extend(body.code);
+            out.line("}, stata_r2000 = function(e) cat(conditionMessage(e), \"\\n\", sep = \"\"))");
+        } else {
+            out.code.extend(body.code);
+        }
+        out.line("}");
+        for cv in body.caveats {
+            out.caveat(cv);
+        }
+        for p in body.packages {
+            out.package(p);
+        }
+        out.caveat(
+            "by: each group in turn, in sorted order with a missing value last, as in Stata; \
+             after a model, the results kept are the last group's",
+        );
+        if !sort {
+            out.caveat(
+                "the rows must already be in order of the by variables; R checks the order \
+                 itself and stops with Stata's not sorted",
+            );
+        }
+        Ok(())
+    }
+
     fn command(&mut self, c: &Command) -> Result<RCode, Untranslated> {
         if c.prefixes.iter().any(|p| matches!(p, Prefix::Frame(_))) {
             return Err(no("frames (frame name:) are translated in a later step"));
@@ -592,7 +725,12 @@ impl Session {
             return Err(no(format!("{} with weights is not translated yet", c.name)));
         }
         let mut out = Out::default();
-        let done = self.dispatch(c, &mut out);
+        let by = c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. }));
+        let done = if by && BY_EACH.contains(&c.name.as_str()) {
+            self.by_each(c, &mut out)
+        } else {
+            self.dispatch(c, &mut out)
+        };
         // a line that is not translated still runs in Stata, so it counts too
         if done.is_err() || !LEAVE_DATA_ALONE.contains(&c.name.as_str()) {
             self.changed_since_fit = done.is_err() || !MODELS.contains(&c.name.as_str());

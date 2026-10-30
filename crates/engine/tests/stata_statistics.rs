@@ -456,8 +456,8 @@ fn the_statistics_commands_say_why_they_refuse_what_they_refuse() {
         "tab1 and tab2 are not this command"
     );
     assert!(
-        refusal("use \"d.dta\"\nbysort g: summarize x\n").contains("by with summarize"),
-        "by is not translated yet"
+        refusal("use \"d.dta\"\nbysort g: margins\n").contains("by with margins"),
+        "by with margins is not translated yet"
     );
     assert!(
         refusal("summarize x\n").contains("no data is in memory"),
@@ -791,5 +791,155 @@ fn tab2_pwcorr_meanonly_and_beta_say_what_stata_says() {
     assert!(
         text.contains("(s ignored because string variable)"),
         "{text}"
+    );
+}
+
+/// `by` before a statistics command or a model, against Stata 19 on the same
+/// data: one heading per group in sorted order (value labels shown, a missing
+/// value last), and after a model the last group's estimates.
+#[test]
+fn by_runs_each_group_in_turn_as_stata_19_does() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let near = |got: &[f64], stata: &[f64], what: &str| {
+        assert_eq!(got.len(), stata.len(), "{what}: {got:?} against {stata:?}");
+        for (g, s) in got.iter().zip(stata) {
+            assert!(
+                (g - s).abs() <= 1e-9 * s.abs().max(1.0),
+                "{what}: {g} against Stata's {s}"
+            );
+        }
+    };
+    let use_ = format!("use \"{dir}/study.dta\"\n");
+    let headings = |text: &str| -> Vec<String> {
+        text.lines()
+            .filter_map(|l| l.strip_prefix("-> "))
+            .map(|l| l.trim().to_string())
+            .collect()
+    };
+
+    // the groups in order, and each group's own figures (by definition: the
+    // same command on that group's rows alone)
+    let code = script(&format!("{use_}by g: summarize x z\n"));
+    let text = ok(&mut e, &code);
+    assert_eq!(headings(&text), ["g = 0", "g = 1"], "{text}");
+    let v = numbers(
+        &mut e,
+        "{ a <- stata_summarize(study[study$g == 0, c(\"x\", \"z\")]); b <- stata_summarize(study[study$g == 1, c(\"x\", \"z\")]) }",
+        "a$mean, b$mean",
+    );
+    near(
+        &v,
+        &[3.0, 4.25, 8.0, 5.6],
+        "each group's means, as Stata printed them",
+    );
+    assert!(text.contains("4.25") && text.contains("5.6"), "{text}");
+
+    // bysort sorts the data; by on rows out of order stops as Stata does
+    let code = script(&format!("{use_}by b: summarize x\n"));
+    let (outcome, text) = run(&mut e, &code);
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("not sorted"), "{text}");
+    let code = script(&format!("{use_}bysort b: summarize x\nby b: summarize x\n"));
+    let text = ok(&mut e, &code);
+    assert_eq!(
+        headings(&text),
+        ["b = 0", "b = 1", "b = 0", "b = 1"],
+        "after bysort the rows are in order: {text}"
+    );
+    assert!(
+        text.contains("4.833333"),
+        "Stata's mean of x where b = 1: {text}"
+    );
+
+    // a missing value is a group of its own, the last
+    let code = script(&format!(
+        "{use_}replace g = . in 10\nsort g\nby g: summarize x\n"
+    ));
+    let text = ok(&mut e, &code);
+    assert_eq!(headings(&text), ["g = 0", "g = 1", "g = ."], "{text}");
+
+    // value labels in the heading, two variables, and a within-group sort
+    let code = script(&format!(
+        "{use_}label define gl 0 \"low\" 1 \"high\"\nlabel values g gl\nby g: summarize x\nby g b, sort: summarize x\nbysort g (id): summarize x\n"
+    ));
+    let text = ok(&mut e, &code);
+    assert_eq!(
+        headings(&text),
+        [
+            "g = low",
+            "g = high",
+            "g = low, b = 0",
+            "g = low, b = 1",
+            "g = high, b = 0",
+            "g = high, b = 1",
+            "g = low",
+            "g = high"
+        ],
+        "{text}"
+    );
+
+    // a string variable's groups, with tabulate, correlate and ttest inside
+    let code = script(&format!(
+        "{use_}bysort s: tabulate g b, chi2\nby s: correlate x z\nby s: ttest x, by(g)\n"
+    ));
+    let text = ok(&mut e, &code);
+    assert_eq!(
+        headings(&text),
+        ["s = a", "s = b", "s = a", "s = b", "s = a", "s = b"]
+    );
+    // Stata 19: Pearson chi2(1) = 0.1389 and 2.2222; (obs=4) and (obs=5); t = -3 on 3 df
+    for want in [
+        "0.138889", "2.22222", "(obs=4)", "(obs=5)", "-0.3207", "0.3434",
+    ] {
+        assert!(text.contains(want), "{want} in {text}");
+    }
+    assert_eq!(text.matches("t = -3, df = 3").count(), 2, "{text}");
+
+    // after a model, e() is the last group's: Stata 19's figures
+    let code = script(&format!("{use_}bysort g: regress z x\n"));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        "0",
+        "stata_b[2], sqrt(stata_vcov[2, 2]), nrow(stata_data)",
+    );
+    near(
+        &v,
+        &[-0.40000000000000013, 0.95916630466254393, 5.0],
+        "regress after by: the last group",
+    );
+    let code = script(&format!("{use_}bysort s: logit b x\n"));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        "0",
+        "stata_b[2], sqrt(stata_vcov[2, 2]), stata_b[1]",
+    );
+    // to 6 digits: on these five rows Stata stops with a score of about 4e-7,
+    // and R's estimates have one of about 1e-15, so the gap is Stata's
+    let stata = [
+        -0.21974952232028047,
+        0.34977355931649418,
+        1.7620447717596983,
+    ];
+    assert_eq!(v.len(), 3, "{v:?}");
+    for (g, s) in v.iter().zip(stata) {
+        assert!(
+            (g - s).abs() <= 1e-6 * s.abs().max(1.0),
+            "logit after by: {g} against Stata's {s}"
+        );
+    }
+    // quietly: no headings, the same estimates
+    let code = script(&format!("{use_}quietly bysort g: regress z x\n"));
+    let text = ok(&mut e, &code);
+    assert!(headings(&text).is_empty(), "{text}");
+    let v = numbers(&mut e, "0", "stata_b[2]");
+    near(&v, &[-0.40000000000000013], "quietly by: regress");
+
+    // Stata's words for in
+    assert_eq!(
+        refusal("use s\nby g: summarize x in 1/3"),
+        "'in' may not be combined with 'by'"
     );
 }
