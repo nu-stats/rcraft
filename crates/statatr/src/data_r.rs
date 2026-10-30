@@ -25,8 +25,10 @@
 //! otherwise taken as numbers. Abbreviated variable names cannot be resolved
 //! without the data and are taken as written.
 
+mod ml;
 mod model;
 mod more;
+mod post;
 mod stats;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -180,6 +182,15 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
         "stata_tabulate" => stats::TABULATE_HELPER,
         "stata_correlate" => stats::CORRELATE_HELPER,
+        "stata_coefs" => model::COEFS_HELPER,
+        "stata_glm_vcov" => ml::GLM_VCOV_HELPER,
+        "stata_nbreg_vcov" => ml::NBREG_VCOV_HELPER,
+        "stata_ml_header" => ml::ML_HEADER_HELPER,
+        "stata_multinom_b" => ml::MULTINOM_B_HELPER,
+        "stata_outcome_probs" => post::OUTCOME_PROBS_HELPER,
+        "stata_test" => post::TEST_HELPER,
+        "stata_lincom" => post::LINCOM_HELPER,
+        "stata_estat" => post::ESTAT_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -195,6 +206,8 @@ struct Session {
     kinds: BTreeMap<String, Kind>,
     /// Value label sets defined so far: name -> (value, text).
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
+    /// The model last fitted, for the commands that read it afterwards.
+    estimates: Option<model::Estimates>,
     helpers: BTreeSet<&'static str>,
 }
 
@@ -560,6 +573,17 @@ impl Session {
             "correlate" => self.correlate(c, &opts, out),
             "ttest" => self.ttest(c, &opts, out),
             "regress" => self.regress(c, &opts, out),
+            "logit" => self.ml(c, &opts, out, model::Fit::Logit),
+            "probit" => self.ml(c, &opts, out, model::Fit::Probit),
+            "poisson" => self.ml(c, &opts, out, model::Fit::Poisson),
+            "nbreg" => self.ml(c, &opts, out, model::Fit::Nbreg),
+            "ologit" => self.ml(c, &opts, out, model::Fit::Ologit),
+            "oprobit" => self.ml(c, &opts, out, model::Fit::Oprobit),
+            "mlogit" => self.ml(c, &opts, out, model::Fit::Mlogit),
+            "predict" => self.predict(c, &opts, out),
+            "test" => self.test(c, &opts, out),
+            "lincom" => self.lincom(c, &opts, out),
+            "estat" => self.estat(c, &opts, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1536,7 +1560,7 @@ mod tests {
     #[test]
     fn what_is_not_translated_says_why() {
         for (src, why) in [
-            ("use s\nlogit y x", "logit is not translated yet"),
+            ("use s\nmargins, dydx(x)", "margins is not translated yet"),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
             ("use s\nsummarize x [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),

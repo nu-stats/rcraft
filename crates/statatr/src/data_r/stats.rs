@@ -457,7 +457,7 @@ impl Session {
     }
 }
 
-fn r_logical(b: bool) -> &'static str {
+pub(super) fn r_logical(b: bool) -> &'static str {
     if b {
         "TRUE"
     } else {

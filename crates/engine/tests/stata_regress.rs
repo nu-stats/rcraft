@@ -9,11 +9,15 @@
 //! - `robust` against HC1 worked out from the residuals, and shown to differ
 //!   from HC0 and HC3, so the choice of correction is really being made;
 //! - `vce(cluster cl)` against the clustered sandwich with Stata's two
-//!   corrections, `G / (G - 1)` and `(N - 1) / (N - K)`, worked out by hand;
+//!   corrections, `G / (G - 1)` and `(N - 1) / (N - K)`, worked out by hand,
+//!   and its t tests and intervals on `G - 1` degrees of freedom;
 //! - `i.g` against a factor whose base level is the lowest value, as Stata's
 //!   base is.
 //!
-//! Without a supported R, or without haven, dplyr, sandwich and lmtest, the
+//! The standard errors are read from `stata_vcov`, which is what the
+//! translation leaves in R for `test` and `lincom` to use.
+//!
+//! Without a supported R, or without haven, dplyr and sandwich, the
 //! test is skipped with a note.
 
 #![allow(clippy::panic)]
@@ -37,10 +41,10 @@ fn engine() -> Option<Engine> {
     let (have, _) = run(
         &mut e,
         "stopifnot(requireNamespace(\"dplyr\", quietly = TRUE), requireNamespace(\"haven\", quietly = TRUE), \
-         requireNamespace(\"sandwich\", quietly = TRUE), requireNamespace(\"lmtest\", quietly = TRUE))",
+         requireNamespace(\"sandwich\", quietly = TRUE))",
     );
     if have != Outcome::Ok {
-        eprintln!("skipped: the R packages dplyr, haven, sandwich and lmtest are needed");
+        eprintln!("skipped: the R packages dplyr, haven and sandwich are needed");
         return None;
     }
     Some(e)
@@ -200,13 +204,9 @@ fn robust_standard_errors_are_hc1_and_not_hc0_or_hc3() {
     let dir = fixture(&mut e);
     let code = script(&format!("use \"{dir}/panel.dta\"\nregress y x w, robust\n"));
     let text = ok(&mut e, &code);
-    assert!(text.contains("t test of coefficients"), "{text}");
+    assert!(text.contains("Std. err."), "{text}");
 
-    let got = numbers(
-        &mut e,
-        "v <- sandwich::vcovHC(stata_estimates, type = \"HC1\")",
-        "sqrt(diag(v))",
-    );
+    let got = numbers(&mut e, "0", "sqrt(diag(stata_vcov))");
     // HC1 worked out from the residuals: the sandwich, scaled by n / (n - k)
     let want = numbers(
         &mut e,
@@ -248,13 +248,9 @@ fn clustered_standard_errors_carry_statas_two_small_sample_corrections() {
         "use \"{dir}/panel.dta\"\nregress y x w, vce(cluster cl)\n"
     ));
     let text = ok(&mut e, &code);
-    assert!(text.contains("t test of coefficients"), "{text}");
+    assert!(text.contains("Std. err."), "{text}");
 
-    let got = numbers(
-        &mut e,
-        "v <- sandwich::vcovCL(stata_estimates, cluster = panel$cl, type = \"HC1\")",
-        "sqrt(diag(v))",
-    );
+    let got = numbers(&mut e, "0", "sqrt(diag(stata_vcov))");
     // the clustered sandwich by hand, with G / (G - 1) and (N - 1) / (N - K)
     let want = numbers(
         &mut e,
@@ -280,6 +276,55 @@ fn clustered_standard_errors_carry_statas_two_small_sample_corrections() {
         (at(&plain, 1) - at(&got, 1)).abs() > 1e-6,
         "clustering should change the standard errors"
     );
+
+    // Stata's t tests after vce(cluster) have G - 1 = 4 degrees of freedom,
+    // not N - K = 17, so the interval is wider than the one R would give
+    let df = numbers(&mut e, "0", "stata_df");
+    assert_eq!(
+        at(&df, 0),
+        4.0,
+        "five clusters leave four degrees of freedom"
+    );
+    let half = numbers(
+        &mut e,
+        "tab <- stata_coefs(stata_b, stata_vcov, stata_df)",
+        "tab[[6]] - tab[[1]]",
+    );
+    for i in 0..3 {
+        close(
+            at(&half, i),
+            stats_qt(&mut e, 4.0) * at(&want, i),
+            1e-9,
+            "the interval's half width on G - 1 degrees of freedom",
+        );
+    }
+    let p = numbers(
+        &mut e,
+        "tab <- stata_coefs(stata_b, stata_vcov, stata_df)",
+        "tab[[4]]",
+    );
+    let by_hand = numbers(
+        &mut e,
+        "tab <- stata_coefs(stata_b, stata_vcov, stata_df)",
+        "2 * stats::pt(-abs(tab[[3]]), 4)",
+    );
+    let r_default = numbers(
+        &mut e,
+        "tab <- stata_coefs(stata_b, stata_vcov, stata_df)",
+        "2 * stats::pt(-abs(tab[[3]]), 17)",
+    );
+    for i in 0..3 {
+        close(at(&p, i), at(&by_hand, i), 1e-12, "p-value on G - 1");
+    }
+    assert!(
+        (at(&p, 1) - at(&r_default, 1)).abs() > 1e-6,
+        "the p-value on N - K would be a different number"
+    );
+}
+
+/// The t quantile for a 95% interval.
+fn stats_qt(e: &mut Engine, df: f64) -> f64 {
+    at(&numbers(e, "0", &format!("stats::qt(0.975, {df})")), 0)
 }
 
 #[test]

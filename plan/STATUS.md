@@ -1624,3 +1624,62 @@ in this crate.
   by its full name only. Stata does not abbreviate it, so nothing is lost, but the commands still to come
   (`poisson`, `nbreg`, `mlogit` and the rest) will need entries there, and that table is vendored from
   StatCraft, so a change has to be made in both places.
+
+## P2B.4 Stata models and postestimation, part two, 2026-10-30
+
+`logit`, `probit`, `poisson`, `nbreg`, `ologit`, `oprobit`, `mlogit`, and after a model `predict`, `test`,
+`lincom` and `estat` (`statatr/src/data_r/{ml,post}.rs`, with the shared pieces in `model.rs`).
+
+- **What a model leaves in R.** Every model, `regress` included, now leaves `stata_estimates` (the fit),
+  `stata_b` (`e(b)`), `stata_vcov` (`e(V)`, robust or clustered when asked) and `stata_df` (`e(df_r)`, or
+  `Inf` where Stata uses z and chi-squared). The postestimation commands read only these, so `test` after
+  `regress, robust` uses the robust variance, as Stata's does.
+- **A fix to part one.** `regress, vce(cluster v)` had the right standard errors but took its t tests and
+  intervals on R's `N - K` degrees of freedom. Stata uses `G - 1`. Fixed, and the regress tests now check
+  the degrees of freedom, the interval width and the p-value, and show the `N - K` p-value is a different
+  number. They also read the standard errors from `stata_vcov`, what the translation left, instead of
+  recomputing the sandwich in the test. `lmtest` is no longer needed.
+- **Stata's rules where R's defaults differ.** The outcome of `logit`/`probit` is 1 where it is not 0, so
+  0/2 works. Standard errors are the observed information: the same as R's for logit and poisson
+  (canonical links), but not for probit, where `summary(glm)` uses the expected information, nor for
+  nbreg, where `glm.nb` holds theta fixed; both are worked out as Stata's. Robust errors after a
+  likelihood model carry `N / (N - 1)` and clusters `G / (G - 1)`, not regress's HC1. nbreg's alpha is
+  `1 / theta`, shown with `/lnalpha`. `ologit` cut points are `polr`'s zeta, renamed `/cut1`, `/cut2`.
+  `mlogit`'s base is the most frequent outcome (R takes the first level); `baseoutcome()` picks another.
+  Intervals are Wald, not `confint()`'s profile likelihood. `or`, `irr`, `rrr` exponentiate the estimate and
+  interval and give the delta-method error, and never the cut points or `/lnalpha`. The iterations run to a
+  tighter tolerance than R's default.
+- **predict.** `xb` and `residuals` after regress; `pr` and `xb` after logit/probit; `n` and `xb` (with the
+  exposure in, as Stata's) after poisson/nbreg; after ologit/oprobit/mlogit one variable per outcome in the
+  order of the outcome values, or `outcome(v)` / `outcome(#k)`, or one variable meaning the first outcome.
+  Every row with the values it needs is filled in, inside the estimation sample or not, as a float unless
+  `double`. A name already in use stops, as in Stata.
+- **test and lincom.** `test x w`, `test x = w`, `test 2*x + w = 1`, `test (x = 0) (w = 1)`; coefficients by
+  Stata's names (`x`, `_cons`, `1.g`, `_b[x]`). An F where the model has residual degrees of freedom, a
+  chi-squared otherwise. `lincom` with `level()`, `or`, `irr`, `rrr`, `eform`.
+- **estat.** `ic` (degrees of freedom are the coefficients, as Stata counts them, so after regress it is 2
+  below R's `AIC()`), `vce` (and `correlation`), and after regress `hettest` (on the fitted values or
+  `rhs`, normal errors, Stata's default) and `ovtest` (RESET with powers 2 to 4 of the fitted values).
+- **Found while testing.** `glm` returns `$weights` from the start of its last iteration, one step behind the
+  estimates, so a variance built from them was off at the seventh digit. The weights and scores are now
+  worked out from the final linear predictor, and the tests hold at 1e-10.
+- **Tests** (`engine/tests/stata_models.rs`, 12 cases, real R). Each model's estimates are checked against
+  its likelihood written out by hand (`dbinom`, `dpois`, `dnbinom`, `plogis`, `pnorm`, a softmax) and
+  maximised with `optim`, and its standard errors against the Hessian of that hand-written likelihood.
+  Robust and clustered logit are checked against the sandwich built by hand, and HC1's scaling is shown to
+  differ. `test` after regress is checked against `anova` of nested models (the same F for least squares),
+  after robust against the Wald test built by hand, and after clusters for `G - 1`. `hettest` is checked
+  against the projection formula of the score test, `ovtest` against `anova` with the powers added, and
+  `estat ic` against `-2 ll + 2k`. With the regress and statistics files that is 26 real-R cases for P2B.4.
+- **Packages.** `MASS` for nbreg/ologit/oprobit and `nnet` for mlogit. Both are R's recommended packages,
+  but this machine's conda R had no `nnet`, so it was installed into RCraft's library from the pinned
+  snapshot; the tests skip with a note where they are missing.
+- **The command table needed nothing.** None of the new names (`poisson`, `nbreg`, `ologit`, `oprobit`,
+  `mlogit`, `predict`, `lincom`, `estat`) can be abbreviated in Stata, and the reader passes a full name
+  through unchanged; `logit`, `probit` and `test` were already in the table. So nothing had to be mirrored
+  into StatCraft.
+- **Not done:** `margins`; `anova`; `xtset`/`xtreg`; `ivregress`; `stset`/`stcox`; weights; `by` with any of
+  these; `tab1`/`tab2`; `pwcorr`; `summarize, meanonly`; `regress, beta`; `robust` after nbreg, ologit and
+  mlogit; `predict, stdp` and the other predict statistics; `test` and `lincom` after ologit/mlogit (several
+  equations) and with interaction coefficients; `estat` with a varlist; the LR test of alpha after nbreg;
+  `e(sample)` in an `if`.

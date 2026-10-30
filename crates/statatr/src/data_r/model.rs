@@ -1,9 +1,14 @@
-//! P2B.4, the models: `regress` so far, with Stata's factor-variable notation
-//! and its robust and clustered standard errors.
+//! P2B.4, the models: `regress` here, the maximum-likelihood models in
+//! [`super::ml`], and what reads a fit afterwards in [`super::post`].
 //!
-//! The fitted model is kept in R as `stata_estimates`, which is where the
-//! commands that read a fit afterwards (`predict`, `test`, `margins`, Stata's
-//! `e()`) will look when they are translated.
+//! Every model leaves four things in R, which are Stata's `e()` results:
+//!
+//! - `stata_estimates`, the fit itself;
+//! - `stata_b`, the coefficients (`e(b)`);
+//! - `stata_vcov`, their variance (`e(V)`), robust or clustered when asked,
+//!   so that `test` and `lincom` use the same one Stata would;
+//! - `stata_df`, the residual degrees of freedom for t and F tests
+//!   (`e(df_r)`), or `Inf` where Stata uses z and chi-squared.
 //!
 //! Stata's rules kept here:
 //!
@@ -13,11 +18,83 @@
 //!   `*`; `c.x` is the plain variable.
 //! - `robust` (and `vce(robust)`) is the HC1 correction, not HC0 or HC3.
 //! - `vce(cluster v)` is HC1 with the cluster correction `G / (G - 1)`, which
-//!   is what `sandwich::vcovCL` does with `cadjust = TRUE` and `type = "HC1"`.
+//!   is what `sandwich::vcovCL` does with `cadjust = TRUE` and `type = "HC1"`,
+//!   and its t tests and intervals use `G - 1` degrees of freedom, not
+//!   `N - K`.
 //! - a row with a missing value anywhere in the model is dropped, which is R's
 //!   `na.omit`.
 
 use super::*;
+
+/// Which model `stata_estimates` holds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum Fit {
+    Regress,
+    Logit,
+    Probit,
+    Poisson,
+    Nbreg,
+    Ologit,
+    Oprobit,
+    Mlogit,
+}
+
+impl Fit {
+    pub(super) fn name(self) -> &'static str {
+        match self {
+            Fit::Regress => "regress",
+            Fit::Logit => "logit",
+            Fit::Probit => "probit",
+            Fit::Poisson => "poisson",
+            Fit::Nbreg => "nbreg",
+            Fit::Ologit => "ologit",
+            Fit::Oprobit => "oprobit",
+            Fit::Mlogit => "mlogit",
+        }
+    }
+
+    /// One outcome per row of the data, so a prediction is one variable.
+    pub(super) fn one_outcome(self) -> bool {
+        !matches!(self, Fit::Ologit | Fit::Oprobit | Fit::Mlogit)
+    }
+}
+
+/// What the translator remembers of the model last fitted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct Estimates {
+    pub(super) fit: Fit,
+    /// The variable explained, as written.
+    pub(super) dep: String,
+    /// Factor variables (`i.g`, `ib2.g`) and the R that made each one, so
+    /// that Stata's `1.g` can be found among R's coefficient names.
+    pub(super) factors: BTreeMap<String, String>,
+}
+
+/// Stata's coefficient table: estimate, standard error, t or z, p-value and
+/// interval, from the coefficients and the variance given. With `eform`
+/// (`or`, `irr`, `rrr`) the estimate and interval are exponentiated and the
+/// standard error is the delta method's, as Stata shows them; `eform` may
+/// name only some of the rows (cut points are never exponentiated).
+pub(super) const COEFS_HELPER: &str = r#"stata_coefs <- function(b, V, df = Inf, level = 0.95, eform = FALSE, label = "Coef.") {
+  se <- sqrt(diag(as.matrix(V)))
+  stat <- b / se
+  small <- is.finite(df)
+  p <- if (small) 2 * stats::pt(-abs(stat), df) else 2 * stats::pnorm(-abs(stat))
+  q <- if (small) stats::qt((1 + level) / 2, df) else stats::qnorm((1 + level) / 2)
+  lo <- b - q * se
+  hi <- b + q * se
+  e <- rep_len(eform, length(b))
+  est <- ifelse(e, exp(b), b)
+  se <- ifelse(e, exp(b) * se, se)
+  lo <- ifelse(e, exp(lo), lo)
+  hi <- ifelse(e, exp(hi), hi)
+  tab <- data.frame(est, se, stat, p, lo, hi)
+  names(tab) <- c(label, "Std. err.", if (small) "t" else "z", if (small) "P>|t|" else "P>|z|",
+                  paste0("[", format(100 * level), "% conf."), "interval]")
+  rownames(tab) <- names(b)
+  print(tab, digits = 7)
+  invisible(tab)
+}"#;
 
 impl Session {
     pub(super) fn regress(
@@ -32,113 +109,177 @@ impl Session {
                 "regress with the option {o} is not translated yet"
             )));
         }
-        let mut words = c.parts.main.split_whitespace();
-        let Some(dep) = words.next() else {
-            return Err(no("regress needs a variable to explain"));
-        };
-        if !is_name(dep) {
-            return Err(no(format!("{dep} is not a variable name")));
-        }
-        let terms: Vec<String> = words.map(term).collect::<Result<Vec<_>, Untranslated>>()?;
-        let level = match opts.arg("level", 3) {
-            Some(l) => {
-                let n: f64 = l
-                    .trim()
-                    .parse()
-                    .map_err(|_| no(format!("level({l}) is not a number")))?;
-                if !(0.0..100.0).contains(&n) {
-                    return Err(no(format!("level({l}) is not between 0 and 100")));
-                }
-                n / 100.0
-            }
-            None => 0.95,
-        };
-        let (robust, cluster) = self.vce(opts)?;
+        let spec = Spec::read(c, "regress")?;
+        let level = level(opts)?;
+        let (robust, cluster) = vce(opts)?;
         let src = self.rows_for(c, out)?;
-        let right = if terms.is_empty() {
-            "1".to_string()
-        } else {
-            terms.join(" + ")
-        };
-        let right = if opts.has("noconstant", 5) {
-            format!("{right} + 0")
-        } else {
-            right
-        };
+        let right = spec.right(opts.has("noconstant", 5));
         out.line(format!(
             "stata_estimates <- stats::lm({} ~ {right}, data = {src})",
-            r_name(dep)
+            r_name(&spec.dep)
         ));
+        out.line("stata_b <- stats::coef(stata_estimates)");
+        match &cluster {
+            None if !robust => {
+                out.line("stata_vcov <- stats::vcov(stata_estimates)");
+                out.line("stata_df <- stata_estimates$df.residual");
+            }
+            None => {
+                out.package("sandwich");
+                out.line("stata_vcov <- sandwich::vcovHC(stata_estimates, type = \"HC1\")");
+                out.line("stata_df <- stata_estimates$df.residual");
+            }
+            Some(v) => {
+                out.package("sandwich");
+                out.line(format!("stata_cluster <- {}", cluster_rows(&src, v)));
+                out.line(super::ml::no_missing_cluster());
+                out.line(
+                    "stata_vcov <- sandwich::vcovCL(stata_estimates, cluster = stata_cluster, type = \"HC1\")",
+                );
+                out.line("stata_df <- length(unique(stata_cluster)) - 1");
+            }
+        }
+        self.estimates = Some(Estimates {
+            fit: Fit::Regress,
+            dep: spec.dep.clone(),
+            factors: spec.factors.clone(),
+        });
+        if cluster.is_some() {
+            out.caveat(
+                "the clusters are the rows the model kept, so a row dropped for a missing value \
+                 is out of its cluster too",
+            );
+            out.caveat("t tests and intervals use G - 1 degrees of freedom, as Stata's do");
+        }
         if Self::quiet(c) {
             return Ok(());
         }
-        match (robust, cluster) {
-            (false, None) => {
-                out.line("print(summary(stata_estimates))");
-                out.line(format!(
-                    "print(stats::confint(stata_estimates, level = {}))",
-                    r_number(level)
-                ));
-            }
-            (_, cluster) => {
-                let vcov = match &cluster {
-                    Some(v) => {
-                        out.caveat(
-                            "the clusters are the rows the model kept, so a row dropped for a \
-                             missing value is out of its cluster too",
-                        );
-                        format!(
-                            "sandwich::vcovCL(stata_estimates, cluster = {src}${}[match(rownames(stats::model.frame(stata_estimates)), rownames({src}))], type = \"HC1\")",
-                            r_name(v)
-                        )
-                    }
-                    None => "sandwich::vcovHC(stata_estimates, type = \"HC1\")".to_string(),
-                };
-                out.package("sandwich");
-                out.package("lmtest");
-                out.line(format!(
-                    "print(lmtest::coeftest(stata_estimates, vcov. = {vcov}))"
-                ));
-                out.line(format!(
-                    "print(lmtest::coefci(stata_estimates, vcov. = {vcov}, level = {}))",
-                    r_number(level)
-                ));
-                out.caveat("HC1, which is what Stata's robust means; R's own default would be HC3");
-                out.caveat(
-                    "only the coefficient table is corrected: R's F and R-squared come from the \
-                     ordinary fit",
-                );
-            }
+        if robust || cluster.is_some() {
+            self.helpers.insert("stata_coefs");
+            out.line(format!(
+                "stata_coefs(stata_b, stata_vcov, stata_df, level = {})",
+                r_number(level)
+            ));
+            out.caveat("HC1, which is what Stata's robust means; R's own default would be HC3");
+        } else {
+            out.line("print(summary(stata_estimates))");
+            out.line(format!(
+                "print(stats::confint(stata_estimates, level = {}))",
+                r_number(level)
+            ));
         }
         out.caveat("a row with a missing value anywhere in the model is dropped, as in Stata");
         out.caveat("printed in R's layout, not Stata's table");
         Ok(())
     }
+}
 
-    /// `robust` and `vce()` together: whether the standard errors are robust,
-    /// and the variable to cluster on.
-    fn vce(&self, opts: &Opts) -> Result<(bool, Option<String>), Untranslated> {
-        let robust = opts.has("robust", 1);
-        let Some(v) = opts.arg("vce", 3) else {
-            return Ok((robust, None));
+/// The variable a model explains and the terms that explain it.
+pub(super) struct Spec {
+    pub(super) dep: String,
+    pub(super) terms: Vec<String>,
+    pub(super) factors: BTreeMap<String, String>,
+}
+
+impl Spec {
+    pub(super) fn read(c: &Command, name: &str) -> Result<Spec, Untranslated> {
+        let mut words = c.parts.main.split_whitespace();
+        let Some(dep) = words.next() else {
+            return Err(no(format!("{name} needs a variable to explain")));
         };
-        let v = v.trim();
-        let (kind, rest) = match v.split_once(char::is_whitespace) {
-            Some((a, b)) => (a.trim(), b.trim()),
-            None => (v, ""),
-        };
-        match kind {
-            "ols" if rest.is_empty() => Ok((robust, None)),
-            "robust" if rest.is_empty() => Ok((true, None)),
-            "cluster" => {
-                if !is_name(rest) {
-                    return Err(no(format!("vce(cluster {rest}) needs one variable name")));
+        if !is_name(dep) {
+            return Err(no(format!("{dep} is not a variable name")));
+        }
+        let mut terms = Vec::new();
+        let mut factors = BTreeMap::new();
+        for w in words {
+            terms.push(term(w)?);
+            for part in w.split('#').filter(|p| !p.is_empty()) {
+                if let Some(v) = factor_variable(part) {
+                    factors.insert(v.to_string(), one(part)?);
                 }
-                Ok((true, Some(rest.to_string())))
             }
-            other => Err(no(format!("vce({other}) is not translated yet"))),
+        }
+        Ok(Spec {
+            dep: dep.to_string(),
+            terms,
+            factors,
+        })
+    }
+
+    /// The right-hand side of R's formula.
+    pub(super) fn right(&self, noconstant: bool) -> String {
+        let right = if self.terms.is_empty() {
+            "1".to_string()
+        } else {
+            self.terms.join(" + ")
+        };
+        if noconstant {
+            format!("{right} + 0")
+        } else {
+            right
         }
     }
+}
+
+/// The variable of `i.g` or `ib2.g`.
+fn factor_variable(part: &str) -> Option<&str> {
+    let part = part.trim();
+    if let Some(v) = part.strip_prefix("i.") {
+        return Some(v);
+    }
+    let rest = part.strip_prefix("ib")?;
+    rest.split_once('.').map(|(_, v)| v)
+}
+
+/// `level()` as a proportion; 95% when it is not given.
+pub(super) fn level(opts: &Opts) -> Result<f64, Untranslated> {
+    match opts.arg("level", 3) {
+        Some(l) => {
+            let n: f64 = l
+                .trim()
+                .parse()
+                .map_err(|_| no(format!("level({l}) is not a number")))?;
+            if !(10.0..100.0).contains(&n) {
+                return Err(no(format!("level({l}) is not between 10 and 99.99")));
+            }
+            Ok(n / 100.0)
+        }
+        None => Ok(0.95),
+    }
+}
+
+/// `robust` and `vce()` together: whether the standard errors are robust,
+/// and the variable to cluster on.
+pub(super) fn vce(opts: &Opts) -> Result<(bool, Option<String>), Untranslated> {
+    let robust = opts.has("robust", 1);
+    let Some(v) = opts.arg("vce", 3) else {
+        return Ok((robust, None));
+    };
+    let v = v.trim();
+    let (kind, rest) = match v.split_once(char::is_whitespace) {
+        Some((a, b)) => (a.trim(), b.trim()),
+        None => (v, ""),
+    };
+    match kind {
+        "ols" | "oim" if rest.is_empty() => Ok((robust, None)),
+        "robust" if rest.is_empty() => Ok((true, None)),
+        "cluster" => {
+            if !is_name(rest) {
+                return Err(no(format!("vce(cluster {rest}) needs one variable name")));
+            }
+            Ok((true, Some(rest.to_string())))
+        }
+        other => Err(no(format!("vce({other}) is not translated yet"))),
+    }
+}
+
+/// The cluster variable for the rows the model kept.
+pub(super) fn cluster_rows(src: &str, v: &str) -> String {
+    format!(
+        "{src}${}[match(rownames(stats::model.frame(stata_estimates)), rownames({src}))]",
+        r_name(v)
+    )
 }
 
 /// One term of a model in R: `i.x` is a factor, `c.x` the plain variable,
@@ -222,5 +363,13 @@ mod tests {
         );
         assert!(term("L.x").is_err(), "lags are not translated");
         assert!(term("i.2x").is_err(), "not a variable name");
+    }
+
+    #[test]
+    fn factor_variables_are_remembered_with_their_r() {
+        assert_eq!(factor_variable("i.g"), Some("g"));
+        assert_eq!(factor_variable("ib3.g"), Some("g"));
+        assert_eq!(factor_variable("c.x"), None);
+        assert_eq!(factor_variable("x"), None);
     }
 }

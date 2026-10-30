@@ -248,11 +248,19 @@ Tasks:
   real R against the same figure worked out a second way, so Stata's rules are
   the ones kept: percentiles by Stata's rule, population skewness and
   kurtosis, casewise `correlate`, chi-squared with no continuity correction,
-  HC1 for `robust` and HC1 with `G / (G - 1)` for clusters. `ttest, welch` is
-  refused with its reason. Still to do: `logit`, `probit`, `poisson`, `nbreg`,
-  `ologit`, `mlogit`, `anova`, `predict`, `test`, `lincom`, `margins`,
-  `estat`, `xtset`/`xtreg`, `ivregress`, `stset`/`stcox`, weights, `by` and
-  `tab1`/`tab2`)
+  HC1 for `robust` and HC1 with `G / (G - 1)` for clusters, with t tests on
+  `G - 1` degrees of freedom. `ttest, welch` is refused with its reason.
+  Part two, also done: `logit`, `probit`, `poisson`, `nbreg`, `ologit`,
+  `oprobit`, `mlogit` (with `or`/`irr`/`rrr`, `exposure()`/`offset()`,
+  `baseoutcome()`, and `robust`/`vce(cluster)` for logit, probit and
+  poisson), and after any model `predict`, `test`, `lincom` and `estat`
+  (`ic`, `vce`, `hettest`, `ovtest`), all reading Stata's `e(b)`, `e(V)` and
+  `e(df_r)` left in R. Stata's rules kept: observed-information errors (probit
+  and nbreg differ from R's own), `N / (N - 1)` for robust likelihood models,
+  the most frequent outcome as mlogit's base, Wald intervals, predictions in
+  every row as floats, `estat ic` counting only coefficients. Still to do:
+  `anova`, `margins`, `xtset`/`xtreg`, `ivregress`, `stset`/`stcox`,
+  weights, `by` and `tab1`/`tab2`)
 - P2B.5 Graph commands: `twoway`, `histogram`, `graph bar`, `scatter`,
   `line`, `kdensity` to ggplot2.
 - P2B.6 Estimates and returned values: `e()`, `r()` and `_b[]`/`_se[]`
