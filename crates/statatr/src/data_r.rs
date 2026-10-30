@@ -26,6 +26,7 @@
 //! without the data and are taken as written.
 
 mod anova;
+mod iv;
 mod margins;
 mod ml;
 mod model;
@@ -164,8 +165,17 @@ fn opener_text(o: &Opener) -> String {
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
-    "regress", "logit", "probit", "poisson", "nbreg", "ologit", "oprobit", "mlogit", "anova",
+    "regress",
+    "logit",
+    "probit",
+    "poisson",
+    "nbreg",
+    "ologit",
+    "oprobit",
+    "mlogit",
+    "anova",
     "xtreg",
+    "ivregress",
 ];
 
 /// Commands that leave the values of existing variables and the set of rows
@@ -233,6 +243,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_anova" => anova::ANOVA_HELPER,
         "stata_xtset" => xt::XTSET_HELPER,
         "stata_xtreg" => xt::XTREG_HELPER,
+        "stata_ivregress" => iv::IV_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -648,6 +659,7 @@ impl Session {
             "anova" => self.anova(c, &opts, out),
             "xtset" => self.xtset(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
+            "ivregress" => self.ivregress(c, &opts, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1635,10 +1647,7 @@ mod tests {
     #[test]
     fn what_is_not_translated_says_why() {
         for (src, why) in [
-            (
-                "use s\nivregress 2sls y (x = z)",
-                "ivregress is not translated yet",
-            ),
+            ("use s\nstcox x", "stcox is not translated yet"),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
             ("use s\nsummarize x [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),

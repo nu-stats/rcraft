@@ -168,8 +168,8 @@ impl Session {
                  would average the changed rows, which is not translated yet"
             )));
         }
-        if est.fit == Fit::Xtreg {
-            return Err(no("margins after xtreg is not translated yet"));
+        if matches!(est.fit, Fit::Xtreg | Fit::Ivregress) {
+            return Err(no(format!("margins after {name} is not translated yet")));
         }
         if !est.fit.one_outcome() {
             return Err(no(format!(

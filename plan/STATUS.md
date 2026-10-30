@@ -1851,3 +1851,29 @@ rather than left to a panel package, because Stata's estimators are specific.
 - **Not done:** `xtreg, mle` and `pa`; `margins`, `estat ic` and `predict, u|e|ue` after xtreg; `xtset` alone
   and its options (`delta()`, ...); `fe` with factor variables whose levels are absorbed; the other `xt`
   commands (`xtsum`, `xtlogit`, ...).
+
+## P2B.4 Stata ivregress, 2026-10-30
+
+`ivregress 2sls|liml|gmm depvar [exog] (endog = instruments)` with `small`, `vce(robust|cluster v)` (2sls),
+`first` and `level()`, then `estat endogenous`, `estat overid`, `predict` (xb, residuals), `test`, `lincom`
+(`statatr/src/data_r/iv.rs`), written in base R.
+
+- **What Stata does.** StatCraft's probe 219 (`statcraft/plan/stata/ivregress.md`) had decoded the estimators,
+  the default and robust variances and the `estat` tests; all of it was checked again in Stata 19 here. 2SLS is
+  (X'P_Z X)^-1 X'P_Z y; LIML the k-class estimator with kappa the smallest root of |W1 - kappa W| = 0; GMM two
+  steps from 2SLS with the robust weight matrix and its sandwich variance. Without `small` the variance divides
+  by N and the tests are z and chi-squared; with `small`, N - k and t and F.
+- **Decoded here: the clustered scaling.** Without `small`, Stata's clustered errors carry *no* G / (G - 1): the
+  plain clustered sandwich. With `small`, G / (G - 1) times (N - 1) / (N - k), and t on G - 1. Found because the
+  first try (with G / (G - 1) always, as `regress` does) was off by exactly sqrt(11/12) with 12 clusters. Plain
+  robust is likewise unscaled without `small` and N / (N - k) with it.
+- **Stata's words:** an under-identified equation stops the R with Stata's
+  `equation not identified; must have at least as many instruments not in the regression as there are instrumented variables`.
+- **Tests** (`engine/tests/stata_ivregress.rs`, 3 cases, real R): 2SLS against two literal stages of least
+  squares (the same coefficients, and the second stage's own standard errors shown to be wrong), and every
+  estimator, variance, Wald chi2 or F, kappa, R-squared, root MSE, both `estat` tests (with one and two endogenous
+  variables), `predict` and `test` against Stata 19's numbers to 10 digits. P2B.4 has 56 real-R cases.
+- **Not done:** `liml` with robust or clustered errors; `gmm` with its own `vce()` or `wmatrix()`, `igmm`;
+  `estat firststage`; `estat endogenous` and `overid` after robust errors (Stata switches to robust score
+  tests), after `liml` and `gmm`; several `(endog = inst)` groups; factor variables inside the parentheses;
+  `margins` and `estat ic` after it; `noconstant`.

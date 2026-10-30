@@ -259,7 +259,11 @@ Tasks:
   and nbreg differ from R's own), `N / (N - 1)` for robust likelihood models,
   the most frequent outcome as mlogit's base, Wald intervals, predictions in
   every row as floats, `estat ic` counting only coefficients. Still to do:
-  `ivregress`, `stset`/`stcox`, weights, `by` and `tab1`/`tab2`. `xtset` and
+  `stset`/`stcox`, weights, `by` and `tab1`/`tab2`. `ivregress` is done
+  (`2sls`, `liml`, `gmm`, `small`, `vce(robust|cluster)` for 2sls, `first`,
+  `estat endogenous` and `overid`, `predict`, `test`), matching Stata 19 to
+  10 digits; not yet robust `liml`, `gmm` with its own `vce()`/`wmatrix()`,
+  `estat firststage`, or the robust forms of the `estat` tests. `xtset` and
   `xtreg` (`fe`, `re`, `be`, `vce(robust|cluster)`, then `predict`, `test`,
   `lincom`) are done and match Stata 19 to 10 digits; not yet `mle`, `pa`,
   `margins` or `estat ic` after it, or `predict, u|e|ue`. `anova` is done: categorical unless `c.x`, partial (Type
