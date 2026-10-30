@@ -190,6 +190,7 @@ impl Session {
             Fit::Oprobit => {}
             Fit::Mlogit => known.extend([("noconstant", 5), ("rrr", 3), ("baseoutcome", 4)]),
             Fit::Regress => return self.regress(c, opts, out),
+            Fit::Xtreg => return self.xtreg(c, opts, out),
         }
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -285,7 +286,7 @@ impl Session {
                     "stats::relevel(factor({dep}), ref = stata_base)"
                 )));
             }
-            Fit::Regress => {}
+            Fit::Regress | Fit::Xtreg => {}
         }
         match fit {
             Fit::Logit | Fit::Probit | Fit::Poisson => {
@@ -347,7 +348,7 @@ impl Session {
                 out.line("dimnames(stata_vcov) <- list(names(stata_b), names(stata_b))");
                 out.caveat("each coefficient is named outcome:variable; the base outcome has none");
             }
-            Fit::Regress => {}
+            Fit::Regress | Fit::Xtreg => {}
         }
         if fit.one_outcome() {
             out.line(keep_sample(&src));

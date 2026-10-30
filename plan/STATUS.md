@@ -1819,3 +1819,35 @@ the R tests make, and compared number by number.
   call.
 - **Still not checked against Stata:** only the printed layout, which is deliberately R's, not Stata's. P2B.4
   has 49 real-R cases.
+
+## P2B.4 Stata xtset and xtreg, 2026-10-30
+
+`xtset` and `xtreg` with `fe`, `re` (the default) and `be` (`statatr/src/data_r/xt.rs`), written in base R
+rather than left to a panel package, because Stata's estimators are specific.
+
+- **What Stata does, and so the translation.** StatCraft's probe 174 (`statcraft/plan/stata/panel.md`) had
+  decoded the estimators; this was checked in Stata 19 again on an unbalanced panel with gaps. fe: least squares
+  on y - ybar_i + ybar, df = N - n - k, a regressor with no variation within a panel dropped with Stata's note.
+  be: least squares on the panel means. re: Swamy-Arora, sigma_e^2 from fe, sigma_u^2 = s_be^2 - sigma_e^2 /
+  T-bar with T-bar the harmonic mean of the T_i, theta_i, least squares on the quasi-demeaned data, z tests.
+  R-squared within, between and overall as squared correlations; sigma_u, sigma_e, rho; fe's F test that all
+  u_i = 0 against the pooled fit.
+- **Decoded here: the robust scaling.** `vce(robust)` clusters on the panel and `vce(cluster v)` on v; both are
+  scaled by G / (G - 1) and (N - 1) / (N - k), with k the regressors and the constant, *not* counting the panel
+  effects. Found by trying the candidates against Stata's numbers: that one matches to 17 digits for fe (on the
+  panel and on another cluster variable) and for re; the others are 1% to 12% off. fe then tests on G - 1 df.
+- **After it:** `predict` (xb, the default, as a float unless `double`), `test`, `lincom` read Stata's e(b),
+  e(V), e(df_r) as after any model. `margins`, `estat ic` and `predict, u|e|ue` are refused for now.
+- **Stata's words:** `xtreg` with no `xtset` is refused with Stata's `must specify panelvar; use xtset`; a
+  repeated time in `xtset` stops the R with `repeated time values within panel`.
+- **A bug found on the way, not in xtreg.** A test file named `repeat.dta` made the translation write
+  `repeat <- ...`, and `repeat` is reserved in R. A data frame named after its file now gets `data_` in front of
+  any name R reserves (`if`, `function`, `repeat` ...) and of any name starting `stata_`, which the
+  translation's own objects use (a file `stata_b.dta` would have been overwritten by the next model).
+- **Tests** (`engine/tests/stata_xtreg.rs`, 4 cases, real R): fe against least squares with a dummy for every
+  panel (the same slopes, and with the same df the same standard errors), be against least squares on the
+  means, and every estimator, robust and clustered error, R-squared, sigma, rho, theta, the F test, `predict` and
+  `test` against Stata 19's own numbers, to 10 digits. P2B.4 has 53 real-R cases.
+- **Not done:** `xtreg, mle` and `pa`; `margins`, `estat ic` and `predict, u|e|ue` after xtreg; `xtset` alone
+  and its options (`delta()`, ...); `fe` with factor variables whose levels are absorbed; the other `xt`
+  commands (`xtsum`, `xtlogit`, ...).

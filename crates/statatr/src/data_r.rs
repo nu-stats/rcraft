@@ -32,6 +32,7 @@ mod model;
 mod more;
 mod post;
 mod stats;
+mod xt;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -164,6 +165,7 @@ fn opener_text(o: &Opener) -> String {
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
     "regress", "logit", "probit", "poisson", "nbreg", "ologit", "oprobit", "mlogit", "anova",
+    "xtreg",
 ];
 
 /// Commands that leave the values of existing variables and the set of rows
@@ -229,6 +231,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_estat" => post::ESTAT_HELPER,
         "stata_margins" => margins::MARGINS_HELPER,
         "stata_anova" => anova::ANOVA_HELPER,
+        "stata_xtset" => xt::XTSET_HELPER,
+        "stata_xtreg" => xt::XTREG_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -249,6 +253,8 @@ struct Session {
     /// A command since that model may have changed the data, so the copy of
     /// its estimation sample kept in R is no longer what Stata would use.
     changed_since_fit: bool,
+    /// The panel variable `xtset` named.
+    panel: Option<String>,
     helpers: BTreeSet<&'static str>,
 }
 
@@ -346,7 +352,15 @@ fn frame_name(file: &str) -> String {
             }
         })
         .collect();
-    if !n.chars().next().is_some_and(|c| c.is_ascii_alphabetic()) {
+    // not a name R reserves (`repeat.dta` once became `repeat <- ...`), nor
+    // one of the translation's own `stata_` objects
+    const RESERVED: &[&str] = &[
+        "if", "else", "repeat", "while", "function", "for", "in", "next", "break",
+    ];
+    if !n.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        || RESERVED.contains(&n.as_str())
+        || n.starts_with("stata_")
+    {
         n = format!("data_{n}");
     }
     n
@@ -632,6 +646,8 @@ impl Session {
             "estat" => self.estat(c, &opts, out),
             "margins" => self.margins(c, &opts, out),
             "anova" => self.anova(c, &opts, out),
+            "xtset" => self.xtset(c, &opts, out),
+            "xtreg" => self.xtreg(c, &opts, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1516,6 +1532,17 @@ mod tests {
     use super::*;
     use crate::reader::read;
 
+    #[test]
+    fn a_file_name_becomes_a_name_r_can_assign_to() {
+        assert_eq!(frame_name("study.dta"), "study");
+        assert_eq!(frame_name("C:/data/My Study.dta"), "my_study");
+        assert_eq!(frame_name("2024.dta"), "data_2024");
+        // reserved in R, and the translation's own objects
+        assert_eq!(frame_name("repeat.dta"), "data_repeat");
+        assert_eq!(frame_name("function.dta"), "data_function");
+        assert_eq!(frame_name("stata_b.dta"), "data_stata_b");
+    }
+
     fn r(source: &str) -> Vec<String> {
         translate(&read(source))
             .lines
@@ -1608,7 +1635,10 @@ mod tests {
     #[test]
     fn what_is_not_translated_says_why() {
         for (src, why) in [
-            ("use s\nxtreg y x", "xtreg is not translated yet"),
+            (
+                "use s\nivregress 2sls y (x = z)",
+                "ivregress is not translated yet",
+            ),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
             ("use s\nsummarize x [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),

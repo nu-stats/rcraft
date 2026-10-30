@@ -153,6 +153,7 @@ impl Session {
         let name = fit.name();
         let known: &[(&str, usize)] = match fit {
             Fit::Regress => &[("xb", 2), ("residuals", 1)],
+            Fit::Xtreg => &[("xb", 2)],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2)],
             Fit::Poisson | Fit::Nbreg => &[("n", 1), ("xb", 2)],
             Fit::Ologit | Fit::Oprobit | Fit::Mlogit => &[("pr", 2), ("outcome", 3)],
@@ -199,6 +200,7 @@ impl Session {
                     format!("{} - {}", r_name(&est.dep), newdata(""))
                 }
                 Fit::Regress => newdata(""),
+                Fit::Xtreg => format!("unname(stata_xt_xb(stata_estimates, {d}))"),
                 _ if opts.has("xb", 2) => newdata(", type = \"link\""),
                 _ => newdata(", type = \"response\""),
             };
@@ -412,6 +414,9 @@ impl Session {
             return Err(no(format!(
                 "estat {sub} with a varlist is not translated yet"
             )));
+        }
+        if sub == "ic" && est.fit == Fit::Xtreg {
+            return Err(no("estat ic after xtreg is not translated yet"));
         }
         if sub == "ic" {
             if let Some(o) = opts.other(&[]) {

@@ -792,8 +792,8 @@ fn what_is_not_translated_after_a_model_says_why() {
         "test after mlogit"
     );
     assert!(
-        refusal("use \"d.dta\"\nlogit y x\nxtreg y x\n").contains("xtreg"),
-        "xtreg is not translated yet"
+        refusal("use \"d.dta\"\nlogit y x\nivregress 2sls y (x = z)\n").contains("ivregress"),
+        "ivregress is not translated yet"
     );
     assert!(
         refusal("use \"d.dta\"\nnbreg y x, robust\n").contains("robust"),

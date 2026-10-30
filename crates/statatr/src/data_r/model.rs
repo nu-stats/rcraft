@@ -37,6 +37,7 @@ pub(super) enum Fit {
     Ologit,
     Oprobit,
     Mlogit,
+    Xtreg,
 }
 
 impl Fit {
@@ -50,6 +51,7 @@ impl Fit {
             Fit::Ologit => "ologit",
             Fit::Oprobit => "oprobit",
             Fit::Mlogit => "mlogit",
+            Fit::Xtreg => "xtreg",
         }
     }
 
