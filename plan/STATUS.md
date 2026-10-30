@@ -1731,26 +1731,59 @@ two fixes to the model terms found on the way.
   `ib3.g` and `c.x` work the same). The fit is kept with Stata's dummy coding, base level the lowest, with
   `stata_b`, `stata_vcov`, `stata_df` and the estimation sample, so `test`, `predict` and `margins` work after
   it as after `regress`.
-- **The table.** Partial sums of squares by default, which Stata documents as SAS's Type III when no cell is
-  empty. They come from the same model refitted with sum-to-zero contrasts, each term's sum of squares being
-  the Wald statistic of its columns. An empty cell makes those coefficients inestimable; the R then stops and
-  says why rather than print a number Stata would not. `sequential` gives Type I (R's own `anova()`, which
-  does not depend on the coding). Model, Residual and Total rows, and R-squared, adjusted R-squared and root
-  MSE, as Stata shows them.
-- **Refused, with reasons:** nested terms (`a|b`), error terms (`/`), `repeated()`, and partial sums of squares
-  for a continuous variable interacted with a factor. That last one is a choice: what
-  Stata's partial test means for such a term has not been confirmed, so the translation refuses it rather than
-  guess; the sequential
-  version is translated.
-- **Tests** (`engine/tests/stata_anova.rs`, 7 cases, real R, on an unbalanced 3 x 2 design so the kinds of sums
+- **The table.** Partial sums of squares by default, which are Type III: the same model refitted with
+  sum-to-zero contrasts, each term's sum of squares being the Wald statistic of its columns. Checked against
+  Stata 19 itself (see the next section), including a continuous variable interacted with a factor, to about
+  15 digits; StatCraft's probe 237 (`statcraft/plan/stata/anova.md`) had already found Type III. `sequential`
+  gives Type I (R's own `anova()`, which does not depend on the coding). Model, Residual and Total rows, and
+  R-squared, adjusted R-squared and root MSE, as Stata shows them.
+- **An empty cell.** Stata still gives partial sums of squares there (with the interaction's df cut), but by a
+  rule not matched yet: tried against Stata's numbers and ruled out are Type III with the aliased column
+  dropped, Type II, and a reference-coded model with every choice of base levels (each gets the interaction
+  right and the main effects wrong). So the R stops and says so; sequential sums of squares work.
+- **Refused, with reasons:** nested terms (`a|b`), error terms (`/`), `repeated()`.
+- **Tests** (`engine/tests/stata_anova.rs`, 8 cases, real R, on an unbalanced 3 x 2 design so the kinds of sums
   of squares differ). The partial sums of squares are checked against Type III by its definition (the
   sum-to-zero design matrix built by hand, each term's sum of squares as the rise in the residual sum of squares
   when its columns are dropped), with their df, F and p, and shown to differ from the sequential ones; the
   sequential ones against the same model comparisons in order; a covariate's against its t squared times the
   MSE; `ib3.g` gives the same table; `test 2.g 3.g` after `anova y g h` gives the table's F for g; an empty cell
-  stops the R. P2B.4 now has 42 real-R cases.
-- **Resting on Stata's documentation.** That Stata's partial sums of squares equal Type III without empty cells
-  is Stata's documented statement, not something checked against Stata's own output here (there is no Stata
-  on this machine). If a StatCraft probe or a Stata run ever shows otherwise, this is where to look.
+  stops the R; and four tables against Stata 19's own sums of squares on the same data.
+- **A correction.** The first version of this note said there was no Stata on this machine to check against.
+  There is: Stata 19 SE, at `C:\Program Files\Stata19`. The check it made possible is the next section.
 - **Still not done in P2B.4:** `xtset`/`xtreg`; `ivregress`; `stset`/`stcox`; weights; `by`; `tab1`/`tab2`;
   and the smaller items in the lists above.
+
+## P2B.4 checked against Stata 19, 2026-10-30
+
+The models, postestimation, margins and anova translations were run in Stata 19 SE on the same synthetic data
+the R tests make, and compared number by number.
+
+- **How.** `"C:\Program Files\Stata19\StataSE-64.exe" /e do probe.do`, run from PowerShell (Git Bash turns
+  `/e` into a drive path, and Stata then quietly does nothing). The log lands next to the do-file. Following
+  StatCraft's rules (`statcraft/AGENTS.md` section 5): own synthetic data only, never StataCorp's datasets;
+  results printed with `%24.17g`; logs kept out of the repository, with the licence banner, and only the
+  numbers and what they show recorded here and in the tests.
+- **Agree to 10 digits or more:** `regress, vce(cluster)` (b, se, and `e(df_r)` = G - 1 = 7, and `test`'s F
+  on 7 df), `regress, robust` (HC1), `logit, robust` (N / (N - 1)) and clustered (G / (G - 1)), `nbreg` with
+  `/lnalpha`, `mlogit`'s base outcome (the most frequent), `estat ic` (Stata too counts only the coefficients),
+  both `hettest`s, `regress y c.x##c.x w`, `margins, dydx(x)` after it (and Stata does show t there),
+  `margins, at()`, `lincom`, and the four anova tables.
+- **Two fixes it led to.** (1) `estat ovtest` differed in the sixth digit. Stata rescales the fitted values to
+  [0, 1] and stores each power as a float before the regression, which moves F; the translation now does the
+  same and agrees to 13 digits (the test shows the exact-powers F is about six digits away). (2) `probit`
+  agreed only to 8 digits, and the score showed it was R's fault, not Stata's: about 1e-11 at Stata's
+  estimates, 3e-7 at `glm`'s, because `glm` scores with the expected information and stops on the change in
+  deviance. Newton steps on the observed information now follow `glm`'s probit fit (`stata_probit_newton`),
+  and it agrees to 10 digits.
+- **Agree to 6 to 8 digits, and why.** `ologit`/`oprobit`: the gradient is about 5e-6 at Stata's estimates and
+  2e-7 at R's, so here Stata's own fit is the looser one. The `margins` after `logit yb x i.g` and `mlogit`
+  coefficients agree to 7 to 8 digits. After `poisson` with a constant the average predicted count must equal
+  the mean count exactly; R gives 2.4125 to 14 digits, Stata 2.4125000019.
+- **Two earlier statements were wrong.** The anova note said there was no Stata here to check against, and the
+  part-two note implied R's estimates were the tighter ones throughout; for probit they were not.
+- **Tests.** `the_models_agree_with_stata_19` in `engine/tests/stata_models.rs` and
+  `the_sums_of_squares_are_stata_19s_own` in `stata_anova.rs` hold Stata's numbers, at 10 digits where both
+  converge fully and 6 where Stata's own iterations stop earlier, each saying which. P2B.4 has 44 real-R cases.
+- **Not checked against Stata yet:** part one (`summarize`, `tabulate`, `correlate`, `ttest`), whose rules came
+  from StatCraft's own probes; `margins` with `atmeans`; `predict` of a float; the refusals' wording.

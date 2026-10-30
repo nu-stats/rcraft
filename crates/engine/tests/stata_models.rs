@@ -24,7 +24,8 @@
 //! Without a supported R, or without haven, dplyr, MASS and nnet, the test
 //! is skipped with a note.
 
-#![allow(clippy::panic)]
+// Stata's numbers are kept exactly as it printed them (%24.17g)
+#![allow(clippy::panic, clippy::excessive_precision)]
 
 use std::time::{Duration, Instant};
 
@@ -749,13 +750,31 @@ fn estat_gives_statas_information_criteria_and_tests() {
         &format!("res <- {}", line_of(&code, "stata_ovtest(")),
         "res[1]",
     );
+    // Stata rescales the fitted values to [0, 1] and stores each power as a
+    // float, so its F is the nested F with those powers...
     let hand = numbers(
         &mut e,
         "m0 <- stats::lm(y ~ x + w, data = models); h <- stats::fitted(m0); \
-         a <- stats::anova(m0, stats::lm(y ~ x + w + I(h^2) + I(h^3) + I(h^4), data = models))",
-        "a$F[2]",
+         u <- (h - min(h)) / (max(h) - min(h)); \
+         p2 <- readBin(writeBin(as.numeric(u^2), raw(), size = 4), \"double\", size = 4, n = length(u)); \
+         p3 <- readBin(writeBin(as.numeric(u^3), raw(), size = 4), \"double\", size = 4, n = length(u)); \
+         p4 <- readBin(writeBin(as.numeric(u^4), raw(), size = 4), \"double\", size = 4, n = length(u)); \
+         a <- stats::anova(m0, stats::lm(y ~ x + w + p2 + p3 + p4, data = models)); \
+         r <- stats::anova(m0, stats::lm(y ~ x + w + I(h^2) + I(h^3) + I(h^4), data = models))",
+        "a$F[2], r$F[2]",
     );
-    close(at(&ov, 0), at(&hand, 0), 1e-8, "RESET F");
+    close(
+        at(&ov, 0),
+        at(&hand, 0),
+        1e-10,
+        "RESET F with Stata's float powers",
+    );
+    // ...which is the exact one to about six digits, no more
+    let gap = (at(&ov, 0) - at(&hand, 1)).abs() / at(&hand, 1);
+    assert!(
+        gap > 1e-8 && gap < 1e-4,
+        "the float powers move F slightly: {gap}"
+    );
 }
 
 #[test]
@@ -791,5 +810,300 @@ fn what_is_not_translated_after_a_model_says_why() {
     assert!(
         refusal("use \"d.dta\"\nregress y x\npredict s, stdp\n").contains("stdp"),
         "stdp is not translated yet"
+    );
+}
+
+/// Each number within `tol` of Stata's, relative to its size.
+fn near_stata(got: &[f64], stata: &[f64], tol: f64, what: &str) {
+    assert_eq!(
+        got.len(),
+        stata.len(),
+        "{what}: {got:?} against Stata's {stata:?}"
+    );
+    for (g, s) in got.iter().zip(stata) {
+        assert!(
+            (g - s).abs() <= tol * s.abs().max(1.0),
+            "{what}: {g} against Stata's {s}"
+        );
+    }
+}
+
+/// Stata 19 SE's own results on this same data (`models`), run in batch mode
+/// on 2026-10-30 and printed with `%24.17g`. Most agree to ten digits or more.
+/// Where Stata's own iterations stop earlier than R's (ologit's gradient is
+/// about 5e-6 at Stata's estimates, 2e-7 at R's; logit after `i.g`; the
+/// poisson margin, which must equal the mean count exactly and is 2.4125 in R
+/// but 2.4125000019 in Stata), the tolerance is six digits and says so.
+#[test]
+fn the_models_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let fit = |e: &mut Engine, cmd: &str, show: &str| -> Vec<f64> {
+        let code = script(&format!("use \"{dir}/models.dta\"\n{cmd}\n"));
+        ok(e, &code);
+        numbers(e, "0", show)
+    };
+    let rerun = |e: &mut Engine, cmd: &str, start: &str, show: &str| -> Vec<f64> {
+        let code = script(&format!("use \"{dir}/models.dta\"\n{cmd}\n"));
+        ok(e, &code);
+        numbers(e, &format!("res <- {}", line_of(&code, start)), show)
+    };
+    let b_se = "unname(stata_b), unname(sqrt(diag(stata_vcov)))";
+
+    let got = fit(
+        &mut e,
+        "regress y x w g, vce(cluster cl)",
+        &format!("{b_se}, stata_df"),
+    );
+    near_stata(
+        &got,
+        &[
+            0.90782238091709189,
+            1.8379643645175934,
+            -0.96934912606092671,
+            0.86343158525323538,
+            0.34165245303205355,
+            0.3619667718985719,
+            0.48641861746295489,
+            0.40960119598931632,
+            7.0,
+        ],
+        1e-10,
+        "regress, vce(cluster cl): b, se and df_r = G - 1",
+    );
+    let got = rerun(
+        &mut e,
+        "regress y x w g, vce(cluster cl)\ntest x w",
+        "stata_test(",
+        "res[1], res[3]",
+    );
+    near_stata(
+        &got,
+        &[56.515593151738031, 7.0],
+        1e-10,
+        "test after clustering",
+    );
+    let got = fit(&mut e, "regress y x w, robust", b_se);
+    near_stata(
+        &got,
+        &[
+            1.3514155530542686,
+            1.9265970683026681,
+            -0.9140205174299384,
+            0.23905479523371148,
+            0.26150004070253402,
+            0.39168691077357537,
+        ],
+        1e-10,
+        "regress, robust (HC1)",
+    );
+    let got = fit(&mut e, "probit yb x w", b_se);
+    near_stata(
+        &got,
+        &[
+            0.12362790668735292,
+            0.79572554525624506,
+            -1.0530699961645282,
+            0.1648672654430498,
+            0.1923150529540622,
+            0.3090964989509753,
+        ],
+        1e-10,
+        "probit, observed information",
+    );
+    let got = fit(&mut e, "logit yb x w, robust", b_se);
+    near_stata(
+        &got,
+        &[
+            0.18644887826476039,
+            1.363199246020228,
+            -1.7470886873426894,
+            0.28017457137732377,
+            0.38204137334680699,
+            0.49786700439256282,
+        ],
+        1e-10,
+        "logit, robust: N / (N - 1)",
+    );
+    let got = fit(
+        &mut e,
+        "logit yb x w, vce(cluster cl)",
+        "unname(sqrt(diag(stata_vcov)))",
+    );
+    near_stata(
+        &got,
+        &[0.19659074836245186, 0.4506964474614174, 0.43513419898139655],
+        1e-10,
+        "logit, clustered: G / (G - 1)",
+    );
+    let got = fit(&mut e, "nbreg nb x", b_se);
+    near_stata(
+        &got,
+        &[
+            0.6654924804910296,
+            0.44577236830095102,
+            -0.73053565022100209,
+            0.11410420800909059,
+            0.10787436435765344,
+            0.34086156471440715,
+        ],
+        1e-9,
+        "nbreg with /lnalpha",
+    );
+    let got = fit(&mut e, "ologit ord x w", "unname(stata_b)");
+    near_stata(
+        &got,
+        &[
+            0.53465541589421406,
+            0.33508927778611575,
+            -0.62940104652368734,
+            0.65545508627858329,
+        ],
+        1e-6,
+        "ologit and its cut points (Stata's own fit stops earlier)",
+    );
+    let got = fit(
+        &mut e,
+        "mlogit cat3 x",
+        "as.numeric(stata_base), unname(stata_b)",
+    );
+    near_stata(
+        &got,
+        &[
+            2.0,
+            -0.71063529275358917,
+            -0.7869965436975902,
+            -0.34073709457654067,
+            -1.2654174894097019,
+        ],
+        1e-7,
+        "mlogit: base outcome 2, the most frequent",
+    );
+    let got = rerun(
+        &mut e,
+        "regress y x w\nestat ic",
+        "stata_estat_ic(",
+        "unlist(res)[2:5]",
+    );
+    near_stata(
+        &got,
+        &[
+            -169.33271352580755,
+            3.0,
+            344.6654270516151,
+            351.8115069556367,
+        ],
+        1e-12,
+        "estat ic: ll, df, AIC, BIC",
+    );
+    let got = rerun(
+        &mut e,
+        "regress y x w\nestat hettest",
+        "stata_hettest(",
+        "res[1]",
+    );
+    near_stata(&got, &[3.037405763040681], 1e-12, "estat hettest");
+    let got = rerun(
+        &mut e,
+        "regress y x w\nestat hettest, rhs",
+        "stata_hettest(",
+        "res[1], res[2]",
+    );
+    near_stata(
+        &got,
+        &[3.4511055574605791, 2.0],
+        1e-12,
+        "estat hettest, rhs",
+    );
+    let got = rerun(
+        &mut e,
+        "regress y x w\nestat ovtest",
+        "stata_ovtest(",
+        "res[1], res[3]",
+    );
+    near_stata(
+        &got,
+        &[0.51465677976399593, 74.0],
+        1e-11,
+        "estat ovtest, with Stata's float powers",
+    );
+    let got = rerun(
+        &mut e,
+        "regress y c.x##c.x w\nmargins, dydx(x)",
+        "stata_margins(",
+        "res$b, sqrt(diag(res$V)), as.numeric(names(res$table)[3] == \"t\")",
+    );
+    near_stata(
+        &got,
+        &[1.9628880322447464, 0.21547004559432981, 1.0],
+        1e-10,
+        "margins after a quadratic, on t",
+    );
+    let got = rerun(
+        &mut e,
+        "logit yb x i.g\nmargins, dydx(x g)",
+        "stata_margins(",
+        "res$b",
+    );
+    near_stata(
+        &got,
+        &[0.22167164928071345, -0.025904504851519128],
+        1e-6,
+        "average marginal effects after logit",
+    );
+    let got = rerun(
+        &mut e,
+        "poisson cnt x, exposure(expo)\nmargins",
+        "stata_margins(",
+        "res$b, sqrt(diag(res$V))",
+    );
+    near_stata(
+        &got,
+        &[2.4125000019148466, 0.17365554993703941],
+        1e-8,
+        "margins after poisson",
+    );
+    let got = fit(
+        &mut e,
+        "ologit ord x w\npredict p\npredict q1 q2 q3",
+        "models$p[1], models$q1[1], models$q3[1]",
+    );
+    near_stata(
+        &got,
+        &[
+            0.51647889614105225,
+            0.51647889614105225,
+            0.20574034750461578,
+        ],
+        1e-6,
+        "predict after ologit: one variable is the first outcome",
+    );
+    let got = rerun(
+        &mut e,
+        "logit yb x w\nlincom x + w",
+        "stata_lincom(",
+        "res[[1]], res[[2]]",
+    );
+    near_stata(
+        &got,
+        &[-0.38388944132246139, 0.52445865610364761],
+        1e-10,
+        "lincom",
+    );
+    let got = rerun(
+        &mut e,
+        "logit yb x w\nmargins, at(x=(0 1))",
+        "stata_margins(",
+        "res$b, sqrt(diag(res$V))[1]",
+    );
+    near_stata(
+        &got,
+        &[
+            0.5449587031052433,
+            0.78732552200888906,
+            0.055959030239695555,
+        ],
+        1e-10,
+        "margins, at()",
     );
 }

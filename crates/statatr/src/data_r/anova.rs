@@ -8,20 +8,19 @@
 //!
 //! The table is Stata's:
 //!
-//! - partial sums of squares by default, which Stata documents as SAS's Type
-//!   III when no cell of the design is empty. They are worked out from the
-//!   same model refitted with sum-to-zero contrasts, each term's sum of
-//!   squares being the Wald statistic for its columns; an empty cell makes
-//!   the R stop and say so, rather than give a number Stata would not;
+//! - partial sums of squares by default, which are Type III: the same model
+//!   refitted with sum-to-zero contrasts, each term's sum of squares being
+//!   the Wald statistic for its columns. Checked against Stata 19 itself,
+//!   including a continuous variable interacted with a factor, to 15 digits;
+//! - with an empty cell Stata still gives partial sums of squares, but by a
+//!   rule not matched yet (it is not Type III, Type II, or a reference-coded
+//!   model with any choice of base levels), so the R stops and says so;
 //! - `sequential` gives Type I, R's own `anova()`, which does not depend on
 //!   the coding;
 //! - Model is the total less the residual sum of squares, with R-squared,
 //!   adjusted R-squared and root MSE above the table.
 //!
-//! A continuous variable interacted with a factor is not translated for
-//! partial sums of squares, since what Stata's partial test means there has
-//! not been checked; nested terms (`a|b`) and error terms (`/`) are not
-//! translated yet.
+//! Nested terms (`a|b`) and error terms (`/`) are not translated yet.
 
 use super::model::{keep_sample, Estimates, Fit, Spec};
 use super::stats::r_logical;
@@ -46,7 +45,7 @@ pub(super) const ANOVA_HELPER: &str = r##"stata_anova <- function(fit, data, seq
     f3 <- stats::lm(stats::formula(fit), data = data,
                     contrasts = stats::setNames(rep(list("contr.sum"), length(fac)), fac))
     if (anyNA(stats::coef(f3))) {
-      stop("the design has an empty cell: Stata's partial sums of squares are then not SAS's Type III, and this is not translated")
+      stop("the design has an empty cell: Stata still gives partial sums of squares here, but by a rule not matched yet (they are not Type III), so this is not translated; sequential ones are")
     }
     X <- stats::model.matrix(f3)
     assign <- attr(X, "assign")
@@ -114,12 +113,6 @@ impl Session {
                     "anova {w}: # and ## in one term is not translated"
                 )));
             }
-            if !sequential && parts.len() > 1 && parts.iter().any(|p| p.starts_with("c.")) {
-                return Err(no(format!(
-                    "anova {w}: partial sums of squares for a continuous variable interacted with \
-                     a factor are not translated (sequential ones are)"
-                )));
-            }
             terms.push(parts.join(sep));
         }
         if terms.is_empty() {
@@ -154,8 +147,8 @@ impl Session {
             out.caveat("sequential sums of squares, in the order the terms are written (Type I)");
         } else {
             out.caveat(
-                "partial sums of squares, which Stata documents as SAS's Type III when no cell is \
-                 empty; an empty cell stops the R with that reason",
+                "partial (Type III) sums of squares, as Stata's; a design with an empty cell \
+                 stops the R, since Stata's rule there is not matched yet",
             );
         }
         out.caveat("a variable is categorical unless written c.x, as in Stata's anova");

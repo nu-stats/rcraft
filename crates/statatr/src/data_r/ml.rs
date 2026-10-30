@@ -89,6 +89,29 @@ pub(super) const NBREG_VCOV_HELPER: &str = r#"stata_nbreg_vcov <- function(fit) 
   V
 }"#;
 
+/// Newton steps on the observed information after `glm`'s probit fit.
+/// `glm` scores with the expected information and stops on the change in
+/// deviance, which for probit leaves the score near 1e-7; Stata's estimates
+/// sit at about 1e-11. The fit is then refreshed from the polished estimates
+/// (one `glm` step from there moves them by no more than the score).
+pub(super) const PROBIT_NEWTON_HELPER: &str = r#"stata_probit_newton <- function(fit) {
+  X <- stats::model.matrix(fit)
+  y <- fit$y
+  off <- if (is.null(fit$offset)) 0 else fit$offset
+  b <- stats::coef(fit)
+  for (i in 1:25) {
+    eta <- drop(X %*% b) + off
+    P <- stats::pnorm(eta)
+    f <- stats::dnorm(eta)
+    s <- colSums(X * (y * f / P - (1 - y) * f / (1 - P)))
+    w <- y * (eta * f * P + f^2) / P^2 + (1 - y) * (f^2 - eta * f * (1 - P)) / (1 - P)^2
+    step <- solve(crossprod(X * w, X), s)
+    b <- b + step
+    if (max(abs(step)) < 1e-15 * (1 + max(abs(b)))) break
+  }
+  stats::update(fit, start = unname(b), control = stats::glm.control(epsilon = 1e-15, maxit = 1))
+}"#;
+
 /// mlogit's coefficients as one named vector, in the order of `vcov()`.
 pub(super) const MULTINOM_B_HELPER: &str = r#"stata_multinom_b <- function(fit) {
   cf <- stats::coef(fit)
@@ -209,6 +232,10 @@ impl Session {
                 out.line(format!(
                     "stata_estimates <- stats::glm(as.numeric({dep} != 0) ~ {right}, family = stats::binomial(link = \"{link}\"), data = {src}, {control})"
                 ));
+                if fit == Fit::Probit {
+                    self.helpers.insert("stata_probit_newton");
+                    out.line("stata_estimates <- stata_probit_newton(stata_estimates)");
+                }
                 out.caveat("the outcome is 1 where it is not 0 (and not missing), as Stata takes it");
                 out.caveat(
                     "a variable that predicts the outcome perfectly is not dropped as Stata drops \

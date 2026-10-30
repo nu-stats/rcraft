@@ -222,6 +222,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_nbreg_vcov" => ml::NBREG_VCOV_HELPER,
         "stata_ml_header" => ml::ML_HEADER_HELPER,
         "stata_multinom_b" => ml::MULTINOM_B_HELPER,
+        "stata_probit_newton" => ml::PROBIT_NEWTON_HELPER,
         "stata_outcome_probs" => post::OUTCOME_PROBS_HELPER,
         "stata_test" => post::TEST_HELPER,
         "stata_lincom" => post::LINCOM_HELPER,

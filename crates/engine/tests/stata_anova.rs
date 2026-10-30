@@ -18,7 +18,8 @@
 //! Without a supported R, or without haven and dplyr, the test is skipped
 //! with a note.
 
-#![allow(clippy::panic)]
+// Stata's numbers are kept exactly as it printed them (%24.17g)
+#![allow(clippy::panic, clippy::excessive_precision)]
 
 use std::time::{Duration, Instant};
 
@@ -358,13 +359,61 @@ fn an_empty_cell_stops_the_r_with_its_reason() {
     ok(&mut e, &code);
 }
 
+/// Stata 19 SE's own sums of squares on this same data (`cells`), run in
+/// batch mode on 2026-10-30 and printed with `%24.17g`.
+#[test]
+fn the_sums_of_squares_are_stata_19s_own() {
+    let Some(mut e) = engine() else { return };
+    let dir = cells(&mut e);
+    let stata: [(&str, [f64; 3]); 4] = [
+        (
+            "anova y g h g#h",
+            [
+                20.891545388435485,
+                5.5182964607521905,
+                0.0053058128340021625,
+            ],
+        ),
+        (
+            "anova y g h g#h, sequential",
+            [
+                17.283725139581428,
+                5.9267959204930705,
+                0.0053058128340026656,
+            ],
+        ),
+        // a continuous variable interacted with a factor: Type III too
+        (
+            "anova y g c.x g#c.x",
+            [20.456665562415004, 7.873750760094401, 2.0988419329224439],
+        ),
+        (
+            "anova y ib3.g h ib3.g#h",
+            [
+                20.891545388435475,
+                5.5182964607521861,
+                0.0053058128340020896,
+            ],
+        ),
+    ];
+    for (cmd, want) in stata {
+        let code = script(&format!("use \"{dir}/cells.dta\"\n{cmd}\n"));
+        ok(&mut e, &code);
+        let got = table(&mut e, &code);
+        for (i, w) in want.iter().enumerate() {
+            close(at(&got, i + 1), *w, 1e-10 * w.abs().max(1.0), cmd);
+        }
+    }
+}
+
 #[test]
 fn what_anova_does_not_translate_says_why() {
     assert!(refusal("use \"d.dta\"\nanova y g|h\n").contains("nested"));
     assert!(refusal("use \"d.dta\"\nanova y g / h\n").contains("error terms"));
-    assert!(refusal("use \"d.dta\"\nanova y c.x#g\n").contains("continuous"));
     assert!(refusal("use \"d.dta\"\nanova y g, repeated(g)\n").contains("repeated"));
-    // with sequential sums of squares a covariate interaction is fine
-    let t = translate(&read("use \"d.dta\"\nanova y c.x#g, sequential\n"));
-    assert!(t.lines.iter().all(|l| l.result.is_ok()));
+    // a covariate interacted with a factor is translated, partial or sequential
+    for cmd in ["anova y c.x#g", "anova y c.x#g, sequential"] {
+        let t = translate(&read(&format!("use \"d.dta\"\n{cmd}\n")));
+        assert!(t.lines.iter().all(|l| l.result.is_ok()), "{cmd}");
+    }
 }

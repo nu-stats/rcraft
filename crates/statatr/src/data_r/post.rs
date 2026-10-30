@@ -113,8 +113,15 @@ stata_hettest <- function(fit, rhs = FALSE) {
 stata_ovtest <- function(fit) {
   X <- stats::model.matrix(fit)
   y <- stats::model.response(stats::model.frame(fit))
+  # as Stata does: the fitted values rescaled to [0, 1], and each power stored
+  # as a float before the regression (which moves F in the sixth digit)
   h <- stats::fitted(fit)
-  big <- stats::lm(y ~ X + I(h^2) + I(h^3) + I(h^4) + 0)
+  h <- (h - min(h)) / (max(h) - min(h))
+  fl <- function(v) readBin(writeBin(as.numeric(v), raw(), size = 4), "double", size = 4, n = length(v))
+  h2 <- fl(h^2)
+  h3 <- fl(h^3)
+  h4 <- fl(h^4)
+  big <- stats::lm(y ~ X + h2 + h3 + h4 + 0)
   rss0 <- sum(stats::residuals(fit)^2)
   rss1 <- sum(stats::residuals(big)^2)
   df2 <- big$df.residual
