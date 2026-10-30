@@ -165,7 +165,11 @@ fn refusal(dofile: &str) -> String {
 /// Thirty-two rows in an unbalanced three-by-two design, a covariate, and a
 /// variable `k` that leaves the cell g = 3, k = 1 empty.
 fn cells(e: &mut Engine) -> String {
-    let dir = std::env::temp_dir().join(format!("rcraft-stata-anova-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "rcraft-stata-anova-{}-{}",
+        std::process::id(),
+        fresh()
+    ));
     let _ = std::fs::create_dir_all(&dir);
     let d = dir.display().to_string().replace('\\', "/");
     ok(
@@ -416,4 +420,12 @@ fn what_anova_does_not_translate_says_why() {
         let t = translate(&read(&format!("use \"d.dta\"\n{cmd}\n")));
         assert!(t.lines.iter().all(|l| l.result.is_ok()), "{cmd}");
     }
+}
+
+/// A number no other call in this run has had: the tests in a file run at
+/// once, and each writing its data to the same folder let one read a file
+/// another was still writing.
+fn fresh() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }

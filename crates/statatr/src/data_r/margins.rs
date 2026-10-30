@@ -60,14 +60,20 @@ pub(super) const MARGINS_HELPER: &str = r#"stata_margins <- function(fit, data, 
     vars <- setdiff(vars, used)
   }
   if (identical(dydx, "*")) dydx <- vars
-  for (v in c(dydx, over)) {
-    if (!v %in% vars) stop("variable ", v, " not found in list of covariates")
+  for (v in dydx) {
+    if (!v %in% vars) stop("invalid dydx() option;\n", v, " not found in list of covariates")
   }
-  if (atmeans) for (v in vars) data[[v]] <- mean(data[[v]])
+  for (v in over) {
+    if (!v %in% vars) stop(v, " not found in list of covariates")
+  }
+  # Stata sets a variable to an at() value or a mean as a float, which moves
+  # the margin in about the eighth digit (checked in Stata 19)
+  fl <- function(x) readBin(writeBin(as.numeric(x), raw(), size = 4), "double", size = 4, n = length(x))
+  if (atmeans) for (v in vars) data[[v]] <- fl(mean(data[[v]]))
   levels_of <- function(v) sort(unique(data[[v]]))
   setv <- function(vals) {
     nd <- data
-    for (v in names(vals)) nd[[v]] <- vals[[v]]
+    for (v in names(vals)) nd[[v]] <- fl(vals[[v]])
     nd
   }
   grids <- if (length(at) > 0) at else list(list())

@@ -127,7 +127,11 @@ fn close(got: f64, want: f64, by: f64, what: &str) {
 
 /// Twenty rows in five clusters, with residuals that are not zero.
 fn fixture(e: &mut Engine) -> String {
-    let dir = std::env::temp_dir().join(format!("rcraft-stata-regress-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "rcraft-stata-regress-{}-{}",
+        std::process::id(),
+        fresh()
+    ));
     let _ = std::fs::create_dir_all(&dir);
     let d = dir.display().to_string().replace('\\', "/");
     ok(
@@ -397,4 +401,12 @@ fn regress_says_why_it_refuses_what_it_refuses() {
         refusal("use \"d.dta\"\nregress y x, vce(cluster a b)\n").contains("one variable"),
         "vce(cluster) takes one variable"
     );
+}
+
+/// A number no other call in this run has had: the tests in a file run at
+/// once, and each writing its data to the same folder let one read a file
+/// another was still writing.
+fn fresh() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }

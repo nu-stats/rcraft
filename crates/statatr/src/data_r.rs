@@ -695,7 +695,7 @@ impl Session {
         out.package("haven");
         if !opts.has("replace", 7) {
             out.line(format!(
-                "if (file.exists({p})) stop(\"file {e} already exists; use the replace option\")",
+                "if (file.exists({p})) stop(\"file {e} already exists\")",
                 p = r_text(&path),
                 e = path.replace('\\', "/").replace('"', "")
             ));

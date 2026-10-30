@@ -584,13 +584,23 @@ impl Session {
                     .map(|s| r_name(s))
                     .collect::<Vec<_>>()
                     .join(", ");
+                // every other variable must be the same within i; Stata names
+                // each one that is not, a line apiece
+                let stub_vec = stubs
+                    .iter()
+                    .map(|s| r_text(s))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                out.line(format!(
+                    "local({{ other <- setdiff(names({d}), c({i_vec}, {jt}, {stub_vec})); bad <- other[vapply(other, function(v) any(tapply({d}[[v]], interaction({d}[{i_vec}], drop = TRUE), function(z) length(unique(z)) > 1)), TRUE)]; if (length(bad) > 0) stop(paste0(\"variable \", bad, \" not constant within {within}\", collapse = \"\\n\")) }})",
+                    jt = r_text(&j),
+                    within = i.join(" ")
+                ));
                 out.line(format!(
                     "{d} <- {d} |> tidyr::pivot_wider(names_from = {jn}, values_from = c({values}), names_glue = {glue}, names_vary = \"slowest\", names_sort = TRUE)",
                     jn = r_name(&j),
                     glue = r_text(&format!("{{.value}}{{{j}}}"))
                 ));
-                // every other variable must be the same within i
-                out.line(format!("if (anyDuplicated({d}[{i_vec}])) stop(\"a variable other than the stubs is not constant within {}\")", i.join(" ")));
                 out.line(format!(
                     "{d} <- {d} |> dplyr::arrange(dplyr::pick({i_sel})) |> dplyr::relocate(c({i_sel}, dplyr::matches({})))",
                     r_text(&format!("^({stub_re}).+$"))
@@ -765,7 +775,7 @@ impl Session {
                     return Err(no("duplicates drop with if/in is not translated yet"));
                 }
                 if !vars.trim().is_empty() && !opts.has("force", 5) {
-                    out.line("stop(\"duplicates drop with a varlist needs the force option\")");
+                    out.line("stop(\"force option required with duplicates drop varlist\")");
                     return Ok(());
                 }
                 // the first row of each group stays, in the data's order

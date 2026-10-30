@@ -149,11 +149,15 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
 
 /// `correlate`: casewise, like Stata.
 pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, covariance = FALSE, means = FALSE) {
+  # as Stata 19 does: a string variable is left out with a note, and only
+  # when none is left is it an error
   for (n in names(d)) {
     if (is.character(d[[n]]) || is.factor(d[[n]])) {
-      stop(n, " is a string variable; correlate may not use it")
+      cat("(", n, " ignored because string variable)\n", sep = "")
+      d[[n]] <- NULL
     }
   }
+  if (length(d) == 0) stop("too few variables specified")
   m <- as.matrix(as.data.frame(lapply(d, function(v) {
     u <- unclass(v)
     attributes(u) <- NULL

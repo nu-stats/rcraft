@@ -230,9 +230,11 @@ impl Session {
                 out.caveat("one new variable and no outcome(): the first outcome's probability, as in Stata");
                 values.push("stata_p[, 1]".into());
             } else {
+                // Stata's two lines, word for word
                 out.line(format!(
-                    "if (ncol(stata_p) != {n}) stop(\"you must specify \", ncol(stata_p), \" new variables\")",
-                    n = words.len()
+                    "if (ncol(stata_p) != {n}) stop(if (ncol(stata_p) > {n}) \"too few\" else \"too many\", \" variables specified\\n{dep} has \", ncol(stata_p), \" outcomes and so you must specify \", ncol(stata_p), \" new variables, or you can use the outcome() option and specify variables one at a time\")",
+                    n = words.len(),
+                    dep = est.dep
                 ));
                 values.extend((1..=words.len()).map(|i| format!("stata_p[, {i}]")));
             }

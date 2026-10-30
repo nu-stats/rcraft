@@ -140,7 +140,11 @@ fn all_close(got: &[f64], want: &[f64], by: f64, what: &str) {
 /// Eighty rows with a binary, a count, an overdispersed count, an ordered
 /// and an unordered outcome, made with a fixed seed.
 fn fixture(e: &mut Engine) -> String {
-    let dir = std::env::temp_dir().join(format!("rcraft-stata-models-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "rcraft-stata-models-{}-{}",
+        std::process::id(),
+        fresh()
+    ));
     let _ = std::fs::create_dir_all(&dir);
     let d = dir.display().to_string().replace('\\', "/");
     ok(
@@ -1292,5 +1296,35 @@ fn the_descriptive_commands_agree_with_stata_19() {
     ] {
         let got = rerun(&mut e, cmd, "print(stats::t.test(", tt);
         near_stata(&got, &stata, 1e-12, cmd);
+    }
+}
+
+/// A number no other call in this run has had: the tests in a file run at
+/// once, and each writing its data to the same folder let one read a file
+/// another was still writing.
+fn fresh() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `ttest`'s confidence intervals at other levels, against the intervals
+/// Stata 19 SE prints (to seven figures) for this same data.
+#[test]
+fn ttest_intervals_at_other_levels_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    for (cmd, lo, hi) in [
+        ("ttest y, by(g) level(90)", -2.754959, -0.6227649),
+        ("ttest x == 0.1, level(99)", -0.447099, 0.204149),
+        ("ttest x == w, level(80)", -0.2794166, 0.0766166),
+    ] {
+        let code = script(&format!("use \"{dir}/models.dta\"\n{cmd}\n"));
+        ok(&mut e, &code);
+        let got = numbers(
+            &mut e,
+            &format!("res <- {}", line_of(&code, "print(stats::t.test(")),
+            "res$conf.int[1], res$conf.int[2]",
+        );
+        near_stata(&got, &[lo, hi], 5e-7, cmd);
     }
 }

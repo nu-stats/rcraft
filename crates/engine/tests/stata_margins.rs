@@ -21,7 +21,8 @@
 //! Without a supported R, or without haven, dplyr, MASS and nnet, the test
 //! is skipped with a note.
 
-#![allow(clippy::panic)]
+// Stata's numbers are kept exactly as it printed them (%24.17g)
+#![allow(clippy::panic, clippy::excessive_precision)]
 
 use std::time::{Duration, Instant};
 
@@ -136,7 +137,11 @@ fn all_close(got: &[f64], want: &[f64], by: f64, what: &str) {
 /// Eighty rows with a binary, a count, an overdispersed count, an ordered
 /// and an unordered outcome, made with a fixed seed.
 fn fixture(e: &mut Engine) -> String {
-    let dir = std::env::temp_dir().join(format!("rcraft-stata-margins-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "rcraft-stata-margins-{}-{}",
+        std::process::id(),
+        fresh()
+    ));
     let _ = std::fs::create_dir_all(&dir);
     let d = dir.display().to_string().replace('\\', "/");
     ok(
@@ -395,12 +400,79 @@ fn at_and_atmeans_set_the_covariates_before_averaging() {
     ));
     ok(&mut e, &code);
     let got = margins(&mut e, &code);
+    // Stata sets each covariate to the float of its mean (checked in Stata 19)
     let want = numbers(
         &mut e,
-        "b <- unname(stata_b); a <- c(1, mean(models$x), mean(models$w)); V <- stats::vcov(stata_estimates)",
-        "sum(a * b), sqrt(drop(t(a) %*% V %*% a))",
+        "fl <- function(v) readBin(writeBin(as.numeric(v), raw(), size = 4), \"double\", size = 4, n = length(v)); \
+         b <- unname(stata_b); a <- c(1, fl(mean(models$x)), fl(mean(models$w))); V <- stats::vcov(stata_estimates)",
+        "sum(a * b), sqrt(drop(t(a) %*% V %*% a)), mean(models$y)",
     );
-    all_close(&got, &want, 1e-9, "the prediction at the means");
+    close(
+        at(&got, 0),
+        at(&want, 0),
+        1e-12,
+        "the prediction at the float means",
+    );
+    close(at(&got, 1), at(&want, 1), 1e-12, "its error");
+    // so it is not quite mean(y), which the exact means would give
+    let gap = (at(&got, 0) - at(&want, 2)).abs();
+    assert!(
+        gap > 1e-10 && gap < 1e-7,
+        "the float means move it slightly: {gap}"
+    );
+}
+
+/// Stata 19 SE on this same data, 2026-10-30: `atmeans` and `at()` with
+/// values that are not exact floats.
+#[test]
+fn atmeans_and_at_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let cases: [(&str, &[f64], f64); 6] = [
+        (
+            "regress y x w\nmargins, atmeans",
+            &[1.1357311297706145, 0.22896587017807754],
+            1e-12,
+        ),
+        (
+            "logit yb x w\nmargins, atmeans",
+            &[0.51397811967737173, 0.069298316784833891],
+            1e-9,
+        ),
+        (
+            "logit yb x w\nmargins, dydx(x) atmeans",
+            &[0.3405334589629081, 0.089436156016400661],
+            1e-9,
+        ),
+        (
+            "regress y x w\nmargins, at(x=0.1)",
+            &[1.5624242246427948],
+            1e-12,
+        ),
+        (
+            "regress y x w\nmargins, at(x=0.1 w=0.3)",
+            &[1.2698690966304336],
+            1e-12,
+        ),
+        // Stata's own logit after i.g stops a little earlier than R's
+        (
+            "logit yb x i.g\nmargins, at(x=0.1)",
+            &[0.57381421771106866],
+            1e-6,
+        ),
+    ];
+    for (cmd, stata, tol) in cases {
+        let code = script(&format!("use \"{dir}/models.dta\"\n{cmd}\n"));
+        ok(&mut e, &code);
+        let got = margins(&mut e, &code);
+        for (i, s) in stata.iter().enumerate() {
+            let g = at(&got, i);
+            assert!(
+                (g - s).abs() <= tol * s.abs().max(1.0),
+                "{cmd}: {g} against Stata's {s}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -529,4 +601,12 @@ fn what_margins_does_not_translate_says_why() {
             .is_some_and(|e| e.reason.contains("changed the data")),
         "and counts as a change, since it still runs in Stata"
     );
+}
+
+/// A number no other call in this run has had: the tests in a file run at
+/// once, and each writing its data to the same folder let one read a file
+/// another was still writing.
+fn fresh() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }

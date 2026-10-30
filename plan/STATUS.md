@@ -1793,5 +1793,29 @@ the R tests make, and compared number by number.
   Nothing needed fixing; the tabulate helper now keeps its chi-squared on the table it returns, so the test can
   read it at full precision. Pinned in `the_descriptive_commands_agree_with_stata_19` (`stata_models.rs`) and
   `the_statistics_agree_with_stata_19` (`stata_statistics.rs`). P2B.4 has 46 real-R cases.
-- **Not checked against Stata yet:** `margins` with `atmeans`; `predict` stored as a float; the confidence
-  intervals of `ttest, level()`; the refusals' wording; the printed layout (deliberately R's, not Stata's).
+- **The last four items, also checked.**
+  - `predict` stores a float for the prediction and for the residuals, exactly as the translation does (no
+    row differs from the float of the double value).
+  - `ttest, level()`'s intervals agree to Stata's printed seven figures (90%, 99% and 80% levels).
+  - `margins, atmeans` and `at()` **differed** in about the eighth digit: Stata sets each variable to the
+    *float* of the value (the mean, or `0.1`), which is why after least squares its prediction at the means is
+    1.1357311297706145 and not mean(y), 1.1357311360696081. The translation now does the same and agrees to 16
+    digits.
+  - The messages the translated R gives where it does what Stata does: of 18, 12 already matched word for
+    word, and 6 did not and now do. `correlate` with a string variable does not stop in Stata 19: it prints
+    `(s ignored because string variable)` and goes on, and only with nothing left says
+    `too few variables specified`; the translation stopped, and part one's note was wrong to call that Stata's
+    behaviour. The others: `margins, dydx(zzz)` (`invalid dydx() option;` then
+    `zzz not found in list of covariates`), the wrong number of new variables after `ologit`/`mlogit`
+    (`too few`/`too many variables specified`, then the two-line explanation), `save` over a file (just
+    `file x.dta already exists`, no hint), `duplicates drop` with a varlist
+    (`force option required with duplicates drop varlist`), and `reshape wide` with a varying variable (one
+    `variable w not constant within id` line per variable, which now means checking before the pivot).
+  - All of it pinned: `engine/tests/stata_messages.rs` (19 messages), `atmeans_and_at_agree_with_stata_19`
+    (`stata_margins.rs`), `ttest_intervals_at_other_levels_agree_with_stata_19` (`stata_models.rs`).
+- **A flaky test found on the way.** Ubuntu CI failed once with "Unable to read from file" on `models.dta`. The
+  tests in a file run at once and each fixture wrote its data to the same folder (named by the process id), so
+  one test could read a file another was still writing. Every Stata test fixture now takes a fresh folder per
+  call.
+- **Still not checked against Stata:** only the printed layout, which is deliberately R's, not Stata's. P2B.4
+  has 49 real-R cases.

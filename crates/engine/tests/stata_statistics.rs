@@ -128,7 +128,11 @@ fn close(got: f64, want: f64, by: f64, what: &str) {
 
 /// A folder of this test's own, with the dataset written into it.
 fn fixture(e: &mut Engine) -> String {
-    let dir = std::env::temp_dir().join(format!("rcraft-stata-stats-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "rcraft-stata-stats-{}-{}",
+        std::process::id(),
+        fresh()
+    ));
     let _ = std::fs::create_dir_all(&dir);
     let d = dir.display().to_string().replace('\\', "/");
     ok(
@@ -364,14 +368,30 @@ fn correlate_drops_a_whole_row_when_any_of_its_variables_is_missing() {
     close(at(&v, 0), 2.0 * 82.5 / 9.0, 1e-9, "cov(x, y)");
 }
 
+/// Stata 19 leaves a string variable out with a note and goes on; only when
+/// every variable is a string is it an error (checked in Stata on
+/// 2026-10-30).
 #[test]
-fn correlate_refuses_a_string_variable_as_stata_does() {
+fn correlate_leaves_a_string_variable_out_as_stata_does() {
     let Some(mut e) = engine() else { return };
     let dir = fixture(&mut e);
-    let code = script(&format!("use \"{dir}/study.dta\"\ncorrelate x s\n"));
+    let code = script(&format!("use \"{dir}/study.dta\"\ncorrelate x s y\n"));
+    let text = ok(&mut e, &code);
+    assert!(
+        text.contains("(s ignored because string variable)"),
+        "{text}"
+    );
+    let line = code
+        .lines()
+        .rfind(|l| l.starts_with("stata_correlate("))
+        .unwrap_or_default();
+    let v = numbers(&mut e, &format!("res <- {line}"), "nrow(res), res[2, 1]");
+    assert_eq!(at(&v, 0), 2.0, "x and y are left");
+    close(at(&v, 1), 1.0, 1e-12, "y = 2x, so their correlation is 1");
+    let code = script(&format!("use \"{dir}/study.dta\"\ncorrelate s\n"));
     let (outcome, text) = run(&mut e, &code);
     assert_eq!(outcome, Outcome::Error, "{text}");
-    assert!(text.contains("string variable"), "{text}");
+    assert!(text.contains("too few variables specified"), "{text}");
 }
 
 #[test]
@@ -512,4 +532,12 @@ fn the_statistics_agree_with_stata_19() {
         &[1.6666666666666665, 0.19670560245894692],
         "the 2 x 2 chi-squared",
     );
+}
+
+/// A number no other call in this run has had: the tests in a file run at
+/// once, and each writing its data to the same folder let one read a file
+/// another was still writing.
+fn fresh() -> usize {
+    static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
