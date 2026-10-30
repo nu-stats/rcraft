@@ -27,7 +27,8 @@ use super::stats::r_logical;
 use super::*;
 
 /// Stata's anova table from a fitted linear model.
-pub(super) const ANOVA_HELPER: &str = r##"stata_anova <- function(fit, data, sequential = FALSE) {
+pub(super) const ANOVA_HELPER: &str = r##"stata_anova <- function(fit, data, sequential = FALSE, stata_names = NULL, errors = NULL,
+                        repeated = NULL, yname = NULL, nested = list()) {
   rss <- sum(stats::residuals(fit)^2)
   dfr <- fit$df.residual
   mse <- rss / dfr
@@ -42,14 +43,42 @@ pub(super) const ANOVA_HELPER: &str = r##"stata_anova <- function(fit, data, seq
     kind <- "Seq. SS"
   } else {
     fac <- names(Filter(is.factor, stats::model.frame(fit)))
-    f3 <- stats::lm(stats::formula(fit), data = data,
-                    contrasts = stats::setNames(rep(list("contr.sum"), length(fac)), fac))
-    if (anyNA(stats::coef(f3))) {
-      stop("the design has an empty cell: Stata still gives partial sums of squares here, but by a rule not matched yet (they are not Type III), so this is not translated; sequential ones are")
+    crossed <- setdiff(labels, names(nested))
+    if (length(nested) == 0) {
+      f3 <- stats::lm(stats::terms(fit), data = data,
+                      contrasts = stats::setNames(rep(list("contr.sum"), length(fac)), fac))
+      if (anyNA(stats::coef(f3))) {
+        stop("the design has an empty cell: Stata still gives partial sums of squares here, but by a rule not matched yet (they are not Type III), so this is not translated; sequential ones are")
+      }
+      X <- stats::model.matrix(f3)
+      assign <- attr(X, "assign")
+    } else {
+      # a nested term b|a: within each level of a, sum-to-zero contrasts among
+      # the levels of b found there; the crossed terms as before
+      X <- stats::model.matrix(stats::reformulate(if (length(crossed)) crossed else "1"), data,
+                               contrasts.arg = stats::setNames(rep(list("contr.sum"), length(fac)), fac))
+      # term numbers of the crossed columns (0, the constant, stays 0)
+      assign <- c(0L, match(attr(stats::terms(stats::reformulate(if (length(crossed)) crossed else "1")), "term.labels"), labels))[attr(X, "assign") + 1]
+      assign[is.na(assign)] <- 0L
+      for (t in names(nested)) {
+        inner <- as.vector(unclass(data[[nested[[t]][1]]]))
+        cell <- interaction(lapply(nested[[t]][-1], function(v) as.vector(unclass(data[[v]]))), drop = TRUE)
+        for (lev in levels(cell)) {
+          r <- which(cell == lev)
+          il <- sort(unique(inner[r]))
+          if (length(il) < 2) next
+          C <- stats::contr.sum(length(il))
+          M <- matrix(0, nrow(data), ncol(C))
+          M[r, ] <- C[match(inner[r], il), , drop = FALSE]
+          X <- cbind(X, M)
+          assign <- c(assign, rep(match(t, labels), ncol(C)))
+        }
+      }
+      if (qr(X)$rank < ncol(X)) {
+        stop("the nested design has an empty cell, whose partial sums of squares are not translated yet")
+      }
     }
-    X <- stats::model.matrix(f3)
-    assign <- attr(X, "assign")
-    b <- stats::coef(f3)
+    b <- drop(solve(crossprod(X), crossprod(X, y)))
     XtXi <- solve(crossprod(X))
     ss <- numeric(length(labels))
     df <- numeric(length(labels))
@@ -68,13 +97,57 @@ pub(super) const ANOVA_HELPER: &str = r##"stata_anova <- function(fit, data, seq
   }
   tab <- data.frame(ss = c(tss - rss, ss, rss, tss), df = c(n - 1 - dfr, df, dfr, n - 1))
   tab$ms <- tab$ss / tab$df
-  tab$F <- c(tab$ms[seq_len(length(labels) + 1)] / mse, NA, NA)
-  tab$p <- stats::pf(tab$F, tab$df, dfr, lower.tail = FALSE)
-  rownames(tab) <- c("Model", stata_label(labels), "Residual", "Total")
+  # each term against its error term: the residual (0), another term (its
+  # index), or none, for an error term Stata does not test (-1)
+  if (is.null(errors)) errors <- rep(0L, length(labels))
+  nt <- length(labels)
+  den_ms <- ifelse(errors > 0, tab$ms[errors + 1], mse)
+  den_df <- ifelse(errors > 0, tab$df[errors + 1], dfr)
+  Fs <- ifelse(errors < 0, NA_real_, tab$ms[seq_len(nt) + 1] / den_ms)
+  tab$F <- c(tab$ms[1] / mse, Fs, NA, NA)
+  tab$p <- stats::pf(tab$F, tab$df, c(dfr, den_df, NA, NA), lower.tail = FALSE)
+  rownames(tab) <- c("Model", if (is.null(stata_names)) stata_label(labels) else stata_names, "Residual", "Total")
   names(tab) <- c(kind, "df", "MS", "F", "Prob>F")
   cat(sprintf("Number of obs = %d    R-squared     = %.4f\n", n, 1 - rss / tss))
   cat(sprintf("Root MSE      = %.6g    Adj R-squared = %.4f\n\n", sqrt(mse), 1 - mse / (tss / (n - 1))))
   print(tab, digits = 7, na.print = "")
+  if (!is.null(repeated)) {
+    # the epsilons from the covariance of the repeated measures within the
+    # subjects, pooled over the between-subjects groups
+    d <- as.data.frame(lapply(data, function(v) as.vector(unclass(v))))
+    Y <- tapply(d[[yname]], list(d[[repeated$subject]], d[[repeated$var]]), mean)
+    if (anyNA(Y)) stop("repeated(): every subject needs every level of ", repeated$var)
+    grp <- if (length(repeated$groups)) {
+      interaction(lapply(repeated$groups, function(g) tapply(d[[g]], d[[repeated$subject]], function(v) v[1])), drop = TRUE)
+    } else {
+      factor(rep(1, nrow(Y)))
+    }
+    R <- Y
+    for (G in levels(grp)) {
+      r <- grp == G
+      R[r, ] <- sweep(Y[r, , drop = FALSE], 2, colMeans(Y[r, , drop = FALSE]))
+    }
+    k <- ncol(Y)
+    N <- nrow(Y)
+    g <- nlevels(grp)
+    S <- crossprod(R) / (N - g)
+    C <- qr.Q(qr(cbind(1, stats::contr.poly(k))))[, -1, drop = FALSE]
+    M <- t(C) %*% S %*% C
+    gg <- sum(diag(M))^2 / ((k - 1) * sum(diag(M %*% M)))
+    hf <- min(1, (N * (k - 1) * gg - 2) / ((k - 1) * (N - g - (k - 1) * gg)))
+    box <- 1 / (k - 1)
+    cat(sprintf("\nRepeated variable: %s\n  Huynh-Feldt epsilon        = %.4f\n  Greenhouse-Geisser epsilon = %.4f\n  Box's conservative epsilon = %.4f\n\n",
+                repeated$var, hf, gg, box))
+    rows <- which(vapply(labels, function(l) repeated$var %in% all.vars(stats::as.formula(paste("~", l))), TRUE))
+    adj <- data.frame(df = tab$df[rows + 1], F = tab$F[rows + 1], check.names = FALSE)
+    eps <- c(Regular = 1, "H-F" = hf, "G-G" = gg, Box = box)
+    for (nm in names(eps)) {
+      adj[[nm]] <- stats::pf(adj$F, adj$df * eps[[nm]], den_df[rows] * eps[[nm]], lower.tail = FALSE)
+    }
+    rownames(adj) <- rownames(tab)[rows + 1]
+    print(adj, digits = 4)
+    attr(tab, "epsilon") <- c(hf = hf, gg = gg, box = box)
+  }
   invisible(tab)
 }"##;
 
@@ -86,7 +159,7 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "anova")?;
-        if let Some(o) = opts.other(&[("sequential", 3), ("partial", 4)]) {
+        if let Some(o) = opts.other(&[("sequential", 3), ("partial", 4), ("repeated", 3)]) {
             return Err(no(format!(
                 "anova with the option {o} is not translated yet"
             )));
@@ -99,33 +172,169 @@ impl Session {
         if !is_name(dep) {
             return Err(no(format!("{dep} is not a variable name")));
         }
-        let mut terms = Vec::new();
-        for w in words {
-            if w.contains('|') || w.contains('/') {
-                return Err(no(format!(
-                    "anova {w}: nested terms (|) and error terms (/) are not translated yet"
-                )));
-            }
-            let sep = if w.contains("##") { "##" } else { "#" };
-            let parts: Vec<String> = w.split(sep).map(categorical).collect();
-            if parts.iter().any(|p| p.contains('#')) {
-                return Err(no(format!(
-                    "anova {w}: # and ## in one term is not translated"
-                )));
-            }
-            terms.push(parts.join(sep));
+        // the terms, in groups split by `/` (each group's terms tested against
+        // the first term of the next), each with Stata's label and, for a
+        // nested term b|a, its inner and outer variables
+        struct Term {
+            stata: String,
+            term: String,
+            nested: Option<(String, Vec<String>)>,
         }
-        if terms.is_empty() {
+        let mut groups: Vec<Vec<Term>> = vec![Vec::new()];
+        let mut pieces = Vec::new();
+        for w in words {
+            let mut rest = w;
+            while let Some(i) = rest.find('/') {
+                if i > 0 {
+                    pieces.push(rest.get(..i).unwrap_or("").to_string());
+                }
+                pieces.push("/".to_string());
+                rest = rest.get(i + 1..).unwrap_or("");
+            }
+            if !rest.is_empty() {
+                pieces.push(rest.to_string());
+            }
+        }
+        for w in &pieces {
+            if w == "/" {
+                groups.push(Vec::new());
+                continue;
+            }
+            let t = if let Some((inner, outer)) = w.split_once('|') {
+                let outer: Vec<String> = outer.split('#').map(str::to_string).collect();
+                if !is_name(inner) || outer.iter().any(|v| !is_name(v)) {
+                    return Err(no(format!(
+                        "anova {w}: only variables written out are translated in a nested term"
+                    )));
+                }
+                let parts: Vec<String> = outer
+                    .iter()
+                    .chain(std::iter::once(&inner.to_string()))
+                    .map(|v| format!("i.{v}"))
+                    .collect();
+                Term {
+                    stata: w.clone(),
+                    term: parts.join("#"),
+                    nested: Some((inner.to_string(), outer)),
+                }
+            } else {
+                let sep = if w.contains("##") { "##" } else { "#" };
+                let parts: Vec<String> = w.split(sep).map(categorical).collect();
+                if parts.iter().any(|p| p.contains('#')) {
+                    return Err(no(format!(
+                        "anova {w}: # and ## in one term is not translated"
+                    )));
+                }
+                Term {
+                    stata: w.clone(),
+                    term: parts.join(sep),
+                    nested: None,
+                }
+            };
+            if let Some(last) = groups.last_mut() {
+                last.push(t);
+            }
+        }
+        let slashes = groups.len() > 1;
+        let all: Vec<&Term> = groups.iter().flatten().collect();
+        if all.is_empty() {
             return Err(no("anova needs at least one term"));
         }
-        let spec = Spec::from_terms(dep, terms.iter().map(String::as_str))?;
+        let special = slashes || all.iter().any(|t| t.nested.is_some());
+        if special && all.iter().any(|t| t.term.contains("##")) {
+            return Err(no(
+                "anova: ## together with / or | is not translated; write the terms out",
+            ));
+        }
+        let spec = Spec::from_terms(dep, all.iter().map(|t| t.term.as_str()))?;
+        if special && spec.terms.len() != all.len() {
+            return Err(no("anova: these terms with / or | are not translated"));
+        }
+        // each term's error term: 0 the residual, k the k-th term, -1 none
+        let mut errors = Vec::new();
+        let mut index = 0usize;
+        let starts: Vec<usize> = groups
+            .iter()
+            .scan(1usize, |n, g| {
+                let s = *n;
+                *n += g.len();
+                Some(s)
+            })
+            .collect();
+        for (i, g) in groups.iter().enumerate() {
+            for p in 0..g.len() {
+                index += 1;
+                let e: i64 = if !slashes {
+                    0
+                } else if i + 1 < groups.len() {
+                    if groups.get(i + 1).is_none_or(Vec::is_empty) {
+                        0
+                    } else {
+                        starts.get(i + 1).copied().unwrap_or(0) as i64
+                    }
+                } else if p == 0 {
+                    -1
+                } else {
+                    0
+                };
+                errors.push(e);
+            }
+        }
+        let _ = index;
+        // repeated(v): the subjects are the between-subjects error term, the
+        // first term of the last group (subj, or subj|grp nested in groups)
+        let repeated = match opts.arg("repeated", 3) {
+            None => None,
+            Some(v) => {
+                let v = v.trim();
+                if !is_name(v) {
+                    return Err(no(
+                        "repeated() with more than one variable is not translated yet",
+                    ));
+                }
+                let between = groups
+                    .last()
+                    .and_then(|g| g.first())
+                    .filter(|_| slashes)
+                    .ok_or_else(|| {
+                        no("repeated() needs the between-subjects error term written after a /")
+                    })?;
+                let (subject, outer) = match &between.nested {
+                    Some((inner, outer)) => (inner.clone(), outer.clone()),
+                    None if is_name(&between.stata) => (between.stata.clone(), Vec::new()),
+                    None => {
+                        return Err(no(format!(
+                            "repeated(): the error term {} is not a subject variable",
+                            between.stata
+                        )))
+                    }
+                };
+                let outer: Vec<String> = outer.iter().map(|o| r_text(o)).collect();
+                Some(format!(
+                    "list(var = {}, subject = {}, groups = c({}))",
+                    r_text(v),
+                    r_text(&subject),
+                    outer.join(", ")
+                ))
+            }
+        };
         self.helpers_for(&spec);
         let src = self.rows_for(c, out)?;
-        out.line(format!(
-            "stata_estimates <- stats::lm({} ~ {}, data = {src})",
-            r_name(dep),
-            spec.right(false)
-        ));
+        // with / or | the terms keep the order written (R would put the main
+        // effects first), since each one's error term is named by its place
+        if special {
+            out.line(format!(
+                "stata_estimates <- stats::lm(stats::terms({} ~ {}, keep.order = TRUE), data = {src})",
+                r_name(dep),
+                spec.right(false)
+            ));
+        } else {
+            out.line(format!(
+                "stata_estimates <- stats::lm({} ~ {}, data = {src})",
+                r_name(dep),
+                spec.right(false)
+            ));
+        }
         out.line(keep_sample(&src));
         out.line("stata_b <- stats::coef(stata_estimates)");
         out.line("stata_vcov <- stats::vcov(stata_estimates)");
@@ -139,8 +348,34 @@ impl Session {
             return Ok(());
         }
         self.helpers.insert("stata_anova");
+        let mut extra = String::new();
+        if special {
+            let names: Vec<String> = all.iter().map(|t| r_text(&t.stata)).collect();
+            let errs: Vec<String> = errors.iter().map(|e| format!("{e}L")).collect();
+            extra.push_str(&format!(
+                ", stata_names = c({}), errors = c({})",
+                names.join(", "),
+                errs.join(", ")
+            ));
+            let nested: Vec<String> = all
+                .iter()
+                .zip(&spec.terms)
+                .filter_map(|(t, r)| {
+                    t.nested.as_ref().map(|(inner, outer)| {
+                        let o: Vec<String> = outer.iter().map(|v| r_text(v)).collect();
+                        format!("{} = c({}, {})", r_text(r), r_text(inner), o.join(", "))
+                    })
+                })
+                .collect();
+            if !nested.is_empty() {
+                extra.push_str(&format!(", nested = list({})", nested.join(", ")));
+            }
+        }
+        if let Some(r) = &repeated {
+            extra.push_str(&format!(", repeated = {r}, yname = {}", r_text(dep)));
+        }
         out.line(format!(
-            "stata_anova(stata_estimates, stata_data, sequential = {})",
+            "stata_anova(stata_estimates, stata_data, sequential = {}{extra})",
             r_logical(sequential)
         ));
         if sequential {

@@ -559,9 +559,9 @@ fn margins_averages_the_estimation_sample_only() {
 #[test]
 fn what_margins_does_not_translate_says_why() {
     assert!(
-        refusal("use \"d.dta\"\nregress y x, robust\nmargins, vce(unconditional)\n")
-            .contains("unconditional"),
-        "vce(unconditional)"
+        refusal("use \"d.dta\"\nregress y x\nmargins, vce(unconditional)\n")
+            .contains("allowed only after estimation with robust"),
+        "vce(unconditional) after the model's own errors, in Stata's words"
     );
     assert!(
         refusal("use \"d.dta\"\nlogit y x i.g\nmargins g, contrast(effects)\n")
@@ -807,6 +807,63 @@ fn the_rest_of_margins_agrees_with_stata_19() {
         1e-9,
         "margins, post then lincom",
     );
+}
+
+/// margins, vce(unconditional) against Stata 19: each row's part of the
+/// margin and its part through b, scaled by the model's own small-sample
+/// factor (HC1's N / (N - k) after regress, N / (N - 1) after logit, and the
+/// cluster factors), decoded from these very numbers.
+#[test]
+fn unconditional_margins_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let cases: [(&str, &[f64]); 7] = [
+        (
+            "regress y x w i.g, vce(robust)\nmargins, vce(unconditional)",
+            &[1.1357311360696081, 0.33855976838003143],
+        ),
+        (
+            "regress y x w i.g, vce(robust)\nmargins g, vce(unconditional)",
+            &[
+                0.70401534344298999,
+                1.5674469286962263,
+                0.3975323387431754,
+                0.39344753641863667,
+            ],
+        ),
+        (
+            "regress y x w i.g, vce(robust)\nmargins, dydx(x) vce(unconditional)",
+            &[1.8379643645175932, 0.26285938918129997],
+        ),
+        (
+            "regress y x w i.g, vce(cluster cl)\nmargins, vce(unconditional)",
+            &[1.1357311360696081, 0.42528032413685596],
+        ),
+        (
+            "logit yb x w, vce(robust)\nmargins, vce(unconditional)",
+            &[0.51249999999849805, 0.056236812800193887],
+        ),
+        (
+            "logit yb x w, vce(robust)\nmargins, dydx(x) vce(unconditional)",
+            &[0.22145818978797666, 0.042608756204886376],
+        ),
+        (
+            "logit yb x w, vce(cluster cl)\nmargins, vce(unconditional)",
+            &[0.51249999999849805, 0.058056315025031599],
+        ),
+    ];
+    for (cmd, stata) in cases {
+        let code = script(&format!("use \"{dir}/models.dta\"\n{cmd}\n"));
+        ok(&mut e, &code);
+        let got = margins(&mut e, &code);
+        assert_eq!(got.len(), stata.len(), "{cmd}: {got:?}");
+        for (g, s) in got.iter().zip(stata) {
+            assert!(
+                (g - s).abs() <= 1e-8 * s.abs().max(1.0),
+                "{cmd}: {g} against Stata's {s}"
+            );
+        }
+    }
 }
 
 /// A number no other call in this run has had: the tests in a file run at

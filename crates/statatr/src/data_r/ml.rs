@@ -346,6 +346,8 @@ impl Session {
         match fit {
             Fit::Logit | Fit::Probit | Fit::Poisson => {
                 self.helpers.insert("stata_glm_vcov");
+                self.fit_robust = (robust || cluster.is_some()) && w.is_none();
+                self.fit_cluster = cluster.is_some() && w.is_none();
                 out.line("stata_b <- stats::coef(stata_estimates)");
                 match &cluster {
                     Some(v) => {

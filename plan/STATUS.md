@@ -2113,3 +2113,35 @@ data by trying the candidate formulas against its numbers.
   cases.
 - **Not done:** gmm's `wmatrix(hac ...)` and `vce(hac ...)`, `center`; the estat tests after clustered errors;
   `estat firststage` after clustered errors; Shea's partial R-squared with several endogenous variables.
+
+## P2B.4 unconditional margins, and anova's error terms, nesting and repeated(), 2026-10-30
+
+The last big items of the lists above, each decoded in Stata 19.
+
+- **margins, vce(unconditional)** after regress, logit, probit and poisson with robust or clustered errors (Stata
+  allows it only then, and says so in the words the refusal now uses). Each row's part of the margin,
+  `(f_i - m) / N`, plus its part through b (its influence on b times the margin's Jacobian), summed in squares or by
+  cluster and scaled by the model's own small-sample factor: N / (N - k) after regress (HC1's), N / (N - 1) after
+  logit, G / (G - 1) with clusters and (N - 1) / (N - k) as well after regress. A first reading from a prototype
+  suggested N / (N - 1) after regress with a special case for constant effects; rerun in the test session, the
+  plain rule above fits all seven of Stata's figures and needs no special case. Refused with an `if`, `over()`,
+  `atmeans`, changed data, or after the other models.
+- **anova with error terms (`/`):** each term before a `/` is tested against the first term after it (against the
+  residual after a trailing `/`), and the first term of the last group, being an error term, is not tested (Stata's
+  F is missing there). The terms keep the order written (R would put main effects first and lose the places the
+  error terms are named by).
+- **Nested terms (`b|a`):** the columns are sum-to-zero contrasts among the levels of b found within each level of a
+  (R's own coding of `a:b` leaves empty columns when, as for subjects within groups, most combinations are absent),
+  so the partial sums of squares are Stata's.
+- **repeated(v):** the Huynh-Feldt, Greenhouse-Geisser and Box epsilons from the covariance of the repeated measures
+  within the subjects (the between-subjects error term, `subj` or `subj|grp`), pooled over the between-subjects
+  groups, HF with `N - g` in its denominator and capped at 1; the p-values of the terms with v, unadjusted and
+  adjusted by each.
+- **Tests** (`stata_margins.rs` and `stata_anova.rs`, 2 new cases): the seven unconditional margins, four error-term
+  and nesting designs and the repeated-measures design (sums of squares, F's and the three epsilons) against Stata
+  19 to 9 digits. P2B.4 has 74 real-R cases.
+- **Still not done in P2B.4, of the lists above:** `stset`/`stcox` (next); anova's partial sums of squares with an
+  empty cell (Stata's rule is still not matched) and with a nested design that has one; `##` together with `/` or
+  `|`; `repeated()` with several variables; the other `xt` commands (`xtsum`, `xtlogit`, ...), which are commands of
+  their own; and the smaller items each section above names (weights in the other models, `margins` contrasts with
+  suboptions, gmm's HAC, the estat tests after clustered errors, `by` before the postestimation commands).

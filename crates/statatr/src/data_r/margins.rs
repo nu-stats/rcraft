@@ -33,7 +33,7 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
                           within = character(), at = list(), dydx = character(), eyex = character(),
                           dyex = character(), eydx = character(), factors = character(),
                           atmeans = FALSE, level = 0.95, expression = "", outcomes = NULL,
-                          compare = "") {
+                          compare = "", unconditional = NULL) {
   plain <- function(v) if (inherits(v, "haven_labelled")) as.vector(unclass(v)) else v
   data <- as.data.frame(lapply(data, plain), check.names = FALSE)
   tt <- stats::delete.response(stats::terms(fit))
@@ -176,7 +176,7 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
               d <- design(nd)
               oo <- o
               j <- join(oname, where)
-              add(function(bb) mean(pred(d, bb, oo)), if (nzchar(j)) j else "_cons")
+              add(function(bb) pred(d, bb, oo), if (nzchar(j)) j else "_cons")
             })
           }
           for (e in names(effects)) {
@@ -193,7 +193,7 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
                       d1 <- design(setv(nd, stats::setNames(list(l), v)))
                       oo <- o
                       lab1 <- if (nzchar(join(oname, where))) paste0(l, ".", v, ":", join(oname, where)) else paste0(l, ".", v)
-                      add(function(bb) mean(pred(d1, bb, oo) - pred(d0, bb, oo)), lab1)
+                      add(function(bb) pred(d1, bb, oo) - pred(d0, bb, oo), lab1)
                     })
                   }
                 })
@@ -218,7 +218,7 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
                       (pred(du, bb, oo) - pred(dd, bb, oo)) / (2 * h)
                     }
                     y <- pred(d, bb, oo)
-                    mean(switch(ee, dydx = s, eyex = s * xv / y, dyex = s * xv, eydx = s / y))
+                    switch(ee, dydx = s, eyex = s * xv / y, dyex = s * xv, eydx = s / y)
                   }, lab)
                 })
               }
@@ -228,16 +228,29 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
       }
     }
   }
-  m <- vapply(items, function(f) f(b), 0)
+  # each item gives one value per row; the margin is their mean
+  m <- vapply(items, function(f) mean(f(b)), 0)
   J <- t(vapply(items, function(f) vapply(seq_along(b), function(j) {
     h <- 1e-5 * (abs(b[[j]]) + 1e-3)
     bp <- b
     bm <- b
     bp[j] <- b[j] + h
     bm[j] <- b[j] - h
-    (f(bp) - f(bm)) / (2 * h)
+    (mean(f(bp)) - mean(f(bm))) / (2 * h)
   }, 0), numeric(length(b))))
   Vm <- J %*% V %*% t(J)
+  if (!is.null(unconditional)) {
+    # vce(unconditional): each row's part of the margin, (f_i - m) / N, and
+    # its part through b, its influence on b times the Jacobian, summed in
+    # squares (or by cluster) and scaled by the model's own small-sample
+    # factor (so an effect the same in every row keeps the model's variance)
+    vals <- lapply(items, function(f) f(b))
+    IF <- unconditional$IF[, names(b), drop = FALSE]
+    n <- nrow(IF)
+    S <- matrix(vapply(seq_along(items), function(j) (rep_len(vals[[j]], n) - m[j]) / n + drop(IF %*% J[j, ]), numeric(n)), n)
+    if (!is.null(unconditional$cluster)) S <- rowsum(S, unconditional$cluster)
+    Vm <- unconditional$c * crossprod(S)
+  }
   names(m) <- labels
   dimnames(Vm) <- list(labels, labels)
   what <- if (length(dydx) > 0) "dy/dx" else if (length(eyex) > 0) "ey/ex" else if (length(dyex) > 0) "dy/ex" else if (length(eydx) > 0) "ey/dx" else "Margin"
@@ -322,16 +335,39 @@ impl Session {
                 "margins with the option {o} is not translated yet"
             )));
         }
-        if let Some(v) = opts.arg("vce", 3) {
-            return Err(match v.trim() {
-                "delta" => no("margins, vce(delta) is the default; leave it out"),
-                "unconditional" => no(
-                    "margins, vce(unconditional) is not translated yet (Stata allows it only \
-                     after robust, semirobust, or linearized standard errors)",
-                ),
-                other => no(format!("margins, vce({other}) is not translated yet")),
-            });
-        }
+        let unconditional = match opts.arg("vce", 3).as_deref().map(str::trim) {
+            None | Some("delta") => false,
+            Some(v) if v.len() >= 3 && "unconditional".starts_with(v) => {
+                if !self.fit_robust {
+                    // Stata's own words
+                    return Err(no(
+                        "option vce(unconditional) is allowed only after estimation with robust, \
+                         semirobust, or linearized standard errors",
+                    ));
+                }
+                if !matches!(
+                    est.fit,
+                    Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson
+                ) {
+                    return Err(no(format!(
+                        "margins, vce(unconditional) after {name} is not translated yet"
+                    )));
+                }
+                if self.changed_since_fit
+                    || c.parts.if_exp.is_some()
+                    || c.parts.in_range.is_some()
+                    || opts.has("over", 4)
+                    || opts.has("atmeans", 5)
+                {
+                    return Err(no(
+                        "margins, vce(unconditional) with if, over(), atmeans or changed data is \
+                         not translated yet",
+                    ));
+                }
+                true
+            }
+            Some(other) => return Err(no(format!("margins, vce({other}) is not translated yet"))),
+        };
         // the marginlist: factor variables of the model, alone or joined by #,
         // or one r.v (each level against the first)
         let mut terms = Vec::new();
@@ -546,11 +582,21 @@ impl Session {
         self.helpers.insert("stata_coefs");
         self.helpers.insert("stata_margins");
         let call = format!(
-            "stata_margins(stata_estimates, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {})",
+            "stata_margins(stata_estimates, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond})",
             r_logical(atmeans),
             r_number(level),
             r_text(&expression),
-            r_text(compare)
+            r_text(compare),
+            uncond = if unconditional {
+                self.helpers.insert("stata_unconditional");
+                if self.fit_cluster {
+                    ", unconditional = stata_unconditional(stata_estimates, cluster = stata_cluster)"
+                } else {
+                    ", unconditional = stata_unconditional(stata_estimates)"
+                }
+            } else {
+                ""
+            }
         );
         if opts.has("post", 4) {
             // the margins become e(b) and e(V), as for a model
@@ -695,6 +741,43 @@ fn numlist(text: &str) -> Result<Vec<f64>, Untranslated> {
     Ok(out)
 }
 
+/// What `margins, vce(unconditional)` needs from the model: each row's
+/// influence on b (so that their sum of squares is the model's sandwich
+/// without its small-sample factor), the clusters, and Stata's scale:
+/// N / (N - 1), or with clusters the model's own (G / (G - 1), and
+/// (N - 1) / (N - k) after regress), as decoded in Stata 19.
+pub(super) const UNCONDITIONAL_HELPER: &str = r#"stata_unconditional <- function(fit, cluster = NULL) {
+  X <- stats::model.matrix(fit)
+  N <- nrow(X)
+  k <- ncol(X)
+  if (inherits(fit, "glm")) {
+    eta <- fit$linear.predictors
+    fam <- fit$family
+    mu <- fam$linkinv(eta)
+    me <- fam$mu.eta(eta)
+    y <- fit$y
+    if (fam$link == "probit") {
+      P <- stats::pnorm(eta)
+      f <- stats::dnorm(eta)
+      w <- y * (eta * f * P + f^2) / P^2 + (1 - y) * (f^2 - eta * f * (1 - P)) / (1 - P)^2
+    } else {
+      w <- me^2 / fam$variance(mu)
+    }
+    IF <- (X * ((y - mu) * me / fam$variance(mu))) %*% solve(crossprod(X * w, X))
+    small <- 1
+  } else {
+    IF <- (X * stats::residuals(fit)) %*% solve(crossprod(X))
+    small <- (N - 1) / (N - k)
+  }
+  colnames(IF) <- colnames(X)
+  c <- if (is.null(cluster)) {
+    if (inherits(fit, "glm")) N / (N - 1) else N / (N - k)
+  } else {
+    G <- length(unique(cluster))
+    G / (G - 1) * small
+  }
+  list(IF = IF, cluster = cluster, c = c)
+}"#;
 #[cfg(test)]
 mod tests {
     use super::*;

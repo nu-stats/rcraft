@@ -295,6 +295,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_lincom" => post::LINCOM_HELPER,
         "stata_estat" => post::ESTAT_HELPER,
         "stata_margins" => margins::MARGINS_HELPER,
+        "stata_unconditional" => margins::UNCONDITIONAL_HELPER,
         "stata_anova" => anova::ANOVA_HELPER,
         "stata_xtset" => xt::XTSET_HELPER,
         "stata_xtreg" => xt::XTREG_HELPER,
@@ -331,6 +332,10 @@ struct Session {
     esample: bool,
     /// A model this command fitted left `stata_esample`.
     esample_new: bool,
+    /// The last model had robust or clustered errors (Stata allows
+    /// margins, vce(unconditional) only then), and which.
+    fit_robust: bool,
+    fit_cluster: bool,
     /// The panel variable `xtset` named.
     panel: Option<String>,
     /// And its time variable.
@@ -784,6 +789,10 @@ impl Session {
         let mut out = Out::default();
         let by = c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. }));
         self.esample_new = false;
+        if MODELS.contains(&c.name.as_str()) {
+            self.fit_robust = false;
+            self.fit_cluster = false;
+        }
         let done = if by && BY_EACH.contains(&c.name.as_str()) {
             self.by_each(c, &mut out)
         } else {

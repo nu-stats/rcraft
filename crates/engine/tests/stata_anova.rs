@@ -412,9 +412,9 @@ fn the_sums_of_squares_are_stata_19s_own() {
 
 #[test]
 fn what_anova_does_not_translate_says_why() {
-    assert!(refusal("use \"d.dta\"\nanova y g|h\n").contains("nested"));
-    assert!(refusal("use \"d.dta\"\nanova y g / h\n").contains("error terms"));
-    assert!(refusal("use \"d.dta\"\nanova y g, repeated(g)\n").contains("repeated"));
+    assert!(refusal("use \"d.dta\"\nanova y g|c.x\n").contains("nested"));
+    assert!(refusal("use \"d.dta\"\nanova y g##h / k\n").contains("##"));
+    assert!(refusal("use \"d.dta\"\nanova y g, repeated(g)\n").contains("between-subjects"));
     // a covariate interacted with a factor is translated, partial or sequential
     for cmd in ["anova y c.x#g", "anova y c.x#g, sequential"] {
         let t = translate(&read(&format!("use \"d.dta\"\n{cmd}\n")));
@@ -428,4 +428,143 @@ fn what_anova_does_not_translate_says_why() {
 fn fresh() -> usize {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The nested and repeated-measures designs of the Stata 19 probe, made the
+/// way Stata made them (`round(..., 0.001)` stored as a float).
+fn designs(e: &mut Engine) -> String {
+    let dir = std::env::temp_dir().join(format!(
+        "rcraft-stata-anova-designs-{}-{}",
+        std::process::id(),
+        fresh()
+    ));
+    let _ = std::fs::create_dir_all(&dir);
+    let d = dir.display().to_string().replace('\\', "/");
+    ok(
+        e,
+        &format!(
+            "local({{
+  fl <- function(x) readBin(writeBin(as.numeric(x), raw(), size = 4), 'double', size = 4, n = length(x))
+  i <- 1:36
+  a <- (i - 1) %% 3 + 1
+  b <- floor((i - 1) / 3) %% 4 + 1
+  r <- floor((i - 1) / 12) + 1
+  haven::write_dta(data.frame(a = a, b = b, r = r, y = fl(round(sin(i) * 3 + a + 0.5 * b + cos(3 * i), 3))), '{d}/nest.dta')
+  i <- 1:40
+  subj <- floor((i - 1) / 4) + 1
+  t <- (i - 1) %% 4 + 1
+  grp <- subj %% 2
+  haven::write_dta(data.frame(subj = subj, t = t, grp = grp, y = fl(round(subj * 0.3 + t * 0.7 + cos(i * 1.7) + grp, 3))), '{d}/rep.dta')
+}})"
+        ),
+    );
+    d
+}
+
+/// Error terms (`/`), nested terms (`b|a`) and `repeated()`, against Stata 19:
+/// a term is tested against the first term after the next `/` (the residual
+/// after a trailing one), and the first term of the last group, being an
+/// error term, is not tested; the epsilons come from the covariance of the
+/// repeated measures within the subjects, pooled over the groups.
+#[test]
+fn error_terms_nesting_and_repeated_measures_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let d = designs(&mut e);
+    let table = |e: &mut Engine, file: &str, cmd: &str| -> Vec<f64> {
+        let code = script(&format!("use \"{d}/{file}.dta\"\n{cmd}\n"));
+        ok(e, &code);
+        numbers(
+            e,
+            &format!("res <- {}", line_of(&code, "stata_anova(")),
+            "res[[1]], res$F",
+        )
+    };
+    // rows: Model, the terms, Residual, Total; the SS then the F
+    let near = |got: &[f64], want: &[(usize, f64)], what: &str| {
+        for (i, w) in want {
+            let g = got.get(*i).copied().unwrap_or(f64::NAN);
+            assert!(
+                (g - w).abs() <= 1e-9 * w.abs().max(1.0),
+                "{what} [{i}]: {g} against Stata's {w}"
+            );
+        }
+    };
+    let got = table(&mut e, "nest", "anova y a / b|a /");
+    // 4 rows: Model a b|a Residual Total, then 5 F's
+    near(
+        &got,
+        &[
+            (1, 17.677635373230093),
+            (2, 117.14307905202323),
+            (3, 41.417676185496553),
+            (5, 7.1021436524181425),
+            (6, 0.67907860902484518),
+            (7, 7.5422276889623499),
+        ],
+        "anova y a / b|a /",
+    );
+    let got = table(&mut e, "nest", "anova y a b|a");
+    near(
+        &got,
+        &[(6, 5.1217654879692258), (7, 7.5422276889623499)],
+        "anova y a b|a",
+    );
+    let got = table(&mut e, "nest", "anova y a / b|a / r");
+    near(
+        &got,
+        &[
+            (3, 0.39619997744566338),
+            (4, 41.021476208050892),
+            (7, 0.67907860902484518),
+            (8, 65.703676998477789),
+        ],
+        "anova y a / b|a / r",
+    );
+    // r, an error term, is not tested (Stata's F is missing; NA is not read
+    // back as a number, so only the nine others come back)
+    assert_eq!(got.len(), 9, "r has no F: {got:?}");
+    let got = table(&mut e, "nest", "anova y a / r#a / b b#a");
+    near(
+        &got,
+        &[
+            (1, 17.677635373230068),
+            (2, 0.93452342472244321),
+            (3, 95.652101229802966),
+            (4, 21.490977822220188),
+            (5, 40.483152760774111),
+            (8, 56.748610807097919),
+            // b, an error term, has no F (NA is not read back), so b#a's is the 11th
+            (10, 1.5925867693074338),
+        ],
+        "anova y a / r#a / b b#a",
+    );
+    // repeated measures
+    let code = script(&format!(
+        "use \"{d}/rep.dta\"\nanova y grp / subj|grp t t#grp, repeated(t)\n"
+    ));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        &format!("res <- {}", line_of(&code, "stata_anova(")),
+        "res[[1]][2:5], res$F[c(2, 4, 5)], attr(res, \"epsilon\")",
+    );
+    let want = [
+        4.8587881361442111,
+        30.102932344362266,
+        23.408814176963325,
+        0.05377213614029755,
+        1.2912464687658043,
+        10.117446683156812,
+        0.023240678332792183,
+        0.96785136720848786,
+        0.65171793275739631,
+        0.33333333333333331,
+    ];
+    assert_eq!(v.len(), want.len(), "{v:?}");
+    for (g, w) in v.iter().zip(want) {
+        assert!(
+            (g - w).abs() <= 1e-9 * w.abs().max(1.0),
+            "repeated: {g} against Stata's {w}"
+        );
+    }
 }

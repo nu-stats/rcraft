@@ -165,6 +165,8 @@ impl Session {
         // sampling weights mean robust errors
         let robust = robust || matches!(w, Some((W::P, _)));
         self.plain_regress = !robust && cluster.is_none() && w.is_none();
+        self.fit_robust = (robust || cluster.is_some()) && w.is_none();
+        self.fit_cluster = cluster.is_some() && w.is_none();
         let rows = self.rows_for(c, out)?;
         let src = self.weighted_rows(rows, &w);
         let right = spec.right(opts.has("noconstant", 5));
