@@ -2083,3 +2083,33 @@ The items left on the xtreg list (`statatr/src/data_r/xt.rs`), decoded in Stata 
   digits, margins to 9, mle to 8 and its errors to 4, pa to 9, the note word for word). P2B.4 has 71 real-R cases.
 - **Not done:** `xtreg, mle` with robust errors, `pa` with `vce(cluster)` or other correlations (`ar 1`,
   `unstructured`, ...), `predict` after pa other than xb and stdp, the other `xt` commands (`xtsum`, `xtlogit`, ...).
+
+## P2B.4 the rest of ivregress, 2026-10-30
+
+The items left on the ivregress list (`statatr/src/data_r/iv.rs`), each decoded in Stata 19 on the ivregress tests'
+data by trying the candidate formulas against its numbers.
+
+- **liml with robust and clustered errors:** the sandwich around (X_k' X)^-1 with the instruments' fitted X times u
+  as the scores (not X_k: that one is 6e-4 away), scaled as 2SLS's.
+- **gmm:** `vce(unadjusted)` is N (Q' W Q)^-1 with W the estimation weight; `wmatrix(unadjusted)` gives 2SLS's b with
+  the homoskedastic variance s^2 N (Q' (Z'Z / N)^-1 Q)^-1; `wmatrix(cluster v)` the clustered weight and variance
+  (no G / (G - 1), as 2SLS's clusters); `igmm` iterates the weight from the current residuals until both b and W
+  change by less than 1e-6 (relatively), where Stata stops; Hansen's J = N g' W g with the estimation weight (with
+  an unadjusted one, s^2 from the final residuals), kept with the fit and shown by `estat overid`.
+- **estat firststage:** each endogenous variable's first-stage R-squared, adjusted R-squared, partial R-squared and F
+  of the excluded instruments (after robust errors the HC1 Wald F), and the Cragg-Donald minimum eigenvalue
+  statistic.
+- **The estat tests after robust errors and after liml:** `estat endogenous` after robust is Wooldridge's robust
+  score test (N less the residual sum of squares of 1 on the OLS residuals times v, v orthogonal to every
+  regressor); `estat overid` after robust is two-step GMM's J (weight from the 2SLS residuals); after liml, the
+  Anderson-Rubin chi2 N (kappa - 1) and Basmann's F (kappa - 1)(N - L)/l; after liml and gmm, `estat endogenous` is
+  not available, as in Stata 19. After clustered errors these are refused for now.
+- **Also:** `noconstant` (no constant in X or Z, and R-squared missing, as Stata's); factor variables inside the
+  parentheses (`(x = i.zc z1)`, the base level left out); `margins` after ivregress (the linear prediction), with the
+  estimation sample and e(sample) kept; `estat ic` refused in Stata's terms (r(321)); two parenthesised groups
+  refused in Stata's words (`invalid syntax`; the syntax is one group).
+- **Tests** (`stata_ivregress.rs`, 1 new case): seven fits' coefficients and errors, four J's, noconstant, both
+  firststage F's, the robust and liml tests and margins against Stata 19 to 9 digits or better. P2B.4 has 72 real-R
+  cases.
+- **Not done:** gmm's `wmatrix(hac ...)` and `vce(hac ...)`, `center`; the estat tests after clustered errors;
+  `estat firststage` after clustered errors; Shea's partial R-squared with several endogenous variables.
