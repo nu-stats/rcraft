@@ -33,6 +33,7 @@ mod model;
 mod more;
 mod post;
 mod stats;
+mod weights;
 mod xt;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -186,6 +187,22 @@ const BY_EACH: &[&str] = &[
     "ivregress",
 ];
 
+/// The commands that take weights here; each reads `c.parts.weight` itself
+/// (collapse refuses them in its own words).
+const WEIGHTED: &[&str] = &[
+    "collapse",
+    "summarize",
+    "tabulate",
+    "tab1",
+    "tab2",
+    "correlate",
+    "pwcorr",
+    "regress",
+    "logit",
+    "probit",
+    "poisson",
+];
+
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
     "regress",
@@ -258,6 +275,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tab2" => stats::TAB2_HELPER,
         "stata_pwcorr" => stats::PWCORR_HELPER,
         "stata_by_groups" => stats::BY_GROUPS_HELPER,
+        "stata_wrows" => weights::WROWS_HELPER,
+        "stata_wcov" => weights::WCOV_HELPER,
+        "stata_lm_wvcov" => weights::LM_WVCOV_HELPER,
         "stata_coefs" => model::COEFS_HELPER,
         "stata_ib" => model::IB_HELPER,
         "stata_glm_vcov" => ml::GLM_VCOV_HELPER,
@@ -295,6 +315,8 @@ struct Session {
     /// A command since that model may have changed the data, so the copy of
     /// its estimation sample kept in R is no longer what Stata would use.
     changed_since_fit: bool,
+    /// The model last fitted had weights (margins and estat do not take them yet).
+    weighted_fit: bool,
     /// The panel variable `xtset` named.
     panel: Option<String>,
     helpers: BTreeSet<&'static str>,
@@ -721,7 +743,7 @@ impl Session {
         if c.prefixes.iter().any(|p| matches!(p, Prefix::Frame(_))) {
             return Err(no("frames (frame name:) are translated in a later step"));
         }
-        if c.parts.weight.is_some() && !matches!(c.name.as_str(), "collapse") {
+        if c.parts.weight.is_some() && !WEIGHTED.contains(&c.name.as_str()) {
             return Err(no(format!("{} with weights is not translated yet", c.name)));
         }
         let mut out = Out::default();
@@ -736,6 +758,9 @@ impl Session {
             self.changed_since_fit = done.is_err() || !MODELS.contains(&c.name.as_str());
         }
         done?;
+        if MODELS.contains(&c.name.as_str()) {
+            self.weighted_fit = c.parts.weight.is_some();
+        }
         if c.prefixes.contains(&Prefix::Capture) {
             // capture: an error is ignored and the do-file goes on
             let body = out.code.join("\n");
@@ -1796,7 +1821,7 @@ mod tests {
         for (src, why) in [
             ("use s\nstcox x", "stcox is not translated yet"),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
-            ("use s\nsummarize x [aw = w]", "with weights"),
+            ("use s\nanova y g [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),
             ("use s\ngen x", "newvar = exp"),
         ] {

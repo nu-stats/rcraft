@@ -400,6 +400,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "estat")?;
+        if self.weighted_fit {
+            return Err(no("estat after a model with weights is not translated yet"));
+        }
         let est = self.estimates_for("estat")?;
         let (sub, rest) = first_word(&c.parts.main);
         let is = |full: &str, min: usize| sub.len() >= min && full.starts_with(sub);

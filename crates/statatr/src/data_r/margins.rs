@@ -158,6 +158,11 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "margins")?;
+        if self.weighted_fit {
+            return Err(no(
+                "margins after a model with weights is not translated yet",
+            ));
+        }
         let est = self.estimates.clone().ok_or_else(|| {
             no("margins needs a model fitted earlier in this do-file (regress, logit, ...)")
         })?;

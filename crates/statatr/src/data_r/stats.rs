@@ -26,52 +26,90 @@
 //! The crate has no dependencies (it sits below the catalog), so the R here is
 //! written out in full rather than borrowed from a dialog.
 
+use super::weights::{Weighting, W};
 use super::*;
 
 /// `summarize`, and the statistics `correlate, means` prints.
-pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, detail = FALSE, meanonly = FALSE) {
+pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, detail = FALSE, meanonly = FALSE, w = NULL, wtype = "f") {
   num <- function(v) {
     if (is.character(v) || is.factor(v)) return(rep(NA_real_, length(v)))
     u <- unclass(v)
     attributes(u) <- NULL
     if (is.numeric(u)) as.numeric(u) else rep(NA_real_, length(v))
   }
+  weighted <- !is.null(w)
+  if (!weighted) w <- rep(1, nrow(d))
+  w <- num(w)
+  # one variable's values (sorted) with their weights
+  vals <- function(n) {
+    x <- num(d[[n]])
+    ok <- !is.na(x) & !is.na(w)
+    o <- order(x[ok])
+    list(x = x[ok][o], w = w[ok][o])
+  }
+  # Stata's count, sum of weights, mean and variance for each kind of weight
+  moments <- function(x, v) {
+    k <- length(x)
+    W <- sum(v)
+    m <- if (k > 0) sum(v * x) / W else NA_real_
+    N <- if (weighted && wtype == "f") W else k
+    ss <- sum(v * (x - m)^2)
+    var <- if (!weighted || wtype == "f") ss / (N - 1) else if (wtype == "a") ss / W * k / (k - 1) else ss / (W - 1)
+    list(N = N, sum_w = W, mean = m, var = if (N > 1) var else NA_real_, sum = sum(v * x))
+  }
   if (meanonly) {
     # Stata's r() after meanonly, of the last variable, and nothing printed
     if (length(names(d)) == 0) return(invisible(NULL))
-    x <- num(d[[utils::tail(names(d), 1)]])
-    x <- x[!is.na(x)]
-    k <- length(x)
-    return(invisible(list(N = k, sum_w = k, mean = if (k > 0) mean(x) else NA_real_,
-                          min = if (k > 0) min(x) else NA_real_,
-                          max = if (k > 0) max(x) else NA_real_, sum = sum(x))))
+    a <- vals(utils::tail(names(d), 1))
+    m <- moments(a$x, a$w)
+    k <- length(a$x)
+    return(invisible(list(N = m$N, sum_w = m$sum_w, mean = m$mean,
+                          min = if (k > 0) min(a$x) else NA_real_,
+                          max = if (k > 0) max(a$x) else NA_real_, sum = m$sum)))
   }
   if (length(names(d)) == 0) {
     cat("no variables\n")
     return(invisible(NULL))
   }
   pcts <- c(1, 5, 10, 25, 50, 75, 90, 95, 99)
+  # Stata's percentile with weights: the first value whose running sum of
+  # weights passes p W, or the mean with the next value where it equals it;
+  # with no weights that is R's quantile type 2
+  wq <- function(x, v, p) {
+    W <- cumsum(v)
+    P <- sum(v) * p
+    i <- which(W >= P)[1]
+    if (W[i] == P && i < length(x)) (x[i] + x[i + 1]) / 2 else x[i]
+  }
   one <- function(n) {
-    x <- num(d[[n]])
-    x <- sort(x[!is.na(x)])
+    a <- vals(n)
+    x <- a$x
     k <- length(x)
-    mom <- function(r) if (k > 0) mean((x - mean(x))^r) else NA_real_
+    m <- moments(x, a$w)
+    mom <- function(r) if (k > 0) sum(a$w * (x - m$mean)^r) / m$sum_w else NA_real_
     s <- data.frame(
       variable = n,
-      obs = k,
-      mean = if (k > 0) mean(x) else NA_real_,
-      sd = if (k > 1) stats::sd(x) else NA_real_,
+      obs = m$N,
+      mean = m$mean,
+      sd = sqrt(m$var),
       min = if (k > 0) min(x) else NA_real_,
       max = if (k > 0) max(x) else NA_real_,
       stringsAsFactors = FALSE
     )
+    if (weighted) s$sum_w <- m$sum_w
     if (!detail) return(s)
     m2 <- mom(2)
     ok <- k > 1 && is.finite(m2) && m2 > 0
-    s$variance <- if (k > 1) stats::var(x) else NA_real_
+    s$variance <- m$var
     s$skewness <- if (ok) mom(3) / m2^1.5 else NA_real_
     s$kurtosis <- if (ok) mom(4) / m2^2 else NA_real_
-    p <- if (k > 0) unname(stats::quantile(x, pcts / 100, type = 2)) else rep(NA_real_, length(pcts))
+    p <- if (k == 0) {
+      rep(NA_real_, length(pcts))
+    } else if (weighted) {
+      vapply(pcts / 100, function(q) wq(x, a$w, q), 0)
+    } else {
+      unname(stats::quantile(x, pcts / 100, type = 2))
+    }
     for (i in seq_along(pcts)) s[[paste0("p", pcts[i])]] <- p[i]
     s
   }
@@ -113,12 +151,21 @@ pub(super) const TAB_VALUES_HELPER: &str = r#"stata_tab_values <- function(v, no
 /// One-way and two-way `tabulate`.
 pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NULL, missing = FALSE, sort = FALSE,
                             row = FALSE, column = FALSE, cell = FALSE,
-                            chi2 = FALSE) {
+                            chi2 = FALSE, w = NULL, wtype = "f") {
   use_na <- if (missing) "ifany" else "no"
+  # weighted counts: sums of the weights, analytic ones scaled to the rows
+  wtab <- function(keep, ...) {
+    if (missing) keep[] <- TRUE
+    f <- function(v) if (missing) factor(v[keep], exclude = NULL) else factor(v[keep])
+    v <- lapply(list(...), f)
+    t <- if (length(v) == 1) stats::xtabs(w[keep] ~ v[[1]]) else stats::xtabs(w[keep] ~ v[[1]] + v[[2]])
+    if (wtype == "a") t <- t * sum(keep) / sum(t)
+    t
+  }
   if (is.null(y)) {
-    t <- table(x, useNA = use_na)
+    t <- if (is.null(w)) table(x, useNA = use_na) else wtab(!is.na(x), x)
     if (sort) t <- sort(t, decreasing = TRUE)
-    freq <- as.integer(t)
+    freq <- as.numeric(t)
     total <- sum(freq)
     pct <- if (total > 0) 100 * freq / total else rep(NA_real_, length(freq))
     out <- data.frame(
@@ -133,7 +180,7 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
     return(invisible(out))
   }
   keep <- if (missing) rep(TRUE, length(x)) else !is.na(x) & !is.na(y)
-  t <- table(x[keep], y[keep], useNA = use_na)
+  t <- if (is.null(w)) table(x[keep], y[keep], useNA = use_na) else wtab(keep, x, y)
   print(stats::addmargins(t))
   if (row) {
     cat("\nrow percentages\n")
@@ -158,7 +205,7 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
 }"#;
 
 /// `correlate`: casewise, like Stata.
-pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, covariance = FALSE, means = FALSE) {
+pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, covariance = FALSE, means = FALSE, w = NULL, wtype = "f") {
   # as Stata 19 does: a string variable is left out with a note, and only
   # when none is left is it an error
   for (n in names(d)) {
@@ -174,15 +221,24 @@ pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, cova
     as.numeric(u)
   })))
   colnames(m) <- names(d)
-  m <- m[stats::complete.cases(m), , drop = FALSE]
-  cat("(obs=", nrow(m), ")\n", sep = "")
+  ok <- stats::complete.cases(m)
+  m <- m[ok, , drop = FALSE]
+  if (!is.null(w)) w <- as.numeric(w[ok])
+  cat("(obs=", if (!is.null(w) && wtype == "f") sum(w) else nrow(m), ")\n", sep = "")
   if (nrow(m) < 2) {
     cat("too few rows are left once the ones with a missing value are dropped\n")
     return(invisible(NULL))
   }
-  r <- if (covariance) stats::cov(m) else stats::cor(m)
+  r <- if (is.null(w)) {
+    if (covariance) stats::cov(m) else stats::cor(m)
+  } else {
+    C <- stata_wcov(m, w, wtype)
+    if (covariance) C else stats::cov2cor(C)
+  }
   print(round(r, 4))
-  if (means) stata_summarize(as.data.frame(m))
+  if (means) {
+    if (is.null(w)) stata_summarize(as.data.frame(m)) else stata_summarize(as.data.frame(m), w = w, wtype = wtype)
+  }
   invisible(r)
 }"#;
 
@@ -207,15 +263,21 @@ impl Session {
             )));
         }
         let detail = opts.has("detail", 1);
+        let allowed: &[W] = if detail {
+            &[W::F, W::A]
+        } else {
+            &[W::F, W::A, W::I]
+        };
+        let w = self.weight_of(c, allowed)?;
         if opts.has("meanonly", 8) {
             if detail {
                 return Err(no("only one of meanonly or detail may be specified"));
             }
             // prints nothing; what it keeps is Stata's r() of the last variable
-            let src = self.frame_for(c, out)?;
+            let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
             self.helpers.insert("stata_summarize");
             out.line(format!(
-                "stata_r <- stata_summarize({src}, meanonly = TRUE)"
+                "stata_r <- stata_summarize({src}, meanonly = TRUE{wargs})"
             ));
             out.caveat("prints nothing, as in Stata; r() is kept in R as stata_r");
             return Ok(());
@@ -223,10 +285,10 @@ impl Session {
         if Self::quiet(c) {
             return Ok(());
         }
-        let src = self.frame_for(c, out)?;
+        let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_summarize");
         out.line(format!(
-            "stata_summarize({src}{})",
+            "stata_summarize({src}{}{wargs})",
             if detail { ", detail = TRUE" } else { "" }
         ));
         out.caveat("printed in R's layout, not Stata's table");
@@ -284,10 +346,12 @@ impl Session {
                 return Err(no(format!("{v} is not a variable name")));
             }
         }
+        let w = self.weight_of(c, &[W::F, W::A, W::I])?;
+        tab_chi2_weight(opts, &w)?;
         if Self::quiet(c) {
             return Ok(());
         }
-        let src = self.rows_for(c, out)?;
+        let (src, _, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_tab_values");
         self.helpers.insert("stata_tabulate");
         let nolabel = opts.has("nolabel", 3);
@@ -314,7 +378,7 @@ impl Session {
                 args.push(format!("{name} = TRUE"));
             }
         }
-        out.line(format!("stata_tabulate({})", args.join(", ")));
+        out.line(format!("stata_tabulate({}{wargs})", args.join(", ")));
         out.caveat("printed in R's layout, not Stata's table");
         if opts.has("chi2", 4) {
             out.caveat("Pearson's chi-squared, with no continuity correction, as Stata does it");
@@ -336,12 +400,16 @@ impl Session {
                 "correlate with the option {o} is not translated yet"
             )));
         }
+        let w = self.weight_of(c, &[W::F, W::A])?;
         if Self::quiet(c) {
             return Ok(());
         }
-        let src = self.frame_for(c, out)?;
+        let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_correlate");
-        let mut args = vec![src];
+        if w.is_some() {
+            self.helpers.insert("stata_wcov");
+        }
+        let mut args = vec![src + &wargs];
         if opts.has("covariance", 3) {
             args.push("covariance = TRUE".into());
         }
@@ -481,7 +549,7 @@ impl Session {
 
     /// The same, with the varlist's columns chosen (all of them when the
     /// command names none).
-    fn frame_for(&mut self, c: &Command, out: &mut Out) -> Result<String, Untranslated> {
+    pub(super) fn frame_for(&mut self, c: &Command, out: &mut Out) -> Result<String, Untranslated> {
         let rows = self.rows_for(c, out)?;
         if c.parts.main.trim().is_empty() {
             return Ok(rows);
@@ -530,7 +598,8 @@ pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FA
 /// freedom, and Bonferroni's and Sidak's adjustments over the number of pairs.
 /// `star()` and `print()` read the adjusted p-value, as Stata's do.
 pub(super) const PWCORR_HELPER: &str = r#"stata_pwcorr <- function(d, obs = FALSE, sig = FALSE, star = NULL, print = NULL,
-                          bonferroni = FALSE, sidak = FALSE, listwise = FALSE) {
+                          bonferroni = FALSE, sidak = FALSE, listwise = FALSE,
+                          w = NULL, wtype = "f") {
   for (n in names(d)) {
     if (is.character(d[[n]]) || is.factor(d[[n]])) {
       cat("(", n, " ignored because string variable)\n", sep = "")
@@ -544,7 +613,12 @@ pub(super) const PWCORR_HELPER: &str = r#"stata_pwcorr <- function(d, obs = FALS
     as.numeric(u)
   })))
   colnames(m) <- names(d)
-  if (listwise) m <- m[stats::complete.cases(m), , drop = FALSE]
+  if (!is.null(w)) w <- as.numeric(w)
+  if (listwise) {
+    cc <- stats::complete.cases(m)
+    m <- m[cc, , drop = FALSE]
+    if (!is.null(w)) w <- w[cc]
+  }
   k <- ncol(m)
   pairs <- k * (k - 1) / 2
   dn <- list(names(d), names(d))
@@ -554,10 +628,13 @@ pub(super) const PWCORR_HELPER: &str = r#"stata_pwcorr <- function(d, obs = FALS
   for (i in seq_len(k)) {
     for (j in seq_len(i)) {
       ok <- !is.na(m[, i]) & !is.na(m[, j])
-      n <- sum(ok)
+      n <- if (!is.null(w) && wtype == "f") sum(w[ok]) else sum(ok)
       N[i, j] <- N[j, i] <- n
       if (n < 2) next
-      r <- suppressWarnings(stats::cor(m[ok, i], m[ok, j]))
+      r <- if (is.null(w)) suppressWarnings(stats::cor(m[ok, i], m[ok, j])) else {
+        S <- stata_wcov(m[ok, c(i, j), drop = FALSE], w[ok], wtype)
+        S[1, 2] / sqrt(S[1, 1] * S[2, 2])
+      }
       C[i, j] <- C[j, i] <- r
       if (i == j || n < 3 || is.na(r)) next
       t <- r * sqrt((n - 2) / (1 - r^2))
@@ -598,6 +675,7 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "tab1")?;
+        let w = self.weight_of(c, &[W::F, W::A, W::I])?;
         if let Some(o) = opts.other(&[("missing", 1), ("nolabel", 3), ("sort", 4)]) {
             return Err(no(format!(
                 "tab1 with the option {o} is not translated yet"
@@ -609,11 +687,11 @@ impl Session {
         if Self::quiet(c) {
             return Ok(());
         }
-        let src = self.frame_for(c, out)?;
+        let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         for h in ["stata_tab_values", "stata_tabulate", "stata_tab1"] {
             self.helpers.insert(h);
         }
-        let args = tab_args(src, opts, &[("missing", 1), ("sort", 4)]);
+        let args = tab_args(src + &wargs, opts, &[("missing", 1), ("sort", 4)]);
         out.line(format!("stata_tab1({})", args.join(", ")));
         out.caveat("each table has the rows where its own variable is present, as in Stata");
         out.caveat("printed in R's layout, not Stata's table");
@@ -627,6 +705,8 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "tab2")?;
+        let w = self.weight_of(c, &[W::F, W::A, W::I])?;
+        tab_chi2_weight(opts, &w)?;
         let known = [
             ("firstonly", 9),
             ("missing", 1),
@@ -647,12 +727,12 @@ impl Session {
         if Self::quiet(c) {
             return Ok(());
         }
-        let src = self.frame_for(c, out)?;
+        let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         for h in ["stata_tab_values", "stata_tabulate", "stata_tab2"] {
             self.helpers.insert(h);
         }
         let mut args = tab_args(
-            src,
+            src + &wargs,
             opts,
             &[
                 ("missing", 1),
@@ -683,6 +763,7 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "pwcorr")?;
+        let w = self.weight_of(c, &[W::F, W::A])?;
         if let Some(o) = opts.other(&[
             ("obs", 3),
             ("sig", 3),
@@ -705,9 +786,12 @@ impl Session {
         if Self::quiet(c) {
             return Ok(());
         }
-        let src = self.frame_for(c, out)?;
+        let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_pwcorr");
-        let mut args = vec![src];
+        if w.is_some() {
+            self.helpers.insert("stata_wcov");
+        }
+        let mut args = vec![src + &wargs];
         for (name, min) in [("obs", 3), ("sig", 3), ("bonferroni", 1), ("sidak", 4)] {
             if opts.has(name, min) {
                 args.push(format!("{name} = TRUE"));
@@ -790,3 +874,12 @@ pub(super) const BY_GROUPS_HELPER: &str = r#"stata_by_groups <- function(d, vars
                                  collapse = ", "))
   })
 }"#;
+
+/// Stata takes `chi2` only with frequency weights.
+fn tab_chi2_weight(opts: &Opts, w: &Weighting) -> Result<(), Untranslated> {
+    match w {
+        Some((W::A, _)) if opts.has("chi2", 4) => Err(no("chi2 not allowed with aweights")),
+        Some((W::I, _)) if opts.has("chi2", 4) => Err(no("option chi2 not allowed")),
+        _ => Ok(()),
+    }
+}

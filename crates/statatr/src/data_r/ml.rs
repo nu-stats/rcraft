@@ -25,11 +25,14 @@
 
 use super::model::{cluster_rows, keep_sample, level, vce, Estimates, Fit, Spec};
 use super::stats::r_logical;
+use super::weights::W;
 use super::*;
 
 /// The observed information of a binary or Poisson glm, and its robust or
 /// clustered sandwich the way Stata scales them.
-pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robust = FALSE, cluster = NULL) {
+pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robust = FALSE, cluster = NULL, kind = "") {
+  # the weights the model was given (1 without): frequency ones count as copies
+  pw <- fit$prior.weights
   X <- stats::model.matrix(fit)
   eta <- fit$linear.predictors
   y <- fit$y
@@ -44,11 +47,13 @@ pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robu
   } else {
     w <- me^2 / fam$variance(mu)
   }
-  V <- solve(crossprod(X * w, X))
+  V <- solve(crossprod(X * (w * pw), X))
   if (robust) {
-    s <- X * ((y - mu) * me / fam$variance(mu))
+    r <- (y - mu) * me / fam$variance(mu)
+    s <- X * (pw * r)
     if (is.null(cluster)) {
-      n <- nrow(X)
+      n <- if (kind == "f") sum(pw) else nrow(X)
+      if (kind == "f") s <- X * (sqrt(pw) * r)
       V <- V %*% crossprod(s) %*% V * n / (n - 1)
     } else {
       sg <- rowsum(s, cluster)
@@ -99,17 +104,22 @@ pub(super) const PROBIT_NEWTON_HELPER: &str = r#"stata_probit_newton <- function
   y <- fit$y
   off <- if (is.null(fit$offset)) 0 else fit$offset
   b <- stats::coef(fit)
+  pw <- fit$prior.weights
   for (i in 1:25) {
     eta <- drop(X %*% b) + off
     P <- stats::pnorm(eta)
     f <- stats::dnorm(eta)
-    s <- colSums(X * (y * f / P - (1 - y) * f / (1 - P)))
+    s <- colSums(X * (pw * (y * f / P - (1 - y) * f / (1 - P))))
     w <- y * (eta * f * P + f^2) / P^2 + (1 - y) * (f^2 - eta * f * (1 - P)) / (1 - P)^2
-    step <- solve(crossprod(X * w, X), s)
+    step <- solve(crossprod(X * (w * pw), X), s)
     b <- b + step
     if (max(abs(step)) < 1e-15 * (1 + max(abs(b)))) break
   }
-  stats::update(fit, start = unname(b), control = stats::glm.control(epsilon = 1e-15, maxit = 1))
+  # weights that are not whole numbers make binomial() warn; Stata takes them
+  withCallingHandlers(
+    stats::update(fit, start = unname(b), control = stats::glm.control(epsilon = 1e-15, maxit = 1)),
+    warning = function(w) if (grepl("non-integer", conditionMessage(w))) invokeRestart("muffleWarning")
+  )
 }"#;
 
 /// mlogit's coefficients as one named vector, in the order of `vcov()`.
@@ -122,9 +132,14 @@ pub(super) const MULTINOM_B_HELPER: &str = r#"stata_multinom_b <- function(fit) 
 /// The lines above Stata's table: observations, the test of the model
 /// (likelihood ratio, or Wald when robust), pseudo R-squared and the log
 /// likelihood.
-pub(super) const ML_HEADER_HELPER: &str = r#"stata_ml_header <- function(fit, robust = FALSE) {
+pub(super) const ML_HEADER_HELPER: &str = r#"stata_ml_header <- function(fit, robust = FALSE, nobs = NULL) {
   ll <- as.numeric(stats::logLik(fit))
-  n <- NROW(stats::fitted(fit))
+  if (inherits(fit, "glm") && fit$family$family == "binomial") {
+    # by hand: R's binomial logLik rounds weights that are not whole numbers
+    mu <- fit$fitted.values
+    ll <- sum(fit$prior.weights * (fit$y * log(mu) + (1 - fit$y) * log(1 - mu)))
+  }
+  n <- if (is.null(nobs)) NROW(stats::fitted(fit)) else nobs
   if (inherits(fit, "negbin")) {
     ll0 <- NA_real_
   } else if (inherits(fit, "glm")) {
@@ -225,7 +240,30 @@ impl Session {
             }
             (None, None) => {}
         }
-        let src = self.rows_for(c, out)?;
+        let w = match fit {
+            Fit::Logit | Fit::Probit | Fit::Poisson => self.weight_of(c, &[W::F, W::P, W::I])?,
+            _ => None,
+        };
+        if matches!(w, Some((W::I, _))) && (robust || cluster.is_some()) {
+            return Err(no(
+                "robust or clustered errors with iweights are not translated yet",
+            ));
+        }
+        // sampling weights mean robust errors
+        let robust = robust || matches!(w, Some((W::P, _)));
+        let rows = self.rows_for(c, out)?;
+        let src = self.weighted_rows(rows, &w);
+        let weights = match &w {
+            Some((_, v)) => format!(", weights = {}", r_name(v)),
+            None => String::new(),
+        };
+        let kind = match &w {
+            Some((k, _)) => format!(", kind = {}", r_text(k.code())),
+            None => String::new(),
+        };
+        if w.is_some() {
+            out.caveat(super::weights::weight_caveat(&w));
+        }
         let dep = r_name(&spec.dep);
         let control = "control = stats::glm.control(epsilon = 1e-12, maxit = 100)";
         match fit {
@@ -234,7 +272,7 @@ impl Session {
                 // the first fit only finds the rows and terms; stata_perfect
                 // applies Stata's check for perfect prediction and fits again
                 out.line(format!(
-                    "stata_estimates <- suppressWarnings(stats::glm(as.numeric({dep} != 0) ~ {right}, family = stats::binomial(link = \"{link}\"), data = {src}, {control}))"
+                    "stata_estimates <- suppressWarnings(stats::glm(as.numeric({dep} != 0) ~ {right}, family = stats::binomial(link = \"{link}\"), data = {src}{weights}, {control}))"
                 ));
                 self.helpers.insert("stata_perfect");
                 out.line(format!(
@@ -252,7 +290,7 @@ impl Session {
                 );
             }
             Fit::Poisson => out.line(format!(
-                "stata_estimates <- stats::glm({dep} ~ {right}, family = stats::poisson(), data = {src}, {control})"
+                "stata_estimates <- stats::glm({dep} ~ {right}, family = stats::poisson(), data = {src}{weights}, {control})"
             )),
             Fit::Nbreg => {
                 out.package("MASS");
@@ -305,18 +343,22 @@ impl Session {
                         out.line(format!("stata_cluster <- {}", cluster_rows(&src, v)));
                         out.line(no_missing_cluster());
                         out.line(
-                            "stata_vcov <- stata_glm_vcov(stata_estimates, robust = TRUE, cluster = stata_cluster)",
+                            format!("stata_vcov <- stata_glm_vcov(stata_estimates, robust = TRUE, cluster = stata_cluster{kind})"),
                         );
                         out.caveat("clustered standard errors carry G / (G - 1), as Stata's do for this model");
                     }
                     None if robust => {
-                        out.line("stata_vcov <- stata_glm_vcov(stata_estimates, robust = TRUE)");
+                        out.line(format!(
+                            "stata_vcov <- stata_glm_vcov(stata_estimates, robust = TRUE{kind})"
+                        ));
                         out.caveat(
                             "robust standard errors carry N / (N - 1), as Stata's do for a \
                              maximum-likelihood model (not regress's HC1)",
                         );
                     }
-                    None => out.line("stata_vcov <- stata_glm_vcov(stata_estimates)"),
+                    None => out.line(format!(
+                        "stata_vcov <- stata_glm_vcov(stata_estimates{kind})"
+                    )),
                 }
                 if fit == Fit::Probit {
                     out.caveat(
@@ -373,8 +415,13 @@ impl Session {
         self.helpers.insert("stata_ml_header");
         self.helpers.insert("stata_coefs");
         out.line(format!(
-            "stata_ml_header(stata_estimates, robust = {})",
-            r_logical(robust)
+            "stata_ml_header(stata_estimates, robust = {}{})",
+            r_logical(robust),
+            if matches!(w, Some((W::F, _))) {
+                ", nobs = sum(stata_estimates$prior.weights)"
+            } else {
+                ""
+            }
         ));
         let (eform, label) = match fit {
             Fit::Logit if opts.has("or", 2) => ("TRUE", "Odds ratio"),
@@ -487,7 +534,11 @@ pub(super) const PERFECT_HELPER: &str = r#"stata_perfect <- function(fit, notes 
     }
   }
   # the first fit was only for its rows and terms: fit again where the warnings show
-  if (all(keep) && length(gone) == 0) return(eval(fit$call, env))
+  refit <- function(call) withCallingHandlers(eval(call, env), warning = function(w) {
+    # weights that are not whole numbers make binomial() warn; Stata takes them
+    if (grepl("non-integer", conditionMessage(w))) invokeRestart("muffleWarning")
+  })
+  if (all(keep) && length(gone) == 0) return(refit(fit$call))
   # a factor left with one level goes, with every term it is in
   for (t in labs) {
     v <- mf[[t]]
@@ -510,5 +561,5 @@ pub(super) const PERFECT_HELPER: &str = r#"stata_perfect <- function(fit, notes 
   d <- d[match(rownames(mf)[keep], rownames(d)), , drop = FALSE]
   call <- stats::update(fit, formula. = f, evaluate = FALSE)
   call$data <- d
-  eval(call, env)
+  refit(call)
 }"#;

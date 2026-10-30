@@ -1941,3 +1941,42 @@ The data commands keep their own `by` through `dplyr::group_by`.
   10 digits and every note and message word for word, and an ordinary logit against `glm`. Still not translated:
   the zero Stata keeps in e(b) for an omitted variable (R's coefficients leave it out).
 - **Not done:** `by` with `margins`, `predict`, `test`, `lincom`, `estat`; `by`'s `rc0`.
+
+## P2B.4 weights, 2026-10-30
+
+`[fweight]`, `[aweight]`, `[pweight]` and `[iweight]` (and their abbreviations) for `summarize` (with `detail` and
+`meanonly`), `tabulate`, `tab1`, `tab2`, `correlate`, `pwcorr`, `regress` (with `robust` and `vce(cluster)`), `logit`,
+`probit` and `poisson` (`statatr/src/data_r/weights.rs`, and the helpers they feed). Every rule below was decoded
+in Stata 19 on the statistics tests' data with `f = mod(id, 3) + 1` and `a = id / 3`.
+
+- **The rows.** A missing or zero weight leaves its row out, for every kind (iweights too). A negative weight stops
+  with `negative weights encountered` (not for iweights), and a frequency weight that is not whole with
+  `may not use noninteger frequency weights`; both are Stata's messages, raised in R once the data are seen.
+- **The kinds.** Frequency weights are copies of the row: N and the degrees of freedom are their sum (a test checks
+  summarize and regress against the rows really repeated). Analytic weights are scaled to sum to the rows, so the
+  count stays the rows, the variance is `sum w (x - m)^2 / sum w * n / (n - 1)` and `tabulate`'s counts are scaled
+  to sum to N. Importance weights are taken as they are: variance over `sum w - 1`, regress's over `sum w - k` with
+  e(df_r) the whole part of `sum w` less k. Sampling weights give analytic weights' estimates with robust errors.
+- **summarize, detail with weights.** Weighted moments for skewness and kurtosis, and Stata's weighted percentile:
+  the first value whose running sum of weights reaches p W, or the mean with the next where it equals it exactly
+  (with unit weights that is the old rule).
+- **regress.** Weighted least squares; the variance as above, the robust sandwich with scores `w e x` scaled by
+  `N / (N - k)` (for fweights the meat is `w e^2 x x'`, rows as copies) and the clustered one by
+  `G / (G - 1) (N - 1) / (N - k)`, N the weights' sum for fweights and the rows otherwise (`stata_lm_wvcov`).
+- **logit, probit, poisson.** The weighted likelihood; fweights and iweights take the weighted information, pweights
+  the sandwich scaled by `N / (N - 1)`, fweights with `robust` the sandwich with rows as copies and N their sum.
+  The probit polish and the perfect-prediction check carry the weights. R's own binomial `logLik` rounds weights
+  that are not whole numbers, so the log likelihood in the header is now worked out by hand (found by a weighted
+  test: R said -12.33, Stata -12.55).
+- **Refused in Stata's words:** `pweights not allowed` (summarize, tabulate, correlate), `iweights not allowed`
+  (`summarize, detail`, correlate), `aweights not allowed` (logit, probit, poisson), `chi2 not allowed with aweights`,
+  `option chi2 not allowed` (iweights). Not translated yet, with a reason: `[weight = ...]` (each command reads it
+  as a different kind), a weight that is an expression, robust errors with iweights, `regress, beta` with weights,
+  and `margins` and `estat` after a weighted model.
+- **Tests** (`engine/tests/stata_weights.rs`, 5 cases, real R): summarize (every kind, detail, meanonly, a zero
+  weight), tabulate, tab1, correlate (and covariance), pwcorr, regress (every kind, robust, two clusterings, a zero
+  weight) to 12 digits; logit, probit and poisson with every kind they take to 6 digits (Stata stops earlier: after
+  `logit [fw=f]` its score is about 6e-7, R's 1e-15) and their log likelihoods to 10; the messages. P2B.4 has 66
+  real-R cases.
+- **Not done:** weights in `nbreg`, `ologit`, `oprobit`, `mlogit`, `anova`, `xtreg`, `ivregress`, `ttest` (Stata
+  takes none there) and `collapse`; `margins` and `estat` after a weighted model; robust errors with iweights.

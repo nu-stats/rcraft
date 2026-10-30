@@ -24,6 +24,7 @@
 //! - a row with a missing value anywhere in the model is dropped, which is R's
 //!   `na.omit`.
 
+use super::weights::W;
 use super::*;
 
 /// Which model `stata_estimates` holds.
@@ -149,15 +150,51 @@ impl Session {
                 "options vce(cluster clustvar) and beta may not be combined",
             ));
         }
-        let src = self.rows_for(c, out)?;
+        let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
+        if w.is_some() && beta {
+            return Err(no("regress, beta with weights is not translated yet"));
+        }
+        if matches!(w, Some((W::I, _))) && (robust || cluster.is_some()) {
+            return Err(no(
+                "robust or clustered errors with iweights are not translated yet",
+            ));
+        }
+        // sampling weights mean robust errors
+        let robust = robust || matches!(w, Some((W::P, _)));
+        let rows = self.rows_for(c, out)?;
+        let src = self.weighted_rows(rows, &w);
         let right = spec.right(opts.has("noconstant", 5));
+        let weights = match &w {
+            Some((_, v)) => format!(", weights = {}", r_name(v)),
+            None => String::new(),
+        };
         out.line(format!(
-            "stata_estimates <- stats::lm({} ~ {right}, data = {src})",
+            "stata_estimates <- stats::lm({} ~ {right}, data = {src}{weights})",
             r_name(&spec.dep)
         ));
         out.line(keep_sample(&src));
         out.line("stata_b <- stats::coef(stata_estimates)");
+        if let Some((k, _)) = &w {
+            self.helpers.insert("stata_lm_wvcov");
+            let cl = match &cluster {
+                Some(v) => {
+                    out.line(format!("stata_cluster <- {}", cluster_rows(&src, v)));
+                    out.line(super::ml::no_missing_cluster());
+                    ", cluster = stata_cluster"
+                }
+                None => "",
+            };
+            out.line(format!(
+                "stata_vcov <- stata_lm_wvcov(stata_estimates, {}, robust = {}{cl})",
+                r_text(k.code()),
+                super::stats::r_logical(robust)
+            ));
+            out.line("stata_df <- attr(stata_vcov, \"df\")");
+            out.line("attr(stata_vcov, \"df\") <- NULL");
+            out.caveat(super::weights::weight_caveat(&w));
+        }
         match &cluster {
+            _ if w.is_some() => {}
             None if !robust => {
                 out.line("stata_vcov <- stats::vcov(stata_estimates)");
                 out.line("stata_df <- stata_estimates$df.residual");
@@ -202,7 +239,7 @@ impl Session {
         if Self::quiet(c) {
             return Ok(());
         }
-        if robust || cluster.is_some() || beta {
+        if robust || cluster.is_some() || beta || w.is_some() {
             self.helpers.insert("stata_coefs");
             out.line(format!(
                 "stata_coefs(stata_b, stata_vcov, stata_df, level = {}{})",
