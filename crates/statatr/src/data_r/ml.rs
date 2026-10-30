@@ -23,7 +23,7 @@
 //! - the iterations are run to a tighter tolerance than R's default, so the
 //!   estimates agree with Stata's to the digits shown.
 
-use super::model::{cluster_rows, level, vce, Estimates, Fit, Spec};
+use super::model::{cluster_rows, keep_sample, level, vce, Estimates, Fit, Spec};
 use super::stats::r_logical;
 use super::*;
 
@@ -174,6 +174,7 @@ impl Session {
             )));
         }
         let spec = Spec::read(c, name)?;
+        self.helpers_for(&spec);
         let level = level(opts)?;
         let (robust, cluster) = vce(opts)?;
         let mut right = spec.right(opts.has("noconstant", 5));
@@ -320,6 +321,9 @@ impl Session {
                 out.caveat("each coefficient is named outcome:variable; the base outcome has none");
             }
             Fit::Regress => {}
+        }
+        if fit.one_outcome() {
+            out.line(keep_sample(&src));
         }
         out.line("stata_df <- Inf");
         self.estimates = Some(Estimates {

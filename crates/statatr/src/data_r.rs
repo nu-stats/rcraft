@@ -25,6 +25,7 @@
 //! otherwise taken as numbers. Abbreviated variable names cannot be resolved
 //! without the data and are taken as written.
 
+mod margins;
 mod ml;
 mod model;
 mod more;
@@ -159,6 +160,38 @@ fn opener_text(o: &Opener) -> String {
     }
 }
 
+/// The commands that fit a model.
+const MODELS: &[&str] = &[
+    "regress", "logit", "probit", "poisson", "nbreg", "ologit", "oprobit", "mlogit",
+];
+
+/// Commands that leave the values of existing variables and the set of rows
+/// as they were (a new variable, a new order or a label does not matter to
+/// `margins`). Anything else may have changed the data.
+const LEAVE_DATA_ALONE: &[&str] = &[
+    "summarize",
+    "tabulate",
+    "correlate",
+    "ttest",
+    "list",
+    "describe",
+    "count",
+    "test",
+    "lincom",
+    "estat",
+    "margins",
+    "predict",
+    "generate",
+    "sort",
+    "gsort",
+    "order",
+    "label",
+    "set",
+    "version",
+    "save",
+    "saveold",
+];
+
 fn no(reason: impl Into<String>) -> Untranslated {
     Untranslated {
         reason: reason.into(),
@@ -183,6 +216,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tabulate" => stats::TABULATE_HELPER,
         "stata_correlate" => stats::CORRELATE_HELPER,
         "stata_coefs" => model::COEFS_HELPER,
+        "stata_ib" => model::IB_HELPER,
         "stata_glm_vcov" => ml::GLM_VCOV_HELPER,
         "stata_nbreg_vcov" => ml::NBREG_VCOV_HELPER,
         "stata_ml_header" => ml::ML_HEADER_HELPER,
@@ -191,6 +225,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_test" => post::TEST_HELPER,
         "stata_lincom" => post::LINCOM_HELPER,
         "stata_estat" => post::ESTAT_HELPER,
+        "stata_margins" => margins::MARGINS_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -208,6 +243,9 @@ struct Session {
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
     /// The model last fitted, for the commands that read it afterwards.
     estimates: Option<model::Estimates>,
+    /// A command since that model may have changed the data, so the copy of
+    /// its estimation sample kept in R is no longer what Stata would use.
+    changed_since_fit: bool,
     helpers: BTreeSet<&'static str>,
 }
 
@@ -520,7 +558,12 @@ impl Session {
             return Err(no(format!("{} with weights is not translated yet", c.name)));
         }
         let mut out = Out::default();
-        self.dispatch(c, &mut out)?;
+        let done = self.dispatch(c, &mut out);
+        // a line that is not translated still runs in Stata, so it counts too
+        if done.is_err() || !LEAVE_DATA_ALONE.contains(&c.name.as_str()) {
+            self.changed_since_fit = done.is_err() || !MODELS.contains(&c.name.as_str());
+        }
+        done?;
         if c.prefixes.contains(&Prefix::Capture) {
             // capture: an error is ignored and the do-file goes on
             let body = out.code.join("\n");
@@ -584,6 +627,7 @@ impl Session {
             "test" => self.test(c, &opts, out),
             "lincom" => self.lincom(c, &opts, out),
             "estat" => self.estat(c, &opts, out),
+            "margins" => self.margins(c, &opts, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1560,7 +1604,7 @@ mod tests {
     #[test]
     fn what_is_not_translated_says_why() {
         for (src, why) in [
-            ("use s\nmargins, dydx(x)", "margins is not translated yet"),
+            ("use s\nanova y x", "anova is not translated yet"),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
             ("use s\nsummarize x [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),

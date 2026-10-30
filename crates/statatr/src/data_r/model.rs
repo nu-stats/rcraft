@@ -96,7 +96,22 @@ pub(super) const COEFS_HELPER: &str = r#"stata_coefs <- function(b, V, df = Inf,
   invisible(tab)
 }"#;
 
+/// Stata's `ib2.x`: a factor whose first level, the base, is the one chosen.
+/// Unlike `relevel()` it works on data that lack the base level, as the rows
+/// `predict` and `margins` make do (every row set to one level).
+pub(super) const IB_HELPER: &str = r#"stata_ib <- function(x, base) {
+  lv <- as.character(sort(unique(x[!is.na(x)])))
+  factor(x, levels = c(base, setdiff(lv, base)))
+}"#;
+
 impl Session {
+    /// The helpers a model's terms call.
+    pub(super) fn helpers_for(&mut self, spec: &Spec) {
+        if spec.factors.values().any(|e| e.starts_with("stata_ib(")) {
+            self.helpers.insert("stata_ib");
+        }
+    }
+
     pub(super) fn regress(
         &mut self,
         c: &Command,
@@ -110,6 +125,7 @@ impl Session {
             )));
         }
         let spec = Spec::read(c, "regress")?;
+        self.helpers_for(&spec);
         let level = level(opts)?;
         let (robust, cluster) = vce(opts)?;
         let src = self.rows_for(c, out)?;
@@ -118,6 +134,7 @@ impl Session {
             "stata_estimates <- stats::lm({} ~ {right}, data = {src})",
             r_name(&spec.dep)
         ));
+        out.line(keep_sample(&src));
         out.line("stata_b <- stats::coef(stata_estimates)");
         match &cluster {
             None if !robust => {
@@ -274,6 +291,14 @@ pub(super) fn vce(opts: &Opts) -> Result<(bool, Option<String>), Untranslated> {
     }
 }
 
+/// The rows the model used, as they were when it was fitted: Stata's
+/// `e(sample)`, which `margins` averages over.
+pub(super) fn keep_sample(src: &str) -> String {
+    format!(
+        "stata_data <- {src}[match(rownames(stats::model.frame(stata_estimates)), rownames({src})), , drop = FALSE]"
+    )
+}
+
 /// The cluster variable for the rows the model kept.
 pub(super) fn cluster_rows(src: &str, v: &str) -> String {
     format!(
@@ -284,16 +309,63 @@ pub(super) fn cluster_rows(src: &str, v: &str) -> String {
 
 /// One term of a model in R: `i.x` is a factor, `c.x` the plain variable,
 /// `a#b` an interaction and `a##b` a full factorial, as Stata writes them.
+///
+/// `a##b` is written out as `a + b + a:b` rather than R's `a * b`, because
+/// R simplifies `x * x` to `x` where Stata's `c.x##c.x` is `x` and its square.
 fn term(t: &str) -> Result<String, Untranslated> {
     if t.contains("##") {
-        let parts: Result<Vec<_>, _> = t.split("##").map(one).collect();
-        return Ok(parts?.join(" * "));
+        let parts: Vec<&str> = t.split("##").collect();
+        if parts.len() > 8 {
+            return Err(no(format!(
+                "{t}: Stata allows at most eight variables in ##"
+            )));
+        }
+        let mut terms: Vec<String> = Vec::new();
+        for mask in 1u32..(1 << parts.len()) {
+            let chosen: Vec<&str> = parts
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| (mask >> i) & 1 == 1)
+                .map(|(_, p)| *p)
+                .collect();
+            let p = product(&chosen)?;
+            if !terms.contains(&p) {
+                terms.push(p);
+            }
+        }
+        return Ok(terms.join(" + "));
     }
     if t.contains('#') {
-        let parts: Result<Vec<_>, _> = t.split('#').map(one).collect();
-        return Ok(parts?.join(":"));
+        return product(&t.split('#').collect::<Vec<_>>());
     }
     one(t)
+}
+
+/// An interaction: R's `:` between the parts, with a continuous variable
+/// that appears more than once raised to its power (R reads `x:x` as `x`).
+fn product(parts: &[&str]) -> Result<String, Untranslated> {
+    let mut seen: Vec<(String, usize)> = Vec::new();
+    for p in parts {
+        let r = one(p)?;
+        match seen.iter_mut().find(|(s, _)| *s == r) {
+            Some(e) => e.1 += 1,
+            None => seen.push((r, 1)),
+        }
+    }
+    let mut out = Vec::new();
+    for (r, k) in seen {
+        if k == 1 {
+            out.push(r);
+        } else if r.starts_with("factor(") || r.starts_with("stata_ib(") {
+            return Err(no(format!(
+                "{}: a factor variable interacted with itself is not translated",
+                parts.join("#")
+            )));
+        } else {
+            out.push(format!("I({r}^{k})"));
+        }
+    }
+    Ok(out.join(":"))
 }
 
 /// One part of a term, without `#`.
@@ -327,11 +399,7 @@ fn one(t: &str) -> Result<String, Untranslated> {
                     "{t}: only a number can name the base level (ib2.x)"
                 )));
             }
-            return Ok(format!(
-                "stats::relevel(factor({}), ref = {})",
-                r_name(v),
-                r_text(base)
-            ));
+            return Ok(format!("stata_ib({}, {})", r_name(v), r_text(base)));
         }
     }
     if t.contains('.') {
@@ -356,11 +424,20 @@ mod tests {
         assert_eq!(term("c.x").as_deref(), Ok("x"));
         assert_eq!(term("i.g").as_deref(), Ok("factor(g)"));
         assert_eq!(term("i.a#i.b").as_deref(), Ok("factor(a):factor(b)"));
-        assert_eq!(term("i.a##c.x").as_deref(), Ok("factor(a) * x"));
         assert_eq!(
-            term("ib2.g").as_deref(),
-            Ok("stats::relevel(factor(g), ref = \"2\")")
+            term("i.a##c.x").as_deref(),
+            Ok("factor(a) + x + factor(a):x")
         );
+        // R would read x * x and x:x as plain x; Stata's are the square
+        assert_eq!(term("c.x##c.x").as_deref(), Ok("x + I(x^2)"));
+        assert_eq!(term("c.x#c.x").as_deref(), Ok("I(x^2)"));
+        assert_eq!(term("c.x#c.x#i.g").as_deref(), Ok("I(x^2):factor(g)"));
+        assert_eq!(
+            term("a##b##c").as_deref(),
+            Ok("a + b + a:b + c + a:c + b:c + a:b:c")
+        );
+        assert!(term("i.g#i.g").is_err());
+        assert_eq!(term("ib2.g").as_deref(), Ok("stata_ib(g, \"2\")"));
         assert!(term("L.x").is_err(), "lags are not translated");
         assert!(term("i.2x").is_err(), "not a variable name");
     }

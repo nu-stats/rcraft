@@ -769,8 +769,8 @@ fn what_is_not_translated_after_a_model_says_why() {
         "test after mlogit"
     );
     assert!(
-        refusal("use \"d.dta\"\nlogit y x\nmargins, dydx(x)\n").contains("margins"),
-        "margins is not translated yet"
+        refusal("use \"d.dta\"\nlogit y x\nanova y x\n").contains("anova"),
+        "anova is not translated yet"
     );
     assert!(
         refusal("use \"d.dta\"\nnbreg y x, robust\n").contains("robust"),

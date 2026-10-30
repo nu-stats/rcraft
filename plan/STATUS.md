@@ -1683,3 +1683,41 @@ in this crate.
   mlogit; `predict, stdp` and the other predict statistics; `test` and `lincom` after ologit/mlogit (several
   equations) and with interaction coefficients; `estat` with a varlist; the LR test of alpha after nbreg;
   `e(sample)` in an `if`.
+
+## P2B.4 Stata margins, 2026-10-30
+
+`margins` after `regress`, `logit`, `probit`, `poisson` and `nbreg` (`statatr/src/data_r/margins.rs`), and
+two fixes to the model terms found on the way.
+
+- **Two fixes to the models.** (1) `c.x##c.x` and `c.x#c.x` became R's `x * x` and `x:x`, which R reads as
+  plain `x`, so Stata's quadratic was silently fitted as a straight line. `##` is now written out term by
+  term (`x + I(x^2)`, `a + b + a:b`), and a continuous variable repeated in `#` is raised to its power.
+  (2) `ib2.g` became `stats::relevel(factor(g), ref = "2")`, which fails on data that lack level 2, as the
+  rows `predict` and `margins` build do when they set every row to one level. It is now a small helper,
+  `stata_ib(g, "2")`, that puts the base first without needing it present. A test fits the quadratic and
+  checks it against the normal equations with `x^2`.
+- **What margins does.** It averages the model's default prediction (`xb`, `pr`, or `n` with the exposure
+  in) over the estimation sample, after setting variables: a marginlist of factor variables (`margins g`),
+  `at()` (values, numlists, several `at()`s), `atmeans`. `dydx()` of a continuous variable is the average
+  derivative of the prediction, worked out through the model matrix, so interactions and squares are right;
+  of a factor variable it is the change from the base level to each other level; `dydx(*)` is every
+  covariate. `predict(xb)` gives the linear prediction. `if`/`in` narrow the rows. The standard errors are the
+  delta method's with the model's own variance (robust or clustered when the model was), on t tests where the
+  model has residual degrees of freedom, as Stata 14 and later do.
+- **The estimation sample.** Each single-outcome model now keeps its rows as `stata_data`. Stata's margins uses
+  the *current* values of the rows in `e(sample)`, so a copy is only right while the data are unchanged. The
+  translator tracks that: any command between the model and `margins` that may change the data (anything
+  outside a short list that leaves values and rows alone, and any line that was not translated, since it
+  still runs in Stata) makes `margins` refuse with that reason rather than give a different number.
+- **Tests** (`engine/tests/stata_margins.rs`, 9 cases, real R). Every margin is checked against its formula
+  worked out by hand with an analytic gradient, never against the helper's numerical derivatives: the average
+  probability after logit (exactly the share of successes) and its error, `mean(p (1 - p)) b` and its gradient,
+  a factor's change from its base (with `ib1.g` turning the sign), the quadratic's `b1 + 2 b2 mean(x)` on 76
+  degrees of freedom, `at()` and `atmeans`, the exposure after poisson, an `if`, and the robust variance. P2B.4
+  now has 35 real-R cases.
+- **Not done in margins:** after ologit, oprobit and mlogit (a margin per outcome); `atmeans` with factor
+  variables (Stata uses the means of their indicators); `at()` with statistics such as `(mean) x`; `post`,
+  `over()`, `eyex`/`dyex`/`eydx`, `contrast`, `pwcompare`, `vce(unconditional)`; interactions in the
+  marginlist; `margins` after the data changed.
+- **Still not done in P2B.4:** `anova`; `xtset`/`xtreg`; `ivregress`; `stset`/`stcox`; weights; `by`;
+  `tab1`/`tab2`; and the smaller items in the list above.
