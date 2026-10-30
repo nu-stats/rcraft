@@ -448,11 +448,11 @@ fn the_statistics_commands_say_why_they_refuse_what_they_refuse() {
         "a one-sample ttest cannot be unpaired"
     );
     assert!(
-        refusal("use \"d.dta\"\nsummarize x, meanonly\n").contains("meanonly"),
+        refusal("use \"d.dta\"\nsummarize x, vsquish\n").contains("vsquish"),
         "an option that is not translated should be named"
     );
     assert!(
-        refusal("use \"d.dta\"\ntabulate a b c\n").contains("one or two variables"),
+        refusal("use \"d.dta\"\ntabulate a b c\n").contains("tab1 and tab2 take"),
         "tab1 and tab2 are not this command"
     );
     assert!(
@@ -540,4 +540,256 @@ fn the_statistics_agree_with_stata_19() {
 fn fresh() -> usize {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// `tab1`, `tab2`, `pwcorr`, `summarize, meanonly` and `regress, beta`, run in
+/// Stata 19 on this same dataset (`%24.17g`) and worked out a second way here.
+#[test]
+fn tab1_tab2_pwcorr_meanonly_and_beta_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let rerun = |e: &mut Engine, cmd: &str, start: &str, show: &str| -> Vec<f64> {
+        let code = script(&format!("use \"{dir}/study.dta\"\n{cmd}\n"));
+        ok(e, &code);
+        let line = code
+            .lines()
+            .rfind(|l| l.starts_with(start))
+            .unwrap_or_else(|| panic!("no {start} line:\n{code}"))
+            .to_string();
+        numbers(e, &format!("res <- {line}"), show)
+    };
+    let near = |got: &[f64], stata: &[f64], what: &str| {
+        assert_eq!(got.len(), stata.len(), "{what}: {got:?} against {stata:?}");
+        for (g, s) in got.iter().zip(stata) {
+            assert!(
+                (g - s).abs() <= 1e-12 * s.abs().max(1.0),
+                "{what}: {g} against Stata's {s}"
+            );
+        }
+    };
+
+    // tab1: each variable on its own rows, so z has 9 and g 10
+    let got = rerun(
+        &mut e,
+        "tab1 g z",
+        "stata_tab1(",
+        "length(res), sum(res$g$freq), sum(res$z$freq)",
+    );
+    near(&got, &[2.0, 10.0, 9.0], "tab1 g z");
+    let got = rerun(
+        &mut e,
+        "tab1 z, missing",
+        "stata_tab1(",
+        "sum(res$z$freq), nrow(res$z)",
+    );
+    near(
+        &got,
+        &[10.0, 10.0],
+        "tab1 z, missing: the missing value is a row",
+    );
+
+    // tab2: every pair, each on the rows where both are present
+    let got = rerun(
+        &mut e,
+        "tab2 g b z",
+        "stata_tab2(",
+        "length(res), sum(res[[1]]), sum(res[[2]]), sum(res[[3]]), res[[1]][1, 1], res[[1]][2, 2]",
+    );
+    near(&got, &[3.0, 10.0, 9.0, 9.0, 1.0, 2.0], "tab2 g b z");
+    // firstonly drops b by z; g by z has every column total 1, so chi2 is
+    // N (sum of n_ij^2 / (r_i c_j) - 1) = 9 (4/4 + 5/5 - 1) = 9 on 8 df
+    let got = rerun(
+        &mut e,
+        "tab2 g b z, chi2 firstonly",
+        "stata_tab2(",
+        "length(res), attr(res[[1]], \"chi2\")[\"chi2\"], attr(res[[2]], \"chi2\")[c(\"chi2\", \"df\")]",
+    );
+    near(
+        &got,
+        &[2.0, 1.6666666666666665, 9.0, 8.0],
+        "tab2, chi2 firstonly",
+    );
+
+    // pwcorr: pairwise, so x and z use 9 rows and x and y all 10
+    let got = rerun(
+        &mut e,
+        "pwcorr x z y, sig obs",
+        "stata_pwcorr(",
+        "res$C[2, 1], res$C[3, 1], res$sig[2, 1], res$sig[3, 1], res$Nobs[2, 1], res$Nobs[3, 1], res$Nobs[2, 2]",
+    );
+    near(
+        &got,
+        &[
+            0.11881770515720093,
+            1.0,
+            0.76077618548731318,
+            0.0,
+            9.0,
+            10.0,
+            9.0,
+        ],
+        "pwcorr x z y, sig obs",
+    );
+    let got = rerun(
+        &mut e,
+        "pwcorr x z b, sig sidak",
+        "stata_pwcorr(",
+        "res$sig[2, 1], res$sig[3, 1], res$sig[3, 2]",
+    );
+    near(
+        &got,
+        &[
+            0.98630969154581571,
+            0.81090494048205841,
+            0.99461058961983118,
+        ],
+        "pwcorr, sidak",
+    );
+    let got = rerun(
+        &mut e,
+        "pwcorr x z b, sig bonferroni",
+        "stata_pwcorr(",
+        "res$sig[2, 1], res$sig[3, 1], res$sig[3, 2]",
+    );
+    near(&got, &[1.0, 1.0, 1.0], "pwcorr, bonferroni is capped at 1");
+    let got = rerun(
+        &mut e,
+        "pwcorr x z b, listwise",
+        "stata_pwcorr(",
+        "res$C[3, 1], res$C[3, 2]",
+    );
+    near(
+        &got,
+        &[-0.22294816068526141, 0.086602540378443893],
+        "pwcorr, listwise",
+    );
+    // the p-value is R's own test of the correlation on the same rows, and
+    // Sidak's is 1 - (1 - p)^3 over the three pairs
+    let got = rerun(
+        &mut e,
+        "pwcorr x z b, sig",
+        "stata_pwcorr(",
+        "res$sig[2, 1], stats::cor.test(study$x, study$z)$p.value, 1 - (1 - res$sig[3, 1])^3",
+    );
+    near(&got[..1], &got[1..2], "pwcorr's p-value is cor.test's");
+    near(&got[2..], &[0.81090494048205841], "Sidak by hand");
+    // star() marks, print() blanks, both on the adjusted p
+    let code = script(&format!(
+        "use \"{dir}/study.dta\"\npwcorr x z b, star(0.5) print(0.6)\n"
+    ));
+    let text = ok(&mut e, &code);
+    assert!(text.contains("-0.2843*"), "{text}");
+    assert!(
+        !text.contains("0.1188"),
+        "print(0.6) leaves out p = 0.76: {text}"
+    );
+
+    // summarize, meanonly: r() of the last variable, nothing printed
+    let got = rerun(
+        &mut e,
+        "summarize z, meanonly",
+        "stata_r <- ",
+        "res$N, res$mean, res$sum, res$min, res$max, res$sum_w",
+    );
+    near(
+        &got,
+        &[9.0, 5.0, 45.0, 1.0, 9.0, 9.0],
+        "summarize z, meanonly",
+    );
+    let got = rerun(
+        &mut e,
+        "summarize x z, meanonly",
+        "stata_r <- ",
+        "res$N, res$mean",
+    );
+    near(&got, &[9.0, 5.0], "meanonly keeps the last variable's");
+    let code = script(&format!("use \"{dir}/study.dta\"\nsummarize z, meanonly\n"));
+    let text = ok(&mut e, &code);
+    assert!(!text.contains('5'), "meanonly prints nothing: {text}");
+
+    // regress, beta: e(beta), with the base level of b left out
+    let got = rerun(
+        &mut e,
+        "regress z x i.b, beta",
+        "stata_beta <- ",
+        "res[2], res[3]",
+    );
+    near(
+        &got,
+        &[0.14535034962359536, 0.11900813348198415],
+        "regress z x i.b, beta",
+    );
+    let got = rerun(
+        &mut e,
+        "regress z x i.b, beta robust",
+        "stata_beta <- ",
+        "res[2], res[3]",
+    );
+    near(
+        &got,
+        &[0.14535034962359536, 0.11900813348198415],
+        "beta does not change with robust",
+    );
+    let got = rerun(
+        &mut e,
+        "regress z x b, beta noconstant",
+        "stata_beta <- ",
+        "res[1], res[2]",
+    );
+    near(
+        &got,
+        &[0.61886962708309534, 0.44883708634675212],
+        "beta, noconstant still uses the centred sd",
+    );
+    let got = rerun(
+        &mut e,
+        "regress z x b if g == 1, beta",
+        "stata_beta <- ",
+        "res[2]",
+    );
+    near(
+        &got,
+        &[-0.23408229439226133],
+        "beta over the rows an if keeps",
+    );
+    // and by its definition: b sd(x) / sd(z) over the nine rows with z
+    let got = rerun(
+        &mut e,
+        "regress z x i.b, beta",
+        "stata_beta <- ",
+        "res[2], local({ k <- !is.na(study$z); stata_b[2] * stats::sd(study$x[k]) / stats::sd(study$z[k]) })",
+    );
+    near(&got[..1], &got[1..], "beta by hand");
+}
+
+#[test]
+fn tab2_pwcorr_meanonly_and_beta_say_what_stata_says() {
+    assert_eq!(
+        refusal("use s\nregress z x, beta vce(cluster g)"),
+        "options vce(cluster clustvar) and beta may not be combined"
+    );
+    assert_eq!(
+        refusal("use s\nsummarize z, meanonly detail"),
+        "only one of meanonly or detail may be specified"
+    );
+    assert!(refusal("use s\npwcorr x z, bonferroni sidak").starts_with("invalid syntax"));
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    // in Stata these are errors once the data are seen, so the R stops
+    for (cmd, message) in [
+        ("tab2 g", "too few variables specified"),
+        ("pwcorr s x", "too few variables specified"),
+    ] {
+        let code = script(&format!("use \"{dir}/study.dta\"\n{cmd}\n"));
+        let (outcome, text) = run(&mut e, &code);
+        assert_eq!(outcome, Outcome::Error, "{cmd}: {text}");
+        assert!(text.contains(message), "{cmd}: {text}");
+    }
+    // a string variable is left out with Stata's note
+    let code = script(&format!("use \"{dir}/study.dta\"\npwcorr x s z\n"));
+    let text = ok(&mut e, &code);
+    assert!(
+        text.contains("(s ignored because string variable)"),
+        "{text}"
+    );
 }

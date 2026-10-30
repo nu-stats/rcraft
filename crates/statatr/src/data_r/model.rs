@@ -79,7 +79,7 @@ pub(super) struct Estimates {
 /// (`or`, `irr`, `rrr`) the estimate and interval are exponentiated and the
 /// standard error is the delta method's, as Stata shows them; `eform` may
 /// name only some of the rows (cut points are never exponentiated).
-pub(super) const COEFS_HELPER: &str = r#"stata_coefs <- function(b, V, df = Inf, level = 0.95, eform = FALSE, label = "Coef.") {
+pub(super) const COEFS_HELPER: &str = r#"stata_coefs <- function(b, V, df = Inf, level = 0.95, eform = FALSE, label = "Coef.", beta = NULL) {
   se <- sqrt(diag(as.matrix(V)))
   stat <- b / se
   small <- is.finite(df)
@@ -95,6 +95,11 @@ pub(super) const COEFS_HELPER: &str = r#"stata_coefs <- function(b, V, df = Inf,
   tab <- data.frame(est, se, stat, p, lo, hi)
   names(tab) <- c(label, "Std. err.", if (small) "t" else "z", if (small) "P>|t|" else "P>|z|",
                   paste0("[", format(100 * level), "% conf."), "interval]")
+  if (!is.null(beta)) {
+    # regress, beta: the standardised coefficient in place of the interval
+    tab <- tab[1:4]
+    tab$Beta <- unname(beta)
+  }
   rownames(tab) <- names(b)
   print(tab, digits = 7)
   invisible(tab)
@@ -123,7 +128,13 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "regress")?;
-        if let Some(o) = opts.other(&[("noconstant", 5), ("robust", 1), ("vce", 3), ("level", 3)]) {
+        if let Some(o) = opts.other(&[
+            ("noconstant", 5),
+            ("robust", 1),
+            ("vce", 3),
+            ("level", 3),
+            ("beta", 4),
+        ]) {
             return Err(no(format!(
                 "regress with the option {o} is not translated yet"
             )));
@@ -132,6 +143,12 @@ impl Session {
         self.helpers_for(&spec);
         let level = level(opts)?;
         let (robust, cluster) = vce(opts)?;
+        let beta = opts.has("beta", 4);
+        if beta && cluster.is_some() {
+            return Err(no(
+                "options vce(cluster clustvar) and beta may not be combined",
+            ));
+        }
         let src = self.rows_for(c, out)?;
         let right = spec.right(opts.has("noconstant", 5));
         out.line(format!(
@@ -172,16 +189,35 @@ impl Session {
             );
             out.caveat("t tests and intervals use G - 1 degrees of freedom, as Stata's do");
         }
+        if beta {
+            // e(beta): b times the standard deviation of its column over that of
+            // the outcome, both over the estimation sample; none for the constant
+            out.line(
+                "stata_beta <- local({ X <- stats::model.matrix(stata_estimates); \
+                 b <- stata_b * apply(X, 2, stats::sd) / \
+                 stats::sd(stats::model.response(stats::model.frame(stata_estimates))); \
+                 b[colnames(X) == \"(Intercept)\"] <- NA; b })",
+            );
+        }
         if Self::quiet(c) {
             return Ok(());
         }
-        if robust || cluster.is_some() {
+        if robust || cluster.is_some() || beta {
             self.helpers.insert("stata_coefs");
             out.line(format!(
-                "stata_coefs(stata_b, stata_vcov, stata_df, level = {})",
-                r_number(level)
+                "stata_coefs(stata_b, stata_vcov, stata_df, level = {}{})",
+                r_number(level),
+                if beta { ", beta = stata_beta" } else { "" }
             ));
-            out.caveat("HC1, which is what Stata's robust means; R's own default would be HC3");
+            if robust || cluster.is_some() {
+                out.caveat("HC1, which is what Stata's robust means; R's own default would be HC3");
+            }
+            if beta {
+                out.caveat(
+                    "Beta is the coefficient times sd(x) / sd(y) over the rows the model used, \
+                     shown in place of the interval as Stata does",
+                );
+            }
         } else {
             out.line("print(summary(stata_estimates))");
             out.line(format!(

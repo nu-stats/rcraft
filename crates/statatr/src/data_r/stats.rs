@@ -29,12 +29,22 @@
 use super::*;
 
 /// `summarize`, and the statistics `correlate, means` prints.
-pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, detail = FALSE) {
+pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, detail = FALSE, meanonly = FALSE) {
   num <- function(v) {
     if (is.character(v) || is.factor(v)) return(rep(NA_real_, length(v)))
     u <- unclass(v)
     attributes(u) <- NULL
     if (is.numeric(u)) as.numeric(u) else rep(NA_real_, length(v))
+  }
+  if (meanonly) {
+    # Stata's r() after meanonly, of the last variable, and nothing printed
+    if (length(names(d)) == 0) return(invisible(NULL))
+    x <- num(d[[utils::tail(names(d), 1)]])
+    x <- x[!is.na(x)]
+    k <- length(x)
+    return(invisible(list(N = k, sum_w = k, mean = if (k > 0) mean(x) else NA_real_,
+                          min = if (k > 0) min(x) else NA_real_,
+                          max = if (k > 0) max(x) else NA_real_, sum = sum(x))))
   }
   if (length(names(d)) == 0) {
     cat("no variables\n")
@@ -186,17 +196,35 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "summarize")?;
-        if let Some(o) = opts.other(&[("detail", 1), ("separator", 3), ("format", 1)]) {
+        if let Some(o) = opts.other(&[
+            ("detail", 1),
+            ("meanonly", 8),
+            ("separator", 3),
+            ("format", 1),
+        ]) {
             return Err(no(format!(
                 "summarize with the option {o} is not translated yet"
             )));
+        }
+        let detail = opts.has("detail", 1);
+        if opts.has("meanonly", 8) {
+            if detail {
+                return Err(no("only one of meanonly or detail may be specified"));
+            }
+            // prints nothing; what it keeps is Stata's r() of the last variable
+            let src = self.frame_for(c, out)?;
+            self.helpers.insert("stata_summarize");
+            out.line(format!(
+                "stata_r <- stata_summarize({src}, meanonly = TRUE)"
+            ));
+            out.caveat("prints nothing, as in Stata; r() is kept in R as stata_r");
+            return Ok(());
         }
         if Self::quiet(c) {
             return Ok(());
         }
         let src = self.frame_for(c, out)?;
         self.helpers.insert("stata_summarize");
-        let detail = opts.has("detail", 1);
         out.line(format!(
             "stata_summarize({src}{})",
             if detail { ", detail = TRUE" } else { "" }
@@ -230,7 +258,8 @@ impl Session {
                 [x, y] => (*x, Some(*y)),
                 [] => return Err(no("tabulate needs a variable")),
                 _ => return Err(no(
-                    "tabulate takes one or two variables (tab1 and tab2 are not translated yet)",
+                    "too many variables specified: tabulate takes one or two (tab1 and tab2 take \
+                     more)",
                 )),
             };
         let known: &[(&str, usize)] = if y.is_some() {
@@ -468,4 +497,258 @@ pub(super) fn r_logical(b: bool) -> &'static str {
     } else {
         "FALSE"
     }
+}
+
+/// `tab1`: a one-way table of each variable, each on its own rows.
+pub(super) const TAB1_HELPER: &str = r#"stata_tab1 <- function(d, nolabel = FALSE, ...) {
+  out <- list()
+  for (n in names(d)) {
+    cat("\n-> tabulation of ", n, "\n", sep = "")
+    out[[n]] <- stata_tabulate(stata_tab_values(d[[n]], nolabel), ...)
+  }
+  invisible(out)
+}"#;
+
+/// `tab2`: a two-way table of every pair (of the first with each other with
+/// `firstonly`), each pair on the rows where both are present.
+pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FALSE, nolabel = FALSE, ...) {
+  n <- names(d)
+  if (length(n) < 2) stop("too few variables specified")
+  out <- list()
+  for (i in seq_len(if (firstonly) 1 else length(n) - 1)) {
+    for (j in (i + 1):length(n)) {
+      cat("\n-> tabulation of ", n[i], " by ", n[j], "\n", sep = "")
+      out[[paste(n[i], n[j])]] <- stata_tabulate(stata_tab_values(d[[n[i]]], nolabel),
+                                                  stata_tab_values(d[[n[j]]], nolabel), ...)
+    }
+  }
+  invisible(out)
+}"#;
+
+/// `pwcorr`: each correlation on the rows where both variables are present
+/// (all of them with `listwise`), its p-value from t on n - 2 degrees of
+/// freedom, and Bonferroni's and Sidak's adjustments over the number of pairs.
+/// `star()` and `print()` read the adjusted p-value, as Stata's do.
+pub(super) const PWCORR_HELPER: &str = r#"stata_pwcorr <- function(d, obs = FALSE, sig = FALSE, star = NULL, print = NULL,
+                          bonferroni = FALSE, sidak = FALSE, listwise = FALSE) {
+  for (n in names(d)) {
+    if (is.character(d[[n]]) || is.factor(d[[n]])) {
+      cat("(", n, " ignored because string variable)\n", sep = "")
+      d[[n]] <- NULL
+    }
+  }
+  if (length(d) < 2) stop("too few variables specified")
+  m <- as.matrix(as.data.frame(lapply(d, function(v) {
+    u <- unclass(v)
+    attributes(u) <- NULL
+    as.numeric(u)
+  })))
+  colnames(m) <- names(d)
+  if (listwise) m <- m[stats::complete.cases(m), , drop = FALSE]
+  k <- ncol(m)
+  pairs <- k * (k - 1) / 2
+  dn <- list(names(d), names(d))
+  C <- matrix(NA_real_, k, k, dimnames = dn)
+  P <- matrix(NA_real_, k, k, dimnames = dn)
+  N <- matrix(0, k, k, dimnames = dn)
+  for (i in seq_len(k)) {
+    for (j in seq_len(i)) {
+      ok <- !is.na(m[, i]) & !is.na(m[, j])
+      n <- sum(ok)
+      N[i, j] <- N[j, i] <- n
+      if (n < 2) next
+      r <- suppressWarnings(stats::cor(m[ok, i], m[ok, j]))
+      C[i, j] <- C[j, i] <- r
+      if (i == j || n < 3 || is.na(r)) next
+      t <- r * sqrt((n - 2) / (1 - r^2))
+      p <- 2 * stats::pt(-abs(t), n - 2)
+      if (bonferroni) p <- min(1, p * pairs)
+      if (sidak) p <- min(1, 1 - (1 - p)^pairs)
+      P[i, j] <- P[j, i] <- p
+    }
+  }
+  show <- matrix("", k, k, dimnames = dn)
+  for (i in seq_len(k)) {
+    for (j in seq_len(i)) {
+      p <- P[i, j]
+      if (i != j && !is.null(print) && (is.na(p) || p > print)) next
+      show[i, j] <- if (is.na(C[i, j])) "." else formatC(C[i, j], format = "f", digits = 4)
+      if (i != j && !is.null(star) && !is.na(p) && p <= star) show[i, j] <- paste0(show[i, j], "*")
+    }
+  }
+  print(noquote(show), right = TRUE)
+  if (sig) {
+    cat("\nsignificance\n")
+    print(round(P, 4))
+  }
+  if (obs) {
+    cat("\nobservations\n")
+    print(N)
+  }
+  invisible(list(C = C, sig = P, Nobs = N))
+}"#;
+
+impl Session {
+    // ---------------- tab1, tab2 ----------------
+
+    pub(super) fn tab1(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "tab1")?;
+        if let Some(o) = opts.other(&[("missing", 1), ("nolabel", 3), ("sort", 4)]) {
+            return Err(no(format!(
+                "tab1 with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.main.trim().is_empty() {
+            return Err(no("varlist required"));
+        }
+        if Self::quiet(c) {
+            return Ok(());
+        }
+        let src = self.frame_for(c, out)?;
+        for h in ["stata_tab_values", "stata_tabulate", "stata_tab1"] {
+            self.helpers.insert(h);
+        }
+        let args = tab_args(src, opts, &[("missing", 1), ("sort", 4)]);
+        out.line(format!("stata_tab1({})", args.join(", ")));
+        out.caveat("each table has the rows where its own variable is present, as in Stata");
+        out.caveat("printed in R's layout, not Stata's table");
+        Ok(())
+    }
+
+    pub(super) fn tab2(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "tab2")?;
+        let known = [
+            ("firstonly", 9),
+            ("missing", 1),
+            ("nolabel", 3),
+            ("row", 3),
+            ("column", 3),
+            ("cell", 4),
+            ("chi2", 4),
+        ];
+        if let Some(o) = opts.other(&known) {
+            return Err(no(format!(
+                "tab2 with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.main.trim().is_empty() {
+            return Err(no("varlist required"));
+        }
+        if Self::quiet(c) {
+            return Ok(());
+        }
+        let src = self.frame_for(c, out)?;
+        for h in ["stata_tab_values", "stata_tabulate", "stata_tab2"] {
+            self.helpers.insert(h);
+        }
+        let mut args = tab_args(
+            src,
+            opts,
+            &[
+                ("missing", 1),
+                ("row", 3),
+                ("column", 3),
+                ("cell", 4),
+                ("chi2", 4),
+            ],
+        );
+        if opts.has("firstonly", 9) {
+            args.push("firstonly = TRUE".into());
+        }
+        out.line(format!("stata_tab2({})", args.join(", ")));
+        out.caveat("each table has the rows where both of its variables are present, as in Stata");
+        if opts.has("chi2", 4) {
+            out.caveat("Pearson's chi-squared, with no continuity correction, as Stata does it");
+        }
+        out.caveat("printed in R's layout, not Stata's table");
+        Ok(())
+    }
+
+    // ---------------- pwcorr ----------------
+
+    pub(super) fn pwcorr(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "pwcorr")?;
+        if let Some(o) = opts.other(&[
+            ("obs", 3),
+            ("sig", 3),
+            ("star", 2),
+            ("print", 2),
+            ("bonferroni", 1),
+            ("sidak", 4),
+            ("listwise", 5),
+            ("casewise", 4),
+        ]) {
+            return Err(no(format!(
+                "pwcorr with the option {o} is not translated yet"
+            )));
+        }
+        if opts.has("bonferroni", 1) && opts.has("sidak", 4) {
+            return Err(no(
+                "invalid syntax: bonferroni and sidak may not be combined",
+            ));
+        }
+        if Self::quiet(c) {
+            return Ok(());
+        }
+        let src = self.frame_for(c, out)?;
+        self.helpers.insert("stata_pwcorr");
+        let mut args = vec![src];
+        for (name, min) in [("obs", 3), ("sig", 3), ("bonferroni", 1), ("sidak", 4)] {
+            if opts.has(name, min) {
+                args.push(format!("{name} = TRUE"));
+            }
+        }
+        let listwise = opts.has("listwise", 5) || opts.has("casewise", 4);
+        if listwise {
+            args.push("listwise = TRUE".into());
+        }
+        for (name, min) in [("star", 2), ("print", 2)] {
+            if let Some(a) = opts.arg(name, min) {
+                let p: f64 = a
+                    .trim()
+                    .parse()
+                    .map_err(|_| no(format!("{name}({a}) is not a number")))?;
+                args.push(format!("{name} = {}", r_number(p)));
+            }
+        }
+        out.line(format!("stata_pwcorr({})", args.join(", ")));
+        if listwise {
+            out.caveat(
+                "a row with a missing value in any of the variables is dropped, as Stata does",
+            );
+        } else {
+            out.caveat("each correlation has the rows where both of its variables are present");
+        }
+        out.caveat("printed in R's layout, not Stata's table");
+        Ok(())
+    }
+}
+
+/// The source and the `name = TRUE` flags a tabulation passes on.
+fn tab_args(src: String, opts: &Opts, flags: &[(&str, usize)]) -> Vec<String> {
+    let mut args = vec![src];
+    if opts.has("nolabel", 3) {
+        args.push("nolabel = TRUE".into());
+    }
+    for (name, min) in flags {
+        if opts.has(name, *min) {
+            args.push(format!("{name} = TRUE"));
+        }
+    }
+    args
 }

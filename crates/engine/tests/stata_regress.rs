@@ -390,7 +390,7 @@ fn regress_says_why_it_refuses_what_it_refuses() {
         "lags are not translated"
     );
     assert!(
-        refusal("use \"d.dta\"\nregress y x, beta\n").contains("beta"),
+        refusal("use \"d.dta\"\nregress y x, hascons\n").contains("hascons"),
         "an option that is not translated should be named"
     );
     assert!(

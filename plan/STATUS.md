@@ -1877,3 +1877,30 @@ rather than left to a panel package, because Stata's estimators are specific.
   `estat firststage`; `estat endogenous` and `overid` after robust errors (Stata switches to robust score
   tests), after `liml` and `gmm`; several `(endog = inst)` groups; factor variables inside the parentheses;
   `margins` and `estat ic` after it; `noconstant`.
+
+## P2B.4 tab1, tab2, pwcorr, meanonly and beta, 2026-10-30
+
+The first of the small items left on the lists above (`statatr/src/data_r/{stats,model}.rs`), each run in Stata 19
+first on the statistics tests' own data, so the rules below are Stata's and not guesses.
+
+- **tab1** (`missing`, `nolabel`, `sort`): a one-way table of each variable, each on the rows where that variable is
+  present. **tab2** (`firstonly`, `chi2`, `row`, `column`, `cell`, `missing`, `nolabel`): a two-way table of every
+  pair, each on the rows where both of its variables are present (Stata does not drop a row for a missing value in a
+  third variable); `firstonly` keeps the pairs with the first variable. One variable stops the R with Stata's
+  `too few variables specified`.
+- **pwcorr** (`sig`, `obs`, `star()`, `print()`, `bonferroni`, `sidak`, `listwise`/`casewise`): each correlation on
+  its pair's rows, p from t on n - 2 df, Bonferroni `min(1, k p)` and Sidak `1 - (1 - p)^k` with k the number of
+  pairs, and `star()`/`print()` read the adjusted p, as Stata's do. A string variable is left out with Stata's note,
+  as `correlate` does; fewer than two left stops with `too few variables specified`. `bonferroni` with `sidak` is
+  Stata's `invalid syntax`, refused.
+- **summarize, meanonly**: prints nothing, as in Stata, and keeps Stata's r() of the last variable (N, sum_w, mean,
+  min, max, sum) as `stata_r`, ready for `r()` in P2B.6. With `detail` it is refused in Stata's words
+  (`only one of meanonly or detail may be specified`).
+- **regress, beta**: e(beta), the coefficient times sd(x) / sd(y) over the estimation sample (the centred sd, with
+  `noconstant` too; none for the constant), shown in place of the interval as Stata does, also with `robust`. With
+  `vce(cluster)` refused in Stata's words (`options vce(cluster clustvar) and beta may not be combined`).
+- **Tests** (`engine/tests/stata_statistics.rs`, 2 new cases, real R): table counts and both chi-squareds (g by z's is
+  exactly 9 on 8 df, worked out by hand), every pwcorr correlation, p-value, count and adjustment, the e(beta) of
+  four fits and the meanonly results against Stata 19's numbers to 12 digits; the p-value against `cor.test`, Sidak's
+  and beta by their definitions; `star()`/`print()` in the printed table; the Stata messages. P2B.4 has 58 real-R
+  cases.

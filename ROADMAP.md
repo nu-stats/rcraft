@@ -259,7 +259,7 @@ Tasks:
   and nbreg differ from R's own), `N / (N - 1)` for robust likelihood models,
   the most frequent outcome as mlogit's base, Wald intervals, predictions in
   every row as floats, `estat ic` counting only coefficients. Still to do:
-  `stset`/`stcox`, weights, `by` and `tab1`/`tab2`. `ivregress` is done
+  `stset`/`stcox`, weights and `by`. `tab1`, `tab2` (`firstonly`, `chi2`), `pwcorr` (`sig`, `obs`, `star()`, `print()`, `bonferroni`, `sidak`, `listwise`), `summarize, meanonly` and `regress, beta` are done and match Stata 19. `ivregress` is done
   (`2sls`, `liml`, `gmm`, `small`, `vce(robust|cluster)` for 2sls, `first`,
   `estat endogenous` and `overid`, `predict`, `test`), matching Stata 19 to
   10 digits; not yet robust `liml`, `gmm` with its own `vce()`/`wmatrix()`,
@@ -269,7 +269,7 @@ Tasks:
   `margins` or `estat ic` after it, or `predict, u|e|ue`. `anova` is done: categorical unless `c.x`, partial (Type
   III, an empty cell refused) or `sequential` sums of squares, postestimation
   as after regress; not yet nested (`|`) or error (`/`) terms, `repeated()`,
-  or partial sums of squares for a covariate interacted with a factor.
+  or partial sums of squares with an empty cell.
   `margins` is done after regress, logit, probit, poisson and
   nbreg: predictive margins, `dydx()` (continuous and factor), a marginlist
   of factor variables, `at()`, `atmeans`, `predict()`, delta-method errors
