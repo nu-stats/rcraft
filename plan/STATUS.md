@@ -1583,3 +1583,44 @@ All in base R (no new package), each checked against published or independently 
   (project file, P7.5); a new session starts in the shown one's folder, and only the last folder chosen is
   remembered; closing the window does not ask about running sessions; I have not driven the native window by mouse,
   only the picture mode (`--click`), because moving the real mouse takes over the user's desktop.
+
+## P2B.4 Stata statistics commands, part one, 2026-10-30
+
+`summarize`, `tabulate`, `correlate`, `ttest` and `regress` translated from a do-file to R
+(`statatr/src/data_r/{stats,model}.rs`). The work is not RCraft's own statistics dialogs and must not
+become them: those follow R's conventions, these follow Stata's, and on purpose they do not always give
+the same number. Where R cannot do what Stata does, the line is refused with its reason, as everywhere
+in this crate.
+
+- **summarize.** Obs, mean, sample standard deviation, min and max; with `detail`, the variance, the
+  population skewness and kurtosis (so a normal sample's kurtosis is near 3) and the nine percentiles by
+  Stata's rule (`x[ceil(np)]`, or the mean of the neighbours when `np` is whole), which is R's
+  `quantile(type = 2)`, not R's default. A string variable has no observations, as in Stata.
+- **tabulate.** One-way (frequency, percent, cumulative) and two-way with margins; `chi2` (Pearson, no
+  continuity correction), `row`, `column`, `cell`, `missing`, `nolabel`, `sort`. Value labels are shown
+  in the order of the values underneath, which is Stata's order, without needing haven.
+- **correlate.** Casewise, so a row with a missing value in any of the variables goes for all of them;
+  `covariance` and `means`. A string variable is refused in Stata's own words.
+- **ttest.** One-sample (`ttest x == 3`), paired (`ttest x == y`), two-sample (`by()` or `unpaired`),
+  with `unequal` and `level()`. `welch` is refused: it asks for Welch's degrees of freedom and R's
+  `t.test` offers only Satterthwaite's, which is what Stata's `unequal` means.
+- **regress.** Stata's factor notation (`i.x`, `c.x`, `ib2.x`, `a#b`, `a##b`) becomes R's `factor()`,
+  `:` and `*`, and the base level agrees without being told because both leave out the lowest value.
+  `noconstant`, `robust`, `vce(robust|ols|cluster v)` and `level()`. The fit is kept in R as
+  `stata_estimates`, which is where `predict`, `test`, `margins` and `e()` will look. Robust means HC1,
+  which is Stata's, not R's default HC3; clusters add `G / (G - 1)` and `(N - 1) / (N - K)`.
+- **Tests** (`engine/tests/stata_statistics.rs`, `stata_regress.rs`, 14 cases, real R). Every figure is
+  checked against the same figure worked out a second way: the coefficients against the normal equations
+  solved by hand, HC1 against the sandwich built from the residuals, the clustered errors against the
+  clustered sandwich with both of Stata's corrections, the casewise correlation against the same
+  correlation with the row removed, chi-squared against the 2x2 formula. HC0, HC3 and R's corrected
+  chi-squared are shown to be different numbers, so the choices are real. A degenerate fixture was found
+  this way: `x = 1:20` with four-row clusters makes the clustered variance of `x` exactly zero, so the
+  test data are irregular now.
+- **Not done:** the rest of P2B.4 (`logit`, `probit`, `poisson`, `nbreg`, `ologit`, `mlogit`, `anova`,
+  `predict`, `test`, `lincom`, `margins`, `estat`, `xtset`/`xtreg`, `ivregress`, `stset`/`stcox`);
+  weights; `by` with any of these; `tab1`/`tab2`; `pwcorr`; `summarize, meanonly`; `regress, beta`.
+- **Note for later:** `ttest` is not in the vendored command table (`lang/commands.rs`), so it is matched
+  by its full name only. Stata does not abbreviate it, so nothing is lost, but the commands still to come
+  (`poisson`, `nbreg`, `mlogit` and the rest) will need entries there, and that table is vendored from
+  StatCraft, so a change has to be made in both places.

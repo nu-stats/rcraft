@@ -239,6 +239,20 @@ Tasks:
   maps to a chosen R function in a named package (for example `fixest`,
   `sandwich`, `survival`) and the package is offered through Phase 1A when
   missing.
+  (part done: `summarize` (with `detail`), `tabulate` (one-way and two-way,
+  with `chi2`, `row`, `column`, `cell`, `missing`, `nolabel`, `sort`),
+  `correlate` (with `covariance` and `means`), `ttest` (one-sample, paired,
+  two-sample by `by()` or two variables, with `unequal` and `level()`) and
+  `regress` (Stata's factor notation `i.`/`c.`/`ib#.`/`#`/`##`, `noconstant`,
+  `robust`, `vce(robust|ols|cluster v)`, `level()`). Each figure is checked in
+  real R against the same figure worked out a second way, so Stata's rules are
+  the ones kept: percentiles by Stata's rule, population skewness and
+  kurtosis, casewise `correlate`, chi-squared with no continuity correction,
+  HC1 for `robust` and HC1 with `G / (G - 1)` for clusters. `ttest, welch` is
+  refused with its reason. Still to do: `logit`, `probit`, `poisson`, `nbreg`,
+  `ologit`, `mlogit`, `anova`, `predict`, `test`, `lincom`, `margins`,
+  `estat`, `xtset`/`xtreg`, `ivregress`, `stset`/`stcox`, weights, `by` and
+  `tab1`/`tab2`)
 - P2B.5 Graph commands: `twoway`, `histogram`, `graph bar`, `scatter`,
   `line`, `kdensity` to ggplot2.
 - P2B.6 Estimates and returned values: `e()`, `r()` and `_b[]`/`_se[]`

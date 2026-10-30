@@ -25,7 +25,9 @@
 //! otherwise taken as numbers. Abbreviated variable names cannot be resolved
 //! without the data and are taken as written.
 
+mod model;
 mod more;
+mod stats;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -174,6 +176,10 @@ fn helper_code(name: &str) -> &'static str {
         "stata_stats" => more::STAT_HELPERS,
         "stata_destring" => more::DESTRING_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
+        "stata_summarize" => stats::SUMMARIZE_HELPER,
+        "stata_tab_values" => stats::TAB_VALUES_HELPER,
+        "stata_tabulate" => stats::TABULATE_HELPER,
+        "stata_correlate" => stats::CORRELATE_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -549,6 +555,11 @@ impl Session {
             "encode" => self.encode(c, &opts, out),
             "destring" => self.destring(c, &opts, out),
             "tostring" => self.tostring(c, &opts, out),
+            "summarize" => self.summarize(c, &opts, out),
+            "tabulate" => self.tabulate(c, &opts, out),
+            "correlate" => self.correlate(c, &opts, out),
+            "ttest" => self.ttest(c, &opts, out),
+            "regress" => self.regress(c, &opts, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1525,7 +1536,7 @@ mod tests {
     #[test]
     fn what_is_not_translated_says_why() {
         for (src, why) in [
-            ("use s\nregress y x", "regress is not translated yet"),
+            ("use s\nlogit y x", "logit is not translated yet"),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
             ("use s\nsummarize x [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),
