@@ -1721,3 +1721,36 @@ two fixes to the model terms found on the way.
   marginlist; `margins` after the data changed.
 - **Still not done in P2B.4:** `anova`; `xtset`/`xtreg`; `ivregress`; `stset`/`stcox`; weights; `by`;
   `tab1`/`tab2`; and the smaller items in the list above.
+
+## P2B.4 Stata anova, 2026-10-30
+
+`anova` (`statatr/src/data_r/anova.rs`).
+
+- **What it is.** Stata's `anova` is a linear model in which a variable is categorical unless written `c.x`,
+  so each plain variable gets `i.` before going through the same term translation as `regress` (so `g##h`,
+  `ib3.g` and `c.x` work the same). The fit is kept with Stata's dummy coding, base level the lowest, with
+  `stata_b`, `stata_vcov`, `stata_df` and the estimation sample, so `test`, `predict` and `margins` work after
+  it as after `regress`.
+- **The table.** Partial sums of squares by default, which Stata documents as SAS's Type III when no cell is
+  empty. They come from the same model refitted with sum-to-zero contrasts, each term's sum of squares being
+  the Wald statistic of its columns. An empty cell makes those coefficients inestimable; the R then stops and
+  says why rather than print a number Stata would not. `sequential` gives Type I (R's own `anova()`, which
+  does not depend on the coding). Model, Residual and Total rows, and R-squared, adjusted R-squared and root
+  MSE, as Stata shows them.
+- **Refused, with reasons:** nested terms (`a|b`), error terms (`/`), `repeated()`, and partial sums of squares
+  for a continuous variable interacted with a factor. That last one is a choice: what
+  Stata's partial test means for such a term has not been confirmed, so the translation refuses it rather than
+  guess; the sequential
+  version is translated.
+- **Tests** (`engine/tests/stata_anova.rs`, 7 cases, real R, on an unbalanced 3 x 2 design so the kinds of sums
+  of squares differ). The partial sums of squares are checked against Type III by its definition (the
+  sum-to-zero design matrix built by hand, each term's sum of squares as the rise in the residual sum of squares
+  when its columns are dropped), with their df, F and p, and shown to differ from the sequential ones; the
+  sequential ones against the same model comparisons in order; a covariate's against its t squared times the
+  MSE; `ib3.g` gives the same table; `test 2.g 3.g` after `anova y g h` gives the table's F for g; an empty cell
+  stops the R. P2B.4 now has 42 real-R cases.
+- **Resting on Stata's documentation.** That Stata's partial sums of squares equal Type III without empty cells
+  is Stata's documented statement, not something checked against Stata's own output here (there is no Stata
+  on this machine). If a StatCraft probe or a Stata run ever shows otherwise, this is where to look.
+- **Still not done in P2B.4:** `xtset`/`xtreg`; `ivregress`; `stset`/`stcox`; weights; `by`; `tab1`/`tab2`;
+  and the smaller items in the lists above.

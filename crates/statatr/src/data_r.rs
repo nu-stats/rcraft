@@ -25,6 +25,7 @@
 //! otherwise taken as numbers. Abbreviated variable names cannot be resolved
 //! without the data and are taken as written.
 
+mod anova;
 mod margins;
 mod ml;
 mod model;
@@ -162,7 +163,7 @@ fn opener_text(o: &Opener) -> String {
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
-    "regress", "logit", "probit", "poisson", "nbreg", "ologit", "oprobit", "mlogit",
+    "regress", "logit", "probit", "poisson", "nbreg", "ologit", "oprobit", "mlogit", "anova",
 ];
 
 /// Commands that leave the values of existing variables and the set of rows
@@ -226,6 +227,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_lincom" => post::LINCOM_HELPER,
         "stata_estat" => post::ESTAT_HELPER,
         "stata_margins" => margins::MARGINS_HELPER,
+        "stata_anova" => anova::ANOVA_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -628,6 +630,7 @@ impl Session {
             "lincom" => self.lincom(c, &opts, out),
             "estat" => self.estat(c, &opts, out),
             "margins" => self.margins(c, &opts, out),
+            "anova" => self.anova(c, &opts, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1604,7 +1607,7 @@ mod tests {
     #[test]
     fn what_is_not_translated_says_why() {
         for (src, why) in [
-            ("use s\nanova y x", "anova is not translated yet"),
+            ("use s\nxtreg y x", "xtreg is not translated yet"),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
             ("use s\nsummarize x [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),

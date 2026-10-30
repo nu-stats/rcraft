@@ -207,6 +207,14 @@ impl Spec {
         if !is_name(dep) {
             return Err(no(format!("{dep} is not a variable name")));
         }
+        Spec::from_terms(dep, words)
+    }
+
+    /// The variable explained and the terms as Stata writes them.
+    pub(super) fn from_terms<'a>(
+        dep: &str,
+        words: impl IntoIterator<Item = &'a str>,
+    ) -> Result<Spec, Untranslated> {
         let mut terms = Vec::new();
         let mut factors = BTreeMap::new();
         for w in words {

@@ -259,8 +259,12 @@ Tasks:
   and nbreg differ from R's own), `N / (N - 1)` for robust likelihood models,
   the most frequent outcome as mlogit's base, Wald intervals, predictions in
   every row as floats, `estat ic` counting only coefficients. Still to do:
-  `anova`, `xtset`/`xtreg`, `ivregress`, `stset`/`stcox`, weights, `by` and
-  `tab1`/`tab2`. `margins` is done after regress, logit, probit, poisson and
+  `xtset`/`xtreg`, `ivregress`, `stset`/`stcox`, weights, `by` and
+  `tab1`/`tab2`. `anova` is done: categorical unless `c.x`, partial (Type
+  III, an empty cell refused) or `sequential` sums of squares, postestimation
+  as after regress; not yet nested (`|`) or error (`/`) terms, `repeated()`,
+  or partial sums of squares for a covariate interacted with a factor.
+  `margins` is done after regress, logit, probit, poisson and
   nbreg: predictive margins, `dydx()` (continuous and factor), a marginlist
   of factor variables, `at()`, `atmeans`, `predict()`, delta-method errors
   from the model's own variance; not yet after ologit/mlogit, nor `post`,
