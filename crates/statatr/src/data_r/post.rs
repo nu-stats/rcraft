@@ -190,6 +190,7 @@ impl Session {
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4)],
             Fit::Ologit | Fit::Oprobit | Fit::Mlogit => &[("pr", 2), ("outcome", 3)],
+            Fit::Stcox => &[("hr", 2), ("xb", 2)],
             Fit::Margins => {
                 return Err(no(
                     "predict after margins, post is not allowed, as in Stata",
@@ -273,6 +274,14 @@ impl Session {
                     format!("{} - {}", r_name(&est.dep), newdata(""))
                 }
                 Fit::Regress => newdata(""),
+                Fit::Stcox if opts.has("xb", 2) => {
+                    self.helpers.insert("stata_stcox");
+                    format!("unname(stata_st_xb(stata_estimates, {d}))")
+                }
+                Fit::Stcox => {
+                    self.helpers.insert("stata_stcox");
+                    format!("exp(unname(stata_st_xb(stata_estimates, {d})))")
+                }
                 Fit::Xtreg => {
                     let s = [("xbu", 3), ("ue", 2), ("u", 1), ("e", 1)]
                         .into_iter()

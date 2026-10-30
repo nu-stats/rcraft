@@ -2145,3 +2145,36 @@ The last big items of the lists above, each decoded in Stata 19.
   `|`; `repeated()` with several variables; the other `xt` commands (`xtsum`, `xtlogit`, ...), which are commands of
   their own; and the smaller items each section above names (weights in the other models, `margins` contrasts with
   suboptions, gmm's HAC, the estat tests after clustered errors, `by` before the postestimation commands).
+
+## P2B.4 stset and stcox, 2026-10-31
+
+`stset` and `stcox` (`statatr/src/data_r/st.rs`), on R's `survival::coxph`, checked against Stata 19 on sixty subjects
+with 42 failures at only 16 distinct times, so the handling of ties is really exercised.
+
+- **stset** `timevar, failure(var[==values]) id() origin() enter() exit() scale()` makes Stata's `_st`, `_d`, `_t`
+  and `_t0`: the time from the origin over the scale, entry at the later of origin and `enter()`, failures after
+  `exit()` censored there, a subject's records under `id()` each starting where its last one ended, and a row that
+  enters at or after its end not used (`_st` 0), as with Stata's `enter(t0)` here (57 of 60 rows left). It prints
+  Stata's counts. `origin()`, `enter()` and `exit()` take a number or a variable (`time` before it is accepted);
+  expressions and `var==value` forms are refused for now.
+- **stcox** `varlist` (factor notation too), with `breslow` (the default, as Stata's; R's own default is Efron's),
+  `efron`, `exactp` (R's `exact`, the exact partial likelihood; with no late entry, since R's takes no entry
+  times), `vce(robust|cluster v)`, `strata()`, `nohr`, `level()`. coxph's estimates, standard errors and log
+  likelihoods are Stata's to 15 digits; robust errors are coxph's sandwich times N / (N - 1) and clustered ones
+  times G / (G - 1) (robust with `id()` clusters on the subject, as Stata's). The table shows hazard ratios, e(b)
+  the coefficients; the header the subjects, failures, time at risk, LR (or, robust, Wald) chi2 and log likelihood.
+  `predict, xb` is x b with nothing subtracted (R's `predict()` would centre it) and `hr` its exponential; `test`
+  and `lincom` read e(b) and e(V) as after any model; e(sample) is kept.
+- **Found on the way:** R's `coxph` wants a `cluster` or `id` for robust errors on (start, stop] data, so robust
+  without clusters gives each row its own cluster (the same sandwich); and it looks for `cluster =` in the data
+  first, where a variable of the same name (`cl` here) would have been taken instead, so the clusters go in a
+  column of their own.
+- **Refused:** `exactm` (Stata's exact marginal likelihood has no counterpart in R's survival), `stcox` before
+  `stset` (Stata's `data not st; use stset`), `margins` after stcox for now.
+- **Tests** (`engine/tests/stata_stcox.rs`, 3 cases, real R): all three ties methods (coefficients, errors and both
+  log likelihoods), robust and clustered errors, factor variables with `nohr`, `test`, `predict hr` and `xb`, the
+  header, `strata()`, and stset's `scale()`, `id()`, `enter()`, `exit()` and `origin()`, against Stata 19 to 10
+  digits. P2B.4 has 77 real-R cases.
+- **Not done:** `estat phtest` (Schoenfeld residuals; R's `cox.zph` transforms time differently by default), the
+  other `st` commands (`sts`, `streg`, `stsplit`, ...), `margins` after stcox, `stset` with expressions or
+  `var==value` in `origin()`/`enter()`/`exit()`, `exactp` with late entry.

@@ -32,6 +32,7 @@ mod ml;
 mod model;
 mod more;
 mod post;
+mod st;
 mod stats;
 mod weights;
 mod xt;
@@ -205,6 +206,7 @@ const WEIGHTED: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "stcox",
     "regress",
     "logit",
     "probit",
@@ -303,6 +305,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xt_ic" => xt::XT_IC_HELPER,
         "stata_xt_other" => xt::XT_OTHER_HELPER,
         "stata_ivregress" => iv::IV_HELPER,
+        "stata_stset" => st::STSET_HELPER,
+        "stata_stcox" => st::STCOX_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -338,6 +342,8 @@ struct Session {
     fit_cluster: bool,
     /// The panel variable `xtset` named.
     panel: Option<String>,
+    /// What stset declared.
+    stset: Option<st::StSet>,
     /// And its time variable.
     panel_time: Option<String>,
     helpers: BTreeSet<&'static str>,
@@ -911,6 +917,8 @@ impl Session {
             "xtset" => self.xtset(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
             "ivregress" => self.ivregress(c, &opts, out),
+            "stset" => self.stset(c, &opts, out),
+            "stcox" => self.stcox(c, &opts, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1898,7 +1906,10 @@ mod tests {
     #[test]
     fn what_is_not_translated_says_why() {
         for (src, why) in [
-            ("use s\nstcox x", "stcox is not translated yet"),
+            (
+                "use s\nstreg x, dist(weibull)",
+                "streg is not translated yet",
+            ),
             ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
             ("use s\nanova y g [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),
