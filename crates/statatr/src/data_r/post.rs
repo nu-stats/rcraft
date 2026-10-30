@@ -183,6 +183,11 @@ impl Session {
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4)],
             Fit::Ologit | Fit::Oprobit | Fit::Mlogit => &[("pr", 2), ("outcome", 3)],
+            Fit::Margins => {
+                return Err(no(
+                    "predict after margins, post is not allowed, as in Stata",
+                ))
+            }
         };
         // one statistic worked out by stata_predict_stat, if one was asked for
         let stat = [
@@ -747,6 +752,14 @@ fn signed_terms(text: &str) -> Result<Vec<(f64, String)>, Untranslated> {
 /// name among R's coefficients.
 fn coef_name(t: &str, est: &Estimates) -> Result<String, Untranslated> {
     let t = t.trim();
+    if est.fit == Fit::Margins {
+        // after margins, post the names are Stata's own (1.g, x, 1._at)
+        let n = t
+            .strip_prefix("_b[")
+            .and_then(|r| r.strip_suffix(']'))
+            .unwrap_or(t);
+        return Ok(format!("stata:{}", n.replace(' ', "")));
+    }
     // `[2]x` and `[2]_b[x]` are `2:x`, as `_b[2:x]` is
     let owned;
     let t = match t.strip_prefix('[').and_then(|r| r.split_once(']')) {
@@ -916,7 +929,9 @@ pub(super) const NAMES_HELPER: &str = r##"stata_canon <- function(s) {
     s <- sub("^[^:]*:", "", s)
   }
   p <- strsplit(gsub(" ", "", s), "#", fixed = TRUE)[[1]]
-  paste0(eq, paste(sort(sub("^c\\.", "", p)), collapse = "#"))
+  # Stata writes a base level as 0bn.g and an omitted one as 0o.g; both are 0.g
+  p <- sub("^([0-9]+)(bn|b|o)\\.", "\\1.", sub("^c\\.", "", p))
+  paste0(eq, paste(sort(p), collapse = "#"))
 }
 stata_bnames <- function() {
   part <- function(p) {

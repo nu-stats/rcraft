@@ -40,6 +40,8 @@ pub(super) enum Fit {
     Mlogit,
     Xtreg,
     Ivregress,
+    /// `margins, post`: the margins are e(b) and e(V)
+    Margins,
 }
 
 impl Fit {
@@ -55,6 +57,7 @@ impl Fit {
             Fit::Mlogit => "mlogit",
             Fit::Xtreg => "xtreg",
             Fit::Ivregress => "ivregress",
+            Fit::Margins => "margins",
         }
     }
 

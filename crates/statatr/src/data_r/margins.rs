@@ -24,34 +24,73 @@
 //!   variance (robust or clustered when the model was), and the tests are t
 //!   tests where the model has residual degrees of freedom, as Stata's are.
 
-use super::model::Fit;
+use super::model::{Estimates, Fit};
 use super::stats::r_logical;
 use super::*;
 
 /// Predictive margins and average marginal effects with delta-method errors.
-pub(super) const MARGINS_HELPER: &str = r#"stata_margins <- function(fit, data, b, V, df = Inf, type = "response", over = character(),
-                          at = list(), dydx = character(), factors = character(), atmeans = FALSE,
-                          level = 0.95, expression = "") {
+pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data, b, V, df = Inf, type = "response", terms = list(),
+                          within = character(), at = list(), dydx = character(), eyex = character(),
+                          dyex = character(), eydx = character(), factors = character(),
+                          atmeans = FALSE, level = 0.95, expression = "", outcomes = NULL,
+                          compare = "") {
   plain <- function(v) if (inherits(v, "haven_labelled")) as.vector(unclass(v)) else v
   data <- as.data.frame(lapply(data, plain), check.names = FALSE)
   tt <- stats::delete.response(stats::terms(fit))
+  kind <- if (inherits(fit, "polr")) "polr" else if (inherits(fit, "multinom")) "multinom" else "glm"
   fam <- if (inherits(fit, "glm")) fit$family else stats::gaussian()
-  cf <- names(stats::coef(fit))
-  b <- b[cf]
-  V <- V[cf, cf, drop = FALSE]
-  design <- function(nd) {
-    mf <- stats::model.frame(tt, nd, xlev = fit$xlevels, na.action = stats::na.pass)
-    X <- stats::model.matrix(tt, mf, contrasts.arg = fit$contrasts)
-    off <- stats::model.offset(mf)
-    list(X = X[, cf, drop = FALSE], off = if (is.null(off)) 0 else off)
+  xnames <- if (kind == "multinom") colnames(stats::model.matrix(fit)) else names(stats::coef(fit))
+  if (kind == "glm") {
+    b <- b[xnames]
+    V <- V[xnames, xnames, drop = FALSE]
   }
-  pred <- function(d, bb) {
+  # Stata sets a variable to an at() value or a mean as a float, which moves
+  # the margin in about the eighth digit (checked in Stata 19)
+  fl <- function(x) readBin(writeBin(as.numeric(x), raw(), size = 4), "double", size = 4, n = length(x))
+  # atmeans: each variable at its mean, a factor's indicators at theirs, and
+  # every column of the design the product of its parts
+  part_mean <- function(p, nd, sv = NULL, h = 0) {
+    if (p == "(Intercept)") return(1)
+    m <- regmatches(p, regexec("^(factor|stata_ib)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", p))[[1]]
+    if (length(m)) return(fl(mean(as.character(nd[[m[3]]]) == m[5])))
+    m <- regmatches(p, regexec("^I\\(([^()^]+)\\^([0-9]+)\\)$", p))[[1]]
+    if (length(m)) return((fl(mean(nd[[m[2]]])) + if (identical(m[2], sv)) h else 0)^as.integer(m[3]))
+    fl(mean(nd[[p]])) + if (identical(p, sv)) h else 0
+  }
+  # sv, h: a variable moved by h for a derivative (after the float at means)
+  design <- function(nd, sv = NULL, h = 0) {
+    if (!atmeans && !is.null(sv)) nd[[sv]] <- nd[[sv]] + h
+    mf <- stats::model.frame(tt, nd, xlev = fit$xlevels, na.action = stats::na.pass)
+    X <- stats::model.matrix(tt, mf, contrasts.arg = fit$contrasts)[, xnames, drop = FALSE]
+    off <- stats::model.offset(mf)
+    if (is.null(off)) off <- 0
+    if (atmeans) {
+      row <- vapply(colnames(X), function(cn) prod(vapply(strsplit(cn, ":", fixed = TRUE)[[1]], part_mean, 0, nd = nd, sv = sv, h = h)), 0)
+      X <- matrix(row, 1, dimnames = list(NULL, colnames(X)))
+      off <- mean(off)
+    }
+    list(X = X, off = off)
+  }
+  # the probability of each outcome, in the order of the outcome values
+  probs <- function(d, bb) {
+    n <- nrow(d$X)
+    if (kind == "polr") {
+      eta <- drop(d$X %*% bb[xnames])
+      z <- c(-Inf, bb[paste0("/cut", seq_along(fit$zeta))], Inf)
+      F <- if (fit$method == "probit") stats::pnorm else stats::plogis
+      return(matrix(vapply(seq_len(length(z) - 1), function(k) F(z[k + 1] - eta) - F(z[k] - eta), numeric(n)), n))
+    }
+    lev <- fit$lev
+    E <- matrix(vapply(lev, function(l) {
+      if (l == lev[1]) numeric(n) else drop(d$X %*% bb[paste0(l, ":", xnames)])
+    }, numeric(n)), n)
+    P <- exp(E) / rowSums(exp(E))
+    P[, order(as.numeric(lev)), drop = FALSE]
+  }
+  pred <- function(d, bb, o = NULL) {
+    if (!is.null(o)) return(probs(d, bb)[, o])
     eta <- drop(d$X %*% bb) + d$off
     if (type == "link") eta else fam$linkinv(eta)
-  }
-  slope <- function(d, dX, bb) {
-    s <- drop(dX %*% bb)
-    if (type == "link") s else fam$mu.eta(drop(d$X %*% bb) + d$off) * s
   }
   vars <- all.vars(tt)
   offs <- attr(tt, "offset")
@@ -60,71 +99,132 @@ pub(super) const MARGINS_HELPER: &str = r#"stata_margins <- function(fit, data, 
     vars <- setdiff(vars, used)
   }
   if (identical(dydx, "*")) dydx <- vars
-  for (v in dydx) {
+  for (v in c(dydx, eyex, dyex, eydx)) {
     if (!v %in% vars) stop("invalid dydx() option;\n", v, " not found in list of covariates")
   }
-  for (v in over) {
+  for (v in unlist(terms)) {
     if (!v %in% vars) stop(v, " not found in list of covariates")
   }
-  # Stata sets a variable to an at() value or a mean as a float, which moves
-  # the margin in about the eighth digit (checked in Stata 19)
-  fl <- function(x) readBin(writeBin(as.numeric(x), raw(), size = 4), "double", size = 4, n = length(x))
-  if (atmeans) for (v in vars) data[[v]] <- fl(mean(data[[v]]))
   levels_of <- function(v) sort(unique(data[[v]]))
-  setv <- function(vals) {
-    nd <- data
+  setv <- function(nd, vals) {
     for (v in names(vals)) nd[[v]] <- fl(vals[[v]])
     nd
   }
-  grids <- if (length(at) > 0) at else list(list())
-  scen <- list()
-  for (a in seq_along(grids)) {
-    combos <- c(lapply(stats::setNames(over, over), levels_of), grids[[a]])
-    grid <- if (length(combos) > 0) expand.grid(combos, KEEP.OUT.ATTRS = FALSE) else data.frame(row.names = 1)
-    for (r in seq_len(nrow(grid))) {
-      vals <- as.list(grid[r, , drop = FALSE])
-      label <- if (length(vals) > 0) paste(paste0(names(vals), "=", unlist(vals)), collapse = ", ") else ""
-      scen[[length(scen) + 1]] <- list(vals = vals, label = label)
+  # at(): a statistic of the estimation sample, or the values given
+  stat <- function(s, v) {
+    x <- sort(data[[v]][!is.na(data[[v]])])
+    switch(s,
+      mean = mean(x), median = , p50 = unname(stats::quantile(x, 0.5, type = 2)),
+      min = min(x), max = max(x),
+      unname(stats::quantile(x, as.numeric(sub("^p", "", s)) / 100, type = 2)))
+  }
+  ats <- list()
+  for (a in at) {
+    a <- lapply(stats::setNames(names(a), names(a)), function(v) {
+      x <- a[[v]]
+      if (is.character(x)) stat(x, v) else x
+    })
+    g <- expand.grid(a, KEEP.OUT.ATTRS = FALSE)
+    for (r in seq_len(nrow(g))) ats[[length(ats) + 1]] <- as.list(g[r, , drop = FALSE])
+  }
+  at_names <- if (length(ats) > 0) paste0(seq_along(ats), "._at") else ""
+  if (length(ats) == 0) ats <- list(list())
+  # the marginlist: each term's cells, a term with # setting its variables together
+  cells <- list(list(vals = list(), name = ""))
+  if (length(terms) > 0) {
+    cells <- list()
+    for (tm in terms) {
+      g <- expand.grid(rev(lapply(stats::setNames(tm, tm), levels_of)), KEEP.OUT.ATTRS = FALSE)[tm]
+      for (r in seq_len(nrow(g))) {
+        vals <- as.list(g[r, , drop = FALSE])
+        cells[[length(cells) + 1]] <- list(vals = vals, name = paste(paste0(unlist(vals), ".", names(vals)), collapse = "#"))
+      }
     }
   }
+  # over(): each group of the estimation sample on its own
+  groups <- list(list(rows = rep(TRUE, nrow(data)), name = ""))
+  if (length(within) > 0) {
+    g <- unique(data[within])
+    g <- g[do.call(order, unname(as.list(g))), , drop = FALSE]
+    groups <- lapply(seq_len(nrow(g)), function(r) {
+      rows <- Reduce(`&`, lapply(within, function(w) data[[w]] == g[r, w]))
+      list(rows = rows, name = paste(paste0(unlist(g[r, ]), ".", within), collapse = "#"))
+    })
+  }
+  outs <- if (is.null(outcomes)) list(NULL) else as.list(outcomes)
   items <- list()
   labels <- character()
   add <- function(f, label) {
     items[[length(items) + 1]] <<- f
     labels <<- c(labels, label)
   }
-  within <- function(label, s) if (nzchar(s$label)) paste0(label, " (", s$label, ")") else label
-  for (s in scen) {
-    nd <- setv(s$vals)
-    if (length(dydx) == 0) {
-      local({
-        d <- design(nd)
-        add(function(bb) mean(pred(d, bb)), if (nzchar(s$label)) s$label else "_cons")
-      })
-    }
-    for (v in dydx) {
-      if (v %in% names(factors)) {
-        lv <- levels_of(v)
-        base <- if (is.na(factors[[v]])) lv[1] else as.numeric(factors[[v]])
-        d0 <- design(setv(c(s$vals, stats::setNames(list(base), v))))
-        for (l in setdiff(lv, base)) {
-          local({
-            d1 <- design(setv(c(s$vals, stats::setNames(list(l), v))))
-            add(function(bb) mean(pred(d1, bb) - pred(d0, bb)), within(paste0(l, ".", v), s))
-          })
+  join <- function(...) {
+    p <- c(...)
+    paste(p[nzchar(p)], collapse = "#")
+  }
+  effects <- list(dydx = dydx, eyex = eyex, dyex = dyex, eydx = eydx)
+  any_effect <- length(unlist(effects)) > 0
+  for (o in outs) {
+    oname <- if (is.null(o)) "" else paste0(o, "._predict")
+    for (ai in seq_along(ats)) {
+      for (cl in cells) {
+        for (gr in groups) {
+          nd <- setv(setv(data[gr$rows, , drop = FALSE], ats[[ai]]), cl$vals)
+          where <- join(cl$name, at_names[min(ai, length(at_names))], gr$name)
+          if (!any_effect) {
+            local({
+              d <- design(nd)
+              oo <- o
+              j <- join(oname, where)
+              add(function(bb) mean(pred(d, bb, oo)), if (nzchar(j)) j else "_cons")
+            })
+          }
+          for (e in names(effects)) {
+            for (v in effects[[e]]) {
+              lab <- if (nzchar(join(oname, where))) paste0(v, ":", join(oname, where)) else v
+              if (v %in% names(factors)) {
+                if (e != "dydx") stop(e, "(): ", v, " is a factor variable, which Stata does not allow here")
+                lv <- levels_of(v)
+                base <- if (is.na(factors[[v]])) lv[1] else as.numeric(factors[[v]])
+                local({
+                  d0 <- design(setv(nd, stats::setNames(list(base), v)))
+                  for (l in setdiff(lv, base)) {
+                    local({
+                      d1 <- design(setv(nd, stats::setNames(list(l), v)))
+                      oo <- o
+                      lab1 <- if (nzchar(join(oname, where))) paste0(l, ".", v, ":", join(oname, where)) else paste0(l, ".", v)
+                      add(function(bb) mean(pred(d1, bb, oo) - pred(d0, bb, oo)), lab1)
+                    })
+                  }
+                })
+              } else {
+                local({
+                  x <- nd[[v]]
+                  h <- 1e-4 * (mean(abs(x)) + 1e-4)
+                  du <- design(nd, v, h)
+                  dd <- design(nd, v, -h)
+                  d <- design(nd)
+                  xv <- if (atmeans) fl(mean(x)) else x
+                  oo <- o
+                  ee <- e
+                  dX <- (du$X - dd$X) / (2 * h)
+                  add(function(bb) {
+                    # one outcome: the chain rule through the design, exactly;
+                    # several: the outcome probabilities differenced
+                    s <- if (is.null(oo)) {
+                      g <- drop(dX %*% bb)
+                      if (type == "link") g else fam$mu.eta(drop(d$X %*% bb) + d$off) * g
+                    } else {
+                      (pred(du, bb, oo) - pred(dd, bb, oo)) / (2 * h)
+                    }
+                    y <- pred(d, bb, oo)
+                    mean(switch(ee, dydx = s, eyex = s * xv / y, dyex = s * xv, eydx = s / y))
+                  }, lab)
+                })
+              }
+            }
+          }
         }
-      } else {
-        local({
-          x <- nd[[v]]
-          h <- 1e-4 * (mean(abs(x)) + 1e-4)
-          up <- nd
-          up[[v]] <- x + h
-          dn <- nd
-          dn[[v]] <- x - h
-          dX <- (design(up)$X - design(dn)$X) / (2 * h)
-          d <- design(nd)
-          add(function(bb) mean(slope(d, dX, bb)), within(v, s))
-        })
       }
     }
   }
@@ -140,15 +240,48 @@ pub(super) const MARGINS_HELPER: &str = r#"stata_margins <- function(fit, data, 
   Vm <- J %*% V %*% t(J)
   names(m) <- labels
   dimnames(Vm) <- list(labels, labels)
-  cat(if (length(dydx) > 0) "Average marginal effects\n" else "Predictive margins\n")
+  what <- if (length(dydx) > 0) "dy/dx" else if (length(eyex) > 0) "ey/ex" else if (length(dyex) > 0) "dy/ex" else if (length(eydx) > 0) "ey/dx" else "Margin"
+  cat(if (any_effect) "Average marginal effects\n" else "Predictive margins\n")
   cat(sprintf("Number of obs = %d\n", nrow(data)))
   cat("Expression:", expression, "\n")
-  if (length(dydx) > 0) cat("dy/dx wrt:", paste(dydx, collapse = " "), "\n")
+  if (any_effect) cat(what, "wrt:", paste(unlist(effects), collapse = " "), "\n")
   if (atmeans) cat("at: the covariates at their means\n")
   cat("\n")
-  tab <- stata_coefs(m, Vm, df, level, label = if (length(dydx) > 0) "dy/dx" else "Margin")
-  invisible(list(b = m, V = Vm, table = tab))
-}"#;
+  if (compare == "") {
+    tab <- stata_coefs(m, Vm, df, level, label = what)
+    return(invisible(list(b = m, V = Vm, table = tab)))
+  }
+  # contrasts of the margins of one term: each level against the first (r.),
+  # every pair (pwcompare), or the joint test that they are all equal
+  k <- length(m)
+  if (k < 2) stop("a contrast needs at least two margins")
+  pairs <- if (compare == "pwcompare") utils::combn(k, 2) else rbind(1, 2:k)
+  L <- matrix(0, ncol(pairs), k)
+  for (i in seq_len(ncol(pairs))) {
+    L[i, pairs[2, i]] <- 1
+    L[i, pairs[1, i]] <- -1
+  }
+  lv <- sub("\\..*$", "", labels)
+  rownames(L) <- paste0(if (compare == "pwcompare") "" else "r", lv[pairs[2, ]], "vs", lv[pairs[1, ]], sub("^[^.]*", "", labels[1]))
+  cc <- drop(L %*% m)
+  Vc <- L %*% Vm %*% t(L)
+  dimnames(Vc) <- list(rownames(L), rownames(L))
+  if (compare == "contrast") {
+    W <- drop(t(cc) %*% solve(Vc, cc))
+    q <- length(cc)
+    if (is.finite(df)) {
+      F <- W / q
+      p <- stats::pf(F, q, df, lower.tail = FALSE)
+      cat(sprintf("Contrasts of predictive margins\n   df = %d   F = %.2f   P>F = %.4f   (denominator %g)\n", q, F, p, df))
+      return(invisible(list(b = cc, V = Vc, F = F, df = q, df_r = df, p = p)))
+    }
+    p <- stats::pchisq(W, q, lower.tail = FALSE)
+    cat(sprintf("Contrasts of predictive margins\n   df = %d   chi2 = %.2f   P>chi2 = %.4f\n", q, W, p))
+    return(invisible(list(b = cc, V = Vc, chi2 = W, df = q, p = p)))
+  }
+  tab <- stata_coefs(cc, Vc, df, level, label = "Contrast")
+  invisible(list(b = cc, V = Vc, table = tab))
+}"##;
 
 impl Session {
     pub(super) fn margins(
@@ -167,54 +300,100 @@ impl Session {
             no("margins needs a model fitted earlier in this do-file (regress, logit, ...)")
         })?;
         let name = est.fit.name();
-        if self.changed_since_fit {
-            return Err(no(format!(
-                "margins after a command that may have changed the data since {name}: Stata \
-                 would average the changed rows, which is not translated yet"
-            )));
-        }
         if matches!(est.fit, Fit::Xtreg | Fit::Ivregress) {
             return Err(no(format!("margins after {name} is not translated yet")));
         }
-        if !est.fit.one_outcome() {
-            return Err(no(format!(
-                "margins after {name} is not translated yet (it has a margin per outcome)"
-            )));
+        if est.fit == Fit::Margins {
+            return Err(no("margins after margins, post is not translated yet"));
         }
         if let Some(o) = opts.other(&[
             ("dydx", 4),
+            ("eyex", 4),
+            ("dyex", 4),
+            ("eydx", 4),
             ("at", 2),
             ("atmeans", 5),
+            ("over", 4),
             ("predict", 7),
             ("level", 3),
+            ("post", 4),
+            ("pwcompare", 2),
+            ("contrast", 4),
+            ("vce", 3),
         ]) {
             return Err(no(format!(
                 "margins with the option {o} is not translated yet"
             )));
         }
-        // the marginlist: factor variables of the model
-        let mut over = Vec::new();
-        for w in c.parts.main.split_whitespace() {
-            if w.contains('#') {
-                return Err(no(format!(
-                    "margins {w}: interactions in the marginlist are not translated yet"
-                )));
-            }
-            let v = w.strip_prefix("i.").unwrap_or(w);
-            if !est.factors.contains_key(v) {
-                return Err(no(format!(
-                    "margins {w}: {v} is not in the model as a factor variable (i.{v}), as Stata requires"
-                )));
-            }
-            over.push(r_text(v));
+        if let Some(v) = opts.arg("vce", 3) {
+            return Err(match v.trim() {
+                "delta" => no("margins, vce(delta) is the default; leave it out"),
+                "unconditional" => no(
+                    "margins, vce(unconditional) is not translated yet (Stata allows it only \
+                     after robust, semirobust, or linearized standard errors)",
+                ),
+                other => no(format!("margins, vce({other}) is not translated yet")),
+            });
         }
-        let dydx = match opts.arg("dydx", 4) {
-            None => "character()".to_string(),
-            Some(list) => {
-                let list = list.trim();
-                if list == "*" || list == "_all" {
-                    "\"*\"".to_string()
-                } else {
+        // the marginlist: factor variables of the model, alone or joined by #,
+        // or one r.v (each level against the first)
+        let mut terms = Vec::new();
+        let mut compare = "";
+        for w in c.parts.main.split_whitespace() {
+            let w = match w.strip_prefix("r.") {
+                Some(v) => {
+                    compare = "r";
+                    v
+                }
+                None => w,
+            };
+            let mut term = Vec::new();
+            for part in w.split('#') {
+                let v = part.strip_prefix("i.").unwrap_or(part);
+                if !est.factors.contains_key(v) {
+                    return Err(no(format!(
+                        "margins {w}: {v} is not in the model as a factor variable (i.{v}), as Stata requires"
+                    )));
+                }
+                term.push(r_text(v));
+            }
+            terms.push(format!("c({})", term.join(", ")));
+        }
+        if opts.has("pwcompare", 2) {
+            if compare == "r" {
+                return Err(no("margins: r. and pwcompare together are not translated"));
+            }
+            if let Some(a) = opts.arg("pwcompare", 2) {
+                if !matches!(a.trim(), "" | "effects") {
+                    return Err(no(format!("pwcompare({a}) is not translated yet")));
+                }
+            }
+            compare = "pwcompare";
+        }
+        if opts.has("contrast", 4) {
+            if opts
+                .arg("contrast", 4)
+                .is_some_and(|a| !a.trim().is_empty())
+            {
+                return Err(no(
+                    "margins, contrast() with suboptions is not translated yet",
+                ));
+            }
+            compare = "contrast";
+        }
+        if !compare.is_empty() && terms.len() != 1 {
+            return Err(no(
+                "margins: a contrast of the margins of one marginlist term is translated, not more",
+            ));
+        }
+        let list = |o: &str, min: usize| -> Result<String, Untranslated> {
+            match opts.arg(o, min) {
+                None => Ok("character()".to_string()),
+                Some(list) => {
+                    let list = list.trim();
+                    if o == "dydx" && (list == "*" || list == "_all") {
+                        return Ok("\"*\"".to_string());
+                    }
                     let mut vs = Vec::new();
                     for w in list.split_whitespace() {
                         let v = w
@@ -223,31 +402,59 @@ impl Session {
                             .unwrap_or(w);
                         if !is_name(v) {
                             return Err(no(format!(
-                                "dydx({list}): only variable names, * and _all are translated"
+                                "{o}({list}): only variable names are translated"
                             )));
                         }
                         vs.push(r_text(v));
                     }
                     if vs.is_empty() {
-                        return Err(no("dydx() needs a variable"));
+                        return Err(no(format!("{o}() needs a variable")));
                     }
-                    format!("c({})", vs.join(", "))
+                    Ok(format!("c({})", vs.join(", ")))
                 }
             }
         };
+        let (dydx, eyex, dyex, eydx) = (
+            list("dydx", 4)?,
+            list("eyex", 4)?,
+            list("dyex", 4)?,
+            list("eydx", 4)?,
+        );
+        let effects = [&dydx, &eyex, &dyex, &eydx]
+            .iter()
+            .filter(|e| e.as_str() != "character()")
+            .count();
+        if effects > 1 {
+            return Err(no(
+                "margins: one of dydx(), eyex(), dyex() and eydx() at a time",
+            ));
+        }
+        if effects > 0 && !compare.is_empty() {
+            return Err(no(
+                "margins: contrasts of marginal effects are not translated yet",
+            ));
+        }
         let mut ats = Vec::new();
         for o in c.options.iter().filter(|o| o.is("at", 2)) {
             ats.push(at_set(&o.arg())?);
         }
+        let within = match opts.arg("over", 4) {
+            None => "character()".to_string(),
+            Some(v) => {
+                let vs: Vec<&str> = v.split_whitespace().collect();
+                if vs.is_empty() || vs.iter().any(|w| !is_name(w)) {
+                    return Err(no(format!("over({v}): only variable names are translated")));
+                }
+                let vs: Vec<String> = vs.iter().map(|w| r_text(w)).collect();
+                format!("c({})", vs.join(", "))
+            }
+        };
         let atmeans = opts.has("atmeans", 5);
-        if atmeans && !est.factors.is_empty() {
-            return Err(no(
-                "margins, atmeans with factor variables is not translated yet (Stata uses the \
-                 means of their indicators)",
-            ));
-        }
+        let mut outcomes = "NULL".to_string();
         let (ty, expression) = match (opts.arg("predict", 7).as_deref().map(str::trim), est.fit) {
-            (Some("xb"), _) => ("link", "Linear prediction, predict(xb)".to_string()),
+            (Some("xb"), f) if f.one_outcome() => {
+                ("link", "Linear prediction, predict(xb)".to_string())
+            }
             (None, Fit::Regress) => ("response", "Linear prediction, predict()".to_string()),
             (None | Some("pr"), Fit::Logit | Fit::Probit) => {
                 ("response", format!("Pr({}), predict()", est.dep))
@@ -256,6 +463,37 @@ impl Session {
                 "response",
                 "Predicted number of events, predict()".to_string(),
             ),
+            (None | Some("pr"), f) if !f.one_outcome() => {
+                outcomes = "seq_along(stata_levels)".to_string();
+                ("response", "Pr of each outcome, predict()".to_string())
+            }
+            (Some(p), f) if !f.one_outcome() => {
+                let k = p
+                    .strip_prefix("outcome(")
+                    .and_then(|r| r.strip_suffix(')'))
+                    .map(str::trim)
+                    .ok_or_else(|| {
+                        no(format!(
+                            "margins, predict({p}) after {name} is not translated yet"
+                        ))
+                    })?;
+                outcomes = match k.strip_prefix('#') {
+                    Some(n) => match n.trim().parse::<usize>() {
+                        Ok(n) if n >= 1 => format!("{n}"),
+                        _ => return Err(no(format!("outcome({k}) is not an outcome number"))),
+                    },
+                    None if k.parse::<f64>().is_ok() => format!(
+                        "match({}, as.character(sort(as.numeric(stata_levels))))",
+                        r_text(k)
+                    ),
+                    None => {
+                        return Err(no(format!(
+                            "outcome({k}): only a value or #k is translated, not a label"
+                        )))
+                    }
+                };
+                ("response", format!("Pr({}=={k}), predict({p})", est.dep))
+            }
             (Some(p), _) => {
                 return Err(no(format!(
                     "margins, predict({p}) after {name} is not translated yet"
@@ -264,12 +502,28 @@ impl Session {
             (None, _) => return Err(no(format!("margins after {name} is not translated yet"))),
         };
         let level = super::model::level(opts)?;
+        // the estimation sample: as it was fitted, or, once the data may have
+        // changed, the current values of its rows (what Stata averages)
+        let rows = if !self.changed_since_fit {
+            "stata_data".to_string()
+        } else if self.esample {
+            out.caveat(
+                "the data changed since the model, so the current values of its rows are used, \
+                 as Stata does",
+            );
+            format!("{}[stata_esample, , drop = FALSE]", self.data()?)
+        } else {
+            return Err(no(format!(
+                "margins after a command that may have changed the rows since {name} (Stata \
+                 would average the rows it then finds in e(sample)), which is not translated yet"
+            )));
+        };
         let data = match self.condition(c, out)? {
             Some(cond) => {
                 out.package("dplyr");
-                format!("dplyr::filter(stata_data, {cond})")
+                format!("dplyr::filter({rows}, {cond})")
             }
-            None => "stata_data".to_string(),
+            None => rows,
         };
         let factors: Vec<String> = est
             .factors
@@ -284,11 +538,7 @@ impl Session {
         } else {
             format!("c({})", factors.join(", "))
         };
-        let over = if over.is_empty() {
-            "character()".to_string()
-        } else {
-            format!("c({})", over.join(", "))
-        };
+        let terms = format!("list({})", terms.join(", "));
         let at = if ats.is_empty() {
             "list()".to_string()
         } else {
@@ -296,12 +546,28 @@ impl Session {
         };
         self.helpers.insert("stata_coefs");
         self.helpers.insert("stata_margins");
-        out.line(format!(
-            "stata_margins(stata_estimates, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", over = {over}, at = {at}, dydx = {dydx}, factors = {factors}, atmeans = {}, level = {}, expression = {})",
+        let call = format!(
+            "stata_margins(stata_estimates, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {})",
             r_logical(atmeans),
             r_number(level),
-            r_text(&expression)
-        ));
+            r_text(&expression),
+            r_text(compare)
+        );
+        if opts.has("post", 4) {
+            // the margins become e(b) and e(V), as for a model
+            out.line(format!("stata_m <- {call}"));
+            out.line("stata_b <- stata_m$b");
+            out.line("stata_vcov <- stata_m$V");
+            out.line("rm(stata_m)");
+            self.estimates = Some(Estimates {
+                fit: Fit::Margins,
+                dep: est.dep.clone(),
+                factors: est.factors.clone(),
+            });
+            out.caveat("post: the margins are now e(b) and e(V), named as Stata names them (1.g, x, 1._at)");
+        } else {
+            out.line(call);
+        }
         out.caveat("averaged over the estimation sample, Stata's e(sample)");
         out.caveat("delta-method standard errors from the model's own variance, as Stata's");
         Ok(())
@@ -319,11 +585,38 @@ fn factor_base(expr: &str) -> Option<String> {
 fn at_set(text: &str) -> Result<String, Untranslated> {
     let mut parts = Vec::new();
     let mut rest = text.trim();
+    // `(mean) x w`: a statistic of the estimation sample for the names after it
+    let mut stat: Option<String> = None;
     while !rest.is_empty() {
-        if rest.starts_with('(') {
-            return Err(no(format!(
-                "at({text}): statistics like (mean) are not translated yet"
-            )));
+        if let Some(inner) = rest.strip_prefix('(') {
+            let (s, next) = inner
+                .split_once(')')
+                .ok_or_else(|| no(format!("at({text}): a ( without its )")))?;
+            let s = s.trim();
+            let known = matches!(s, "mean" | "median" | "min" | "max")
+                || s.strip_prefix('p')
+                    .and_then(|k| k.parse::<u32>().ok())
+                    .is_some_and(|k| (1..=99).contains(&k));
+            if !known {
+                return Err(no(format!("at({text}): ({s}) is not translated yet")));
+            }
+            stat = Some(s.to_string());
+            rest = next.trim_start();
+            continue;
+        }
+        if let Some(s) = &stat {
+            // names up to the next = or (
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            let (word, next) = rest.split_at(end);
+            if !word.contains('=') && !next.trim_start().starts_with('=') {
+                if !is_name(word) {
+                    return Err(no(format!("at({text}): {word} is not a variable name")));
+                }
+                parts.push(format!("{} = {}", r_text(word), r_text(s)));
+                rest = next.trim_start();
+                continue;
+            }
+            stat = None;
         }
         let (name, after) = rest
             .split_once('=')
@@ -426,7 +719,11 @@ mod tests {
             at_set("x=(0(1)2)").as_deref(),
             Ok("list(\"x\" = c(0, 1, 2))")
         );
-        assert!(at_set("(mean) x").is_err(), "statistics are not translated");
+        assert_eq!(
+            at_set("(mean) x w=0.5").as_deref(),
+            Ok("list(\"x\" = \"mean\", \"w\" = 0.5)")
+        );
+        assert!(at_set("(asobserved) x").is_err(), "not translated yet");
         assert!(at_set("x").is_err());
     }
 

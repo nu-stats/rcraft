@@ -215,6 +215,7 @@ impl Session {
             Fit::Regress => return self.regress(c, opts, out),
             Fit::Xtreg => return self.xtreg(c, opts, out),
             Fit::Ivregress => return self.ivregress(c, opts, out),
+            Fit::Margins => return Err(no("margins is not a model to fit")),
         }
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -340,7 +341,7 @@ impl Session {
                     "stats::relevel(factor({dep}), ref = stata_base)"
                 )));
             }
-            Fit::Regress | Fit::Xtreg | Fit::Ivregress => {}
+            Fit::Regress | Fit::Xtreg | Fit::Ivregress | Fit::Margins => {}
         }
         match fit {
             Fit::Logit | Fit::Probit | Fit::Poisson => {
@@ -405,7 +406,7 @@ impl Session {
                 out.line("dimnames(stata_vcov) <- list(names(stata_b), names(stata_b))");
                 out.caveat("each coefficient is named outcome:variable; the base outcome has none");
             }
-            Fit::Regress | Fit::Xtreg | Fit::Ivregress => {}
+            Fit::Regress | Fit::Xtreg | Fit::Ivregress | Fit::Margins => {}
         }
         if matches!(fit, Fit::Nbreg | Fit::Ologit | Fit::Oprobit | Fit::Mlogit)
             && (robust || cluster.is_some())

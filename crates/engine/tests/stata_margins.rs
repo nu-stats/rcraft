@@ -559,34 +559,37 @@ fn margins_averages_the_estimation_sample_only() {
 #[test]
 fn what_margins_does_not_translate_says_why() {
     assert!(
-        refusal("use \"d.dta\"\nmlogit y x\nmargins\n").contains("per outcome"),
-        "margins after mlogit"
+        refusal("use \"d.dta\"\nregress y x, robust\nmargins, vce(unconditional)\n")
+            .contains("unconditional"),
+        "vce(unconditional)"
     );
     assert!(
-        refusal("use \"d.dta\"\nlogit y x i.g\nmargins, atmeans\n").contains("indicators"),
-        "atmeans with a factor variable"
+        refusal("use \"d.dta\"\nlogit y x i.g\nmargins g, contrast(effects)\n")
+            .contains("suboptions"),
+        "contrast() with suboptions"
     );
     assert!(
-        refusal("use \"d.dta\"\nlogit y x\nmargins, at((mean) x)\n").contains("(mean)"),
-        "at() with a statistic"
+        refusal("use \"d.dta\"\nlogit y x\nmargins, at((asobserved) x)\n").contains("asobserved"),
+        "an at() statistic that is not translated"
     );
     assert!(
         refusal("use \"d.dta\"\nlogit y x\nmargins x\n").contains("factor variable"),
         "a continuous variable in the marginlist"
     );
     assert!(
-        refusal("use \"d.dta\"\nlogit y x\nmargins, dydx(x) post\n").contains("post"),
-        "post"
+        refusal("use \"d.dta\"\nlogit y x i.g\nmargins g, dydx(x) pwcompare\n")
+            .contains("marginal effects"),
+        "contrasts of effects"
     );
     assert!(
         refusal("use \"d.dta\"\nmargins\n").contains("needs a model"),
         "margins with no model"
     );
-    // Stata would average the changed rows, which a copy made at the fit is not
+    // Stata averages the rows e(sample) marks, which a drop moves (a sort does not matter)
     assert!(
-        refusal("use \"d.dta\"\nregress y x\nreplace x = x + 1\nmargins\n")
-            .contains("changed the data"),
-        "data changed after the fit"
+        refusal("use \"d.dta\"\nregress y x\ndrop if x > 1\nmargins\n")
+            .contains("changed the rows"),
+        "rows dropped after the fit"
     );
     assert!(
         refusal("use \"d.dta\"\nregress y x\nfoo bar\nmargins\n").contains("is not translated yet"),
@@ -598,8 +601,211 @@ fn what_margins_does_not_translate_says_why() {
             .lines
             .last()
             .and_then(|l| l.result.as_ref().err())
-            .is_some_and(|e| e.reason.contains("changed the data")),
+            .is_some_and(|e| e.reason.contains("changed the rows")),
         "and counts as a change, since it still runs in Stata"
+    );
+}
+
+/// The rest of margins against Stata 19 on `models` (with `h = mod(id, 3)`):
+/// over(), at() statistics, elasticities, a marginlist with #, atmeans with a
+/// factor variable, pwcompare, contrast, r., post, the outcomes after ologit
+/// and mlogit, and the current values after the data changed. Margins and
+/// then standard errors; after logit, ologit and mlogit to 6 digits (Stata's
+/// own fits stop earlier than R's, see the notes), after regress to 9 (the
+/// Jacobian of the margins in b is numerical).
+#[test]
+fn the_rest_of_margins_agrees_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let use_ = format!("use \"{dir}/models.dta\"\ngen h = mod(id, 3)\n");
+    let l = "logit yb x w i.g\n";
+    let r = "regress y x i.g i.h\n";
+    let cases: Vec<(String, Vec<f64>, f64)> = vec![
+        (
+            format!("{l}margins, over(g)"),
+            vec![
+                0.47500000000044607,
+                0.54999999999682758,
+                0.063053993863915428,
+                0.064401873213277616,
+            ],
+            1e-6,
+        ),
+        (
+            format!("{l}margins, at((mean) x w=0.5)"),
+            vec![0.29906261156329061, 0.082675811726279608],
+            1e-6,
+        ),
+        (
+            format!("{l}margins, at((median) x (p25) w)"),
+            vec![0.70036813871337988, 0.077537066337290614],
+            1e-6,
+        ),
+        (
+            format!("{l}margins, eyex(x)"),
+            vec![-0.42376061655653424, 0.16157893662109019],
+            1e-6,
+        ),
+        (
+            format!("{l}margins, dyex(x)"),
+            vec![-0.025767667584057186, 0.016951261222154856],
+            1e-6,
+        ),
+        (
+            format!("{l}margins, eydx(x)"),
+            vec![0.66610229520473663, 0.18819605537535844],
+            1e-6,
+        ),
+        (
+            format!("{l}margins g, atmeans"),
+            vec![
+                0.51730752087508891,
+                0.51077191918759945,
+                0.10029653170111062,
+                0.09840772724847878,
+            ],
+            1e-6,
+        ),
+        (
+            format!("{l}margins, atmeans"),
+            vec![0.51404032022408286, 0.069308336264685216],
+            1e-6,
+        ),
+        (
+            format!("{l}margins, dydx(x) atmeans"),
+            vec![0.34132156853525353, 0.091160864359315308],
+            1e-6,
+        ),
+        (
+            format!("{l}margins g, pwcompare"),
+            vec![0.51042053664913012 - 0.51466813532433708, 0.0924826],
+            1e-5,
+        ),
+        (
+            format!("{r}margins g#h"),
+            vec![
+                0.53223261122581178,
+                1.1339681494993243,
+                0.53880585599388087,
+                1.3286212323603368,
+                1.9303567706338494,
+                1.3351944771284057,
+                0.48070645886583846,
+                0.4626586117378565,
+                0.4707662941978667,
+                0.47214316851828109,
+                0.47465090862734288,
+                0.46715921588117898,
+            ],
+            1e-9,
+        ),
+        (
+            format!("{r}margins r.h"),
+            vec![
+                0.60173553827351256,
+                0.0065732447680690864,
+                0.57658675175521656,
+                0.57726962658350467,
+            ],
+            1e-9,
+        ),
+        (
+            "ologit ord x w\nmargins".to_string(),
+            vec![
+                0.37353847000299228,
+                0.28721357182919444,
+                0.33924795816781328,
+                0.052360240711368078,
+                0.050468238267759397,
+                0.050315501722370676,
+            ],
+            1e-6,
+        ),
+        (
+            "ologit ord x w\nmargins, dydx(x)".to_string(),
+            vec![
+                -0.1152024309051382,
+                0.003994061864939653,
+                0.11120836904019855,
+                0.039933733396693219,
+                0.012028948592611648,
+                0.038784455659196582,
+            ],
+            1e-6,
+        ),
+        (
+            "ologit ord x w\nmargins, predict(outcome(2))".to_string(),
+            vec![0.28721357182919444, 0.050468238267759397],
+            1e-6,
+        ),
+        (
+            "mlogit cat3 x w\nmargins".to_string(),
+            vec![
+                0.20000000050428998,
+                0.43749999983893434,
+                0.36249999965677565,
+                0.044403112347908454,
+                0.049267543823752216,
+                0.048471674092946851,
+            ],
+            1e-6,
+        ),
+        (
+            "mlogit cat3 x w\nmargins, dydx(w) predict(outcome(3))".to_string(),
+            vec![-0.10219746700157813, 0.080350356839752085],
+            1e-6,
+        ),
+        // the data changed after the fit: Stata averages the current values
+        (
+            "regress y x w\nreplace x = x + 1\nmargins".to_string(),
+            vec![3.0623282043722764, 0.30995184856485197],
+            1e-9,
+        ),
+    ];
+    for (cmd, stata, tol) in cases {
+        let code = script(&format!("{use_}{cmd}\n"));
+        ok(&mut e, &code);
+        let got = margins(&mut e, &code);
+        assert_eq!(got.len(), stata.len(), "{cmd}: {got:?}");
+        for (g, s) in got.iter().zip(&stata) {
+            assert!(
+                (g - s).abs() <= tol * s.abs().max(1.0),
+                "{cmd}: {g} against Stata's {s}"
+            );
+        }
+    }
+    // contrast: Stata's joint F that the three margins of h are equal
+    let code = script(&format!("{use_}{r}margins h, contrast\n"));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        &format!("res <- {}", line_of(&code, "stata_margins(")),
+        "res$F, res$df, res$df_r, res$p",
+    );
+    all_close(
+        &v,
+        &[0.73140167233399322, 2.0, 75.0, 0.48463442521357269],
+        1e-10,
+        "contrast",
+    );
+    // post: the margins are e(b) and e(V), and lincom reads them by Stata's names
+    let code = script(&format!("{use_}{r}margins h, post\nlincom 2.h - 1.h\n"));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        &format!("res <- {}", line_of(&code, "stata_lincom(")),
+        "stata_b[[\"1.h\"]], sqrt(stata_vcov[\"1.h\", \"1.h\"]), res[1, 1], res[1, 2]",
+    );
+    all_close(
+        &v,
+        &[
+            1.5321624600665869,
+            0.40252848417697484,
+            -0.59516229350544347,
+            0.56907600437296579,
+        ],
+        1e-9,
+        "margins, post then lincom",
     );
 }
 

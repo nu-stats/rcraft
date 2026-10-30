@@ -797,9 +797,28 @@ impl Session {
         self.esample = if MODELS.contains(&name) {
             done.is_ok() && self.esample_new && !by
         } else {
+            // values may change (Stata's e(sample) is a mark on the rows, so
+            // it stays); rows may not be sorted, added or dropped
+            let values_only = matches!(
+                name,
+                "replace"
+                    | "recode"
+                    | "egen"
+                    | "label"
+                    | "rename"
+                    | "destring"
+                    | "tostring"
+                    | "encode"
+                    | "decode"
+                    | "format"
+                    | "order"
+                    | "compress"
+            ) || (matches!(name, "drop" | "keep")
+                && c.parts.if_exp.is_none()
+                && c.parts.in_range.is_none());
             self.esample
                 && done.is_ok()
-                && LEAVE_DATA_ALONE.contains(&name)
+                && (LEAVE_DATA_ALONE.contains(&name) || values_only)
                 && !matches!(name, "sort" | "gsort")
                 && !bysort
         };

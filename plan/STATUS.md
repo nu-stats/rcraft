@@ -2021,3 +2021,32 @@ The smaller items of part two's list, each decoded or checked in Stata 19 on the
 - **Not done:** `predict` after mlogit/ologit other than probabilities (`xb`, `stdp` per equation), `score` after
   nbreg (two equations), the residual statistics after robust or weighted regress, `e(sample)` after xtreg,
   ivregress and anova, a test with 0 df printed as Stata prints it.
+
+## P2B.4 the rest of margins, 2026-10-30
+
+The items left on the margins list (`statatr/src/data_r/margins.rs`), each run in Stata 19 first.
+
+- **A fix.** `margins g h` was taken as the cells of g and h together; Stata gives the margins of g and then those of
+  h. Each marginlist term is now its own, and `margins g#h` gives the cells (g outermost, as Stata lists them).
+- **New:** `over(v)` (each group of the estimation sample on its own); `at((mean) x (median) z (p25) w x=1)` with
+  `mean`, `median`, `min`, `max` and `p1`-`p99` of the estimation sample (Stata's percentile rule); `eyex()`,
+  `dyex()`, `eydx()` (the row's derivative times x / y, x, or over y, averaged); `atmeans` with factor variables
+  (each indicator at its mean, every column of the design the product of its parts' means, all as floats, so a
+  derivative at the means moves x after the float); `pwcompare` and `pwcompare(effects)` (every pair, `1vs0.g`);
+  `r.g` in the marginlist (each level against the first); `contrast` (Stata's joint F, or chi2, that a term's
+  margins are equal); `post` (the margins become e(b) and e(V) under Stata's names, `1.h`, `0.g#1.h`, `x`, `1._at`,
+  and `test`/`lincom` read them by those names, `0bn.h` included); margins after `ologit`, `oprobit` and `mlogit`
+  (one per outcome, from the outcome probabilities rebuilt from e(b) so the delta method reaches the cut points
+  and every equation; `predict(outcome(2))`/`outcome(#k)`; `dydx()` per outcome).
+- **Margins after the data changed.** Stata averages the current values of the rows e(sample) marks. Now that
+  e(sample) is kept (see the postestimation section), `margins` after a `replace`, `recode`, `generate`, `label`,
+  `drop` of variables and the like uses the current values of those rows; a sort, a drop of rows, an append or an
+  untranslated line in between still makes it refuse with the reason. (e(sample) now survives the commands that
+  change values but not rows.)
+- **Tests** (`stata_margins.rs`, 1 new case, 18 Stata figures plus the contrast and post): every margin and standard
+  error above against Stata 19, to 6 digits after logit, ologit and mlogit (their fits), to 9 after regress (the
+  Jacobian in b is numerical). P2B.4 has 70 real-R cases.
+- **Not done:** `vce(unconditional)` (Stata allows it only after robust errors); `contrast()` and `pwcompare()` with
+  suboptions (`effects` aside), and other contrast operators (`a.`, `ar.`, ...); contrasts of marginal effects;
+  margins after `xtreg` and `ivregress`; margins after a weighted model; `at()` statistics other than the ones above
+  (`asobserved`, `zero`, ...).
