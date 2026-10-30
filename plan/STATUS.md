@@ -1784,6 +1784,14 @@ the R tests make, and compared number by number.
   part-two note implied R's estimates were the tighter ones throughout; for probit they were not.
 - **Tests.** `the_models_agree_with_stata_19` in `engine/tests/stata_models.rs` and
   `the_sums_of_squares_are_stata_19s_own` in `stata_anova.rs` hold Stata's numbers, at 10 digits where both
-  converge fully and 6 where Stata's own iterations stop earlier, each saying which. P2B.4 has 44 real-R cases.
-- **Not checked against Stata yet:** part one (`summarize`, `tabulate`, `correlate`, `ttest`), whose rules came
-  from StatCraft's own probes; `margins` with `atmeans`; `predict` of a float; the refusals' wording.
+  converge fully and 6 where Stata's own iterations stop earlier, each saying which.
+- **Part one too.** `summarize` (with `detail`: variance, skewness, kurtosis and all nine percentiles on data
+  with decimals, so the percentile rule is really exercised; with `if`; a string variable's 0 observations; a
+  variable with a missing value), `tabulate` (cell counts and the chi-squared, on a 3 x 3 and a 2 x 2),
+  `correlate` (casewise with `(obs=9)`, and `covariance`) and all five forms of `ttest` (one-sample, two-sample,
+  `unequal` with Satterthwaite's 77.949 df, paired, `unpaired`) all agree with Stata 19 to about 15 digits.
+  Nothing needed fixing; the tabulate helper now keeps its chi-squared on the table it returns, so the test can
+  read it at full precision. Pinned in `the_descriptive_commands_agree_with_stata_19` (`stata_models.rs`) and
+  `the_statistics_agree_with_stata_19` (`stata_statistics.rs`). P2B.4 has 46 real-R cases.
+- **Not checked against Stata yet:** `margins` with `atmeans`; `predict` stored as a float; the confidence
+  intervals of `ttest, level()`; the refusals' wording; the printed layout (deliberately R's, not Stata's).

@@ -1107,3 +1107,190 @@ fn the_models_agree_with_stata_19() {
         "margins, at()",
     );
 }
+
+/// The descriptive commands (P2B.4 part one) on this same data, against
+/// Stata 19 SE run in batch mode on 2026-10-30: every figure agrees to
+/// about 15 digits.
+#[test]
+fn the_descriptive_commands_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let rerun = |e: &mut Engine, cmd: &str, start: &str, show: &str| -> Vec<f64> {
+        let code = script(&format!("use \"{dir}/models.dta\"\n{cmd}\n"));
+        ok(e, &code);
+        numbers(e, &format!("res <- {}", line_of(&code, start)), show)
+    };
+    // obs, mean, sd, variance, skewness, kurtosis, then p1 ... p99, min, max
+    let pick = "obs, mean, sd, variance, skewness, kurtosis, p1, p5, p10, p25, p50, p75, p90, p95, p99, min, max";
+    let got = rerun(
+        &mut e,
+        "summarize x y, detail",
+        "stata_summarize(",
+        &format!("unlist(res[1, c(\"{}\")])", pick.replace(", ", "\", \"")),
+    );
+    near_stata(
+        &got,
+        &[
+            80.0,
+            -0.121475,
+            1.1034152502829395,
+            1.2175252145569622,
+            -0.38904249237915856,
+            3.7922878609735462,
+            -3.891,
+            -2.0205000000000002,
+            -1.325,
+            -0.88349999999999995,
+            -0.10200000000000001,
+            0.48250000000000004,
+            1.2969999999999999,
+            1.8115000000000001,
+            2.0630000000000002,
+            -3.891,
+            2.0630000000000002,
+        ],
+        1e-12,
+        "summarize x, detail",
+    );
+    let got = rerun(
+        &mut e,
+        "summarize x y, detail",
+        "stata_summarize(",
+        &format!("unlist(res[2, c(\"{}\")])", pick.replace(", ", "\", \"")),
+    );
+    near_stata(
+        &got,
+        &[
+            80.0,
+            1.1357311360696081,
+            2.9701172417179857,
+            8.821596429550457,
+            0.072917564118979705,
+            2.9458007685120333,
+            -6.061345365088699,
+            -3.8691643052767963,
+            -2.9451464084859253,
+            -0.9532353901444679,
+            1.3842907721004238,
+            2.8595645587654399,
+            5.0327669469103693,
+            6.3554806213730881,
+            9.1811303392437047,
+            -6.061345365088699,
+            9.1811303392437047,
+        ],
+        1e-12,
+        "summarize y, detail",
+    );
+    let got = rerun(
+        &mut e,
+        "summarize x if g == 1",
+        "stata_summarize(",
+        "res$obs, res$mean, res$sd",
+    );
+    near_stata(
+        &got,
+        &[40.0, 0.12784999999999999, 0.9820770127512195],
+        1e-12,
+        "summarize with if",
+    );
+    let got = rerun(
+        &mut e,
+        "tabulate ord cat3, chi2",
+        "stata_tabulate(",
+        "res[1, 1], res[1, 2], res[1, 3], res[2, 1], res[3, 3], attr(res, \"chi2\")[c(\"chi2\", \"p\")]",
+    );
+    near_stata(
+        &got,
+        &[
+            5.0,
+            11.0,
+            13.0,
+            6.0,
+            12.0,
+            4.9925778665909837,
+            0.28805990065319959,
+        ],
+        1e-12,
+        "tabulate, chi2",
+    );
+    let got = rerun(
+        &mut e,
+        "correlate x w y",
+        "stata_correlate(",
+        "res[2, 1], res[3, 1], res[3, 2]",
+    );
+    near_stata(
+        &got,
+        &[
+            0.030562992155089359,
+            0.71025990044143561,
+            -0.15748353526503756,
+        ],
+        1e-12,
+        "correlate",
+    );
+    let got = rerun(
+        &mut e,
+        "correlate x w y, covariance",
+        "stata_correlate(",
+        "res[1, 1], res[2, 1], res[3, 3]",
+    );
+    near_stata(
+        &got,
+        &[1.2175252145569624, 0.0196550905063291, 8.821596429550457],
+        1e-12,
+        "correlate, covariance",
+    );
+    let tt = "res$statistic, res$parameter, res$p.value, res$stderr";
+    for (cmd, stata) in [
+        (
+            "ttest x == 0.1",
+            [
+                -1.795273919550332,
+                79.0,
+                0.076434344499437201,
+                0.1233655753521299,
+            ],
+        ),
+        (
+            "ttest y, by(g)",
+            [
+                -2.6370215700362909,
+                78.0,
+                0.0100900980595278,
+                0.64044306061678036,
+            ],
+        ),
+        (
+            "ttest y, by(g) unequal",
+            [
+                -2.6370215700362909,
+                77.94905418583474,
+                0.010091270326294101,
+                0.64044306061678036,
+            ],
+        ),
+        (
+            "ttest x == w",
+            [
+                -0.7361408412039967,
+                79.0,
+                0.46382524817465443,
+                0.13774538012882839,
+            ],
+        ),
+        (
+            "ttest x == w, unpaired",
+            [
+                -0.72678990744809435,
+                158.0,
+                0.46843008766222288,
+                0.13951762257684039,
+            ],
+        ),
+    ] {
+        let got = rerun(&mut e, cmd, "print(stats::t.test(", tt);
+        near_stata(&got, &stata, 1e-12, cmd);
+    }
+}

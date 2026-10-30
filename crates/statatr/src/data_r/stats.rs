@@ -142,6 +142,7 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
     cat("\nPearson chi2(", unname(r$parameter), ") = ",
         format(unname(r$statistic), digits = 6),
         "   Pr = ", format(r$p.value, digits = 4), "\n", sep = "")
+    attr(t, "chi2") <- c(chi2 = unname(r$statistic), df = unname(r$parameter), p = r$p.value)
   }
   invisible(t)
 }"#;

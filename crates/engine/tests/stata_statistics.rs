@@ -20,7 +20,8 @@
 //! Without a supported R, or without dplyr and haven, the test is skipped with
 //! a note.
 
-#![allow(clippy::panic)]
+// Stata's numbers are kept exactly as it printed them (%24.17g)
+#![allow(clippy::panic, clippy::excessive_precision)]
 
 use std::time::{Duration, Instant};
 
@@ -441,5 +442,74 @@ fn the_statistics_commands_say_why_they_refuse_what_they_refuse() {
     assert!(
         refusal("summarize x\n").contains("no data is in memory"),
         "a command before any use should say so"
+    );
+}
+
+/// The figures on this small data set against Stata 19 SE, run in batch mode
+/// on 2026-10-30: casewise correlation, a string variable, percentiles with
+/// a missing value, and the 2 x 2 chi-squared.
+#[test]
+fn the_statistics_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let mut rerun = |cmd: &str, start: &str, show: &str| -> Vec<f64> {
+        let code = script(&format!("use \"{dir}/study.dta\"\n{cmd}\n"));
+        ok(&mut e, &code);
+        let line = code
+            .lines()
+            .rfind(|l| l.starts_with(start))
+            .unwrap_or_else(|| panic!("no {start} line:\n{code}"))
+            .to_string();
+        numbers(&mut e, &format!("res <- {line}"), show)
+    };
+    let near = |got: &[f64], stata: &[f64], what: &str| {
+        assert_eq!(got.len(), stata.len(), "{what}: {got:?} against {stata:?}");
+        for (g, s) in got.iter().zip(stata) {
+            assert!(
+                (g - s).abs() <= 1e-12 * s.abs().max(1.0),
+                "{what}: {g} against Stata's {s}"
+            );
+        }
+    };
+    let got = rerun(
+        "correlate x z y",
+        "stata_correlate(",
+        "res[2, 1], res[3, 2]",
+    );
+    near(
+        &got,
+        &[0.11881770515720093, 0.11881770515720093],
+        "casewise correlate",
+    );
+    let got = rerun("summarize s", "stata_summarize(", "res$obs");
+    near(&got, &[0.0], "a string variable has no observations");
+    let got = rerun(
+        "summarize z, detail",
+        "stata_summarize(",
+        "res$obs, res$mean, res$sd, res$skewness, res$kurtosis, res$p25, res$p50, res$p75",
+    );
+    near(
+        &got,
+        &[
+            9.0,
+            5.0,
+            2.7386127875258306,
+            0.0,
+            1.7699999999999998,
+            3.0,
+            5.0,
+            7.0,
+        ],
+        "summarize z, detail",
+    );
+    let got = rerun(
+        "tabulate g b, chi2",
+        "stata_tabulate(",
+        "attr(res, \"chi2\")[c(\"chi2\", \"p\")]",
+    );
+    near(
+        &got,
+        &[1.6666666666666665, 0.19670560245894692],
+        "the 2 x 2 chi-squared",
     );
 }
