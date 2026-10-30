@@ -71,6 +71,8 @@ pub struct ImportDialog {
     footer: Option<Footer>,
     /// Files opened lately, newest first, and whether each is still there.
     recent: Vec<(String, bool)>,
+    /// The folder R works in: where the file chooser opens when the box is empty.
+    folder: Option<std::path::PathBuf>,
 }
 
 struct Footer {
@@ -132,6 +134,11 @@ impl ImportDialog {
 
     /// Sets the list of recent files the dialog offers (newest first), and
     /// looks which of them are still there.
+    /// Tells the dialog which folder R is working in.
+    pub fn set_folder(&mut self, folder: Option<std::path::PathBuf>) {
+        self.folder = folder;
+    }
+
     pub fn set_recent(&mut self, paths: &[String]) {
         self.recent = paths
             .iter()
@@ -485,7 +492,7 @@ impl ImportDialog {
             .set_title("Choose a data file")
             .add_filter("Data files", DATA_EXTENSIONS)
             .add_filter("All files", &["*"]);
-        if let Some(dir) = start_folder(&self.path, &self.recent) {
+        if let Some(dir) = start_folder(&self.path, self.folder.as_deref(), &self.recent) {
             chooser = chooser.set_directory(dir);
         }
         if let Some(path) = chooser.pick_file() {
@@ -844,21 +851,27 @@ fn haven_options(ui: &mut egui::Ui, spec: &mut HavenImport) {
     }
 }
 
-/// The folder the file chooser opens in: where the file in the box is, else
-/// where the newest recent file that is still there is.
-fn start_folder(path: &str, recent: &[(String, bool)]) -> Option<std::path::PathBuf> {
+/// The folder the file chooser opens in: where the file in the box is, else the
+/// folder R works in, else where the newest recent file that is still there is.
+fn start_folder(
+    path: &str,
+    working: Option<&Path>,
+    recent: &[(String, bool)],
+) -> Option<std::path::PathBuf> {
     let folder_of = |p: &str| {
         Path::new(p.trim())
             .parent()
             .filter(|d| d.is_dir())
             .map(Path::to_path_buf)
     };
-    folder_of(path).or_else(|| {
-        recent
-            .iter()
-            .filter(|(_, there)| *there)
-            .find_map(|(p, _)| folder_of(p))
-    })
+    folder_of(path)
+        .or_else(|| working.filter(|d| d.is_dir()).map(Path::to_path_buf))
+        .or_else(|| {
+            recent
+                .iter()
+                .filter(|(_, there)| *there)
+                .find_map(|(p, _)| folder_of(p))
+        })
 }
 
 #[cfg(test)]
@@ -964,13 +977,23 @@ mod tests {
         let file = temp("start.csv", b"a\n1\n");
         let dir = file.parent().map(Path::to_path_buf);
         let file = file.to_string_lossy().into_owned();
-        assert_eq!(start_folder(&file, &[]), dir);
+        assert_eq!(start_folder(&file, None, &[]), dir);
         // an empty or missing path falls back to the newest recent file that exists
         let recent = [("gone/dir/x.csv".to_string(), false), (file.clone(), true)];
-        assert_eq!(start_folder("", &recent), dir);
-        assert_eq!(start_folder("nowhere/at/all.csv", &recent), dir);
-        assert_eq!(start_folder("", &[]), None);
-        assert_eq!(start_folder("", &[("gone/x.csv".into(), false)]), None);
+        assert_eq!(start_folder("", None, &recent), dir);
+        assert_eq!(start_folder("nowhere/at/all.csv", None, &recent), dir);
+        assert_eq!(start_folder("", None, &[]), None);
+        // the working folder comes before the recent files, and only when it is there
+        let work = std::env::temp_dir();
+        assert_eq!(start_folder("", Some(&work), &recent), Some(work.clone()));
+        assert_eq!(
+            start_folder("", Some(Path::new("no/such/folder")), &[]),
+            None
+        );
+        assert_eq!(
+            start_folder("", None, &[("gone/x.csv".into(), false)]),
+            None
+        );
     }
 
     #[test]

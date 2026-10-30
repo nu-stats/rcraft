@@ -19,6 +19,7 @@ pub const LISTING_R: &str = r#"invisible(local({
     x <- gsub("\r", "\\r", x, fixed = TRUE)
     gsub("\t", "\\t", x, fixed = TRUE)
   }
+  cat("\t", "wd", "\t", esc(getwd()), "\n", sep = "")
   nm <- ls(globalenv())
   nm <- nm[seq_len(min(length(nm), 5000L))]
   for (n in nm) {
@@ -54,10 +55,21 @@ impl WorkspaceItem {
     }
 }
 
+/// The folder R is working in, from the listing's first line (which starts with a
+/// tab, as no object name can: tabs in names are escaped).
+pub fn parse_working_dir(text: &str) -> Option<String> {
+    let line = text.lines().find(|l| l.starts_with('\t'))?;
+    let mut f = line.split('\t').skip(1);
+    (f.next()? == "wd").then_some(())?;
+    let dir = unescape(f.next()?);
+    (!dir.is_empty()).then_some(dir)
+}
+
 /// Reads the listing's output. A line that cannot be read is skipped.
 pub fn parse_listing(text: &str) -> Vec<WorkspaceItem> {
     let mut items: Vec<WorkspaceItem> = text
         .lines()
+        .filter(|l| !l.starts_with('\t'))
         .filter_map(|line| {
             let mut f = line.split('\t');
             let name = unescape(f.next()?);
@@ -111,6 +123,23 @@ mod tests {
         assert!(!items[0].is_data_frame());
         assert_eq!(items[1].dims, Some((3, 2)));
         assert_eq!(items[1].cells(), 6);
+    }
+
+    #[test]
+    fn the_working_folder_is_the_line_that_starts_with_a_tab_and_is_not_an_object() {
+        let text = "\twd\tC:/data/my work\nb\tdata.frame\t3\t2\n";
+        assert_eq!(parse_working_dir(text).as_deref(), Some("C:/data/my work"));
+        let items = parse_listing(text);
+        assert_eq!(items.len(), 1, "the folder line is not an object");
+        assert_eq!(items[0].name, "b");
+        assert_eq!(parse_working_dir("b\tdata.frame\t3\t2\n"), None);
+        assert_eq!(parse_working_dir("\twd\t\n"), None);
+        assert_eq!(parse_working_dir(""), None);
+        // R escapes a backslash and a tab inside the folder's name
+        assert_eq!(
+            parse_working_dir("\twd\tC:\\\\dir\\ttab\n").as_deref(),
+            Some("C:\\dir\ttab")
+        );
     }
 
     #[test]

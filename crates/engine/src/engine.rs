@@ -16,7 +16,9 @@ use rcraft_rproto::RunId;
 use crate::history::{CommandId, History, Outcome, Source};
 use crate::results::{Item, Results};
 use crate::transcript::Transcript;
-use crate::workspace::{parse_listing, WorkspaceItem, AUTO_REFRESH_CELLS, LISTING_R};
+use crate::workspace::{
+    parse_listing, parse_working_dir, WorkspaceItem, AUTO_REFRESH_CELLS, LISTING_R,
+};
 
 /// The most events handled in one [`Engine::poll`], so a flood of output
 /// cannot freeze an interface that polls once per frame.
@@ -73,6 +75,8 @@ pub struct Engine {
     /// A hidden query in flight (the workspace listing, a table fetch).
     internal: Option<InternalRun>,
     workspace: Vec<WorkspaceItem>,
+    /// The folder R is working in, as of the last listing.
+    working_dir: Option<String>,
     /// The workspace may have changed since it was last listed.
     stale: bool,
     /// Data frames the interface wants kept up to date.
@@ -125,6 +129,7 @@ impl Engine {
             last_command: None,
             internal: None,
             workspace: Vec::new(),
+            working_dir: None,
             stale: true,
             watched: BTreeSet::new(),
             tables: BTreeMap::new(),
@@ -280,6 +285,17 @@ impl Engine {
     }
 
     /// The objects in R's workspace, as of the last listing.
+    /// Sets the folder a restarted R starts in (see `Session::set_working_dir`).
+    pub fn set_start_folder(&mut self, dir: Option<std::path::PathBuf>) {
+        self.session.set_working_dir(dir);
+    }
+
+    /// The folder R is working in (what `getwd()` says), once the first
+    /// listing of the workspace has come; it follows `setwd()`.
+    pub fn working_dir(&self) -> Option<&str> {
+        self.working_dir.as_deref()
+    }
+
     pub fn workspace(&self) -> &[WorkspaceItem] {
         &self.workspace
     }
@@ -415,6 +431,7 @@ impl Engine {
             InternalKind::Listing => {
                 if !done.failed {
                     self.workspace = parse_listing(&done.out);
+                    self.working_dir = parse_working_dir(&done.out);
                     // a watched object that is gone or no longer a data frame
                     let gone: Vec<String> = self
                         .watched

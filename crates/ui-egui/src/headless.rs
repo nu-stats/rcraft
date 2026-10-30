@@ -116,6 +116,7 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     let ctx = egui::Context::default();
     ctx.set_pixels_per_point(ppp);
     let mut app = App::new(&ctx);
+    app.keep_settings(false);
     let mut recent = rcraft_rhost::recent::Recent::at(None);
     for path in options.recent.iter().rev() {
         recent.add(path);

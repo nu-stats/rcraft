@@ -509,6 +509,12 @@ impl Session {
         self.r_pid
     }
 
+    /// The folder a restarted R starts in (and the one R was started in, for
+    /// the record). A running R is not moved; that is `setwd()`.
+    pub fn set_working_dir(&mut self, dir: Option<PathBuf>) {
+        self.config.working_dir = dir;
+    }
+
     /// Ends this R and starts a fresh one with the same settings. Objects in
     /// the old session are gone.
     pub fn restart(&mut self) -> Result<(), SessionError> {

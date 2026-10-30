@@ -31,7 +31,9 @@ tests and docs are repetitive and fit a mid-size model.
 - P1.5 Package library basics: the user library path, dated snapshot
   repository, binary packages where available (the full install and search
   experience is Phase 1A)
-- P1.6 Multiple sessions and working directories
+- P1.6 Multiple sessions and working directories (done 2026-10-30: the working folder is shown and
+  chosen from Session; several R sessions, each with its own objects, history, plots and tabs; sessions are not
+  saved when RCraft closes, which belongs to the project files, P7.5)
 
 ## Phase 1A: Packages (`ssc install` and `net search` for R)
 
@@ -344,7 +346,7 @@ skipped. It never gives a silent wrong answer.
   ticked; a Browse button opens the system's save dialog; File > Save workspace. Not
   written: `.sas7bdat` and SPSS portable `.por`, which haven cannot write. P3.7 is done)
 - P3.8 Frames-style workspace: several data frames open at once with a
-  switcher
+  switcher (done 2026-10-30: tabs above the Data grid)
 
 ## Phase 4: Catalog and core statistics
 

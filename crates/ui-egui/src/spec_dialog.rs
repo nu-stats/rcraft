@@ -39,12 +39,15 @@ struct Open {
     ctx: Context,
     values: Values,
     style: Style,
+    /// The folder R works in: where a Browse chooser opens when the box is empty.
+    folder: Option<std::path::PathBuf>,
 }
 
 #[derive(Default)]
 pub struct SpecDialog {
     open: Option<Open>,
     packages: PackageCheck,
+    folder: Option<std::path::PathBuf>,
 }
 
 /// The columns of `table` as a dialog sees them.
@@ -78,7 +81,16 @@ impl SpecDialog {
             ctx,
             values,
             style,
+            folder: self.folder.clone(),
         });
+    }
+
+    /// Tells the dialog which folder R is working in.
+    pub fn set_folder(&mut self, folder: Option<std::path::PathBuf>) {
+        if let Some(open) = &mut self.open {
+            open.folder = folder.clone();
+        }
+        self.folder = folder;
     }
 
     #[cfg(test)]
@@ -159,7 +171,7 @@ impl SpecDialog {
         pal: &Palette,
         engine: Option<&mut Engine>,
     ) -> Option<SpecAction> {
-        let SpecDialog { open, packages } = self;
+        let SpecDialog { open, packages, .. } = self;
         let open = open.as_mut()?;
         let checked = engine.is_some();
         if let Some(engine) = engine {
@@ -329,7 +341,12 @@ fn browse_save(open: &mut Open, id: &str) {
         .add_filter(format!(".{ext} file"), &[ext])
         .add_filter("All files", &["*"]);
     let typed = open.values.text(id).trim().to_string();
-    if let Some(dir) = std::path::Path::new(&typed).parent().filter(|d| d.is_dir()) {
+    let typed_dir = std::path::Path::new(&typed)
+        .parent()
+        .filter(|d| d.is_dir())
+        .map(std::path::Path::to_path_buf);
+    let start = typed_dir.or_else(|| open.folder.clone().filter(|d| d.is_dir()));
+    if let Some(dir) = start {
         chooser = chooser.set_directory(dir);
     }
     if let Some(path) = chooser.save_file() {

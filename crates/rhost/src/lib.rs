@@ -3,6 +3,7 @@
 //! P1.1 lives here: [`find`] looks for installed copies of R.
 
 pub mod find;
+pub mod folder;
 pub mod library;
 pub mod pinokio;
 pub mod procinfo;

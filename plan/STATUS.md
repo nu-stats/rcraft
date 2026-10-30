@@ -1542,3 +1542,34 @@ All in base R (no new package), each checked against published or independently 
   (the position is now a dimmed number apart from the level so "1  4" no longer reads as fourteen).
 - Still to do from this: a Bayesian or weighted version of agreement, contrasts of means across several
   factors at once (this takes one factor), and contrasts for generalised models.
+
+## P1.6 working folder and sessions, P3.8 data-frame tabs, 2026-10-30
+
+- **Working folder.** The status bar showed the program's own folder, not R's, so it was wrong as soon as a
+  script called `setwd()`. The workspace listing (a hidden query after commands) now also reads `getwd()`
+  (`Engine::working_dir()`), and the status bar shows that; clicking it, or **Session > Working folder…**, opens
+  the system's folder chooser and runs `setwd("...")` as an ordinary menu command (in Results, the log and the
+  script). The folder is remembered between runs (`working-folder.txt` in RCraft's folder, only if it is still a
+  folder; pictures and tests never write it) and a Restart returns to the folder last chosen. Use my file's Browse and
+  the save dialogs' Browse open in the working folder when their box is empty (before the recent files).
+- **Several R sessions.** **Session > New R session** starts another R in the folder the shown one is in; the Session
+  menu lists them (`R 2  (survey)`: the name and the folder) and a click switches; **Close this session…** asks first
+  (its R stops and its objects are lost; the last session cannot be closed). Each session keeps its own R, objects,
+  history, results, log, script text, Command line and recall, plots, tabs and the data frame shown. A command
+  running in one goes on while another is shown (every session's R is served each frame). Dialogs open on one
+  session are closed when you switch; the Packages and Help windows work on the shown session. The status bar says
+  `Session R 2` when there is more than one. Implementation: the shown session's state lives in `App`, the others in
+  `App::sessions`, swapped by `exchange`.
+- **Data-frame tabs.** The Data tab has a strip of tabs for the data frames opened (clicked in Objects or the
+  variable list, or imported), in the order opened; a click switches, **×** closes a tab (the data frame stays in
+  R; closing the shown one goes to its left neighbour); a tab whose data frame has gone from R is dropped.
+- **Tests.** Real R: `working_dir` follows `setwd` and a restart (`engine/tests/workspace.rs`); choosing a folder
+  moves R and a restart keeps it; two sessions are separate and each keeps its own state while a slow command in a
+  parked one finishes; a new session starts where the shown one is (even made while the last was still starting:
+  each session remembers its start folder); closing an earlier session keeps the shown one; tabs and their
+  neighbour rule; a tab dropped when its frame is removed. Also the file-chooser start folder order and the
+  remembered-folder file (`rhost::folder`). Seen in pictures with the new `--click`: the Session menu with one and
+  with two sessions, the tabs.
+- **Not done:** per-session working-folder memory across runs (only the last folder chosen is remembered, and every
+  new session starts in the shown one's folder); sessions are not saved or restored when RCraft closes (that is the
+  project file, P7.5); a session name cannot be changed; closing the window does not ask about running sessions.

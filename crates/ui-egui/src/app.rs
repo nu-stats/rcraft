@@ -52,6 +52,73 @@ enum EngineState {
     Failed(String),
 }
 
+/// One R session as the window keeps it: the engine and everything the window
+/// shows about it (the Command line and its recall, the Script, which tab, the
+/// data frame shown and the tabs open, the plots). The live session's are
+/// fields of [`App`]; the others wait in `App::sessions` and are swapped in.
+struct SessionUi {
+    name: String,
+    /// The folder this session's R was started in (or last moved to by the window).
+    start_folder: Option<std::path::PathBuf>,
+    engine: EngineState,
+    command: String,
+    recall: Recall,
+    script: String,
+    needs_restart: bool,
+    message: Option<String>,
+    view: View,
+    graph: GraphView,
+    dataset: Option<String>,
+    open_frames: Vec<String>,
+    dialog_watch: Vec<String>,
+    grid_x: f32,
+    label_view: LabelView,
+    side_tab: SideTab,
+    type_filter: TypeFilter,
+    show_when_listed: Option<String>,
+    completions: Vec<String>,
+    tab_pending: Option<(QueryId, String)>,
+}
+
+impl SessionUi {
+    /// A new session called `name`, starting R in `folder` (or where the
+    /// program is, with none).
+    fn fresh(name: String, folder: Option<std::path::PathBuf>) -> SessionUi {
+        SessionUi {
+            name,
+            start_folder: folder.clone(),
+            engine: EngineState::Starting(start_engine(folder)),
+            ..SessionUi::hollow()
+        }
+    }
+
+    /// What a slot holds while its session is the live one: nothing that is read.
+    fn hollow() -> SessionUi {
+        SessionUi {
+            name: String::new(),
+            start_folder: None,
+            engine: EngineState::Failed(String::new()),
+            command: String::new(),
+            recall: Recall::new(),
+            script: SCRIPT_START.to_string(),
+            needs_restart: false,
+            message: None,
+            view: View::Results,
+            graph: GraphView::default(),
+            dataset: None,
+            open_frames: Vec::new(),
+            dialog_watch: Vec::new(),
+            grid_x: 0.0,
+            label_view: LabelView::default(),
+            side_tab: SideTab::Variables,
+            type_filter: TypeFilter::default(),
+            show_when_listed: None,
+            completions: Vec::new(),
+            tab_pending: None,
+        }
+    }
+}
+
 /// What a click or key asks for; collected while drawing, done afterwards,
 /// so drawing never needs the engine mutably.
 enum Action {
@@ -83,9 +150,21 @@ enum Action {
     OpenObjectSpec(&'static Spec, String),
     /// Open Export plot on this plot (its file name; empty: the newest).
     OpenPlotExport(String),
+    /// Close this data frame's tab (the data frame stays in R).
+    CloseFrame(String),
     SetView(View),
     SetSideTab(SideTab),
     SetTypeFilter(TypeFilter),
+    /// Start another R session and switch to it.
+    NewSession,
+    /// Make this session (its place in the list) the one shown.
+    SwitchSession(usize),
+    /// Ask whether to end this session.
+    AskCloseSession(usize),
+    /// Ask for a folder and make it the one R works in.
+    ChooseFolder,
+    /// Make this the folder R works in (and the one it starts in from now on).
+    SetFolder(std::path::PathBuf),
     Interrupt,
     Restart,
     ClearResults,
@@ -97,6 +176,19 @@ enum Action {
 }
 
 pub struct App {
+    /// The name of the session shown (`R 1`); the others are in `sessions`.
+    session_name: String,
+    /// Where the session shown was started (or last moved to by the window).
+    start_folder: Option<std::path::PathBuf>,
+    /// Every session, in the order made. The live one's state is in this struct
+    /// (its slot here is empty); the others' is in their slots.
+    sessions: Vec<SessionUi>,
+    /// Which slot of `sessions` is the live one.
+    active: usize,
+    /// Numbers the next session made.
+    next_session: usize,
+    /// A session asked to close, waiting for a yes.
+    confirm_close: Option<usize>,
     engine: EngineState,
     command: String,
     recall: Recall,
@@ -111,6 +203,8 @@ pub struct App {
     graph: GraphView,
     /// The data frame shown in Variables and Data.
     dataset: Option<String>,
+    /// The data frames open as tabs above the Data grid, in the order opened.
+    open_frames: Vec<String>,
     /// Other data frames brought over only because a dialog chose them.
     dialog_watch: Vec<String>,
     /// Sideways scroll of the Data grid, handed to its header.
@@ -135,6 +229,9 @@ pub struct App {
     /// A completion asked of R and not yet answered: the question, and the
     /// line it was asked for (an answer is used only if the line is unchanged).
     tab_pending: Option<(QueryId, String)>,
+    /// Whether choices (the working folder) are kept between runs. Pictures and
+    /// tests turn it off, so they never touch the user's own settings.
+    keep_settings: bool,
 }
 
 impl App {
@@ -145,10 +242,19 @@ impl App {
         let theme = egui::ThemePreference::System;
         ctx.set_theme(theme);
         let recent = Recent::load(&Env::from_process());
+        let start_folder = rcraft_rhost::folder::load(&Env::from_process());
         let mut import = ImportDialog::default();
         import.set_recent(recent.paths());
         App {
-            engine: EngineState::Starting(start_engine()),
+            session_name: "R 1".to_string(),
+            start_folder: start_folder.clone(),
+            sessions: vec![SessionUi::hollow()],
+            active: 0,
+            next_session: 2,
+            confirm_close: None,
+            engine: EngineState::Starting(start_engine(rcraft_rhost::folder::load(
+                &Env::from_process(),
+            ))),
             command: String::new(),
             recall: Recall::new(),
             script: SCRIPT_START.to_string(),
@@ -160,6 +266,7 @@ impl App {
             view: View::Results,
             graph: GraphView::default(),
             dataset: None,
+            open_frames: Vec::new(),
             dialog_watch: Vec::new(),
             grid_x: 0.0,
             label_view: LabelView::default(),
@@ -174,7 +281,13 @@ impl App {
             help_window: HelpWindow::default(),
             completions: Vec::new(),
             tab_pending: None,
+            keep_settings: true,
         }
+    }
+
+    /// Turns off keeping choices between runs (for pictures and tests).
+    pub fn keep_settings(&mut self, keep: bool) {
+        self.keep_settings = keep;
     }
 
     /// Uses another list of recent files (pictures and tests keep their own,
@@ -182,6 +295,164 @@ impl App {
     pub fn use_recent(&mut self, recent: Recent) {
         self.import.set_recent(recent.paths());
         self.recent = recent;
+    }
+
+    /// Swaps the live session with the one in slot `i`: the live one goes into
+    /// the slot and the slot's comes alive (a slot then holds what was live).
+    fn exchange(&mut self, i: usize) {
+        use std::mem::swap;
+        let Some(mut other) = self
+            .sessions
+            .get_mut(i)
+            .map(|s| std::mem::replace(s, SessionUi::hollow()))
+        else {
+            return;
+        };
+        swap(&mut self.session_name, &mut other.name);
+        swap(&mut self.start_folder, &mut other.start_folder);
+        swap(&mut self.engine, &mut other.engine);
+        swap(&mut self.command, &mut other.command);
+        swap(&mut self.recall, &mut other.recall);
+        swap(&mut self.script, &mut other.script);
+        swap(&mut self.needs_restart, &mut other.needs_restart);
+        swap(&mut self.message, &mut other.message);
+        swap(&mut self.view, &mut other.view);
+        swap(&mut self.graph, &mut other.graph);
+        swap(&mut self.dataset, &mut other.dataset);
+        swap(&mut self.open_frames, &mut other.open_frames);
+        swap(&mut self.dialog_watch, &mut other.dialog_watch);
+        swap(&mut self.grid_x, &mut other.grid_x);
+        swap(&mut self.label_view, &mut other.label_view);
+        swap(&mut self.side_tab, &mut other.side_tab);
+        swap(&mut self.type_filter, &mut other.type_filter);
+        swap(&mut self.show_when_listed, &mut other.show_when_listed);
+        swap(&mut self.completions, &mut other.completions);
+        swap(&mut self.tab_pending, &mut other.tab_pending);
+        if let Some(slot) = self.sessions.get_mut(i) {
+            *slot = other;
+        }
+    }
+
+    /// Makes session `to` the live one. A dialog open on the old session is
+    /// closed: it was working on that session's data frames.
+    fn switch_session(&mut self, to: usize) {
+        if to == self.active || to >= self.sessions.len() {
+            return;
+        }
+        self.exchange(self.active);
+        self.exchange(to);
+        self.active = to;
+        self.spec_dialog = SpecDialog::default();
+        self.import.open = false;
+        self.focus_command = true;
+    }
+
+    /// Starts another R session, in the folder the live one works in, and
+    /// switches to it.
+    fn new_session(&mut self) {
+        let folder = self
+            .engine()
+            .and_then(|e| e.working_dir())
+            .map(std::path::PathBuf::from)
+            .filter(|d| d.is_dir())
+            .or_else(|| self.start_folder.clone());
+        let name = format!("R {}", self.next_session);
+        self.next_session += 1;
+        self.sessions.push(SessionUi::fresh(name, folder));
+        let last = self.sessions.len() - 1;
+        self.switch_session(last);
+    }
+
+    /// Ends session `i`: its R stops and its objects are gone. The last
+    /// session cannot be closed. Closing the live one switches to its neighbour.
+    fn close_session(&mut self, i: usize) {
+        if self.sessions.len() < 2 || i >= self.sessions.len() {
+            return;
+        }
+        if i == self.active {
+            let neighbour = if i > 0 { i - 1 } else { 1 };
+            self.switch_session(neighbour);
+        }
+        // the slot of a session that is not live holds its real state
+        if i < self.sessions.len() {
+            self.sessions.remove(i);
+            if i < self.active {
+                self.active -= 1;
+            }
+        }
+    }
+
+    /// The sessions' names for the menu: the name and the folder R is in.
+    fn session_labels(&self) -> Vec<String> {
+        (0..self.sessions.len())
+            .map(|j| {
+                let (name, engine) = if j == self.active {
+                    (self.session_name.as_str(), &self.engine)
+                } else {
+                    match self.sessions.get(j) {
+                        Some(s) => (s.name.as_str(), &s.engine),
+                        None => ("", &self.engine),
+                    }
+                };
+                let folder = match engine {
+                    EngineState::Ready(e) => e
+                        .working_dir()
+                        .and_then(|w| std::path::Path::new(w).file_name())
+                        .map(|f| f.to_string_lossy().into_owned()),
+                    _ => None,
+                };
+                match folder {
+                    Some(f) => format!("{name}  ({f})"),
+                    None => name.to_string(),
+                }
+            })
+            .collect()
+    }
+
+    /// Serves the sessions that are not live: they finish starting, and what
+    /// R prints is taken in, so a long command in one goes on while another is
+    /// shown.
+    fn poll_parked(&mut self, ctx: &egui::Context) {
+        for (j, session) in self.sessions.iter_mut().enumerate() {
+            if j == self.active {
+                continue;
+            }
+            if let EngineState::Starting(rx) = &session.engine {
+                match rx.try_recv() {
+                    Ok(Ok(engine)) => session.engine = EngineState::Ready(Box::new(engine)),
+                    Ok(Err(why)) => session.engine = EngineState::Failed(why),
+                    Err(TryRecvError::Empty) => {
+                        ctx.request_repaint_after(Duration::from_millis(100));
+                    }
+                    Err(TryRecvError::Disconnected) => {
+                        session.engine = EngineState::Failed("R did not start".into());
+                    }
+                }
+            }
+            if let EngineState::Ready(engine) = &mut session.engine {
+                if engine.poll(Duration::ZERO).changed || engine.is_working() {
+                    ctx.request_repaint_after(Duration::from_millis(100));
+                }
+            }
+        }
+    }
+
+    /// Keeps the tabs above the Data grid: the data frame shown has one, and a
+    /// tab whose data frame has gone from R is dropped.
+    fn track_open_frames(&mut self) {
+        if let Some(name) = &self.dataset {
+            if !self.open_frames.contains(name) {
+                self.open_frames.push(name.clone());
+            }
+        }
+        if let EngineState::Ready(engine) = &self.engine {
+            let listed = engine.workspace();
+            let shown = self.dataset.clone();
+            self.open_frames.retain(|f| {
+                shown.as_deref() == Some(f.as_str())
+                    || listed.iter().any(|w| &w.name == f && w.is_data_frame())
+            });
+        }
     }
 
     fn engine(&self) -> Option<&Engine> {
@@ -256,6 +527,7 @@ impl App {
                 ctx.request_repaint_after(Duration::from_millis(33));
             }
         }
+        self.poll_parked(ctx);
         self.follow_datasets();
     }
 
@@ -338,6 +610,19 @@ impl App {
                     }
                 }
                 self.dataset = choice;
+            }
+            Action::CloseFrame(name) => {
+                let at = self.open_frames.iter().position(|f| *f == name);
+                self.open_frames.retain(|f| *f != name);
+                if self.dataset.as_deref() == Some(name.as_str()) {
+                    // the neighbour on the left, else the first one left, else none
+                    let next = at
+                        .and_then(|i| i.checked_sub(1))
+                        .and_then(|i| self.open_frames.get(i))
+                        .or_else(|| self.open_frames.first())
+                        .cloned();
+                    self.perform(ctx, Action::SelectDataset(next));
+                }
             }
             Action::SetView(view) => self.view = view,
             Action::SetSideTab(tab) => self.side_tab = tab,
@@ -440,6 +725,41 @@ impl App {
             Action::SetTheme(theme) => {
                 self.theme = theme;
                 ctx.set_theme(theme);
+            }
+            Action::NewSession => self.new_session(),
+            Action::SwitchSession(i) => self.switch_session(i),
+            Action::AskCloseSession(i) => self.confirm_close = Some(i),
+            Action::ChooseFolder => {
+                let here = self
+                    .engine()
+                    .and_then(|e| e.working_dir())
+                    .map(std::path::PathBuf::from)
+                    .filter(|d| d.is_dir());
+                let mut chooser = rfd::FileDialog::new().set_title("Choose the working folder");
+                if let Some(dir) = here {
+                    chooser = chooser.set_directory(dir);
+                }
+                if let Some(dir) = chooser.pick_folder() {
+                    self.perform(ctx, Action::SetFolder(dir));
+                }
+            }
+            Action::SetFolder(dir) => {
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    // R moves with an ordinary command, so it is in Results and the log
+                    let path = dir.to_string_lossy().replace('\\', "/");
+                    let code = format!("setwd({})", rcraft_rcodegen::r_string(&path));
+                    match engine.submit(Source::Menu("Session > Working folder".into()), &code) {
+                        Ok(_) => {
+                            self.message = None;
+                            engine.set_start_folder(Some(dir.clone()));
+                            self.start_folder = Some(dir.clone());
+                            if self.keep_settings {
+                                rcraft_rhost::folder::save(&Env::from_process(), &dir);
+                            }
+                        }
+                        Err(e) => self.message = Some(e.to_string()),
+                    }
+                }
             }
             Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
@@ -590,7 +910,15 @@ impl App {
     /// offscreen picture (`headless.rs`) both call this.
     pub fn ui(&mut self, ctx: &egui::Context) {
         self.poll(ctx);
+        // the dialogs' file choosers open in the folder R is working in
+        let folder = self
+            .engine()
+            .and_then(|e| e.working_dir())
+            .map(std::path::PathBuf::from);
+        self.import.set_folder(folder.clone());
+        self.spec_dialog.set_folder(folder);
         let dark = ctx.style().visuals.dark_mode;
+        self.track_open_frames();
         let pal = Palette::new(self.accent, dark);
         let mut actions: Vec<Action> = Vec::new();
         let busy = self.engine().is_some_and(Engine::is_busy);
@@ -598,7 +926,8 @@ impl App {
         egui::TopBottomPanel::top("menu").show(ctx, |ui| {
             self.menu_bar(ui, &pal, &mut actions);
         });
-        egui::TopBottomPanel::bottom("status").show(ctx, |ui| self.status_bar(ui, &pal));
+        egui::TopBottomPanel::bottom("status")
+            .show(ctx, |ui| self.status_bar(ui, &pal, &mut actions));
         egui::TopBottomPanel::bottom("command")
             .resizable(true)
             .default_height(64.0)
@@ -702,6 +1031,38 @@ impl App {
             Some(HelpOut::Run(code)) => actions.push(Action::Submit(Source::Typed, code)),
             Some(HelpOut::FindPackages(topic)) => actions.push(Action::FindPackagesFor(topic)),
             None => {}
+        }
+
+        if let Some(i) = self.confirm_close {
+            let name = self.session_labels().get(i).cloned().unwrap_or_default();
+            let mut open = true;
+            let mut decision: Option<bool> = None;
+            egui::Window::new("Close session")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    ui.label(format!("End {name}?"));
+                    ui.label(
+                        RichText::new("Its R stops and every object in it is lost.").color(pal.dim),
+                    );
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Close session").clicked() {
+                            decision = Some(true);
+                        }
+                        if ui.button("Cancel").clicked() {
+                            decision = Some(false);
+                        }
+                    });
+                });
+            if decision == Some(true) {
+                self.close_session(i);
+            }
+            if !open || decision.is_some() {
+                self.confirm_close = None;
+            }
         }
 
         // a plot that has just been drawn is shown in the Graph tab
@@ -883,6 +1244,31 @@ impl App {
                     out.push(Action::Restart);
                     ui.close_menu();
                 }
+                ui.separator();
+                if ui.button("Working folder…").clicked() {
+                    out.push(Action::ChooseFolder);
+                    ui.close_menu();
+                }
+                ui.separator();
+                let labels = self.session_labels();
+                for (j, label) in labels.iter().enumerate() {
+                    if ui.selectable_label(j == self.active, label).clicked() {
+                        out.push(Action::SwitchSession(j));
+                        ui.close_menu();
+                    }
+                }
+                if ui.button("New R session").clicked() {
+                    out.push(Action::NewSession);
+                    ui.close_menu();
+                }
+                if ui
+                    .add_enabled(labels.len() > 1, egui::Button::new("Close this session…"))
+                    .on_disabled_hover_text("The only session cannot be closed")
+                    .clicked()
+                {
+                    out.push(Action::AskCloseSession(self.active));
+                    ui.close_menu();
+                }
             });
             ui.menu_button("Help", |ui| {
                 if ui.button("Search R help…").clicked() {
@@ -911,7 +1297,7 @@ impl App {
         });
     }
 
-    fn status_bar(&self, ui: &mut egui::Ui, pal: &Palette) {
+    fn status_bar(&self, ui: &mut egui::Ui, pal: &Palette, out: &mut Vec<Action>) {
         ui.horizontal(|ui| {
             let (text, color) = match &self.engine {
                 EngineState::Starting(_) => ("Starting R…".to_string(), pal.dim),
@@ -924,6 +1310,10 @@ impl App {
             };
             ui.label(RichText::new(text).strong().color(color));
             ui.separator();
+            if self.sessions.len() > 1 {
+                ui.label(RichText::new(format!("Session {}", self.session_name)).color(pal.dim));
+                ui.separator();
+            }
             let data_note = match (&self.dataset, self.engine()) {
                 (Some(name), Some(engine)) => match engine.table(name) {
                     Some(t) => format!("{name}: {} rows × {} columns", t.nrow, t.columns.len()),
@@ -937,10 +1327,27 @@ impl App {
                 ui.label(RichText::new(message).color(pal.error));
             }
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                let folder = std::env::current_dir()
-                    .map(|p| p.display().to_string())
-                    .unwrap_or_default();
-                ui.label(RichText::new(format!("Working folder: {folder}")).color(pal.dim));
+                // the folder R is in (what getwd() says), not the program's own
+                let folder = self
+                    .engine()
+                    .and_then(|e| e.working_dir())
+                    .unwrap_or("(R is starting)")
+                    .to_string();
+                let label = egui::Label::new(
+                    RichText::new(format!("Working folder: {folder}")).color(pal.dim),
+                )
+                .truncate()
+                .sense(egui::Sense::click());
+                if ui
+                    .add(label)
+                    .on_hover_text(format!(
+                        "{folder}
+Click to choose another folder"
+                    ))
+                    .clicked()
+                {
+                    out.push(Action::ChooseFolder);
+                }
             });
         });
     }
@@ -1142,7 +1549,7 @@ impl App {
             }
         });
         if self.view == View::Data {
-            self.data_pane(ui, pal);
+            self.data_pane(ui, pal, out);
             return;
         }
         if self.view == View::Graph {
@@ -1179,7 +1586,27 @@ impl App {
             });
     }
 
-    fn data_pane(&mut self, ui: &mut egui::Ui, pal: &Palette) {
+    fn data_pane(&mut self, ui: &mut egui::Ui, pal: &Palette, out: &mut Vec<Action>) {
+        if !self.open_frames.is_empty() {
+            ui.horizontal_wrapped(|ui| {
+                for name in &self.open_frames {
+                    let chosen = self.dataset.as_deref() == Some(name.as_str());
+                    let text = RichText::new(name).monospace();
+                    if ui.selectable_label(chosen, text).clicked() && !chosen {
+                        out.push(Action::SelectDataset(Some(name.clone())));
+                    }
+                    if ui
+                        .small_button("×")
+                        .on_hover_text("Close this tab. The data frame stays in R.")
+                        .clicked()
+                    {
+                        out.push(Action::CloseFrame(name.clone()));
+                    }
+                    ui.add_space(6.0);
+                }
+            });
+            ui.separator();
+        }
         let Some(name) = self.dataset.clone() else {
             ui.label(
                 RichText::new("No data frame yet. Create one, or open a data file.").color(pal.dim),
@@ -1520,7 +1947,7 @@ fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
 
 /// Finds R and starts the engine on another thread, so the window opens at
 /// once and shows "Starting R…" meanwhile.
-fn start_engine() -> Receiver<Result<Engine, String>> {
+fn start_engine(folder: Option<std::path::PathBuf>) -> Receiver<Result<Engine, String>> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         let result = (|| {
@@ -1528,7 +1955,9 @@ fn start_engine() -> Receiver<Result<Engine, String>> {
                 .into_iter()
                 .find(|i| i.is_supported())
                 .ok_or_else(|| format!("No R found. RCraft needs R {MIN_VERSION} or later."))?;
-            Engine::start(SessionConfig::new(install)).map_err(|e| e.to_string())
+            let mut config = SessionConfig::new(install);
+            config.working_dir = folder;
+            Engine::start(config).map_err(|e| e.to_string())
         })();
         let _ = tx.send(result);
     });
@@ -2112,6 +2541,207 @@ mod tests {
         assert!(frames_until(&mut app, &ctx, |a| !listed(a, "frame1")
             && a.dataset.is_none()
             && a.is_settled()));
+    }
+
+    #[test]
+    fn data_frames_open_as_tabs_and_closing_one_picks_a_neighbour() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        for name in ["a", "b", "c"] {
+            app.perform(&ctx, Action::SelectDataset(Some(name.into())));
+            app.track_open_frames();
+        }
+        assert_eq!(app.open_frames, ["a", "b", "c"]);
+        assert_eq!(app.dataset.as_deref(), Some("c"));
+        // going back to one already open adds nothing
+        app.perform(&ctx, Action::SelectDataset(Some("a".into())));
+        app.track_open_frames();
+        assert_eq!(app.open_frames.len(), 3);
+        // closing a tab that is not shown leaves the one shown
+        app.perform(&ctx, Action::CloseFrame("c".into()));
+        assert_eq!(app.open_frames, ["a", "b"]);
+        assert_eq!(app.dataset.as_deref(), Some("a"));
+        // closing the one shown goes to its neighbour on the left, else the first
+        app.perform(&ctx, Action::SelectDataset(Some("b".into())));
+        app.perform(&ctx, Action::CloseFrame("b".into()));
+        assert_eq!(app.dataset.as_deref(), Some("a"));
+        app.perform(&ctx, Action::CloseFrame("a".into()));
+        assert_eq!(app.dataset, None);
+        assert!(app.open_frames.is_empty());
+        // closing one that is not there is harmless
+        app.perform(&ctx, Action::CloseFrame("zzz".into()));
+    }
+
+    #[test]
+    fn a_tab_whose_data_frame_is_gone_from_r_is_dropped() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start here");
+            return;
+        }
+        app.submit_typed("one <- data.frame(x = 1); two <- data.frame(y = 2)");
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()
+            && a.engine().is_some_and(|e| e.workspace().len() == 2)));
+        for name in ["one", "two"] {
+            app.perform(&ctx, Action::SelectDataset(Some(name.into())));
+            app.track_open_frames();
+        }
+        assert_eq!(app.open_frames, ["one", "two"]);
+        app.submit_typed("rm(one)");
+        assert!(frames_until(&mut app, &ctx, |a| a.open_frames == ["two"]));
+    }
+
+    /// The names of the objects in the live session's workspace.
+    fn object_names(app: &App) -> Vec<String> {
+        app.engine()
+            .map(|e| e.workspace().iter().map(|w| w.name.clone()).collect())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn sessions_are_separate_keep_their_own_state_and_a_parked_one_goes_on_working() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start here");
+            return;
+        }
+        app.submit_typed("first <- data.frame(a = 1)");
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.is_settled() && object_names(a) == ["first"]
+        }));
+        app.command = "typed in the first".into();
+        app.script = "# the first script".into();
+
+        // a second session starts empty, with nothing of the first one's
+        app.perform(&ctx, Action::NewSession);
+        assert_eq!(app.sessions.len(), 2);
+        assert_eq!(app.active, 1);
+        assert_eq!(app.session_name, "R 2");
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        assert!(app.is_ready(), "the second R did not start");
+        assert!(object_names(&app).is_empty(), "{:?}", object_names(&app));
+        assert_eq!(app.command, "");
+        assert_ne!(app.script, "# the first script");
+
+        // a slow command in the second session, then back to the first
+        app.submit_typed("second <- data.frame(b = 2); Sys.sleep(1.5); done <- TRUE");
+        app.perform(&ctx, Action::SwitchSession(0));
+        assert_eq!(app.session_name, "R 1");
+        assert_eq!(app.command, "typed in the first");
+        assert_eq!(app.script, "# the first script");
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        assert_eq!(object_names(&app), ["first"]);
+
+        // the second session carried on while it was parked
+        app.perform(&ctx, Action::SwitchSession(1));
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.is_settled() && object_names(a) == ["done", "second"]
+        }));
+
+        // ending the shown session goes back to the other one
+        app.close_session(1);
+        assert_eq!(app.sessions.len(), 1);
+        assert_eq!(app.session_name, "R 1");
+        assert_eq!(app.active, 0);
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.is_settled() && object_names(a) == ["first"]
+        }));
+
+        // the only session cannot be closed
+        app.close_session(0);
+        assert_eq!(app.sessions.len(), 1);
+        assert!(app.is_ready());
+    }
+
+    #[test]
+    fn a_new_session_starts_where_the_shown_one_is_and_closing_an_earlier_one_keeps_the_shown() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start here");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("rcraft-sessions-{}", std::process::id()));
+        assert!(std::fs::create_dir_all(&dir).is_ok());
+        assert!(std::fs::write(dir.join("marker.txt"), "x").is_ok());
+        let in_dir = |a: &App| {
+            a.engine()
+                .and_then(|e| e.working_dir())
+                .is_some_and(|w| std::path::Path::new(w).join("marker.txt").exists())
+        };
+        app.perform(&ctx, Action::SetFolder(dir.clone()));
+        assert!(frames_until(&mut app, &ctx, in_dir));
+        app.perform(&ctx, Action::NewSession);
+        app.perform(&ctx, Action::NewSession);
+        assert_eq!(app.sessions.len(), 3);
+        assert_eq!(app.session_name, "R 3");
+        // the new sessions started in the folder the one they were made from is in
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled() && in_dir(a)));
+        let labels = app.session_labels();
+        assert_eq!(labels.len(), 3);
+        assert!(
+            labels.get(2).is_some_and(|l| l.starts_with("R 3")),
+            "{labels:?}"
+        );
+        assert!(
+            labels.get(2).is_some_and(|l| l.contains("rcraft-sessions")),
+            "{labels:?}"
+        );
+        // close the first while the third is shown: the third stays shown
+        app.close_session(0);
+        assert_eq!(app.sessions.len(), 2);
+        assert_eq!(app.active, 1);
+        assert_eq!(app.session_name, "R 3");
+        app.perform(&ctx, Action::SwitchSession(0));
+        assert_eq!(app.session_name, "R 2");
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled() && in_dir(a)));
+        // requests out of range do nothing
+        app.perform(&ctx, Action::SwitchSession(9));
+        app.close_session(9);
+        assert_eq!(app.sessions.len(), 2);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn choosing_a_working_folder_moves_r_and_a_restart_keeps_it() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start here");
+            return;
+        }
+        assert!(frames_until(&mut app, &ctx, |a| a
+            .engine()
+            .is_some_and(|e| e.working_dir().is_some())));
+        let dir = std::env::temp_dir().join(format!("rcraft-app-folder-{}", std::process::id()));
+        assert!(std::fs::create_dir_all(&dir).is_ok());
+        assert!(std::fs::write(dir.join("marker.txt"), "x").is_ok());
+        let in_dir = |a: &App| {
+            a.engine()
+                .and_then(|e| e.working_dir())
+                .is_some_and(|w| std::path::Path::new(w).join("marker.txt").exists())
+        };
+        app.perform(&ctx, Action::SetFolder(dir.clone()));
+        assert!(frames_until(&mut app, &ctx, in_dir), "R did not move");
+        // a restarted R begins in the folder chosen, not where the program started
+        app.perform(&ctx, Action::Restart);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        assert!(
+            frames_until(&mut app, &ctx, in_dir),
+            "the restart went elsewhere"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

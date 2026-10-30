@@ -138,3 +138,33 @@ fn restart_empties_the_workspace_and_asks_for_it_again() {
     settle(&mut e);
     assert!(e.workspace().is_empty());
 }
+
+#[test]
+fn the_working_folder_is_known_and_follows_setwd() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    // the first listing says where R is
+    let start = e.working_dir().map(str::to_string);
+    assert!(start.is_some(), "no working folder after the first listing");
+    // a folder with a marker file, and a name with a space and a quote in it
+    let dir = std::env::temp_dir().join(format!("rcraft wd 'q' {}", std::process::id()));
+    assert!(std::fs::create_dir_all(&dir).is_ok());
+    assert!(std::fs::write(dir.join("marker.txt"), "x").is_ok());
+    let r_path = dir
+        .to_string_lossy()
+        .replace(std::path::MAIN_SEPARATOR, "/");
+    run(&mut e, &format!("setwd(\"{r_path}\")"));
+    let now = e.working_dir().map(str::to_string).unwrap_or_default();
+    assert!(
+        std::path::Path::new(&now).join("marker.txt").exists(),
+        "R is in {now}, not in {r_path}"
+    );
+    // the folder question left no trace in the history or the log
+    assert_eq!(e.history().len(), 1);
+    assert!(!e.log_text().contains("getwd"));
+    // a restart goes back to where the session started
+    assert!(e.restart().is_ok());
+    settle(&mut e);
+    assert_eq!(e.working_dir().map(str::to_string), start);
+    let _ = std::fs::remove_dir_all(&dir);
+}
