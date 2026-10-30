@@ -538,6 +538,99 @@ pub const MARGINAL_EFFECTS: Spec = Spec {
     },
 };
 
+// ---- Sums of squares, Type II and Type III ----
+
+const SS_TYPES: &[Opt] = &[
+    Opt {
+        value: "2",
+        label: "Type II: each term after the terms that do not contain it",
+    },
+    Opt {
+        value: "3",
+        label: "Type III: each term after all the others (factors coded to sum to zero)",
+    },
+];
+
+/// Type II and III sums of squares of a linear model in base R, from the
+/// model's own model matrix: the sum of squares of a term is the rise in the
+/// residual sum of squares when its columns are taken out (Type III: all other
+/// columns stay; Type II: only the terms that do not contain it stay, so a
+/// main effect is judged without the interactions it is part of). Type III
+/// recodes the factors to sum to zero first, which is what makes it mean the
+/// same thing whatever coding the model was fitted with; the saved model is
+/// not touched. The table is an `anova` object, printed like R's own.
+const SS_R: &str = r#"(function(m, type) {
+  if (!inherits(m, "lm") || inherits(m, "glm")) stop("This needs a model fitted with the Linear model dialog (lm).")
+  if (anyNA(stats::coef(m))) stop("The model has terms that are redundant with each other (a coefficient is NA); take one of them out first.")
+  tt <- stats::terms(m)
+  mf <- stats::model.frame(m)
+  y <- stats::model.response(mf)
+  w <- stats::model.weights(mf)
+  off <- stats::model.offset(mf)
+  if (is.null(off)) off <- 0
+  coding <- if (type == 3) lapply(m$xlevels, function(x) "contr.sum") else m$contrasts
+  if (!length(coding)) coding <- NULL
+  X <- stats::model.matrix(tt, mf, contrasts.arg = coding)
+  asg <- attr(X, "assign")
+  labels <- attr(tt, "term.labels")
+  fac <- attr(tt, "factors")
+  contains <- function(j, i) all(fac[fac[, i] > 0, j] > 0)
+  rss <- function(cols) {
+    if (!length(cols)) {
+      r <- y - off
+    } else {
+      xs <- X[, cols, drop = FALSE]
+      fit <- if (is.null(w)) stats::lm.fit(xs, y - off) else stats::lm.wfit(xs, y - off, w)
+      r <- fit$residuals
+    }
+    sum(if (is.null(w)) r^2 else w * r^2)
+  }
+  full <- rss(seq_len(ncol(X)))
+  df_res <- m$df.residual
+  ids <- if (type == 3) sort(unique(asg)) else setdiff(sort(unique(asg)), 0)
+  ss <- numeric()
+  df <- numeric()
+  for (i in ids) {
+    if (type == 3) {
+      ss <- c(ss, rss(which(asg != i)) - full)
+    } else {
+      outer_terms <- which(vapply(seq_along(labels), function(j) j != i && contains(j, i), TRUE))
+      without <- which(!(asg %in% c(i, outer_terms)))
+      ss <- c(ss, rss(without) - rss(which(!(asg %in% outer_terms))))
+    }
+    df <- c(df, sum(asg == i))
+  }
+  f <- (ss / df) / (full / df_res)
+  tab <- data.frame(
+    `Sum Sq` = c(ss, full), Df = c(df, df_res), `Mean Sq` = c(ss / df, full / df_res),
+    `F value` = c(f, NA), `Pr(>F)` = c(stats::pf(f, df, df_res, lower.tail = FALSE), NA),
+    check.names = FALSE, row.names = c(ifelse(ids == 0, "(Intercept)", labels[pmax(ids, 1)]), "Residuals"))
+  print(structure(tab, heading = c(paste0("Anova Table (Type ", c("II", "III")[type - 1], " tests)\n"),
+    paste("Response:", deparse(stats::formula(m)[[2L]]))), class = c("anova", "data.frame")))
+  if (type == 3) cat("\nFactors were coded to sum to zero for this table; the saved model is unchanged.\n")
+  invisible(tab)
+})"#;
+
+pub const SUMS_OF_SQUARES: Spec = Spec {
+    entry: "Sums of squares (Type II/III)",
+    menu: "Objects > Model > Sums of squares (Type II/III)",
+    about: "The analysis-of-variance table of a linear model with Type II or Type III sums of \
+            squares, which do not depend on the order the terms were typed in (the Linear \
+            model dialog's own table does). The model itself is not changed.",
+    widgets: &[Widget::Choice {
+        id: "type",
+        label: "Sums of squares",
+        options: SS_TYPES,
+        default: "2",
+        hint: "With no interactions in the model the two give the same tests; they differ \
+               when there are interactions, most when group sizes are unequal.",
+    }],
+    needs: &[],
+    styles: BASE,
+    check: |_| Vec::new(),
+    code: |a, _| format!("{SS_R}({m}, {t}L)", m = a.data(), t = a.choice("type")),
+};
+
 /// The dialogs offered on a model object, in menu order.
 pub const MODEL_SPECS: &[&Spec] = &[
     &MODEL_FIT,
@@ -547,6 +640,7 @@ pub const MODEL_SPECS: &[&Spec] = &[
     &DIAGNOSTIC_PLOTS,
     &ROBUST,
     &TEST_TERMS,
+    &SUMS_OF_SQUARES,
     &MARGINAL_EFFECTS,
 ];
 

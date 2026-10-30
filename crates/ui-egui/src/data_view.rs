@@ -265,13 +265,6 @@ pub fn variable_list(
             .horizontal(|ui| {
                 let name = ui.selectable_label(false, RichText::new(&col.name).monospace());
                 ui.label(RichText::new(col.data.kind_name()).small().color(pal.dim));
-                if let Data::Factor { levels, .. } = &col.data {
-                    ui.label(
-                        RichText::new(format!("{} levels", levels.len()))
-                            .small()
-                            .color(pal.dim),
-                    );
-                }
                 if missing > 0 {
                     ui.label(
                         RichText::new(format!("{missing} missing"))
@@ -292,7 +285,82 @@ pub fn variable_list(
         if response.clicked() {
             out.push(VariableClick::Insert(rcraft_rcodegen::r_name(&col.name)));
         }
+        if let Data::Factor {
+            levels,
+            codes,
+            ordered,
+        } = &col.data
+        {
+            level_list(ui, pal, &col.name, levels, codes, *ordered, out);
+        }
     }
+}
+
+/// Most levels of a factor listed at once.
+const LEVELS_SHOWN: usize = 60;
+
+/// How many rows each level of a factor has (missing codes are not counted).
+pub fn level_counts(levels: &[Option<String>], codes: &[i32]) -> Vec<usize> {
+    let mut counts = vec![0usize; levels.len()];
+    for &c in codes {
+        if let Some(n) = usize::try_from(c).ok().and_then(|i| counts.get_mut(i)) {
+            *n += 1;
+        }
+    }
+    counts
+}
+
+/// A factor's levels under its line in the Variables list, folded away until
+/// asked for: each level with how many rows have it, in the factor's own order
+/// (the order a model uses; the first is the reference level). A click puts the
+/// level, quoted, in the Command line.
+fn level_list(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    name: &str,
+    levels: &[Option<String>],
+    codes: &[i32],
+    ordered: bool,
+    out: &mut Vec<VariableClick>,
+) {
+    let title = format!(
+        "{} level{}{}",
+        levels.len(),
+        if levels.len() == 1 { "" } else { "s" },
+        if ordered { ", ordered" } else { "" }
+    );
+    egui::CollapsingHeader::new(RichText::new(title).small().color(pal.dim))
+        .id_salt(("levels", name))
+        .show(ui, |ui| {
+            let counts = level_counts(levels, codes);
+            for (i, level) in levels.iter().take(LEVELS_SHOWN).enumerate() {
+                let text = level.as_deref().unwrap_or("NA");
+                let n = counts.get(i).copied().unwrap_or(0);
+                ui.horizontal(|ui| {
+                    let shown = format!("{}  {text}", i + 1);
+                    let r = ui
+                        .selectable_label(false, RichText::new(shown).monospace().small())
+                        .on_hover_text(if i == 0 {
+                            "The first level: the one a model compares the others with. Click to put it in the Command line."
+                        } else {
+                            "Click to put this level in the Command line."
+                        });
+                    if r.clicked() {
+                        if let Some(l) = level {
+                            out.push(VariableClick::Insert(rcraft_rcodegen::r_string(l)));
+                        }
+                    }
+                    ui.label(RichText::new(format!("{n} rows")).small().color(pal.dim));
+                });
+            }
+            if levels.len() > LEVELS_SHOWN {
+                ui.label(
+                    RichText::new(format!("… and {} more", levels.len() - LEVELS_SHOWN))
+                        .small()
+                        .color(pal.dim),
+                );
+            }
+        });
 }
 
 /// What the Objects pane asks for.
@@ -436,6 +504,19 @@ mod tests {
             dropped_attrs: 0,
             data,
         }
+    }
+
+    #[test]
+    fn each_level_of_a_factor_is_counted_and_bad_codes_are_ignored() {
+        let levels = vec![Some("low".to_string()), Some("high".to_string()), None];
+        assert_eq!(level_counts(&levels, &[0, 1, 1, -1, 0, 1]), vec![2, 3, 0]);
+        assert_eq!(level_counts(&levels, &[]), vec![0, 0, 0]);
+        // a code past the levels (damaged data) is not counted and does not panic
+        assert_eq!(
+            level_counts(&levels, &[7, 99, i32::MAX, i32::MIN, 2]),
+            vec![0, 0, 1]
+        );
+        assert!(level_counts(&[], &[0, 1]).is_empty());
     }
 
     #[test]

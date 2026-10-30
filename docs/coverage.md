@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 94 | 0 | 84 | 10 |
+| 96 | 0 | 86 | 10 |
 
 ## File
 
@@ -73,6 +73,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Wilcoxon signed-rank test | partial |
 | Kruskal-Wallis test | partial |
 | Variance test | partial |
+| Agreement (kappa) | partial |
 | Linear model | partial |
 | One-way ANOVA | partial |
 | Factorial ANOVA | partial |
@@ -88,6 +89,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Diagnostic plots | partial |
 | Robust standard errors | partial |
 | Test terms | partial |
+| Sums of squares (Type II/III) | partial |
 | Average marginal effects | partial |
 
 ## Graphs

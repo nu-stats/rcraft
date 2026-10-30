@@ -418,6 +418,7 @@ pub const SPECS: &[&Spec] = &[
     &inference::SIGNED_RANK,
     &inference::KRUSKAL,
     &inference::VARIANCE,
+    &inference::KAPPA,
     &models::LINEAR,
     &models::ONE_WAY,
     &models::FACTORIAL,

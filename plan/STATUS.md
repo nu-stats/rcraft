@@ -1483,3 +1483,28 @@ RCraft's own manuals, catered to RCraft, are down the road (ROADMAP P2A.10; the 
 now). Found in the walkthrough: some packages' help index has section headings (`Functions:`, `=====`), which
 are no longer listed as topics; the Packages window's Help button and package count no longer overlap the tabs.
 Not tried by hand: clicking the button in the live window (the address is built and tested; the browser opens it).
+
+## Data leftovers: factor levels, kappa, Type II/III sums of squares, 2026-10-30
+
+- **P3.4 level list.** Each factor in the Variables pane has a folded line under it ("3 levels", "3 levels,
+  ordered"). Opened, it lists the levels in the factor's own order (the first is the reference level a model
+  compares with) with how many rows each has; a click puts the level, quoted, in the Command line. At most 60 shown.
+  Counting is tested (damaged codes are ignored, not a crash); seen in a picture folded, not opened.
+- **P4.2 Agreement (kappa)**, `Statistics > Tests and intervals`: Cohen's kappa for two ratings of the same rows
+  (factor, text, logical or number categories), in base R. Prints the agreement table with margins, observed and
+  chance agreement, kappa, its standard error (Fleiss, Cohen and Everitt 1969), a confidence interval at 90, 95 or
+  99%, and the z test of kappa = 0 (standard error under that hypothesis). Linear or quadratic weights for ordered
+  categories give a weighted kappa (point estimate only, and it says so). Rows missing either rating are left out; a
+  category neither rater used is dropped; all ratings in one category stops with "fewer than two different values".
+  `engine/tests/kappa.rs` checks it against numbers worked by hand (2 x 2: kappa .4000, standard error .1270, z
+  2.8868, p .00389, interval .1511 to .6489; 3 x 3: .6056, linear .6732, quadratic .7444).
+- **P4.3 Sums of squares (Type II/III)**, in the Objects pane's Model menu on a linear model: the analysis-of-variance
+  table with Type II or Type III sums of squares, in base R, so no package is needed (it works from the model's own
+  model matrix; Type III recodes factors to sum to zero and says so; the saved model is unchanged). Weights, covariates
+  and interactions work; a model that is not `lm`, or has a redundant (NA) coefficient, is refused in words.
+  `engine/tests/sums_of_squares.rs` checks it against other computations: Type II against base R's sequential `anova()`
+  with the term fitted last, Type III against a Wald test from `coef()` and `vcov()` under sum-to-zero coding, equal
+  for additive models, equal to the sequential table for balanced groups, and unchanged by the order of terms. Not
+  checked against the `car` package, which is not installed here; this machine's R is the only one used.
+- Still to do from these three: custom contrasts (P4.3), a stronger agreement family (Fleiss' kappa for more than two
+  raters, intraclass correlation), and the opened level list in a picture.

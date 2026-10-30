@@ -501,6 +501,137 @@ pub const VARIANCE: Spec = Spec {
     },
 };
 
+const RATINGS: &[VarKind] = &[
+    VarKind::Factor,
+    VarKind::Text,
+    VarKind::Logical,
+    VarKind::Number,
+];
+
+const KAPPA_WEIGHTS: &[Opt] = &[
+    Opt {
+        value: "none",
+        label: "None: only exact agreement counts",
+    },
+    Opt {
+        value: "linear",
+        label: "Linear: near misses count partly",
+    },
+    Opt {
+        value: "quadratic",
+        label: "Quadratic: near misses count mostly",
+    },
+];
+
+/// Cohen's kappa in base R. The rows with both ratings present are used; the
+/// categories are those of the factors (in their order) or the sorted values;
+/// a category neither rater used is left out. The unweighted standard error is
+/// Fleiss, Cohen and Everitt's (1969) large-sample one, the test of kappa = 0
+/// uses the standard error under that hypothesis; a weighted kappa has neither.
+const KAPPA_R: &str = r#"(function(a, b, na, nb, level, weights) {
+  ok <- stats::complete.cases(a, b)
+  a <- a[ok]
+  b <- b[ok]
+  order_of <- function(x) if (is.factor(x)) levels(x) else as.character(sort(unique(x)))
+  lv <- unique(c(order_of(a), order_of(b)))
+  t <- table(factor(as.character(a), levels = lv), factor(as.character(b), levels = lv), dnn = c(na, nb))
+  used <- rowSums(t) + colSums(t) > 0
+  t <- t[used, used, drop = FALSE]
+  n <- sum(t)
+  k <- nrow(t)
+  if (n == 0 || k < 2) stop("There is nothing to compare: fewer than two different values are used.")
+  p <- t / n
+  pr <- rowSums(p)
+  pc <- colSums(p)
+  gap <- outer(seq_len(k), seq_len(k), "-")
+  w <- switch(weights, none = diag(k), linear = 1 - abs(gap) / (k - 1), quadratic = 1 - (gap / (k - 1))^2)
+  po <- sum(w * p)
+  pe <- sum(w * outer(pr, pc))
+  if (pe == 1) stop("Kappa is not defined: every rating falls in one category.")
+  kappa <- (po - pe) / (1 - pe)
+  num <- function(x) formatC(x, digits = 4, format = "f")
+  line <- function(what, value) cat(sprintf("%-30s %s\n", what, value))
+  cat("Agreement of ", na, " and ", nb, ": ", n, " rows with both present\n\n", sep = "")
+  print(stats::addmargins(t))
+  cat("\n")
+  line("Observed agreement", num(po))
+  line("Agreement expected by chance", num(pe))
+  if (weights == "none") {
+    var_k <- (sum(diag(p) * (1 - (pr + pc) * (1 - kappa))^2) +
+      (1 - kappa)^2 * sum((p * outer(pc, pr, "+")^2)[row(p) != col(p)]) -
+      (kappa - pe * (1 - kappa))^2) / (n * (1 - pe)^2)
+    se <- sqrt(var_k)
+    se0 <- sqrt((pe + pe^2 - sum(pr * pc * (pr + pc))) / (n * (1 - pe)^2))
+    crit <- stats::qnorm(1 - (1 - level) / 2)
+    line("Kappa", num(kappa))
+    line("Standard error", num(se))
+    line(paste0(format(100 * level), "% confidence interval"),
+         paste0(num(kappa - crit * se), " to ", num(kappa + crit * se)))
+    z <- kappa / se0
+    line("z (kappa = 0)", num(z))
+    line("p-value", format.pval(2 * stats::pnorm(-abs(z)), digits = 3))
+  } else {
+    line(paste0("Kappa (", weights, " weights)"), num(kappa))
+    cat("(The standard error, interval and test are given for unweighted kappa only.)\n")
+  }
+  invisible(kappa)
+})"#;
+
+pub const KAPPA: Spec = Spec {
+    entry: "Agreement (kappa)",
+    menu: "Statistics > Tests and intervals > Agreement (kappa)",
+    about: "How well two raters, or two ways of measuring, agree on the same rows: Cohen's \
+            kappa, which corrects the share of rows they agree on for the agreement chance \
+            alone would give.",
+    widgets: &[
+        Widget::Variable {
+            id: "a",
+            label: "First rating",
+            kinds: RATINGS,
+            required: true,
+            hint: "A variable of categories: the first rater.",
+        },
+        Widget::Variable {
+            id: "b",
+            label: "Second rating",
+            kinds: RATINGS,
+            required: true,
+            hint: "The second rater, using the same categories. Rows missing either rating \
+                   are left out.",
+        },
+        Widget::Choice {
+            id: "weights",
+            label: "Weights",
+            options: KAPPA_WEIGHTS,
+            default: "none",
+            hint: "For ordered categories, a near miss can count for part of an agreement. \
+                   The order is the factor's own, or the sorted values.",
+        },
+        CONFIDENCE,
+    ],
+    needs: &[],
+    styles: BASE,
+    check: |a| {
+        if a.var_text("a") == a.var_text("b") {
+            vec![Problem::new("b", "Choose two different variables.")]
+        } else {
+            Vec::new()
+        }
+    },
+    code: |a, _| {
+        let d = a.data();
+        let (va, vb) = (
+            a.var_string("a").unwrap_or_default(),
+            a.var_string("b").unwrap_or_default(),
+        );
+        format!(
+            "{KAPPA_R}({d}[[{va}]], {d}[[{vb}]], {va}, {vb}, {conf}, {weights})",
+            conf = a.choice("conf"),
+            weights = r_string(a.choice("weights")),
+        )
+    },
+};
+
 /// The dialogs of this module, in menu order.
 pub const SPECS: &[&Spec] = &[
     &ONE_T,
@@ -513,6 +644,7 @@ pub const SPECS: &[&Spec] = &[
     &SIGNED_RANK,
     &KRUSKAL,
     &VARIANCE,
+    &KAPPA,
 ];
 
 #[cfg(test)]
