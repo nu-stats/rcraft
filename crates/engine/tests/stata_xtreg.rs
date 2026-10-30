@@ -450,9 +450,8 @@ fn xtreg_says_what_stata_says() {
         "xtreg before xtset"
     );
     assert!(refusal("use \"d.dta\"\nxtset id\nxtreg y x, be robust\n").contains("be"));
-    assert!(refusal("use \"d.dta\"\nxtset id\nxtreg y x, mle\n").contains("mle"));
-    assert!(refusal("use \"d.dta\"\nxtset id\nxtreg y x, fe\nmargins\n")
-        .contains("margins after xtreg"));
+    assert!(refusal("use \"d.dta\"\nxtset id\nxtreg y x, mle robust\n").contains("mle"));
+    assert!(refusal("use \"d.dta\"\nxtset id\nxtreg y x, pa corr(ar1)\n").contains("ar1"));
     let Some(mut e) = engine() else { return };
     let d = panel(&mut e);
     ok(
@@ -475,4 +474,243 @@ fn xtreg_says_what_stata_says() {
 fn fresh() -> usize {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// After xtreg: predict u, e, ue, xbu and stdp, estat ic, margins; and the
+/// mle and pa estimators; against Stata 19 on the same panel.
+#[test]
+fn xtreg_postestimation_mle_and_pa_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let d = panel(&mut e);
+    let start = format!("use \"{d}/panel.dta\"\nxtset id year\n");
+    let run_xt = |e: &mut Engine, cmd: &str, show: &str| -> Vec<f64> {
+        let code = script(&format!("{start}{cmd}\n"));
+        ok(e, &code);
+        numbers(e, "0", show)
+    };
+    // predict, rows 1 to 3 (panel 1); Stata stores floats
+    let rows = |v: &str| format!("panel${v}[1], panel${v}[2], panel${v}[3]");
+    let fe = "xtreg y x w z, fe\npredict u, u\npredict e, e\npredict ue, ue\npredict xbu, xbu\npredict sp, stdp";
+    let show = [rows("u"), rows("e"), rows("ue"), rows("xbu"), rows("sp")].join(", ");
+    near_stata(
+        &run_xt(&mut e, fe, &show),
+        &[
+            0.59583044052124023,
+            0.59583044052124023,
+            0.59583044052124023,
+            0.75192904472351074,
+            -0.7682802677154541,
+            0.80148983001708984,
+            1.347759485244751,
+            -0.17244979739189148,
+            1.3973202705383301,
+            1.0190709829330444,
+            1.5072802305221558,
+            2.4015102386474609,
+            0.19747310876846313,
+            0.15167064964771271,
+            0.13619007170200348,
+        ],
+        1e-7,
+        "predict after fe",
+    );
+    let re = "xtreg y x w z, re\npredict u, u\npredict e, e\npredict ue, ue\npredict sp, stdp";
+    let show = [rows("u"), rows("e"), rows("ue"), rows("sp")].join(", ");
+    near_stata(
+        &run_xt(&mut e, re, &show),
+        &[
+            0.51528650522232056,
+            0.51528650522232056,
+            0.51528650522232056,
+            1.1214331388473511,
+            -0.54146319627761841,
+            0.93407469987869263,
+            1.6367195844650269,
+            -0.026176683604717255,
+            1.4493612051010132,
+            0.23186948895454407,
+            0.19724787771701813,
+            0.19038988649845123,
+        ],
+        1e-7,
+        "predict after re (u is the BLUP)",
+    );
+    // estat ic after fe: the within regression's likelihood
+    let code = script(&format!("{start}xtreg y x w z, fe\nestat ic\n"));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        &format!("res <- {}", line_of(&code, "stata_xt_ic(")),
+        "res[[\"ll(model)\"]], res$df, res$AIC, res$BIC, res[[\"ll(null)\"]]",
+    );
+    near_stata(
+        &v,
+        &[
+            -200.26599338191409,
+            3.0,
+            406.53198676382817,
+            415.62330052800547,
+            -215.02848819182748,
+        ],
+        1e-12,
+        "estat ic after fe",
+    );
+    let (outcome, text) = run(
+        &mut e,
+        &script(&format!("{start}xtreg y x w z, re\nestat ic\n")),
+    );
+    assert_eq!(
+        outcome,
+        Outcome::Error,
+        "Stata 19 has no estat ic after re: {text}"
+    );
+    // margins: the linear prediction
+    let m = |e: &mut Engine, cmd: &str| -> Vec<f64> {
+        let code = script(&format!("{start}{cmd}\n"));
+        ok(e, &code);
+        numbers(
+            e,
+            &format!("res <- {}", line_of(&code, "stata_margins(")),
+            "res$b, sqrt(diag(res$V))",
+        )
+    };
+    near_stata(
+        &m(&mut e, "xtreg y x w z, fe\nmargins"),
+        &[1.2668104575163399, 0.081438614024875192],
+        1e-9,
+        "margins after fe",
+    );
+    near_stata(
+        &m(&mut e, "xtreg y x w z, fe\nmargins, dydx(x)"),
+        &[0.45056565462318765, 0.095903152512251802],
+        1e-9,
+        "dydx after fe",
+    );
+    near_stata(
+        &m(&mut e, "xtreg y x w z, re\nmargins"),
+        &[1.1960437628654388, 0.14534515654557145],
+        1e-9,
+        "margins after re",
+    );
+
+    // mle: the estimates to 8 digits, the standard errors to 4 (Stata's come
+    // from a numerical Hessian, about 1e-5 from the exact one used here)
+    let got = run_xt(&mut e, "xtreg y x w z, mle", "unname(stata_b), stata_estimates$ll, stata_estimates$chi2_c, stata_estimates$ll_0, stata_estimates$rho");
+    near_stata(
+        &got,
+        &[
+            1.2978784107792978,
+            0.54324784019211358,
+            -0.44992240105067777,
+            0.32048660326610856,
+            0.79642985941226974,
+            1.0081742754063852,
+            -239.27223369659271,
+            21.532347554347609,
+            -257.1259954867117,
+            0.38425783903390176,
+        ],
+        1e-8,
+        "xtreg, mle",
+    );
+    let got = run_xt(
+        &mut e,
+        "xtreg y x w z, mle",
+        "unname(sqrt(diag(stata_vcov)))",
+    );
+    near_stata(
+        &got,
+        &[
+            0.23837998526221765,
+            0.095863469497235912,
+            0.30136711160123991,
+            0.1879665170907672,
+            0.15085528368967502,
+            0.065466868062699177,
+        ],
+        1e-4,
+        "xtreg, mle standard errors",
+    );
+    // pa: Stata's estimator and its stopping rule, so to 12 digits
+    let pa = "unname(stata_b), unname(sqrt(diag(stata_vcov))), stata_estimates$phi, stata_estimates$alpha";
+    near_stata(
+        &run_xt(&mut e, "xtreg y x w z, pa", pa),
+        &[
+            1.2889617624885081,
+            0.57395883488951316,
+            -0.42213394222137834,
+            0.3320836392882951,
+            0.23093264449312431,
+            0.096086454230536064,
+            0.31362793837166369,
+            0.16732382648876165,
+            1.570803203240142,
+            0.27965291833918154,
+        ],
+        1e-9,
+        "xtreg, pa",
+    );
+    near_stata(
+        &run_xt(
+            &mut e,
+            "xtreg y x w z, pa vce(robust)",
+            "unname(sqrt(diag(stata_vcov)))",
+        ),
+        &[
+            0.24388996098796273,
+            0.084851405577160074,
+            0.2992428604250329,
+            0.19079410304570604,
+        ],
+        1e-8,
+        "xtreg, pa robust",
+    );
+    near_stata(
+        &run_xt(
+            &mut e,
+            "xtreg y x w z, pa corr(independent)",
+            "unname(stata_b), unname(sqrt(diag(stata_vcov)))",
+        ),
+        &[
+            1.2442744322202479,
+            0.72928704501182118,
+            -0.2669558773569598,
+            0.3912273401943851,
+            0.21484817874804016,
+            0.10339112864550958,
+            0.34329352241324645,
+            0.11148696107473481,
+        ],
+        1e-12,
+        "xtreg, pa corr(independent)",
+    );
+    // a factor level absorbed by the panels, named as Stata names it
+    let code = script(&format!("{start}gen gg = mod(id, 2)\nxtreg y x i.gg, fe\n"));
+    let text = ok(&mut e, &code);
+    assert!(
+        text.contains("note: 1.gg omitted because of collinearity."),
+        "{text}"
+    );
+    let v = numbers(
+        &mut e,
+        "0",
+        "unname(stata_b), unname(sqrt(diag(stata_vcov)))",
+    );
+    near_stata(
+        &v,
+        &[
+            1.1683601775202799,
+            0.45743547752428476,
+            0.084682971483573816,
+            0.096588661449641289,
+        ],
+        1e-10,
+        "fe with i.gg absorbed",
+    );
+    // xtset alone shows the settings again
+    let code = script(&format!("{start}xtset\n"));
+    assert!(
+        ok(&mut e, &code).contains("Panel variable: id"),
+        "xtset alone"
+    );
 }

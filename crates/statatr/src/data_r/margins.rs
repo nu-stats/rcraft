@@ -300,7 +300,7 @@ impl Session {
             no("margins needs a model fitted earlier in this do-file (regress, logit, ...)")
         })?;
         let name = est.fit.name();
-        if matches!(est.fit, Fit::Xtreg | Fit::Ivregress) {
+        if est.fit == Fit::Ivregress {
             return Err(no(format!("margins after {name} is not translated yet")));
         }
         if est.fit == Fit::Margins {
@@ -455,7 +455,9 @@ impl Session {
             (Some("xb"), f) if f.one_outcome() => {
                 ("link", "Linear prediction, predict(xb)".to_string())
             }
-            (None, Fit::Regress) => ("response", "Linear prediction, predict()".to_string()),
+            (None, Fit::Regress | Fit::Xtreg) => {
+                ("response", "Linear prediction, predict()".to_string())
+            }
             (None | Some("pr"), Fit::Logit | Fit::Probit) => {
                 ("response", format!("Pr({}), predict()", est.dep))
             }

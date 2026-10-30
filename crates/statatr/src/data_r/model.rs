@@ -507,6 +507,14 @@ fn one(t: &str) -> Result<String, Untranslated> {
     }
 }
 
+/// `e(sample)` for a fit that keeps the rows it used, as positions in the
+/// rows its data expression gives (`xtreg`, `ivregress`).
+pub(super) fn esample_rows_line(d: &str, src: &str, rows: &str) -> String {
+    format!(
+        "stata_esample <- local({{ {d} <- dplyr::mutate({d}, stata_row = seq_len(nrow({d}))); s <- {src}; seq_len(nrow({d})) %in% s$stata_row[{rows}] }})"
+    )
+}
+
 /// Stata's `e(sample)` as `stata_esample`: for each row of the data frame
 /// `d`, whether the model used it. The model's rows are found by running its
 /// data expression again on `d` with each row's number added (the name `d`

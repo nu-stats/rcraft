@@ -177,7 +177,14 @@ impl Session {
                 ("leverage", 3),
                 ("hat", 3),
             ],
-            Fit::Xtreg => &[("xb", 2)],
+            Fit::Xtreg => &[
+                ("xb", 2),
+                ("stdp", 4),
+                ("u", 1),
+                ("e", 1),
+                ("ue", 2),
+                ("xbu", 3),
+            ],
             Fit::Ivregress => &[("xb", 2), ("residuals", 1)],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
@@ -266,7 +273,17 @@ impl Session {
                     format!("{} - {}", r_name(&est.dep), newdata(""))
                 }
                 Fit::Regress => newdata(""),
-                Fit::Xtreg => format!("unname(stata_xt_xb(stata_estimates, {d}))"),
+                Fit::Xtreg => {
+                    let s = [("xbu", 3), ("ue", 2), ("u", 1), ("e", 1)]
+                        .into_iter()
+                        .find(|(o, m)| opts.has(o, *m))
+                        .map_or("xb", |(o, _)| o);
+                    self.helpers.insert("stata_xt_predict");
+                    format!(
+                        "unname(stata_xt_predict(stata_estimates, {d}, {}))",
+                        r_text(s)
+                    )
+                }
                 Fit::Ivregress if opts.has("residuals", 1) => format!(
                     "{} - unname(stata_iv_xb(stata_estimates, {d}))",
                     r_name(&est.dep)
@@ -496,7 +513,10 @@ impl Session {
             return self.estat_iv(sub, out);
         }
         if sub == "ic" && est.fit == Fit::Xtreg {
-            return Err(no("estat ic after xtreg is not translated yet"));
+            // fe has the within regression's likelihood; Stata 19 gives none after re or be
+            self.helpers.insert("stata_xt_ic");
+            out.line("stata_xt_ic(stata_estimates)");
+            return Ok(());
         }
         if sub == "ic" {
             if let Some(o) = opts.other(&[]) {

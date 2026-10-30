@@ -2050,3 +2050,36 @@ The items left on the margins list (`statatr/src/data_r/margins.rs`), each run i
   suboptions (`effects` aside), and other contrast operators (`a.`, `ar.`, ...); contrasts of marginal effects;
   margins after `xtreg` and `ivregress`; margins after a weighted model; `at()` statistics other than the ones above
   (`asobserved`, `zero`, ...).
+
+## P2B.4 the rest of xtreg, 2026-10-30
+
+The items left on the xtreg list (`statatr/src/data_r/xt.rs`), decoded in Stata 19 on the xtreg tests' panel.
+
+- **predict after xtreg:** `u` (fe: ybar_i - xbar_i b - _cons; re and mle: the BLUP,
+  `T_i s_u^2 / (T_i s_u^2 + s_e^2)` times the panel's mean of y - xb), `e` (y - xb - u), `ue` (y - xb), `xbu`
+  (xb + u) and `stdp`; u for every row of a panel that was in the sample, as Stata's manual says it fills it in.
+- **estat ic after fe:** the within regression's normal log likelihood (Stata's e(ll), and e(ll_0) for the
+  constant-only within model), its coefficients with the constant as df, AIC and BIC on N. After re and be Stata 19
+  has none (r(321)), and the R stops saying so.
+- **margins after xtreg:** the linear prediction, as Stata's default after it (`margins`, `dydx()` and the rest of the
+  margins options); xtreg now keeps its estimation sample (`stata_data`) and e(sample).
+- **xtset alone** shows the settings again (the time variable is remembered too), and the unit options (`yearly`,
+  `delta()`, ...) are accepted: they only label the time and matter for lags, which are not translated.
+- **A factor level absorbed by the panels** is dropped with Stata's own note, `note: 1.gg omitted because of
+  collinearity.` (it said `factor(gg)1`).
+- **xtreg, mle:** the random-effects likelihood maximised in b, ln sigma_u and ln sigma_e (analytic gradient, Newton
+  steps), e(b) with `/sigma_u` and `/sigma_e` (delta-method errors), the LR model test against the constant-only
+  model (Stata's e(ll_0)), rho, and the chi-bar-squared test of sigma_u = 0 against the pooled fit (e(chi2_c)).
+  The estimates and log likelihood agree with Stata to 8 digits or better (R's log likelihood is the higher, so R
+  is at the maximum); the standard errors to about 5: R's come from the exact Hessian, which the numerical one
+  reproduces at every step size, so Stata's own is a numerical one about 1e-5 away.
+- **xtreg, pa** (GEE, `corr(exchangeable)`, the default, or `independent`; `vce(robust)`): decoded by trying the
+  candidates against Stata's numbers. phi = sum e^2 / N; alpha = the within-panel cross products over
+  `phi sum T_i (T_i - 1)`; b by GLS with that correlation, iterated from least squares and stopped at the first
+  iterate whose largest relative change is below 1e-6, which is where Stata stops (that iterate matches Stata to 16
+  digits; the converged one would be 1e-7 away); the variance phi (sum X_i' R^-1 X_i)^-1 with phi from the final
+  residuals (as is Stata's e(phi)); robust, the panel-clustered sandwich with G / (G - 1).
+- **Tests** (`stata_xtreg.rs`, 1 new case): all of the above against Stata 19 (predict as floats, estat ic to 12
+  digits, margins to 9, mle to 8 and its errors to 4, pa to 9, the note word for word). P2B.4 has 71 real-R cases.
+- **Not done:** `xtreg, mle` with robust errors, `pa` with `vce(cluster)` or other correlations (`ar 1`,
+  `unstructured`, ...), `predict` after pa other than xb and stdp, the other `xt` commands (`xtsum`, `xtlogit`, ...).

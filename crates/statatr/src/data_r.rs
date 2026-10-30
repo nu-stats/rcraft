@@ -298,6 +298,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_anova" => anova::ANOVA_HELPER,
         "stata_xtset" => xt::XTSET_HELPER,
         "stata_xtreg" => xt::XTREG_HELPER,
+        "stata_xt_predict" => xt::XT_PREDICT_HELPER,
+        "stata_xt_ic" => xt::XT_IC_HELPER,
+        "stata_xt_other" => xt::XT_OTHER_HELPER,
         "stata_ivregress" => iv::IV_HELPER,
         _ => FLOAT_HELPER,
     }
@@ -330,6 +333,8 @@ struct Session {
     esample_new: bool,
     /// The panel variable `xtset` named.
     panel: Option<String>,
+    /// And its time variable.
+    panel_time: Option<String>,
     helpers: BTreeSet<&'static str>,
 }
 
