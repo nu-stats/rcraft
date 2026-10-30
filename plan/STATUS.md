@@ -1573,3 +1573,13 @@ All in base R (no new package), each checked against published or independently 
 - **Not done:** per-session working-folder memory across runs (only the last folder chosen is remembered, and every
   new session starts in the shown one's folder); sessions are not saved or restored when RCraft closes (that is the
   project file, P7.5); a session name cannot be changed; closing the window does not ask about running sessions.
+
+## Session rename, 2026-10-30
+
+- **Rename.** **Session > Rename this session…** opens a small window with the name; Enter or Rename keeps it. A
+  blank name keeps the old one, a name is cut to 30 characters and line breaks become spaces. The Session menu and
+  the status bar show the new name. Test: `sessions_are_separate…` in `ui-egui/src/app.rs`.
+- **The one "Not done" list** (this replaces the lists above): sessions are not saved or restored when RCraft closes
+  (project file, P7.5); a new session starts in the shown one's folder, and only the last folder chosen is
+  remembered; closing the window does not ask about running sessions; I have not driven the native window by mouse,
+  only the picture mode (`--click`), because moving the real mouse takes over the user's desktop.

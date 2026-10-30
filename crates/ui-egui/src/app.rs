@@ -161,6 +161,8 @@ enum Action {
     SwitchSession(usize),
     /// Ask whether to end this session.
     AskCloseSession(usize),
+    /// Ask for a new name for the session shown.
+    AskRenameSession,
     /// Ask for a folder and make it the one R works in.
     ChooseFolder,
     /// Make this the folder R works in (and the one it starts in from now on).
@@ -189,6 +191,8 @@ pub struct App {
     next_session: usize,
     /// A session asked to close, waiting for a yes.
     confirm_close: Option<usize>,
+    /// The name being typed in the Rename session window (open when set).
+    renaming: Option<String>,
     engine: EngineState,
     command: String,
     recall: Recall,
@@ -252,6 +256,7 @@ impl App {
             active: 0,
             next_session: 2,
             confirm_close: None,
+            renaming: None,
             engine: EngineState::Starting(start_engine(rcraft_rhost::folder::load(
                 &Env::from_process(),
             ))),
@@ -379,6 +384,20 @@ impl App {
             if i < self.active {
                 self.active -= 1;
             }
+        }
+    }
+
+    /// Renames the session shown. A blank name keeps the old one; a name is
+    /// cut to 30 characters and line breaks become spaces.
+    fn rename_session(&mut self, name: &str) {
+        let clean: String = name
+            .chars()
+            .map(|c| if c.is_control() { ' ' } else { c })
+            .take(30)
+            .collect();
+        let clean = clean.trim();
+        if !clean.is_empty() {
+            self.session_name = clean.to_string();
         }
     }
 
@@ -729,6 +748,7 @@ impl App {
             Action::NewSession => self.new_session(),
             Action::SwitchSession(i) => self.switch_session(i),
             Action::AskCloseSession(i) => self.confirm_close = Some(i),
+            Action::AskRenameSession => self.renaming = Some(self.session_name.clone()),
             Action::ChooseFolder => {
                 let here = self
                     .engine()
@@ -1065,6 +1085,36 @@ impl App {
             }
         }
 
+        if let Some(mut text) = self.renaming.take() {
+            let mut open = true;
+            let mut decision: Option<bool> = None;
+            egui::Window::new("Rename session")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                .show(ctx, |ui| {
+                    let edit = ui.add(egui::TextEdit::singleline(&mut text).desired_width(220.0));
+                    edit.request_focus();
+                    let enter = edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Rename").clicked() || enter {
+                            decision = Some(true);
+                        }
+                        if ui.button("Cancel").clicked() {
+                            decision = Some(false);
+                        }
+                    });
+                });
+            if decision == Some(true) {
+                self.rename_session(&text);
+            }
+            if open && decision.is_none() {
+                self.renaming = Some(text);
+            }
+        }
+
         // a plot that has just been drawn is shown in the Graph tab
         if let EngineState::Ready(engine) = &self.engine {
             if self.graph.note_new(engine) {
@@ -1259,6 +1309,10 @@ impl App {
                 }
                 if ui.button("New R session").clicked() {
                     out.push(Action::NewSession);
+                    ui.close_menu();
+                }
+                if ui.button("Rename this session…").clicked() {
+                    out.push(Action::AskRenameSession);
                     ui.close_menu();
                 }
                 if ui
@@ -2704,6 +2758,17 @@ mod tests {
         app.perform(&ctx, Action::SwitchSession(0));
         assert_eq!(app.session_name, "R 2");
         assert!(frames_until(&mut app, &ctx, |a| a.is_settled() && in_dir(a)));
+        // renaming: the label follows; blank keeps the name; long names are cut
+        app.rename_session("  Survey\nanalysis ");
+        assert_eq!(app.session_name, "Survey analysis");
+        app.rename_session("   ");
+        assert_eq!(app.session_name, "Survey analysis");
+        app.rename_session(&"x".repeat(80));
+        assert_eq!(app.session_name.chars().count(), 30);
+        app.perform(&ctx, Action::AskRenameSession);
+        assert_eq!(app.renaming.as_deref(), Some(app.session_name.as_str()));
+        app.renaming = None;
+        app.rename_session("R 2");
         // requests out of range do nothing
         app.perform(&ctx, Action::SwitchSession(9));
         app.close_session(9);
