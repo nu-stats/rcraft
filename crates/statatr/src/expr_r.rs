@@ -682,6 +682,12 @@ impl Translator<'_> {
                     "date() of text that is only known when the file runs is not translated yet",
                 )),
             },
+            // e(sample): the rows of the last model, kept in R as stata_esample
+            // (the translator lets it through only while those rows are unmoved)
+            "e" => match args {
+                [Expr::Name(n)] if n == "sample" => Ok(("stata_esample".into(), Kind::Logical)),
+                _ => Err(no("e() other than e(sample) is translated in P2B.6")),
+            },
             _ => Err(no(format!("the function {name}() is not translated yet"))),
         }
     }

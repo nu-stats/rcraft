@@ -161,6 +161,7 @@ impl Session {
         }
         // sampling weights mean robust errors
         let robust = robust || matches!(w, Some((W::P, _)));
+        self.plain_regress = !robust && cluster.is_none() && w.is_none();
         let rows = self.rows_for(c, out)?;
         let src = self.weighted_rows(rows, &w);
         let right = spec.right(opts.has("noconstant", 5));
@@ -173,6 +174,10 @@ impl Session {
             r_name(&spec.dep)
         ));
         out.line(keep_sample(&src));
+        let d = self.data()?;
+        out.package("dplyr");
+        out.line(esample_line(&d, &src));
+        self.esample_new = true;
         out.line("stata_b <- stats::coef(stata_estimates)");
         if let Some((k, _)) = &w {
             self.helpers.insert("stata_lm_wvcov");
@@ -499,6 +504,15 @@ fn one(t: &str) -> Result<String, Untranslated> {
     }
 }
 
+/// Stata's `e(sample)` as `stata_esample`: for each row of the data frame
+/// `d`, whether the model used it. The model's rows are found by running its
+/// data expression again on `d` with each row's number added (the name `d`
+/// is shadowed inside `local()`, so `src` reads the numbered copy).
+pub(super) fn esample_line(d: &str, src: &str) -> String {
+    format!(
+        "stata_esample <- local({{ {d} <- dplyr::mutate({d}, stata_row = seq_len(nrow({d}))); s <- {src}; seq_len(nrow({d})) %in% s$stata_row[match(rownames(stats::model.frame(stata_estimates)), rownames(s))] }})"
+    )
+}
 #[cfg(test)]
 mod tests {
     use super::*;

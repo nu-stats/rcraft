@@ -286,7 +286,11 @@ fn helper_code(name: &str) -> &'static str {
         "stata_multinom_b" => ml::MULTINOM_B_HELPER,
         "stata_probit_newton" => ml::PROBIT_NEWTON_HELPER,
         "stata_perfect" => ml::PERFECT_HELPER,
+        "stata_ml_sandwich" => ml::ML_SANDWICH_HELPER,
+        "stata_nbreg_lr" => ml::NBREG_LR_HELPER,
         "stata_outcome_probs" => post::OUTCOME_PROBS_HELPER,
+        "stata_predict_stat" => post::PREDICT_STAT_HELPER,
+        "stata_names" => post::NAMES_HELPER,
         "stata_test" => post::TEST_HELPER,
         "stata_lincom" => post::LINCOM_HELPER,
         "stata_estat" => post::ESTAT_HELPER,
@@ -317,6 +321,13 @@ struct Session {
     changed_since_fit: bool,
     /// The model last fitted had weights (margins and estat do not take them yet).
     weighted_fit: bool,
+    /// The last regress was plain: no robust, clustered or weighted errors.
+    plain_regress: bool,
+    /// `stata_esample` holds the last model's e(sample) and the rows have not
+    /// moved since, so `e(sample)` can be translated.
+    esample: bool,
+    /// A model this command fitted left `stata_esample`.
+    esample_new: bool,
     /// The panel variable `xtset` named.
     panel: Option<String>,
     helpers: BTreeSet<&'static str>,
@@ -537,6 +548,7 @@ impl Session {
     }
 
     fn expr(&self, text: &str, use_: Use, out: &mut Out) -> Result<String, Untranslated> {
+        self.esample_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let r = expr_r::translate(text, &kinds, use_)?;
         for c in r.caveats {
@@ -545,7 +557,21 @@ impl Session {
         Ok(r.code)
     }
 
+    /// `e(sample)` only while `stata_esample` still lines up with the rows.
+    fn esample_ok(&self, text: &str) -> Result<(), Untranslated> {
+        let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        if squeezed.contains("e(sample)") && !self.esample {
+            return Err(no(
+                "e(sample) is translated only after regress or a likelihood model, while the \
+                 data's rows are still the ones it was fitted on (not sorted, added or dropped \
+                 since)",
+            ));
+        }
+        Ok(())
+    }
+
     fn value(&self, text: &str, out: &mut Out) -> Result<(String, Kind), Untranslated> {
+        self.esample_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let r = expr_r::translate(text, &kinds, Use::Value)?;
         for c in r.caveats {
@@ -741,13 +767,18 @@ impl Session {
 
     fn command(&mut self, c: &Command) -> Result<RCode, Untranslated> {
         if c.prefixes.iter().any(|p| matches!(p, Prefix::Frame(_))) {
+            self.esample = false;
+            self.changed_since_fit = true;
             return Err(no("frames (frame name:) are translated in a later step"));
         }
         if c.parts.weight.is_some() && !WEIGHTED.contains(&c.name.as_str()) {
+            self.esample = false;
+            self.changed_since_fit = true;
             return Err(no(format!("{} with weights is not translated yet", c.name)));
         }
         let mut out = Out::default();
         let by = c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. }));
+        self.esample_new = false;
         let done = if by && BY_EACH.contains(&c.name.as_str()) {
             self.by_each(c, &mut out)
         } else {
@@ -757,6 +788,21 @@ impl Session {
         if done.is_err() || !LEAVE_DATA_ALONE.contains(&c.name.as_str()) {
             self.changed_since_fit = done.is_err() || !MODELS.contains(&c.name.as_str());
         }
+        // e(sample) holds while the rows stay where the model found them
+        let name = c.name.as_str();
+        let bysort = c
+            .prefixes
+            .iter()
+            .any(|p| matches!(p, Prefix::By { sort: true, .. }));
+        self.esample = if MODELS.contains(&name) {
+            done.is_ok() && self.esample_new && !by
+        } else {
+            self.esample
+                && done.is_ok()
+                && LEAVE_DATA_ALONE.contains(&name)
+                && !matches!(name, "sort" | "gsort")
+                && !bysort
+        };
         done?;
         if MODELS.contains(&c.name.as_str()) {
             self.weighted_fit = c.parts.weight.is_some();

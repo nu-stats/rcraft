@@ -1980,3 +1980,44 @@ in Stata 19 on the statistics tests' data with `f = mod(id, 3) + 1` and `a = id 
   real-R cases.
 - **Not done:** weights in `nbreg`, `ologit`, `oprobit`, `mlogit`, `anova`, `xtreg`, `ivregress`, `ttest` (Stata
   takes none there) and `collapse`; `margins` and `estat` after a weighted model; robust errors with iweights.
+
+## P2B.4 the postestimation gaps, 2026-10-30
+
+The smaller items of part two's list, each decoded or checked in Stata 19 on the models tests' data
+(`statatr/src/data_r/{ml,post}.rs`, `expr_r.rs`).
+
+- **Robust and clustered errors after nbreg, ologit, oprobit and mlogit.** Each row's score (the gradient of its log
+  likelihood: for nbreg in b and `/lnalpha`, for ologit/oprobit in b and the cut points, for mlogit in each
+  equation but the base's) in a sandwich around the model's own variance, scaled by `N / (N - 1)` or
+  `G / (G - 1)` (`stata_ml_sandwich`). Agrees with Stata to 6 digits or better, the bread for ologit and mlogit
+  being R's numerical Hessian as before.
+- **The LR test of alpha after nbreg:** the Poisson fit on the same rows against it, a chi-bar-squared(01) with p
+  half of chi2(1)'s tail, printed as Stata does and, as in Stata, not with robust or clustered errors. Stata's
+  chi2_c to 6 digits. (Stata's `e(p)` after nbreg is the model test's, not this one's.)
+- **predict's other statistics:** `stdp` after every one-equation model (`sqrt(x V x')`, the model's own V);
+  after regress `stdf`, `stdr`, `rstandard`, `rstudent`, `cooksd` and `leverage`/`hat` (s the root MSE, h from
+  `(X'X)^-1`, rstudent with s worked out without the row); `score` after logit, probit and poisson; `ir` after
+  poisson and nbreg (`exp(xb)` without the exposure). Stata fills them in for every row with the values they need,
+  out of the sample too, and so does the translation; all agree with Stata's stored floats, in and out of the
+  sample. The residual statistics after robust, clustered or weighted regress are refused for now.
+- **test and lincom after ologit, oprobit and mlogit, and with interactions** (`stata_resolve`, `stata_bnames`).
+  The names the translation cannot know before the model runs are looked up in R by Stata's name for each of R's
+  coefficients: `1.g#c.x` in either order and with or without `c.` (Stata takes all three), `c.x#c.w`, `c.x#c.x`
+  for a square, ologit's `_b[/cut1]`, mlogit's `[2]x`, `[3]_cons` and `_b[2:x]`. Stata's rules after mlogit:
+  `test x` is x in every equation but the base's (chi2(2) here), `test [3]` every coefficient of equation 3 but its
+  constant, `lincom x` the first equation's x, and a base outcome's coefficient is a zero (so `test [2]x = [3]x`
+  with 2 the base tests `[3]x`); a test with nothing left stops and says why, where Stata prints a test with 0 df.
+  A name without an equation inside an equation after mlogit is refused with a reason.
+- **estat hettest with a varlist** (and with `rhs` as well: the union), over the estimation sample.
+- **e(sample)** in an expression (`summarize x if e(sample)`, `gen byte es = e(sample)`): kept in R as
+  `stata_esample` after regress and the likelihood models, by running the model's data expression again on the
+  data with each row's number added. It is translated only while the rows are where the model found them: a sort,
+  a by-sort, a command that may add or drop rows, or an untranslated line in between makes it refused with the
+  reason (and so does `by` before the model).
+- **Tests** (`stata_models.rs`, 3 new cases, real R): every robust and clustered standard error of the four models,
+  the LR test, the seven regress statistics in rows 1 to 3 (in and out of the sample) and the logit and poisson
+  ones, `stdp` against `predict(se.fit = TRUE)` and leverage against `hatvalues`, and every test, lincom, hettest
+  and e(sample) figure above against Stata 19. P2B.4 has 69 real-R cases.
+- **Not done:** `predict` after mlogit/ologit other than probabilities (`xb`, `stdp` per equation), `score` after
+  nbreg (two equations), the residual statistics after robust or weighted regress, `e(sample)` after xtreg,
+  ivregress and anova, a test with 0 df printed as Stata prints it.

@@ -200,10 +200,18 @@ impl Session {
                 ("irr", 3),
                 ("exposure", 3),
                 ("offset", 6),
+                ("robust", 1),
+                ("vce", 3),
             ]),
-            Fit::Ologit => known.push(("or", 2)),
-            Fit::Oprobit => {}
-            Fit::Mlogit => known.extend([("noconstant", 5), ("rrr", 3), ("baseoutcome", 4)]),
+            Fit::Ologit => known.extend([("or", 2), ("robust", 1), ("vce", 3)]),
+            Fit::Oprobit => known.extend([("robust", 1), ("vce", 3)]),
+            Fit::Mlogit => known.extend([
+                ("noconstant", 5),
+                ("rrr", 3),
+                ("baseoutcome", 4),
+                ("robust", 1),
+                ("vce", 3),
+            ]),
             Fit::Regress => return self.regress(c, opts, out),
             Fit::Xtreg => return self.xtreg(c, opts, out),
             Fit::Ivregress => return self.ivregress(c, opts, out),
@@ -377,7 +385,6 @@ impl Session {
                     "alpha is 1 / theta of MASS::glm.nb; the standard errors come from the whole \
                      likelihood, alpha included, as Stata's do",
                 );
-                out.caveat("the likelihood-ratio test of alpha = 0 is not shown");
             }
             Fit::Ologit | Fit::Oprobit => {
                 out.line(
@@ -400,9 +407,39 @@ impl Session {
             }
             Fit::Regress | Fit::Xtreg | Fit::Ivregress => {}
         }
+        if matches!(fit, Fit::Nbreg | Fit::Ologit | Fit::Oprobit | Fit::Mlogit)
+            && (robust || cluster.is_some())
+        {
+            // the sandwich of each row's score around the model's own variance
+            self.helpers.insert("stata_ml_sandwich");
+            let cl = match &cluster {
+                Some(v) => {
+                    out.line(format!("stata_cluster <- {}", cluster_rows(&src, v)));
+                    out.line(no_missing_cluster());
+                    out.caveat(
+                        "clustered standard errors carry G / (G - 1), as Stata's do for this model",
+                    );
+                    ", cluster = stata_cluster"
+                }
+                None => {
+                    out.caveat(
+                        "robust standard errors carry N / (N - 1), as Stata's do for a \
+                         maximum-likelihood model (not regress's HC1)",
+                    );
+                    ""
+                }
+            };
+            out.line(format!(
+                "stata_vcov <- stata_ml_sandwich(stata_estimates, stata_vcov{cl})"
+            ));
+        }
         if fit.one_outcome() {
             out.line(keep_sample(&src));
         }
+        let d = self.data()?;
+        out.package("dplyr");
+        out.line(super::model::esample_line(&d, &src));
+        self.esample_new = true;
         out.line("stata_df <- Inf");
         self.estimates = Some(Estimates {
             fit,
@@ -444,6 +481,11 @@ impl Session {
                 "stata_coefs(c(alpha = stata_b[[\"/lnalpha\"]]), stata_vcov[\"/lnalpha\", \"/lnalpha\", drop = FALSE], level = {}, eform = TRUE, label = \"alpha\")",
                 r_number(level)
             ));
+            if !robust && cluster.is_none() {
+                // as Stata: not shown with robust or clustered errors
+                self.helpers.insert("stata_nbreg_lr");
+                out.line("stata_nbreg_lr(stata_estimates)");
+            }
         }
         if fit == Fit::Mlogit {
             out.line("cat(\"base outcome:\", stata_base, \"\\n\")");
@@ -562,4 +604,69 @@ pub(super) const PERFECT_HELPER: &str = r#"stata_perfect <- function(fit, notes 
   call <- stats::update(fit, formula. = f, evaluate = FALSE)
   call$data <- d
   refit(call)
+}"#;
+
+/// Each row's score (the gradient of its log likelihood) after `nbreg`,
+/// `ologit`/`oprobit` or `mlogit`, one column per element of `stata_b`, and
+/// the robust or clustered sandwich Stata builds from them around the model's
+/// own variance: `N / (N - 1)`, or `G / (G - 1)` with clusters.
+pub(super) const ML_SANDWICH_HELPER: &str = r#"stata_ml_scores <- function(fit) {
+  if (inherits(fit, "negbin")) {
+    X <- stats::model.matrix(fit)
+    y <- fit$y
+    mu <- fit$fitted.values
+    th <- fit$theta
+    gt <- digamma(y + th) - digamma(th) + log(th / (th + mu)) + (mu - y) / (th + mu)
+    return(cbind(X * ((y - mu) / (1 + mu / th)), "/lnalpha" = -th * gt))
+  }
+  if (inherits(fit, "polr")) {
+    mf <- stats::model.frame(fit)
+    X <- stats::model.matrix(stats::delete.response(stats::terms(fit)), mf)
+    X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+    j <- as.integer(stats::model.response(mf))
+    z <- c(-Inf, fit$zeta, Inf)
+    eta <- drop(X %*% fit$coefficients)
+    F <- if (fit$method == "probit") stats::pnorm else stats::plogis
+    f <- if (fit$method == "probit") stats::dnorm else stats::dlogis
+    up <- z[j + 1] - eta
+    lo <- z[j] - eta
+    P <- F(up) - F(lo)
+    fu <- ifelse(is.finite(up), f(up), 0)
+    fl <- ifelse(is.finite(lo), f(lo), 0)
+    K <- length(fit$zeta)
+    C <- matrix(0, length(j), K)
+    for (k in seq_len(K)) C[, k] <- (j == k) * fu / P - (j == k + 1) * fl / P
+    return(cbind(X * (-(fu - fl) / P), C))
+  }
+  # multinom: for each outcome but the base, x times (1 if that outcome, less its probability)
+  X <- stats::model.matrix(fit)
+  y <- stats::model.response(stats::model.frame(fit))
+  P <- stats::fitted(fit)
+  if (is.null(dim(P))) P <- cbind(1 - P, P)
+  colnames(P) <- fit$lev
+  do.call(cbind, lapply(fit$lev[-1], function(k) X * ((y == k) - P[, k])))
+}
+stata_ml_sandwich <- function(fit, V, cluster = NULL) {
+  S <- stata_ml_scores(fit)
+  if (is.null(cluster)) {
+    n <- nrow(S)
+    out <- V %*% crossprod(S) %*% V * n / (n - 1)
+  } else {
+    sg <- rowsum(S, cluster)
+    G <- nrow(sg)
+    out <- V %*% crossprod(sg) %*% V * G / (G - 1)
+  }
+  dimnames(out) <- dimnames(V)
+  out
+}"#;
+
+/// The likelihood-ratio test of alpha = 0 after `nbreg`: the Poisson model on
+/// the same rows against it, a chi-bar-squared with half its mass at zero.
+pub(super) const NBREG_LR_HELPER: &str = r#"stata_nbreg_lr <- function(fit) {
+  p <- stats::glm(fit$y ~ stats::model.matrix(fit) - 1, family = stats::poisson(),
+                  offset = fit$offset, control = stats::glm.control(epsilon = 1e-14, maxit = 100))
+  chi2 <- max(0, 2 * (as.numeric(stats::logLik(fit)) - as.numeric(stats::logLik(p))))
+  pr <- 0.5 * stats::pchisq(chi2, 1, lower.tail = FALSE)
+  cat(sprintf("LR test of alpha=0: chibar2(01) = %.2f  Prob >= chibar2 = %.4f\n", chi2, pr))
+  invisible(c(chi2_c = chi2, p = pr))
 }"#;

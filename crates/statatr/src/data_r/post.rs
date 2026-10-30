@@ -43,6 +43,10 @@ pub(super) const OUTCOME_PROBS_HELPER: &str = r#"stata_outcome_probs <- function
 /// Stata's `test`: the Wald test that each row's combination of
 /// coefficients equals its value, as an F or a chi-squared.
 pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels) {
+  res <- stata_resolve(rows, r, labels)
+  rows <- res$rows
+  r <- res$r
+  labels <- res$labels
   b <- stata_b
   R <- matrix(0, length(rows), length(b), dimnames = list(NULL, names(b)))
   for (i in seq_along(rows)) {
@@ -69,6 +73,7 @@ pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels) 
 /// Stata's `lincom`: one combination of the coefficients, its standard
 /// error, test and interval.
 pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, level = 0.95, eform = FALSE, what = "Coef.") {
+  a <- stata_resolve(list(a), 0, "")$rows[[1]]
   b <- stata_b
   miss <- setdiff(names(a), names(b))
   if (length(miss) > 0) stop(miss[1], " not found")
@@ -91,21 +96,29 @@ pub(super) const ESTAT_HELPER: &str = r#"stata_estat_ic <- function(fit) {
   print(tab, digits = 8)
   invisible(tab)
 }
-stata_hettest <- function(fit, rhs = FALSE) {
+stata_hettest <- function(fit, rhs = FALSE, vars = NULL) {
   e <- stats::residuals(fit)
   z <- e^2 / mean(e^2)
   if (rhs) {
     Z <- stats::model.matrix(fit)
     Z <- Z[, colnames(Z) != "(Intercept)", drop = FALSE]
   } else {
-    Z <- stats::fitted(fit)
+    Z <- NULL
   }
+  if (!is.null(vars)) {
+    # a varlist: those variables over the estimation sample, with rhs as well
+    V <- as.matrix(as.data.frame(lapply(stata_data[vars], function(v) as.numeric(unclass(v)))))
+    colnames(V) <- vars
+    Z <- if (is.null(Z)) V else cbind(Z, V[, setdiff(vars, colnames(Z)), drop = FALSE])
+  }
+  if (is.null(Z)) Z <- stats::fitted(fit)
   aux <- stats::lm(z ~ Z)
   chi2 <- sum((stats::fitted(aux) - mean(z))^2) / 2
   df <- NCOL(Z)
   p <- stats::pchisq(chi2, df, lower.tail = FALSE)
   cat("Breusch-Pagan/Cook-Weisberg test for heteroskedasticity\n")
-  cat(if (rhs) "Variables: all independent variables\n" else "Variable: Fitted values\n")
+  cat(if (!is.null(vars)) paste0("Variables: ", paste(colnames(Z), collapse = " "), "\n")
+      else if (rhs) "Variables: all independent variables\n" else "Variable: Fitted values\n")
   cat("H0: Constant variance (normal error terms)\n\n")
   cat(sprintf("    chi2(%d) = %10.2f\nProb > chi2 = %10.4f\n", df, chi2, p))
   invisible(c(chi2 = chi2, df = df, p = p))
@@ -152,13 +165,53 @@ impl Session {
         let fit = est.fit;
         let name = fit.name();
         let known: &[(&str, usize)] = match fit {
-            Fit::Regress => &[("xb", 2), ("residuals", 1)],
+            Fit::Regress => &[
+                ("xb", 2),
+                ("residuals", 1),
+                ("stdp", 4),
+                ("stdf", 4),
+                ("stdr", 4),
+                ("rstandard", 3),
+                ("rstudent", 4),
+                ("cooksd", 4),
+                ("leverage", 3),
+                ("hat", 3),
+            ],
             Fit::Xtreg => &[("xb", 2)],
             Fit::Ivregress => &[("xb", 2), ("residuals", 1)],
-            Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2)],
-            Fit::Poisson | Fit::Nbreg => &[("n", 1), ("xb", 2)],
+            Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
+            Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
+            Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4)],
             Fit::Ologit | Fit::Oprobit | Fit::Mlogit => &[("pr", 2), ("outcome", 3)],
         };
+        // one statistic worked out by stata_predict_stat, if one was asked for
+        let stat = [
+            ("stdp", 4, "stdp"),
+            ("stdf", 4, "stdf"),
+            ("stdr", 4, "stdr"),
+            ("rstandard", 3, "rstandard"),
+            ("rstudent", 4, "rstudent"),
+            ("cooksd", 4, "cooksd"),
+            ("leverage", 3, "leverage"),
+            ("hat", 3, "leverage"),
+            ("score", 5, "score"),
+            ("ir", 2, "ir"),
+        ]
+        .into_iter()
+        .find(|(o, min, _)| opts.has(o, *min) && known.iter().any(|(k, _)| k == o))
+        .map(|(_, _, s)| s);
+        if fit == Fit::Regress
+            && !self.plain_regress
+            && matches!(
+                stat,
+                Some("stdf" | "stdr" | "rstandard" | "rstudent" | "cooksd" | "leverage")
+            )
+        {
+            return Err(no(
+                "predict's residual statistics after robust, clustered or weighted regress are \
+                 not translated yet",
+            ));
+        }
         if let Some(o) = opts.other(known) {
             return Err(no(format!(
                 "predict after {name} with the option {o} is not translated yet"
@@ -196,7 +249,14 @@ impl Session {
             if words.len() != 1 {
                 return Err(no(format!("predict after {name} makes one new variable")));
             }
+            if stat.is_some() {
+                self.helpers.insert("stata_predict_stat");
+            }
             let v = match fit {
+                _ if stat.is_some() => format!(
+                    "unname(stata_predict_stat(stata_estimates, {d}, {}))",
+                    r_text(stat.unwrap_or_default())
+                ),
                 Fit::Regress if opts.has("residuals", 1) => {
                     format!("{} - {}", r_name(&est.dep), newdata(""))
                 }
@@ -284,12 +344,6 @@ impl Session {
     ) -> Result<(), Untranslated> {
         self.no_by(c, "test")?;
         let est = self.estimates_for("test")?;
-        if !est.fit.one_outcome() {
-            return Err(no(format!(
-                "test after {} is not translated yet (its coefficients are in several equations)",
-                est.fit.name()
-            )));
-        }
         if let Some(o) = opts.other(&[]) {
             return Err(no(format!(
                 "test with the option {o} is not translated yet"
@@ -307,15 +361,27 @@ impl Session {
         } else if text.contains('=') {
             rows.push(equation(text, &est)?);
         } else {
-            // `test x w`: each coefficient is zero, jointly
+            // `test x w`: each coefficient is zero, jointly; after mlogit a
+            // name without an equation is in every equation, as in Stata
             for w in text.split_whitespace() {
-                rows.push(equation(w, &est)?);
+                let mut row = equation(w, &est)?;
+                row.coefs = rename_any(row.coefs, "stata:all:");
+                rows.push(row);
             }
+        }
+        if rows
+            .iter()
+            .any(|r| r.coefs.keys().any(|k| k.starts_with("stata:any:")))
+        {
+            return Err(no(
+                "after mlogit, name the equation of each coefficient in an equation, as [2]x",
+            ));
         }
         let list: Vec<String> = rows.iter().map(|r| r.r_vector()).collect();
         let values: Vec<String> = rows.iter().map(|r| r_number(r.value)).collect();
         let labels: Vec<String> = rows.iter().map(|r| r_text(&r.label)).collect();
         self.helpers.insert("stata_test");
+        self.helpers.insert("stata_names");
         out.line(format!(
             "stata_test(list({}), c({}), c({}))",
             list.join(", "),
@@ -333,12 +399,6 @@ impl Session {
     ) -> Result<(), Untranslated> {
         self.no_by(c, "lincom")?;
         let est = self.estimates_for("lincom")?;
-        if !est.fit.one_outcome() {
-            return Err(no(format!(
-                "lincom after {} is not translated yet (its coefficients are in several equations)",
-                est.fit.name()
-            )));
-        }
         if let Some(o) = opts.other(&[
             ("level", 3),
             ("or", 2),
@@ -357,6 +417,8 @@ impl Session {
             ));
         }
         let (coefs, constant) = linear(text, &est)?;
+        // after mlogit a name without an equation is the first equation's, as in Stata
+        let coefs = rename_any(coefs, "stata:first:");
         if constant != 0.0 {
             return Err(no("lincom takes coefficients only, not a constant"));
         }
@@ -377,6 +439,7 @@ impl Session {
         };
         self.helpers.insert("stata_coefs");
         self.helpers.insert("stata_lincom");
+        self.helpers.insert("stata_names");
         let row = Row {
             coefs,
             value: 0.0,
@@ -419,7 +482,7 @@ impl Session {
         if sub.is_empty() {
             return Err(no("estat needs a subcommand (ic, vce, hettest, ovtest)"));
         }
-        if !rest.is_empty() {
+        if !rest.is_empty() && !(sub.len() >= 4 && "hettest".starts_with(sub)) {
             return Err(no(format!(
                 "estat {sub} with a varlist is not translated yet"
             )));
@@ -460,9 +523,21 @@ impl Session {
                     "estat hettest with the option {o} is not translated yet"
                 )));
             }
+            let vars: Vec<&str> = rest.split_whitespace().collect();
+            if let Some(v) = vars.iter().find(|v| !is_name(v)) {
+                return Err(no(format!(
+                    "estat hettest {v}: only variable names written out are translated"
+                )));
+            }
+            let vars = if vars.is_empty() {
+                String::new()
+            } else {
+                let v: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+                format!(", vars = c({})", v.join(", "))
+            };
             self.helpers.insert("stata_estat");
             out.line(format!(
-                "stata_hettest(stata_estimates, rhs = {})",
+                "stata_hettest(stata_estimates, rhs = {}{vars})",
                 r_logical(opts.has("rhs", 3))
             ));
         } else if is("ovtest", 3) {
@@ -577,6 +652,17 @@ fn equation(text: &str, est: &Estimates) -> Result<Row, Untranslated> {
     })
 }
 
+/// `stata:any:x` (a name without an equation, after mlogit) as `to` says.
+fn rename_any(coefs: BTreeMap<String, f64>, to: &str) -> BTreeMap<String, f64> {
+    coefs
+        .into_iter()
+        .map(|(k, w)| match k.strip_prefix("stata:any:") {
+            Some(n) => (format!("{to}{n}"), w),
+            None => (k, w),
+        })
+        .collect()
+}
+
 /// Spaces made single, for the lines `test` and `lincom` print.
 fn tidy(t: &str) -> String {
     t.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -661,21 +747,81 @@ fn signed_terms(text: &str) -> Result<Vec<(f64, String)>, Untranslated> {
 /// name among R's coefficients.
 fn coef_name(t: &str, est: &Estimates) -> Result<String, Untranslated> {
     let t = t.trim();
-    let t = t
-        .strip_prefix("_b[")
-        .and_then(|r| r.strip_suffix(']'))
-        .unwrap_or(t)
-        .trim();
+    // `[2]x` and `[2]_b[x]` are `2:x`, as `_b[2:x]` is
+    let owned;
+    let t = match t.strip_prefix('[').and_then(|r| r.split_once(']')) {
+        Some((eq, rest)) if !rest.trim().is_empty() => {
+            let rest = rest.trim();
+            let rest = rest
+                .strip_prefix("_b[")
+                .and_then(|r| r.strip_suffix(']'))
+                .unwrap_or(rest);
+            owned = format!("{}:{}", eq.trim(), rest.trim());
+            owned.as_str()
+        }
+        Some((eq, _)) => {
+            // `test [3]`: the whole equation
+            return if est.fit == Fit::Mlogit {
+                Ok(format!("stata:eq:{}", eq.trim()))
+            } else {
+                Err(no(format!(
+                    "[{}]: {} has one equation",
+                    eq.trim(),
+                    est.fit.name()
+                )))
+            };
+        }
+        None => t
+            .strip_prefix("_b[")
+            .and_then(|r| r.strip_suffix(']'))
+            .unwrap_or(t)
+            .trim(),
+    };
+    let one_name = |s: &str| {
+        s.split('#').all(|p| {
+            let p = p.trim();
+            let p = p.strip_prefix("c.").unwrap_or(p);
+            is_name(p)
+                || p.split_once('.').is_some_and(|(l, v)| {
+                    !l.is_empty() && l.chars().all(|c| c.is_ascii_digit()) && is_name(v)
+                })
+        })
+    };
+    if let Some((eq, name)) = t.split_once(':') {
+        if est.fit != Fit::Mlogit {
+            return Err(no(format!("{t}: {} has one equation", est.fit.name())));
+        }
+        let name = name.trim();
+        if !(name == "_cons" || one_name(name)) || eq.trim().parse::<f64>().is_err() {
+            return Err(no(format!("{t} is not a coefficient name")));
+        }
+        return Ok(format!("stata:{}:{name}", eq.trim()));
+    }
+    // ologit's and oprobit's cut points are named as Stata names them
+    if let Some(k) = t.strip_prefix("/cut") {
+        if matches!(est.fit, Fit::Ologit | Fit::Oprobit) && k.parse::<usize>().is_ok() {
+            return Ok(t.to_string());
+        }
+        return Err(no(format!("{t}: not a coefficient of {}", est.fit.name())));
+    }
+    if est.fit == Fit::Mlogit {
+        // a name without an equation: which ones depends on the command
+        return if t == "_cons" || one_name(t) {
+            Ok(format!("stata:any:{t}"))
+        } else {
+            Err(no(format!("{t} is not a coefficient name")))
+        };
+    }
     if t == "_cons" {
         return Ok("(Intercept)".into());
     }
     if t.contains('#') {
-        return Err(no(format!(
-            "{t}: interaction coefficients are not translated in test and lincom yet"
-        )));
-    }
-    if t.contains('[') || t.contains(':') {
-        return Err(no(format!("{t}: equation names are not translated yet")));
+        // looked up among R's coefficients once the model has run
+        return if one_name(t) {
+            Ok(format!("stata:{}", t.replace(' ', "")))
+        } else {
+            Err(no(format!("{t} is not a coefficient name")))
+        };
     }
     if let Some(v) = t.strip_prefix("c.") {
         return if is_name(v) {
@@ -704,6 +850,150 @@ fn coef_name(t: &str, est: &Estimates) -> Result<String, Untranslated> {
     }
 }
 
+/// `predict`'s other statistics, for every row with the values they need
+/// (in the estimation sample or not, as Stata does), decoded in Stata 19:
+/// `stdp` is `sqrt(x V x')` with the model's own variance; after `regress`,
+/// with `s` its root MSE and `h = x (X'X)^-1 x'`, `stdf = sqrt(stdp^2 + s^2)`,
+/// `stdr = s sqrt(1 - h)`, `rstandard = e / stdr`, `rstudent` the same with
+/// `s` worked out without the row, `cooksd = e^2 h / (k s^2 (1 - h)^2)` and
+/// `leverage = h`; after logit, probit and poisson `score` is the derivative
+/// of the row's log likelihood by its linear prediction, and `ir` is
+/// `exp(xb)` without the exposure.
+pub(super) const PREDICT_STAT_HELPER: &str = r#"stata_predict_stat <- function(fit, newdata, stat) {
+  tt <- stats::delete.response(stats::terms(fit))
+  mf <- stats::model.frame(tt, newdata, na.action = stats::na.pass, xlev = fit$xlevels)
+  X <- stats::model.matrix(tt, mf)
+  b <- stats::coef(fit)
+  keep <- !is.na(b)
+  X <- X[, names(b)[keep], drop = FALSE]
+  xb <- drop(X %*% b[keep])
+  V <- stata_vcov[colnames(X), colnames(X), drop = FALSE]
+  stdp <- sqrt(rowSums((X %*% V) * X))
+  if (stat == "stdp") return(stdp)
+  if (stat == "ir") return(exp(xb))
+  off <- stats::model.offset(mf)
+  eta <- xb + if (is.null(off)) 0 else off
+  y <- eval(stats::formula(fit)[[2]], newdata, environment(stats::formula(fit)))
+  if (stat == "score") {
+    link <- fit$family$link
+    if (link == "logit") return(y - stats::plogis(eta))
+    if (link == "probit") {
+      P <- stats::pnorm(eta)
+      f <- stats::dnorm(eta)
+      return(ifelse(y == 1, f / P, -f / (1 - P)))
+    }
+    return(y - exp(eta))
+  }
+  Xf <- stats::model.matrix(fit)[, colnames(X), drop = FALSE]
+  k <- ncol(Xf)
+  n <- nrow(Xf)
+  rss <- sum(stats::residuals(fit)^2)
+  s2 <- rss / (n - k)
+  h <- rowSums((X %*% solve(crossprod(Xf))) * X)
+  e <- y - eta
+  switch(stat,
+    stdf = sqrt(stdp^2 + s2),
+    stdr = sqrt(s2 * (1 - h)),
+    rstandard = e / sqrt(s2 * (1 - h)),
+    rstudent = e / sqrt((rss - e^2 / (1 - h)) / (n - k - 1) * (1 - h)),
+    cooksd = e^2 * h / (k * s2 * (1 - h)^2),
+    leverage = h
+  )
+}"#;
+
+/// Stata's names for R's coefficients, so that `test` and `lincom` can find
+/// the ones the translation cannot name before the model runs: interactions
+/// (`1.g#c.x`, in either order, `c.` optional, as Stata takes them), squares
+/// (`c.x#c.x`) and mlogit's equations (`[2]x`, `[3]_cons`, `_b[2:x]`). A key
+/// `stata:...` in a row is looked up here; `stata:all:x` is `x` in every
+/// equation but the base (mlogit's `test x`), `stata:eq:3` every coefficient
+/// of equation 3 but its constant (`test [3]`), `stata:first:x` `x` in the
+/// first equation (`lincom x`), as Stata 19 reads them.
+pub(super) const NAMES_HELPER: &str = r##"stata_canon <- function(s) {
+  eq <- ""
+  if (grepl(":", s, fixed = TRUE)) {
+    eq <- paste0(sub(":.*$", "", s), ":")
+    s <- sub("^[^:]*:", "", s)
+  }
+  p <- strsplit(gsub(" ", "", s), "#", fixed = TRUE)[[1]]
+  paste0(eq, paste(sort(sub("^c\\.", "", p)), collapse = "#"))
+}
+stata_bnames <- function() {
+  part <- function(p) {
+    if (p == "(Intercept)") return("_cons")
+    m <- regmatches(p, regexec("^factor\\(([^()]+)\\)(.+)$", p))[[1]]
+    if (length(m)) return(paste0(m[3], ".", m[2]))
+    m <- regmatches(p, regexec("^stata_ib\\(([^,]+), \"[^\"]*\"\\)(.+)$", p))[[1]]
+    if (length(m)) return(paste0(m[3], ".", m[2]))
+    m <- regmatches(p, regexec("^I\\(([^()^]+)\\^([0-9]+)\\)$", p))[[1]]
+    if (length(m)) return(paste(rep(m[2], as.integer(m[3])), collapse = "#"))
+    p
+  }
+  multi <- inherits(stata_estimates, "multinom")
+  vapply(names(stata_b), function(n) {
+    eq <- ""
+    if (multi) {
+      eq <- paste0(sub(":.*$", "", n), ":")
+      n <- sub("^[^:]*:", "", n)
+    }
+    stata_canon(paste0(eq, paste(vapply(strsplit(n, ":", fixed = TRUE)[[1]], part, ""), collapse = "#")))
+  }, "")
+}
+stata_resolve <- function(rows, r, labels) {
+  st <- stata_bnames()
+  nm <- names(stata_b)
+  multi <- inherits(stata_estimates, "multinom")
+  eqs <- if (multi) unique(sub(":.*$", "", nm)) else character(0)
+  find <- function(k) {
+    if (multi && grepl(":", k, fixed = TRUE) && sub(":.*$", "", k) == stata_base) {
+      return(NA_character_)  # Stata takes it as a zero
+    }
+    i <- match(stata_canon(k), st)
+    if (is.na(i)) stop(k, " not found")
+    nm[i]
+  }
+  out <- list(rows = list(), r = numeric(0), labels = character(0))
+  add <- function(row, v, l) {
+    out$rows[[length(out$rows) + 1]] <<- row
+    out$r <<- c(out$r, v)
+    out$labels <<- c(out$labels, l)
+  }
+  for (i in seq_along(rows)) {
+    row <- rows[[i]]
+    keys <- names(row)
+    if (length(row) == 1 && startsWith(keys, "stata:all:")) {
+      v <- sub("^stata:all:", "", keys)
+      for (e in eqs) add(stats::setNames(row[[1]], find(paste0(e, ":", v))), r[i], paste0("[", e, "]", v, " = 0"))
+      next
+    }
+    if (length(row) == 1 && startsWith(keys, "stata:eq:")) {
+      e <- sub("^stata:eq:", "", keys)
+      if (multi && e == stata_base) stop("[", e, "] is the base outcome's equation, which Stata fixes at zero")
+      these <- nm[startsWith(nm, paste0(e, ":")) & !endsWith(nm, ":(Intercept)")]
+      if (length(these) == 0) stop("equation [", e, "] not found")
+      for (n in these) add(stats::setNames(1, n), 0, paste0("[", e, "]", sub("^[^:]*:", "", n), " = 0"))
+      next
+    }
+    for (j in seq_along(keys)) {
+      k <- keys[j]
+      if (startsWith(k, "stata:first:")) {
+        lv <- as.character(sort(as.numeric(stata_estimates$lev)))
+        keys[j] <- find(paste0(lv[1], ":", sub("^stata:first:", "", k)))
+      } else if (startsWith(k, "stata:")) {
+        keys[j] <- find(sub("^stata:", "", k))
+      }
+    }
+    keep <- !is.na(keys)
+    row <- row[keep]
+    names(row) <- keys[keep]
+    if (length(row) == 0) {
+      stop("[", stata_base, "] is the base outcome's equation, which Stata fixes at zero, so nothing is left to test")
+    }
+    add(row, r[i], labels[i])
+  }
+  out
+}"##;
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -729,7 +1019,9 @@ mod tests {
             coef_name("1.h", &e).is_err(),
             "h is not a factor in the model"
         );
-        assert!(coef_name("1.g#c.x", &e).is_err(), "interactions not yet");
+        // an interaction is looked up among R's coefficients once the model has run
+        assert_eq!(coef_name("1.g#c.x", &e).as_deref(), Ok("stata:1.g#c.x"));
+        assert!(coef_name("[2]x", &e).is_err(), "regress has one equation");
     }
 
     #[test]

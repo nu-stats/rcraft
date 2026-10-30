@@ -788,16 +788,16 @@ fn what_is_not_translated_after_a_model_says_why() {
         "predict with no model before it"
     );
     assert!(
-        refusal("use \"d.dta\"\nmlogit y x\ntest x\n").contains("several equations"),
-        "test after mlogit"
+        refusal("use \"d.dta\"\nmlogit y x\ntest x = 1\n").contains("name the equation"),
+        "after mlogit an equation needs its names written with equations"
     );
     assert!(
         refusal("use \"d.dta\"\nlogit y x\nstcox x\n").contains("stcox"),
         "stcox is not translated yet"
     );
     assert!(
-        refusal("use \"d.dta\"\nnbreg y x, robust\n").contains("robust"),
-        "robust nbreg is not translated yet"
+        refusal("use \"d.dta\"\nnbreg y x, vce(bootstrap)\n").contains("bootstrap"),
+        "a vce that is not translated is named"
     );
     assert!(
         refusal("use \"d.dta\"\npoisson y x, exposure(t) offset(o)\n").contains("not both"),
@@ -812,8 +812,8 @@ fn what_is_not_translated_after_a_model_says_why() {
         "hettest is for regress"
     );
     assert!(
-        refusal("use \"d.dta\"\nregress y x\npredict s, stdp\n").contains("stdp"),
-        "stdp is not translated yet"
+        refusal("use \"d.dta\"\nlogit y x\npredict s, dbeta\n").contains("dbeta"),
+        "a predict statistic that is not translated is named"
     );
 }
 
@@ -1476,4 +1476,394 @@ fn by_goes_on_past_a_group_that_stata_cannot_fit() {
         "both groups, then the next command: {text}"
     );
     assert!(text.contains("-> d = 1"), "{text}");
+}
+
+/// Robust and clustered errors after nbreg, ologit, oprobit and mlogit, and the
+/// likelihood-ratio test of alpha after nbreg, against Stata 19 on `models`.
+/// Six digits: the bread is each model's own variance, which for ologit and
+/// mlogit comes from R's numerical Hessian (see the notes above).
+#[test]
+fn robust_errors_after_the_other_likelihood_models_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let se = |e: &mut Engine, cmd: &str, names: &[&str]| -> Vec<f64> {
+        ok(e, &script(&format!("use \"{dir}/models.dta\"\n{cmd}\n")));
+        let pick: Vec<String> = names
+            .iter()
+            .map(|n| format!("sqrt(stata_vcov[\"{n}\", \"{n}\"])"))
+            .collect();
+        numbers(e, "0", &pick.join(", "))
+    };
+    let nb = ["x", "(Intercept)", "/lnalpha"];
+    near_stata(
+        &se(&mut e, "nbreg nb x, vce(robust)", &nb),
+        &[
+            0.096321330899123245,
+            0.12072961105109967,
+            0.35624427194401809,
+        ],
+        1e-6,
+        "nbreg, robust",
+    );
+    near_stata(
+        &se(&mut e, "nbreg nb x, vce(cluster cl)", &nb),
+        &[
+            0.11975966068493894,
+            0.078489570543055789,
+            0.49880799190745001,
+        ],
+        1e-6,
+        "nbreg, clustered",
+    );
+    let ol = ["x", "w", "/cut1", "/cut2"];
+    near_stata(
+        &se(&mut e, "ologit ord x w, vce(robust)", &ol),
+        &[
+            0.20295988781520097,
+            0.35591311674491405,
+            0.22753245407567338,
+            0.25989714190966423,
+        ],
+        1e-6,
+        "ologit, robust",
+    );
+    near_stata(
+        &se(&mut e, "ologit ord x w, vce(cluster cl)", &ol),
+        &[
+            0.14219638072514956,
+            0.40191690471570396,
+            0.18552382694791314,
+            0.19889956780877471,
+        ],
+        1e-6,
+        "ologit, clustered",
+    );
+    near_stata(
+        &se(&mut e, "oprobit ord x w, robust", &ol),
+        &[
+            0.12239063028173303,
+            0.21816064705598151,
+            0.14000675901248208,
+            0.15427723266093946,
+        ],
+        1e-6,
+        "oprobit, robust",
+    );
+    let ml = ["1:x", "1:w", "1:(Intercept)", "3:x", "3:w", "3:(Intercept)"];
+    near_stata(
+        &se(&mut e, "mlogit cat3 x w, vce(robust)", &ml),
+        &[
+            0.38351552296724112,
+            0.4895574927561735,
+            0.32138887171006247,
+            0.34250707079036058,
+            0.52036120642589179,
+            0.29606214123558133,
+        ],
+        1e-6,
+        "mlogit, robust",
+    );
+    near_stata(
+        &se(&mut e, "mlogit cat3 x w, vce(cluster cl)", &ml),
+        &[
+            0.29665241080478849,
+            0.40356906086796074,
+            0.34477866338370322,
+            0.39273126859588464,
+            0.53316684176963314,
+            0.31501637141386846,
+        ],
+        1e-6,
+        "mlogit, clustered",
+    );
+    // the LR test of alpha: chibar2(01), half of chi2(1)'s tail
+    let code = script(&format!("use \"{dir}/models.dta\"\nnbreg nb x\n"));
+    let text = ok(&mut e, &code);
+    assert!(
+        text.contains("LR test of alpha=0: chibar2(01) = 26.69"),
+        "{text}"
+    );
+    let v = numbers(
+        &mut e,
+        "lr <- stata_nbreg_lr(stata_estimates)",
+        "lr[[\"chi2_c\"]], lr[[\"p\"]] / (0.5 * stats::pchisq(26.689103748660159, 1, lower.tail = FALSE))",
+    );
+    near_stata(
+        &v,
+        // Stata's chi2_c, and p as half of chi2(1)'s tail (Stata's e(p) is the model's test)
+        &[26.689103748660159, 1.0],
+        1e-6,
+        "LR test of alpha",
+    );
+    let code = script(&format!("use \"{dir}/models.dta\"\nnbreg nb x, robust\n"));
+    assert!(
+        !ok(&mut e, &code).contains("LR test"),
+        "not shown with robust errors, as in Stata"
+    );
+}
+
+/// `predict`'s other statistics against Stata 19's stored values (floats, so
+/// to float precision), for rows 1 and 3, in the estimation sample of
+/// `regress y x w if g == 0`, and row 2, which is not.
+#[test]
+fn predict_statistics_agree_with_stata_19_in_and_out_of_the_sample() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let stats = [
+        "stdp",
+        "stdf",
+        "stdr",
+        "rstandard",
+        "rstudent",
+        "cooksd",
+        "leverage",
+    ];
+    let mut dofile = format!("use \"{dir}/models.dta\"\nregress y x w if g == 0\n");
+    for s in stats {
+        dofile.push_str(&format!("predict s_{s}, {s}\n"));
+    }
+    dofile.push_str(
+        "logit yb x w\npredict l_stdp, stdp\npredict l_sc, score\npoisson cnt x, exposure(expo)\npredict p_stdp, stdp\npredict p_ir, ir\npredict p_sc, score\n",
+    );
+    ok(&mut e, &script(&dofile));
+    let cols: Vec<String> = stats.iter().map(|s| format!("models$s_{s}[r]")).collect();
+    let stata: [[f64; 7]; 3] = [
+        [
+            0.42897382378578186,
+            2.1067731380462646,
+            2.0175371170043945,
+            -2.7202763557434082,
+            -2.9999756813049316,
+            0.1115124449133873,
+            0.043252941220998764,
+        ],
+        [
+            0.35639479756355286,
+            2.0932013988494873,
+            2.0316145420074463,
+            1.2987469434738159,
+            1.3113147020339966,
+            0.017302464693784714,
+            0.029854981228709221,
+        ],
+        [
+            1.0440839529037476,
+            2.3118360042572021,
+            1.7788656949996948,
+            0.58660697937011719,
+            0.58133512735366821,
+            0.039514612406492233,
+            0.25622701644897461,
+        ],
+    ];
+    for (r, want) in stata.iter().enumerate() {
+        let got = numbers(&mut e, &format!("r <- {}", r + 1), &cols.join(", "));
+        near_stata(
+            &got,
+            want,
+            1e-7,
+            &format!("predict after regress, row {}", r + 1),
+        );
+    }
+    let got = numbers(
+        &mut e,
+        "0",
+        "models$l_stdp[1], models$l_sc[1], models$l_stdp[2], models$l_sc[2], models$p_stdp[1], models$p_ir[1], models$p_sc[1], models$p_stdp[2], models$p_ir[2], models$p_sc[2]",
+    );
+    near_stata(
+        &got,
+        &[
+            0.42340770363807678,
+            0.59998035430908203,
+            0.30726629495620728,
+            0.35271617770195007,
+            0.11630483716726303,
+            0.86206150054931641,
+            -0.094818085432052612,
+            0.073511473834514618,
+            1.3572994470596313,
+            -0.33895650506019592,
+        ],
+        1e-7,
+        "predict after logit and poisson",
+    );
+    // by definition: stdp after regress is predict's own se.fit, and leverage
+    // in the sample is R's hatvalues
+    let got = numbers(
+        &mut e,
+        "fit <- stats::lm(y ~ x + w, data = models[models$g == 0, ])",
+        "models$s_stdp[1], unname(stats::predict(fit, models[1, ], se.fit = TRUE)$se.fit), models$s_leverage[1], unname(stats::hatvalues(fit)[1])",
+    );
+    near_stata(&got[..1], &got[1..2], 1e-7, "stdp is se.fit");
+    near_stata(&got[2..3], &got[3..4], 1e-7, "leverage is hatvalues");
+    assert!(
+        refusal("use s\nregress y x, robust\npredict r, rstudent\n").contains("not translated yet"),
+        "residual statistics after robust regress"
+    );
+}
+
+/// `test` and `lincom` after ologit and mlogit (equations, cut points) and
+/// with interaction coefficients, `estat hettest` with a varlist, and
+/// `e(sample)`, against Stata 19 on `models`.
+#[test]
+fn test_lincom_hettest_and_esample_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let use_ = format!("use \"{dir}/models.dta\"\n");
+    // the last test or lincom line of the script, run again for its numbers
+    let last = |e: &mut Engine, dofile: &str, begin: &str, show: &str| -> Vec<f64> {
+        let code = script(&format!("{use_}{dofile}\n"));
+        ok(e, &code);
+        let line = line_of(&code, begin);
+        numbers(e, &format!("res <- {line}"), show)
+    };
+    let chi2 = |e: &mut Engine, dofile: &str| {
+        last(e, dofile, "stata_test(", "res[[\"chi2\"]], res[[\"df\"]]")
+    };
+    let lincom =
+        |e: &mut Engine, dofile: &str| last(e, dofile, "stata_lincom(", "res[1, 1], res[1, 2]");
+    // ologit: six digits, as its estimates (see the notes above)
+    near_stata(
+        &chi2(&mut e, "ologit ord x w\ntest x"),
+        &[6.6500532543804587, 1.0],
+        1e-6,
+        "test x",
+    );
+    near_stata(
+        &chi2(&mut e, "ologit ord x w\ntest x = w")[..1],
+        &[0.23236045096730346],
+        1e-6,
+        "test x = w",
+    );
+    near_stata(
+        &chi2(&mut e, "ologit ord x w\ntest _b[/cut1] = 0")[..1],
+        &[6.7023293366669954],
+        1e-6,
+        "a cut point",
+    );
+    near_stata(
+        &lincom(&mut e, "ologit ord x w\nlincom x + w"),
+        &[0.86974469368032981, 0.41575438500015555],
+        1e-6,
+        "lincom x + w",
+    );
+    near_stata(
+        &lincom(&mut e, "ologit ord x w\nlincom _b[/cut2] - _b[/cut1]"),
+        &[1.2848561328022705, 0.24119739466004386],
+        1e-6,
+        "lincom of cut points",
+    );
+    // mlogit: the base outcome (2, the most frequent) has no equation
+    let m = "mlogit cat3 x w\n";
+    near_stata(
+        &chi2(&mut e, &format!("{m}test x")),
+        &[13.624281484051277, 2.0],
+        1e-6,
+        "x in every equation",
+    );
+    near_stata(
+        &chi2(&mut e, &format!("{m}test [2]x = [3]x")),
+        &[13.52585604224444, 1.0],
+        1e-6,
+        "[2]x is the base outcome's, a zero",
+    );
+    near_stata(
+        &chi2(&mut e, &format!("{m}test [3]")),
+        &[14.415873645763989, 2.0],
+        1e-6,
+        "an equation but its constant",
+    );
+    near_stata(
+        &lincom(&mut e, &format!("{m}lincom [2]x - [3]x")),
+        &[1.2749167694777452, 0.34665658405672817],
+        1e-6,
+        "lincom with the base outcome's zero",
+    );
+    near_stata(
+        &lincom(&mut e, &format!("{m}lincom x")),
+        &[-0.79525353414211297, 0.35450794336819591],
+        1e-6,
+        "the first equation's x",
+    );
+    near_stata(
+        &lincom(&mut e, &format!("{m}lincom [3]_cons + [3]w")),
+        &[-0.9609326129381851, 0.59459953119170661],
+        1e-6,
+        "a constant",
+    );
+    // Stata gives a test of nothing for the base outcome's equation; R says why
+    let (outcome, text) = run(&mut e, &script(&format!("{use_}{m}test [2]x\n")));
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("base outcome"), "{text}");
+
+    // interactions, in either order and with or without c.
+    let f = |e: &mut Engine, dofile: &str| {
+        last(
+            e,
+            dofile,
+            "stata_test(",
+            "res[[\"F\"]], res[[\"df\"]], res[[\"df_r\"]]",
+        )
+    };
+    let r = "regress y c.x##i.g\n";
+    for t in ["test 1.g#c.x", "test c.x#1.g", "test 1.g#x"] {
+        near_stata(
+            &f(&mut e, &format!("{r}{t}")),
+            &[0.75376122119394684, 1.0, 76.0],
+            1e-10,
+            t,
+        );
+    }
+    near_stata(
+        &lincom(&mut e, &format!("{r}lincom x + 1.g#c.x")),
+        &[2.0577600777372527, 0.340094179827649],
+        1e-10,
+        "lincom with an interaction",
+    );
+    near_stata(
+        &f(&mut e, "regress y c.x##c.w\ntest c.x#c.w")[..1],
+        &[0.72707260506675842],
+        1e-10,
+        "a continuous interaction",
+    );
+
+    // estat hettest with a varlist, and with rhs as well
+    let h = |e: &mut Engine, dofile: &str| {
+        last(
+            e,
+            dofile,
+            "stata_hettest(",
+            "res[[\"chi2\"]], res[[\"df\"]]",
+        )
+    };
+    let reg = "regress y x w if g == 0\n";
+    near_stata(
+        &h(&mut e, &format!("{reg}estat hettest x")),
+        &[0.039580253225814488, 1.0],
+        1e-10,
+        "hettest x",
+    );
+    near_stata(
+        &h(&mut e, &format!("{reg}estat hettest x w, rhs")),
+        &[0.16375070954466509, 2.0],
+        1e-10,
+        "hettest x w, rhs",
+    );
+
+    // e(sample): the forty rows of g == 0
+    let code = script(&format!(
+        "{use_}{reg}summarize x if e(sample)\ngen byte es = e(sample)\n"
+    ));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        "0",
+        "sum(models$es), mean(models$x[models$es == 1])",
+    );
+    near_stata(&v, &[40.0, -0.37080000000000002], 1e-12, "e(sample)");
+    // not once the rows may have moved
+    assert!(
+        refusal(&format!("{use_}{reg}sort x\nsummarize x if e(sample)\n")).contains("e(sample)")
+    );
+    assert!(refusal(&format!("{use_}summarize x if e(sample)\n")).contains("e(sample)"));
 }
