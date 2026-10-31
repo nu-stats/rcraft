@@ -72,6 +72,8 @@ pub struct HeadlessOptions {
     pub stata: bool,
     /// ... and this file in the Script Editor.
     pub script: Option<PathBuf>,
+    /// Show the differences guide on the command of this Stata line.
+    pub stata_guide: Option<String>,
     pub accent: Accent,
     /// Width and height in points.
     pub size: [u32; 2],
@@ -105,6 +107,7 @@ impl HeadlessOptions {
             packages_from: None,
             stata: false,
             script: None,
+            stata_guide: None,
             accent: Accent::default(),
             size: [1240, 780],
             pixels_per_point: 1.0,
@@ -143,6 +146,9 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     if let Some(path) = &options.script {
         let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
         app.set_script(&text);
+    }
+    if let Some(line) = &options.stata_guide {
+        app.show_stata_guide(line);
     }
     if options.show_data {
         app.show_data(&ctx);

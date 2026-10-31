@@ -19,6 +19,7 @@ use rcraft_rcodegen::help_docs::{
     package_code, parse_package, parse_text, parse_vignettes, vignettes_code, FileKind,
     PackageAnswer, PackageDoc, Vignette,
 };
+use rcraft_statatr::differences::{self, Guide};
 
 use crate::look::Palette;
 
@@ -49,6 +50,8 @@ enum Content {
     Message(String),
     /// The help page of one of RCraft's own dialogs.
     Dialog(Box<DialogHelp>),
+    /// Where R and Stata differ for one command (P2B.8), or the general page.
+    Stata(&'static Guide),
     /// A package's own page.
     Package(Box<PackageDoc>),
     /// This package is not installed.
@@ -101,6 +104,25 @@ impl HelpWindow {
     pub fn show_dialog(&mut self, page: DialogHelp) {
         self.open = true;
         self.push(Content::Dialog(Box::new(page)));
+    }
+
+    /// Opens the window on the differences guide's page for the command a
+    /// Stata line runs (the general page when it has none). Nothing is asked of R.
+    pub fn show_stata(&mut self, line: &str) {
+        self.open = true;
+        let page = differences::for_line(line).or_else(|| differences::guide("general"));
+        if let Some(page) = page {
+            self.push(Content::Stata(page));
+        }
+    }
+
+    /// The command whose page of the differences guide is showing, if one is.
+    #[cfg(test)]
+    pub fn shown_stata(&self) -> Option<&'static str> {
+        match self.current() {
+            Some(Content::Stata(page)) => Some(page.command),
+            _ => None,
+        }
     }
 
     /// Opens the window at the search box.
@@ -237,6 +259,7 @@ impl HelpWindow {
         }
         let mut out = None;
         let mut next: Option<HelpCommand> = None;
+        let mut guide: Option<&'static Guide> = None;
         let mut open = self.open;
         egui::Window::new("Help")
             .open(&mut open)
@@ -250,9 +273,12 @@ impl HelpWindow {
                 if self.pending.is_some() || self.queued.is_some() {
                     ui.label(RichText::new("Asking R…").color(pal.dim));
                 }
-                self.body(ui, pal, ctx, &mut next, &mut out);
+                self.body(ui, pal, ctx, &mut next, &mut guide, &mut out);
             });
         self.open = open;
+        if let Some(page) = guide {
+            self.push(Content::Stata(page));
+        }
         if let Some(command) = next {
             self.queued = Some(command);
         }
@@ -304,6 +330,7 @@ impl HelpWindow {
         pal: &Palette,
         ctx: &egui::Context,
         next: &mut Option<HelpCommand>,
+        guide: &mut Option<&'static Guide>,
         out: &mut Option<HelpOut>,
     ) {
         match self.current() {
@@ -381,6 +408,7 @@ impl HelpWindow {
             }
             Some(Content::Page(page)) => self.page(ui, pal, ctx, page, next, out),
             Some(Content::Dialog(page)) => self.dialog_page(ui, pal, ctx, page, next),
+            Some(Content::Stata(page)) => stata_page(ui, pal, page, guide),
             Some(Content::Package(doc)) => self.package_page(ui, pal, ctx, doc, next),
             Some(Content::NoPackage(package)) => {
                 ui.label(
@@ -803,6 +831,51 @@ impl HelpWindow {
                 );
             });
     }
+}
+
+/// A page of the differences guide: what the command does, then each point;
+/// the general page ends with the list of the commands' pages.
+fn stata_page(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    page: &'static Guide,
+    guide: &mut Option<&'static Guide>,
+) {
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let title = if page.command == "general" {
+                "Stata and R: what differs".to_string()
+            } else {
+                format!("Stata and R: {}", page.command)
+            };
+            ui.label(RichText::new(title).strong().size(17.0));
+            ui.label(
+                RichText::new("Stata mode's differences guide")
+                    .small()
+                    .color(pal.dim),
+            );
+            ui.add_space(4.0);
+            ui.label(page.about);
+            for point in page.points {
+                ui.add_space(6.0);
+                ui.label(RichText::new(point.topic).strong());
+                ui.label(point.text);
+            }
+            ui.add_space(10.0);
+            if page.command == "general" {
+                ui.label(RichText::new("Each command").strong().color(pal.dim));
+                ui.horizontal_wrapped(|ui| {
+                    for g in differences::GUIDES.iter().skip(1) {
+                        if ui.link(g.command).on_hover_text(g.about).clicked() {
+                            *guide = Some(g);
+                        }
+                    }
+                });
+            } else if ui.link("What differs for every command").clicked() {
+                *guide = differences::guide("general");
+            }
+        });
 }
 
 #[cfg(test)]

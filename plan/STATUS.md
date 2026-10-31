@@ -2442,3 +2442,20 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   (`regress y big tiny`), and now solves it on the errors' scale; a one-coefficient model lost its name.
 - **Tests:** the 26 tables of two Stata 19 runs compared character for character (`stata_returned.rs`), the
   refusal, the Results parts, Tab in the script; the old tests that read R's layout now read Stata's.
+
+## P2B.8 The differences guide, 2026-10-31
+
+- `statatr/src/differences.rs` (new): a page for every command Stata mode translates, and a general page on what
+  differs everywhere (Stata's missing value above every number and the conditions written out for it, float
+  against double, string widths, sort ties, random numbers, returned values, what is not translated). Each point
+  says what Stata does, what R does by itself and what the translation does; the pages are written from the
+  translator's own rules (each one checked against its code: destring leaves a variable with text as it is,
+  tostring takes whole numbers, merge makes `_merge` with Stata's labels and order, reshape sorts by i and j, ...),
+  never from Stata's files. `guide()` finds a page by a command or its abbreviation (`probit` shares `logit`'s,
+  `tab2` `tabulate`'s, `scatter` `twoway`'s); `for_line()` by a Stata line, past `quietly`, `capture` and `by:`.
+- **In the app:** a note or a reason under a Stata line, in Results and in the Script Editor's R pane, opens the
+  Help window on its command's page (the general page for a command with none); Help > *Stata and R: what
+  differs…* opens the general page, which lists every command's. Back and Forward work as for R's pages. Picture
+  mode: `--stata-guide LINE`.
+- **Tests:** every command Tab offers (the translator's) has a page with points, each page once; a line finds its
+  page through prefixes and abbreviations; a note's click opens the right page.

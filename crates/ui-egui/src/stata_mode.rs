@@ -264,15 +264,24 @@ pub fn char_range(text: &str, first: usize, lines: usize) -> (usize, usize) {
     (start.min(end), end)
 }
 
+/// What a click on the R pane asks for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Clicked {
+    /// Select this line's Stata.
+    Line(usize),
+    /// Show the differences guide for this line's command.
+    Guide(usize),
+}
+
 /// The R pane: each Stata line's R under its Stata, its notes, or why it was
-/// not translated. The line holding `cursor_line` (1-based) is marked; the
-/// one clicked is returned.
+/// not translated. The line holding `cursor_line` (1-based) is marked. A
+/// click on a line's Stata or R selects its Stata; on a note, the guide.
 pub fn translation_pane(
     ui: &mut egui::Ui,
     pal: &Palette,
     t: &Translation,
     cursor_line: usize,
-) -> Option<usize> {
+) -> Option<Clicked> {
     let mut clicked = None;
     if !t.helpers.is_empty() {
         ui.label(
@@ -285,6 +294,19 @@ pub fn translation_pane(
             .color(pal.dim),
         );
     }
+    let line_label = |ui: &mut egui::Ui, text: RichText| {
+        ui.add(
+            egui::Label::new(text)
+                .wrap_mode(egui::TextWrapMode::Extend)
+                .sense(egui::Sense::click()),
+        )
+        .clicked()
+    };
+    let note_label = |ui: &mut egui::Ui, text: RichText| {
+        ui.add(egui::Label::new(text).sense(egui::Sense::click()))
+            .on_hover_text("Click for where R and Stata differ here")
+            .clicked()
+    };
     for (i, l) in t.lines.iter().enumerate() {
         let here = cursor_line >= l.span.line
             && cursor_line < l.span.line.saturating_add(l.span.lines.max(1));
@@ -297,58 +319,53 @@ pub fn translation_pane(
             .fill(fill)
             .inner_margin(egui::Margin::symmetric(4.0, 2.0))
             .rounding(3.0);
-        let response = frame
-            .show(ui, |ui| {
-                ui.set_width(ui.available_width());
-                let stata = RichText::new(format!(
-                    "{:>4}  {}",
-                    l.span.line,
-                    l.stata.replace('\n', " ")
-                ))
-                .monospace()
-                .small()
-                .color(pal.dim);
-                ui.add(egui::Label::new(stata).wrap_mode(egui::TextWrapMode::Extend));
-                match &l.result {
-                    Ok(r) => {
-                        for code in r.code.lines() {
-                            ui.add(
-                                egui::Label::new(
-                                    RichText::new(code).monospace().color(pal.command),
-                                )
-                                .wrap_mode(egui::TextWrapMode::Extend),
-                            );
-                        }
-                        if r.code.is_empty() {
-                            ui.label(
-                                RichText::new("(nothing to do in R)")
-                                    .italics()
-                                    .small()
-                                    .color(pal.dim),
-                            );
-                        }
-                        for c in &r.caveats {
-                            ui.label(
-                                RichText::new(format!("note: {c}"))
-                                    .small()
-                                    .color(pal.warning),
-                            );
+        frame.show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let stata = RichText::new(format!(
+                "{:>4}  {}",
+                l.span.line,
+                l.stata.replace('\n', " ")
+            ))
+            .monospace()
+            .small()
+            .color(pal.dim);
+            if line_label(ui, stata) {
+                clicked = Some(Clicked::Line(i));
+            }
+            match &l.result {
+                Ok(r) => {
+                    for code in r.code.lines() {
+                        if line_label(ui, RichText::new(code).monospace().color(pal.command)) {
+                            clicked = Some(Clicked::Line(i));
                         }
                     }
-                    Err(e) => {
+                    if r.code.is_empty() {
                         ui.label(
-                            RichText::new(format!("not translated: {}", e.reason))
+                            RichText::new("(nothing to do in R)")
+                                .italics()
                                 .small()
-                                .color(pal.error),
+                                .color(pal.dim),
                         );
                     }
+                    for c in &r.caveats {
+                        let note = RichText::new(format!("note: {c}"))
+                            .small()
+                            .color(pal.warning);
+                        if note_label(ui, note) {
+                            clicked = Some(Clicked::Guide(i));
+                        }
+                    }
                 }
-            })
-            .response
-            .interact(egui::Sense::click());
-        if response.clicked() {
-            clicked = Some(i);
-        }
+                Err(e) => {
+                    let why = RichText::new(format!("not translated: {}", e.reason))
+                        .small()
+                        .color(pal.error);
+                    if note_label(ui, why) {
+                        clicked = Some(Clicked::Guide(i));
+                    }
+                }
+            }
+        });
     }
     clicked
 }

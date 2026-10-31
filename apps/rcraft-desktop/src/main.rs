@@ -11,6 +11,7 @@
 //! --dark           dark mode (default light)
 //! --stata          Stata mode on, and the --demo lines run as Stata
 //! --script FILE    put FILE in the Script Editor
+//! --stata-guide LINE   show the differences guide on the command of LINE (`general` for all)
 //! --data           show the Data tab instead of Results
 //! --objects        show the Objects list instead of Variables
 //! --filter TYPE    list only one type of variable (Numbers, Text, Factors, ...)
@@ -69,6 +70,7 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
             "--demo" => options.demo = Some(PathBuf::from(value("--demo")?)),
             "--dark" => options.dark = true,
             "--stata" => options.stata = true,
+            "--stata-guide" => options.stata_guide = Some(value("--stata-guide")?.clone()),
             "--script" => options.script = Some(PathBuf::from(value("--script")?)),
             "--data" => options.show_data = true,
             "--objects" => options.show_objects = true,

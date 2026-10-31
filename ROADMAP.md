@@ -297,6 +297,7 @@ Tasks:
   and Stata differ (default standard errors, degrees of freedom, how ties
   and missing values are handled, sort stability, string widths, float
   versus double). Linked from the note in P2B.7.
+  (done 2026-10-31: `statatr::differences`, a page per translated command and a general one, opened from every note and reason under a Stata line and from the Help menu.)
 - P2B.9 Do-file runner: see Phase 2C.
 - P2B.10 Checked against Stata: a private corpus of made-up data and
   recorded Stata results, the same method as StatCraft's observation kit, so

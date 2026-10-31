@@ -132,6 +132,8 @@ enum Action {
     SubmitStata(Source, String),
     /// Turns Stata mode on or off for the session shown.
     SetStataMode(bool),
+    /// Open the differences guide on the command this Stata line runs (P2B.8).
+    OpenStataGuide(String),
     SetCommand(String),
     /// Add text (a variable name) to the Command line.
     Insert(String),
@@ -661,6 +663,7 @@ impl App {
                     }
                 }
             }
+            Action::OpenStataGuide(line) => self.help_window.show_stata(&line),
             Action::SetStataMode(on) => {
                 self.stata.on = on;
                 // an untouched script starts over in the other language
@@ -1421,6 +1424,10 @@ impl App {
                     }));
                     ui.close_menu();
                 }
+                if ui.button("Stata and R: what differs…").clicked() {
+                    out.push(Action::OpenStataGuide("general".into()));
+                    ui.close_menu();
+                }
                 ui.separator();
                 ui.label(format!(
                     "{} {}",
@@ -1718,6 +1725,16 @@ Click to choose another folder"
                 Some(shown)
             });
             // a click on an R block selects its Stata
+            // a click on a note opens the guide on its line's command
+            if let Some(stata_mode::Clicked::Guide(i)) = picked {
+                if let Some(l) = self.stata.translation(&self.script).lines.get(i) {
+                    out.push(Action::OpenStataGuide(l.stata.clone()));
+                }
+            }
+            let picked = match picked {
+                Some(stata_mode::Clicked::Line(i)) => Some(i),
+                _ => None,
+            };
             let span = picked.and_then(|i| {
                 self.stata
                     .translation(&self.script)
@@ -2177,11 +2194,14 @@ fn stata_parts(
     out: &mut Vec<Action>,
 ) {
     use stata_mode::Part;
+    // the Stata line a note is about, for its page in the guide
+    let mut line = "";
     for part in parts {
         match part {
-            Part::Helpers(line) => mono(ui, line, pal.dim, false),
-            Part::Stata(line) => {
-                let text = RichText::new(format!(". {line}"))
+            Part::Helpers(helpers) => mono(ui, helpers, pal.dim, false),
+            Part::Stata(s) => {
+                line = s;
+                let text = RichText::new(format!(". {s}"))
                     .monospace()
                     .strong()
                     .color(pal.accent);
@@ -2191,24 +2211,35 @@ fn stata_parts(
                         .add(label.sense(egui::Sense::click()))
                         .on_hover_text("Click to put this Stata back in the Command line");
                     if response.clicked() {
-                        out.push(Action::SetCommand(line.clone()));
+                        out.push(Action::SetCommand(s.clone()));
                     }
                 } else {
                     ui.add(label);
                 }
             }
-            Part::R(line) => mono(ui, &format!("  {line}"), pal.dim, false),
+            Part::R(r) => mono(ui, &format!("  {r}"), pal.dim, false),
             Part::Note(n) => {
-                ui.label(
-                    RichText::new(format!("  note: {n}"))
-                        .small()
-                        .color(pal.warning),
-                );
+                let note = RichText::new(format!("  note: {n}"))
+                    .small()
+                    .color(pal.warning);
+                guide_link(ui, note, line, out);
             }
             Part::Refused(why) => {
-                ui.label(RichText::new(format!("  not translated: {why}")).color(pal.error));
+                let why = RichText::new(format!("  not translated: {why}")).color(pal.error);
+                guide_link(ui, why, line, out);
             }
         }
+    }
+}
+
+/// A note under a Stata line: a click opens the differences guide on its
+/// command.
+fn guide_link(ui: &mut egui::Ui, text: RichText, line: &str, out: &mut Vec<Action>) {
+    let response = ui
+        .add(egui::Label::new(text).sense(egui::Sense::click()))
+        .on_hover_text("Click for where R and Stata differ here");
+    if response.clicked() {
+        out.push(Action::OpenStataGuide(line.to_string()));
     }
 }
 
@@ -2522,6 +2553,11 @@ impl App {
     /// Runs a line of Stata as if typed in the Command window (pictures).
     pub fn submit_stata(&mut self, ctx: &egui::Context, code: &str) {
         self.perform(ctx, Action::SubmitStata(Source::Typed, code.to_string()));
+    }
+
+    /// Opens the differences guide on the command this Stata line runs (pictures).
+    pub fn show_stata_guide(&mut self, line: &str) {
+        self.help_window.show_stata(line);
     }
 
     /// Puts this text in the Script Editor (pictures).
@@ -3398,6 +3434,21 @@ mod tests {
         app.perform(&ctx, Action::SetStataMode(false));
         assert_eq!(app.script, SCRIPT_START);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_note_opens_the_differences_guide_on_its_command() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        app.perform(&ctx, Action::OpenStataGuide("qui: reg y x".into()));
+        assert!(app.help_window.open);
+        assert_eq!(app.help_window.shown_stata(), Some("regress"));
+        app.perform(&ctx, Action::OpenStataGuide("tab2 g h".into()));
+        assert_eq!(app.help_window.shown_stata(), Some("tabulate"));
+        // a command with no page of its own: the page on what differs everywhere
+        app.perform(&ctx, Action::OpenStataGuide("xtlogit y x".into()));
+        assert_eq!(app.help_window.shown_stata(), Some("general"));
     }
 
     fn codes_last(app: &App) -> String {

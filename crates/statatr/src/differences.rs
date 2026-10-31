@@ -1,0 +1,948 @@
+//! The differences guide (P2B.8): for each command Stata mode translates,
+//! where R and Stata differ and what the translation does about it.
+//!
+//! Each page lists the points that matter for that command: standard
+//! errors, degrees of freedom, ties, missing values, sorting, string widths,
+//! float against double, printing. Every point says what Stata does, what R
+//! does by itself, and what the R that RCraft writes does (which is Stata's
+//! wherever it could be matched, checked against Stata 19). The notes under
+//! a translated line are the short form; the Help window shows the page.
+//!
+//! The pages are written from the translator, never from Stata's files.
+
+/// One difference: its topic, and what to know.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Point {
+    pub topic: &'static str,
+    pub text: &'static str,
+}
+
+/// The page of one command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Guide {
+    /// The command's full name (`summarize`), or `general` for what holds
+    /// everywhere.
+    pub command: &'static str,
+    /// What it does, in one line.
+    pub about: &'static str,
+    pub points: &'static [Point],
+}
+
+const fn p(topic: &'static str, text: &'static str) -> Point {
+    Point { topic, text }
+}
+
+// Points several commands share.
+const MISSING_IN_MODELS: Point = p(
+    "Missing values",
+    "A row with a missing value in any variable of the model is left out, as Stata does. \
+     R's own lm() and glm() do the same by default (na.omit), so the estimation sample is \
+     Stata's; e(sample) marks it.",
+);
+const LAYOUT_R: Point = p(
+    "Printing",
+    "The results are printed in R's layout, not Stata's table; the numbers are Stata's.",
+);
+const ML_SE: Point = p(
+    "Standard errors",
+    "From the observed information (the Hessian), as Stata's. R's summary() uses the \
+     expected information for some models (probit), which differs.",
+);
+const ML_ROBUST: Point = p(
+    "Robust and clustered errors",
+    "Robust errors carry N / (N - 1) and clustered ones G / (G - 1), as Stata's do for a \
+     maximum-likelihood model (not regress's HC1).",
+);
+const ML_DIGITS: Point = p(
+    "Last digits",
+    "Stata stops iterating at its tolerance, about 1e-7 from the optimum; R goes on. \
+     Estimates agree to 6 or 7 digits, so an 8th printed digit can differ.",
+);
+const GRAPH: Point = p(
+    "Look",
+    "Drawn with ggplot2, so it looks like R's graphs, not Stata's; what is drawn (bins, \
+     bandwidths, fitted lines) is worked out as Stata does. Options that only change \
+     Stata's look are not carried over and are named in a note.",
+);
+const PREDICT_ROWS: Point = p(
+    "Rows predicted",
+    "Every row that has the values the model needs, in the estimation sample or not, as \
+     Stata does; R's predict() on new data does the same.",
+);
+
+/// Every page, the general one first.
+pub const GUIDES: &[Guide] = &[
+    Guide {
+        command: "general",
+        about: "What differs between Stata and the R that Stata mode writes, for every command",
+        points: &[
+            p(
+                "Missing values",
+                "Stata's missing value (.) is larger than every number, so x > 5 is true for a \
+                 missing x; R's NA compared with anything is NA. The translation writes \
+                 Stata's rule out (is.na(x) | x > 5), so conditions keep the rows Stata keeps. \
+                 The extended missing values .a to .z all become NA, with a note.",
+            ),
+            p(
+                "Float and double",
+                "generate without a type makes a float in Stata (about 7 digits); R keeps every \
+                 number as a double. The translation rounds a new variable to float as Stata \
+                 stores it, unless the do-file says double, so x == 0.1 behaves as in Stata. \
+                 replace keeps a float a float in Stata; R keeps full precision for a variable \
+                 the do-file did not make, with a note.",
+            ),
+            p(
+                "String widths",
+                "str5 holds 5 characters in Stata; the translation cuts the text to that width. \
+                 Text has no width in R otherwise.",
+            ),
+            p(
+                "Sorting",
+                "Stata's sort leaves rows that tie in no set order unless sort, stable; R's \
+                 order() keeps them as they were, which is one of the orders Stata may give.",
+            ),
+            p(
+                "Random numbers",
+                "R's generators are not Stata's: set seed gives reproducible draws in R, but not \
+                 the same draws as Stata's.",
+            ),
+            p(
+                "Returned values",
+                "e() and r() are kept in R as stata_e and stata_r, with Stata's names and \
+                 values; one Stata keeps that RCraft does not is refused with the reason, not \
+                 left missing.",
+            ),
+            p(
+                "What is not translated",
+                "A line RCraft cannot translate exactly is kept as a comment with the reason, \
+                 never guessed.",
+            ),
+        ],
+    },
+    Guide {
+        command: "anova",
+        about: "Analysis of variance",
+        points: &[
+            p(
+                "Variables",
+                "A variable is categorical unless written c.x, as in Stata's anova; in R's \
+                 formula a number is continuous unless written factor().",
+            ),
+            p(
+                "Sums of squares",
+                "Partial (Type III) sums of squares by default, as Stata's; R's anova() gives \
+                 sequential (Type I) ones, which the translation uses only with sequential. A \
+                 design with an empty cell stops, since Stata's rule there is not matched yet.",
+            ),
+            MISSING_IN_MODELS,
+        ],
+    },
+    Guide {
+        command: "append",
+        about: "Adds the rows of another file",
+        points: &[p(
+            "Types",
+            "A string variable in one file and a number in the other stops with an error, as \
+             in Stata; R's rbind() would turn both into text.",
+        )],
+    },
+    Guide {
+        command: "by",
+        about: "by varlist: and bysort varlist: (the prefix)",
+        points: &[
+            p(
+                "Groups",
+                "Each group in turn, in sorted order with a missing value last, as in Stata; \
+                 after a model the results kept are the last group's.",
+            ),
+            p(
+                "Order",
+                "Without bysort the rows must already be in order of the by variables: R \
+                 checks the order itself and stops with Stata's not sorted.",
+            ),
+        ],
+    },
+    Guide {
+        command: "clear",
+        about: "Drops the data in memory",
+        points: &[p("In R", "The data frame is removed with rm(); nothing else differs.")],
+    },
+    Guide {
+        command: "collapse",
+        about: "Makes a dataset of summary statistics",
+        points: &[p(
+            "Precision",
+            "Stata stores means and the like of float variables as floats; R keeps full \
+             precision, so the 8th digit can differ.",
+        )],
+    },
+    Guide {
+        command: "correlate",
+        about: "Correlations and covariances",
+        points: &[
+            p(
+                "Missing values",
+                "A row with a missing value in any of the variables is dropped (casewise), as \
+                 Stata does; R's cor() would stop or need use = \"complete.obs\".",
+            ),
+            p(
+                "Weights",
+                "Frequency weights count rows; analytic weights are scaled to sum to N; r() \
+                 is Stata's (sum_w with analytic weights).",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "count",
+        about: "Counts the rows",
+        points: &[p("Missing values", "With an if, a missing value counts as larger than every number, as in Stata.")],
+    },
+    Guide {
+        command: "describe",
+        about: "Describes the data",
+        points: &[
+            p(
+                "Storage types",
+                "R has no storage types (byte, int, float, str20), so the description lists R's \
+                 classes instead, and r(width) and r(changed) are refused.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "destring",
+        about: "Text to numbers",
+        points: &[p(
+            "Non-numbers",
+            "A variable with text that is not a number is left as it is, with Stata's message \
+             (contains nonnumeric characters), unless force or ignore() says otherwise.",
+        )],
+    },
+    Guide {
+        command: "display",
+        about: "Prints text and values",
+        points: &[
+            p(
+                "Formats",
+                "Stata's formats (%9.0g, %6.2f, %e, %s, with c, - and 0) are worked out as \
+                 Stata does at every width: R's format() and sprintf() give other digits.",
+            ),
+            p(
+                "Variables",
+                "A variable in an expression means its first row, as in Stata.",
+            ),
+            p("Colours", "as text, as result and as error are left out: R prints plain text."),
+        ],
+    },
+    Guide {
+        command: "drop",
+        about: "Drops variables or rows",
+        points: &[p("Missing values", "drop if x > 5 drops the rows where x is missing too, as Stata does.")],
+    },
+    Guide {
+        command: "duplicates",
+        about: "Reports, tags or drops repeated rows",
+        points: &[LAYOUT_R],
+    },
+    Guide {
+        command: "egen",
+        about: "Generate with functions over rows or groups",
+        points: &[p(
+            "Missing values",
+            "The functions leave missing values out of their sums and means, as Stata's do; \
+             R's mean() would give NA without na.rm.",
+        )],
+    },
+    Guide {
+        command: "encode",
+        about: "Text to a labelled number",
+        points: &[p("Codes", "The codes follow the text's sorted order from 1, as Stata's.")],
+    },
+    Guide {
+        command: "ereturn",
+        about: "ereturn list",
+        points: &[p(
+            "What is listed",
+            "Stata's scalars, macros and matrices in Stata's layout; what Stata also lists and \
+             RCraft does not keep (the optimizer's settings, e(ilog), ...) is named in a note.",
+        )],
+    },
+    Guide {
+        command: "estat",
+        about: "Statistics after a model",
+        points: &[p(
+            "Information criteria",
+            "estat ic counts the coefficients as the degrees of freedom, as Stata does; R's \
+             AIC() on a linear model also counts the variance.",
+        )],
+    },
+    Guide {
+        command: "generate",
+        about: "Makes a new variable",
+        points: &[
+            p(
+                "Float",
+                "Without a type the new variable is a float, as in Stata: the translation rounds \
+                 it to float precision (about 7 digits).",
+            ),
+            p(
+                "Missing values",
+                "A row the if leaves out is missing (.), or empty text for a string, as in Stata.",
+            ),
+        ],
+    },
+    Guide {
+        command: "graph",
+        about: "graph bar, graph twoway, graph export",
+        points: &[GRAPH],
+    },
+    Guide {
+        command: "gsort",
+        about: "Sorts, descending where asked",
+        points: &[p(
+            "Missing values",
+            "Missing values sort last ascending and first descending, as in Stata; mfirst is \
+             translated for numbers, and for text the empty string counts as missing.",
+        )],
+    },
+    Guide {
+        command: "histogram",
+        about: "Histogram",
+        points: &[
+            p(
+                "Bins",
+                "Stata's: int(min(sqrt(N), 10 log10 N)) bins from the minimum, unless bin(), \
+                 width() or discrete say otherwise. R's hist() uses Sturges' rule.",
+            ),
+            GRAPH,
+        ],
+    },
+    Guide {
+        command: "import",
+        about: "import delimited and import excel",
+        points: &[p(
+            "Variable names",
+            "Columns without names are v1, v2, ... as Stata names them; names that are not \
+             valid Stata names are made valid by R's rules, which can differ from Stata's.",
+        )],
+    },
+    Guide {
+        command: "ivregress",
+        about: "Instrumental-variables regression",
+        points: &[
+            p(
+                "Degrees of freedom",
+                "Without small the variance divides by N, with z tests, as in Stata; small \
+                 gives N - k and t tests.",
+            ),
+            p(
+                "Clusters",
+                "Clustered errors without small carry no G / (G - 1), as Stata's ivregress \
+                 (unlike its regress).",
+            ),
+            p(
+                "GMM",
+                "The weight matrix from the 2SLS residuals, robust unless wmatrix() says \
+                 otherwise, and the variance of the same kind unless vce() says, as Stata's.",
+            ),
+            MISSING_IN_MODELS,
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "kdensity",
+        about: "Kernel density",
+        points: &[
+            p(
+                "Kernel and bandwidth",
+                "Stata's: the Epanechnikov kernel unless kernel() names another, the bandwidth \
+                 0.9 min(sd, IQR / 1.349) N^(-1/5) unless bwidth(), at min(N, 50) points. R's \
+                 density() uses a Gaussian kernel and another bandwidth.",
+            ),
+            GRAPH,
+        ],
+    },
+    Guide {
+        command: "keep",
+        about: "Keeps variables or rows",
+        points: &[p("Missing values", "keep if x > 5 keeps the rows where x is missing, as Stata does.")],
+    },
+    Guide {
+        command: "label",
+        about: "Variable and value labels",
+        points: &[p(
+            "Labels",
+            "Kept as labelled vectors (the haven package), which other R functions mostly \
+             ignore; a value label not defined earlier in the do-file is expected from the \
+             data file.",
+        )],
+    },
+    Guide {
+        command: "lincom",
+        about: "A linear combination of coefficients",
+        points: &[p(
+            "Tests",
+            "t on the model's degrees of freedom after regress, z after a likelihood model, as \
+             Stata's; with or, irr or rrr the estimate and its interval are exponentiated and \
+             the standard error is the delta method's.",
+        )],
+    },
+    Guide {
+        command: "list",
+        about: "Lists rows",
+        points: &[LAYOUT_R],
+    },
+    Guide {
+        command: "logit",
+        about: "Logistic regression (logit and probit alike)",
+        points: &[
+            p(
+                "Outcome",
+                "The outcome is 1 where it is not 0 (and not missing), as Stata takes it; R's \
+                 glm() needs 0 and 1.",
+            ),
+            p(
+                "Perfect prediction",
+                "A variable that predicts the outcome perfectly is dealt with as Stata does: \
+                 omitted with the rows it decides, or the fit stops with Stata's message. R's \
+                 glm() would go on with huge estimates.",
+            ),
+            ML_SE,
+            ML_ROBUST,
+            ML_DIGITS,
+            MISSING_IN_MODELS,
+        ],
+    },
+    Guide {
+        command: "lowess",
+        about: "Lowess smoothing",
+        points: &[
+            p(
+                "Smoother",
+                "Stata's lowess: a local line with tricube weights over the nearest 80% of the \
+                 data, with no robustness steps. R's lowess() adds three robustness steps.",
+            ),
+            GRAPH,
+        ],
+    },
+    Guide {
+        command: "margins",
+        about: "Margins and marginal effects",
+        points: &[
+            p(
+                "Rows averaged",
+                "Averaged over the estimation sample, Stata's e(sample); if the data changed \
+                 since the model, the current values of its rows are used, as Stata does.",
+            ),
+            p(
+                "Standard errors",
+                "The delta method from the model's own variance, as Stata's.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "matrix",
+        about: "matrix list",
+        points: &[p(
+            "Columns",
+            "e(b) and e(V) have Stata's columns (base levels as zeros, o. for omitted, the \
+             equations), printed in Stata's layout at a linesize of 80.",
+        )],
+    },
+    Guide {
+        command: "merge",
+        about: "Joins another file",
+        points: &[p(
+            "_merge",
+            "_merge is made as Stata makes it (1, 2, 3 with Stata's labels) and the rows are \
+             in Stata's order; R's merge() sorts them and makes no _merge.",
+        )],
+    },
+    Guide {
+        command: "mlogit",
+        about: "Multinomial logistic regression",
+        points: &[
+            p(
+                "Base outcome",
+                "The most frequent outcome, as in Stata, unless baseoutcome() says; R's \
+                 multinom() takes the first level.",
+            ),
+            p(
+                "Names",
+                "Each coefficient is named outcome:variable; the base outcome's equation is \
+                 zeros, as in Stata's e(b).",
+            ),
+            ML_ROBUST,
+            ML_DIGITS,
+            MISSING_IN_MODELS,
+        ],
+    },
+    Guide {
+        command: "nbreg",
+        about: "Negative binomial regression",
+        points: &[
+            p(
+                "Alpha",
+                "alpha is 1 / theta of MASS::glm.nb; the standard errors come from the whole \
+                 likelihood, alpha included, as Stata's (glm.nb's own leave theta out).",
+            ),
+            ML_ROBUST,
+            ML_DIGITS,
+            MISSING_IN_MODELS,
+        ],
+    },
+    Guide {
+        command: "ologit",
+        about: "Ordered logistic regression (ologit and oprobit alike)",
+        points: &[
+            p(
+                "Cut points",
+                "R's zeta are Stata's /cut1, /cut2, ... with the same sign.",
+            ),
+            p(
+                "Standard errors",
+                "From R's numerical Hessian, so the last digit or two can differ from Stata's.",
+            ),
+            ML_ROBUST,
+            ML_DIGITS,
+            MISSING_IN_MODELS,
+        ],
+    },
+    Guide {
+        command: "order",
+        about: "Orders the variables",
+        points: &[p("In R", "The columns are moved as Stata moves them (first, last, before(), after(), alphabetic); the data do not change.")],
+    },
+    Guide {
+        command: "poisson",
+        about: "Poisson regression",
+        points: &[ML_SE, ML_ROBUST, ML_DIGITS, MISSING_IN_MODELS],
+    },
+    Guide {
+        command: "predict",
+        about: "Predictions after a model",
+        points: &[
+            PREDICT_ROWS,
+            p(
+                "Defaults",
+                "One new variable and no outcome() after mlogit or ologit is the first \
+                 outcome's probability, as in Stata.",
+            ),
+        ],
+    },
+    Guide {
+        command: "pwcorr",
+        about: "Pairwise correlations",
+        points: &[
+            p(
+                "Rows",
+                "Each correlation has the rows where both of its variables are present; with \
+                 listwise a row with any missing value is dropped.",
+            ),
+            p(
+                "Significance",
+                "The p-value from t on n - 2 degrees of freedom, and Bonferroni's and Sidak's \
+                 adjustments over the number of pairs, as Stata's.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "recode",
+        about: "Changes values by rules",
+        points: &[p(
+            "Rules",
+            "The rules are taken in Stata's order, the first that matches a value deciding it; \
+             missing values are kept unless a rule names them, as in Stata.",
+        )],
+    },
+    Guide {
+        command: "regress",
+        about: "Linear regression",
+        points: &[
+            p(
+                "Robust errors",
+                "robust is HC1, as Stata's: the sandwich times N / (N - k). R's sandwich \
+                 package defaults to HC3, which differs.",
+            ),
+            p(
+                "Clustered errors",
+                "Scaled by G / (G - 1) and (N - 1) / (N - k), with t tests and intervals on G - 1 \
+                 degrees of freedom, as Stata's; a row dropped for a missing value is out of its \
+                 cluster too.",
+            ),
+            p(
+                "Weights",
+                "Frequency weights count rows; analytic ones are scaled to sum to N; sampling \
+                 weights mean robust errors; with importance weights N is their sum rounded \
+                 down, as Stata's e(N).",
+            ),
+            p(
+                "Factor variables",
+                "i.g leaves out the lowest level, as Stata's base; without the constant Stata \
+                 still leaves it out while R would keep every level, so noconstant with factor \
+                 variables is refused.",
+            ),
+            p(
+                "Printing",
+                "Stata's own table (ANOVA or robust header, coefficients with t, P and the \
+                 interval), checked character for character; a shape not checked keeps R's \
+                 layout and says so.",
+            ),
+            MISSING_IN_MODELS,
+        ],
+    },
+    Guide {
+        command: "rename",
+        about: "Renames variables",
+        points: &[p(
+            "Options",
+            "Renames as Stata does, lower and upper included; rename's other options are not \
+             translated yet.",
+        )],
+    },
+    Guide {
+        command: "replace",
+        about: "Changes the values of a variable",
+        points: &[p(
+            "Storage type",
+            "replace keeps a float a float in Stata; R keeps full precision unless the \
+             do-file made the variable, with a note.",
+        )],
+    },
+    Guide {
+        command: "reshape",
+        about: "Long to wide and back",
+        points: &[p(
+            "Order",
+            "Long to wide and back with i() and j() as Stata takes them; the rows come out \
+             sorted by i and j, as Stata leaves them.",
+        )],
+    },
+    Guide {
+        command: "save",
+        about: "Writes a .dta file",
+        points: &[p("File", "Written by haven::write_dta, which Stata reads; value labels and variable labels are kept.")],
+    },
+    Guide {
+        command: "scalar",
+        about: "Scalars",
+        points: &[p(
+            "Names",
+            "A variable comes before a scalar of the same name, as in Stata. R cannot see a \
+             file's columns before it runs, so a command that reads a scalar by name checks \
+             the data first and stops if a variable has that name; scalar(name) is always the \
+             scalar.",
+        )],
+    },
+    Guide {
+        command: "set",
+        about: "Settings",
+        points: &[
+            p(
+                "set seed",
+                "R's random numbers are not Stata's: the same seed does not give the same draws.",
+            ),
+            p(
+                "Other settings",
+                "Those that only change how Stata runs or prints (more, linesize, ...) have \
+                 nothing to do in R.",
+            ),
+        ],
+    },
+    Guide {
+        command: "sort",
+        about: "Sorts the rows",
+        points: &[p(
+            "Ties",
+            "Stata's sort puts rows that tie in no set order unless stable; R keeps them in \
+             their current order. Missing values sort last, as in Stata.",
+        )],
+    },
+    Guide {
+        command: "stcox",
+        about: "Cox regression",
+        points: &[
+            p(
+                "Ties",
+                "Breslow's method by default, as Stata's; R's coxph() defaults to Efron's. \
+                 efron and exactp are translated as asked.",
+            ),
+            p(
+                "Robust errors",
+                "Robust errors carry N / (N - 1) and clustered ones G / (G - 1), as Stata's.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "stset",
+        about: "Declares survival data",
+        points: &[p(
+            "Variables",
+            "_st, _d, _t and _t0 are made as Stata makes them; a row that enters at or after \
+             its end is not used.",
+        )],
+    },
+    Guide {
+        command: "summarize",
+        about: "Summary statistics",
+        points: &[
+            p(
+                "Standard deviation",
+                "The sample standard deviation (n - 1), as R's sd(); with weights Stata's \
+                 rules for each kind of weight.",
+            ),
+            p(
+                "Percentiles",
+                "With detail, Stata's rule: x[ceil(np)], or the mean of the two neighbours \
+                 when np is whole, which is R's quantile type 2, not R's default type 7.",
+            ),
+            p(
+                "Skewness and kurtosis",
+                "Stata's, over the whole sample, so a normal sample's kurtosis is near 3, not 0.",
+            ),
+            p(
+                "Printing",
+                "Stata's own table without detail or weights, checked character for character; \
+                 detail and weights keep R's layout.",
+            ),
+        ],
+    },
+    Guide {
+        command: "tabulate",
+        about: "One-way and two-way tables (and tab1, tab2)",
+        points: &[
+            p(
+                "Missing values",
+                "Left out unless missing is given, as in Stata; R's table() leaves them out \
+                 too unless useNA says otherwise.",
+            ),
+            p(
+                "Order",
+                "Categories in the order of the values underneath, with their labels, as \
+                 Stata's.",
+            ),
+            p(
+                "chi2",
+                "Pearson's chi-squared with no continuity correction, as Stata's; R's \
+                 chisq.test() corrects 2 x 2 tables unless told not to.",
+            ),
+            p(
+                "Printing",
+                "Stata's own tables for counts, checked character for character; percentages, \
+                 analytic weights and string variables keep R's layout.",
+            ),
+        ],
+    },
+    Guide {
+        command: "test",
+        about: "Wald tests after a model",
+        points: &[p(
+            "Statistic",
+            "F on the model's degrees of freedom after regress, chi2 after a likelihood \
+             model, as Stata's.",
+        )],
+    },
+    Guide {
+        command: "tostring",
+        about: "Numbers to text",
+        points: &[p(
+            "Format",
+            "Whole numbers are written as Stata's %12.0g writes them, a missing value as \".\"; \
+             other numbers are not translated yet.",
+        )],
+    },
+    Guide {
+        command: "ttest",
+        about: "t tests: one sample, paired, two samples",
+        points: &[
+            p(
+                "Variances",
+                "Two groups are taken to have the same variance unless unequal, as Stata does; \
+                 R's t.test() assumes unequal variances by default (Welch). welch itself is \
+                 refused, since R offers only Satterthwaite's degrees of freedom.",
+            ),
+            p(
+                "p-values",
+                "R prints the two-sided p-value; Stata prints the one-sided ones beside it. \
+                 r() holds all three.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "twoway",
+        about: "scatter, line, connected and the other twoway plots",
+        points: &[GRAPH],
+    },
+    Guide {
+        command: "use",
+        about: "Reads a .dta file",
+        points: &[p(
+            "Labels",
+            "Read by haven::read_dta: value labels and variable labels are kept as labelled \
+             vectors; storage types are not.",
+        )],
+    },
+    Guide {
+        command: "version",
+        about: "Sets how Stata reads the do-file",
+        points: &[p("In R", "Nothing to do in R.")],
+    },
+    Guide {
+        command: "xtreg",
+        about: "Panel regression",
+        points: &[
+            p(
+                "Estimators",
+                "re is Swamy-Arora random effects with z tests, as Stata's default; fe is the \
+                 within regression with the constant as the grand mean's; be the regression on \
+                 the panel means; mle and pa as Stata's (pa iterated until b changes by less \
+                 than 1e-6, where Stata stops).",
+            ),
+            p(
+                "Robust errors",
+                "Clustered on the panel (or the cluster variable), scaled by G / (G - 1) and \
+                 (N - 1) / (N - k), as Stata's.",
+            ),
+            MISSING_IN_MODELS,
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "xtset",
+        about: "Declares panel data",
+        points: &[p(
+            "Time",
+            "The time unit and delta() only label the time and matter for lags, which are not \
+             translated; nothing fitted here changes.",
+        )],
+    },
+];
+
+/// The page a command has (`reg` is `regress`; `probit` shares `logit`'s,
+/// `tab1` and `tab2` `tabulate`'s, `scatter` and `line` `twoway`'s).
+pub fn guide(command: &str) -> Option<&'static Guide> {
+    let full = full(command);
+    let page = match full.as_str() {
+        "probit" => "logit",
+        "oprobit" => "ologit",
+        "tab1" | "tab2" => "tabulate",
+        "scatter" | "line" | "connected" => "twoway",
+        "bysort" => "by",
+        "saveold" => "save",
+        "return" => "ereturn",
+        other => other,
+    };
+    GUIDES.iter().find(|g| g.command == page)
+}
+
+/// The page of the command a Stata line runs, past its prefixes.
+pub fn for_line(line: &str) -> Option<&'static Guide> {
+    let mut rest = line.trim();
+    loop {
+        let word: String = rest
+            .chars()
+            .take_while(|c| c.is_alphanumeric() || *c == '_')
+            .collect();
+        let after = rest.get(word.len()..).unwrap_or("").trim_start();
+        match full(&word).as_str() {
+            "quietly" | "capture" | "noisily" => {
+                rest = after.trim_start_matches(':').trim_start();
+            }
+            "by" | "bysort" => {
+                // the command after the colon
+                match after.split_once(':') {
+                    Some((_, cmd)) if !cmd.trim().is_empty() => rest = cmd.trim(),
+                    _ => return guide("by"),
+                }
+            }
+            _ => return guide(&word),
+        }
+    }
+}
+
+/// A command word's full name.
+fn full(word: &str) -> String {
+    const MORE: &[(&str, usize)] = &[
+        ("quietly", 3),
+        ("capture", 3),
+        ("noisily", 3),
+        ("bysort", 3),
+        ("by", 2),
+        ("histogram", 4),
+        ("kdensity", 5),
+        ("scatter", 2),
+        ("connected", 4),
+        ("twoway", 2),
+        ("graph", 2),
+        ("logit", 4),
+        ("probit", 4),
+        ("poisson", 4),
+        ("xtreg", 5),
+        ("ttest", 5),
+        ("pwcorr", 6),
+        ("predict", 4),
+        ("margins", 6),
+    ];
+    if let Some((name, _)) = MORE
+        .iter()
+        .find(|(n, min)| crate::lang::syntax::abbrev(word, n, *min))
+    {
+        return (*name).to_string();
+    }
+    crate::lang::commands::resolve(word).to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_command_offered_has_a_page() {
+        // the prefixes and blocks the reader takes, translated in a later step
+        let reader = [
+            "capture",
+            "quietly",
+            "noisily",
+            "foreach",
+            "forvalues",
+            "local",
+            "global",
+        ];
+        for cmd in crate::complete::COMMANDS
+            .iter()
+            .filter(|c| !reader.contains(c))
+        {
+            let g = guide(cmd);
+            assert!(g.is_some(), "{cmd} has no page");
+            assert!(
+                g.is_some_and(|g| !g.points.is_empty()),
+                "{cmd}'s page is empty"
+            );
+        }
+        // each page once, the general one first
+        assert_eq!(GUIDES.first().map(|g| g.command), Some("general"));
+        let mut names: Vec<&str> = GUIDES.iter().map(|g| g.command).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), GUIDES.len());
+    }
+
+    #[test]
+    fn a_line_finds_its_commands_page() {
+        let page = |l: &str| for_line(l).map(|g| g.command);
+        assert_eq!(page("reg y x"), Some("regress"));
+        assert_eq!(page("quietly summarize y"), Some("summarize"));
+        assert_eq!(page("qui: tab g"), Some("tabulate"));
+        assert_eq!(page("bysort g: generate n = _n"), Some("generate"));
+        assert_eq!(page("by g"), Some("by"));
+        assert_eq!(page("probit d x"), Some("logit"));
+        assert_eq!(page("tab2 g h"), Some("tabulate"));
+        assert_eq!(page("scatter y x"), Some("twoway"));
+        assert_eq!(page("xtlogit y x"), None);
+    }
+}
