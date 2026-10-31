@@ -26,6 +26,7 @@
 //! without the data and are taken as written.
 
 mod anova;
+mod graph;
 mod iv;
 mod margins;
 mod ml;
@@ -228,6 +229,13 @@ const MODELS: &[&str] = &[
 /// as they were (a new variable, a new order or a label does not matter to
 /// `margins`). Anything else may have changed the data.
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "histogram",
+    "kdensity",
+    "scatter",
+    "line",
+    "connected",
+    "twoway",
+    "graph",
     "summarize",
     "tabulate",
     "correlate",
@@ -311,6 +319,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xt_other" => xt::XT_OTHER_HELPER,
         "stata_ivregress" => iv::IV_HELPER,
         "stata_stset" => st::STSET_HELPER,
+        "stata_graph" => graph::GRAPH_HELPER,
         "stata_stcox" => st::STCOX_HELPER,
         "stata_phtest" => st::PHTEST_HELPER,
         _ => FLOAT_HELPER,
@@ -352,6 +361,8 @@ struct Session {
     panel: Option<String>,
     /// What stset declared.
     stset: Option<st::StSet>,
+    /// A graph was drawn, so `graph export` has one to write.
+    graph_drawn: bool,
     /// And its time variable.
     panel_time: Option<String>,
     helpers: BTreeSet<&'static str>,
@@ -926,6 +937,18 @@ impl Session {
             "xtset" => self.xtset(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
             "ivregress" => self.ivregress(c, &opts, out),
+            w if crate::lang::syntax::abbrev(w, "histogram", 4) => self.histogram(c, &opts, out),
+            w if crate::lang::syntax::abbrev(w, "kdensity", 5) => self.kdensity(c, &opts, out),
+            w if crate::lang::syntax::abbrev(w, "scatter", 2) => {
+                self.twoway(c, &opts, out, Some("scatter"))
+            }
+            "line" => self.twoway(c, &opts, out, Some("line")),
+            w if crate::lang::syntax::abbrev(w, "connected", 4) => {
+                self.twoway(c, &opts, out, Some("connected"))
+            }
+            w if crate::lang::syntax::abbrev(w, "twoway", 2) => self.twoway(c, &opts, out, None),
+            w if crate::lang::syntax::abbrev(w, "graph", 2) => self.graph(c, &opts, out),
+            "lowess" => self.lowess(c, &opts, out),
             "stset" => self.stset(c, &opts, out),
             "stcox" => self.stcox(c, &opts, out),
             other => Err(no(format!("{other} is not translated yet"))),

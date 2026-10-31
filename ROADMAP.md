@@ -277,6 +277,7 @@ Tasks:
   `over()`, `eyex`, contrasts)
 - P2B.5 Graph commands: `twoway`, `histogram`, `graph bar`, `scatter`,
   `line`, `kdensity` to ggplot2.
+  (done 2026-10-31: `histogram` (`bin()`, `width()`, `start()`, `discrete`, the four scales, `normal`, `kdensity`), `kdensity` (all of Stata's kernels, `bwidth()`, `n()`, `at()`, `generate()`, `normal`), `scatter`, `line` (`sort`), `connected`, `twoway` with `scatter`/`line`/`connected`/`lfit`/`qfit`/`lowess`/`histogram`/`kdensity` layers in `( )` or `||`, `lowess` (`generate()`), `graph bar`/`hbar` with statistics and `over()`, `graph export`, titles, `legend(off)` and `by()`. The bins, densities, smooths and bar heights are worked out as Stata does and match Stata 19 to 12 digits; look-only options are left to ggplot2 and named in a note. Not yet: `graph box`, `pie`, `matrix`, `combine`, `twoway` `area`/`bar`/`rcap`/`lfitci`/`function`, `by()` with fitted layers or histograms, `histogram` with `by()`, `xlabel()` as axis breaks.)
 - P2B.6 Estimates and returned values: `e()`, `r()` and `_b[]`/`_se[]`
   after a translated command, with `estimates store` and `esttab`/`outreg2`
   style tables going to Phase 7.

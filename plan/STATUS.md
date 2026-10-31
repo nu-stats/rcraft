@@ -2208,3 +2208,44 @@ Items from the not-done lists above, each run in Stata 19 first.
 - **Still not done:** weights in anova, xtreg and ivregress; `atmeans` and `at()` statistics after weights; the other
   `estat`s after weights; `margins` contrasts with suboptions; gmm's HAC; the estat tests after clustered iv errors;
   `xtreg, mle` robust and `pa` with other correlations; `stset` `var==value`; `exactm`; anova with an empty cell.
+
+## P2B.5 Stata graph commands to ggplot2, 2026-10-31
+
+`histogram`, `kdensity`, `scatter`, `line`, `connected`, `twoway`, `lowess`, `graph bar`/`hbar`, `graph twoway` and
+`graph export` (`statatr/src/data_r/graph.rs`), drawn with ggplot2 3.5.1, which is now in RCraft's R library (from
+the pinned 2025-03-15 snapshot, as the user approved) and in CI's package list.
+
+- **The principle.** What a graph shows is worked out in R the way Stata 19 works it out, and only the drawing is
+  left to ggplot2, since R's defaults differ at every step. Each rule was decoded in Stata 19 on the models data:
+  - `histogram`: `int(min(sqrt(N), 10 log10 N))` bins (8 for 80 rows) from the minimum, width (max - min) / bins,
+    each bin closed below and the last also above; `bin()`, `width()` (bins enough to reach the maximum), `start()`
+    (Stata's `option start() may not be larger than minimum of y`); `discrete` (one bar per value, the width the
+    smallest gap); density, `fraction`, `frequency`, `percent`; `normal` and `kdensity` overlays on the bars'
+    scale. R's `hist()` would choose Sturges' bins.
+  - `kdensity`: the Epanechnikov kernel on +-sqrt(5) (R's default is the Gaussian), the bandwidth
+    `0.9 min(sd, IQR / 1.349) N^(-1/5)` with Stata's quartiles and the same whatever the kernel, at min(N, 50)
+    points from min - h to max + h; `epan2`, `biweight`, `cosine`, `gaussian`, `parzen`, `rectangle`, `triangle`;
+    `bwidth()`, `n()`, `at()`, `generate()`, `normal`; Stata's title and kernel/bandwidth note.
+  - `lowess`: Stata's, a local line with tricube weights over `int((0.8 N - 0.5) / 2)` neighbours on each side, the
+    window 1.0001 times its half-width, no robustness steps; R's `lowess()` is a different curve (the test shows
+    it). `bwidth()`, `generate()`.
+  - `lfit` and `qfit`: least-squares lines over the data's range (`qfit` at 100 points).
+  - `graph bar`/`hbar`: `(mean)` unless another statistic (`median`, `p#`, `sum`, `count`, `min`, `max`, `sd`) is
+    named, of each variable within each `over()` group (value labels as the categories), `stack`.
+- **twoway.** Layers in parentheses or split by `||`, each with its own `if`/`in`; `line` joins the points in the
+  data's order unless `sort`, as Stata's; several layers or y variables get a legend labelled as Stata's
+  (the variable label, `Fitted values`, `lowess y x`, `Kernel density estimate`), and the y title is shown when
+  every layer shares its y.
+- **Options.** `title()`, `subtitle()`, `xtitle()`, `ytitle()`, `note()`, `caption()`, `legend(off)` and `by()` (for
+  plain layers) are translated; options that only change the look (`msymbol()`, colours, `scheme()`, `xlabel()`,
+  ...) are left to ggplot2's defaults and named in a note; anything else is refused with its name. Every graph is
+  kept as `stata_graph` and printed, so it shows in RCraft's Graph tab.
+- **graph export** writes `stata_graph` with `ggsave` (png, pdf, svg, eps, jpg, tif), `width()`/`height()` in pixels,
+  and stops with Stata's `file ... already exists` unless `replace`.
+- **Tests** (`engine/tests/stata_graphs.rs`, 4 cases, real R and ggplot2): the histogram bins and heights of four
+  forms against Stata 19's `twoway__histogram_gen`, kdensity's bandwidth, grid and densities for all seven kernels
+  and `at()`, Stata's lowess, the bar statistics against Stata's collapse, lfit against `lm`; eleven graphs built by
+  ggplot2; export, its refusal to overwrite, and the refusals. Four graphs were also rendered and looked at.
+- **Not done:** `graph box`, `graph pie`, `graph matrix`, `graph combine`; twoway `area`, `bar`, `rcap`, `lfitci`,
+  `function`, `scatteri`; `by()` with fitted layers or histograms; `xlabel()`/`ylabel()` as axis breaks; weights in
+  graphs; graphs that look like Stata's own (its schemes).
