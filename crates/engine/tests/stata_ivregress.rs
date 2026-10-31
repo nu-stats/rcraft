@@ -867,3 +867,21 @@ fn e_after_ivregress_is_statas() {
     );
     assert_eq!(v, vec![1.0; 5], "ivregress's macros");
 }
+
+/// `matrix list e(b)` after `ivregress`, as Stata 19 printed it.
+#[test]
+fn matrix_list_after_ivregress_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let d = ivdata(&mut e);
+    let text = ok(
+        &mut e,
+        &script(&format!(
+            "use \"{d}/iv.dta\"\nquietly ivregress 2sls y w (x = z1 z2 z3)\nmatrix list e(b)\n"
+        )),
+    );
+    let stata = "\ne(b)[1,3]\n             x           w       _cons\ny1   .92916163  -.53510678   1.0347725\n";
+    assert!(
+        text.ends_with(stata),
+        "Stata printed\n{stata}\nRCraft printed\n{text}"
+    );
+}

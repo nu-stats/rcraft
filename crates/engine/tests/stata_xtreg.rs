@@ -822,3 +822,22 @@ fn e_after_xtreg_is_statas() {
         "xtreg, be",
     );
 }
+
+/// `matrix list e(b)` after `xtreg, fe`, as Stata 19 printed it: z, which does
+/// not vary within a panel, is left out and kept as Stata's `o.z`, a zero.
+#[test]
+fn matrix_list_after_xtreg_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let d = panel(&mut e);
+    let text = ok(
+        &mut e,
+        &script(&format!(
+            "use \"{d}/panel.dta\"\nxtset id year\nquietly xtreg y x w z, fe\nmatrix list e(b)\n"
+        )),
+    );
+    let stata = "\ne(b)[1,4]\n                                     o.            \n             x           w           z       _cons\ny1   .45056565  -.53278865           0   1.4595016\n";
+    assert!(
+        text.ends_with(stata),
+        "Stata printed\n{stata}\nRCraft printed\n{text}"
+    );
+}

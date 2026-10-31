@@ -209,6 +209,8 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
     out$F_u <- F_u
     out$df_f <- c(n - 1, N - n - (kf - 1))
     out$corr <- corr_u
+    # left out because they do not vary within a panel, as Stata keeps them in e(b)
+    out$omitted <- colnames(X)[!varies]
     if (!robust) cat(sprintf("F test that all u_i=0: F(%d, %d) = %.2f    Prob > F = %.4f\n",
                              n - 1, N - n - (kf - 1), F_u, stats::pf(F_u, n - 1, N - n - (kf - 1), lower.tail = FALSE)))
   }

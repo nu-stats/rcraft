@@ -544,3 +544,22 @@ fn e_after_stcox_is_statas() {
         "stcox x w, vce(robust): a Wald chi2",
     );
 }
+
+/// `matrix list` of e(b) and e(V) after `stcox`, as Stata 19 printed them:
+/// no constant, no equation.
+#[test]
+fn matrix_list_after_stcox_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let d = survdata(&mut e);
+    let text = ok(
+        &mut e,
+        &script(&format!(
+            "use \"{d}/surv.dta\"\nquietly stset time, failure(died)\nquietly stcox x w\nmatrix list e(b)\nmatrix list e(V)\n"
+        )),
+    );
+    let stata = "\ne(b)[1,2]\n            x          w\ny1  .44351742  -.6088131\n\nsymmetric e(V)[2,2]\n            x           w\nx   .03636384\nw  -.03239651   .32074277\n";
+    assert!(
+        text.ends_with(stata),
+        "Stata printed\n{stata}\nRCraft printed\n{text}"
+    );
+}

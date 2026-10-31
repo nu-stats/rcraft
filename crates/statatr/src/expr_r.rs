@@ -253,7 +253,11 @@ impl Translator<'_> {
                 "_n" => ("dplyr::row_number()".into(), Kind::Number),
                 "_N" => ("dplyr::n()".into(), Kind::Number),
                 "_pi" => ("pi".into(), Kind::Number),
-                _ => (r_name(n), (self.kind_of)(n).unwrap_or(Kind::Unknown)),
+                // a variable before a scalar of the same name, as in Stata
+                _ => match (self.kind_of)(n) {
+                    Some(k) => (r_name(n), k),
+                    None => (self.returned)("scalar?", n).unwrap_or((r_name(n), Kind::Unknown)),
+                },
             }),
             Expr::Subscript(name, index) => self.subscript(name, index),
             Expr::Unary(op, inner) => {
@@ -719,6 +723,10 @@ impl Translator<'_> {
                 [Expr::Name(n)] if n == "sample" => Ok(("stata_esample".into(), Kind::Logical)),
                 [Expr::Name(n)] => (self.returned)("e", n),
                 _ => Err(no("e() takes one name, as e(N)")),
+            },
+            "scalar" => match args {
+                [Expr::Name(n)] => (self.returned)("scalar", n),
+                _ => Err(no("scalar() takes one scalar name")),
             },
             "r" => match args {
                 [Expr::Name(n)] => (self.returned)("r", n),

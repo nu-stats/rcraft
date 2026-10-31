@@ -258,8 +258,24 @@ pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, cova
   if (means) {
     if (is.null(w)) stata_summarize(as.data.frame(m)) else stata_summarize(as.data.frame(m), w = w, wtype = wtype)
   }
-  # Stata's r(): the count, the first pair's correlation and the matrix
-  if (ret) assign("stata_r", list(N = nrow(m), rho = if (ncol(m) > 1) r[1, 2] else NA_real_, C = r), envir = env)
+  # Stata's r(): the sum of analytic weights, the count, the first pair's
+  # correlation (or with covariance the first two variances and their
+  # covariance, 0 when there is one variable) and the matrix
+  if (ret) {
+    rr <- list()
+    if (!is.null(w) && wtype == "a") rr$sum_w <- sum(w)
+    rr$N <- if (!is.null(w) && wtype == "f") sum(w) else nrow(m)
+    two <- ncol(m) > 1
+    if (covariance) {
+      rr$cov_12 <- if (two) r[1, 2] else 0
+      rr$Var_2 <- if (two) r[2, 2] else 0
+      rr$Var_1 <- r[1, 1]
+    } else {
+      rr$rho <- if (two) r[1, 2] else NA_real_
+    }
+    rr$C <- r
+    assign("stata_r", rr, envir = env)
+  }
   invisible(r)
 }"#;
 
@@ -388,7 +404,8 @@ impl Session {
         let (src, _, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_tab_values");
         self.helpers.insert("stata_tabulate");
-        if w.is_none() {
+        // importance weights' r() was not checked against Stata
+        if !matches!(w, Some((W::I, _))) {
             self.r_new = Some((
                 if y.is_some() {
                     super::returned::R_TAB2
@@ -464,10 +481,8 @@ impl Session {
             args.push("means = TRUE".into());
             self.helpers.insert("stata_summarize");
         }
-        if w.is_none() && !opts.has("covariance", 3) {
-            args.push("ret = TRUE".into());
-            self.r_new = Some((super::returned::R_CORRELATE, "correlate".into()));
-        }
+        args.push("ret = TRUE".into());
+        self.r_new = Some((super::returned::R_CORRELATE, "correlate".into()));
         let call = format!("stata_correlate({})", args.join(", "));
         if Self::quiet(c) {
             out.line(format!("invisible(utils::capture.output({call}))"));
@@ -518,7 +533,8 @@ impl Session {
         let group = opts.arg("by", 2);
         let mut args: Vec<String> = Vec::new();
         let mut two_sample = false;
-        let mut by_rows: Option<String> = None;
+        // what stata_ttest_r() takes to leave Stata's r() of this test
+        let r_args;
         match main.split_once("==") {
             Some((left, right)) => {
                 let (left, right) = (left.trim(), right.trim());
@@ -528,14 +544,18 @@ impl Session {
                 if group.is_some() {
                     return Err(no("ttest takes either == or by(), not both"));
                 }
-                args.push(format!("{src}${}", r_name(left)));
+                let first = format!("{src}${}", r_name(left));
+                args.push(first.clone());
                 if is_name(right) {
-                    args.push(format!("{src}${}", r_name(right)));
+                    let second = format!("{src}${}", r_name(right));
+                    args.push(second.clone());
                     if opts.has("unpaired", 5) {
                         two_sample = true;
                         args.push(format!("var.equal = {}", r_logical(equal)));
+                        r_args = format!("{first}, y = {second}");
                     } else {
                         args.push("paired = TRUE".into());
+                        r_args = format!("{first}, y = {second}, paired = TRUE");
                     }
                 } else {
                     let v: f64 = right
@@ -545,6 +565,7 @@ impl Session {
                         return Err(no("ttest var == number has nothing to unpair"));
                     }
                     args.push(format!("mu = {}", r_number(v)));
+                    r_args = format!("{first}, mu = {}", r_number(v));
                 }
             }
             None => {
@@ -560,7 +581,7 @@ impl Session {
                     return Err(no(format!("by({g}) is not a variable name")));
                 }
                 two_sample = true;
-                by_rows = Some(format!("{src}${}, {src}${}", r_name(v), r_name(g)));
+                r_args = format!("{src}${}, {src}${}", r_name(v), r_name(g));
                 args.push(format!("{} ~ {}", r_name(v), r_name(g)));
                 args.push(format!("data = {src}"));
                 args.push(format!("var.equal = {}", r_logical(equal)));
@@ -569,16 +590,14 @@ impl Session {
         if let Some(l) = level {
             args.push(format!("conf.level = {}", r_number(l)));
         }
-        if let Some(rows) = &by_rows {
-            // Stata's r() of the two-sample test
-            self.helpers.insert("stata_ttest_r");
-            out.line(format!(
-                "stata_r <- stata_ttest_r({rows}, level = {}, equal = {})",
-                r_number(super::returned::percent(level.unwrap_or(0.95))),
-                r_logical(equal)
-            ));
-            self.r_new = Some((super::returned::R_TTEST, "ttest".into()));
-        }
+        // Stata's r() of the test, quietly or not
+        self.helpers.insert("stata_ttest_r");
+        out.line(format!(
+            "stata_r <- stata_ttest_r({r_args}, level = {}, equal = {})",
+            r_number(super::returned::percent(level.unwrap_or(0.95))),
+            r_logical(equal)
+        ));
+        self.r_new = Some((super::returned::R_TTEST, "ttest".into()));
         if Self::quiet(c) {
             return Ok(());
         }
@@ -640,18 +659,20 @@ pub(super) fn r_logical(b: bool) -> &'static str {
 }
 
 /// `tab1`: a one-way table of each variable, each on its own rows.
-pub(super) const TAB1_HELPER: &str = r#"stata_tab1 <- function(d, nolabel = FALSE, ...) {
+pub(super) const TAB1_HELPER: &str = r#"stata_tab1 <- function(d, nolabel = FALSE, ret = FALSE, ...) {
   out <- list()
   for (n in names(d)) {
     cat("\n-> tabulation of ", n, "\n", sep = "")
-    out[[n]] <- stata_tabulate(stata_tab_values(d[[n]], nolabel), ...)
+    out[[n]] <- stata_tabulate(stata_tab_values(d[[n]], nolabel), ret = ret, ...)
   }
+  # Stata leaves the last table's r()
+  if (ret) assign("stata_r", stata_r, envir = parent.frame())
   invisible(out)
 }"#;
 
 /// `tab2`: a two-way table of every pair (of the first with each other with
 /// `firstonly`), each pair on the rows where both are present.
-pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FALSE, nolabel = FALSE, ...) {
+pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FALSE, nolabel = FALSE, ret = FALSE, ...) {
   n <- names(d)
   if (length(n) < 2) stop("too few variables specified")
   out <- list()
@@ -659,9 +680,11 @@ pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FA
     for (j in (i + 1):length(n)) {
       cat("\n-> tabulation of ", n[i], " by ", n[j], "\n", sep = "")
       out[[paste(n[i], n[j])]] <- stata_tabulate(stata_tab_values(d[[n[i]]], nolabel),
-                                                  stata_tab_values(d[[n[j]]], nolabel), ...)
+                                                  stata_tab_values(d[[n[j]]], nolabel), ret = ret, ...)
     }
   }
+  # Stata leaves the last table's r()
+  if (ret) assign("stata_r", stata_r, envir = parent.frame())
   invisible(out)
 }"#;
 
@@ -671,7 +694,7 @@ pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FA
 /// `star()` and `print()` read the adjusted p-value, as Stata's do.
 pub(super) const PWCORR_HELPER: &str = r#"stata_pwcorr <- function(d, obs = FALSE, sig = FALSE, star = NULL, print = NULL,
                           bonferroni = FALSE, sidak = FALSE, listwise = FALSE,
-                          w = NULL, wtype = "f") {
+                          w = NULL, wtype = "f", ret = FALSE) {
   for (n in names(d)) {
     if (is.character(d[[n]]) || is.factor(d[[n]])) {
       cat("(", n, " ignored because string variable)\n", sep = "")
@@ -734,6 +757,9 @@ pub(super) const PWCORR_HELPER: &str = r#"stata_pwcorr <- function(d, obs = FALS
     cat("\nobservations\n")
     print(N)
   }
+  # Stata's r(): the first pair's count and correlation, and the matrices
+  if (ret) assign("stata_r", c(list(N = N[2, 1], rho = C[2, 1], Nobs = N, C = C), if (sig) list(sig = P)),
+                  envir = parent.frame())
   invisible(list(C = C, sig = P, Nobs = N))
 }"#;
 
@@ -756,15 +782,23 @@ impl Session {
         if c.parts.main.trim().is_empty() {
             return Err(no("varlist required"));
         }
-        if Self::quiet(c) {
-            return Ok(());
-        }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         for h in ["stata_tab_values", "stata_tabulate", "stata_tab1"] {
             self.helpers.insert(h);
         }
-        let args = tab_args(src + &wargs, opts, &[("missing", 1), ("sort", 4)]);
-        out.line(format!("stata_tab1({})", args.join(", ")));
+        let mut args = tab_args(src + &wargs, opts, &[("missing", 1), ("sort", 4)]);
+        // importance weights' r() was not checked against Stata
+        if !matches!(w, Some((W::I, _))) {
+            args.push("ret = TRUE".into());
+            self.r_new = Some((super::returned::R_TAB1, "tab1".into()));
+        }
+        let call = format!("stata_tab1({})", args.join(", "));
+        if Self::quiet(c) {
+            // nothing shown, r() still left
+            out.line(format!("invisible(utils::capture.output({call}))"));
+            return Ok(());
+        }
+        out.line(call);
         out.caveat("each table has the rows where its own variable is present, as in Stata");
         out.caveat("printed in R's layout, not Stata's table");
         Ok(())
@@ -796,9 +830,6 @@ impl Session {
         if c.parts.main.trim().is_empty() {
             return Err(no("varlist required"));
         }
-        if Self::quiet(c) {
-            return Ok(());
-        }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         for h in ["stata_tab_values", "stata_tabulate", "stata_tab2"] {
             self.helpers.insert(h);
@@ -817,7 +848,18 @@ impl Session {
         if opts.has("firstonly", 9) {
             args.push("firstonly = TRUE".into());
         }
-        out.line(format!("stata_tab2({})", args.join(", ")));
+        // importance weights' r() was not checked against Stata
+        if !matches!(w, Some((W::I, _))) {
+            args.push("ret = TRUE".into());
+            self.r_new = Some((super::returned::R_TAB2, "tab2".into()));
+        }
+        let call = format!("stata_tab2({})", args.join(", "));
+        if Self::quiet(c) {
+            // nothing shown, r() still left
+            out.line(format!("invisible(utils::capture.output({call}))"));
+            return Ok(());
+        }
+        out.line(call);
         out.caveat("each table has the rows where both of its variables are present, as in Stata");
         if opts.has("chi2", 4) {
             out.caveat("Pearson's chi-squared, with no continuity correction, as Stata does it");
@@ -855,9 +897,6 @@ impl Session {
                 "invalid syntax: bonferroni and sidak may not be combined",
             ));
         }
-        if Self::quiet(c) {
-            return Ok(());
-        }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_pwcorr");
         if w.is_some() {
@@ -882,7 +921,15 @@ impl Session {
                 args.push(format!("{name} = {}", r_number(p)));
             }
         }
-        out.line(format!("stata_pwcorr({})", args.join(", ")));
+        args.push("ret = TRUE".into());
+        self.r_new = Some((super::returned::R_CORRELATE, "pwcorr".into()));
+        let call = format!("stata_pwcorr({})", args.join(", "));
+        if Self::quiet(c) {
+            // nothing shown, r() still left
+            out.line(format!("invisible(utils::capture.output({call}))"));
+            return Ok(());
+        }
+        out.line(call);
         if listwise {
             out.caveat(
                 "a row with a missing value in any of the variables is dropped, as Stata does",

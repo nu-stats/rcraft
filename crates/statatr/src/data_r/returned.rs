@@ -419,9 +419,10 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   } else if (cmd == "margins") {
     put(N = extra$N, cmd = "margins", est_cmd = extra$est_cmd, cmdline = cmdline, properties = "b V")
   }
-  e$b <- matrix(b, 1, dimnames = list("y1", stata_bnames()))
-  e$V <- V
-  dimnames(e$V) <- list(stata_bnames(), stata_bnames())
+  # Stata's columns: base levels, left-out ones, each equation's constant last
+  eb <- stata_eb(b, V, cmd, depvar)
+  e$b <- eb$b
+  e$V <- eb$V
   e
 }"##;
 
@@ -600,6 +601,8 @@ const MATRIX_NAMES: &[&str] = &[
     "b",
     "V",
     "C",
+    "Nobs",
+    "sig",
     "beta",
     "V_modelbased",
     "mns",
@@ -665,6 +668,7 @@ const LEAVE_R_ALONE: &[&str] = &[
     "note",
     "codebook_",
     "assert",
+    "scalar",
 ];
 
 /// Commands that never change e() (an untranslated command not here might
@@ -770,7 +774,8 @@ pub(super) const R_TEST: &[&str] = &["drop", "df_r", "F", "df", "p", "chi2"];
 pub(super) const R_LINCOM: &[&str] = &["df", "ub", "lb", "p", "t", "z", "level", "se", "estimate"];
 pub(super) const R_TAB1: &[&str] = &["N", "r"];
 pub(super) const R_TAB2: &[&str] = &["N", "r", "c", "chi2", "p"];
-pub(super) const R_CORRELATE: &[&str] = &["N", "rho"];
+pub(super) const R_CORRELATE: &[&str] = &["sum_w", "N", "rho", "cov_12", "Var_2", "Var_1"];
+pub(super) const R_DESCRIBE: &[&str] = &["k", "N"];
 pub(super) const R_TTEST: &[&str] = &[
     "N_1",
     "N_2",
@@ -790,6 +795,7 @@ pub(super) const R_TTEST: &[&str] = &[
     "lb_combined",
     "ub_combined",
     "mu_diff",
+    "sd_diff",
     "lb_diff",
     "ub_diff",
     "t",
@@ -802,6 +808,19 @@ pub(super) const R_TTEST: &[&str] = &[
     "level",
 ];
 pub(super) const R_MARGINS: &[&str] = &["N", "level", "cmd", "est_cmd", "est_cmdline"];
+
+/// The r() Stata leaves that R has nothing to give for, and why.
+fn r_not_kept(cmd: &str, name: &str) -> Option<&'static str> {
+    match (cmd, name) {
+        ("describe", "width") => Some(
+            "it is the bytes a row takes in Stata's storage types, which R's columns do not have",
+        ),
+        ("describe", "changed") => Some(
+            "it says whether the data changed since they were last saved, which R does not follow",
+        ),
+        _ => None,
+    }
+}
 
 impl Session {
     /// After each command: who now holds e() and r().
@@ -821,6 +840,8 @@ impl Session {
                 }
             }
             _ if LEAVE_R_ALONE.contains(&name) => {}
+            // matrix list (the one matrix command translated) leaves it too
+            _ if ok && name == "matrix" => {}
             _ => {
                 self.r_ret = Returned::Lost(if ok {
                     format!("{name} replaces r() in Stata with results RCraft does not keep yet")
@@ -885,6 +906,11 @@ impl Session {
                                 "{shown}, which Stata leaves after {cmd}, is not kept in R yet"
                             )));
                         }
+                        if which == "r" {
+                            if let Some(why) = r_not_kept(cmd, name) {
+                                return Err(no(format!("{shown} after {cmd} is not kept in R: {why}")));
+                            }
+                        }
                         if which == "r" && !names.contains(&name) {
                             return Err(no(format!(
                                 "{shown} after {cmd} is not kept in R yet (RCraft keeps r() {})",
@@ -904,13 +930,49 @@ impl Session {
                     }
                 }
             }
+            "scalar" => self.scalar_value(name, false),
+            // a bare name: a scalar only if it is one (else the variable)
+            "scalar?" => self.scalar_value(name, true),
             _ => Err(no(format!("{which}() is not translated"))),
         }
     }
 
+    /// The R of a matrix a command left, for `matrix list`.
+    pub(super) fn returned_matrix(&self, which: &str, name: &str) -> Result<String, Untranslated> {
+        let shown = format!("{which}({name})");
+        let state = if which == "e" {
+            &self.e_ret
+        } else {
+            &self.r_ret
+        };
+        match state {
+            Returned::Nothing => Err(no(format!(
+                "matrix list {shown}: nothing before it in this do-file leaves {which}()"
+            ))),
+            Returned::Lost(why) => Err(no(format!("matrix list {shown}: {why}"))),
+            Returned::Kept { cmd, model, .. } => {
+                if which == "e" {
+                    if matches!(cmd.as_str(), "anova" | "margins") {
+                        return Err(no(format!(
+                            "matrix list {shown} after {cmd} is not translated yet: Stata's columns there are not rebuilt in R"
+                        )));
+                    }
+                    if e_refused(cmd, model, name) {
+                        return Err(no(format!(
+                            "{shown}, which Stata leaves after {cmd}, is not kept in R yet"
+                        )));
+                    }
+                    Ok(format!("stata_e[[{}]]", r_text(name)))
+                } else {
+                    Ok(format!("stata_r[[{}]]", r_text(name)))
+                }
+            }
+        }
+    }
     /// The line that keeps a model's e() in R, after its translation.
     pub(super) fn keep_e(&mut self, c: &Command, out: &mut Out, args: &str, model: &str) {
         self.helpers.insert("stata_ereturn");
+        self.helpers.insert("stata_eb");
         self.helpers.insert("stata_returned");
         self.helpers.insert("stata_names");
         self.helpers.insert("stata_ml_header");
@@ -1066,9 +1128,14 @@ impl Session {
 
     /// One expression of `display`: a variable stands for its first row, as
     /// in Stata, so it is worked out over the data when there is any.
-    fn display_value(&self, e: &str, out: &mut Out) -> Result<(String, Kind), Untranslated> {
+    pub(super) fn display_value(
+        &self,
+        e: &str,
+        out: &mut Out,
+    ) -> Result<(String, Kind), Untranslated> {
         let (code, kind) = self.value(e, out)?;
-        let data_free = !mentions_data(e);
+        let scalar = |n: &str| self.scalars.contains_key(n) && self.kind_of(n).is_none();
+        let data_free = !mentions_data(e, &scalar);
         Ok(match (&self.data, data_free) {
             (Some(d), false) => {
                 out.package("dplyr");
@@ -1110,6 +1177,10 @@ impl Session {
                             missing.join(", ")
                         ));
                     }
+                } else if cmd == "describe" {
+                    out.caveat(
+                        "Stata also lists r(changed) and r(width) after describe, which RCraft does not keep",
+                    );
                 }
             }
         }
@@ -1136,7 +1207,7 @@ pub(super) fn cmdline(c: &Command) -> String {
 }
 
 /// The text of the line after the command word.
-fn after_name(c: &Command) -> String {
+pub(super) fn after_name(c: &Command) -> String {
     let text = c.text.as_str();
     let mut from = 0;
     // past the prefixes: the command word is the first one that is it
@@ -1185,7 +1256,7 @@ fn quoted(chars: &[char], start: usize) -> Option<(String, usize)> {
 }
 
 /// The display formats `stata_fmt` has.
-fn valid_format(f: &str) -> bool {
+pub(super) fn valid_format(f: &str) -> bool {
     let b = f.as_bytes();
     if b.first() != Some(&b'%') {
         return false;
@@ -1229,34 +1300,34 @@ fn valid_format(f: &str) -> bool {
 
 /// Whether an expression reads the data: a name other than the ones that
 /// stand for something else (`_n`, `_N`, `_pi`, functions).
-fn mentions_data(e: &str) -> bool {
-    fn walk(x: &Expr) -> bool {
+fn mentions_data(e: &str, scalar: &dyn Fn(&str) -> bool) -> bool {
+    fn walk(x: &Expr, scalar: &dyn Fn(&str) -> bool) -> bool {
         match x {
-            Expr::Name(n) => !matches!(n.as_str(), "_pi" | "c"),
-            Expr::Subscript(n, i) => !matches!(n.as_str(), "_b" | "_se" | "_coef") || walk(i),
-            Expr::Call(name, args) => !matches!(name.as_str(), "e" | "r") && args.iter().any(walk),
-            Expr::Unary(_, a) => walk(a),
-            Expr::Binary(_, a, b) => walk(a) || walk(b),
+            Expr::Name(n) => !matches!(n.as_str(), "_pi" | "c") && !scalar(n),
+            Expr::Subscript(n, i) => {
+                !matches!(n.as_str(), "_b" | "_se" | "_coef") || walk(i, scalar)
+            }
+            Expr::Call(name, args) => {
+                !matches!(name.as_str(), "e" | "r" | "scalar")
+                    && args.iter().any(|a| walk(a, scalar))
+            }
+            Expr::Unary(_, a) => walk(a, scalar),
+            Expr::Binary(_, a, b) => walk(a, scalar) || walk(b, scalar),
             _ => false,
         }
     }
     // what does not parse is left to the full translation to refuse
     match crate::lang::expr::parse(e) {
-        Ok(t) => walk(&t),
+        Ok(t) => walk(&t, scalar),
         Err(_) => true,
     }
 }
 
-/// `ttest var, by(group)`: Stata's r(), in the order of its `return list`.
-pub(super) const TTEST_R_HELPER: &str = r#"stata_ttest_r <- function(x, g, level = 95, equal = TRUE) {
+/// `ttest`: Stata's r() of each of its four tests, in the order of its `return list`.
+pub(super) const TTEST_R_HELPER: &str = r#"stata_ttest_r <- function(x, g = NULL, y = NULL, mu = NULL, paired = FALSE, level = 95, equal = TRUE) {
+  # Stata's r() of ttest: one sample (mu), paired, two samples (y), or by(g)
   num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
   x <- num(x)
-  g <- num(g)
-  ok <- !is.na(x) & !is.na(g)
-  x <- x[ok]
-  g <- g[ok]
-  lv <- sort(unique(g))
-  if (length(lv) != 2) stop("more than 2 groups found, only 2 allowed")
   q <- (1 + level / 100) / 2
   one <- function(v) {
     n <- length(v)
@@ -1264,27 +1335,59 @@ pub(super) const TTEST_R_HELPER: &str = r#"stata_ttest_r <- function(x, g, level
     h <- stats::qt(q, n - 1) * se
     list(N = n, mu = mean(v), sd = stats::sd(v), se = se, lb = mean(v) - h, ub = mean(v) + h)
   }
-  a <- one(x[g == lv[1]])
-  b <- one(x[g == lv[2]])
-  all <- one(x)
+  tests <- function(t, df) {
+    list(p_u = stats::pt(t, df, lower.tail = FALSE), p_l = stats::pt(t, df), p = 2 * stats::pt(-abs(t), df),
+         t = t, df_t = df)
+  }
+  if (!is.null(mu)) {
+    a <- one(x[!is.na(x)])
+    return(c(list(ub_1 = a$ub, lb_1 = a$lb, level = level, sd_1 = a$sd, se = a$se),
+             tests((a$mu - mu) / a$se, a$N - 1), list(mu_1 = a$mu, N_1 = a$N)))
+  }
+  if (paired) {
+    y <- num(y)
+    ok <- !is.na(x) & !is.na(y)
+    a <- one(x[ok])
+    b <- one(y[ok])
+    d <- one(x[ok] - y[ok])
+    return(c(list(ub_diff = d$ub, lb_diff = d$lb, sd_diff = d$sd, mu_diff = d$mu, ub_2 = b$ub, lb_2 = b$lb,
+                  se_2 = b$se, ub_1 = a$ub, lb_1 = a$lb, se_1 = a$se, level = level, sd_2 = b$sd,
+                  sd_1 = a$sd, se = d$se),
+             tests(d$mu / d$se, d$N - 1), list(mu_2 = b$mu, N_2 = b$N, mu_1 = a$mu, N_1 = a$N)))
+  }
+  if (is.null(g)) {
+    y <- num(y)
+    v1 <- x[!is.na(x)]
+    v2 <- y[!is.na(y)]
+  } else {
+    g <- num(g)
+    ok <- !is.na(x) & !is.na(g)
+    x <- x[ok]
+    g <- g[ok]
+    lv <- sort(unique(g))
+    if (length(lv) != 2) stop("more than 2 groups found, only 2 allowed")
+    v1 <- x[g == lv[1]]
+    v2 <- x[g == lv[2]]
+  }
+  a <- one(v1)
+  b <- one(v2)
+  all <- one(c(v1, v2))
   diff <- a$mu - b$mu
   if (equal) {
     df <- a$N + b$N - 2
     se <- sqrt(((a$N - 1) * a$sd^2 + (b$N - 1) * b$sd^2) / df * (1 / a$N + 1 / b$N))
   } else {
-    v1 <- a$sd^2 / a$N
-    v2 <- b$sd^2 / b$N
-    se <- sqrt(v1 + v2)
-    df <- (v1 + v2)^2 / (v1^2 / (a$N - 1) + v2^2 / (b$N - 1))
+    s1 <- a$sd^2 / a$N
+    s2 <- b$sd^2 / b$N
+    se <- sqrt(s1 + s2)
+    df <- (s1 + s2)^2 / (s1^2 / (a$N - 1) + s2^2 / (b$N - 1))
   }
-  t <- diff / se
   h <- stats::qt(q, df) * se
-  list(ub_diff = diff + h, lb_diff = diff - h, mu_diff = diff,
-       ub_combined = all$ub, lb_combined = all$lb, se_combined = all$se, mu_combined = all$mu,
-       N_combined = all$N, ub_2 = b$ub, lb_2 = b$lb, se_2 = b$se, ub_1 = a$ub, lb_1 = a$lb, se_1 = a$se,
-       level = level, sd = all$sd, sd_2 = b$sd, sd_1 = a$sd, se = se,
-       p_u = stats::pt(t, df, lower.tail = FALSE), p_l = stats::pt(t, df), p = 2 * stats::pt(-abs(t), df),
-       t = t, df_t = df, mu_2 = b$mu, N_2 = b$N, mu_1 = a$mu, N_1 = a$N)
+  c(list(ub_diff = diff + h, lb_diff = diff - h, mu_diff = diff,
+         ub_combined = all$ub, lb_combined = all$lb, se_combined = all$se, mu_combined = all$mu,
+         N_combined = all$N, ub_2 = b$ub, lb_2 = b$lb, se_2 = b$se, ub_1 = a$ub, lb_1 = a$lb, se_1 = a$se,
+         level = level, sd = all$sd, sd_2 = b$sd, sd_1 = a$sd, se = se),
+    tests(diff / se, df), list(mu_2 = b$mu, N_2 = b$N, mu_1 = a$mu, N_1 = a$N))
 }"#;
 
 /// The arguments of `stata_ereturn` every model passes: its outcome, what

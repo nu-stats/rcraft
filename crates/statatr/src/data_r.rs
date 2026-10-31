@@ -29,11 +29,13 @@ mod anova;
 mod graph;
 mod iv;
 mod margins;
+mod matrices;
 mod ml;
 mod model;
 mod more;
 mod post;
 mod returned;
+mod scalars;
 mod st;
 mod stats;
 mod weights;
@@ -327,6 +329,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_fmt" => returned::FORMAT_HELPER,
         "stata_ereturn" => returned::ERETURN_HELPER,
         "stata_ttest_r" => returned::TTEST_R_HELPER,
+        "stata_eb" => matrices::EB_HELPER,
+        "stata_scalar" => scalars::SCALAR_HELPER,
+        "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -340,6 +345,10 @@ struct Session {
     file: Option<String>,
     /// Variable types made by the do-file itself.
     kinds: BTreeMap<String, Kind>,
+    /// Scalars defined so far, number or text.
+    scalars: BTreeMap<String, Kind>,
+    /// The scalars the command being translated reads by their bare names.
+    scalars_read: std::cell::RefCell<Vec<String>>,
     /// Value label sets defined so far: name -> (value, text).
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
     /// The model last fitted, for the commands that read it afterwards.
@@ -830,6 +839,7 @@ impl Session {
         self.esample_new = false;
         self.r_new = None;
         self.e_new = false;
+        self.scalars_read.borrow_mut().clear();
         if MODELS.contains(&c.name.as_str()) {
             self.fit_robust = false;
             self.fit_cluster = false;
@@ -839,6 +849,21 @@ impl Session {
         } else {
             self.dispatch(c, &mut out)
         };
+        // a variable comes before a scalar of the same name, as in Stata
+        let read = std::mem::take(&mut *self.scalars_read.borrow_mut());
+        if let (Ok(()), Some(d), false) = (&done, &self.data, read.is_empty()) {
+            let mut names: Vec<String> = Vec::new();
+            for n in read {
+                let n = r_text(&n);
+                if !names.contains(&n) {
+                    names.push(n);
+                }
+            }
+            out.code.insert(
+                0,
+                format!("stata_scalar_clash({d}, c({}))", names.join(", ")),
+            );
+        }
         // who holds e() and r() now
         let r_left = self.r_new.take();
         self.track_returned(c, done.is_ok(), r_left);
@@ -976,6 +1001,8 @@ impl Session {
             "stcox" => self.stcox(c, &opts, out),
             "display" => self.display(c, out),
             "ereturn" | "return" => self.list_returned(c, out),
+            "matrix" => self.matrix(c, out),
+            "scalar" => self.scalar(c, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1704,17 +1731,27 @@ impl Session {
 
     fn describe(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let d = self.data()?;
+        let opts = Opts(&c.options);
+        if !c.parts.main.trim().is_empty()
+            || c.using.is_some()
+            || opts.other(&[("short", 1)]).is_some()
+        {
+            return Err(no(
+                "describe of chosen variables, a file or with options other than short is not \
+                 translated yet",
+            ));
+        }
+        // Stata's r(), quietly or not
+        out.line(format!("stata_r <- list(k = ncol({d}), N = nrow({d}))"));
+        self.r_new = Some((returned::R_DESCRIBE, "describe".into()));
         if Self::quiet(c) {
             return Ok(());
         }
-        if !c.parts.main.trim().is_empty() || !c.options.is_empty() || c.using.is_some() {
-            return Err(no(
-                "describe of chosen variables, a file or with options is not translated yet",
+        if !opts.has("short", 1) {
+            out.line(format!(
+                "print(data.frame(variable = names({d}), type = vapply({d}, \\(v) class(v)[1], \"\"), label = vapply({d}, \\(v) {{ l <- attr(v, \"label\"); if (is.null(l)) \"\" else l }}, \"\")), row.names = FALSE)"
             ));
         }
-        out.line(format!(
-            "print(data.frame(variable = names({d}), type = vapply({d}, \\(v) class(v)[1], \"\"), label = vapply({d}, \\(v) {{ l <- attr(v, \"label\"); if (is.null(l)) \"\" else l }}, \"\")), row.names = FALSE)"
-        ));
         out.line(format!(
             "cat(\"observations:\", nrow({d}), \" variables:\", ncol({d}), \"\\n\")"
         ));

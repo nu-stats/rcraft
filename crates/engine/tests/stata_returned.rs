@@ -1335,3 +1335,515 @@ fn what_is_not_kept_is_refused_with_the_reason() {
     let t = translate(&read("use s\nregress y x\ngenerate z = e(nosuch)\n"));
     assert!(t.lines.iter().all(|l| l.result.is_ok()), "{:?}", t.lines);
 }
+
+/// r() after the ttests, correlate's other forms, pwcorr, tab1, tab2,
+/// weighted tables and describe, as Stata 19's `return list` shows it.
+#[test]
+fn r_after_the_other_r_class_commands_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    // the rows Stata was run on, some with x or y missing
+    let gaps = "replace x = . in 3\nreplace y = . in 5/6";
+    let mut r_values = |setup: &str, names: &[&str]| -> (Vec<f64>, String) {
+        let code = script(&format!(
+            "use \"{dir}/models.dta\"\ngenerate f = mod(_n, 3) + 1\ngenerate a = _n / 3\n{setup}\n"
+        ));
+        ok(&mut e, &code);
+        let show: Vec<String> = names
+            .iter()
+            .map(|n| format!("stata_r[[\"{n}\"]]"))
+            .collect();
+        let order = ok(&mut e, "cat(names(stata_r), \"\\n\")");
+        (
+            numbers(&mut e, "0", &show.join(", ")),
+            order.trim().to_string(),
+        )
+    };
+    let one = [
+        "ub_1", "lb_1", "level", "sd_1", "se", "p_u", "p_l", "p", "t", "df_t", "mu_1", "N_1",
+    ];
+    let (got, order) = r_values("ttest y == 1", &one);
+    near_stata(
+        &got,
+        &[
+            1.796698350357512,
+            0.4747639217817043,
+            95.0,
+            2.970117241717986,
+            0.3320692026812795,
+            0.3419169046823998,
+            0.6580830953176002,
+            0.6838338093647995,
+            0.4087435238608471,
+            79.0,
+            1.135731136069608,
+            80.0,
+        ],
+        1e-12,
+        "ttest y == 1",
+    );
+    assert_eq!(order, one.join(" "), "ttest y == 1: Stata's order");
+    let (got, _) = r_values(&format!("{gaps}\nttest y == 0.5, level(90)"), &one);
+    near_stata(
+        &got,
+        &[
+            1.669612996854735,
+            0.5382764331038735,
+            90.0,
+            3.00071679650391,
+            0.3397642714653319,
+            0.0397139620162551,
+            0.9602860379837449,
+            0.0794279240325103,
+            1.777540388147987,
+            77.0,
+            1.103944714979304,
+            78.0,
+        ],
+        1e-12,
+        "ttest y == 0.5, level(90)",
+    );
+    let paired = [
+        "ub_diff", "lb_diff", "sd_diff", "mu_diff", "ub_2", "lb_2", "se_2", "ub_1", "lb_1", "se_1",
+        "level", "sd_2", "sd_1", "se", "p_u", "p_l", "p", "t", "df_t", "mu_2", "N_2", "mu_1",
+        "N_1",
+    ];
+    let (got, order) = r_values(&format!("{gaps}\nttest y == x"), &paired);
+    near_stata(
+        &got,
+        &[
+            1.790086342165675,
+            0.7238827043579089,
+            2.348754234547684,
+            1.256984523261792,
+            0.1558839775594633,
+            -0.3147670944425801,
+            0.1181547282728392,
+            1.846811351635465,
+            0.508274578005003,
+            0.336033333779007,
+            95.0,
+            1.036803532796157,
+            2.948680536887437,
+            0.2676653865310697,
+            5.76687439355e-06,
+            0.9999942331256064,
+            0.0000115337487871,
+            4.696104115486316,
+            76.0,
+            -0.0794415584415584,
+            77.0,
+            1.177542964820234,
+            77.0,
+        ],
+        1e-11,
+        "ttest y == x, paired, on the rows with both",
+    );
+    assert_eq!(order, paired.join(" "), "paired ttest: Stata's order");
+    let two = [
+        "ub_diff",
+        "lb_diff",
+        "mu_diff",
+        "ub_combined",
+        "lb_combined",
+        "se_combined",
+        "mu_combined",
+        "N_combined",
+        "ub_2",
+        "lb_2",
+        "se_2",
+        "ub_1",
+        "lb_1",
+        "se_1",
+        "level",
+        "sd",
+        "sd_2",
+        "sd_1",
+        "se",
+        "p_u",
+        "p_l",
+        "p",
+        "t",
+        "df_t",
+        "mu_2",
+        "N_2",
+        "mu_1",
+        "N_1",
+    ];
+    let (got, order) = r_values(&format!("{gaps}\nttest y == x, unpaired"), &two);
+    near_stata(
+        &got,
+        &[
+            1.882821954708976,
+            0.4725864625914039,
+            1.17770420865019,
+            0.8748742750076224,
+            0.1478096456087561,
+            0.1840402034041572,
+            0.5113419603081892,
+            157.0,
+            0.1556129546354733,
+            -0.3031319419772455,
+            0.1152134947478757,
+            1.780501813930578,
+            0.4273876160280301,
+            0.3397642714653319,
+            95.0,
+            2.306017139060297,
+            1.024039940817488,
+            3.00071679650391,
+            0.3569516754329369,
+            0.0006011856607863,
+            0.9993988143392137,
+            0.0012023713215727,
+            3.29933794881838,
+            155.0,
+            -0.0737594936708861,
+            79.0,
+            1.103944714979304,
+            78.0,
+        ],
+        1e-11,
+        "ttest y == x, unpaired, each on its own rows",
+    );
+    assert_eq!(order, two.join(" "), "unpaired ttest: Stata's order");
+    let (got, _) = r_values(
+        "ttest y == x, unpaired unequal",
+        &["lb_diff", "ub_diff", "p", "df_t"],
+    );
+    near_stata(
+        &got,
+        &[
+            0.5544297433560661,
+            1.95998252878315,
+            0.000589997772306,
+            100.3989762490671,
+        ],
+        1e-11,
+        "ttest y == x, unpaired unequal",
+    );
+    // correlate's other forms
+    let cov = ["N", "cov_12", "Var_2", "Var_1"];
+    let (got, order) = r_values("correlate y x w, covariance", &cov);
+    near_stata(
+        &got,
+        &[
+            80.0,
+            2.327715352955293,
+            1.217525214556962,
+            8.821596429550457,
+        ],
+        1e-12,
+        "correlate, covariance",
+    );
+    assert_eq!(
+        order, "N cov_12 Var_2 Var_1 C",
+        "correlate, covariance: Stata's order"
+    );
+    let (got, _) = r_values(&format!("{gaps}\ncorrelate y, covariance"), &cov);
+    near_stata(
+        &got,
+        &[78.0, 0.0, 0.0, 9.00430129282069],
+        1e-12,
+        "correlate of one variable, covariance",
+    );
+    let (got, _) = r_values("correlate y x [fw=f]", &["N", "rho"]);
+    near_stata(
+        &got,
+        &[161.0, 0.6803941441272422],
+        1e-12,
+        "correlate [fw=f]",
+    );
+    // a = _n / 3 is a float in Stata, so its sum is not quite 1080
+    let (got, order) = r_values("correlate y x [aw=a]", &["sum_w", "N", "rho"]);
+    near_stata(
+        &got,
+        &[1080.000000029802, 80.0, 0.721438453425216],
+        1e-9,
+        "correlate [aw=a]",
+    );
+    assert_eq!(order, "sum_w N rho C", "correlate [aw=a]: Stata's order");
+    let (got, _) = r_values(
+        "correlate y x w [aw=a], covariance",
+        &["sum_w", "N", "cov_12", "Var_2", "Var_1"],
+    );
+    near_stata(
+        &got,
+        &[
+            1080.000000029802,
+            80.0,
+            2.265733008860503,
+            1.213325847971648,
+            8.129080796317179,
+        ],
+        1e-9,
+        "correlate [aw=a], covariance",
+    );
+    let (got, _) = r_values("quietly correlate y x w, means", &["N", "rho"]);
+    near_stata(&got, &[80.0, 0.7102599004414356], 1e-12, "correlate, means");
+    // pwcorr: the first pair's count and correlation
+    let (got, order) = r_values("pwcorr y x w", &["N", "rho"]);
+    near_stata(&got, &[80.0, 0.7102599004414356], 1e-12, "pwcorr");
+    assert_eq!(order, "N rho Nobs C", "pwcorr: Stata's order");
+    let (_, order) = r_values("pwcorr y x w, sig", &["N"]);
+    assert_eq!(order, "N rho Nobs C sig", "pwcorr, sig: Stata's order");
+    let missing_xw = "replace x = . in 3\nreplace w = . in 5/6";
+    let (got, _) = r_values(
+        &format!("{missing_xw}\npwcorr y x w"),
+        &["N", "rho", "Nobs"],
+    );
+    near_stata(
+        &got,
+        &[
+            79.0,
+            0.6957036675633577,
+            80.0,
+            79.0,
+            78.0,
+            79.0,
+            79.0,
+            77.0,
+            78.0,
+            77.0,
+            78.0,
+        ],
+        1e-12,
+        "pwcorr with gaps, and r(Nobs)",
+    );
+    let (got, _) = r_values(&format!("{missing_xw}\npwcorr x w y"), &["N", "rho"]);
+    near_stata(&got, &[77.0, 0.029545212304378], 1e-12, "pwcorr x w y");
+    let (got, _) = r_values(&format!("{gaps}\npwcorr y x w [fw=f]"), &["N", "rho"]);
+    near_stata(&got, &[156.0, 0.6720641749877559], 1e-12, "pwcorr [fw=f]");
+    let (got, _) = r_values(
+        &format!("{gaps}\nquietly pwcorr y x w [aw=f]"),
+        &["N", "rho"],
+    );
+    near_stata(
+        &got,
+        &[77.0, 0.6720641749877563],
+        1e-12,
+        "quietly pwcorr [aw=f]",
+    );
+    // tables: the last one's, weighted too
+    let (got, _) = r_values("tab1 g ord [fw=f]", &["N", "r"]);
+    near_stata(&got, &[161.0, 3.0], 0.0, "tab1 [fw=f]");
+    let (got, _) = r_values("tab2 g ord cat3", &["N", "r", "c"]);
+    near_stata(&got, &[80.0, 3.0, 3.0], 0.0, "tab2: the last pair");
+    let (got, _) = r_values("quietly tab1 g", &["N", "r"]);
+    near_stata(&got, &[80.0, 2.0], 0.0, "quietly tab1");
+    let (got, _) = r_values("tabulate g [fw=f]", &["N", "r"]);
+    near_stata(&got, &[161.0, 2.0], 0.0, "tabulate [fw=f]");
+    let (got, _) = r_values("tabulate g ord [aw=a]", &["N", "r", "c"]);
+    near_stata(&got, &[80.0, 2.0, 3.0], 1e-12, "tabulate [aw=a]");
+    let (got, _) = r_values("tabulate g ord [fw=f], chi2", &["N", "r", "c", "chi2", "p"]);
+    near_stata(
+        &got,
+        &[161.0, 2.0, 3.0, 0.7802414988087495, 0.676975125219529],
+        1e-12,
+        "tabulate [fw=f], chi2",
+    );
+    // describe
+    let (got, order) = r_values("describe", &["k", "N"]);
+    near_stata(&got, &[15.0, 80.0], 0.0, "describe (with f and a)");
+    assert_eq!(order, "k N", "describe: Stata's order");
+    let (got, _) = r_values("keep y x\nquietly describe, short", &["k", "N"]);
+    near_stata(&got, &[2.0, 80.0], 0.0, "describe, short");
+    let why = refusal("use s\ndescribe\ndisplay r(width)\n");
+    assert!(why.contains("storage types"), "{why}");
+    let why = refusal("use s\ndescribe\ndisplay r(changed)\n");
+    assert!(why.contains("last saved"), "{why}");
+}
+
+/// `matrix list` of e(b), e(V) and r() matrices, line for line as Stata 19
+/// printed them (its log of the same do-file, linesize 80): Stata's columns
+/// (base levels, `o.` for the base outcome, equations, `/:cut1`), widths,
+/// prefix lines, wrapping, shortened names and the options.
+#[test]
+fn matrix_list_prints_statas_matrices() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let body = "quietly regress y x w\nmatrix list e(b)\nquietly regress y c.x##i.g i.cat3\nmatrix list e(b)\n\
+                matrix list e(V)\nquietly regress y ib2.cat3 i.g#c.x x\nmatrix list e(b)\n\
+                quietly regress y c.x#c.w x w\nmatrix list e(b)\nquietly probit yb x\nmatrix list e(b)\n\
+                quietly logit yb x i.g\nmatrix list e(b)\nquietly poisson cnt x i.g\nmatrix list e(b)\n\
+                quietly nbreg nb x\nmatrix list e(b)\nmatrix list e(V)\nquietly ologit ord x w\nmatrix list e(b)\n\
+                quietly oprobit ord x\nmatrix list e(b)\nquietly mlogit cat3 x\nmatrix list e(b)\n\
+                quietly mlogit cat3 x, baseoutcome(1)\nmatrix list e(b)\nquietly regress y w\nmatrix list e(V)\n\
+                matrix list e(b), noheader\nmatrix list e(V), nohalf\nmatrix list e(V), noblank\n\
+                matrix list e(V), title(my title)\nmatrix list e(b), format(%9.3f)\nquietly correlate y x w\n\
+                matrix list r(C)\nquietly pwcorr y x w\nmatrix list r(Nobs)\nrename x abcdef\n\
+                quietly regress y abcdef w g cl expo\nmatrix list e(V)\n\
+                generate averyveryverylongname = abcdef\nquietly correlate y averyveryverylongname w\n\
+                matrix list r(C)\nmatrix list r(C), format(%5.2f)\n";
+    // a marker after each matrix list, to cut RCraft's output into theirs
+    let marked: String = body
+        .lines()
+        .map(|l| {
+            if l.starts_with("matrix list") {
+                format!("{l}\ndisplay \"@@\"\n")
+            } else {
+                format!("{l}\n")
+            }
+        })
+        .collect();
+    let text = ok(
+        &mut e,
+        &script(&format!("use \"{dir}/models.dta\"\n{marked}")),
+    );
+    let got: Vec<&str> = text.split("@@\n").collect();
+    let stata: &[(&str, &str)] = &[
+        ("matrix list e(b)", "\ne(b)[1,3]\n             x           w       _cons\ny1   1.9265971  -.91402052   1.3514156\n"),
+        ("matrix list e(b)", "\ne(b)[1,9]\n                      0b.         1.      0b.g#       1.g#        1b.\n            x          g          g       co.x        c.x       cat3\ny1  1.7314506          0  .79882531          0  .38601592          0\n\n            2.         3.           \n         cat3       cat3      _cons\ny1  .27359978  .63452418  .57225545\n"),
+        ("matrix list e(V)", "\nsymmetric e(V)[9,9]\n                               0b.          1.       0b.g#        1.g#\n                    x           g           g        co.x         c.x\n        x   .10255015\n     0b.g           0           0\n      1.g  -.04057028           0    .2394607\n0b.g#co.x           0           0           0           0\n  1.g#c.x  -.08996818           0   .01999606           0   .20318371\n  1b.cat3           0           0           0           0           0\n   2.cat3  -.06048457           0   .04304305           0   .03625313\n   3.cat3    .0230412           0   .00498126           0   .00816533\n    _cons    .0566032           0  -.14657391           0  -.05273611\n\n                   1b.          2.          3.            \n                 cat3        cat3        cat3       _cons\n  1b.cat3           0\n   2.cat3           0   .44103615\n   3.cat3           0   .25965939    .4409282\n    _cons           0  -.31826621  -.27365112   .37712054\n"),
+        ("matrix list e(b)", "\ne(b)[1,7]\n             1.         2b.          3.       0b.g#        1.g#            \n          cat3        cat3        cat3        co.x         c.x           x\ny1  -.13001095           0   .48789609           0   .31931037   1.8667904\n\n               \n         _cons\ny1   1.1912274\n"),
+        ("matrix list e(b)", "\ne(b)[1,4]\n           c.x#                                    \n           c.w           x           w       _cons\ny1  -.36407648   1.9145457  -.92700505   1.3576453\n"),
+        ("matrix list e(b)", "\ne(b)[1,2]\n           yb:        yb:\n            x      _cons\ny1  .66029691  .10289385\n"),
+        ("matrix list e(b)", "\ne(b)[1,4]\n            yb:         yb:         yb:         yb:\n                        0b.          1.            \n             x           g           g       _cons\ny1   1.1354142           0  -.13313965   .25078595\n"),
+        ("matrix list e(b)", "\ne(b)[1,4]\n          cnt:       cnt:       cnt:       cnt:\n                      0b.         1.           \n            x          g          g      _cons\ny1  .36894698          0  .13955836  .76936173\n"),
+        ("matrix list e(b)", "\ne(b)[1,3]\n            nb:         nb:          /:\n             x       _cons     lnalpha\ny1   .44577237   .66549248  -.73053565\n"),
+        ("matrix list e(V)", "\nsymmetric e(V)[3,3]\n                   nb:         nb:          /:\n                    x       _cons     lnalpha\n     nb:x   .01163688\n nb:_cons  -.00180266   .01301977\n/:lnalpha  -.00137373   .00019194   .11618661\n"),
+        ("matrix list e(b)", "\ne(b)[1,4]\n           ord:        ord:          /:          /:\n             x           w        cut1        cut2\ny1   .53465542   .33508928  -.62940105   .65545509\n"),
+        ("matrix list e(b)", "\ne(b)[1,3]\n           ord:          /:          /:\n             x        cut1        cut2\ny1   .32767643  -.39591229   .38579873\n"),
+        ("matrix list e(b)", "\ne(b)[1,6]\n             1:          1:          2:          2:          3:          3:\n                                     o.          o.                        \n             x       _cons           x       _cons           x       _cons\ny1  -.78699654  -.71063529           0           0  -1.2654175  -.34073709\n"),
+        ("matrix list e(b)", "\ne(b)[1,6]\n             1:          1:          2:          2:          3:          3:\n             o.          o.                                                \n             x       _cons           x       _cons           x       _cons\ny1           0           0   .78699654   .71063529  -.47842095    .3698982\n"),
+        ("matrix list e(V)", "\nsymmetric e(V)[2,2]\n               w      _cons\n    w  .32468738\n_cons   .0065181  .10904465\n"),
+        ("matrix list e(b), noheader", "\n             w       _cons\ny1  -.80254345   1.1196201\n"),
+        ("matrix list e(V), nohalf", "\nsymmetric e(V)[2,2]\n               w      _cons\n    w  .32468738   .0065181\n_cons   .0065181  .10904465\n"),
+        ("matrix list e(V), noblank", "symmetric e(V)[2,2]\n               w      _cons\n    w  .32468738\n_cons   .0065181  .10904465\n"),
+        ("matrix list e(V), title(my title)", "\nsymmetric e(V)[2,2]:  my title\n               w      _cons\n    w  .32468738\n_cons   .0065181  .10904465\n"),
+        ("matrix list e(b), format(%9.3f)", "\ne(b)[1,2]\n         w   _cons\ny1  -0.803   1.120\n"),
+        ("matrix list r(C)", "\nsymmetric r(C)[3,3]\n            y           x           w\ny           1\nx    .7102599           1\nw  -.15748354   .03056299           1\n"),
+        ("matrix list r(Nobs)", "\nsymmetric r(Nobs)[3,3]\n    y   x   w\ny  80\nx  80  80\nw  80  80  80\n"),
+        ("matrix list e(V)", "\nsymmetric e(V)[6,6]\n            abcdef           w           g          cl        expo       _cons\nabcdef     .046465\n     w   .00128902   .16575993\n     g  -.02259898  -.01307548   .21970595\n    cl    .0024409   .00026513  -.00119053   .00998147\n  expo   .00709636    .0322096   .00306261   .00052853   .09874158\n _cons  -.00672393  -.04885851  -.11298842  -.04496609  -.17924723   .62980328\n"),
+        ("matrix list r(C)", "\nsymmetric r(C)[3,3]\n                         y  averyveryv~e             w\n           y             1\naveryveryv~e      .7102599             1\n           w    -.15748354     .03056299             1\n"),
+        ("matrix list r(C), format(%5.2f)", "\nsymmetric r(C)[3,3]\n                         y  averyveryv~e             w\n           y          1.00\naveryveryv~e          0.71          1.00\n           w         -0.16          0.03          1.00\n"),
+    ];
+    // The likelihood models (probit to mlogit, 5 to 13) stop where Stata's
+    // iterations stop, about 1e-7 from R's optimum, so their last digit can
+    // differ and with it a column's width: their names, equations and
+    // prefixes are checked word for word and their numbers to 5e-6. The rest
+    // are Stata's characters exactly.
+    assert_eq!(got.len(), stata.len() + 1, "{text}");
+    for (i, ((cmd, want), have)) in stata.iter().zip(&got).enumerate() {
+        if !(5..=13).contains(&i) {
+            assert_eq!(
+                have, want,
+                "{cmd} [{i}]: Stata printed\n{want}\nRCraft printed\n{have}"
+            );
+            continue;
+        }
+        let (w, h): (Vec<&str>, Vec<&str>) = (want.lines().collect(), have.lines().collect());
+        assert_eq!(
+            w.len(),
+            h.len(),
+            "{cmd} [{i}]: Stata printed\n{want}\nRCraft printed\n{have}"
+        );
+        for (wl, hl) in w.iter().zip(&h) {
+            let (wt, ht): (Vec<&str>, Vec<&str>) = (
+                wl.split_whitespace().collect(),
+                hl.split_whitespace().collect(),
+            );
+            assert_eq!(wt.len(), ht.len(), "{cmd} [{i}]: {wl:?} against {hl:?}");
+            for (a, b) in wt.iter().zip(&ht) {
+                match (a.parse::<f64>(), b.parse::<f64>()) {
+                    (Ok(x), Ok(y)) => assert!(
+                        (x - y).abs() <= 5e-6 * x.abs().max(1e-2),
+                        "{cmd} [{i}]: {b} against Stata's {a}"
+                    ),
+                    _ => assert_eq!(a, b, "{cmd} [{i}]: {wl:?} against {hl:?}"),
+                }
+            }
+        }
+    }
+    // a model whose columns RCraft does not rebuild is refused with the reason
+    let why = refusal("use s\nanova y g\nmatrix list e(b)\n");
+    assert!(why.contains("after anova"), "{why}");
+    let why = refusal("use s\nmatrix list A\n");
+    assert!(why.contains("only the matrices a command leaves"), "{why}");
+    let why = refusal("use s\nregress y x\nsummarize y\nmatrix list r(table)\n");
+    assert!(
+        why.is_empty(),
+        "r(table) after summarize is Stata's own error: {why}"
+    );
+}
+
+/// `scalar`: define, list (newest first, a change of type making it the
+/// newest), drop, the first row of a variable, a variable before a scalar of
+/// the same name, `scalar()`, and r() left alone; every line Stata 19 printed.
+#[test]
+fn scalars_are_statas() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let body = "scalar a = 5\nscalar b = a * 2 + y\nscalar s = \"hello\"\nscalar define big = 123456789.125\n\
+                scalar small = -0.000012345678\nscalar m = .\nscalar list\nscalar list a s\n\
+                display a \" \" b \" \" s\ndisplay scalar(a) + 1\ngenerate z = a * x\ndisplay z[2] \" \" x[2]\n\
+                generate a = 1\ndisplay a\ndisplay scalar(a)\ngenerate z2 = a\ndisplay z2[1]\nscalar drop a\n\
+                scalar list\nscalar drop _all\nscalar list\nscalar p = 1\nscalar q = 2\nscalar t = 3\n\
+                scalar p = p + 10\nscalar list\nscalar q = \"text now\"\nscalar list\nscalar list t p\n\
+                scalar longername = 1/3\nscalar l2 = 1e20\nscalar l3 = -123456.5\nscalar list\n\
+                display longername\nquietly summarize y\nscalar list t\ndisplay r(mean)\nquietly regress y x\n\
+                quietly summarize y\nmatrix list e(b)\ndisplay r(mean)\n";
+    let text = ok(
+        &mut e,
+        &script(&format!("use \"{dir}/models.dta\"\n{body}")),
+    );
+    let got: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    let stata = [
+        "         m =          .",
+        "     small = -.00001235",
+        "       big =  1.235e+08",
+        "         s = hello",
+        "         b =  3.9386546",
+        "         a =          5",
+        "         a =          5",
+        "         s = hello",
+        "5 3.9386546 hello",
+        "6",
+        ".46000001 .092",
+        "1",
+        "5",
+        "1",
+        "         m =          .",
+        "     small = -.00001235",
+        "       big =  1.235e+08",
+        "         s = hello",
+        "         b =  3.9386546",
+        "         t =          3",
+        "         q =          2",
+        "         p =         11",
+        "         q = text now",
+        "         t =          3",
+        "         p =         11",
+        "         t =          3",
+        "         p =         11",
+        "        l3 =  -123456.5",
+        "        l2 =  1.000e+20",
+        "longername =  .33333333",
+        "         q = text now",
+        "         t =          3",
+        "         p =         11",
+        ".33333333",
+        "         t =          3",
+        "1.1357311",
+        "e(b)[1,2]",
+        "            x      _cons",
+        "y1  1.9118416  1.3679721",
+        "1.1357311",
+    ];
+    assert_eq!(got, stata, "the lines Stata printed\n{text}");
+    // a scalar that is also a variable of the data: R stops, as RCraft
+    // cannot see the file's columns and Stata would take the variable
+    let (outcome, said) = run(
+        &mut e,
+        &script(&format!(
+            "use \"{dir}/models.dta\"\nscalar x = 2\ndisplay x\n"
+        )),
+    );
+    assert_eq!(outcome, Outcome::Error, "{said}");
+    assert!(
+        said.contains("x is a variable as well as a scalar"),
+        "{said}"
+    );
+    let why = refusal("use s\ndisplay scalar(nosuch)\n");
+    assert!(why.contains("no scalar nosuch"), "{why}");
+}
