@@ -864,6 +864,23 @@ impl eframe::App for App {
 impl App {
     /// What Tab does on an `rc` line: the line completed as far as it can be,
     /// and, when several words fit, the choices shown above the line.
+    /// Tab on a Stata line, from what the session holds: the variables of the
+    /// data in memory (as R last sent them) and the files of R's folder.
+    fn complete_stata(&self, line: &str) -> Option<(String, Vec<String>)> {
+        let variables: Vec<String> = self
+            .stata
+            .live
+            .data()
+            .and_then(|d| self.engine().and_then(|e| e.table(d)))
+            .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
+            .unwrap_or_default();
+        let folder = self
+            .engine()
+            .and_then(|e| e.working_dir())
+            .map(std::path::PathBuf::from);
+        self.stata.complete(line, &variables, folder.as_deref())
+    }
+
     fn complete_rc(&mut self) -> Option<String> {
         let cran = |p: &str| -> Vec<String> {
             self.package_index
@@ -1624,6 +1641,45 @@ Click to choose another folder"
             });
         });
         let editor = egui::Id::new(SCRIPT_ID);
+        // Tab in Stata mode completes the line up to the cursor, as on the
+        // Command line (taken before the editor would insert a tab)
+        if stata
+            && ui.memory(|m| m.has_focus(editor))
+            && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab))
+        {
+            let at = egui::TextEdit::load_state(ui.ctx(), editor)
+                .and_then(|s| s.cursor.char_range())
+                .map(|r| r.primary.index);
+            let done = at.and_then(|at| {
+                stata_mode::complete_at(&self.script, at, |line| self.complete_stata(line))
+            });
+            match done {
+                Some((text, cursor, shown)) => {
+                    self.script = text;
+                    let mut state =
+                        egui::TextEdit::load_state(ui.ctx(), editor).unwrap_or_default();
+                    state
+                        .cursor
+                        .set_char_range(Some(egui::text::CCursorRange::one(
+                            egui::text::CCursor::new(cursor),
+                        )));
+                    state.store(ui.ctx(), editor);
+                    self.stata.script_choices =
+                        (!shown.is_empty()).then(|| (self.script.clone(), shown));
+                }
+                None => self.stata.script_choices = None,
+            }
+        }
+        if let Some((for_script, shown)) = &self.stata.script_choices {
+            if stata && *for_script == self.script {
+                ui.label(
+                    RichText::new(shown.join("   "))
+                        .monospace()
+                        .small()
+                        .color(pal.accent),
+                );
+            }
+        }
         let draw_editor = |ui: &mut egui::Ui, script: &mut String| {
             egui::ScrollArea::vertical()
                 .id_salt("script")
@@ -1778,7 +1834,7 @@ Click to choose another folder"
                         .color(pal.dim),
                     );
                 }
-                EngineState::Ready(engine) => results_list(ui, pal, engine),
+                EngineState::Ready(engine) => results_list(ui, pal, engine, self.stata.on, out),
             });
     }
 
@@ -1917,21 +1973,7 @@ Click to choose another folder"
             let t = self.command.trim_start();
             if self.stata.on {
                 // a Stata line: completed here, from what the session holds
-                let variables: Vec<String> = self
-                    .stata
-                    .live
-                    .data()
-                    .and_then(|d| self.engine().and_then(|e| e.table(d)))
-                    .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
-                    .unwrap_or_default();
-                let folder = self
-                    .engine()
-                    .and_then(|e| e.working_dir())
-                    .map(std::path::PathBuf::from);
-                match self
-                    .stata
-                    .complete(&self.command, &variables, folder.as_deref())
-                {
+                match self.complete_stata(&self.command) {
                     Some((done, shown)) => {
                         self.completions = shown;
                         recalled = Some(done);
@@ -2026,7 +2068,7 @@ fn pane_title(ui: &mut egui::Ui, pal: &Palette, text: &str) {
     ui.label(RichText::new(text).strong().color(pal.dim));
 }
 
-/// In Stata mode a click puts back a Stata line (the comment its R starts
+/// In Stata mode a click puts back a Stata line (the `# Stata:` comment its R starts
 /// with), else the code.
 fn history_list(
     ui: &mut egui::Ui,
@@ -2044,7 +2086,12 @@ fn history_list(
         } else {
             ""
         };
-        let text = RichText::new(format!("{first}{more}")).monospace();
+        // a Stata line as Stata shows it
+        let shown = match first.strip_prefix(rcraft_statatr::data_r::STATA_COMMENT) {
+            Some(line) => format!(". {line}"),
+            None => format!("{first}{more}"),
+        };
+        let text = RichText::new(shown).monospace();
         let text = match entry.outcome {
             Some(Outcome::Ok) | None => text,
             Some(_) => text.color(pal.error),
@@ -2053,7 +2100,7 @@ fn history_list(
             .selectable_label(false, text)
             .on_hover_text("Click to put this back in the Command line");
         if response.clicked() {
-            let back = match first.strip_prefix("# ") {
+            let back = match first.strip_prefix(rcraft_statatr::data_r::STATA_COMMENT) {
                 Some(line) if stata => line.to_string(),
                 _ => entry.code.trim_end().to_string(),
             };
@@ -2062,13 +2109,26 @@ fn history_list(
     }
 }
 
-fn results_list(ui: &mut egui::Ui, pal: &Palette, engine: &Engine) {
+/// The commands and what they printed. A Stata-mode command shows its Stata
+/// as Stata does (`. summarize y`), the R it became under it and the notes;
+/// in Stata mode a click on its Stata puts that line back.
+fn results_list(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    engine: &Engine,
+    stata: bool,
+    out: &mut Vec<Action>,
+) {
     for block in engine.results().blocks() {
         if let Some(entry) = engine.history().get(block.command) {
-            // RCraft's Stata helpers folded to one line; the session script keeps them
-            for (i, line) in stata_mode::shown_lines(&entry.code).iter().enumerate() {
-                let prompt = if i == 0 { "> " } else { "+ " };
-                mono(ui, &format!("{prompt}{line}"), pal.accent, true);
+            match stata_mode::parts(&entry.code) {
+                Some(parts) => stata_parts(ui, pal, &parts, stata, out),
+                None => {
+                    for (i, line) in stata_mode::shown_lines(&entry.code).iter().enumerate() {
+                        let prompt = if i == 0 { "> " } else { "+ " };
+                        mono(ui, &format!("{prompt}{line}"), pal.accent, true);
+                    }
+                }
             }
         }
         for item in &block.items {
@@ -2105,6 +2165,50 @@ fn results_list(ui: &mut egui::Ui, pal: &Palette, engine: &Engine) {
             }
         }
         ui.add_space(6.0);
+    }
+}
+
+/// A Stata-mode command in Results: its Stata, its R, its notes.
+fn stata_parts(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    parts: &[stata_mode::Part],
+    stata: bool,
+    out: &mut Vec<Action>,
+) {
+    use stata_mode::Part;
+    for part in parts {
+        match part {
+            Part::Helpers(line) => mono(ui, line, pal.dim, false),
+            Part::Stata(line) => {
+                let text = RichText::new(format!(". {line}"))
+                    .monospace()
+                    .strong()
+                    .color(pal.accent);
+                let label = egui::Label::new(text).wrap_mode(egui::TextWrapMode::Extend);
+                if stata {
+                    let response = ui
+                        .add(label.sense(egui::Sense::click()))
+                        .on_hover_text("Click to put this Stata back in the Command line");
+                    if response.clicked() {
+                        out.push(Action::SetCommand(line.clone()));
+                    }
+                } else {
+                    ui.add(label);
+                }
+            }
+            Part::R(line) => mono(ui, &format!("  {line}"), pal.dim, false),
+            Part::Note(n) => {
+                ui.label(
+                    RichText::new(format!("  note: {n}"))
+                        .small()
+                        .color(pal.warning),
+                );
+            }
+            Part::Refused(why) => {
+                ui.label(RichText::new(format!("  not translated: {why}")).color(pal.error));
+            }
+        }
     }
 }
 
@@ -3250,7 +3354,7 @@ mod tests {
             .unwrap_or_default();
         let summarize = codes
             .iter()
-            .find(|c| c.contains("# summarize y"))
+            .find(|c| c.contains("# Stata: summarize y"))
             .cloned()
             .unwrap_or_default();
         assert!(
@@ -3264,15 +3368,11 @@ mod tests {
         );
         let display = codes
             .iter()
-            .find(|c| c.contains("# display r(mean)"))
+            .find(|c| c.contains("# Stata: display r(mean)"))
             .cloned()
             .unwrap_or_default();
-        // what it needs first comes with it, what came before does not again
-        assert!(
-            display.contains("stata_fmt <- function")
-                && !display.contains("stata_summarize <- function"),
-            "{display}"
-        );
+        // what came before (stata_fmt came with summarize's table) does not come again
+        assert!(!display.contains("<- function"), "{display}");
         // a line that cannot be translated says why and leaves the session as it was
         run(&mut app, "xtlogit y x");
         assert!(

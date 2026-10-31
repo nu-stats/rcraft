@@ -237,7 +237,7 @@ impl Session {
         self.helpers_for(&spec);
         let level = level(opts)?;
         let (robust, cluster) = vce(opts)?;
-        let mut right = spec.right(opts.has("noconstant", 5));
+        let mut right = spec.right(opts.has("noconstant", 5))?;
         match (opts.arg("exposure", 3), opts.arg("offset", 6)) {
             (Some(_), Some(_)) => {
                 return Err(no(format!(

@@ -2411,5 +2411,34 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   (the folding, a command's lines found and selected, Page Up, Tab from the session and the folder), and an app
   test with R: the switch, `use` of a .dta, `summarize`, `display r(mean)` printing Stata's 4.3333333, the helpers
   sent once, an untranslated line's reason, recall, Tab on the data's variables, a restart.
-- **Not done:** a click on the R side of the Command window's Results (only the Script Editor has the two panes);
-  Stata-style output tables (later, as the roadmap says); the Script Editor's own Tab completion.
+- **Not done** (done since, see the next section): a click on the R side of the Command window's Results; Stata-style
+  output tables; the Script Editor's own Tab completion.
+
+## P2B.7 finished: Stata in Results, Tab in the Script Editor, Stata's tables, 2026-10-31
+
+- **Results and History.** A Stata line is marked in its R as `# Stata: summarize y` (`data_r::STATA_COMMENT`), so
+  a Stata-mode command is told from R. Results shows it as Stata does, `. summarize y`, with its R under it (dim),
+  its notes in the warning colour and the reason a line was not translated in the error colour; in Stata mode a
+  click on the Stata puts it back on the Command line. History shows `. summarize y` too.
+- **Tab in the Script Editor** (Stata mode): the line the cursor is on, up to the cursor, completed as on the
+  Command line, the choices shown above the editor while the script is unchanged.
+- **Stata's own tables** (`statatr/src/data_r/tables.rs`), read off Stata 19's output (never its files):
+  - `summarize`: Obs with commas, the rest at `%9.0g`, a rule after every five variables, names past 12 shortened,
+    a string variable as Obs 0 (weights and `detail` keep R's layout and say so);
+  - `tabulate` one-way: the labels' column as wide as the widest label (11 at least), a long variable name split
+    over two lines, percentages at `%.2f`, commas past 999; two-way: rows' labels cut at 21, columns of 10 a space
+    apart in blocks that fit 80 characters (wrapped as Stata does), the column variable centred over its columns,
+    `chi2` as Stata's line; `tab1`/`tab2` print Stata's `-> tabulation of` headings;
+  - `regress`: the ANOVA header (SS and MS at `%11.0g`, Root MSE at `%10.5g`), the robust and clustered headers,
+    `(Std. err. adjusted for 8 clusters in cl)`, the coefficient table (b, se and the interval at `%9.0g`, t at
+    `%8.2f`, P at `%5.3f`) and factors as Stata groups them: one level inline (`1.g`), several, or any
+    interaction with a continuous variable, under the factor's name.
+  - Kept in R's layout, with a note, where the shape was not checked against Stata: string variables in tabulate
+    (Stata sizes them by their storage type, which R does not keep), percentages (`row`, `column`, `cell`),
+    analytic and importance weights, factors with value labels, omitted variables, two factors interacted.
+- **Found and fixed on the way:** `regress y x i.g, noconstant` fitted a different model (R gives the first factor
+  every level without the constant; Stata still leaves its base out) and is refused with that reason now, in every
+  model; the Wald F solved e(V) unscaled, which R called singular when coefficients differ by many orders of size
+  (`regress y big tiny`), and now solves it on the errors' scale; a one-coefficient model lost its name.
+- **Tests:** the 26 tables of two Stata 19 runs compared character for character (`stata_returned.rs`), the
+  refusal, the Results parts, Tab in the script; the old tests that read R's layout now read Stata's.

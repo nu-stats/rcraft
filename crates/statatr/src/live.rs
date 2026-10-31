@@ -158,10 +158,10 @@ mod tests {
         assert!(b.code.starts_with(HELPERS_BEGIN), "{}", b.code);
         assert!(b.code.contains("stata_summarize <- function"));
         assert!(b.code.contains(HELPERS_END));
-        assert!(b.code.contains("# summarize price\n"));
+        assert!(b.code.contains("# Stata: summarize price\n"));
         let c = live.step("summarize mpg");
         assert!(!c.code.contains(HELPERS_BEGIN), "{}", c.code);
-        assert!(c.code.starts_with("# summarize mpg\n"), "{}", c.code);
+        assert!(c.code.starts_with("# Stata: summarize mpg\n"), "{}", c.code);
         // a line that reads e() after a model typed earlier
         live.step("regress price mpg");
         let d = live.step("display e(N)");

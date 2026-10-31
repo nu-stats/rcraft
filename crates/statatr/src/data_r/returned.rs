@@ -215,8 +215,13 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   robust <- vce %in% c("robust", "cluster")
   G <- if (vce != "cluster") NULL else if (!is.null(fit[["G"]])) fit[["G"]] else if (cmd == "ivregress") length(unique(fit$cluster)) else if (cmd == "stcox") stata_m$G else length(unique(stata_cluster))
   wald <- function(keep) {
+    # on the scale of the errors (a correlation), so coefficients of very
+    # different sizes do not make V look singular to solve()
     bk <- b[keep]
-    drop(t(bk) %*% solve(V[keep, keep, drop = FALSE], bk))
+    Vk <- as.matrix(V[keep, keep, drop = FALSE])
+    s <- sqrt(diag(Vk))
+    z <- bk / s
+    drop(t(z) %*% solve(Vk / outer(s, s), z))
   }
   slopes <- !grepl("(Intercept)", names(b), fixed = TRUE) & !startsWith(names(b), "/")
   cons <- any(grepl("(Intercept)", names(b), fixed = TRUE))

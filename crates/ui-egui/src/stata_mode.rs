@@ -14,7 +14,7 @@ use std::path::Path;
 
 use eframe::egui::{self, RichText};
 use rcraft_statatr::complete::{self, Completion, Context};
-use rcraft_statatr::data_r::{translate, Translation};
+use rcraft_statatr::data_r::{translate, Translation, STATA_COMMENT};
 use rcraft_statatr::live::{Live, HELPERS_BEGIN, HELPERS_END};
 use rcraft_statatr::reader::read;
 
@@ -35,6 +35,9 @@ pub struct StataMode {
     pub live: Live,
     /// A data frame to show once R lists it (after `use`), staying on Results.
     pub follow: Option<String>,
+    /// What Tab in the Script Editor could complete to, and the script it was
+    /// for (shown while the script is unchanged).
+    pub script_choices: Option<(String, Vec<String>)>,
     /// The Stata lines typed, oldest first, and where Page Up has got to.
     typed: Vec<String>,
     at: Option<usize>,
@@ -151,6 +154,68 @@ pub fn shown_lines(code: &str) -> Vec<String> {
         out.push(line.to_string());
     }
     out
+}
+
+/// Tab in the Script Editor: the line the cursor is on, up to the cursor,
+/// completed by `complete` (as a Command line would be) and put back. The
+/// script after, where the cursor goes (in characters) and the choices.
+pub fn complete_at(
+    script: &str,
+    at: usize,
+    complete: impl Fn(&str) -> Option<(String, Vec<String>)>,
+) -> Option<(String, usize, Vec<String>)> {
+    let chars: Vec<char> = script.chars().collect();
+    let at = at.min(chars.len());
+    let before = chars.get(..at)?;
+    let start = before.iter().rposition(|c| *c == '\n').map_or(0, |i| i + 1);
+    let line: String = chars.get(start..at)?.iter().collect();
+    let (done, shown) = complete(&line)?;
+    let mut out: String = chars.get(..start)?.iter().collect();
+    out.push_str(&done);
+    let cursor = start + done.chars().count();
+    out.extend(chars.get(at..)?.iter());
+    Some((out, cursor, shown))
+}
+
+/// One line of a Stata-mode command as Results shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Part {
+    /// RCraft's helpers, folded to their marker line.
+    Helpers(String),
+    /// A Stata line, as typed.
+    Stata(String),
+    /// A line of the R it became.
+    R(String),
+    /// A known difference from Stata.
+    Note(String),
+    /// Why the line was not translated.
+    Refused(String),
+}
+
+/// A command's code read as Stata mode's, or `None` when it is plain R.
+pub fn parts(code: &str) -> Option<Vec<Part>> {
+    let lines = shown_lines(code);
+    if !lines.iter().any(|l| l.starts_with(STATA_COMMENT)) {
+        return None;
+    }
+    Some(
+        lines
+            .into_iter()
+            .map(|l| {
+                if l.starts_with(HELPERS_BEGIN) {
+                    Part::Helpers(l)
+                } else if let Some(s) = l.strip_prefix(STATA_COMMENT) {
+                    Part::Stata(s.to_string())
+                } else if let Some(n) = l.strip_prefix("#   note: ") {
+                    Part::Note(n.to_string())
+                } else if let Some(n) = l.strip_prefix("#   not translated: ") {
+                    Part::Refused(n.to_string())
+                } else {
+                    Part::R(l)
+                }
+            })
+            .collect(),
+    )
 }
 
 /// What History shows for a command: its first line, past RCraft's Stata
@@ -321,6 +386,44 @@ mod tests {
         let picked: String = text.chars().skip(a).take(b - a).collect();
         assert_eq!(picked, "regress price mpg");
         assert_eq!(char_range("", 3, 1), (0, 0));
+    }
+
+    #[test]
+    fn results_read_a_stata_command_as_its_parts() {
+        let code = format!(
+            "{HELPERS_BEGIN} stata_fmt\nstata_fmt <- function(x) x\n{HELPERS_END}\n# Stata: summarize y\nstata_summarize(d)\n#   note: printed in R's layout\n# Stata: xtlogit y x\n#   not translated: xtlogit is not translated yet\n"
+        );
+        assert_eq!(
+            parts(&code),
+            Some(vec![
+                Part::Helpers(format!(
+                    "{HELPERS_BEGIN} stata_fmt (1 lines, in the session script)"
+                )),
+                Part::Stata("summarize y".into()),
+                Part::R("stata_summarize(d)".into()),
+                Part::Note("printed in R's layout".into()),
+                Part::Stata("xtlogit y x".into()),
+                Part::Refused("xtlogit is not translated yet".into()),
+            ])
+        );
+        // R typed in R mode is left as it is
+        assert_eq!(parts("# a comment\nx <- 1\n"), None);
+    }
+
+    #[test]
+    fn tab_in_the_script_completes_the_line_up_to_the_cursor() {
+        let script = "use auto\nsumm pr\nlist";
+        let complete = |line: &str| -> Option<(String, Vec<String>)> {
+            (line == "summ pr").then(|| ("summ price".to_string(), Vec::new()))
+        };
+        // the cursor after "summ pr" (9 + 7 characters in)
+        assert_eq!(
+            complete_at(script, 16, complete),
+            Some(("use auto\nsumm price\nlist".to_string(), 19, Vec::new()))
+        );
+        // a cursor past the end is the end
+        assert_eq!(complete_at("summ pr", 99, complete).map(|c| c.1), Some(10));
+        assert_eq!(complete_at(script, 3, complete), None);
     }
 
     #[test]

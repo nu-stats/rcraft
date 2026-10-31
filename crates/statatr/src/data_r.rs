@@ -38,6 +38,7 @@ mod returned;
 mod scalars;
 mod st;
 mod stats;
+mod tables;
 mod weights;
 mod xt;
 
@@ -46,6 +47,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::expr_r::{self, r_name, r_number, r_text, Kind, Untranslated, Use};
 use crate::lang::syntax::Opt;
 use crate::reader::{Command, Item, Opener, Prefix, Program, Span};
+
+/// How a Stata line starts in the R script, as a comment above its R.
+pub const STATA_COMMENT: &str = "# Stata: ";
 
 /// R for one Stata command.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -83,7 +87,7 @@ impl Line {
     /// This line in the R script: the Stata as a comment, then its R and its
     /// notes (or the reason it was not translated).
     pub fn script(&self) -> String {
-        let mut out = format!("# {}\n", self.stata.replace('\n', " "));
+        let mut out = format!("{STATA_COMMENT}{}\n", self.stata.replace('\n', " "));
         match &self.result {
             Ok(r) => {
                 if !r.code.is_empty() {
@@ -346,6 +350,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ttest_r" => returned::TTEST_R_HELPER,
         "stata_eb" => matrices::EB_HELPER,
         "stata_scalar" => scalars::SCALAR_HELPER,
+        "stata_tables" => tables::TABLES_HELPER,
         "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
         _ => FLOAT_HELPER,
     }

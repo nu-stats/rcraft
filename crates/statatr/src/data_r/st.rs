@@ -301,7 +301,7 @@ impl Session {
             return Err(no("stcox needs at least one covariate here"));
         }
         self.helpers_for(&spec);
-        let mut right = spec.right(false);
+        let mut right = spec.right(false)?;
         if let Some(s) = opts.arg("strata", 3) {
             let vs: Vec<&str> = s.split_whitespace().collect();
             if vs.is_empty() || vs.iter().any(|v| !is_name(v)) {

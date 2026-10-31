@@ -173,7 +173,7 @@ impl Session {
         self.fit_cluster = cluster.is_some() && w.is_none();
         let rows = self.rows_for(c, out)?;
         let src = self.weighted_rows(rows, &w);
-        let right = spec.right(opts.has("noconstant", 5));
+        let right = spec.right(opts.has("noconstant", 5))?;
         let weights = match &w {
             Some((_, v)) => format!(", weights = {}", r_name(v)),
             None => String::new(),
@@ -264,6 +264,32 @@ impl Session {
         if Self::quiet(c) {
             return Ok(());
         }
+        if !beta && w.is_none() {
+            // Stata's table, from e(); R's layout where its shape was not checked
+            for h in ["stata_tables", "stata_fmt", "stata_coefs"] {
+                self.helpers.insert(h);
+            }
+            let fallback = if robust || cluster.is_some() {
+                format!(
+                    "stata_coefs(stata_b, stata_vcov, stata_df, level = {})",
+                    r_number(level)
+                )
+            } else {
+                format!(
+                    "print(summary(stata_estimates)); print(stats::confint(stata_estimates, level = {}))",
+                    r_number(level)
+                )
+            };
+            out.line(format!(
+                "if (!stata_regress_print(level = {})) {{ {fallback}; cat(\"(printed in R's layout: Stata's table for this model is not matched yet)\\n\") }}",
+                r_number(level)
+            ));
+            if robust || cluster.is_some() {
+                out.caveat("HC1, which is what Stata's robust means; R's own default would be HC3");
+            }
+            out.caveat("a row with a missing value anywhere in the model is dropped, as in Stata");
+            return Ok(());
+        }
         if robust || cluster.is_some() || beta || w.is_some() {
             self.helpers.insert("stata_coefs");
             out.line(format!(
@@ -335,16 +361,23 @@ impl Spec {
     }
 
     /// The right-hand side of R's formula.
-    pub(super) fn right(&self, noconstant: bool) -> String {
+    pub(super) fn right(&self, noconstant: bool) -> Result<String, Untranslated> {
+        // Stata keeps dropping a factor's base level without the constant; R would
+        // give the first factor every level, a different model
+        if noconstant && !self.factors.is_empty() {
+            return Err(no(
+                "noconstant with factor variables is not translated yet: R would keep every level of the first factor, Stata still leaves its base level out",
+            ));
+        }
         let right = if self.terms.is_empty() {
             "1".to_string()
         } else {
             self.terms.join(" + ")
         };
         if noconstant {
-            format!("{right} + 0")
+            Ok(format!("{right} + 0"))
         } else {
-            right
+            Ok(right)
         }
     }
 }

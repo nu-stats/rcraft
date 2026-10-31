@@ -245,7 +245,10 @@ fn tabulate_counts_and_its_chi_squared_has_no_continuity_correction() {
         "use \"{dir}/study.dta\"\ntabulate g\ntabulate g b, chi2 row\n"
     ));
     let text = ok(&mut e, &code);
-    assert!(text.contains("total 10"), "{text}");
+    assert!(
+        text.contains("      Total |         10      100.00"),
+        "{text}"
+    );
     assert!(text.contains("Pearson chi2"), "{text}");
     assert!(text.contains("row percentages"), "{text}");
 
@@ -891,7 +894,12 @@ fn by_runs_each_group_in_turn_as_stata_19_does() {
     );
     // Stata 19: Pearson chi2(1) = 0.1389 and 2.2222; (obs=4) and (obs=5); t = -3 on 3 df
     for want in [
-        "0.138889", "2.22222", "(obs=4)", "(obs=5)", "-0.3207", "0.3434",
+        "chi2(1) =   0.1389",
+        "chi2(1) =   2.2222",
+        "(obs=4)",
+        "(obs=5)",
+        "-0.3207",
+        "0.3434",
     ] {
         assert!(text.contains(want), "{want} in {text}");
     }

@@ -326,13 +326,13 @@ impl Session {
             out.line(format!(
                 "stata_estimates <- stats::lm(stats::terms({} ~ {}, keep.order = TRUE), data = {src})",
                 r_name(dep),
-                spec.right(false)
+                spec.right(false)?
             ));
         } else {
             out.line(format!(
                 "stata_estimates <- stats::lm({} ~ {}, data = {src})",
                 r_name(dep),
-                spec.right(false)
+                spec.right(false)?
             ));
         }
         out.line(keep_sample(&src));

@@ -1956,3 +1956,115 @@ fn e_with_iweights_is_statas() {
         "nbreg [iw=a]",
     );
 }
+
+/// Each summarize, tabulate and regress of `body` and what RCraft printed for
+/// it, cut out of the output with markers around it.
+fn printed_tables(e: &mut Engine, dir: &str, body: &str) -> Vec<(String, String)> {
+    let tested = |l: &str| {
+        l.starts_with("summarize ") || l.starts_with("tabulate ") || l.starts_with("regress ")
+    };
+    let marked: String = body
+        .lines()
+        .map(|l| {
+            if tested(l) {
+                format!("display \"##\"\n{l}\ndisplay \"@@\"\n")
+            } else {
+                format!("{l}\n")
+            }
+        })
+        .collect();
+    let text = ok(e, &script(&format!("use \"{dir}/models.dta\"\n{marked}")));
+    let cmds: Vec<&str> = body.lines().filter(|l| tested(l)).collect();
+    let mut out = Vec::new();
+    let mut rest = text.as_str();
+    for c in cmds {
+        let start = rest.find("##\n").map_or(rest.len(), |i| i + 3);
+        rest = rest.get(start..).unwrap_or("");
+        let end = rest.find("@@\n").unwrap_or(rest.len());
+        out.push((c.to_string(), rest.get(..end).unwrap_or("").to_string()));
+        rest = rest.get(end..).unwrap_or("");
+    }
+    out
+}
+
+/// summarize, tabulate and regress print Stata's own tables, character for
+/// character as Stata 19 printed them for the same do-file: widths and
+/// formats, the rule after every five variables, commas past 999, names
+/// shortened or split, labels, two-way tables wrapped at 80, chi2, regress's
+/// ANOVA and robust headers, clusters, factor levels grouped.
+#[test]
+fn summarize_tabulate_and_regress_print_statas_tables() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let appends = (0..13)
+        .map(|_| format!("append using \"{dir}/tblx\"\n"))
+        .collect::<String>();
+    let first = format!(
+        "generate double big = x * 123456.789\ngenerate double tiny = w / 98765.4\n\
+         generate double averyveryverylongname = y\ngenerate double neg = -abs(y) * 1000\n\
+         replace tiny = . in 1/3\nsummarize y\nsummarize y x w g cl expo yb cnt\n\
+         summarize big tiny averyveryverylongname neg\ntabulate g\ntabulate ord\n\
+         tabulate cat3 g\ntabulate cat3 g, chi2\nregress y x w\nregress y big tiny\n\
+         regress y x w, robust\nregress y x w, vce(cluster cl)\n\
+         save \"{dir}/tblx\", replace\n{appends}summarize y x\ntabulate g\ntabulate ord g\nregress y x\n"
+    );
+    let second = "regress y x i.cat3\nregress y c.x##i.g\n\
+                  label define cl3 1 \"first category\" 2 \"second\" 3 \"a much longer category label here\"\n\
+                  label values cat3 cl3\ntabulate cat3\ntabulate cat3 g\ngenerate str20 s = \"abc\" + string(g)\n\
+                  summarize s y\ngenerate averyveryverylongname = ord\n\
+                  tabulate averyveryverylongname\ntabulate ord averyveryverylongname\ntabulate cl g\n\
+                  tabulate g cl\ntabulate cnt\n";
+    let stata_first: &[(&str, &str)] = &[
+        ("summarize y", "\n    Variable |        Obs        Mean    Std. dev.       Min        Max\n-------------+---------------------------------------------------------\n           y |         80    1.135731    2.970117  -6.061345    9.18113\n"),
+        ("summarize y x w g cl expo yb cnt", "\n    Variable |        Obs        Mean    Std. dev.       Min        Max\n-------------+---------------------------------------------------------\n           y |         80    1.135731    2.970117  -6.061345    9.18113\n           x |         80    -.121475    1.103415     -3.891      2.063\n           w |         80    -.020075    .5828277      -.983       .994\n           g |         80          .5    .5031546          0          1\n          cl |         80         4.5    2.305744          1          8\n-------------+---------------------------------------------------------\n        expo |         80       1.791    .7583286         .5       2.99\n          yb |         80       .5125    .5029973          0          1\n         cnt |         80      2.4125    2.168204          0         11\n"),
+        ("summarize big tiny averyveryverylongname neg", "\n    Variable |        Obs        Mean    Std. dev.       Min        Max\n-------------+---------------------------------------------------------\n         big |         80   -14996.91    136224.1  -480370.4   254691.4\n        tiny |         77   -1.17e-07    5.99e-06  -9.95e-06   .0000101\naveryveryv~e |         80    1.135731    2.970117  -6.061345    9.18113\n         neg |         80   -2585.982      1831.9   -9181.13  -30.17397\n"),
+        ("tabulate g", "\n          g |      Freq.     Percent        Cum.\n------------+-----------------------------------\n          0 |         40       50.00       50.00\n          1 |         40       50.00      100.00\n------------+-----------------------------------\n      Total |         80      100.00\n"),
+        ("tabulate ord", "\n        ord |      Freq.     Percent        Cum.\n------------+-----------------------------------\n          1 |         29       36.25       36.25\n          2 |         23       28.75       65.00\n          3 |         28       35.00      100.00\n------------+-----------------------------------\n      Total |         80      100.00\n"),
+        ("tabulate cat3 g", "\n           |           g\n      cat3 |         0          1 |     Total\n-----------+----------------------+----------\n         1 |         7          9 |        16 \n         2 |        18         17 |        35 \n         3 |        15         14 |        29 \n-----------+----------------------+----------\n     Total |        40         40 |        80 \n"),
+        ("tabulate cat3 g, chi2", "\n           |           g\n      cat3 |         0          1 |     Total\n-----------+----------------------+----------\n         1 |         7          9 |        16 \n         2 |        18         17 |        35 \n         3 |        15         14 |        29 \n-----------+----------------------+----------\n     Total |        40         40 |        80 \n\n          Pearson chi2(2) =   0.3131   Pr = 0.855\n"),
+        ("regress y x w", "\n      Source |       SS           df       MS      Number of obs   =        80\n-------------+----------------------------------   F(2, 77)        =     44.58\n       Model |  373.965841         2   186.98292   Prob > F        =    0.0000\n    Residual |  322.940277        77  4.19402958   R-squared       =    0.5366\n-------------+----------------------------------   Adj R-squared   =    0.5246\n       Total |  696.906118        79  8.82159643   Root MSE        =    2.0479\n\n------------------------------------------------------------------------------\n           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n           x |   1.926597   .2089133     9.22   0.000     1.510597    2.342597\n           w |  -.9140205   .3955168    -2.31   0.024    -1.701595    -.126446\n       _cons |   1.351416    .230478     5.86   0.000     .8924751    1.810356\n------------------------------------------------------------------------------\n"),
+        ("regress y big tiny", "\n      Source |       SS           df       MS      Number of obs   =        77\n-------------+----------------------------------   F(2, 74)        =     42.39\n       Model |  322.674029         2  161.337014   Prob > F        =    0.0000\n    Residual |  281.673433        74  3.80639775   R-squared       =    0.5339\n-------------+----------------------------------   Adj R-squared   =    0.5213\n       Total |  604.347462        76  7.95194029   Root MSE        =     1.951\n\n------------------------------------------------------------------------------\n           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n         big |   .0000156   1.76e-06     8.87   0.000     .0000121    .0000191\n        tiny |  -98217.56   37358.41    -2.63   0.010    -172655.8   -23779.29\n       _cons |   1.380191   .2228033     6.19   0.000     .9362459    1.824137\n------------------------------------------------------------------------------\n"),
+        ("regress y x w, robust", "\nLinear regression                               Number of obs     =         80\n                                                F(2, 77)          =      39.04\n                                                Prob > F          =     0.0000\n                                                R-squared         =     0.5366\n                                                Root MSE          =     2.0479\n\n------------------------------------------------------------------------------\n             |               Robust\n           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n           x |   1.926597      .2615     7.37   0.000     1.405884     2.44731\n           w |  -.9140205   .3916869    -2.33   0.022    -1.693969   -.1340722\n       _cons |   1.351416   .2390548     5.65   0.000     .8753966    1.827434\n------------------------------------------------------------------------------\n"),
+        ("regress y x w, vce(cluster cl)", "\nLinear regression                               Number of obs     =         80\n                                                F(2, 7)           =      64.67\n                                                Prob > F          =     0.0000\n                                                R-squared         =     0.5366\n                                                Root MSE          =     2.0479\n\n                                     (Std. err. adjusted for 8 clusters in cl)\n------------------------------------------------------------------------------\n             |               Robust\n           y | Coefficient  std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n           x |   1.926597   .3306048     5.83   0.001     1.144841    2.708353\n           w |  -.9140205   .4626133    -1.98   0.089    -2.007927    .1798862\n       _cons |   1.351416    .227966     5.93   0.001     .8123616     1.89047\n------------------------------------------------------------------------------\n"),
+        ("summarize y x", "\n    Variable |        Obs        Mean    Std. dev.       Min        Max\n-------------+---------------------------------------------------------\n           y |      1,120    1.135731    2.952814  -6.061345    9.18113\n           x |      1,120    -.121475    1.096987     -3.891      2.063\n"),
+        ("tabulate g", "\n          g |      Freq.     Percent        Cum.\n------------+-----------------------------------\n          0 |        560       50.00       50.00\n          1 |        560       50.00      100.00\n------------+-----------------------------------\n      Total |      1,120      100.00\n"),
+        ("tabulate ord g", "\n           |           g\n       ord |         0          1 |     Total\n-----------+----------------------+----------\n         1 |       182        224 |       406 \n         2 |       182        140 |       322 \n         3 |       196        196 |       392 \n-----------+----------------------+----------\n     Total |       560        560 |     1,120 \n"),
+        ("regress y x", "\n      Source |       SS           df       MS      Number of obs   =     1,120\n-------------+----------------------------------   F(1, 1118)      =   1138.17\n       Model |  4921.94668         1  4921.94668   Prob > F        =    0.0000\n    Residual |  4834.73897     1,118  4.32445346   R-squared       =    0.5045\n-------------+----------------------------------   Adj R-squared   =    0.5040\n       Total |  9756.68565     1,119   8.7191114   Root MSE        =    2.0795\n\n------------------------------------------------------------------------------\n           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n           x |   1.911842   .0566695    33.74   0.000     1.800651    2.023032\n       _cons |   1.367972   .0625181    21.88   0.000     1.245306    1.490638\n------------------------------------------------------------------------------\n"),
+    ];
+    let stata_second: &[(&str, &str)] = &[
+        ("regress y x i.cat3", "\n      Source |       SS           df       MS      Number of obs   =        80\n-------------+----------------------------------   F(3, 76)        =     26.52\n       Model |  356.449846         3  118.816615   Prob > F        =    0.0000\n    Residual |  340.456272        76  4.47968779   R-squared       =    0.5115\n-------------+----------------------------------   Adj R-squared   =    0.4922\n       Total |  696.906118        79  8.82159643   Root MSE        =    2.1165\n\n------------------------------------------------------------------------------\n           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n           x |   2.003982   .2436765     8.22   0.000     1.518658    2.489306\n             |\n        cat3 |\n          2  |   .0782611   .6592418     0.12   0.906    -1.234733    1.391255\n          3  |   .6056277   .6688146     0.91   0.368     -.726432    1.937687\n             |\n       _cons |   1.125386   .5325096     2.11   0.038     .0648007     2.18597\n------------------------------------------------------------------------------\n"),
+        ("regress y c.x##i.g", "\n      Source |       SS           df       MS      Number of obs   =        80\n-------------+----------------------------------   F(3, 76)        =     28.06\n       Model |  366.256755         3  122.085585   Prob > F        =    0.0000\n    Residual |  330.649363        76  4.35064951   R-squared       =    0.5255\n-------------+----------------------------------   Adj R-squared   =    0.5068\n       Total |  696.906118        79  8.82159643   Root MSE        =    2.0858\n\n------------------------------------------------------------------------------\n           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]\n-------------+----------------------------------------------------------------\n           x |   1.672574   .2849096     5.87   0.000     1.105127     2.24002\n         1.g |   .8055872   .4801915     1.68   0.098     -.150797    1.761971\n             |\n       g#c.x |\n          1  |   .3851863   .4436638     0.87   0.388    -.4984467    1.268819\n             |\n       _cons |   .9114904   .3463048     2.63   0.010     .2217647    1.601216\n------------------------------------------------------------------------------\n"),
+        ("tabulate cat3", "\n                             cat3 |      Freq.     Percent        Cum.\n----------------------------------+-----------------------------------\n                   first category |         16       20.00       20.00\n                           second |         35       43.75       63.75\na much longer category label here |         29       36.25      100.00\n----------------------------------+-----------------------------------\n                            Total |         80      100.00\n"),
+        ("tabulate cat3 g", "\n                      |           g\n                 cat3 |         0          1 |     Total\n----------------------+----------------------+----------\n       first category |         7          9 |        16 \n               second |        18         17 |        35 \na much longer categor |        15         14 |        29 \n----------------------+----------------------+----------\n                Total |        40         40 |        80 \n"),
+        ("summarize s y", "\n    Variable |        Obs        Mean    Std. dev.       Min        Max\n-------------+---------------------------------------------------------\n           s |          0\n           y |         80    1.135731    2.970117  -6.061345    9.18113\n"),
+        ("tabulate averyveryverylongname", "\naveryveryve |\n rylongname |      Freq.     Percent        Cum.\n------------+-----------------------------------\n          1 |         29       36.25       36.25\n          2 |         23       28.75       65.00\n          3 |         28       35.00      100.00\n------------+-----------------------------------\n      Total |         80      100.00\n"),
+        ("tabulate ord averyveryverylongname", "\n           |      averyveryverylongname\n       ord |         1          2          3 |     Total\n-----------+---------------------------------+----------\n         1 |        29          0          0 |        29 \n         2 |         0         23          0 |        23 \n         3 |         0          0         28 |        28 \n-----------+---------------------------------+----------\n     Total |        29         23         28 |        80 \n"),
+        ("tabulate cl g", "\n           |           g\n        cl |         0          1 |     Total\n-----------+----------------------+----------\n         1 |         5          5 |        10 \n         2 |         5          5 |        10 \n         3 |         5          5 |        10 \n         4 |         5          5 |        10 \n         5 |         5          5 |        10 \n         6 |         5          5 |        10 \n         7 |         5          5 |        10 \n         8 |         5          5 |        10 \n-----------+----------------------+----------\n     Total |        40         40 |        80 \n"),
+        ("tabulate g cl", "\n           |                           cl\n         g |         1          2          3          4          5 |     Total\n-----------+-------------------------------------------------------+----------\n         0 |         5          5          5          5          5 |        40 \n         1 |         5          5          5          5          5 |        40 \n-----------+-------------------------------------------------------+----------\n     Total |        10         10         10         10         10 |        80 \n\n\n           |                cl\n         g |         6          7          8 |     Total\n-----------+---------------------------------+----------\n         0 |         5          5          5 |        40 \n         1 |         5          5          5 |        40 \n-----------+---------------------------------+----------\n     Total |        10         10         10 |        80 \n"),
+        ("tabulate cnt", "\n        cnt |      Freq.     Percent        Cum.\n------------+-----------------------------------\n          0 |         12       15.00       15.00\n          1 |         21       26.25       41.25\n          2 |         16       20.00       61.25\n          3 |         16       20.00       81.25\n          4 |          2        2.50       83.75\n          5 |          4        5.00       88.75\n          6 |          4        5.00       93.75\n          7 |          3        3.75       97.50\n          8 |          1        1.25       98.75\n         11 |          1        1.25      100.00\n------------+-----------------------------------\n      Total |         80      100.00\n"),
+    ];
+    for (body, stata) in [(first.as_str(), stata_first), (second, stata_second)] {
+        let got = printed_tables(&mut e, &dir, body);
+        assert_eq!(got.len(), stata.len(), "{got:?}");
+        for ((cmd, have), (scmd, want)) in got.iter().zip(stata) {
+            assert_eq!(cmd, scmd);
+            assert_eq!(
+                have, want,
+                "{cmd}: Stata printed\n{want}\nRCraft printed\n{have}"
+            );
+        }
+    }
+}
+
+/// Without the constant Stata still leaves a factor's base level out, which
+/// R's formula does not: refused with the reason, not a different model.
+#[test]
+fn noconstant_with_factor_variables_is_refused() {
+    for dofile in [
+        "use s\nregress y x i.g, noconstant\n",
+        "use s\nlogit d x i.g, noconstant\n",
+    ] {
+        let why = refusal(dofile);
+        assert!(why.contains("base level"), "{dofile}: {why}");
+    }
+}

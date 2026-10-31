@@ -31,8 +31,9 @@ use super::*;
 
 /// `summarize`, and the statistics `correlate, means` prints.
 pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, detail = FALSE, meanonly = FALSE, w = NULL, wtype = "f", ret = FALSE,
-                            print = TRUE) {
-  # ret: leave r() of the last variable as stata_r where it was called from
+                            print = TRUE, table = TRUE) {
+  # ret: leave r() of the last variable as stata_r where it was called from;
+  # table: Stata's table (correlate, means prints its own, without Obs)
   env <- parent.frame()
   rr <- NULL
   num <- function(v) {
@@ -124,7 +125,11 @@ pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, deta
   out <- do.call(rbind, lapply(names(d), one))
   if (ret) assign("stata_r", rr, envir = env)
   if (!print) return(invisible(out))
-  if (!detail) {
+  if (table && !detail && !weighted) {
+    # Stata's table, as Stata 19 prints it
+    string <- vapply(out$variable, function(n) is.character(d[[n]]) || is.factor(d[[n]]), TRUE)
+    stata_sum_print(out$variable, out$obs, out$mean, out$sd, out$min, out$max, string)
+  } else if (!detail) {
     print(out, row.names = FALSE)
   } else {
     for (i in seq_len(nrow(out))) {
@@ -161,9 +166,12 @@ pub(super) const TAB_VALUES_HELPER: &str = r#"stata_tab_values <- function(v, no
 /// One-way and two-way `tabulate`.
 pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NULL, missing = FALSE, sort = FALSE,
                             row = FALSE, column = FALSE, cell = FALSE,
-                            chi2 = FALSE, w = NULL, wtype = "f", ret = FALSE) {
-  # ret: leave Stata's r() as stata_r where it was called from
+                            chi2 = FALSE, w = NULL, wtype = "f", ret = FALSE,
+                            xname = NULL, yname = NULL) {
+  # ret: leave Stata's r() as stata_r where it was called from; with the
+  # variables' names, the table is Stata's (counts, or frequency weights)
   env <- parent.frame()
+  counts <- is.null(w) || wtype == "f"
   use_na <- if (missing) "ifany" else "no"
   # weighted counts: sums of the weights, analytic ones scaled to the rows
   wtab <- function(keep, ...) {
@@ -187,13 +195,37 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
       cum = round(cumsum(pct), 2),
       stringsAsFactors = FALSE
     )
-    print(out, row.names = FALSE)
-    cat("  total ", total, "\n", sep = "")
+    # a string's column is as wide as its Stata storage type, which R does not keep
+    if (!is.null(xname) && counts && !is.character(x)) {
+      stata_tab1_print(xname, out$value, freq)
+    } else {
+      print(out, row.names = FALSE)
+      cat("  total ", total, "\n", sep = "")
+    }
     if (ret) assign("stata_r", list(N = total, r = length(freq)), envir = env)
     return(invisible(out))
   }
   keep <- if (missing) rep(TRUE, length(x)) else !is.na(x) & !is.na(y)
   t <- if (is.null(w)) table(x[keep], y[keep], useNA = use_na) else wtab(keep, x, y)
+  if (chi2) {
+    r <- suppressWarnings(stats::chisq.test(t, correct = FALSE))
+    attr(t, "chi2") <- c(chi2 = unname(r$statistic), df = unname(r$parameter), p = r$p.value)
+  }
+  dot <- function(v) ifelse(is.na(v), ".", v)
+  rlabs <- dot(rownames(t))
+  clabs <- dot(colnames(t))
+  if (!is.null(xname) && !is.null(yname) && counts && !row && !column && !cell &&
+      !is.character(x) && !is.character(y) &&
+      stata_tab2_fits(xname, yname, clabs)) {
+    m <- matrix(as.numeric(t), nrow(t), ncol(t))
+    stata_tab2_print(xname, yname, rlabs, clabs, m, if (chi2) attr(t, "chi2"))
+    if (ret) {
+      rr <- list(N = sum(t), r = nrow(t), c = ncol(t))
+      if (chi2) rr <- c(rr, list(chi2 = attr(t, "chi2")[["chi2"]], p = attr(t, "chi2")[["p"]]))
+      assign("stata_r", rr, envir = env)
+    }
+    return(invisible(t))
+  }
   print(stats::addmargins(t))
   if (row) {
     cat("\nrow percentages\n")
@@ -208,11 +240,9 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
     print(round(100 * prop.table(t), 2))
   }
   if (chi2) {
-    r <- suppressWarnings(stats::chisq.test(t, correct = FALSE))
-    cat("\nPearson chi2(", unname(r$parameter), ") = ",
-        format(unname(r$statistic), digits = 6),
-        "   Pr = ", format(r$p.value, digits = 4), "\n", sep = "")
-    attr(t, "chi2") <- c(chi2 = unname(r$statistic), df = unname(r$parameter), p = r$p.value)
+    s <- attr(t, "chi2")
+    cat("\nPearson chi2(", s[["df"]], ") = ", format(s[["chi2"]], digits = 6),
+        "   Pr = ", format(s[["p"]], digits = 4), "\n", sep = "")
   }
   if (ret) {
     rr <- list(N = sum(t), r = nrow(t), c = ncol(t))
@@ -256,7 +286,7 @@ pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, cova
   }
   print(round(r, 4))
   if (means) {
-    if (is.null(w)) stata_summarize(as.data.frame(m)) else stata_summarize(as.data.frame(m), w = w, wtype = wtype)
+    if (is.null(w)) stata_summarize(as.data.frame(m), table = FALSE) else stata_summarize(as.data.frame(m), w = w, wtype = wtype, table = FALSE)
   }
   # Stata's r(): the sum of analytic weights, the count, the first pair's
   # correlation (or with covariance the first two variances and their
@@ -321,7 +351,9 @@ impl Session {
             return Ok(());
         }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
-        self.helpers.insert("stata_summarize");
+        for h in ["stata_summarize", "stata_tables", "stata_fmt"] {
+            self.helpers.insert(h);
+        }
         if !matches!(w, Some((W::I, _))) {
             self.r_new = Some((
                 if detail {
@@ -344,7 +376,9 @@ impl Session {
         if Self::quiet(c) {
             return Ok(());
         }
-        out.caveat("printed in R's layout, not Stata's table");
+        if detail || w.is_some() {
+            out.caveat("printed in R's layout, not Stata's table");
+        }
         if detail {
             out.caveat(
                 "skewness and kurtosis are Stata's, over the whole sample, so a normal sample's \
@@ -439,6 +473,13 @@ impl Session {
                 args.push(format!("{name} = TRUE"));
             }
         }
+        // the names make the table Stata's
+        args.push(format!("xname = {}", r_text(x)));
+        if let Some(y) = y {
+            args.push(format!("yname = {}", r_text(y)));
+        }
+        self.helpers.insert("stata_tables");
+        self.helpers.insert("stata_fmt");
         let call = format!("stata_tabulate({}{wargs}, ret = TRUE)", args.join(", "));
         if Self::quiet(c) {
             // nothing shown, r() still left
@@ -446,7 +487,13 @@ impl Session {
             return Ok(());
         }
         out.line(call);
-        out.caveat("printed in R's layout, not Stata's table");
+        let percents = ["row", "column", "cell"]
+            .iter()
+            .zip([3, 3, 4])
+            .any(|(o, m)| opts.has(o, m));
+        if percents || matches!(w, Some((W::A | W::I, _))) {
+            out.caveat("printed in R's layout, not Stata's table");
+        }
         if opts.has("chi2", 4) {
             out.caveat("Pearson's chi-squared, with no continuity correction, as Stata does it");
         }
@@ -662,8 +709,8 @@ pub(super) fn r_logical(b: bool) -> &'static str {
 pub(super) const TAB1_HELPER: &str = r#"stata_tab1 <- function(d, nolabel = FALSE, ret = FALSE, ...) {
   out <- list()
   for (n in names(d)) {
-    cat("\n-> tabulation of ", n, "\n", sep = "")
-    out[[n]] <- stata_tabulate(stata_tab_values(d[[n]], nolabel), ret = ret, ...)
+    cat("\n-> tabulation of ", n, "  \n", sep = "")
+    out[[n]] <- stata_tabulate(stata_tab_values(d[[n]], nolabel), ret = ret, xname = n, ...)
   }
   # Stata leaves the last table's r()
   if (ret) assign("stata_r", stata_r, envir = parent.frame())
@@ -678,9 +725,10 @@ pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FA
   out <- list()
   for (i in seq_len(if (firstonly) 1 else length(n) - 1)) {
     for (j in (i + 1):length(n)) {
-      cat("\n-> tabulation of ", n[i], " by ", n[j], "\n", sep = "")
+      cat("\n-> tabulation of ", n[i], " by ", n[j], "  \n", sep = "")
       out[[paste(n[i], n[j])]] <- stata_tabulate(stata_tab_values(d[[n[i]]], nolabel),
-                                                  stata_tab_values(d[[n[j]]], nolabel), ret = ret, ...)
+                                                  stata_tab_values(d[[n[j]]], nolabel), ret = ret,
+                                                  xname = n[i], yname = n[j], ...)
     }
   }
   # Stata leaves the last table's r()
@@ -783,7 +831,13 @@ impl Session {
             return Err(no("varlist required"));
         }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
-        for h in ["stata_tab_values", "stata_tabulate", "stata_tab1"] {
+        for h in [
+            "stata_tab_values",
+            "stata_tabulate",
+            "stata_tab1",
+            "stata_tables",
+            "stata_fmt",
+        ] {
             self.helpers.insert(h);
         }
         let mut args = tab_args(src + &wargs, opts, &[("missing", 1), ("sort", 4)]);
@@ -800,7 +854,9 @@ impl Session {
         }
         out.line(call);
         out.caveat("each table has the rows where its own variable is present, as in Stata");
-        out.caveat("printed in R's layout, not Stata's table");
+        if matches!(w, Some((W::A | W::I, _))) {
+            out.caveat("printed in R's layout, not Stata's table");
+        }
         Ok(())
     }
 
@@ -831,7 +887,13 @@ impl Session {
             return Err(no("varlist required"));
         }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
-        for h in ["stata_tab_values", "stata_tabulate", "stata_tab2"] {
+        for h in [
+            "stata_tab_values",
+            "stata_tabulate",
+            "stata_tab2",
+            "stata_tables",
+            "stata_fmt",
+        ] {
             self.helpers.insert(h);
         }
         let mut args = tab_args(
@@ -864,7 +926,12 @@ impl Session {
         if opts.has("chi2", 4) {
             out.caveat("Pearson's chi-squared, with no continuity correction, as Stata does it");
         }
-        out.caveat("printed in R's layout, not Stata's table");
+        let percents = [("row", 3), ("column", 3), ("cell", 4)]
+            .iter()
+            .any(|(o, m)| opts.has(o, *m));
+        if percents || matches!(w, Some((W::A | W::I, _))) {
+            out.caveat("printed in R's layout, not Stata's table");
+        }
         Ok(())
     }
 

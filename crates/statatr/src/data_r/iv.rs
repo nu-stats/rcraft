@@ -366,10 +366,10 @@ impl Session {
         // factor variables are allowed inside the parentheses too
         let endog_spec = Spec::from_terms(dep, endog.split_whitespace())?;
         let inst_spec = Spec::from_terms(dep, inst.split_whitespace())?;
-        if endog_spec.right(false) == "1" {
+        if endog_spec.right(false)? == "1" {
             return Err(no("ivregress needs an endogenous variable"));
         }
-        if inst_spec.right(false) == "1" {
+        if inst_spec.right(false)? == "1" {
             return Err(no("ivregress needs instruments"));
         }
         let mut spec = Spec::from_terms(dep, words)?;
@@ -439,9 +439,9 @@ impl Session {
         let call = format!(
             "stata_ivregress(~{}, ~{}, ~{}, ~{}, data = {src}, estimator = \"{estimator}\", small = {}, robust = {}{}, level = {}, first = {}{extra})",
             r_name(dep),
-            endog_spec.right(false),
-            spec.right(opts.has("noconstant", 5)),
-            inst_spec.right(false),
+            endog_spec.right(false)?,
+            spec.right(opts.has("noconstant", 5))?,
+            inst_spec.right(false)?,
             r_logical(opts.has("small", 5)),
             r_logical(robust),
             cluster

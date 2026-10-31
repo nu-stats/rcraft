@@ -189,9 +189,9 @@ fn regress_gives_the_coefficients_the_normal_equations_give() {
     let dir = fixture(&mut e);
     let code = script(&format!("use \"{dir}/panel.dta\"\nregress y x w\n"));
     let text = ok(&mut e, &code);
-    assert!(text.contains("Coefficients"), "{text}");
-    // Stata always shows a confidence interval, so the translation prints one
-    assert!(text.contains("2.5 %") || text.contains("97.5 %"), "{text}");
+    // Stata's own table, with its confidence interval
+    assert!(text.contains("Coefficient  Std. err."), "{text}");
+    assert!(text.contains("[95% conf. interval]"), "{text}");
 
     let got = numbers(&mut e, "0", "unname(stats::coef(stata_estimates))");
     let want = numbers(&mut e, PIECES, "as.numeric(bhat)");
@@ -208,7 +208,10 @@ fn robust_standard_errors_are_hc1_and_not_hc0_or_hc3() {
     let dir = fixture(&mut e);
     let code = script(&format!("use \"{dir}/panel.dta\"\nregress y x w, robust\n"));
     let text = ok(&mut e, &code);
-    assert!(text.contains("Std. err."), "{text}");
+    assert!(
+        text.contains("Robust") && text.contains("std. err."),
+        "{text}"
+    );
 
     let got = numbers(&mut e, "0", "sqrt(diag(stata_vcov))");
     // HC1 worked out from the residuals: the sandwich, scaled by n / (n - k)
@@ -340,11 +343,11 @@ fn factor_notation_leaves_out_the_lowest_level_as_statas_base_is() {
     ));
     let text = ok(&mut e, &code);
     assert!(
-        text.contains("factor(g)1"),
+        text.contains("         1.g |"),
         "the base level 0 is left out: {text}"
     );
     assert!(
-        !text.contains("factor(g)0"),
+        !text.contains("0.g |") && !text.contains("0b.g |"),
         "the base level should not appear: {text}"
     );
 

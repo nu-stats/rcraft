@@ -381,7 +381,7 @@ impl Session {
         let call = format!(
             "stata_xtreg({} ~ {}, data = {src}, panel = {}, type = \"{kind}\", robust = {}{}, level = {}{})",
             r_name(&spec.dep),
-            spec.right(false),
+            spec.right(false)?,
             r_text(&panel),
             r_logical(robust),
             cluster

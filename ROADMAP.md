@@ -292,7 +292,7 @@ Tasks:
 - P2B.7 The two-pane view: Stata on the left, generated R on the right,
   line by line, with a mapping so a click on either highlights the other; a
   note on each line that has a known difference from Stata.
-  (done 2026-10-31: the Stata switch on the Command and Script panes, typed lines translated after the ones before them (`statatr::live`) and run, the Script Editor's two panes with the cursor's line marked and a click selecting its Stata, the notes and reasons on every line, Copy R, Page Up and Tab in Stata mode.)
+  (done 2026-10-31: the Stata switch on the Command and Script panes, typed lines translated after the ones before them (`statatr::live`) and run, the Script Editor's two panes with the cursor's line marked and a click selecting its Stata, the notes and reasons on every line, Copy R, Page Up and Tab in Stata mode; then Stata lines in Results, Tab in the Script Editor, and Stata's own summarize, tabulate and regress tables, checked character for character against Stata 19.)
 - P2B.8 Differences guide: a page per translated command listing where R
   and Stata differ (default standard errors, degrees of freedom, how ties
   and missing values are handled, sort stability, string widths, float
