@@ -841,3 +841,134 @@ fn matrix_list_after_xtreg_is_statas() {
         "Stata printed\n{stata}\nRCraft printed\n{text}"
     );
 }
+
+/// `e()` after `xtreg, mle` and `xtreg, pa`, as Stata 19's `ereturn list`
+/// shows it, and their e(b) and e(R).
+#[test]
+fn e_after_xtreg_mle_and_pa_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let d = panel(&mut e);
+    let start = format!("use \"{d}/panel.dta\"\nxtset id year\n");
+    let values = |e: &mut Engine, names: &[&str]| -> Vec<f64> {
+        let show: Vec<String> = names
+            .iter()
+            .map(|n| format!("stata_e[[\"{n}\"]]"))
+            .collect();
+        numbers(e, "0", &show.join(", "))
+    };
+    let text = |e: &mut Engine, names: &[&str]| -> String {
+        let show: Vec<String> = names
+            .iter()
+            .map(|n| format!("stata_e[[\"{n}\"]]"))
+            .collect();
+        ok(e, &format!("cat({}, sep = \"|\")", show.join(", ")))
+    };
+    // the likelihood is maximised by R, so to Stata's tolerance
+    let printed = ok(
+        &mut e,
+        &script(&format!(
+            "{start}quietly xtreg y x w z, mle\nmatrix list e(b)\n"
+        )),
+    );
+    near_stata(
+        &values(
+            &mut e,
+            &[
+                "ll_0", "ll", "df_m", "chi2", "N_g", "g_min", "g_avg", "g_max", "N", "rank",
+                "ll_c", "chi2_c", "sigma_u", "sigma_e", "rho", "p",
+            ],
+        ),
+        &[
+            -257.1259954867117,
+            -239.2722336965927,
+            3.0,
+            35.70752358023799,
+            30.0,
+            3.0,
+            5.1,
+            8.0,
+            153.0,
+            6.0,
+            -250.0384074737665,
+            21.53234755434761,
+            0.7964298594122697,
+            1.008174275406385,
+            0.3842578390339018,
+            3.47910370530e-06,
+        ],
+        1e-6,
+        "xtreg, mle",
+    );
+    assert_eq!(
+        text(&mut e, &["cmd", "model", "title", "vce", "chi2_ct", "ivar"]),
+        "xtreg|ml|Random-effects ML regression|oim|LR|id",
+        "xtreg, mle macros"
+    );
+    // Stata's columns: the equation y and sigma_u:_cons, sigma_e:_cons
+    for line in [
+        "e(b)[1,6]\n",
+        "            y:         y:         y:         y:   sigma_u:   sigma_e:\n",
+        "            x          w          z      _cons      _cons      _cons\n",
+    ] {
+        assert!(printed.contains(line), "{line:?} in\n{printed}");
+    }
+    ok(
+        &mut e,
+        &script(&format!("{start}quietly xtreg y x w z, pa\n")),
+    );
+    near_stata(
+        &values(
+            &mut e,
+            &[
+                "df_m", "chi2", "p", "df_pear", "N", "N_g", "g_max", "g_min", "g_avg", "tol",
+                "phi", "deviance", "dispers", "chi2_dev", "chi2_dis", "rc", "rank",
+            ],
+        ),
+        &[
+            3.0,
+            43.31637510310722,
+            2.10831116747e-09,
+            153.0,
+            153.0,
+            30.0,
+            8.0,
+            3.0,
+            5.1,
+            1e-6,
+            1.570803203240142,
+            240.3328900957417,
+            1.570803203240142,
+            240.3328900957417,
+            1.570803203240142,
+            0.0,
+            4.0,
+        ],
+        1e-8,
+        "xtreg, pa",
+    );
+    // the last change in b, as Stata's iterations stop on it
+    near_stata(
+        &values(&mut e, &["dif"]),
+        &[2.57150177201e-07],
+        1e-3,
+        "xtreg, pa e(dif)",
+    );
+    assert_eq!(
+        text(
+            &mut e,
+            &["cmd", "cmd2", "model", "corr", "vce", "scale", "family", "link"]
+        ),
+        "xtgee|xtreg|pa|exchangeable|conventional|x2|Gaussian|identity",
+        "xtreg, pa macros"
+    );
+    near_stata(
+        &numbers(
+            &mut e,
+            "0",
+            "nrow(stata_e$R), ncol(stata_e$R), stata_e$R[2, 1], stata_e$R[8, 7], stata_e$R[3, 3]",
+        ),
+        &[8.0, 8.0, 0.27965292, 0.27965292, 1.0],
+        1e-7,
+        "xtreg, pa e(R)",
+    );
+}

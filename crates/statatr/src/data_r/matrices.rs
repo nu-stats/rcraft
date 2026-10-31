@@ -151,12 +151,17 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     idx <- which(!aux)
     r <- eq_cols(idx, nm[idx])
     if (is.null(r)) return(approx(why))
-    eq <- if (cmd %in% c("logit", "probit", "poisson", "nbreg", "ologit", "oprobit")) paste0(depvar, ":") else ""
+    ml <- cmd %in% c("logit", "probit", "poisson", "nbreg", "ologit", "oprobit") ||
+      (cmd == "xtreg" && identical(fit$type, "mle"))
+    eq <- if (ml) paste0(depvar, ":") else ""
     names_out <- paste0(eq, r$n)
     from <- r$f
   }
-  # cut points and the like: Stata's equation "/"
-  if (any(aux)) names_out <- c(names_out, paste0("/:", sub("^/", "", nm[aux])))
+  # cut points and the like: Stata's equation "/" (xtreg, mle's sigma_u:_cons)
+  if (any(aux)) {
+    a <- sub("^/", "", nm[aux])
+    names_out <- c(names_out, if (cmd == "xtreg") paste0(a, ":_cons") else paste0("/:", a))
+  }
   from <- c(from, nm[aux])
   k <- length(names_out)
   bv <- ifelse(is.na(from), 0, b[from])

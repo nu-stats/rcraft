@@ -2304,8 +2304,49 @@ holds was read off Stata 19's `ereturn list` and `return list` on the test data 
   anova tests): every value against Stata 19's list, to 12 digits for least squares and 7 to 9 for the likelihood
   models; the 176 widths of Stata's `%g` grid and 66 other formats against the strings Stata printed; display and
   the lists against Stata's lines; the refusals.
-- **Not done:** `matrix list`, `scalar`, `estimates store`/`restore` and `esttab`/`outreg2` (Phase 7); macros such
-  as `` `e(cmd)' `` (Phase 2C); e() after anova with error terms or nesting, xtreg mle/pa, ivregress gmm with
-  vce()/wmatrix()/igmm and models with iweights; e(b) with the base levels Stata keeps as zeros; r() after
-  `correlate, covariance`, `pwcorr`, `describe`, `tab1`/`tab2`, the one-sample and paired `ttest`, weighted
-  `tabulate`/`correlate`, and margins' other r() (r(b), r(table), ...).
+- **Not done** (most of it since done; see the next section): `estimates store`/`restore` and
+  `esttab`/`outreg2` (Phase 7); macros such as `` `e(cmd)' `` (Phase 2C).
+
+## P2B.6 leftovers: more r(), scalars, matrix list, Stata's e(b), 2026-10-31
+
+Each checked against Stata 19 on the test data (probes kept outside the repository).
+
+- **r().** The one-sample, paired and unpaired `ttest` (each in Stata's order: the paired test on the rows with
+  both, the unpaired on each variable's own rows, `sd_diff` for the paired one); `correlate, covariance` (N, cov_12,
+  Var_2, Var_1, 0 for one variable) and weighted `correlate` (sum_w with aweights, fweights counted); `pwcorr`
+  (the first pair's N and rho, the matrices Nobs, C and with `sig` sig; weighted too); `tab1` and `tab2` (the last
+  table's); weighted `tabulate` (fweights and aweights); `describe` and `describe, short` (k, N). `quietly tab1`,
+  `tab2` and `pwcorr` now run, leaving r(). `r(width)` and `r(changed)` after describe are refused with the reason
+  (Stata's storage types and its record of saving, which R has neither of).
+- **scalar.** `scalar [define] name = exp`, `scalar list`/`dir` (newest first at `%10.0g`; a redefinition keeps
+  its place unless it changes between number and text, which makes it the newest), `scalar drop` and `_all`;
+  a variable in the expression is its first row; `scalar(name)` and a bare scalar name in any expression. A
+  variable comes before a scalar of the same name, as in Stata: the translator knows only the variables the do-file
+  made, so before a command that reads a scalar by its bare name R checks the data's columns and stops with that
+  reason if one has the name. `scalar` and `matrix list` leave r() alone (checked).
+- **e(b) and e(V) as Stata keeps them** (`statatr/src/data_r/matrices.rs`, `stata_eb()`): the base level of each
+  factor as a zero column (`0b.g`, `2b.cat3` in its place among the levels, `0b.g#co.x`), `o.` for a variable
+  xtreg's fe drops and for lm's aliased ones, mlogit's base outcome as `o.` zeros in its place, the equation names
+  (`yb:` for logit, probit, poisson, nbreg, ologit and oprobit; `y:` and `sigma_u:_cons` for xtreg's mle;
+  `/:cut1`, `/:lnalpha`), each equation's constant last and the terms in the order written (R puts interactions
+  after the main effects). Two factors interacted keep R's columns and `matrix list` says why.
+- **matrix list** of e(b), e(V), e(R) and r(C), r(Nobs), r(sig), in Stata's layout, decoded from Stata 19: each
+  column as wide as its widest entry and 2, a line of equation names and one of prefixes (`0b.`, `1.g#`) set one
+  place right, names past 12 characters shortened (`averyveryv~e`), the lower half of a symmetric matrix, blocks of
+  as many columns as fit in 78 (Stata's linesize 80); `format()`, `nohalf`, `noheader`, `noblank`, `title()`.
+  Refused after anova and margins, whose columns are not rebuilt yet, and for matrices a do-file makes itself.
+- **e() after `xtreg, mle`** (Stata's e(p) there is the test of sigma_u = 0 on 1 degree of freedom, not halved)
+  and **`xtreg, pa`** with the exchangeable correlation (cmd xtgee, cmd2 xtreg, e(R) the working correlation over
+  the longest panel; e(dif), the last change in b, matches Stata's, as the loop stops where Stata's does).
+- **iweights:** e() after regress (N the sum of the weights rounded down, the root MSE and r2_a dividing by the
+  sum itself, as decoded) and the likelihood models (N the rows).
+- **Tests:** `engine/tests/stata_returned.rs` (r() of the other commands, matrix list line for line, scalars line
+  for line, iweights), and a matrix list case each in the xtreg (with `o.z`), ivregress and stcox tests, e() after
+  xtreg mle and pa.
+- **Found:** the likelihood models' 8th digit can differ from Stata's, because Stata stops its Newton-Raphson
+  iterations at its tolerance, about 1e-7 from the optimum, where R goes on (reltol 1e-14). matrix list shows 8
+  digits, so for those models its numbers are checked to 5e-6 and its layout word for word; matching the last
+  digit would mean taking Stata's own iteration path (its starting values and stopping rules).
+- **Not done:** e() after anova with error terms or nesting, ivregress gmm with vce()/wmatrix()/igmm and xtreg pa
+  with corr(independent); e(b) after anova and margins; margins' other r() (r(b), r(table)); matrices a do-file makes
+  (`matrix define`, `matrix A = e(b)`).

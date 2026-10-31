@@ -222,6 +222,8 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   cons <- any(grepl("(Intercept)", names(b), fixed = TRUE))
   fw <- identical(wtype, "fweight")
   e <- list()
+  # matrices Stata lists after e(b) and e(V)
+  after <- list()
   put <- function(...) {
     a <- list(...)
     for (n in names(a)) e[[n]] <<- a[[n]]
@@ -253,8 +255,12 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     y <- stats::model.response(mf)
     w <- stats::model.weights(mf)
     n <- length(y)
-    wn <- if (is.null(w)) rep(1, n) else if (fw) w else w * n / sum(w)
-    N <- if (fw) sum(w) else n
+    iw <- identical(wtype, "iweight")
+    wn <- if (is.null(w)) rep(1, n) else if (fw || iw) w else w * n / sum(w)
+    # importance weights: N is their sum rounded down, the root MSE divides by
+    # the sum itself (both read off Stata 19)
+    N <- if (fw) sum(w) else if (iw) floor(sum(w)) else n
+    Wk <- if (iw) sum(w) else N
     u <- stats::residuals(fit)
     ybar <- sum(wn * y) / sum(wn)
     rss <- sum(wn * u^2)
@@ -275,8 +281,8 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
       if (!is.null(G)) put(N_clust = G)
       put(N = N, sum_w = if (is.null(w)) N else sum(w))
     }
-    put(df_m = df_m, df_r = stata_df, F = wald(slopes) / df_m, r2 = r2, rmse = sqrt(rss / (N - k)),
-        mss = mss, rss = rss, r2_a = 1 - (1 - r2) * (N - cons) / (N - k), ll = ll(rss),
+    put(df_m = df_m, df_r = stata_df, F = wald(slopes) / df_m, r2 = r2, rmse = sqrt(rss / (Wk - k)),
+        mss = mss, rss = rss, r2_a = 1 - rss / (Wk - k) / (tss / (N - cons)), ll = ll(rss),
         ll_0 = if (cons) ll(tss) else NA_real_, rank = k)
     if (cmd == "anova") {
       for (n in names(extra)) e[[n]] <- extra[[n]]
@@ -357,6 +363,36 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     put(chi2type = if (robust) "Wald" else "LR")
     robust_macros()
     put(vce = vce, depvar = depvar, properties = "b V")
+  } else if (cmd == "xtreg" && fit$type == "mle") {
+    k <- sum(slopes)
+    Ti <- fit$Ti
+    put(ll_0 = fit$ll_0, ll = fit$ll, df_m = k, chi2 = fit$chi2, N_g = fit$n, g_min = min(Ti),
+        g_avg = fit$N / fit$n, g_max = max(Ti), N = fit$N, rank = length(b), ll_c = fit$ll_c,
+        chi2_c = fit$chi2_c, sigma_u = fit$sigma_u, sigma_e = fit$sigma_e, rho = fit$rho,
+        # Stata's e(p) here is the test of sigma_u = 0, on 1 degree of freedom, not halved
+        p = stats::pchisq(fit$chi2_c, 1, lower.tail = FALSE))
+    put(cmdline = cmdline, estat_cmd = "xtreg_estat", depvar = depvar, cmd = "xtreg", ivar = fit$panel,
+        marginsnotok = "E U UE SCore STDP XBU", predict = "xtrefe_p", vce = "oim", chi2_ct = "LR",
+        properties = "b V", model = "ml", title = "Random-effects ML regression", distrib = "Gaussian",
+        chi2type = "LR")
+  } else if (cmd == "xtreg" && fit$type == "pa") {
+    k <- sum(slopes)
+    Ti <- fit$Ti
+    chi2 <- wald(slopes)
+    put(df_m = k, chi2 = chi2, p = stats::pchisq(chi2, k, lower.tail = FALSE), df_pear = fit$N, N = fit$N,
+        N_g = fit$n, g_max = max(Ti), g_min = min(Ti), g_avg = fit$N / fit$n, tol = 1e-6, dif = fit$dif,
+        phi = fit$phi, deviance = fit$phi * fit$N, dispers = fit$phi, chi2_dev = fit$phi * fit$N,
+        chi2_dis = fit$phi, rc = 0, rank = length(b))
+    put(estat_cmd = "xtreg_estat", cmdline = cmdline, model = "pa", cmd2 = "xtreg", predict = "xtreg_pa_p",
+        depvar = depvar, cmd = "xtgee", marginsnotok = "SCore STDP", link = "identity", corr = fit$corr,
+        family = "Gaussian", ivar = fit$panel, scale = "x2", vce = if (robust) "robust" else "conventional",
+        chi2type = "Wald", properties = "b V")
+    if (robust) put(vcetype = "Robust")
+    # the working correlation, over the longest panel
+    Tm <- max(Ti)
+    R <- matrix(fit$alpha, Tm, Tm, dimnames = list(paste0("r", seq_len(Tm)), paste0("c", seq_len(Tm))))
+    diag(R) <- 1
+    after <- list(R = R)
   } else if (cmd == "xtreg") {
     k <- sum(slopes)
     Ti <- fit$Ti
@@ -423,6 +459,7 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   eb <- stata_eb(b, V, cmd, depvar)
   e$b <- eb$b
   e$V <- eb$V
+  for (n in names(after)) e[[n]] <- after[[n]]
   e
 }"##;
 
@@ -602,6 +639,7 @@ const MATRIX_NAMES: &[&str] = &[
     "V",
     "C",
     "Nobs",
+    "R",
     "sig",
     "beta",
     "V_modelbased",

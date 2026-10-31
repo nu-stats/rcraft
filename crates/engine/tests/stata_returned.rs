@@ -1323,8 +1323,8 @@ fn what_is_not_kept_is_refused_with_the_reason() {
         ("use s\nanova y g / h|g\ndisplay e(F)\n", "error terms"),
         ("use s\nanova y g h\ndisplay e(ss_1)\n", "not kept"),
         (
-            "use s\nxtset id t\nxtreg y x, mle\ndisplay e(N)\n",
-            "xtreg, mle",
+            "use s\nxtset id t\nxtreg y x, pa corr(independent)\ndisplay e(N)\n",
+            "pa corr(independent)",
         ),
         ("display %~9.4f 1/3\n", "format"),
     ] {
@@ -1846,4 +1846,113 @@ fn scalars_are_statas() {
     );
     let why = refusal("use s\ndisplay scalar(nosuch)\n");
     assert!(why.contains("no scalar nosuch"), "{why}");
+}
+
+/// e() after models with importance weights, as Stata 19 keeps it: for
+/// regress N is the sum of the weights rounded down and the root MSE
+/// divides by the sum itself; the likelihood models count the rows.
+#[test]
+fn e_with_iweights_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let iw = "generate double a = _n / 7.3\n";
+    near_stata(
+        &e_values(
+            &mut e,
+            &dir,
+            &format!("{iw}regress y x w [iw=a]"),
+            &[
+                "N", "sum_w", "df_m", "df_r", "F", "r2", "rmse", "mss", "rss", "r2_a", "ll",
+                "ll_0", "rank",
+            ],
+        ),
+        &[
+            443.0,
+            443.8356164383562,
+            2.0,
+            440.0,
+            261.2173487718156,
+            0.5423552350367566,
+            1.92320801206735,
+            1932.344396544916,
+            1630.531504180844,
+            0.5411464533015129,
+            -917.2245478234233,
+            -1090.362684847988,
+            3.0,
+        ],
+        1e-12,
+        "regress [iw=a]",
+    );
+    near_stata(
+        &e_values(
+            &mut e,
+            &dir,
+            &format!("{iw}poisson cnt x [iw=a]"),
+            &["N", "ll", "ll_0", "chi2", "r2_p"],
+        ),
+        &[
+            80.0,
+            -850.4949533767459,
+            -944.1131379247336,
+            187.2363690959753,
+            0.0991599213985846,
+        ],
+        1e-9,
+        "poisson [iw=a]",
+    );
+    near_stata(
+        &e_values(
+            &mut e,
+            &dir,
+            &format!("{iw}probit yb x [iw=a]"),
+            &["N", "ll", "ll_0", "chi2"],
+        ),
+        &[
+            80.0,
+            -267.09737743033429,
+            -307.48703738757598,
+            80.779319914483381,
+        ],
+        1e-9,
+        "probit [iw=a]",
+    );
+    near_stata(
+        &e_values(
+            &mut e,
+            &dir,
+            &format!("{iw}ologit ord x [iw=a]"),
+            &["N", "ll", "ll_0"],
+        ),
+        &[80.0, -454.5572406826754, -479.18642192905298],
+        1e-9,
+        "ologit [iw=a]",
+    );
+    near_stata(
+        &e_values(
+            &mut e,
+            &dir,
+            &format!("{iw}mlogit cat3 x [iw=a]"),
+            &["N", "ll", "ll_0"],
+        ),
+        &[80.0, -422.54318860350764, -471.23012012937511],
+        1e-9,
+        "mlogit [iw=a]",
+    );
+    near_stata(
+        &e_values(
+            &mut e,
+            &dir,
+            &format!("{iw}nbreg nb x [iw=a]"),
+            &["N", "ll", "ll_0", "alpha"],
+        ),
+        &[
+            80.0,
+            -763.54255676686864,
+            -797.40459451761285,
+            0.2473454714384237,
+        ],
+        1e-6,
+        "nbreg [iw=a]",
+    );
 }

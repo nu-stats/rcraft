@@ -85,7 +85,7 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
     cat("\n")
     stata_coefs(r$b, r$V, Inf, level)
     out <- list(coefficients = bb, b = r$b, vcov = r$V, df = Inf, type = type, N = N, n = n,
-                terms = tt, xlevels = stats::.getXlevels(tt, mf), rows = rows[keep], panel = panel,
+                terms = tt, xlevels = stats::.getXlevels(tt, mf), rows = rows[keep], panel = panel, Ti = Ti,
                 response = stats::formula(tt)[[2]])
     if (type == "mle") {
       out$sigma_u <- r$sigma_u
@@ -95,6 +95,7 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
       out$ll_0 <- r$ll_0
       out$chi2 <- r$chi2
       out$chi2_c <- r$chi2_c
+      out$ll_c <- r$ll_c
       xbf <- drop(cbind(1, X) %*% bb)
       su2 <- r$sigma_u^2
       out$u <- stats::setNames(drop(Ti * su2 / (Ti * su2 + r$sigma_e^2) * mean_i(y - xbf)), levels(factor(g)))
@@ -103,6 +104,8 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
     } else {
       out$phi <- r$phi
       out$alpha <- r$alpha
+      out$dif <- r$dif
+      out$corr <- r$corr
     }
     class(out) <- "stata_xtreg"
     return(invisible(out))
@@ -420,10 +423,11 @@ impl Session {
             dep: spec.dep.clone(),
             factors: spec.factors.clone(),
         });
-        if matches!(kind, "fe" | "re" | "be") {
-            // Stata's robust here clusters on the panel
+        if matches!(kind, "fe" | "re" | "be" | "mle") || (kind == "pa" && corr == "exchangeable") {
+            // Stata's robust here clusters on the panel (pa's is plain robust)
             let (vce, cl) = match (&cluster, robust) {
                 (Some(v), _) => ("cluster", Some(v.as_str())),
+                (None, true) if kind == "pa" => ("robust", None),
                 (None, true) => ("cluster", Some(panel.as_str())),
                 _ => ("oim", None),
             };
@@ -431,7 +435,7 @@ impl Session {
             self.keep_e(c, out, &args, kind);
         } else {
             self.e_ret = super::returned::Returned::Lost(format!(
-                "e() after xtreg, {kind} is not kept in R yet"
+                "e() after xtreg, pa corr({corr}) is not kept in R yet"
             ));
             self.e_new = true;
         }
@@ -528,6 +532,7 @@ pub(super) const XT_OTHER_HELPER: &str = r#"stata_xt_other <- function(y, X, gi,
     a <- 0
     f <- gls(0)
     phi <- NA
+    dif <- NA_real_
     for (it in seq_len(100)) {
       e <- drop(y - Z %*% f$b)
       phi <- sum(e^2) / N
@@ -536,7 +541,8 @@ pub(super) const XT_OTHER_HELPER: &str = r#"stata_xt_other <- function(y, X, gi,
       S2 <- rowsum(e^2, gi)[, 1]
       a <- sum(S1^2 - S2) / (phi * sum(Ti * (Ti - 1)))
       g <- gls(a)
-      done <- max(abs(g$b - f$b) / (abs(f$b) + 1)) < 1e-6
+      dif <- max(abs(g$b - f$b) / (abs(f$b) + 1))
+      done <- dif < 1e-6
       f <- g
       if (done) break
     }
@@ -560,7 +566,7 @@ pub(super) const XT_OTHER_HELPER: &str = r#"stata_xt_other <- function(y, X, gi,
       V <- phi * Ai
     }
     dimnames(V) <- list(names(b), names(b))
-    return(list(b = b, V = V, phi = phi, alpha = a, corr = corr))
+    return(list(b = b, V = V, phi = phi, alpha = a, corr = corr, dif = if (corr == "independent") 0 else dif))
   }
   # mle
   ll <- function(p, Z) {

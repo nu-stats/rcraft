@@ -233,24 +233,17 @@ impl Session {
             dep: spec.dep.clone(),
             factors: spec.factors.clone(),
         });
-        // e(), as Stata leaves it (iweights are not checked against Stata yet)
-        if matches!(w, Some((W::I, _))) {
-            self.e_ret = super::returned::Returned::Lost(
-                "e() after regress with iweights is not kept in R yet".into(),
-            );
-            self.e_new = true;
+        // e(), as Stata leaves it
+        let vce = if cluster.is_some() {
+            "cluster"
+        } else if robust {
+            "robust"
         } else {
-            let vce = if cluster.is_some() {
-                "cluster"
-            } else if robust {
-                "robust"
-            } else {
-                "ols"
-            };
-            let args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &w)
-                + if asked { ", title = FALSE" } else { "" };
-            self.keep_e(c, out, &args, "");
-        }
+            "ols"
+        };
+        let args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &w)
+            + if asked { ", title = FALSE" } else { "" };
+        self.keep_e(c, out, &args, "");
         if cluster.is_some() {
             out.caveat(
                 "the clusters are the rows the model kept, so a row dropped for a missing value \
