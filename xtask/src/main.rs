@@ -1,6 +1,7 @@
 //! `cargo xtask <task>`: build checks.
 
 mod assets;
+mod corpus;
 mod coverage;
 mod layers;
 
@@ -13,7 +14,8 @@ usage: cargo xtask <task>
   ci                   fmt, clippy, tests, layers, assets and coverage (run before every commit)
   layers               check that crates only depend on lower layers
   assets               check that every file in assets/ is listed in ATTRIBUTION.md
-  coverage [--check]   regenerate docs/coverage.md from the catalog";
+  coverage [--check]   regenerate docs/coverage.md from the catalog
+  stata-record         run the Stata corpus on a licensed Stata and keep its results (P2B.10)";
 
 pub type Result<T = ()> = std::result::Result<T, String>;
 
@@ -26,6 +28,7 @@ fn main() -> ExitCode {
         Some("layers") => layers::check(),
         Some("assets") => assets::check(),
         Some("coverage") => coverage::run(rest.iter().any(|a| a == "--check")),
+        Some("stata-record") => corpus::record(),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);

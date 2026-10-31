@@ -29,3 +29,4 @@ pub mod lang;
 pub mod live;
 pub mod reader;
 pub mod values;
+pub mod verified;

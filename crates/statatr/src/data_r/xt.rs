@@ -603,13 +603,19 @@ pub(super) const XT_OTHER_HELPER: &str = r#"stata_xt_other <- function(y, X, gi,
     hess <- function(p) stats::optimHess(p, function(q) -ll(q, Z), function(q) -gr(q, Z),
                                          control = list(ndeps = rep(1e-5, kk + 2)))
     for (i in seq_len(25)) {
-      step <- solve(hess(p), gr(p, Z))
+      # a Hessian that cannot be solved: sigma_u has gone to its boundary
+      step <- tryCatch(solve(hess(p), gr(p, Z)), error = function(e) NULL)
+      if (is.null(step)) break
       p <- p + step
       if (max(abs(step)) < 1e-13) break
     }
     list(p = p, ll = ll(p, Z), H = hess(p))
   }
   m <- fit_ml(Z)
+  if (exp(m$p[k + 1]) < 1e-6 * exp(m$p[k + 2]) || inherits(try(solve(m$H), silent = TRUE), "try-error")) {
+    stop("xtreg, mle: sigma_u is at its boundary, 0, on these data; Stata then reports the pooled fit, ",
+         "which RCraft does not match yet")
+  }
   m0 <- fit_ml(Z[, 1, drop = FALSE])
   bp <- solve(crossprod(Z), crossprod(Z, y))
   ll_p <- -N / 2 * (log(2 * pi * sum((y - Z %*% bp)^2) / N) + 1)

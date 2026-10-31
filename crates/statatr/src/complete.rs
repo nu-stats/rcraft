@@ -115,6 +115,7 @@ pub const COMMANDS: &[&str] = &[
     "scatter",
     "set",
     "sort",
+    "ssc",
     "stcox",
     "stset",
     "summarize",
@@ -448,6 +449,7 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("reshape", &["long", "wide"]),
     ("return", &["list"]),
     ("scalar", &["define", "dir", "drop", "list"]),
+    ("ssc", &["install"]),
 ];
 
 /// What `vce()` takes.

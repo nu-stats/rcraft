@@ -32,6 +32,9 @@ pub struct Step {
     /// The R to run: helpers R does not have yet, then each line's R with its
     /// Stata as a comment and its notes.
     pub code: String,
+    /// The packages its `ssc install` lines ask for, for the window to offer
+    /// the R package of the same name (P2B.11).
+    pub ssc: Vec<String>,
 }
 
 /// The Stata of one session so far.
@@ -47,6 +50,8 @@ pub struct Live {
     value_labels: Vec<String>,
     locals: Vec<String>,
     globals: Vec<String>,
+    /// How many `ssc install` lines have been seen.
+    ssc: usize,
 }
 
 impl Live {
@@ -65,6 +70,7 @@ impl Live {
             return Step {
                 lines: t.lines,
                 code,
+                ssc: Vec::new(),
             };
         }
         let mut whole = self.source.clone();
@@ -110,7 +116,9 @@ impl Live {
                 list.push(name.to_string());
             }
         }
-        Step { lines, code }
+        let ssc = t.ssc.get(self.ssc..).unwrap_or_default().to_vec();
+        self.ssc = t.ssc.len();
+        Step { lines, code, ssc }
     }
 
     /// The R name of the data in memory, as the translator follows it.
@@ -192,5 +200,11 @@ mod tests {
         assert_eq!(live.globals(), ["root".to_string()]);
         assert_eq!(live.value_labels(), ["yesno".to_string()]);
         assert_eq!(helper_name("stata_fmt <- function(x) x"), Some("stata_fmt"));
+        // ssc install: the package asked for, once
+        assert_eq!(
+            live.step("ssc install estout, replace").ssc,
+            ["estout".to_string()]
+        );
+        assert!(live.step("summarize price").ssc.is_empty());
     }
 }

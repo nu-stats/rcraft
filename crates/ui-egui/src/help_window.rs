@@ -857,6 +857,22 @@ fn stata_page(
             );
             ui.add_space(4.0);
             ui.label(page.about);
+            // Verified: what the corpus checks against Stata's own results
+            if let Some(files) = rcraft_statatr::verified::files(page.command) {
+                ui.label(
+                    RichText::new(format!(
+                        "Verified: checked against Stata 19's own results ({} in the corpus)",
+                        files.join(", ")
+                    ))
+                    .color(pal.accent),
+                );
+            } else if page.command != "general" {
+                ui.label(
+                    RichText::new("Not in the Stata corpus yet: checked by its own tests")
+                        .small()
+                        .color(pal.dim),
+                );
+            }
             for point in page.points {
                 ui.add_space(6.0);
                 ui.label(RichText::new(point.topic).strong());

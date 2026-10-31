@@ -2459,3 +2459,44 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   mode: `--stata-guide LINE`.
 - **Tests:** every command Tab offers (the translator's) has a page with points, each page once; a line finds its
   page through prefixes and abbreviations; a note's click opens the right page.
+
+## P2B.10 Checked against Stata: the corpus and Verified, 2026-10-31
+
+- **The corpus** (`engine/tests/stata_corpus/`): made-up data (`corpus.csv`, 60 rows from a fixed generator, a
+  random effect per panel) and five do-files of our own (`descriptives`, `regress`, `likelihood`, `panel`,
+  `data`). Each names the commands it checks (`* commands:`) and its tolerance (`* tolerance:`: 1e-8, or 1e-6 for
+  the likelihood models, which Stata stops iterating at its tolerance), and prints each result as
+  `display "@ key " %24.17g ...`.
+- **Recording:** `cargo xtask stata-record` runs each do-file on a licensed Stata (`RCRAFT_STATA`, else its usual
+  places) in batch mode, keeps only the `@` lines and Stata's version in `NAME.recorded` (committed), and deletes
+  Stata's log, which carries its licence banner (`*.log` is ignored there too). Without a Stata it says so; the
+  tests run on what is committed.
+- **The test** (`engine/tests/stata_corpus.rs`): every line of every do-file must translate; each runs in R and
+  every recorded result is compared with Stata 19's: 119 results, all matching (summarize with detail and weights,
+  tabulate and chi2, correlate, pwcorr, the ttests, regress plain, robust, clustered, with factors, interactions,
+  fweights and aweights, test, lincom, predict, margins, logit, probit, poisson, ologit, oprobit, mlogit,
+  xtreg fe/re/be/mle, ivregress 2sls/liml, anova, stcox, generate, replace, recode, sort, gsort, collapse).
+- **Verified** (`statatr::verified`): each command and the corpus files that check it; a test holds it equal to the
+  files' `commands:` lines, so a command is Verified only while a file that uses it passes. The differences guide
+  says so on each page ("Verified: checked against Stata 19's own results").
+- **Found and fixed on the way:** `import delimited` stores a column with decimals as float in Stata (decided by
+  probing: whole numbers stay byte/int/long, `asdouble` keeps double), which the translation did not, so every
+  result from an imported CSV could differ in the 7th digit: it now rounds them as Stata stores them (`asdouble`,
+  `asfloat` accepted); `collapse (mean) y (sd) sy = y` took the sd of the new mean, as dplyr's summarise reads a
+  column it has just made: each result is made under a name of its own first; `xtreg, mle` stopped with R's
+  "singular" when sigma_u is at its boundary, 0: it now says so (Stata reports the pooled fit there, which is not
+  matched yet).
+- **Not done:** collapse of a float variable (Stata stores the mean as a float; the corpus uses `asdouble`);
+  `xtreg, mle` at sigma_u = 0; the commands and options not in the corpus stay checked by their own tests.
+
+## P2B.11 ssc install, 2026-10-31
+
+- `ssc install name [, replace all]` translates to nothing in R, with a note, and asks the window for the package
+  (`Translation::ssc`, `Step::ssc`); `ssc` with another subcommand and `net` are refused with the reason (Stata's
+  add-ons are out of scope).
+- In Stata mode the window then offers the R package of the same name through `rc install name` (the Packages
+  window's list to say yes to, nothing installed before) when CRAN has one, and says in Results that there is none
+  otherwise (`rc search name` to look); without the package list it says so. `ssc` is in Tab's commands and the
+  differences guide.
+- **Tests:** the translation and refusals; in the app, `ssc install fixest` opening its install list and
+  `ssc install estout` saying there is no R package of that name.

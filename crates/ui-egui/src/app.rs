@@ -640,6 +640,7 @@ impl App {
                 }
             }
             Action::SubmitStata(source, text) => {
+                let mut offer = Vec::new();
                 if let EngineState::Ready(engine) = &mut self.engine {
                     // the translator moves on only if R takes the line
                     let before = self.stata.live.clone();
@@ -655,12 +656,17 @@ impl App {
                             if data.is_some() && data != before.data().map(str::to_string) {
                                 self.stata.follow = data;
                             }
+                            offer = step.ssc.clone();
                         }
                         Err(e) => {
                             self.stata.live = before;
                             self.message = Some(e.to_string());
                         }
                     }
+                }
+                // ssc install: the R package of the same name, if CRAN has one
+                for name in offer {
+                    self.offer_for_ssc(&name);
                 }
             }
             Action::OpenStataGuide(line) => self.help_window.show_stata(&line),
@@ -931,6 +937,45 @@ impl App {
     /// Carries out a typed `rc` command. The ones that change packages open the
     /// Packages window with the list to say yes to; the others answer here, in
     /// Results, and are recorded in the log and the history like any command.
+    /// `ssc install name` in Stata mode (P2B.11): the R package of the same
+    /// name, through `rc install` (the list to say yes to), when CRAN has
+    /// one; otherwise it says so, and nothing is installed.
+    fn offer_for_ssc(&mut self, name: &str) {
+        self.package_index.ensure_loaded();
+        let on_cran = self.package_index.index().map(|ix| ix.get(name).is_some());
+        let loading = matches!(
+            self.package_index.status(),
+            rcraft_engine::IndexStatus::Loading
+        );
+        let shown = format!("ssc install {name}");
+        let text = match on_cran {
+            Some(true) => {
+                let install = Rc::Install {
+                    packages: vec![name.to_string()],
+                    version: None,
+                    from: rcraft_rcodegen::packages::InstallFrom::Default,
+                };
+                self.run_rc(install, &format!("rc install {name}"));
+                return;
+            }
+            Some(false) => format!(
+                "No R package called {name} on CRAN, so nothing is offered: {name} is a Stata add-on, \
+                 and its commands are not translated. rc search {name} looks for R packages about it."
+            ),
+            None if loading => format!(
+                "The CRAN package list is being read; type rc install {name} in a moment if CRAN has it."
+            ),
+            None => format!(
+                "Whether CRAN has an R package called {name} is not known yet: the package list is not \
+                 on this computer (Packages > Find and install downloads it). Then rc install {name} \
+                 installs it, if it is there."
+            ),
+        };
+        if let EngineState::Ready(engine) = &mut self.engine {
+            engine.echo(&shown, &text, Outcome::Error);
+        }
+    }
+
     fn run_rc(&mut self, command: Rc, line: &str) {
         let EngineState::Ready(engine) = &mut self.engine else {
             self.message = Some("Wait until R has started, then type the command again.".into());
@@ -3322,6 +3367,51 @@ mod tests {
         assert_eq!(after, before + 1, "only the typed line was recorded");
         let code = app.packages_window.confirmation_code().unwrap_or_default();
         assert!(code.contains("install.packages(\"fixest\""), "{code}");
+    }
+
+    #[test]
+    fn ssc_install_offers_the_r_package_of_that_name_or_says_there_is_none() {
+        let ctx = egui::Context::default();
+        let mut app = app_with_sample_index(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(&ctx, Action::SetStataMode(true));
+        // an R package of that name: the list to say yes to, nothing installed
+        app.perform(
+            &ctx,
+            Action::SubmitStata(Source::Typed, "ssc install fixest".into()),
+        );
+        assert!(app.packages_window.open);
+        assert!(frames_until(&mut app, &ctx, |a| a
+            .packages_window
+            .has_confirmation()));
+        let code = app.packages_window.confirmation_code().unwrap_or_default();
+        assert!(code.contains("install.packages(\"fixest\""), "{code}");
+        // none: said so in Results
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        app.perform(
+            &ctx,
+            Action::SubmitStata(Source::Typed, "ssc install estout".into()),
+        );
+        let said = app
+            .engine()
+            .and_then(|e| e.results().blocks().last().cloned())
+            .map(|b| {
+                b.items
+                    .iter()
+                    .map(|i| match i {
+                        Item::Text { text, .. } => text.clone(),
+                        Item::Error { message, .. } => message.clone(),
+                        _ => String::new(),
+                    })
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        assert!(said.contains("No R package called estout"), "{said}");
     }
 
     #[test]

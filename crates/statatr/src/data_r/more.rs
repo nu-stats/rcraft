@@ -735,14 +735,23 @@ impl Session {
         if let Some(b) = opts.arg("by", 2) {
             steps.push(format!("dplyr::group_by(dplyr::pick({}))", select(&b)?));
         }
+        // each under a name of its own first: summarise reads a column it has
+        // just made, so (mean) y (sd) sy = y would take the sd of the mean
         let assigns: Vec<String> = targets
             .iter()
-            .map(|(n, e)| format!("{} = {e}", r_name(n)))
+            .enumerate()
+            .map(|(i, (_, e))| format!("stata_collapse_{} = {e}", i + 1))
+            .collect();
+        let renames: Vec<String> = targets
+            .iter()
+            .enumerate()
+            .map(|(i, (n, _))| format!("{} = stata_collapse_{}", r_name(n), i + 1))
             .collect();
         steps.push(format!(
             "dplyr::summarise({}, .groups = \"drop\")",
             assigns.join(", ")
         ));
+        steps.push(format!("dplyr::rename({})", renames.join(", ")));
         steps.push("as.data.frame()".into());
         out.line(format!("{d} <- {d} |> {}", steps.join(" |> ")));
         for p in &percents {

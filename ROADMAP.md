@@ -303,9 +303,11 @@ Tasks:
   recorded Stata results, the same method as StatCraft's observation kit, so
   translated estimates are compared with Stata's to about 8 significant
   digits. A command moves to `Verified` only when its translation matches.
+  (done 2026-10-31: the corpus in engine/tests/stata_corpus, recorded by `cargo xtask stata-record`, 119 of Stata 19's results matched; `statatr::verified` lists the Verified commands, shown in the differences guide.)
 - P2B.11 Ado programs, Mata and `net`/`ssc` commands are out of scope for
   the first release; `ssc install x` is translated to `rc install` (Phase
   1A) when an R package of that name exists, and flagged otherwise.
+  (done 2026-10-31: `ssc install` offers the R package of the same name through rc install, or says there is none; other ssc subcommands and net are refused with the reason.)
 
 Rules (also in AGENTS.md section 1): translations are written from Stata's
 public documentation and from observing a licensed Stata with made-up data.

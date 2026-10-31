@@ -81,6 +81,8 @@ pub struct Translation {
     pub data: Option<String>,
     /// The value-label sets defined by then.
     pub value_labels: Vec<String>,
+    /// The packages `ssc install` asked for, in order (P2B.11).
+    pub ssc: Vec<String>,
 }
 
 impl Line {
@@ -172,6 +174,7 @@ pub fn translate(program: &Program) -> Translation {
         lines,
         data: s.data.clone(),
         value_labels: s.label_sets.keys().cloned().collect(),
+        ssc: s.ssc.clone(),
     }
 }
 
@@ -294,6 +297,10 @@ fn no(reason: impl Into<String>) -> Untranslated {
 /// single-precision value, missing kept missing.
 const FLOAT_HELPER: &str = "stata_float <- function(x) {\n  y <- readBin(writeBin(as.numeric(x), raw(), size = 4), \"double\", size = 4, n = length(x))\n  y[is.na(x) | !is.finite(y)] <- NA\n  y\n}";
 
+/// A column with decimals rounded to float, as `import delimited` stores it
+/// (whole numbers stay as they are: Stata keeps them exactly).
+const IMPORT_FLOAT_HELPER: &str = "stata_import_float <- function(d) {\n  for (n in names(d)) {\n    v <- d[[n]]\n    if (is.numeric(v) && any(!is.na(v) & v != trunc(v))) d[[n]] <- stata_float(v)\n  }\n  d\n}";
+
 /// Names for Excel columns, A to Z, AA, AB ..., from the `first`-th column.
 const EXCEL_NAMES_HELPER: &str = "stata_excel_names <- function(n, first = 1) {\n  vapply(seq_len(n) + first - 1, function(i) {\n    s <- \"\"\n    while (i > 0) {\n      s <- paste0(LETTERS[(i - 1) %% 26 + 1], s)\n      i <- (i - 1) %/% 26\n    }\n    s\n  }, \"\")\n}";
 
@@ -351,6 +358,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_eb" => matrices::EB_HELPER,
         "stata_scalar" => scalars::SCALAR_HELPER,
         "stata_tables" => tables::TABLES_HELPER,
+        "stata_import_float" => IMPORT_FLOAT_HELPER,
         "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
         _ => FLOAT_HELPER,
     }
@@ -407,6 +415,8 @@ struct Session {
     /// This command left e() (`keep_e`).
     e_new: bool,
     helpers: BTreeSet<&'static str>,
+    /// The packages `ssc install` asked for, in order.
+    ssc: Vec<String>,
 }
 
 /// Collects one command's R.
@@ -1023,6 +1033,10 @@ impl Session {
             "ereturn" | "return" => self.list_returned(c, out),
             "matrix" => self.matrix(c, out),
             "scalar" => self.scalar(c, out),
+            "ssc" => self.ssc(c, out),
+            "net" => Err(no(
+                "net fetches Stata add-ons, which are out of scope; an R package can be installed with rc install (P2B.11)",
+            )),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1119,6 +1133,8 @@ impl Session {
                     ("varnames", 7),
                     ("case", 4),
                     ("encoding", 8),
+                    ("asdouble", 8),
+                    ("asfloat", 7),
                 ]) {
                     return Err(no(format!(
                         "import delimited with the option {o} is not translated yet"
@@ -1153,6 +1169,16 @@ impl Session {
                 args.push("show_col_types = FALSE".into());
                 steps.push(format!("readr::read_delim({})", args.join(", ")));
                 steps.push("as.data.frame()".into());
+                // Stata stores a column with decimals as float, unless asdouble
+                if !opts.has("asdouble", 8) {
+                    self.helpers.insert("stata_float");
+                    self.helpers.insert("stata_import_float");
+                    steps.push("stata_import_float()".into());
+                    out.caveat(
+                        "numbers with decimals are stored as floats, as Stata's import delimited \
+                         stores them (asdouble keeps them double)",
+                    );
+                }
                 if opts.arg("varnames", 7).as_deref() == Some("nonames") {
                     steps.push("stats::setNames(paste0(\"v\", seq_along(.)))".into());
                     out.caveat(
@@ -1779,6 +1805,33 @@ impl Session {
         Ok(())
     }
 
+    /// `ssc install name` (P2B.11): Stata's add-ons are out of scope, so
+    /// nothing runs in R; the window offers the R package of the same name
+    /// (`rc install`) when CRAN has one, and says so when it has none.
+    fn ssc(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let (sub, rest) = first_word(&c.parts.main);
+        if sub != "install" {
+            return Err(no(format!(
+                "ssc {sub} is not translated: ssc's add-ons are Stata's (P2B.11)"
+            )));
+        }
+        let name = rest.trim();
+        if !is_name(name) {
+            return Err(no("ssc install needs one package name"));
+        }
+        if let Some(o) = Opts(&c.options).other(&[("replace", 7), ("all", 3)]) {
+            return Err(no(format!(
+                "ssc install with the option {o} is not translated"
+            )));
+        }
+        self.ssc.push(name.to_string());
+        out.caveat(format!(
+            "ssc installs Stata's add-on {name}, whose commands are not translated; RCraft offers \
+             the R package of the same name instead, when CRAN has one (rc install {name})"
+        ));
+        Ok(())
+    }
+
     fn set(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let (what, rest) = first_word(&c.parts.main);
         match what {
@@ -1964,6 +2017,33 @@ mod tests {
             out[1].starts_with("survey <- readxl::read_excel(\"survey.xlsx\", sheet = \"Wave 2\")")
         );
         assert!(r("gen x = 1")[0].starts_with("NOT: no data is in memory"));
+    }
+
+    #[test]
+    fn ssc_install_asks_for_a_package_and_the_other_add_on_commands_are_refused() {
+        let t = translate(&read(
+            "ssc install estout, replace\nssc describe estout\nnet install x, from(y)\n",
+        ));
+        assert_eq!(t.ssc, ["estout".to_string()]);
+        let first = t.lines.first().map(|l| l.result.clone());
+        assert!(
+            matches!(&first, Some(Ok(r)) if r.code.is_empty() && r.caveats.iter().any(|c| c.contains("rc install estout"))),
+            "{first:?}"
+        );
+        let why: Vec<String> = t
+            .lines
+            .iter()
+            .skip(1)
+            .map(|l| l.result.clone().err().map(|e| e.reason).unwrap_or_default())
+            .collect();
+        assert!(
+            why.first().is_some_and(|w| w.contains("add-ons are Stata")),
+            "{why:?}"
+        );
+        assert!(
+            why.get(1).is_some_and(|w| w.contains("out of scope")),
+            "{why:?}"
+        );
     }
 
     #[test]

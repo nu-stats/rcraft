@@ -1,0 +1,11 @@
+* Stata 19.0's results for data.do, recorded by cargo xtask stata-record
+@ x2_sum       57.838226908817887
+@ x2_mean        .5792648498919637
+@ ord2_mean       17.333333333333332
+@ first_y      -2.3589000000000002
+@ first_id                       57
+@ top_x       2.1760000000000002
+@ top_id                        5
+@ c_y1       1.2587433333333331
+@ c_sy2       1.7598346651345391
+@ c_x2       .25686666666666669
