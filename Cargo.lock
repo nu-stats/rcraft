@@ -2484,6 +2484,7 @@ dependencies = [
  "rcraft-rdata",
  "rcraft-rhost",
  "rcraft-rpkg",
+ "rcraft-statatr",
  "rfd",
  "softbuffer",
  "winit",

@@ -9,6 +9,8 @@
 //! --picture FILE   write the window to FILE (a PNG)
 //! --demo FILE      first run each line of FILE as a typed command
 //! --dark           dark mode (default light)
+//! --stata          Stata mode on, and the --demo lines run as Stata
+//! --script FILE    put FILE in the Script Editor
 //! --data           show the Data tab instead of Results
 //! --objects        show the Objects list instead of Variables
 //! --filter TYPE    list only one type of variable (Numbers, Text, Factors, ...)
@@ -66,6 +68,8 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
             "--picture" => picture = Some(PathBuf::from(value("--picture")?)),
             "--demo" => options.demo = Some(PathBuf::from(value("--demo")?)),
             "--dark" => options.dark = true,
+            "--stata" => options.stata = true,
+            "--script" => options.script = Some(PathBuf::from(value("--script")?)),
             "--data" => options.show_data = true,
             "--objects" => options.show_objects = true,
             "--filter" => options.filter = Some(value("--filter")?.clone()),

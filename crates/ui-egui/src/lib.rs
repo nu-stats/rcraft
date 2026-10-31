@@ -19,6 +19,7 @@ mod packages;
 mod softraster;
 mod softwindow;
 mod spec_dialog;
+mod stata_mode;
 
 pub use headless::{run_headless, HeadlessOptions};
 pub use look::Accent;

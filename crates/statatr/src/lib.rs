@@ -25,5 +25,6 @@ pub mod complete;
 pub mod data_r;
 pub mod expr_r;
 pub mod lang;
+pub mod live;
 pub mod reader;
 pub mod values;

@@ -871,6 +871,8 @@ impl Session {
         let name = c.name.as_str();
         match r_left {
             Some((names, cmd)) if ok => {
+                // what reads r() back (stata_rget) comes with it
+                self.helpers.insert("stata_returned");
                 self.r_ret = Returned::Kept {
                     cmd,
                     model: String::new(),

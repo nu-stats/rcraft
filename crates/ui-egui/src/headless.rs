@@ -68,6 +68,10 @@ pub struct HeadlessOptions {
     /// small made-up list when none). A picture never reaches the network or
     /// reads the user's own cache.
     pub packages_from: Option<PathBuf>,
+    /// Stata mode on, the demo lines run as Stata ...
+    pub stata: bool,
+    /// ... and this file in the Script Editor.
+    pub script: Option<PathBuf>,
     pub accent: Accent,
     /// Width and height in points.
     pub size: [u32; 2],
@@ -99,6 +103,8 @@ impl HeadlessOptions {
             packages_view: None,
             packages_source_demo: false,
             packages_from: None,
+            stata: false,
+            script: None,
             accent: Accent::default(),
             size: [1240, 780],
             pixels_per_point: 1.0,
@@ -131,6 +137,13 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
         },
     );
     app.set_accent(&ctx, options.accent);
+    if options.stata {
+        app.set_stata_mode(&ctx, true);
+    }
+    if let Some(path) = &options.script {
+        let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
+        app.set_script(&text);
+    }
     if options.show_data {
         app.show_data(&ctx);
     }
@@ -192,7 +205,11 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
         if app.is_settled() {
             match demo.get(next) {
                 Some(code) if app.is_ready() => {
-                    app.submit_typed(code);
+                    if options.stata {
+                        app.submit_stata(&ctx, code);
+                    } else {
+                        app.submit_typed(code);
+                    }
                     next += 1;
                     settled = 0;
                 }

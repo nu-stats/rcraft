@@ -2377,6 +2377,39 @@ module never starts R. **Tests** (in the module): the cases above; every command
 dispatches and every subcommand one it takes; every option offered is one it takes, by translating a line that
 uses each (which found that `graph bar` and `histogram` do not take `by()` yet).
 
-**Not done:** wiring it into the Command window and the Script Editor, which waits for the Stata mode switch
+**Not done** (since done, see P2B.7): wiring it into the Command window and the Script Editor, which waits for the Stata mode switch
 itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `complete` with the data's variables
 (the data viewer has them), the macros the Stata session has defined and the working folder's files.
+
+## P2B.7 Stata mode: the switch, the two-pane view, Tab, 2026-10-31
+
+- **The switch.** A **Stata** button on the Command and Script panes (one switch per session, kept when another
+  session is shown). In Stata mode the Command line says "Type Stata and press Enter", an untouched script starts
+  over as Stata (`* Type Stata here.`), and switching back restores R's.
+- **A typed line** goes through `statatr::live::Live` (new): the session's Stata so far, so a line means what it
+  does after the ones before it (the data in memory, the model that left e(), the scalars). It is translated, and
+  what runs in R is its R with the Stata as a comment above and the notes below; the helpers R does not have yet go
+  first, once, between two marker lines. Results folds them to one line (`# RCraft's Stata helpers, defined once:
+  stata_summarize (104 lines, in the session script)`); History, the log and the session script keep them whole, so
+  the script still runs in plain R. If R does not take the line the translator does not move on; a restart of R
+  starts it over. A block or a line the reader cannot take is answered (its reason in Results) but not kept, so it
+  cannot swallow the lines after it. The data a `use` or `import` brings in becomes the data shown (Variables, the
+  status bar), staying on Results.
+- **Page Up / Page Down** in Stata mode bring back the Stata typed, not the R it became; History shows a Stata line
+  as its Stata and a click puts that line back.
+- **The Script Editor** in Stata mode is two panes: the Stata on the left, and on the right each line's R under its
+  Stata (with its line number), its notes in the warning colour and the reason a line was not translated in the
+  error colour. The block of the line the cursor is on is marked; a click on a block selects its Stata (all of its
+  lines, `///` included). **Run all** and Ctrl+Enter run the Stata through the same translator as the Command line;
+  **Copy R** copies the whole script's R, helpers first.
+- **Tab** in Stata mode completes from `statatr::complete` (P2B.12): the variables of the data in memory (as R last
+  sent them), the macros and value labels the session's Stata has defined, and the files of R's working folder.
+- Found by the new app test and fixed in the translator: `display r(mean)` after `summarize` alone called
+  `stata_rget` without defining it (a model's e() brought the helper before); whatever leaves r() now brings it.
+- Picture mode: `--stata` (Stata mode on, the `--demo` lines run as Stata) and `--script FILE`.
+- **Tests:** `statatr::live` (lines in context, helpers once, what is not kept, macros and labels), `stata_mode`
+  (the folding, a command's lines found and selected, Page Up, Tab from the session and the folder), and an app
+  test with R: the switch, `use` of a .dta, `summarize`, `display r(mean)` printing Stata's 4.3333333, the helpers
+  sent once, an untranslated line's reason, recall, Tab on the data's variables, a restart.
+- **Not done:** a click on the R side of the Command window's Results (only the Script Editor has the two panes);
+  Stata-style output tables (later, as the roadmap says); the Script Editor's own Tab completion.

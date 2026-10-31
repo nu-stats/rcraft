@@ -23,6 +23,7 @@ use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 use crate::package_window::{PackagesWindow, Tab as PackagesTab};
 use crate::spec_dialog::{self, SpecAction, SpecDialog};
+use crate::stata_mode::{self, StataMode};
 
 /// What the middle pane shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -40,6 +41,7 @@ enum SideTab {
 }
 
 const COMMAND_ID: &str = "command-line";
+const SCRIPT_ID: &str = "script-editor";
 /// History lines drawn (the newest); the rest stay in the engine.
 const HISTORY_SHOWN: usize = 1000;
 
@@ -78,6 +80,7 @@ struct SessionUi {
     show_when_listed: Option<String>,
     completions: Vec<String>,
     tab_pending: Option<(QueryId, String)>,
+    stata: StataMode,
 }
 
 impl SessionUi {
@@ -115,6 +118,7 @@ impl SessionUi {
             show_when_listed: None,
             completions: Vec::new(),
             tab_pending: None,
+            stata: StataMode::default(),
         }
     }
 }
@@ -123,6 +127,11 @@ impl SessionUi {
 /// so drawing never needs the engine mutably.
 enum Action {
     Submit(Source, String),
+    /// Stata, typed or from the Script, translated after the lines before it
+    /// and run (P2B.7).
+    SubmitStata(Source, String),
+    /// Turns Stata mode on or off for the session shown.
+    SetStataMode(bool),
     SetCommand(String),
     /// Add text (a variable name) to the Command line.
     Insert(String),
@@ -236,6 +245,8 @@ pub struct App {
     /// Whether choices (the working folder) are kept between runs. Pictures and
     /// tests turn it off, so they never touch the user's own settings.
     keep_settings: bool,
+    /// Stata mode for the session shown (P2B.7).
+    stata: StataMode,
 }
 
 impl App {
@@ -287,6 +298,7 @@ impl App {
             completions: Vec::new(),
             tab_pending: None,
             keep_settings: true,
+            stata: StataMode::default(),
         }
     }
 
@@ -333,6 +345,7 @@ impl App {
         swap(&mut self.show_when_listed, &mut other.show_when_listed);
         swap(&mut self.completions, &mut other.completions);
         swap(&mut self.tab_pending, &mut other.tab_pending);
+        swap(&mut self.stata, &mut other.stata);
         if let Some(slot) = self.sessions.get_mut(i) {
             *slot = other;
         }
@@ -586,6 +599,25 @@ impl App {
                 self.view = View::Results;
             }
         }
+        // the data Stata mode works on, once R lists it, without leaving Results
+        if let Some(wanted) = self.stata.follow.clone() {
+            let listed = engine
+                .workspace()
+                .iter()
+                .any(|w| w.name == wanted && w.is_data_frame());
+            if listed {
+                if self.dataset.as_deref() != Some(wanted.as_str()) {
+                    if let Some(old) = self.dataset.take() {
+                        engine.unwatch(&old);
+                    }
+                    engine.watch(&wanted);
+                    self.dataset = Some(wanted);
+                }
+                self.stata.follow = None;
+            } else if !engine.is_working() {
+                self.stata.follow = None;
+            }
+        }
         if self.dataset.is_none() {
             if let Some(first) = engine.workspace().iter().find(|w| w.is_data_frame()) {
                 let name = first.name.clone();
@@ -604,6 +636,41 @@ impl App {
                         Err(e) => self.message = Some(e.to_string()),
                     }
                 }
+            }
+            Action::SubmitStata(source, text) => {
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    // the translator moves on only if R takes the line
+                    let before = self.stata.live.clone();
+                    let step = self.stata.live.step(&text);
+                    match engine.submit(source.clone(), &step.code) {
+                        Ok(_) => {
+                            self.message = None;
+                            if source == Source::Typed {
+                                self.stata.typed(text.trim());
+                            }
+                            // show the data the Stata is working on
+                            let data = self.stata.live.data().map(str::to_string);
+                            if data.is_some() && data != before.data().map(str::to_string) {
+                                self.stata.follow = data;
+                            }
+                        }
+                        Err(e) => {
+                            self.stata.live = before;
+                            self.message = Some(e.to_string());
+                        }
+                    }
+                }
+            }
+            Action::SetStataMode(on) => {
+                self.stata.on = on;
+                // an untouched script starts over in the other language
+                if on && self.script == SCRIPT_START {
+                    self.script = stata_mode::SCRIPT_START.to_string();
+                } else if !on && self.script == stata_mode::SCRIPT_START {
+                    self.script = SCRIPT_START.to_string();
+                }
+                self.completions.clear();
+                self.focus_command = true;
             }
             Action::SetCommand(text) => {
                 self.command = text;
@@ -713,6 +780,8 @@ impl App {
             }
             Action::Restart => {
                 if let EngineState::Ready(engine) = &mut self.engine {
+                    // the translator followed an R that is gone
+                    self.stata.forget_r();
                     match engine.restart() {
                         Ok(()) => {
                             self.needs_restart = false;
@@ -1523,33 +1592,102 @@ Click to choose another folder"
             .stick_to_bottom(true)
             .show(ui, |ui| {
                 if let Some(engine) = self.engine() {
-                    history_list(ui, pal, engine.history(), out);
+                    history_list(ui, pal, engine.history(), self.stata.on, out);
                 }
             });
     }
 
     fn script_pane(&mut self, ui: &mut egui::Ui, pal: &Palette, busy: bool, out: &mut Vec<Action>) {
+        let stata = self.stata.on;
         ui.horizontal(|ui| {
             pane_title(ui, pal, "Script");
+            stata_switch(ui, stata, out);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let run_all = ui.add_enabled(!busy, egui::Button::new("Run all"));
                 if run_all.clicked() {
-                    out.push(Action::Submit(Source::Script, self.script.clone()));
+                    let script = self.script.clone();
+                    out.push(if stata {
+                        Action::SubmitStata(Source::Script, script)
+                    } else {
+                        Action::Submit(Source::Script, script)
+                    });
+                }
+                if stata
+                    && ui
+                        .button("Copy R")
+                        .on_hover_text("Copies the whole script's R, RCraft's helpers first")
+                        .clicked()
+                {
+                    let r = self.stata.translation(&self.script).script();
+                    ui.ctx().copy_text(r);
                 }
             });
         });
-        let output = egui::ScrollArea::vertical()
-            .id_salt("script")
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                egui::TextEdit::multiline(&mut self.script)
-                    .code_editor()
-                    .desired_width(f32::INFINITY)
-                    .desired_rows(8)
-                    .lock_focus(true)
-                    .show(ui)
-            })
-            .inner;
+        let editor = egui::Id::new(SCRIPT_ID);
+        let draw_editor = |ui: &mut egui::Ui, script: &mut String| {
+            egui::ScrollArea::vertical()
+                .id_salt("script")
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    egui::TextEdit::multiline(script)
+                        .id(editor)
+                        .code_editor()
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(8)
+                        .lock_focus(true)
+                        .show(ui)
+                })
+                .inner
+        };
+        let output = if stata {
+            // two panes: the Stata, and its R line by line, the cursor's marked
+            let cursor_line = egui::TextEdit::load_state(ui.ctx(), editor)
+                .and_then(|s| s.cursor.char_range())
+                .map_or(0, |r| {
+                    stata_mode::line_of(&self.script, r.primary.index) + 1
+                });
+            let mut picked = None;
+            let shown = ui.columns(2, |cols| {
+                let [left, right] = cols else {
+                    return None;
+                };
+                let shown = draw_editor(left, &mut self.script);
+                let t = self.stata.translation(&self.script);
+                egui::ScrollArea::both()
+                    .id_salt("script-r")
+                    .auto_shrink([false, false])
+                    .show(right, |ui| {
+                        picked = stata_mode::translation_pane(ui, pal, t, cursor_line);
+                    });
+                Some(shown)
+            });
+            // a click on an R block selects its Stata
+            let span = picked.and_then(|i| {
+                self.stata
+                    .translation(&self.script)
+                    .lines
+                    .get(i)
+                    .map(|l| l.span)
+            });
+            if let Some(span) = span {
+                let (a, b) = stata_mode::char_range(&self.script, span.line, span.lines);
+                let mut state = egui::TextEdit::load_state(ui.ctx(), editor).unwrap_or_default();
+                state
+                    .cursor
+                    .set_char_range(Some(egui::text::CCursorRange::two(
+                        egui::text::CCursor::new(a),
+                        egui::text::CCursor::new(b),
+                    )));
+                state.store(ui.ctx(), editor);
+                ui.memory_mut(|m| m.request_focus(editor));
+            }
+            shown
+        } else {
+            Some(draw_editor(ui, &mut self.script))
+        };
+        let Some(output) = output else {
+            return;
+        };
         // Ctrl+Enter: run the selection, or the line the cursor is on
         let pressed = output.response.has_focus()
             && ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::Enter));
@@ -1562,7 +1700,11 @@ Click to choose another folder"
                 )
             });
             if let Some(code) = chosen {
-                out.push(Action::Submit(Source::Script, code));
+                out.push(if stata {
+                    Action::SubmitStata(Source::Script, code)
+                } else {
+                    Action::Submit(Source::Script, code)
+                });
             }
         }
     }
@@ -1691,6 +1833,7 @@ Click to choose another folder"
     ) {
         ui.horizontal(|ui| {
             pane_title(ui, pal, "Command");
+            stata_switch(ui, self.stata.on, out);
             ui.label(
                 RichText::new("Page Up / Page Down: earlier commands")
                     .small()
@@ -1719,7 +1862,14 @@ Click to choose another folder"
                     i.consume_key(Modifiers::NONE, Key::ArrowDown)
                         || i.consume_key(Modifiers::NONE, Key::PageDown)
                 });
-                if back {
+                if self.stata.on {
+                    // the Stata typed, not the R it became
+                    if back {
+                        recalled = self.stata.previous();
+                    } else if forward {
+                        recalled = self.stata.next();
+                    }
+                } else if back {
                     recalled = self.recall.previous(engine.history(), &self.command);
                 } else if forward {
                     recalled = self.recall.next(engine.history());
@@ -1765,7 +1915,30 @@ Click to choose another folder"
         // any other line is completed by R itself (names, columns, files)
         if has_focus && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab)) {
             let t = self.command.trim_start();
-            if t == "rc" || t.starts_with("rc ") || t.starts_with("rc	") {
+            if self.stata.on {
+                // a Stata line: completed here, from what the session holds
+                let variables: Vec<String> = self
+                    .stata
+                    .live
+                    .data()
+                    .and_then(|d| self.engine().and_then(|e| e.table(d)))
+                    .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
+                    .unwrap_or_default();
+                let folder = self
+                    .engine()
+                    .and_then(|e| e.working_dir())
+                    .map(std::path::PathBuf::from);
+                match self
+                    .stata
+                    .complete(&self.command, &variables, folder.as_deref())
+                {
+                    Some((done, shown)) => {
+                        self.completions = shown;
+                        recalled = Some(done);
+                    }
+                    None => self.completions.clear(),
+                }
+            } else if t == "rc" || t.starts_with("rc ") || t.starts_with("rc	") {
                 if let Some(done) = self.complete_rc() {
                     recalled = Some(done);
                 }
@@ -1785,7 +1958,11 @@ Click to choose another folder"
             let field = egui::TextEdit::singleline(&mut self.command)
                 .id(id)
                 .font(TextStyle::Monospace)
-                .hint_text("Type R code and press Enter")
+                .hint_text(if self.stata.on {
+                    "Type Stata and press Enter"
+                } else {
+                    "Type R code and press Enter"
+                })
                 .desired_width(field_width);
             let response = ui.add(field);
             if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
@@ -1815,13 +1992,17 @@ Click to choose another folder"
             let code = std::mem::take(&mut self.command);
             self.recall.reset();
             self.completions.clear();
-            out.push(match rc::parse(&code) {
-                Some(Ok(command)) => Action::Rc(command, code),
-                Some(Err(why)) => Action::RcError(why, code),
-                None => match help::parse_command(&code) {
-                    Some(request) => Action::Help(request, code),
-                    None => Action::Submit(Source::Typed, code),
-                },
+            out.push(if self.stata.on {
+                Action::SubmitStata(Source::Typed, code)
+            } else {
+                match rc::parse(&code) {
+                    Some(Ok(command)) => Action::Rc(command, code),
+                    Some(Err(why)) => Action::RcError(why, code),
+                    None => match help::parse_command(&code) {
+                        Some(request) => Action::Help(request, code),
+                        None => Action::Submit(Source::Typed, code),
+                    },
+                }
             });
         }
         if self.focus_command {
@@ -1831,16 +2012,34 @@ Click to choose another folder"
     }
 }
 
+/// The Stata mode switch, on the Command and Script panes alike.
+fn stata_switch(ui: &mut egui::Ui, on: bool, out: &mut Vec<Action>) {
+    let response = ui
+        .selectable_label(on, "Stata")
+        .on_hover_text("Stata mode: type Stata; RCraft translates it to R and runs the R");
+    if response.clicked() {
+        out.push(Action::SetStataMode(!on));
+    }
+}
+
 fn pane_title(ui: &mut egui::Ui, pal: &Palette, text: &str) {
     ui.label(RichText::new(text).strong().color(pal.dim));
 }
 
-fn history_list(ui: &mut egui::Ui, pal: &Palette, history: &History, out: &mut Vec<Action>) {
+/// In Stata mode a click puts back a Stata line (the comment its R starts
+/// with), else the code.
+fn history_list(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    history: &History,
+    stata: bool,
+    out: &mut Vec<Action>,
+) {
     let entries = history.entries();
     let start = entries.len().saturating_sub(HISTORY_SHOWN);
     for entry in entries.iter().skip(start) {
-        let first = entry.code.lines().next().unwrap_or("");
-        let more = if entry.code.lines().nth(1).is_some() {
+        let first = stata_mode::history_line(&entry.code);
+        let more = if entry.code.trim_end().lines().count() > 1 {
             " …"
         } else {
             ""
@@ -1854,7 +2053,11 @@ fn history_list(ui: &mut egui::Ui, pal: &Palette, history: &History, out: &mut V
             .selectable_label(false, text)
             .on_hover_text("Click to put this back in the Command line");
         if response.clicked() {
-            out.push(Action::SetCommand(entry.code.trim_end().to_string()));
+            let back = match first.strip_prefix("# ") {
+                Some(line) if stata => line.to_string(),
+                _ => entry.code.trim_end().to_string(),
+            };
+            out.push(Action::SetCommand(back));
         }
     }
 }
@@ -1862,7 +2065,8 @@ fn history_list(ui: &mut egui::Ui, pal: &Palette, history: &History, out: &mut V
 fn results_list(ui: &mut egui::Ui, pal: &Palette, engine: &Engine) {
     for block in engine.results().blocks() {
         if let Some(entry) = engine.history().get(block.command) {
-            for (i, line) in entry.code.trim_end().lines().enumerate() {
+            // RCraft's Stata helpers folded to one line; the session script keeps them
+            for (i, line) in stata_mode::shown_lines(&entry.code).iter().enumerate() {
                 let prompt = if i == 0 { "> " } else { "+ " };
                 mono(ui, &format!("{prompt}{line}"), pal.accent, true);
             }
@@ -2204,6 +2408,21 @@ impl App {
 
     pub fn set_accent(&mut self, ctx: &egui::Context, accent: Accent) {
         self.perform(ctx, Action::SetAccent(accent));
+    }
+
+    /// Turns Stata mode on or off (pictures and tests).
+    pub fn set_stata_mode(&mut self, ctx: &egui::Context, on: bool) {
+        self.perform(ctx, Action::SetStataMode(on));
+    }
+
+    /// Runs a line of Stata as if typed in the Command window (pictures).
+    pub fn submit_stata(&mut self, ctx: &egui::Context, code: &str) {
+        self.perform(ctx, Action::SubmitStata(Source::Typed, code.to_string()));
+    }
+
+    /// Puts this text in the Script Editor (pictures).
+    pub fn set_script(&mut self, text: &str) {
+        self.script = text.to_string();
     }
 
     pub fn submit_typed(&mut self, code: &str) {
@@ -2963,6 +3182,128 @@ mod tests {
         assert_eq!(after, before + 1, "only the typed line was recorded");
         let code = app.packages_window.confirmation_code().unwrap_or_default();
         assert!(code.contains("install.packages(\"fixest\""), "{code}");
+    }
+
+    #[test]
+    fn stata_mode_runs_each_line_after_the_ones_before() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("rcraft-stata-mode-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir
+            .join("cars.dta")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                format!(
+                    "stopifnot(requireNamespace(\"haven\", quietly = TRUE), requireNamespace(\"dplyr\", quietly = TRUE)); \
+                     haven::write_dta(data.frame(x = c(1, 2, 3), y = c(2, 4, 7)), \"{file}\")"
+                ),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let made = app
+            .engine()
+            .and_then(|e| e.history().entries().last().and_then(|h| h.outcome));
+        if made != Some(Outcome::Ok) {
+            eprintln!("skipped: haven and dplyr are needed");
+            return;
+        }
+        // the switch: an untouched script starts over as Stata
+        app.perform(&ctx, Action::SetStataMode(true));
+        assert!(app.stata.on);
+        assert_eq!(app.script, stata_mode::SCRIPT_START);
+        let run = |app: &mut App, line: &str| {
+            app.perform(&ctx, Action::SubmitStata(Source::Typed, line.to_string()));
+            assert!(frames_until(app, &ctx, |a| a.is_settled()), "{line}");
+        };
+        run(&mut app, &format!("use \"{file}\""));
+        // the data the Stata works on is shown
+        assert!(frames_until(&mut app, &ctx, |a| a.dataset.as_deref() == Some("cars")));
+        run(&mut app, "summarize y");
+        run(&mut app, "display r(mean)");
+        assert!(
+            newest_text(&app).contains("4.3333333"),
+            "{}",
+            newest_text(&app)
+        );
+        // the helpers went to R once, with the line that needed them, and fold in Results
+        let codes: Vec<String> = app
+            .engine()
+            .map(|e| {
+                e.history()
+                    .entries()
+                    .iter()
+                    .map(|h| h.code.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let summarize = codes
+            .iter()
+            .find(|c| c.contains("# summarize y"))
+            .cloned()
+            .unwrap_or_default();
+        assert!(
+            summarize.contains("stata_summarize <- function"),
+            "{summarize}"
+        );
+        assert!(
+            stata_mode::shown_lines(&summarize).len() < 6,
+            "{:?}",
+            stata_mode::shown_lines(&summarize)
+        );
+        let display = codes
+            .iter()
+            .find(|c| c.contains("# display r(mean)"))
+            .cloned()
+            .unwrap_or_default();
+        // what it needs first comes with it, what came before does not again
+        assert!(
+            display.contains("stata_fmt <- function")
+                && !display.contains("stata_summarize <- function"),
+            "{display}"
+        );
+        // a line that cannot be translated says why and leaves the session as it was
+        run(&mut app, "xtlogit y x");
+        assert!(
+            codes_last(&app).contains("not translated"),
+            "{}",
+            codes_last(&app)
+        );
+        // Page Up brings back the Stata typed
+        assert_eq!(app.stata.previous().as_deref(), Some("xtlogit y x"));
+        // Tab from the data's variables
+        let vars: Vec<String> = app
+            .engine()
+            .and_then(|e| e.table("cars"))
+            .map(|t| t.columns.iter().map(|c| c.name.clone()).collect())
+            .unwrap_or_default();
+        assert_eq!(
+            app.stata.complete("regress y if x", &vars, None),
+            Some(("regress y if x".to_string(), Vec::new()))
+        );
+        // a restart forgets what the translator followed; switching off restores R's script
+        app.perform(&ctx, Action::Restart);
+        assert_eq!(app.stata.live.data(), None);
+        app.perform(&ctx, Action::SetStataMode(false));
+        assert_eq!(app.script, SCRIPT_START);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn codes_last(app: &App) -> String {
+        app.engine()
+            .and_then(|e| e.history().entries().last().map(|h| h.code.clone()))
+            .unwrap_or_default()
     }
 
     #[test]

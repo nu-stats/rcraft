@@ -288,10 +288,11 @@ Tasks:
   `varlist` ranges), local and global macro names, value-label names and file names after
   `using`; the same Tab behaviour as for R lines (complete as far as the choices agree, a
   second Tab lists them); tested against the translator's own command table
-  (part one done 2026-10-31: `statatr::complete`, all of the above with subcommands too, every command, subcommand and option offered checked against the translator. Left: wiring it to the Tab key in Stata mode, which comes with the Stata mode switch, P2B.7.)
+  (part one done 2026-10-31: `statatr::complete`, all of the above with subcommands too, every command, subcommand and option offered checked against the translator. Wired to the Tab key in Stata mode with P2B.7, the same day.)
 - P2B.7 The two-pane view: Stata on the left, generated R on the right,
   line by line, with a mapping so a click on either highlights the other; a
   note on each line that has a known difference from Stata.
+  (done 2026-10-31: the Stata switch on the Command and Script panes, typed lines translated after the ones before them (`statatr::live`) and run, the Script Editor's two panes with the cursor's line marked and a click selecting its Stata, the notes and reasons on every line, Copy R, Page Up and Tab in Stata mode.)
 - P2B.8 Differences guide: a page per translated command listing where R
   and Stata differ (default standard errors, degrees of freedom, how ties
   and missing values are handled, sort stability, string widths, float

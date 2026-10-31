@@ -73,6 +73,31 @@ pub struct Translation {
     /// Small R functions the lines below call (defined once, first).
     pub helpers: Vec<String>,
     pub lines: Vec<Line>,
+    /// The R name of the data in memory after the last line, if any.
+    pub data: Option<String>,
+    /// The value-label sets defined by then.
+    pub value_labels: Vec<String>,
+}
+
+impl Line {
+    /// This line in the R script: the Stata as a comment, then its R and its
+    /// notes (or the reason it was not translated).
+    pub fn script(&self) -> String {
+        let mut out = format!("# {}\n", self.stata.replace('\n', " "));
+        match &self.result {
+            Ok(r) => {
+                if !r.code.is_empty() {
+                    out.push_str(&r.code);
+                    out.push('\n');
+                }
+                for c in &r.caveats {
+                    out.push_str(&format!("#   note: {c}\n"));
+                }
+            }
+            Err(e) => out.push_str(&format!("#   not translated: {}\n", e.reason)),
+        }
+        out
+    }
 }
 
 impl Translation {
@@ -88,19 +113,7 @@ impl Translation {
             out.push('\n');
         }
         for l in &self.lines {
-            out.push_str(&format!("# {}\n", l.stata.replace('\n', " ")));
-            match &l.result {
-                Ok(r) => {
-                    if !r.code.is_empty() {
-                        out.push_str(&r.code);
-                        out.push('\n');
-                    }
-                    for c in &r.caveats {
-                        out.push_str(&format!("#   note: {c}\n"));
-                    }
-                }
-                Err(e) => out.push_str(&format!("#   not translated: {}\n", e.reason)),
-            }
+            out.push_str(&l.script());
         }
         out
     }
@@ -153,6 +166,8 @@ pub fn translate(program: &Program) -> Translation {
             .map(|h| helper_code(h).to_string())
             .collect(),
         lines,
+        data: s.data.clone(),
+        value_labels: s.label_sets.keys().cloned().collect(),
     }
 }
 
@@ -1944,6 +1959,16 @@ mod tests {
             out[1].starts_with("survey <- readxl::read_excel(\"survey.xlsx\", sheet = \"Wave 2\")")
         );
         assert!(r("gen x = 1")[0].starts_with("NOT: no data is in memory"));
+    }
+
+    #[test]
+    fn what_reads_r_back_comes_with_the_command_that_leaves_it() {
+        // no model before it: summarize alone must bring stata_rget
+        let t = translate(&read("use s\nsummarize y\ndisplay r(mean)\n"));
+        assert!(t
+            .helpers
+            .iter()
+            .any(|h| h.contains("stata_rget <- function")));
     }
 
     #[test]
