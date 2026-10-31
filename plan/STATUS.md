@@ -2178,3 +2178,33 @@ with 42 failures at only 16 distinct times, so the handling of ties is really ex
 - **Not done:** `estat phtest` (Schoenfeld residuals; R's `cox.zph` transforms time differently by default), the
   other `st` commands (`sts`, `streg`, `stsplit`, ...), `margins` after stcox, `stset` with expressions or
   `var==value` in `origin()`/`enter()`/`exit()`, `exactp` with late entry.
+
+## P2B.4 more leftovers, 2026-10-31
+
+Items from the not-done lists above, each run in Stata 19 first.
+
+- **Weights in nbreg, ologit, oprobit and mlogit** (`fweight`, `pweight`, `iweight`; `aweights not allowed`, as
+  Stata says): the weighted likelihood (nbreg's variance from its weighted likelihood, alpha included), sampling
+  weights' sandwich with the weighted scores and N / (N - 1), frequency weights counting as copies (e(N) their sum,
+  161 here); mlogit's base outcome by weighted frequency. To 6 digits (numerical Hessians, as before).
+- **margins after a weighted model:** the weighted mean over the estimation sample, as Stata's (logit with pweights
+  and fweights, regress with aweights checked). `atmeans` and `at()` statistics after weights are refused for now.
+- **estat ic after frequency weights:** N their sum and the weighted log likelihood (regress's worked out by hand:
+  R's `logLik.lm` counts the rows); `estat vce` after any weights; the other `estat`s after weights refused.
+- **predict:** `xb` and `stdp` after ologit and oprobit (no cut points), after mlogit for one equation
+  (`outcome()`, the first by default, the base's being zero), and nbreg's two `scores` (xb's and ln(alpha)'s).
+- **Stata's own words:** `by` before `predict`, `test`, `lincom`, `margins` and `estat` is Stata's error
+  (`predict may not be combined with by`, ...), and after robust or clustered errors every residual statistic but
+  `stdp` is too (`option rstandard not allowed after robust estimation`); the translation now says exactly that.
+- **After stcox:** `estat phtest` (and `, detail`) is the Grambsch-Therneau test on analysis time, as Stata's (R's
+  `cox.zph` now gives an exact score test, a different number): the global chi2 to 10 digits, each covariate's rho
+  and chi2 to 6 (Stata works them out from the scaled residuals kept as floats). `margins` after stcox averages the
+  relative hazard, exp(xb), or with `predict(xb)` the linear prediction.
+- **stset** takes expressions in `origin()`, `enter()` and `exit()` (`exit(time 4 * 5)`, `enter(time e0 - 1)`).
+- **Found on the way:** an R list loses an element set to NULL, so a weights list kept beside the margins came out
+  short for an unweighted model (`subscript out of bounds` after ivregress); kept with `list()` now.
+- **Tests** (`stata_models.rs`, `stata_stcox.rs`, 2 new cases): every figure above against Stata 19. P2B.4 has 79
+  real-R cases.
+- **Still not done:** weights in anova, xtreg and ivregress; `atmeans` and `at()` statistics after weights; the other
+  `estat`s after weights; `margins` contrasts with suboptions; gmm's HAC; the estat tests after clustered iv errors;
+  `xtreg, mle` robust and `pa` with other correlations; `stset` `var==value`; `exactm`; anova with an empty cell.

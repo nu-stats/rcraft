@@ -86,9 +86,17 @@ pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, lev
 }"#;
 
 /// `estat ic`, `estat hettest` and `estat ovtest`.
-pub(super) const ESTAT_HELPER: &str = r#"stata_estat_ic <- function(fit) {
+pub(super) const ESTAT_HELPER: &str = r#"stata_estat_ic <- function(fit, fweights = FALSE) {
   ll <- as.numeric(stats::logLik(fit))
   n <- NROW(stats::fitted(fit))
+  if (fweights) {
+    # frequency weights are copies of the row: N is their sum
+    w <- stats::model.weights(stats::model.frame(fit))
+    n <- sum(w)
+    if (inherits(fit, "lm") && !inherits(fit, "glm")) {
+      ll <- -n / 2 * (log(2 * pi * sum(w * stats::residuals(fit)^2) / n) + 1)
+    }
+  }
   k <- length(stata_b)
   tab <- data.frame(N = n, "ll(model)" = ll, df = k, AIC = -2 * ll + 2 * k,
                     BIC = -2 * ll + log(n) * k, check.names = FALSE)
@@ -188,8 +196,10 @@ impl Session {
             Fit::Ivregress => &[("xb", 2), ("residuals", 1)],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
-            Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4)],
-            Fit::Ologit | Fit::Oprobit | Fit::Mlogit => &[("pr", 2), ("outcome", 3)],
+            Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("scores", 2)],
+            Fit::Ologit | Fit::Oprobit | Fit::Mlogit => {
+                &[("pr", 2), ("outcome", 3), ("xb", 2), ("stdp", 4)]
+            }
             Fit::Stcox => &[("hr", 2), ("xb", 2)],
             Fit::Margins => {
                 return Err(no(
@@ -220,10 +230,17 @@ impl Session {
                 Some("stdf" | "stdr" | "rstandard" | "rstudent" | "cooksd" | "leverage")
             )
         {
-            return Err(no(
-                "predict's residual statistics after robust, clustered or weighted regress are \
-                 not translated yet",
-            ));
+            let o = c
+                .options
+                .first()
+                .map(|o| o.name.clone())
+                .unwrap_or_default();
+            return Err(if self.fit_robust {
+                // Stata's own words: after robust or clustered errors it has none
+                no(format!("option {o} not allowed after robust estimation"))
+            } else {
+                no("predict's residual statistics after weighted regress are not translated yet")
+            });
         }
         if let Some(o) = opts.other(known) {
             return Err(no(format!(
@@ -258,7 +275,64 @@ impl Session {
         let newdata =
             |ty: &str| format!("unname(stats::predict(stata_estimates, newdata = {d}{ty}))");
         let mut values = Vec::new();
-        if fit.one_outcome() {
+        let xb_or_stdp = if opts.has("stdp", 4) {
+            Some("stdp")
+        } else if opts.has("xb", 2) {
+            Some("xb")
+        } else {
+            None
+        };
+        if fit == Fit::Nbreg && opts.has("scores", 2) {
+            // two new variables: the score of xb and that of ln(alpha)
+            if words.len() != 2 {
+                return Err(no(
+                    "predict, scores after nbreg makes two new variables (xb's and lnalpha's)",
+                ));
+            }
+            self.helpers.insert("stata_predict_more");
+            out.line(format!(
+                "stata_s <- stata_nbreg_scores(stata_estimates, {d})"
+            ));
+            values.push("stata_s[, 1]".to_string());
+            values.push("stata_s[, 2]".to_string());
+        } else if let (false, Some(s)) = (fit.one_outcome(), xb_or_stdp) {
+            if words.len() != 1 {
+                return Err(no(format!("predict, {s} makes one new variable")));
+            }
+            if fit == Fit::Mlogit {
+                // one equation: outcome() or the first
+                let k = match opts.arg("outcome", 3).as_deref().map(str::trim) {
+                    None => "1".to_string(),
+                    Some(o) => match o.strip_prefix('#') {
+                        Some(n) => match n.trim().parse::<usize>() {
+                            Ok(n) if n >= 1 => n.to_string(),
+                            _ => return Err(no(format!("outcome({o}) is not an outcome number"))),
+                        },
+                        None if o.parse::<f64>().is_ok() => format!(
+                            "match({}, as.character(sort(as.numeric(stata_estimates$lev))))",
+                            r_text(o)
+                        ),
+                        None => {
+                            return Err(no(format!(
+                                "outcome({o}): only a value or #k is translated, not a label"
+                            )))
+                        }
+                    },
+                };
+                self.helpers.insert("stata_predict_more");
+                values.push(format!(
+                    "stata_mlogit_eq(stata_estimates, {d}, {k}, {}, stata_base)",
+                    r_text(s)
+                ));
+            } else {
+                // ologit and oprobit have one linear prediction, without the cut points
+                self.helpers.insert("stata_predict_stat");
+                values.push(format!(
+                    "unname(stata_predict_stat(stata_estimates, {d}, {}))",
+                    r_text(s)
+                ));
+            }
+        } else if fit.one_outcome() {
             if words.len() != 1 {
                 return Err(no(format!("predict after {name} makes one new variable")));
             }
@@ -494,8 +568,15 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "estat")?;
+        // after weights: estat ic with frequency weights, and estat vce
         if self.weighted_fit {
-            return Err(no("estat after a model with weights is not translated yet"));
+            let (s, _) = first_word(&c.parts.main);
+            let ok = s == "vce" || (s == "ic" && self.fit_fweight);
+            if !ok {
+                return Err(no(format!(
+                    "estat {s} after a model with these weights is not translated yet"
+                )));
+            }
         }
         let est = self.estimates_for("estat")?;
         let (sub, rest) = first_word(&c.parts.main);
@@ -518,6 +599,19 @@ impl Session {
                 "estat {sub} with a varlist is not translated yet"
             )));
         }
+        if est.fit == Fit::Stcox && sub.len() >= 2 && "phtest".starts_with(sub) {
+            if let Some(o) = opts.other(&[("detail", 1)]) {
+                return Err(no(format!(
+                    "estat phtest with the option {o} is not translated yet"
+                )));
+            }
+            self.helpers.insert("stata_phtest");
+            out.line(format!(
+                "stata_phtest(stata_estimates, detail = {})",
+                r_logical(opts.has("detail", 1))
+            ));
+            return Ok(());
+        }
         if est.fit == Fit::Ivregress && sub != "vce" {
             return self.estat_iv(sub, out);
         }
@@ -534,7 +628,14 @@ impl Session {
                 )));
             }
             self.helpers.insert("stata_estat");
-            out.line("stata_estat_ic(stata_estimates)");
+            out.line(format!(
+                "stata_estat_ic(stata_estimates{})",
+                if self.fit_fweight {
+                    ", fweights = TRUE"
+                } else {
+                    ""
+                }
+            ));
             out.caveat(
                 "the degrees of freedom are the coefficients, as Stata counts them; R's AIC() on \
                  a linear model also counts the variance",
@@ -912,6 +1013,7 @@ pub(super) const PREDICT_STAT_HELPER: &str = r#"stata_predict_stat <- function(f
   V <- stata_vcov[colnames(X), colnames(X), drop = FALSE]
   stdp <- sqrt(rowSums((X %*% V) * X))
   if (stat == "stdp") return(stdp)
+  if (stat == "xb") return(xb)
   if (stat == "ir") return(exp(xb))
   off <- stats::model.offset(mf)
   eta <- xb + if (is.null(off)) 0 else off
@@ -1037,6 +1139,31 @@ stata_resolve <- function(rows, r, labels) {
   }
   out
 }"##;
+
+/// `predict, xb` and `stdp` for one equation of mlogit (`outcome()`, the base
+/// outcome's being zero, as in Stata), and nbreg's two `scores`: the
+/// derivatives of each row's log likelihood by xb and by ln(alpha).
+pub(super) const PREDICT_MORE_HELPER: &str = r#"stata_mlogit_eq <- function(fit, newdata, k, stat, base) {
+  tt <- stats::delete.response(stats::terms(fit))
+  mf <- stats::model.frame(tt, newdata, xlev = fit$xlevels, na.action = stats::na.pass)
+  X <- stats::model.matrix(tt, mf)
+  lev <- as.character(sort(as.numeric(fit$lev)))[k]
+  if (lev == base) return(rep(0, nrow(X)))
+  nm <- paste0(lev, ":", colnames(X))
+  if (stat == "xb") return(drop(X %*% stata_b[nm]))
+  sqrt(rowSums((X %*% stata_vcov[nm, nm, drop = FALSE]) * X))
+}
+stata_nbreg_scores <- function(fit, newdata) {
+  tt <- stats::delete.response(stats::terms(fit))
+  mf <- stats::model.frame(tt, newdata, xlev = fit$xlevels, na.action = stats::na.pass)
+  X <- stats::model.matrix(tt, mf)
+  off <- stats::model.offset(mf)
+  mu <- exp(drop(X %*% stats::coef(fit)) + if (is.null(off)) 0 else off)
+  y <- eval(stats::formula(fit)[[2]], newdata, environment(stats::formula(fit)))
+  th <- fit$theta
+  gt <- digamma(y + th) - digamma(th) + log(th / (th + mu)) + (mu - y) / (th + mu)
+  cbind((y - mu) / (1 + mu / th), -th * gt)
+}"#;
 
 #[cfg(test)]
 mod tests {

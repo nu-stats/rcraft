@@ -456,8 +456,9 @@ fn the_statistics_commands_say_why_they_refuse_what_they_refuse() {
         "tab1 and tab2 are not this command"
     );
     assert!(
-        refusal("use \"d.dta\"\nbysort g: margins\n").contains("by with margins"),
-        "by with margins is not translated yet"
+        refusal("use \"d.dta\"\nbysort g: margins\n")
+            .contains("margins may not be combined with by"),
+        "by with margins, in Stata's words"
     );
     assert!(
         refusal("summarize x\n").contains("no data is in memory"),

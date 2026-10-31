@@ -136,6 +136,9 @@ fn refusal(dofile: &str) -> String {
         .unwrap_or_default()
 }
 
+fn at(v: &[f64], i: usize) -> f64 {
+    v.get(i).copied().unwrap_or(f64::NAN)
+}
 /// Each number within `tol` of Stata's, relative to its size.
 fn near_stata(got: &[f64], stata: &[f64], tol: f64, what: &str) {
     assert_eq!(
@@ -397,14 +400,96 @@ fn stcox_strata_exit_and_origin_agree_with_stata_19() {
         "stset, origin(o)",
     );
 }
+
+/// estat phtest (the Grambsch-Therneau test, as Stata's), margins after stcox
+/// (the relative hazard), and stset with expressions, against Stata 19.
+#[test]
+fn phtest_margins_and_stset_expressions_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let d = survdata(&mut e);
+    let start = format!("use \"{d}/surv.dta\"\nstset time, failure(died)\n");
+    let code = script(&format!("{start}stcox x w\nestat phtest, detail\n"));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        &format!("res <- {}", line_of(&code, "stata_phtest(")),
+        "res$chi2, res$df, res$table$rho, res$table$chi2",
+    );
+    near_stata(
+        &v,
+        &[
+            0.1505795097985401,
+            2.0,
+            -0.034496164679680412,
+            -0.031618788517091719,
+            0.062646177723168966,
+            0.043179946173377531,
+        ],
+        // each covariate's rho and chi2 to 6 digits: Stata works them out from
+        // the scaled residuals kept as float variables; the global test, from
+        // the matrices, is checked to 9 just below
+        1e-6,
+        "estat phtest, detail",
+    );
+    near_stata(
+        &[at(&v, 0)],
+        &[0.1505795097985401],
+        1e-9,
+        "estat phtest's global chi2",
+    );
+    let m = |e: &mut Engine, cmd: &str| -> Vec<f64> {
+        let code = script(&format!("{start}stcox x w\n{cmd}\n"));
+        ok(e, &code);
+        numbers(
+            e,
+            &format!("res <- {}", line_of(&code, "stata_margins(")),
+            "res$b, sqrt(diag(res$V))",
+        )
+    };
+    near_stata(
+        &m(&mut e, "margins"),
+        &[0.84903142144710519, 0.20505834461113223],
+        1e-9,
+        "margins after stcox",
+    );
+    near_stata(
+        &m(&mut e, "margins, dydx(x)"),
+        &[0.37656022196021333, 0.19072686917382567],
+        // 7 digits: both sides differentiate the margin in b numerically
+        1e-7,
+        "dydx after stcox",
+    );
+    let fit = |e: &mut Engine, cmd: &str, show: &str| -> Vec<f64> {
+        ok(e, &script(&format!("use \"{d}/surv.dta\"\n{cmd}\n")));
+        numbers(e, "0", show)
+    };
+    near_stata(
+        &fit(
+            &mut e,
+            "stset time, failure(died == 1) exit(time 4 * 5)\nstcox x w",
+            "stata_b[\"x\"], sum(stata_data$`_d`)",
+        ),
+        &[0.44248883275836221, 41.0],
+        1e-10,
+        "stset, exit(time 4 * 5)",
+    );
+    near_stata(
+        &fit(
+            &mut e,
+            "gen e0 = 2\nstset time, failure(died) enter(time e0 - 1)\nstcox x w",
+            "stata_b[\"x\"], nrow(stata_data)",
+        ),
+        &[0.30034823395909921, 55.0],
+        1e-10,
+        "stset, enter(time e0 - 1)",
+    );
+}
 #[test]
 fn stcox_says_what_it_does_not_translate() {
     assert!(refusal("use s\nstcox x\n").contains("data not st; use stset"));
     assert!(refusal("use s\nstset t, failure(d)\nstcox x, exactm\n").contains("exactm"));
-    assert!(
-        refusal("use s\nstset t, failure(d)\nstcox x\nmargins\n").contains("margins after stcox")
-    );
 }
+
 /// A number no other call in this run has had, so the tests (which run at
 /// once) each write their data to a folder of their own.
 fn fresh() -> usize {

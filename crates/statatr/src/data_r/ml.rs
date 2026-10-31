@@ -74,16 +74,19 @@ pub(super) const NBREG_VCOV_HELPER: &str = r#"stata_nbreg_vcov <- function(fit) 
   off <- stats::model.offset(stats::model.frame(fit))
   if (is.null(off)) off <- 0
   k <- ncol(X)
+  # the weights the model was given (1 without)
+  pw <- fit$prior.weights
+  if (is.null(pw)) pw <- rep(1, length(y))
   nll <- function(p) {
     mu <- exp(drop(X %*% p[seq_len(k)]) + off)
     th <- exp(-p[k + 1])
-    -sum(lgamma(y + th) - lgamma(th) - lgamma(y + 1) + th * log(th / (th + mu)) + y * log(mu / (th + mu)))
+    -sum(pw * (lgamma(y + th) - lgamma(th) - lgamma(y + 1) + th * log(th / (th + mu)) + y * log(mu / (th + mu))))
   }
   grad <- function(p) {
     mu <- exp(drop(X %*% p[seq_len(k)]) + off)
     th <- exp(-p[k + 1])
-    gb <- crossprod(X, (y - mu) / (1 + mu / th))
-    gt <- sum(digamma(y + th) - digamma(th) + log(th / (th + mu)) + (mu - y) / (th + mu))
+    gb <- crossprod(X, pw * (y - mu) / (1 + mu / th))
+    gt <- sum(pw * (digamma(y + th) - digamma(th) + log(th / (th + mu)) + (mu - y) / (th + mu)))
     -c(gb, -th * gt)
   }
   p <- c(stats::coef(fit), log(1 / fit$theta))
@@ -145,7 +148,8 @@ pub(super) const ML_HEADER_HELPER: &str = r#"stata_ml_header <- function(fit, ro
   } else if (inherits(fit, "glm")) {
     ll0 <- ll + (fit$deviance - fit$null.deviance) / 2
   } else {
-    nj <- table(fit$model[[1]])
+    wt <- stats::model.weights(fit$model)
+    nj <- if (is.null(wt)) table(fit$model[[1]]) else tapply(wt, fit$model[[1]], sum)
     nj <- nj[nj > 0]
     ll0 <- sum(nj * log(nj / sum(nj)))
   }
@@ -251,7 +255,13 @@ impl Session {
             (None, None) => {}
         }
         let w = match fit {
-            Fit::Logit | Fit::Probit | Fit::Poisson => self.weight_of(c, &[W::F, W::P, W::I])?,
+            Fit::Logit
+            | Fit::Probit
+            | Fit::Poisson
+            | Fit::Nbreg
+            | Fit::Ologit
+            | Fit::Oprobit
+            | Fit::Mlogit => self.weight_of(c, &[W::F, W::P, W::I])?,
             _ => None,
         };
         if matches!(w, Some((W::I, _))) && (robust || cluster.is_some()) {
@@ -305,14 +315,14 @@ impl Session {
             Fit::Nbreg => {
                 out.package("MASS");
                 out.line(format!(
-                    "stata_estimates <- MASS::glm.nb({dep} ~ {right}, data = {src}, {control})"
+                    "stata_estimates <- MASS::glm.nb({dep} ~ {right}, data = {src}{weights}, {control})"
                 ));
             }
             Fit::Ologit | Fit::Oprobit => {
                 out.package("MASS");
                 let method = if fit == Fit::Ologit { "logistic" } else { "probit" };
                 out.line(format!(
-                    "stata_estimates <- MASS::polr(factor({dep}) ~ {right}, data = {src}, method = \"{method}\", Hess = TRUE, model = TRUE, control = list(reltol = 1e-14, maxit = 1000))"
+                    "stata_estimates <- MASS::polr(factor({dep}) ~ {right}, data = {src}{weights}, method = \"{method}\", Hess = TRUE, model = TRUE, control = list(reltol = 1e-14, maxit = 1000))"
                 ));
                 out.line("stata_levels <- stata_estimates$lev");
             }
@@ -320,7 +330,7 @@ impl Session {
                 out.package("nnet");
                 let fit_with = |response: &str| {
                     format!(
-                        "stata_estimates <- nnet::multinom({response} ~ {right}, data = {src}, trace = FALSE, model = TRUE, maxit = 1000, reltol = 1e-14)"
+                        "stata_estimates <- nnet::multinom({response} ~ {right}, data = {src}{weights}, trace = FALSE, model = TRUE, maxit = 1000, reltol = 1e-14)"
                     )
                 };
                 out.line(fit_with(&format!("factor({dep})")));
@@ -334,7 +344,7 @@ impl Session {
                         out.line(format!("stata_base <- {}", r_text(b)));
                     }
                     None => {
-                        out.line("stata_base <- names(which.max(table(stata_estimates$model[[1]])))");
+                        out.line("stata_base <- local({ w <- stats::model.weights(stata_estimates$model); y <- stata_estimates$model[[1]]; names(which.max(if (is.null(w)) table(y) else tapply(w, y, sum))) })");
                         out.caveat("the base outcome is the most frequent one, as in Stata");
                     }
                 }
@@ -434,7 +444,7 @@ impl Session {
                 }
             };
             out.line(format!(
-                "stata_vcov <- stata_ml_sandwich(stata_estimates, stata_vcov{cl})"
+                "stata_vcov <- stata_ml_sandwich(stata_estimates, stata_vcov{cl}{kind})"
             ));
         }
         if fit.one_outcome() {
@@ -459,7 +469,7 @@ impl Session {
             "stata_ml_header(stata_estimates, robust = {}{})",
             r_logical(robust),
             if matches!(w, Some((W::F, _))) {
-                ", nobs = sum(stata_estimates$prior.weights)"
+                ", nobs = sum(stats::model.weights(stats::model.frame(stata_estimates)))"
             } else {
                 ""
             }
@@ -650,10 +660,13 @@ pub(super) const ML_SANDWICH_HELPER: &str = r#"stata_ml_scores <- function(fit) 
   colnames(P) <- fit$lev
   do.call(cbind, lapply(fit$lev[-1], function(k) X * ((y == k) - P[, k])))
 }
-stata_ml_sandwich <- function(fit, V, cluster = NULL) {
+stata_ml_sandwich <- function(fit, V, cluster = NULL, kind = "") {
   S <- stata_ml_scores(fit)
+  # weighted scores: sampling weights as they are, frequency ones as copies
+  w <- if (inherits(fit, "negbin")) fit$prior.weights else stats::model.weights(stats::model.frame(fit))
+  if (!is.null(w)) S <- S * (if (kind == "f" && is.null(cluster)) sqrt(w) else w)
   if (is.null(cluster)) {
-    n <- nrow(S)
+    n <- if (kind == "f") sum(w) else nrow(S)
     out <- V %*% crossprod(S) %*% V * n / (n - 1)
   } else {
     sg <- rowsum(S, cluster)

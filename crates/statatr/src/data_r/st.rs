@@ -104,6 +104,35 @@ stata_st_xb <- function(fit, newdata) {
   drop(X[, names(b), drop = FALSE] %*% b)
 }"#;
 
+/// `estat phtest`: the Grambsch-Therneau test of proportional hazards on the
+/// analysis time, as Stata's (R's `cox.zph` now gives an exact score test,
+/// which is a different number): with the Schoenfeld residuals s, the model
+/// variance V and g the event times less their mean, the global chi2 is
+/// `D u' V u / sum(g^2)` with `u = sum g s`, and each covariate's
+/// `D (V u)_j^2 / (V_jj sum(g^2))`; rho is the correlation of the scaled
+/// residuals with time.
+pub(super) const PHTEST_HELPER: &str = r#"stata_phtest <- function(fit, detail = FALSE) {
+  sr <- stats::residuals(fit, type = "schoenfeld")
+  if (is.null(dim(sr))) sr <- matrix(sr, ncol = 1, dimnames = list(names(sr), names(stats::coef(fit))))
+  tt <- as.numeric(rownames(sr))
+  V <- if (is.null(fit$naive.var)) fit$var else fit$naive.var
+  D <- nrow(sr)
+  g <- tt - mean(tt)
+  u <- colSums(sr * g)
+  q <- ncol(sr)
+  global <- drop(t(u) %*% V %*% u) * D / sum(g^2)
+  Vu <- drop(V %*% u)
+  chi <- D * Vu^2 / (diag(V) * sum(g^2))
+  ss <- sr %*% V * D + matrix(stats::coef(fit), D, q, byrow = TRUE)
+  rho <- apply(ss, 2, function(r) stats::cor(tt, r))
+  cat("Test of proportional-hazards assumption\nTime function: Analysis time\n\n")
+  tab <- data.frame(rho = rho, chi2 = chi, df = 1, p = stats::pchisq(chi, 1, lower.tail = FALSE))
+  rownames(tab) <- colnames(sr)
+  if (detail) print(tab, digits = 6)
+  cat(sprintf("Global test: chi2(%d) = %.2f   Prob>chi2 = %.4f\n", q, global, stats::pchisq(global, q, lower.tail = FALSE)))
+  invisible(list(table = tab, chi2 = global, df = q))
+}"#;
+
 /// What `stset` declared, for `stcox` to read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct StSet {
@@ -187,11 +216,15 @@ impl Session {
                     r_number(n)
                 } else if is_name(a) {
                     col(a)
-                } else {
+                } else if a.contains("==") && !a.contains('(') {
                     return Err(no(format!(
-                        "stset, {o}({a}): a number or a variable is translated, not an expression \
-                         or var==value"
+                        "stset, {o}({a}): var==value (the time the variable first takes the \
+                         value) is not translated yet"
                     )));
+                } else {
+                    // `time exp`: an expression of the data, row by row
+                    let (code, _) = self.value(a, out)?;
+                    format!("with({d}, {code})")
                 };
                 args.push(format!("{o} = {v}"));
             }

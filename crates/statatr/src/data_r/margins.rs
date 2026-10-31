@@ -33,12 +33,13 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
                           within = character(), at = list(), dydx = character(), eyex = character(),
                           dyex = character(), eydx = character(), factors = character(),
                           atmeans = FALSE, level = 0.95, expression = "", outcomes = NULL,
-                          compare = "", unconditional = NULL) {
+                          compare = "", unconditional = NULL, w = NULL) {
   plain <- function(v) if (inherits(v, "haven_labelled")) as.vector(unclass(v)) else v
   data <- as.data.frame(lapply(data, plain), check.names = FALSE)
   tt <- stats::delete.response(stats::terms(fit))
   kind <- if (inherits(fit, "polr")) "polr" else if (inherits(fit, "multinom")) "multinom" else "glm"
-  fam <- if (inherits(fit, "glm")) fit$family else stats::gaussian()
+  # after stcox the default prediction is the relative hazard, exp(xb)
+  fam <- if (inherits(fit, "glm")) fit$family else if (inherits(fit, "coxph")) list(linkinv = exp, mu.eta = exp) else stats::gaussian()
   xnames <- if (kind == "multinom") colnames(stats::model.matrix(fit)) else names(stats::coef(fit))
   if (kind == "glm") {
     b <- b[xnames]
@@ -153,9 +154,12 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
   }
   outs <- if (is.null(outcomes)) list(NULL) else as.list(outcomes)
   items <- list()
+  wts <- list()
+  cur_w <- NULL
   labels <- character()
   add <- function(f, label) {
     items[[length(items) + 1]] <<- f
+    wts[length(items)] <<- list(cur_w)
     labels <<- c(labels, label)
   }
   join <- function(...) {
@@ -169,6 +173,7 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
     for (ai in seq_along(ats)) {
       for (cl in cells) {
         for (gr in groups) {
+          cur_w <- if (is.null(w)) NULL else w[gr$rows]
           nd <- setv(setv(data[gr$rows, , drop = FALSE], ats[[ai]]), cl$vals)
           where <- join(cl$name, at_names[min(ai, length(at_names))], gr$name)
           if (!any_effect) {
@@ -229,14 +234,20 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
     }
   }
   # each item gives one value per row; the margin is their mean
-  m <- vapply(items, function(f) mean(f(b)), 0)
-  J <- t(vapply(items, function(f) vapply(seq_along(b), function(j) {
+  # with weights each item is the weighted mean over its rows, as Stata's
+  avg <- function(v, j) {
+    ww <- wts[[j]]
+    if (is.null(ww) || length(v) == 1) mean(v) else sum(ww * v) / sum(ww)
+  }
+  m <- vapply(seq_along(items), function(j) avg(items[[j]](b), j), 0)
+  J <- t(vapply(seq_along(items), function(i) vapply(seq_along(b), function(j) {
+    f <- items[[i]]
     h <- 1e-5 * (abs(b[[j]]) + 1e-3)
     bp <- b
     bm <- b
     bp[j] <- b[j] + h
     bm[j] <- b[j] - h
-    (mean(f(bp)) - mean(f(bm))) / (2 * h)
+    (avg(f(bp), i) - avg(f(bm), i)) / (2 * h)
   }, 0), numeric(length(b))))
   Vm <- J %*% V %*% t(J)
   if (!is.null(unconditional)) {
@@ -304,9 +315,20 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "margins")?;
-        if self.weighted_fit {
+        // with weights the margins are weighted means, as Stata's; the means of
+        // atmeans and at() statistics would need weighting too, not done yet
+        if self.weighted_fit
+            && (opts.has("atmeans", 5)
+                || c.options.iter().any(|o| {
+                    let a = o.arg().replace(' ', "");
+                    o.is("at", 2)
+                        && ["(mean)", "(median)", "(min)", "(max)", "(p"]
+                            .iter()
+                            .any(|s| a.contains(s))
+                }))
+        {
             return Err(no(
-                "margins after a model with weights is not translated yet",
+                "margins, atmeans or at() statistics after a weighted model are not translated yet",
             ));
         }
         let est = self.estimates.clone().ok_or_else(|| {
@@ -494,6 +516,9 @@ impl Session {
             (None | Some("pr"), Fit::Logit | Fit::Probit) => {
                 ("response", format!("Pr({}), predict()", est.dep))
             }
+            (None | Some("hr"), Fit::Stcox) => {
+                ("response", "Relative hazard, predict()".to_string())
+            }
             (None | Some("n"), Fit::Poisson | Fit::Nbreg) => (
                 "response",
                 "Predicted number of events, predict()".to_string(),
@@ -582,11 +607,12 @@ impl Session {
         self.helpers.insert("stata_coefs");
         self.helpers.insert("stata_margins");
         let call = format!(
-            "stata_margins(stata_estimates, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond})",
+            "stata_margins(stata_estimates, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond}{wts})",
             r_logical(atmeans),
             r_number(level),
             r_text(&expression),
             r_text(compare),
+            wts = if self.weighted_fit { ", w = stats::model.weights(stats::model.frame(stata_estimates))" } else { "" },
             uncond = if unconditional {
                 self.helpers.insert("stata_unconditional");
                 if self.fit_cluster {

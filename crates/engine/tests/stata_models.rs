@@ -1697,8 +1697,9 @@ fn predict_statistics_agree_with_stata_19_in_and_out_of_the_sample() {
     near_stata(&got[..1], &got[1..2], 1e-7, "stdp is se.fit");
     near_stata(&got[2..3], &got[3..4], 1e-7, "leverage is hatvalues");
     assert!(
-        refusal("use s\nregress y x, robust\npredict r, rstudent\n").contains("not translated yet"),
-        "residual statistics after robust regress"
+        refusal("use s\nregress y x, robust\npredict r, rstudent\n")
+            .contains("option rstudent not allowed after robust estimation"),
+        "residual statistics after robust regress, in Stata's words"
     );
 }
 
@@ -1866,4 +1867,279 @@ fn test_lincom_hettest_and_esample_agree_with_stata_19() {
         refusal(&format!("{use_}{reg}sort x\nsummarize x if e(sample)\n")).contains("e(sample)")
     );
     assert!(refusal(&format!("{use_}summarize x if e(sample)\n")).contains("e(sample)"));
+}
+
+/// Weights in nbreg, ologit, oprobit and mlogit, margins and estat ic after a
+/// weighted model, the other predict statistics after ologit, mlogit and
+/// nbreg, and Stata's messages for by before the postestimation commands and
+/// for residual statistics after robust errors; against Stata 19 on `models`
+/// (with `f = mod(id, 3) + 1` and `a = id / 30`). Six digits for the
+/// likelihood models (their Hessians are numerical, as noted above).
+#[test]
+fn the_p2b4_leftovers_agree_with_stata_19() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let start = format!("use \"{dir}/models.dta\"\ngen f = mod(id, 3) + 1\ngen a = id / 30\n");
+    let bse = |e: &mut Engine, cmd: &str, names: &[&str]| -> Vec<f64> {
+        ok(e, &script(&format!("{start}{cmd}\n")));
+        let b: Vec<String> = names
+            .iter()
+            .map(|n| format!("stata_b[[\"{n}\"]]"))
+            .collect();
+        let s: Vec<String> = names
+            .iter()
+            .map(|n| format!("sqrt(stata_vcov[\"{n}\", \"{n}\"])"))
+            .collect();
+        numbers(e, "0", &format!("{}, {}", b.join(", "), s.join(", ")))
+    };
+    let nb = ["x", "(Intercept)", "/lnalpha"];
+    let ol = ["x", "w", "/cut1", "/cut2"];
+    let ml = ["1:x", "1:w", "1:(Intercept)", "3:x", "3:w", "3:(Intercept)"];
+    let cases: Vec<(&str, &[&str], Vec<f64>)> = vec![
+        (
+            "nbreg nb x [fw=f]",
+            &nb,
+            vec![
+                0.43302236411285205,
+                0.56245573347608502,
+                -0.8671824759956408,
+                0.072573766546981291,
+                0.080535521404426144,
+                0.26955239259898384,
+            ],
+        ),
+        (
+            "nbreg nb x [pw=a]",
+            &nb,
+            vec![
+                0.32460605198270825,
+                0.61468818409768577,
+                -1.3969692457369167,
+                0.10844445998844079,
+                0.10658061208616615,
+                0.44487508334421361,
+            ],
+        ),
+        (
+            "nbreg nb x [iw=a]",
+            &nb,
+            vec![
+                0.32460605198270825,
+                0.61468818409768577,
+                -1.3969692457369167,
+                0.077935622895645956,
+                0.086783799678838328,
+                0.4187030473503463,
+            ],
+        ),
+        (
+            "ologit ord x w [fw=f]",
+            &ol,
+            vec![
+                0.512291515015314,
+                0.38411228625408755,
+                -0.61802046958406665,
+                0.65748750789724697,
+                0.14152394287079575,
+                0.24956399695425111,
+                0.17156713269500687,
+                0.17177948814902461,
+            ],
+        ),
+        (
+            "ologit ord x w [pw=a]",
+            &ol,
+            vec![
+                0.59113877915432056,
+                0.076693555265671273,
+                -0.63857503594509113,
+                0.45598113699892773,
+                0.25592159063886732,
+                0.44018505332874475,
+                0.26402392894714671,
+                0.28608292943156965,
+            ],
+        ),
+        (
+            "oprobit ord x w [iw=a]",
+            &ol,
+            vec![
+                0.35835518040024683,
+                0.060813885374873838,
+                -0.40277756004120585,
+                0.26750062490527793,
+                0.10580061925310323,
+                0.2044738325735691,
+                0.12881219396047622,
+                0.12547065404859745,
+            ],
+        ),
+        (
+            "mlogit cat3 x w [fw=f]",
+            &ml,
+            vec![
+                -0.62082980072421867,
+                -0.29068207097250226,
+                -0.77926087050975734,
+                -1.2642026471867309,
+                -0.61915031870820625,
+                -0.59103600851653082,
+                0.23234653659029145,
+                0.36899577477175521,
+                0.21911787876592156,
+                0.24097161339489673,
+                0.34976590283517545,
+                0.21864158882499107,
+            ],
+        ),
+        (
+            "mlogit cat3 x w [pw=a]",
+            &ml,
+            vec![
+                -0.81892760256469432,
+                0.052020189448928313,
+                -0.70330718258493596,
+                -1.103864322571533,
+                -0.58685052525389425,
+                -0.35176168204886693,
+                0.51546335756321915,
+                0.56530478419176622,
+                0.38550426671935106,
+                0.3791331121749168,
+                0.58750343163059149,
+                0.31416536461085087,
+            ],
+        ),
+    ];
+    for (cmd, names, stata) in cases {
+        near_stata(&bse(&mut e, cmd, names), &stata, 1e-6, cmd);
+    }
+    // the log likelihood and N with frequency weights
+    let code = script(&format!("{start}nbreg nb x [fw=f]\n"));
+    ok(&mut e, &code);
+    let v = numbers(&mut e, "0", "as.numeric(stats::logLik(stata_estimates)), sum(stats::model.weights(stats::model.frame(stata_estimates)))");
+    near_stata(
+        &v,
+        &[-283.23375073926366, 161.0],
+        1e-8,
+        "nbreg [fw=f]: ll and N",
+    );
+    // margins after a weighted model: weighted means
+    let m = |e: &mut Engine, cmd: &str| -> Vec<f64> {
+        let code = script(&format!("{start}{cmd}\n"));
+        ok(e, &code);
+        numbers(
+            e,
+            &format!("res <- {}", line_of(&code, "stata_margins(")),
+            "res$b, sqrt(diag(res$V))",
+        )
+    };
+    near_stata(
+        &m(&mut e, "logit yb x w [pw=a]\nmargins"),
+        &[0.48672839477585939, 0.05470685354595644],
+        1e-8,
+        "margins after logit [pw=a]",
+    );
+    near_stata(
+        &m(&mut e, "logit yb x w [pw=a]\nmargins, dydx(x)"),
+        &[0.18794105948402579, 0.042922811808571333],
+        1e-8,
+        "dydx after logit [pw=a]",
+    );
+    near_stata(
+        &m(&mut e, "logit yb x w [fw=f]\nmargins"),
+        &[0.52795031055885067, 0.032187920181026793],
+        1e-8,
+        "margins after logit [fw=f]",
+    );
+    near_stata(
+        &m(&mut e, "regress y x w [aw=a]\nmargins"),
+        &[0.93037541653572009, 0.21842792456267526],
+        1e-9,
+        "margins after regress [aw=a]",
+    );
+    // estat ic with frequency weights: N is their sum
+    let ic = |e: &mut Engine, cmd: &str| -> Vec<f64> {
+        let code = script(&format!("{start}{cmd}\nestat ic\n"));
+        ok(e, &code);
+        numbers(
+            e,
+            &format!("res <- {}", line_of(&code, "stata_estat_ic(")),
+            "res$N, res[[\"ll(model)\"]], res$AIC, res$BIC",
+        )
+    };
+    near_stata(
+        &ic(&mut e, "logit yb x w [fw=f]"),
+        &[
+            161.0,
+            -81.070644539023107,
+            168.14128907804621,
+            177.38550217299959,
+        ],
+        1e-9,
+        "estat ic after logit [fw=f]",
+    );
+    near_stata(
+        &ic(&mut e, "regress y x w [fw=f]"),
+        &[
+            161.0,
+            -347.11677046274423,
+            700.23354092548846,
+            709.47775402044181,
+        ],
+        1e-10,
+        "estat ic after regress [fw=f]",
+    );
+    // predict after ologit, mlogit (one equation) and nbreg (two scores), rows 1 and 2
+    let code = script(&format!(
+        "{start}ologit ord x w\npredict ox, xb\npredict os, stdp\nmlogit cat3 x w\npredict mx, xb outcome(3)\npredict ms, stdp outcome(3)\nnbreg nb x\npredict ns1 ns2, scores\n"
+    ));
+    ok(&mut e, &code);
+    let v = numbers(&mut e, "0", "models$ox[1:2], models$os[1:2], models$mx[1:2], models$ms[1:2], models$ns1[1:2], models$ns2[1:2]");
+    near_stata(
+        &v,
+        &[
+            -0.69534045457839966,
+            -0.0074417898431420326,
+            0.26706698536872864,
+            0.063568271696567535,
+            1.2062942981719971,
+            -0.37721768021583557,
+            0.48310372233390808,
+            0.3108803927898407,
+            -0.14844171702861786,
+            -1.0256229639053345,
+            -0.17815661430358887,
+            0.38868618011474609,
+        ],
+        1e-6,
+        "predict after ologit, mlogit and nbreg (floats)",
+    );
+    // Stata's own messages
+    for (cmd, why) in [
+        (
+            "sort g\nregress y x w\nby g: predict p1",
+            "predict may not be combined with by",
+        ),
+        (
+            "sort g\nregress y x w\nby g: test x",
+            "test may not be combined with by",
+        ),
+        (
+            "sort g\nregress y x w\nby g: margins",
+            "margins may not be combined with by",
+        ),
+        (
+            "regress y x w, robust\npredict r1, rstandard",
+            "option rstandard not allowed after robust estimation",
+        ),
+        (
+            "regress y x w, robust\npredict c1, cooksd",
+            "option cooksd not allowed after robust estimation",
+        ),
+        ("ologit ord x w [aw=a]", "aweights not allowed"),
+    ] {
+        let got = refusal(&format!("use s\n{cmd}\n"));
+        assert!(got.contains(why), "{cmd}: {got}");
+    }
 }

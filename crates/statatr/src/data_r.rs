@@ -202,6 +202,10 @@ const WEIGHTED: &[&str] = &[
     "logit",
     "probit",
     "poisson",
+    "nbreg",
+    "ologit",
+    "oprobit",
+    "mlogit",
 ];
 
 /// The commands that fit a model.
@@ -292,6 +296,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_nbreg_lr" => ml::NBREG_LR_HELPER,
         "stata_outcome_probs" => post::OUTCOME_PROBS_HELPER,
         "stata_predict_stat" => post::PREDICT_STAT_HELPER,
+        "stata_predict_more" => post::PREDICT_MORE_HELPER,
         "stata_names" => post::NAMES_HELPER,
         "stata_test" => post::TEST_HELPER,
         "stata_lincom" => post::LINCOM_HELPER,
@@ -307,6 +312,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ivregress" => iv::IV_HELPER,
         "stata_stset" => st::STSET_HELPER,
         "stata_stcox" => st::STCOX_HELPER,
+        "stata_phtest" => st::PHTEST_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -329,6 +335,8 @@ struct Session {
     changed_since_fit: bool,
     /// The model last fitted had weights (margins and estat do not take them yet).
     weighted_fit: bool,
+    /// And they were frequency weights.
+    fit_fweight: bool,
     /// The last regress was plain: no robust, clustered or weighted errors.
     plain_regress: bool,
     /// `stata_esample` holds the last model's e(sample) and the rows have not
@@ -845,6 +853,7 @@ impl Session {
         done?;
         if MODELS.contains(&c.name.as_str()) {
             self.weighted_fit = c.parts.weight.is_some();
+            self.fit_fweight = matches!(&c.parts.weight, Some(w) if w.kind == crate::lang::syntax::WeightKind::Frequency);
         }
         if c.prefixes.contains(&Prefix::Capture) {
             // capture: an error is ignored and the do-file goes on

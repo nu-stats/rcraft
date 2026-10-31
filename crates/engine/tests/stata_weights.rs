@@ -672,12 +672,12 @@ fn weights_stata_refuses_are_refused_in_its_words() {
         ("summarize z [weight=a]", "name it as fweight"),
         ("summarize z [fw=f*2]", "an expression"),
         (
-            "regress z x [fw=f]\nmargins",
-            "margins after a model with weights",
+            "regress z x [fw=f]\nmargins, atmeans",
+            "atmeans or at() statistics after a weighted model",
         ),
         (
             "logit b x [pw=a]\nestat ic",
-            "estat after a model with weights",
+            "after a model with these weights",
         ),
     ] {
         let why_got = refusal(&format!("use s\n{cmd}\n"));

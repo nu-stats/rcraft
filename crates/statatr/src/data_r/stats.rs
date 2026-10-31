@@ -529,6 +529,10 @@ impl Session {
 
     pub(super) fn no_by(&self, c: &Command, name: &str) -> Result<(), Untranslated> {
         if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            // Stata's own words for the commands that read a model
+            if matches!(name, "predict" | "test" | "lincom" | "margins" | "estat") {
+                return Err(no(format!("{name} may not be combined with by")));
+            }
             return Err(no(format!("by with {name} is not translated yet")));
         }
         Ok(())
