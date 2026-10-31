@@ -764,3 +764,106 @@ fn the_rest_of_ivregress_agrees_with_stata_19() {
         "dydx after ivregress",
     );
 }
+
+/// P2B.6: `e()` after ivregress, as Stata 19's `ereturn list` shows it.
+#[test]
+fn e_after_ivregress_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let d = ivdata(&mut e);
+    let e_of = |e: &mut Engine, cmd: &str, names: &[&str]| -> Vec<f64> {
+        let code = script(&format!("use \"{d}/iv.dta\"\n{cmd}\n"));
+        ok(e, &code);
+        let show: Vec<String> = names
+            .iter()
+            .map(|n| format!("stata_e[[\"{n}\"]]"))
+            .collect();
+        numbers(e, "0", &show.join(", "))
+    };
+    let common = [
+        "N", "kappa", "mss", "rss", "rmse", "rank", "df_m", "r2", "r2_a", "k_endog",
+    ];
+    let mut names = common.to_vec();
+    names.push("chi2");
+    near_stata(
+        &e_of(&mut e, "ivregress 2sls y w (x = z1 z2 z3)", &names),
+        &[
+            120.0,
+            1.0,
+            322.8820842315572,
+            165.8298237601094,
+            1.175548892220528,
+            3.0,
+            2.0,
+            0.6606797971394281,
+            0.6548794517913843,
+            1.0,
+            41.25364206154529,
+        ],
+        1e-9,
+        "ivregress 2sls",
+    );
+    near_stata(
+        &e_of(
+            &mut e,
+            "ivregress 2sls y w (x = z1 z2 z3), small",
+            &["rmse", "df_r", "F"],
+        ),
+        &[1.190524641083323, 117.0, 20.11115050500333],
+        1e-9,
+        "ivregress 2sls, small",
+    );
+    near_stata(
+        &e_of(
+            &mut e,
+            "ivregress 2sls y w (x = z1 z2 z3), vce(robust)",
+            &["chi2", "r2"],
+        ),
+        &[39.48391822773566, 0.6606797971394281],
+        1e-9,
+        "ivregress 2sls, vce(robust)",
+    );
+    near_stata(
+        &e_of(&mut e, "ivregress liml y w (x = z1 z2 z3)", &names),
+        &[
+            120.0,
+            1.004034345811458,
+            322.0023186365372,
+            166.7095893551295,
+            1.178663046828657,
+            3.0,
+            2.0,
+            0.6588796249303339,
+            0.6530485074077755,
+            1.0,
+            40.26511648149859,
+        ],
+        1e-8,
+        "ivregress liml",
+    );
+    near_stata(
+        &e_of(
+            &mut e,
+            "ivregress gmm y w (x = z1 z2 z3)",
+            &["J", "rss", "rmse", "mss", "r2", "r2_a", "chi2"],
+        ),
+        &[
+            0.4779764779813473,
+            164.9693082931225,
+            1.172494876652355,
+            323.7425996985442,
+            0.6624405798273786,
+            0.6566703333287014,
+            40.91756152720919,
+        ],
+        1e-8,
+        "ivregress gmm",
+    );
+    let v = numbers(
+        &mut e,
+        "0",
+        "as.numeric(stata_e$exog == \"w z1 z2 z3\"), as.numeric(stata_e$exogr == \"w\"), \
+         as.numeric(stata_e$endog == \"x\"), as.numeric(stata_e$vce == \"robust\"), \
+         as.numeric(stata_e$title == \"Instrumental-variables GMM regression\")",
+    );
+    assert_eq!(v, vec![1.0; 5], "ivregress's macros");
+}

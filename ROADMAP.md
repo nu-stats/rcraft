@@ -281,6 +281,7 @@ Tasks:
 - P2B.6 Estimates and returned values: `e()`, `r()` and `_b[]`/`_se[]`
   after a translated command, with `estimates store` and `esttab`/`outreg2`
   style tables going to Phase 7.
+  (done 2026-10-31: e() after every translated model with Stata's names and values (regress, the likelihood models, anova, xtreg fe/re/be, ivregress, stcox, margins post), r() after summarize, count, tabulate, correlate, ttest, test, lincom and margins, `_b[]`, `_se[]`, `_coef[]` and `[eq]_b[]` in any expression, `display` with Stata's %g/%f/%e/%s formats decoded at every width, `ereturn list` and `return list` line for line; a value Stata keeps that RCraft does not is refused with the reason, not left missing. Not yet: `matrix list`, `scalar`, e(b) with base levels, the r() of pwcorr, describe, one-sample ttest.)
 - P2B.12 Tab completion in Stata mode (the user asked 2026-10-29: it must work there too):
   Stata command names and their abbreviations, `if`/`in`/`by` and option words per command,
   variable names of the open dataset (with Stata's abbreviation rules, wildcards and

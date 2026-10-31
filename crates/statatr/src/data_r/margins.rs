@@ -331,6 +331,10 @@ impl Session {
                 "margins, atmeans or at() statistics after a weighted model are not translated yet",
             ));
         }
+        let est_cmd = match &self.e_ret {
+            super::returned::Returned::Kept { cmd, .. } if cmd != "margins" => Some(cmd.clone()),
+            _ => None,
+        };
         let est = self.estimates.clone().ok_or_else(|| {
             no("margins needs a model fitted earlier in this do-file (regress, logit, ...)")
         })?;
@@ -636,8 +640,32 @@ impl Session {
                 factors: est.factors.clone(),
             });
             out.caveat("post: the margins are now e(b) and e(V), named as Stata names them (1.g, x, 1._at)");
+            match &est_cmd {
+                Some(ec) if !self.weighted_fit => {
+                    let args = format!(
+                        "{}, extra = list(N = sum(stata_esample), est_cmd = {})",
+                        super::returned::e_args(&est.dep, "delta", None, &None),
+                        r_text(ec)
+                    );
+                    self.keep_e(c, out, &args, "");
+                }
+                _ => {
+                    self.e_ret = super::returned::Returned::Lost(
+                        "e() after margins, post here is not kept in R yet".into(),
+                    );
+                }
+            }
         } else {
             out.line(call);
+            // r(): the count, the level and what was fitted
+            if let (Some(ec), false) = (&est_cmd, self.weighted_fit) {
+                out.line(format!(
+                    "stata_r <- list(N = sum(stata_esample), level = {}, cmd = \"margins\", est_cmd = {}, est_cmdline = stata_e$cmdline)",
+                    r_number(super::returned::percent(level)),
+                    r_text(ec)
+                ));
+                self.r_new = Some((super::returned::R_MARGINS, "margins".into()));
+            }
         }
         out.caveat("averaged over the estimation sample, Stata's e(sample)");
         out.caveat("delta-method standard errors from the model's own variance, as Stata's");

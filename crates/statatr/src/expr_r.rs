@@ -76,9 +76,38 @@ pub fn translate(
     kind_of: &dyn Fn(&str) -> Option<Kind>,
     use_: Use,
 ) -> Result<RExpr, Untranslated> {
+    translate_with(
+        text,
+        kind_of,
+        &|which: &str, name: &str| {
+            let shown = if which.starts_with('_') {
+                format!("{which}[{name}]")
+            } else {
+                format!("{which}({name})")
+            };
+            Err(no(format!(
+                "{shown} reads the last estimation or r-class results, which only the commands of a do-file carry"
+            )))
+        },
+        use_,
+    )
+}
+
+/// A lookup for the values a command left: `("e", "N")`, `("r", "mean")`,
+/// `("_b", "x")`, `("_se", "2:x")`; it gives the R and its kind, or why not.
+pub type Returned<'a> = dyn Fn(&str, &str) -> Result<(String, Kind), Untranslated> + 'a;
+
+/// [`translate`] with `e()`, `r()`, `_b[]` and `_se[]` read through `returned`.
+pub fn translate_with(
+    text: &str,
+    kind_of: &dyn Fn(&str) -> Option<Kind>,
+    returned: &Returned,
+    use_: Use,
+) -> Result<RExpr, Untranslated> {
     let tree = parse(text).map_err(|e| no(format!("Stata would not read it: {}", e.message)))?;
     let mut t = Translator {
         kind_of,
+        returned,
         caveats: Vec::new(),
     };
     let (code, kind) = t.expr(&tree)?;
@@ -98,6 +127,7 @@ pub fn translate(
 
 struct Translator<'a> {
     kind_of: &'a dyn Fn(&str) -> Option<Kind>,
+    returned: &'a Returned<'a>,
     caveats: Vec<String>,
 }
 
@@ -240,11 +270,12 @@ impl Translator<'_> {
     }
 
     fn subscript(&mut self, name: &str, index: &Expr) -> Result<(String, Kind), Untranslated> {
-        if name == "_b" || name == "_se" {
-            return Err(no(format!(
-                "{name}[] (a coefficient of the last estimation) is translated with the \
-                 estimation commands, not yet"
-            )));
+        // a coefficient of the last model, or its standard error
+        if matches!(name, "_b" | "_se" | "_coef") {
+            return match index {
+                Expr::Text(key) => (self.returned)(name, key),
+                _ => Err(no(format!("{name}[] needs a coefficient name"))),
+            };
         }
         let var = r_name(name);
         let kind = (self.kind_of)(name).unwrap_or(Kind::Unknown);
@@ -686,7 +717,12 @@ impl Translator<'_> {
             // (the translator lets it through only while those rows are unmoved)
             "e" => match args {
                 [Expr::Name(n)] if n == "sample" => Ok(("stata_esample".into(), Kind::Logical)),
-                _ => Err(no("e() other than e(sample) is translated in P2B.6")),
+                [Expr::Name(n)] => (self.returned)("e", n),
+                _ => Err(no("e() takes one name, as e(N)")),
+            },
+            "r" => match args {
+                [Expr::Name(n)] => (self.returned)("r", n),
+                _ => Err(no("r() takes one name, as r(mean)")),
             },
             _ => Err(no(format!("the function {name}() is not translated yet"))),
         }

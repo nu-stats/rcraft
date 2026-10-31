@@ -197,7 +197,7 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   if (!is.na(G)) cat(sprintf("(Std. err. adjusted for %d clusters)\n", G))
   cat("\n")
   stata_coefs(b, V, df, level)
-  out <- list(coefficients = b, b = b, vcov = V, df = df, type = type, N = N, n = n, r2 = r2,
+  out <- list(coefficients = b, b = b, vcov = V, df = df, type = type, N = N, n = n, r2 = r2, Ti = Ti, G = G,
               sigma_e = sqrt(s2e), terms = tt, xlevels = stats::.getXlevels(tt, mf))
   if (type != "be") {
     out$sigma_u <- sigma_u
@@ -207,6 +207,7 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   }
   if (type == "fe") {
     out$F_u <- F_u
+    out$df_f <- c(n - 1, N - n - (kf - 1))
     out$corr <- corr_u
     if (!robust) cat(sprintf("F test that all u_i=0: F(%d, %d) = %.2f    Prob > F = %.4f\n",
                              n - 1, N - n - (kf - 1), F_u, stats::pf(F_u, n - 1, N - n - (kf - 1), lower.tail = FALSE)))
@@ -417,6 +418,21 @@ impl Session {
             dep: spec.dep.clone(),
             factors: spec.factors.clone(),
         });
+        if matches!(kind, "fe" | "re" | "be") {
+            // Stata's robust here clusters on the panel
+            let (vce, cl) = match (&cluster, robust) {
+                (Some(v), _) => ("cluster", Some(v.as_str())),
+                (None, true) => ("cluster", Some(panel.as_str())),
+                _ => ("oim", None),
+            };
+            let args = super::returned::e_args(&spec.dep, vce, cl, &None);
+            self.keep_e(c, out, &args, kind);
+        } else {
+            self.e_ret = super::returned::Returned::Lost(format!(
+                "e() after xtreg, {kind} is not kept in R yet"
+            ));
+            self.e_new = true;
+        }
         match kind {
             "fe" => {
                 out.caveat("within regression, as Stata's fe: the constant is the grand mean's")

@@ -714,3 +714,111 @@ fn xtreg_postestimation_mle_and_pa_agree_with_stata_19() {
         "xtset alone"
     );
 }
+
+/// P2B.6: `e()` after xtreg, as Stata 19's `ereturn list` shows it.
+#[test]
+fn e_after_xtreg_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let d = panel(&mut e);
+    let e_of = |e: &mut Engine, cmd: &str, names: &[&str]| -> Vec<f64> {
+        let code = script(&format!("use \"{d}/panel.dta\"\nxtset id year\n{cmd}\n"));
+        ok(e, &code);
+        let show: Vec<String> = names
+            .iter()
+            .map(|n| format!("stata_e[[\"{n}\"]]"))
+            .collect();
+        numbers(e, "0", &show.join(", "))
+    };
+    near_stata(
+        &e_of(
+            &mut e,
+            "xtreg y x w z, fe",
+            &[
+                "F_f", "p_f", "g_min", "g_avg", "g_max", "N_g", "sigma_u", "corr", "r2_o", "r2_b",
+                "sigma_e", "rho", "p", "r2_w", "ll_0", "ll", "F", "df_r", "N",
+            ],
+        ),
+        &[
+            4.468645546810879,
+            2.79376104785e-09,
+            3.0,
+            5.1,
+            8.0,
+            30.0,
+            1.045732970586872,
+            0.25509094485957,
+            0.2386407607069246,
+            0.4504080571032016,
+            1.007340022885405,
+            0.5186936979588173,
+            8.50450788127e-06,
+            0.1754964145569913,
+            -215.0284881918275,
+            -200.2659933819141,
+            12.87748563882004,
+            121.0,
+            153.0,
+        ],
+        1e-9,
+        "xtreg, fe",
+    );
+    near_stata(
+        &e_of(
+            &mut e,
+            "xtreg y x w z, fe vce(robust)",
+            &["N_clust", "df_r", "F", "p", "rho", "ll"],
+        ),
+        &[
+            30.0,
+            29.0,
+            13.96215212352803,
+            0.0000566179143766,
+            0.5186936979588173,
+            -200.2659933819141,
+        ],
+        1e-9,
+        "xtreg, fe vce(robust): clustered on the panel",
+    );
+    near_stata(
+        &e_of(
+            &mut e,
+            "xtreg y x w z, re",
+            &[
+                "chi2", "p", "sigma_u", "sigma_e", "rho", "N", "N_g", "r2_w", "r2_b", "r2_o",
+            ],
+        ),
+        &[
+            44.72944876566068,
+            1.05624181240e-09,
+            0.5871405697205125,
+            1.007340022885405,
+            0.253580118206804,
+            153.0,
+            30.0,
+            0.1724708434969766,
+            0.4254527170259473,
+            0.3016853319264362,
+        ],
+        1e-9,
+        "xtreg, re",
+    );
+    near_stata(
+        &e_of(
+            &mut e,
+            "xtreg y x w z, be",
+            &["F", "df_r", "N_g", "N", "r2_b", "r2_o", "r2_w", "p"],
+        ),
+        &[
+            15.85375493056851,
+            26.0,
+            30.0,
+            153.0,
+            0.6465531136037284,
+            0.2360260762683079,
+            0.1126191846052807,
+            4.60692783644e-06,
+        ],
+        1e-9,
+        "xtreg, be",
+    );
+}

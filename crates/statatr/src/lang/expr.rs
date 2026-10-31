@@ -279,7 +279,7 @@ fn next_token(chars: &[char], i: usize) -> Option<(Token, usize)> {
         }
         // `_b[x]` and `_b[eq:x]`: the inside is a name, not an expression
         let word: String = chars.get(i..j)?.iter().collect();
-        if (word == "_b" || word == "_se") && at(j) == Some('[') {
+        if matches!(word.as_str(), "_b" | "_se" | "_coef") && at(j) == Some('[') {
             if let Some(close) = (j + 1..chars.len()).find(|&k| chars.get(k) == Some(&']')) {
                 let inside: String = chars.get(j + 1..close)?.iter().collect();
                 let inside = inside.trim();

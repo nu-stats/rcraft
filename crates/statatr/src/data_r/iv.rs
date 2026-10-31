@@ -478,6 +478,23 @@ impl Session {
             dep: dep.to_string(),
             factors: spec.factors.clone(),
         });
+        // e(): gmm only with its default weight and variance, as checked against Stata
+        if gmm && (vce_type.is_some() || wmatrix != "robust" || opts.has("igmm", 4)) {
+            self.e_ret = super::returned::Returned::Lost(
+                "e() after ivregress gmm with vce(), wmatrix() or igmm is not kept in R yet".into(),
+            );
+            self.e_new = true;
+        } else {
+            let vce = if cluster.is_some() {
+                "cluster"
+            } else if robust || gmm {
+                "robust"
+            } else {
+                "oim"
+            };
+            let args = super::returned::e_args(dep, vce, cluster.as_deref(), &None);
+            self.keep_e(c, out, &args, estimator);
+        }
         if !opts.has("small", 5) {
             out.caveat("without small, as in Stata: the variance divides by N, with z tests");
         }

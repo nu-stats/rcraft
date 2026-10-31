@@ -496,3 +496,51 @@ fn fresh() -> usize {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
+
+/// P2B.6: `e()` after stcox, as Stata 19's `ereturn list` shows it.
+#[test]
+fn e_after_stcox_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let d = survdata(&mut e);
+    let start = format!("use \"{d}/surv.dta\"\nstset time, failure(died)\n");
+    let names = [
+        "N", "ll_0", "ll", "chi2", "r2_p", "rank", "df_m", "N_sub", "N_fail", "risk",
+    ];
+    let show: Vec<String> = names
+        .iter()
+        .map(|n| format!("stata_e[[\"{n}\"]]"))
+        .collect();
+    ok(&mut e, &script(&format!("{start}stcox x w\n")));
+    near_stata(
+        &numbers(&mut e, "0", &show.join(", ")),
+        &[
+            60.0,
+            -141.5192023133305,
+            -138.8834522251813,
+            5.271500176298332,
+            0.018624681633758,
+            2.0,
+            2.0,
+            60.0,
+            42.0,
+            485.0,
+        ],
+        1e-9,
+        "stcox x w",
+    );
+    let v = numbers(
+        &mut e,
+        "0",
+        "as.numeric(stata_e$cmd == \"cox\"), as.numeric(stata_e$cmd2 == \"stcox\"), \
+         as.numeric(stata_e$ties == \"breslow\"), as.numeric(stata_e$depvar == \"_t\"), \
+         as.numeric(is.null(stata_e[[\"p\"]]))",
+    );
+    assert_eq!(v, vec![1.0; 5], "stcox's macros, and no e(p), as in Stata");
+    ok(&mut e, &script(&format!("{start}stcox x w, vce(robust)\n")));
+    near_stata(
+        &numbers(&mut e, "0", "stata_e$chi2, stata_e$ll"),
+        &[5.531251498470934, -138.8834522251813],
+        1e-9,
+        "stcox x w, vce(robust): a Wald chi2",
+    );
+}

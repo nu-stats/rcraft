@@ -42,7 +42,8 @@ pub(super) const OUTCOME_PROBS_HELPER: &str = r#"stata_outcome_probs <- function
 
 /// Stata's `test`: the Wald test that each row's combination of
 /// coefficients equals its value, as an F or a chi-squared.
-pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels) {
+pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, ret = FALSE) {
+  env <- parent.frame()
   res <- stata_resolve(rows, r, labels)
   rows <- res$rows
   r <- res$r
@@ -58,21 +59,26 @@ pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels) 
   d <- R %*% b - r
   W <- drop(t(d) %*% solve(R %*% stata_vcov %*% t(R), d))
   q <- nrow(R)
+  # ret: leave Stata's r() as stata_r where it was called from
   if (is.finite(stata_df)) {
     F <- W / q
     p <- stats::pf(F, q, stata_df, lower.tail = FALSE)
     cat(sprintf("\n       F(%d, %g) = %10.2f\n            Prob > F = %10.4f\n", q, stata_df, F, p))
+    if (ret) assign("stata_r", list(drop = 0, df_r = stata_df, F = F, df = q, p = p), envir = env)
     invisible(c(F = F, df = q, df_r = stata_df, p = p))
   } else {
     p <- stats::pchisq(W, q, lower.tail = FALSE)
     cat(sprintf("\n           chi2(%d) = %10.2f\n         Prob > chi2 = %10.4f\n", q, W, p))
+    if (ret) assign("stata_r", list(drop = 0, chi2 = W, df = q, p = p), envir = env)
     invisible(c(chi2 = W, df = q, p = p))
   }
 }"#;
 
 /// Stata's `lincom`: one combination of the coefficients, its standard
 /// error, test and interval.
-pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, level = 0.95, eform = FALSE, what = "Coef.") {
+pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, level = 0.95, eform = FALSE, what = "Coef.",
+                         ret = FALSE) {
+  env <- parent.frame()
   a <- stata_resolve(list(a), 0, "")$rows[[1]]
   b <- stata_b
   miss <- setdiff(names(a), names(b))
@@ -81,6 +87,22 @@ pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, lev
   L[names(a)] <- a
   est <- sum(L * b)
   v <- drop(t(L) %*% stata_vcov %*% L)
+  if (ret) {
+    # Stata's r(): t and df with a residual df, z without; with eform the
+    # estimate, its bounds and (by the delta method) its se are exp()'s
+    se <- sqrt(v)
+    t <- est / se
+    q <- (1 + level) / 2
+    small <- is.finite(stata_df)
+    crit <- if (small) stats::qt(q, stata_df) else stats::qnorm(q)
+    p <- 2 * (if (small) stats::pt(-abs(t), stata_df) else stats::pnorm(-abs(t)))
+    f <- if (isTRUE(eform)) exp else identity
+    rr <- if (small) list(df = stata_df) else list()
+    rr <- c(rr, list(ub = f(est + crit * se), lb = f(est - crit * se), p = p))
+    rr[[if (small) "t" else "z"]] <- t
+    rr <- c(rr, list(level = round(100 * level, 9), se = if (isTRUE(eform)) exp(est) * se else se, estimate = f(est)))
+    assign("stata_r", rr, envir = env)
+  }
   cat(sprintf(" ( 1)  %s = 0\n\n", label))
   stata_coefs(stats::setNames(est, "(1)"), matrix(v, 1, 1), stata_df, level, eform, what)
 }"#;
@@ -487,12 +509,14 @@ impl Session {
         let labels: Vec<String> = rows.iter().map(|r| r_text(&r.label)).collect();
         self.helpers.insert("stata_test");
         self.helpers.insert("stata_names");
-        out.line(format!(
-            "stata_test(list({}), c({}), c({}))",
+        self.r_new = Some((super::returned::R_TEST, "test".into()));
+        let call = format!(
+            "stata_test(list({}), c({}), c({}), ret = TRUE)",
             list.join(", "),
             values.join(", "),
             labels.join(", ")
-        ));
+        );
+        out.line(super::returned::quietly(c, call));
         Ok(())
     }
 
@@ -550,14 +574,16 @@ impl Session {
             value: 0.0,
             label: String::new(),
         };
-        out.line(format!(
-            "stata_lincom({}, label = {}, level = {}, eform = {}, what = {})",
+        self.r_new = Some((super::returned::R_LINCOM, "lincom".into()));
+        let call = format!(
+            "stata_lincom({}, label = {}, level = {}, eform = {}, what = {}, ret = TRUE)",
             row.r_vector(),
             r_text(&tidy(text)),
             r_number(level),
             r_logical(eform),
             r_text(what)
-        ));
+        );
+        out.line(super::returned::quietly(c, call));
         Ok(())
     }
 

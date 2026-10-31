@@ -135,14 +135,13 @@ pub(super) const MULTINOM_B_HELPER: &str = r#"stata_multinom_b <- function(fit) 
 /// The lines above Stata's table: observations, the test of the model
 /// (likelihood ratio, or Wald when robust), pseudo R-squared and the log
 /// likelihood.
-pub(super) const ML_HEADER_HELPER: &str = r#"stata_ml_header <- function(fit, robust = FALSE, nobs = NULL) {
+pub(super) const ML_HEADER_HELPER: &str = r#"stata_ml_ll <- function(fit) {
   ll <- as.numeric(stats::logLik(fit))
   if (inherits(fit, "glm") && fit$family$family == "binomial") {
     # by hand: R's binomial logLik rounds weights that are not whole numbers
     mu <- fit$fitted.values
     ll <- sum(fit$prior.weights * (fit$y * log(mu) + (1 - fit$y) * log(1 - mu)))
   }
-  n <- if (is.null(nobs)) NROW(stats::fitted(fit)) else nobs
   if (inherits(fit, "negbin")) {
     ll0 <- NA_real_
   } else if (inherits(fit, "glm")) {
@@ -153,6 +152,13 @@ pub(super) const ML_HEADER_HELPER: &str = r#"stata_ml_header <- function(fit, ro
     nj <- nj[nj > 0]
     ll0 <- sum(nj * log(nj / sum(nj)))
   }
+  c(ll = ll, ll_0 = ll0)
+}
+stata_ml_header <- function(fit, robust = FALSE, nobs = NULL) {
+  l <- stata_ml_ll(fit)
+  ll <- l[["ll"]]
+  ll0 <- l[["ll_0"]]
+  n <- if (is.null(nobs)) NROW(stats::fitted(fit)) else nobs
   keep <- !grepl("(Intercept)", names(stata_b), fixed = TRUE) & !grepl("^/", names(stata_b))
   q <- sum(keep)
   cat(sprintf("Number of obs   = %10d\n", n))
@@ -460,6 +466,23 @@ impl Session {
             dep: spec.dep.clone(),
             factors: spec.factors.clone(),
         });
+        // e(), as Stata leaves it (iweights are not checked against Stata yet)
+        if matches!(w, Some((W::I, _))) {
+            self.e_ret = super::returned::Returned::Lost(format!(
+                "e() after {name} with iweights is not kept in R yet"
+            ));
+            self.e_new = true;
+        } else {
+            let vce = if cluster.is_some() {
+                "cluster"
+            } else if robust {
+                "robust"
+            } else {
+                "oim"
+            };
+            let args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &w);
+            self.keep_e(c, out, &args, "");
+        }
         if Self::quiet(c) {
             return Ok(());
         }

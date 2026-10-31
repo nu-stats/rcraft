@@ -568,3 +568,46 @@ fn error_terms_nesting_and_repeated_measures_agree_with_stata_19() {
         );
     }
 }
+
+/// P2B.6: `e()` after anova, as Stata 19's `ereturn list` shows it.
+#[test]
+fn e_after_anova_is_statas() {
+    let Some(mut e) = engine() else { return };
+    let dir = cells(&mut e);
+    ok(
+        &mut e,
+        &script(&format!("use \"{dir}/cells.dta\"\nanova y g h g#h\n")),
+    );
+    let names = [
+        "N", "sum_w", "df_m", "df_r", "F", "r2", "rmse", "mss", "rss", "r2_a", "ll", "ll_0", "rank",
+    ];
+    let show: Vec<String> = names
+        .iter()
+        .map(|n| format!("stata_e[[\"{n}\"]]"))
+        .collect();
+    let want = [
+        32.0,
+        32.0,
+        5.0,
+        26.0,
+        2.707922707936355,
+        0.3424316104175749,
+        1.309450072332716,
+        23.2158268729085,
+        44.58114679023607,
+        0.2159761508824931,
+        -50.71123544892174,
+        -57.41853954116699,
+        6.0,
+    ];
+    let got = numbers(&mut e, "0", &show.join(", "));
+    assert_eq!(got.len(), want.len(), "{got:?}");
+    for (g, s) in got.iter().zip(want) {
+        assert!(
+            (g - s).abs() <= 1e-9 * s.abs().max(1.0),
+            "anova e(): {g} against Stata's {s}"
+        );
+    }
+    let v = numbers(&mut e, "0", "as.numeric(stata_e$cmd == \"anova\")");
+    assert_eq!(v, vec![1.0], "anova's e(cmd)");
+}

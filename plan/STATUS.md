@@ -2249,3 +2249,63 @@ the pinned 2025-03-15 snapshot, as the user approved) and in CI's package list.
 - **Not done:** `graph box`, `graph pie`, `graph matrix`, `graph combine`; twoway `area`, `bar`, `rcap`, `lfitci`,
   `function`, `scatteri`; `by()` with fitted layers or histograms; `xlabel()`/`ylabel()` as axis breaks; weights in
   graphs; graphs that look like Stata's own (its schemes).
+
+## P2B.6 Stata's returned values: e(), r(), _b[], _se[] and display, 2026-10-31
+
+`statatr/src/data_r/returned.rs`. Every translated model now leaves `stata_e` in R and the r-class commands leave
+`stata_r`: named lists holding Stata's names, numbers as numbers, macros as text, `b` and `V` as matrices. What each
+holds was read off Stata 19's `ereturn list` and `return list` on the test data (probes kept outside the repository).
+
+- **e().** `stata_ereturn()` builds it from what the model's translation already left (`stata_estimates`, `stata_b`,
+  `stata_vcov`, `stata_df`, the cluster), in the order of Stata's list:
+  - `regress`: N, sum_w, df_m, df_r, F (the Wald F, so robust and clustered ones too), r2, rmse, mss, rss, r2_a, ll,
+    ll_0, rank, N_clust; fweights count the copies; aweights and pweights are scaled to sum to N, and aweights add
+    half the sum of the log of the scaled weights to ll and ll_0 (decoded: Stata's -176.7788818 for `[aw=a]`); the
+    title only when no robust or clustered errors were asked for, as Stata leaves it out then.
+  - `logit`, `probit`, `poisson`, `nbreg`, `ologit`, `oprobit`, `mlogit`: rank, N, k, k_eq, k_dv, converged, rc,
+    ll, k_eq_model, ll_0, df_m, chi2 (LR, or Wald when robust), p, r2_p, and each one's own (nbreg's rank0, ll_c,
+    alpha and ll_0 of nbreg's constant-only model, refitted; ologit's k_cat, k_aux; mlogit's ibaseout, baseout,
+    k_eq_base, k_out, eqnames).
+  - `anova` (without error terms or nesting), `xtreg` fe/re/be (N_g, g_min/avg/max, sigma_u, sigma_e, rho, r2_w,
+    r2_b, r2_o, corr, F_f, p_f, ll; robust clusters on the panel, as Stata's), `ivregress` 2sls/liml/gmm (kappa,
+    mss, rss, rmse, r2, r2_a, chi2 or F with small, df_r, k_endog, J), `stcox` (N_sub, N_fail, risk, ll, ll_0,
+    chi2, r2_p; no e(p), as in Stata) and `margins, post`.
+  - The macros: cmd, cmdline, depvar, title, vce, vcetype, clustvar, wtype, wexp, properties, predict, estat_cmd,
+    chi2type and the rest Stata lists, as text.
+- **r().** `summarize` (plain, `detail`, `meanonly`, in Stata's order, of the last variable, `quietly` too), `count`,
+  `tabulate` (N, r, c, chi2, p), `correlate` (N, rho, C), `ttest var, by()` (all 28 values, equal or unequal),
+  `test` (F or chi2, df, df_r, p, drop), `lincom` (t and df, or z without df after a likelihood model; with `or`
+  the odds ratio, its bounds and its delta-method se, as Stata's) and `margins` (N, level). The helpers leave
+  `stata_r` in the frame that called them, so their own return values are unchanged.
+- **Who holds them.** The translator follows which command left e() and r(), as Stata does: r() stays after the
+  commands Stata 19 was seen to leave it alone after (generate, replace, sort, list, label, rename, format, order,
+  display, predict, save, use, egen, clear) and is replaced by everything else (drop, keep, describe, the graphs,
+  collapse, recode, xtset and every model, which leave r(table), were checked); e() stays until a model is fitted or
+  an untranslated command that may be one runs. `e(name)` and `r(name)` are translated to `stata_eget()` and
+  `stata_rget()` only when the command that left them is known; a name Stata leaves there that RCraft does not keep
+  (e(ic), e(N_cdf), r(gamma), anova's ss_1, ...) is refused with that reason, never left missing; a name Stata does
+  not have is missing, as in Stata. Matrices (e(b), e(V)) are refused in an expression, as Stata's type mismatch.
+- **_b[] and _se[].** `stata_bget()` reads `stata_b` and `stata_vcov` through the names helper: `_b[x]`, `_b[1.g]`,
+  `_b[_cons]`, `_coef[]`, `[eq]_b[x]`, `_b[eq:x]` after mlogit (the base outcome's equation, first in Stata's
+  order, is zeros), `_b[/cut1]`, `_b[/lnalpha]`; a base or omitted factor level is 0; Stata's messages for a
+  name or an equation that is not there (`[nosuch] not found`, `equation [y] not found`).
+- **display.** Quoted text, expressions (a variable is its first row, as in Stata), `_n`/`_newline()`, `_col()`
+  (which only moves forward), `_skip()`, `_dup()`, a comma as a space, `as`/`in` colours dropped with a note, and
+  Stata's formats through `stata_fmt()`: `%w.dg`, `%w.df`, `%w.de`, with `c`, `-` and `0`, and `%ws`. The rules,
+  decoded from Stata 19 at every width from 5 to 20: `%w.0g` fits the number in w - 1 places (one for the sign),
+  fixed if its integer part fits and it shows at least as many significant digits as e notation would (which has
+  max(2, w - 6) digits, one fewer with a 3-digit exponent), trailing zeros and a leading zero dropped; `%w.dg` keeps
+  d digits but never rounds an integer part; a positive number in e notation keeps the sign's space even past the
+  width; `%f` too wide falls back to e notation unless that is wider still; g and e round an exact half away from
+  zero while f rounds it to even, as Stata's do. `display` without a format is `%10.0g` without the padding.
+- **ereturn list, return list** print as Stata's, line for line (the scalars at `%18.0g`); what Stata also lists
+  and RCraft does not keep (the optimizer's settings, e(ilog), e(V_modelbased), ...) is named in a note.
+- **Tests** (`engine/tests/stata_returned.rs`, 7 cases, and an e() case each in the xtreg, ivregress, stcox and
+  anova tests): every value against Stata 19's list, to 12 digits for least squares and 7 to 9 for the likelihood
+  models; the 176 widths of Stata's `%g` grid and 66 other formats against the strings Stata printed; display and
+  the lists against Stata's lines; the refusals.
+- **Not done:** `matrix list`, `scalar`, `estimates store`/`restore` and `esttab`/`outreg2` (Phase 7); macros such
+  as `` `e(cmd)' `` (Phase 2C); e() after anova with error terms or nesting, xtreg mle/pa, ivregress gmm with
+  vce()/wmatrix()/igmm and models with iweights; e(b) with the base levels Stata keeps as zeros; r() after
+  `correlate, covariance`, `pwcorr`, `describe`, `tab1`/`tab2`, the one-sample and paired `ttest`, weighted
+  `tabulate`/`correlate`, and margins' other r() (r(b), r(table), ...).

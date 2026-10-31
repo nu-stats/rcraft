@@ -30,7 +30,11 @@ use super::weights::{Weighting, W};
 use super::*;
 
 /// `summarize`, and the statistics `correlate, means` prints.
-pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, detail = FALSE, meanonly = FALSE, w = NULL, wtype = "f") {
+pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, detail = FALSE, meanonly = FALSE, w = NULL, wtype = "f", ret = FALSE,
+                            print = TRUE) {
+  # ret: leave r() of the last variable as stata_r where it was called from
+  env <- parent.frame()
+  rr <- NULL
   num <- function(v) {
     if (is.character(v) || is.factor(v)) return(rep(NA_real_, length(v)))
     u <- unclass(v)
@@ -63,9 +67,10 @@ pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, deta
     a <- vals(utils::tail(names(d), 1))
     m <- moments(a$x, a$w)
     k <- length(a$x)
-    return(invisible(list(N = m$N, sum_w = m$sum_w, mean = m$mean,
+    # in the order of Stata's return list
+    return(invisible(list(N = m$N, sum_w = m$sum_w, sum = m$sum, mean = m$mean,
                           min = if (k > 0) min(a$x) else NA_real_,
-                          max = if (k > 0) max(a$x) else NA_real_, sum = m$sum)))
+                          max = if (k > 0) max(a$x) else NA_real_)))
   }
   if (length(names(d)) == 0) {
     cat("no variables\n")
@@ -96,6 +101,7 @@ pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, deta
       max = if (k > 0) max(x) else NA_real_,
       stringsAsFactors = FALSE
     )
+    rr <<- list(N = m$N, sum_w = m$sum_w, mean = m$mean, Var = m$var, sd = sqrt(m$var), min = s$min, max = s$max, sum = m$sum)
     if (weighted) s$sum_w <- m$sum_w
     if (!detail) return(s)
     m2 <- mom(2)
@@ -111,9 +117,13 @@ pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, deta
       unname(stats::quantile(x, pcts / 100, type = 2))
     }
     for (i in seq_along(pcts)) s[[paste0("p", pcts[i])]] <- p[i]
+    rr <<- c(rr[1:5], list(skewness = s$skewness, kurtosis = s$kurtosis, sum = m$sum, min = s$min, max = s$max),
+             stats::setNames(as.list(p), paste0("p", pcts)))
     s
   }
   out <- do.call(rbind, lapply(names(d), one))
+  if (ret) assign("stata_r", rr, envir = env)
+  if (!print) return(invisible(out))
   if (!detail) {
     print(out, row.names = FALSE)
   } else {
@@ -151,7 +161,9 @@ pub(super) const TAB_VALUES_HELPER: &str = r#"stata_tab_values <- function(v, no
 /// One-way and two-way `tabulate`.
 pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NULL, missing = FALSE, sort = FALSE,
                             row = FALSE, column = FALSE, cell = FALSE,
-                            chi2 = FALSE, w = NULL, wtype = "f") {
+                            chi2 = FALSE, w = NULL, wtype = "f", ret = FALSE) {
+  # ret: leave Stata's r() as stata_r where it was called from
+  env <- parent.frame()
   use_na <- if (missing) "ifany" else "no"
   # weighted counts: sums of the weights, analytic ones scaled to the rows
   wtab <- function(keep, ...) {
@@ -177,6 +189,7 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
     )
     print(out, row.names = FALSE)
     cat("  total ", total, "\n", sep = "")
+    if (ret) assign("stata_r", list(N = total, r = length(freq)), envir = env)
     return(invisible(out))
   }
   keep <- if (missing) rep(TRUE, length(x)) else !is.na(x) & !is.na(y)
@@ -201,11 +214,17 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
         "   Pr = ", format(r$p.value, digits = 4), "\n", sep = "")
     attr(t, "chi2") <- c(chi2 = unname(r$statistic), df = unname(r$parameter), p = r$p.value)
   }
+  if (ret) {
+    rr <- list(N = sum(t), r = nrow(t), c = ncol(t))
+    if (chi2) rr <- c(rr, list(chi2 = attr(t, "chi2")[["chi2"]], p = attr(t, "chi2")[["p"]]))
+    assign("stata_r", rr, envir = env)
+  }
   invisible(t)
 }"#;
 
 /// `correlate`: casewise, like Stata.
-pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, covariance = FALSE, means = FALSE, w = NULL, wtype = "f") {
+pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, covariance = FALSE, means = FALSE, w = NULL, wtype = "f", ret = FALSE) {
+  env <- parent.frame()
   # as Stata 19 does: a string variable is left out with a note, and only
   # when none is left is it an error
   for (n in names(d)) {
@@ -239,6 +258,8 @@ pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, cova
   if (means) {
     if (is.null(w)) stata_summarize(as.data.frame(m)) else stata_summarize(as.data.frame(m), w = w, wtype = wtype)
   }
+  # Stata's r(): the count, the first pair's correlation and the matrix
+  if (ret) assign("stata_r", list(N = nrow(m), rho = if (ncol(m) > 1) r[1, 2] else NA_real_, C = r), envir = env)
   invisible(r)
 }"#;
 
@@ -280,17 +301,33 @@ impl Session {
                 "stata_r <- stata_summarize({src}, meanonly = TRUE{wargs})"
             ));
             out.caveat("prints nothing, as in Stata; r() is kept in R as stata_r");
-            return Ok(());
-        }
-        if Self::quiet(c) {
+            self.r_new = Some((super::returned::R_MEANONLY, "summarize".into()));
             return Ok(());
         }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_summarize");
+        if !matches!(w, Some((W::I, _))) {
+            self.r_new = Some((
+                if detail {
+                    super::returned::R_SUMMARIZE_DETAIL
+                } else {
+                    super::returned::R_SUMMARIZE
+                },
+                "summarize".into(),
+            ));
+        }
         out.line(format!(
-            "stata_summarize({src}{}{wargs})",
-            if detail { ", detail = TRUE" } else { "" }
+            "stata_summarize({src}{}{wargs}, ret = TRUE{})",
+            if detail { ", detail = TRUE" } else { "" },
+            if Self::quiet(c) {
+                ", print = FALSE"
+            } else {
+                ""
+            }
         ));
+        if Self::quiet(c) {
+            return Ok(());
+        }
         out.caveat("printed in R's layout, not Stata's table");
         if detail {
             out.caveat(
@@ -348,12 +385,19 @@ impl Session {
         }
         let w = self.weight_of(c, &[W::F, W::A, W::I])?;
         tab_chi2_weight(opts, &w)?;
-        if Self::quiet(c) {
-            return Ok(());
-        }
         let (src, _, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_tab_values");
         self.helpers.insert("stata_tabulate");
+        if w.is_none() {
+            self.r_new = Some((
+                if y.is_some() {
+                    super::returned::R_TAB2
+                } else {
+                    super::returned::R_TAB1
+                },
+                "tabulate".into(),
+            ));
+        }
         let nolabel = opts.has("nolabel", 3);
         let value = |v: &str| {
             format!(
@@ -378,7 +422,13 @@ impl Session {
                 args.push(format!("{name} = TRUE"));
             }
         }
-        out.line(format!("stata_tabulate({}{wargs})", args.join(", ")));
+        let call = format!("stata_tabulate({}{wargs}, ret = TRUE)", args.join(", "));
+        if Self::quiet(c) {
+            // nothing shown, r() still left
+            out.line(format!("invisible(utils::capture.output({call}))"));
+            return Ok(());
+        }
+        out.line(call);
         out.caveat("printed in R's layout, not Stata's table");
         if opts.has("chi2", 4) {
             out.caveat("Pearson's chi-squared, with no continuity correction, as Stata does it");
@@ -401,9 +451,6 @@ impl Session {
             )));
         }
         let w = self.weight_of(c, &[W::F, W::A])?;
-        if Self::quiet(c) {
-            return Ok(());
-        }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_correlate");
         if w.is_some() {
@@ -417,7 +464,16 @@ impl Session {
             args.push("means = TRUE".into());
             self.helpers.insert("stata_summarize");
         }
-        out.line(format!("stata_correlate({})", args.join(", ")));
+        if w.is_none() && !opts.has("covariance", 3) {
+            args.push("ret = TRUE".into());
+            self.r_new = Some((super::returned::R_CORRELATE, "correlate".into()));
+        }
+        let call = format!("stata_correlate({})", args.join(", "));
+        if Self::quiet(c) {
+            out.line(format!("invisible(utils::capture.output({call}))"));
+            return Ok(());
+        }
+        out.line(call);
         out.caveat("a row with a missing value in any of the variables is dropped, as Stata does");
         out.caveat("printed in R's layout, not Stata's table");
         Ok(())
@@ -443,9 +499,6 @@ impl Session {
                 "ttest with the option {o} is not translated yet"
             )));
         }
-        if Self::quiet(c) {
-            return Ok(());
-        }
         let level = match opts.arg("level", 3) {
             Some(l) => {
                 let n: f64 = l
@@ -465,6 +518,7 @@ impl Session {
         let group = opts.arg("by", 2);
         let mut args: Vec<String> = Vec::new();
         let mut two_sample = false;
+        let mut by_rows: Option<String> = None;
         match main.split_once("==") {
             Some((left, right)) => {
                 let (left, right) = (left.trim(), right.trim());
@@ -506,6 +560,7 @@ impl Session {
                     return Err(no(format!("by({g}) is not a variable name")));
                 }
                 two_sample = true;
+                by_rows = Some(format!("{src}${}, {src}${}", r_name(v), r_name(g)));
                 args.push(format!("{} ~ {}", r_name(v), r_name(g)));
                 args.push(format!("data = {src}"));
                 args.push(format!("var.equal = {}", r_logical(equal)));
@@ -513,6 +568,19 @@ impl Session {
         }
         if let Some(l) = level {
             args.push(format!("conf.level = {}", r_number(l)));
+        }
+        if let Some(rows) = &by_rows {
+            // Stata's r() of the two-sample test
+            self.helpers.insert("stata_ttest_r");
+            out.line(format!(
+                "stata_r <- stata_ttest_r({rows}, level = {}, equal = {})",
+                r_number(super::returned::percent(level.unwrap_or(0.95))),
+                r_logical(equal)
+            ));
+            self.r_new = Some((super::returned::R_TTEST, "ttest".into()));
+        }
+        if Self::quiet(c) {
+            return Ok(());
         }
         out.line(format!("print(stats::t.test({}))", args.join(", ")));
         out.caveat("R prints the two-sided p-value; Stata prints the one-sided ones beside it");

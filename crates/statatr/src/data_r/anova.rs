@@ -344,6 +344,20 @@ impl Session {
             dep: dep.to_string(),
             factors: spec.factors.clone(),
         });
+        if special {
+            self.e_ret = super::returned::Returned::Lost(
+                "e() after anova with error terms, nesting or repeated() is not kept in R yet"
+                    .into(),
+            );
+            self.e_new = true;
+        } else {
+            self.keep_e(
+                c,
+                out,
+                &super::returned::e_args(dep, "ols", None, &None),
+                "",
+            );
+        }
         if Self::quiet(c) {
             return Ok(());
         }

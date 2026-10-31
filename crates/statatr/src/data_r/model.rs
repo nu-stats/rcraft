@@ -164,6 +164,8 @@ impl Session {
                 "robust or clustered errors with iweights are not translated yet",
             ));
         }
+        // Stata gives e(title) only when no robust or clustered errors were asked for
+        let asked = robust || cluster.is_some();
         // sampling weights mean robust errors
         let robust = robust || matches!(w, Some((W::P, _)));
         self.plain_regress = !robust && cluster.is_none() && w.is_none();
@@ -231,6 +233,24 @@ impl Session {
             dep: spec.dep.clone(),
             factors: spec.factors.clone(),
         });
+        // e(), as Stata leaves it (iweights are not checked against Stata yet)
+        if matches!(w, Some((W::I, _))) {
+            self.e_ret = super::returned::Returned::Lost(
+                "e() after regress with iweights is not kept in R yet".into(),
+            );
+            self.e_new = true;
+        } else {
+            let vce = if cluster.is_some() {
+                "cluster"
+            } else if robust {
+                "robust"
+            } else {
+                "ols"
+            };
+            let args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &w)
+                + if asked { ", title = FALSE" } else { "" };
+            self.keep_e(c, out, &args, "");
+        }
         if cluster.is_some() {
             out.caveat(
                 "the clusters are the rows the model kept, so a row dropped for a missing value \

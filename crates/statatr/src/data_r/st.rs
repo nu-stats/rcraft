@@ -339,6 +339,20 @@ impl Session {
             dep: "_t".into(),
             factors: spec.factors.clone(),
         });
+        // e(), as Stata leaves it; its ties are named breslow, efron, exactp
+        let vce = if cluster.is_some() {
+            "cluster"
+        } else if robust {
+            "robust"
+        } else {
+            "oim"
+        };
+        let args = format!(
+            "{}, extra = list(ties = {})",
+            super::returned::e_args("_t", vce, cluster.as_deref(), &None),
+            r_text(if ties == "exact" { "exactp" } else { ties })
+        );
+        self.keep_e(c, out, &args, "");
         if !Self::quiet(c) {
             out.line(format!(
                 "stata_stcox_header(stata_m, robust = {})",

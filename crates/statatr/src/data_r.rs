@@ -33,6 +33,7 @@ mod ml;
 mod model;
 mod more;
 mod post;
+mod returned;
 mod st;
 mod stats;
 mod weights;
@@ -322,6 +323,10 @@ fn helper_code(name: &str) -> &'static str {
         "stata_graph" => graph::GRAPH_HELPER,
         "stata_stcox" => st::STCOX_HELPER,
         "stata_phtest" => st::PHTEST_HELPER,
+        "stata_returned" => returned::RETURNED_HELPER,
+        "stata_fmt" => returned::FORMAT_HELPER,
+        "stata_ereturn" => returned::ERETURN_HELPER,
+        "stata_ttest_r" => returned::TTEST_R_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -365,6 +370,13 @@ struct Session {
     graph_drawn: bool,
     /// And its time variable.
     panel_time: Option<String>,
+    /// Who left the e() and r() an expression would read (P2B.6).
+    e_ret: returned::Returned,
+    r_ret: returned::Returned,
+    /// This command left r(): the names it keeps, and its name.
+    r_new: Option<(&'static [&'static str], String)>,
+    /// This command left e() (`keep_e`).
+    e_new: bool,
     helpers: BTreeSet<&'static str>,
 }
 
@@ -585,7 +597,8 @@ impl Session {
     fn expr(&self, text: &str, use_: Use, out: &mut Out) -> Result<String, Untranslated> {
         self.esample_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
-        let r = expr_r::translate(text, &kinds, use_)?;
+        let ret = |w: &str, n: &str| self.returned_value(w, n);
+        let r = expr_r::translate_with(text, &kinds, &ret, use_)?;
         for c in r.caveats {
             out.caveat(c);
         }
@@ -608,7 +621,8 @@ impl Session {
     fn value(&self, text: &str, out: &mut Out) -> Result<(String, Kind), Untranslated> {
         self.esample_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
-        let r = expr_r::translate(text, &kinds, Use::Value)?;
+        let ret = |w: &str, n: &str| self.returned_value(w, n);
+        let r = expr_r::translate_with(text, &kinds, &ret, Use::Value)?;
         for c in r.caveats {
             out.caveat(c);
         }
@@ -814,6 +828,8 @@ impl Session {
         let mut out = Out::default();
         let by = c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. }));
         self.esample_new = false;
+        self.r_new = None;
+        self.e_new = false;
         if MODELS.contains(&c.name.as_str()) {
             self.fit_robust = false;
             self.fit_cluster = false;
@@ -823,6 +839,13 @@ impl Session {
         } else {
             self.dispatch(c, &mut out)
         };
+        // who holds e() and r() now
+        let r_left = self.r_new.take();
+        self.track_returned(c, done.is_ok(), r_left);
+        if done.is_ok() && MODELS.contains(&c.name.as_str()) && !self.e_new {
+            self.e_ret =
+                returned::Returned::Lost(format!("e() after {} is not kept in R yet", c.name));
+        }
         // a line that is not translated still runs in Stata, so it counts too
         if done.is_err() || !LEAVE_DATA_ALONE.contains(&c.name.as_str()) {
             self.changed_since_fit = done.is_err() || !MODELS.contains(&c.name.as_str());
@@ -951,6 +974,8 @@ impl Session {
             "lowess" => self.lowess(c, &opts, out),
             "stset" => self.stset(c, &opts, out),
             "stcox" => self.stcox(c, &opts, out),
+            "display" => self.display(c, out),
+            "ereturn" | "return" => self.list_returned(c, out),
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -1626,9 +1651,6 @@ impl Session {
 
     fn count(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let d = self.data()?;
-        if Self::quiet(c) {
-            return Ok(());
-        }
         if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
             return Err(no("by with count is not translated yet"));
         }
@@ -1637,7 +1659,12 @@ impl Session {
             None => format!("nrow({d})"),
         };
         out.package("dplyr");
-        out.line(format!("cat(format({n}, big.mark = \",\"), \"\\n\")"));
+        // r(N), as Stata leaves it
+        out.line(format!("stata_r <- list(N = {n})"));
+        self.r_new = Some((returned::R_COUNT, "count".into()));
+        if !Self::quiet(c) {
+            out.line("cat(format(stata_r$N, big.mark = \",\"), \"\\n\")");
+        }
         Ok(())
     }
 
