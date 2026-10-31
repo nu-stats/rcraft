@@ -2350,3 +2350,33 @@ Each checked against Stata 19 on the test data (probes kept outside the reposito
 - **Not done:** e() after anova with error terms or nesting, ivregress gmm with vce()/wmatrix()/igmm and xtreg pa
   with corr(independent); e(b) after anova and margins; margins' other r() (r(b), r(table)); matrices a do-file makes
   (`matrix define`, `matrix A = e(b)`).
+
+## P2B.12 Tab completion in Stata mode, part one: the completion, 2026-10-31
+
+`statatr/src/complete.rs`: `complete(line, &Context) -> Option<Completion>` and `apply()`, the Stata line's
+counterpart of `rcodegen::tab` (same `from` and `options`, the same behaviour: complete as far as the choices
+agree, the choices listed when there are several). It reads where the word being typed sits, as Stata reads the
+line:
+
+- command position, after `by ...:`, `bysort ...:`, `quietly`, `capture`, `noisily` (and `qui:` and the like):
+  the commands the translator dispatches and those prefixes (`reg` gives `regress`);
+- a command's subcommand (`graph bar`, `import delimited`, `merge 1:1`, `reshape long`, `estat hettest`,
+  `scalar list`, `matrix list`, `label values`);
+- after the comma (outside parentheses and quotes): that command's options, `level(` with its parenthesis when
+  it takes an argument; inside `vce(` its kinds, then a variable; inside any other option a variable;
+- after `using`, the first word of `use`/`save`/`saveold`, and inside quotes: file names (folders end in `/`);
+- after a backtick a local's name with its closing quote, after `$` or `${` a global's; after `label values var`,
+  `label define`, `label list`, `label drop` a value label's;
+- anywhere else the variables of the data in memory, in their order, with Stata's rules: a unique abbreviation
+  is the name, `inc*`, `?ge` and `inco~` (one variable only) are written out as the variables they match,
+  `id-age` as the variables from id to age and `sex-` offers those after sex; `if` and `in` are offered after a
+  varlist, and `i.` before a factor's name is passed over.
+
+The caller says what the session holds (variables, locals, globals, value labels, a folder's entries), so the
+module never starts R. **Tests** (in the module): the cases above; every command offered is one the translator
+dispatches and every subcommand one it takes; every option offered is one it takes, by translating a line that
+uses each (which found that `graph bar` and `histogram` do not take `by()` yet).
+
+**Not done:** wiring it into the Command window and the Script Editor, which waits for the Stata mode switch
+itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `complete` with the data's variables
+(the data viewer has them), the macros the Stata session has defined and the working folder's files.
