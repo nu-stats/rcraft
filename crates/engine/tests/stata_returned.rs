@@ -1249,9 +1249,6 @@ fn display_and_the_lists_print_as_stata() {
     let text = ok(&mut e, &code);
     for want in [
         "\nscalars:\n                  e(N) =  80\n              e(sum_w) =  80\n               e(df_m) =  2\n",
-        // (F, r2 and ll agree with Stata's to 15 digits; these to all 16)
-        "                e(mss) =  373.9658405430359\n                e(rss) =  322.9402773914502\n",
-        "               e(r2_a) =  .5245724954654194\n",
         "               e(rank) =  3\n",
         "\nmacros:\n            e(cmdline) : \"regress y x w\"\n              e(title) : \"Linear regression\"\n",
         "\nmatrices:\n                  e(b) :  1 x 3\n                  e(V) :  3 x 3\n",
@@ -1259,6 +1256,31 @@ fn display_and_the_lists_print_as_stata() {
         "               r(mean) =  1.135731136069608\n                r(Var) =  8.821596429550457\n",
     ] {
         assert!(text.contains(want), "{want:?} not in:\n{text}");
+    }
+    // the long numbers: each line in Stata's layout, its value Stata's; the
+    // 16th digit of a least-squares sum differs from one machine's R to the next
+    let stata = [
+        ("F", 44.58311913646749),
+        ("r2", 0.5366086348207253),
+        ("rmse", 2.047933000982293),
+        ("mss", 373.9658405430359),
+        ("rss", 322.9402773914502),
+        ("r2_a", 0.5245724954654194),
+        ("ll", -169.3327135258075),
+        ("ll_0", -200.1000455570114),
+    ];
+    for (name, value) in stata {
+        let key = format!("{:>22} =  ", format!("e({name})"));
+        let line = text
+            .lines()
+            .find(|l| l.starts_with(&key))
+            .unwrap_or_else(|| panic!("no line {key:?} in:\n{text}"));
+        let shown = line.trim_start_matches(&key);
+        let got: f64 = shown.parse().unwrap_or(f64::NAN);
+        assert!(
+            (got - value).abs() <= 1e-14 * value.abs().max(1.0) && shown.len() >= 16,
+            "e({name}): {shown} against Stata's {value}"
+        );
     }
 }
 
