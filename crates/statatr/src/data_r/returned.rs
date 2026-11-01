@@ -64,7 +64,18 @@ stata_bget <- function(key, se = FALSE) {
 stata_base_level <- function(k) {
   xl <- stata_estimates$xlevels
   if (is.null(xl)) return(FALSE)
-  vars <- sub("^stata_ibl?\\(([^,]+),.*$", "\\1", sub("^factor\\(([^()]+)\\)$", "\\1", names(xl)))
+  # a cell of two factors interacted alone (stata_cells): the base cell and
+  # an empty one (a level R dropped) have no coefficient; Stata holds a zero
+  for (n in names(xl)[startsWith(names(xl), "stata_cells(")]) {
+    m <- regmatches(n, regexec("^stata_cells\\(([^,]+), ([^,]+),", n))[[1]]
+    ab <- strsplit(xl[[n]], "#", fixed = TRUE)
+    l1 <- unique(vapply(ab, function(x) x[1], ""))
+    l2 <- unique(vapply(ab, function(x) x[2], ""))
+    cells <- vapply(paste0(rep(l1, each = length(l2)), ".", m[2], "#", rep(l2, times = length(l1)), ".", m[3]),
+                    stata_canon, "")
+    if (stata_canon(k) %in% cells) return(TRUE)
+  }
+  vars <- sub("^stata_ib\\(([^,]+),.*$", "\\1", sub("^factor\\(([^()]+)\\)$", "\\1", names(xl)))
   parts <- strsplit(k, "#", fixed = TRUE)[[1]]
   all(vapply(parts, function(p) {
     m <- regmatches(p, regexec("^([0-9]+)\\.(.+)$", p))[[1]]

@@ -56,9 +56,11 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     if (p == "(Intercept)") return(list(kind = "cons", key = p))
     m <- regmatches(p, regexec("^(factor\\(([^()]+)\\))(.+)$", p))[[1]]
     if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4]))
-    m <- regmatches(p, regexec("^(stata_ibl?\\(([^,]+), \"[^\"]*\"\\))(.+)$", p))[[1]]
-    # stata_ibl() keeps its base level last
-    if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4], last = startsWith(m[2], "stata_ibl(")))
+    m <- regmatches(p, regexec("^(stata_ib\\(([^,]+), \"[^\"]*\"\\))(.+)$", p))[[1]]
+    if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4]))
+    # two factors interacted alone: one factor of cells (stata_cells), level a#b
+    m <- regmatches(p, regexec("^(stata_cells\\(([^,]+), ([^,]+), \"([^\"]*)\", \"([^\"]*)\"\\))(.+)$", p))[[1]]
+    if (length(m)) return(list(kind = "cells", key = m[2], vars = m[3:4], lev = m[7]))
     m <- regmatches(p, regexec("^I\\(([^()^]+)\\^([0-9]+)\\)$", p))[[1]]
     if (length(m)) return(list(kind = "c", key = p, var = m[2], pow = as.integer(m[3])))
     list(kind = "c", key = p, var = p, pow = 1L)
@@ -87,19 +89,29 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
       fs <- Filter(function(p) p$kind == "f", q)
       cs <- Filter(function(p) p$kind == "c", q)
       # two factors interacted: every cell, the first factor outermost; a
-      # factor at its base is marked b, one in a cell not estimated o
-      if (length(fs) == 2 && length(cs) == 0) {
-        Ls <- lapply(fs, function(f) fit$xlevels[[f$key]])
-        if (any(vapply(Ls, is.null, TRUE))) return(NULL)
+      # factor at its base is marked b, one in a cell not estimated o. Alone
+      # they are one factor of cells whose first level is the base cell.
+      cl <- Filter(function(p) p$kind == "cells", q)
+      two <- length(fs) == 2 && length(cs) == 0 && length(q) == 2
+      if (two || (length(cl) == 1 && length(q) == 1)) {
+        if (two) {
+          Ls <- lapply(fs, function(f) fit$xlevels[[f$key]])
+          if (any(vapply(Ls, is.null, TRUE))) return(NULL)
+          base <- vapply(Ls, function(L) L[1], "")
+          vars <- vapply(fs, function(f) f$var, "")
+          cell <- vapply(ii, function(i) paste(vapply(ps[[i]], function(p) p$lev, ""), collapse = "#"), "")
+        } else {
+          C <- fit$xlevels[[cl[[1]]$key]]
+          if (is.null(C)) return(NULL)
+          ab <- strsplit(C, "#", fixed = TRUE)
+          Ls <- lapply(1:2, function(j) unique(vapply(ab, function(x) x[j], "")))
+          base <- ab[[1]]
+          vars <- cl[[1]]$vars
+          cell <- vapply(ii, function(i) ps[[i]][[1]]$lev, "")
+        }
         Lns <- lapply(Ls, function(L) suppressWarnings(as.numeric(L)))
         if (any(vapply(Lns, anyNA, TRUE))) return(NULL)
-        base <- vapply(1:2, function(j) {
-          L <- Ls[[j]]
-          if (isTRUE(fs[[j]]$last)) L[length(L)] else L[1]
-        }, "")
-        cell <- vapply(ii, function(i) {
-          paste(vapply(Filter(function(p) p$kind == "f", ps[[i]]), function(p) p$lev, ""), collapse = "#")
-        }, "")
+        fs <- lapply(vars, function(v) list(var = v))
         for (l1 in Ls[[1]][order(Lns[[1]])]) {
           for (l2 in Ls[[2]][order(Lns[[2]])]) {
             i <- ii[match(paste(l1, l2, sep = "#"), cell)]

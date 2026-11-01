@@ -1098,8 +1098,11 @@ stata_bnames <- function() {
     if (p == "(Intercept)") return("_cons")
     m <- regmatches(p, regexec("^factor\\(([^()]+)\\)(.+)$", p))[[1]]
     if (length(m)) return(paste0(m[3], ".", m[2]))
-    m <- regmatches(p, regexec("^stata_ibl?\\(([^,]+), \"[^\"]*\"\\)(.+)$", p))[[1]]
+    m <- regmatches(p, regexec("^stata_ib\\(([^,]+), \"[^\"]*\"\\)(.+)$", p))[[1]]
     if (length(m)) return(paste0(m[3], ".", m[2]))
+    # the cells of two factors interacted alone (stata_cells, level a#b)
+    m <- regmatches(p, regexec("^stata_cells\\(([^,]+), ([^,]+), \"[^\"]*\", \"[^\"]*\"\\)([^#]+)#(.+)$", p))[[1]]
+    if (length(m)) return(paste0(m[4], ".", m[2], "#", m[5], ".", m[3]))
     m <- regmatches(p, regexec("^I\\(([^()^]+)\\^([0-9]+)\\)$", p))[[1]]
     if (length(m)) return(paste(rep(m[2], as.integer(m[3])), collapse = "#"))
     p

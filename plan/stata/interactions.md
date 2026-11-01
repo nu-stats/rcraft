@@ -13,9 +13,12 @@ the model. The constant counts as that term even with `noconstant`.
 - **`i.g i.g#i.h`:** the cells with h at its base are left out. R's coding of `factor(g) + factor(g):factor(h)`
   is the same.
 - **`i.g#i.h` alone:** only the cell where both are at their base is left out. R would give every cell a
-  column and leave out the last one. RCraft codes each factor with its base level last (`stata_ibl`), so
-  the cell R leaves out is Stata's. `stata_collinear` then sets that cell aside as left out by design, not
-  as collinear.
+  column and leave out the last one, as collinear. RCraft codes the pair as one factor of their cells
+  (`stata_cells`), every combination of levels, the base cell first, so R's treatment coding leaves out
+  Stata's cell by construction. A first try put each factor's base level last and leaned on R to find
+  the last column collinear. That held on this machine, but on Windows CI `glm`'s tight check missed it
+  and the logit failed. An empty cell is a level with no rows, which R drops; `_b[]` still gives its 0,
+  and `e(b)` its `o` column.
 - **A bare variable in an interaction is a factor:** `g#h` is `i.g#i.h`, and `g##c.x` makes g a factor.
   Before P2C.15 RCraft read it as a continuous variable, a different model, without saying so.
 
@@ -45,7 +48,6 @@ An empty cell is `o` marked. `matrix list` wraps at `set linesize`, which RCraft
 
 ## Not done
 
-- Three factors interacted alone (`i.a#i.b#i.c` without lower terms): coded base-last as well, but not
-  checked against Stata.
+- Three or more factors interacted alone (`i.a#i.b#i.c` without lower terms): refused with the reason.
 - Interactions in the likelihood models' tables, which RCraft still prints in R's layout. Their `e(b)` is
   Stata's.

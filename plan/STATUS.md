@@ -2801,9 +2801,10 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **What works:**
   - In an interaction a bare variable is a factor, as in Stata (`g#h` is `i.g#i.h`). Before this RCraft
     read it as a continuous variable, a different model, without saying so.
-  - `i.g#i.h` without its main effects estimates every cell but the all-base one, as Stata does. The factors
-    are coded with their base level last (`stata_ibl`), so R leaves out Stata's cell, and `stata_collinear`
-    sets that cell aside as left out by design.
+  - `i.g#i.h` without its main effects estimates every cell but the all-base one, as Stata does. The pair is
+    one factor of its cells (`stata_cells`), the base cell first, so R's coding leaves it out by
+    construction. A first coding, with base levels last, leaned on R to find a column collinear. Windows
+    CI's `glm` missed it, so it was replaced before landing.
   - `i.g##i.h` and `i.g i.g#i.h` were already R's coding.
   - `e(b)` names every cell as Stata does (`1b.g#0b.h`, `1b.g#1.h`, `2o.g#0b.h`).
   - `regress`'s table shows the cells as `2 1`, or `2#yes` with value labels. Value labels are now shown

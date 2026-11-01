@@ -132,7 +132,7 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   G <- NA
   if (type == "fe") {
     # Stata's name for the column: 1.g for factor(g)1
-    stata_nm <- function(v) sub("^(factor|stata_ibl?)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", "\\4.\\2", v)
+    stata_nm <- function(v) sub("^(factor|stata_ib)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", "\\4.\\2", v)
     for (v in colnames(X)[!varies]) cat("note: ", stata_nm(v), " omitted because of collinearity.\n", sep = "")
     b <- ff$b
     if (robust) {
