@@ -296,7 +296,7 @@ pub const GUIDES: &[Guide] = &[
             p("How they run", "RCraft runs a loop itself and gives R each round's lines with the loop's macro replaced, so the R script has the loop written out round by round."),
             p("forvalues", "Each value is the one before plus the step, as Stata does, so 0(.1)1 ends at .9999999999999999, and each is kept as Stata keeps a number in a macro (16 digits)."),
             p("numlist", "foreach ... of numlist works its numbers out from the first and the step and keeps 15 digits, as Stata's numlists do."),
-            p("varlist", "foreach ... of varlist takes the names as written; wildcards, ranges and _all need the data's variable names, which the translator does not have yet, so such a loop is not run."),
+            p("varlist", "foreach ... of varlist with a wildcard, a range or _all asks R for the data's variable names when it runs and makes them Stata's way (x* every name that matches, x1-x3 the names between in the data's order, an ambiguous abbreviation Stata's error). Plain names are taken as written. A dry run cannot know the names, so it says the loop is known only when the do-file runs."),
             p("After the loop", "The loop's macro is gone after the loop, as in Stata. A while loop whose condition is still true after 100,000 rounds is stopped and said so."),
             p("Values only R knows", "A condition such as while r(N) > 0 is worked out by R when the do-file runs, after the lines before it have run."),
         ],
@@ -418,7 +418,8 @@ pub const GUIDES: &[Guide] = &[
             p("How they work", "RCraft keeps the do-file's macros itself and replaces them in each line before the line is translated, as Stata does before it runs a line: nested `x`i'', `=exp', $name and ${name}, and the escapes \\` and \\$."),
             p("Numbers", "local x = exp keeps a number as Stata does, in %18.0g: 1/3 is .3333333333333333, 16 digits, not the full double."),
             p("Values only R knows", "A value from the data or a stored result (local m = r(mean), local n = _N) is worked out by R when the do-file runs, after the lines before it, and the lines after it use that value. The R script saved after a run holds the value it had then. A dry run says such lines are known only when the do-file runs."),
-            p("Macro functions", "word count, word # of, the list functions (uniq, dups, sort, sizeof, retokenize, -, |, &, in, ==, ===, posof), length, strlen, subinstr and display are done as Stata 19 does them; others, such as variable label and type, are not translated yet."),
+            p("Macro functions", "word count, word # of, the list functions (uniq, dups, sort, sizeof, retokenize, -, |, &, in, ==, ===, posof), length, strlen, subinstr and display are done as Stata 19 does them; variable label and label (var) # come from the data's labels in R, and label set # from the do-file's own label define. type, format and value label are not translated: R does not keep Stata's storage types, display formats or the names of value-label sets."),
+            p("unab", "unab gets the data's variable names from R and expands the varlist as Stata does."),
             p("Temporary names", "tempvar and tempname give __000000, __000001, ... as Stata does; tempfile gives a file in a folder of RCraft's own."),
         ],
     },
@@ -426,6 +427,23 @@ pub const GUIDES: &[Guide] = &[
         command: "log",
         about: "Stata's log file (log and cmdlog)",
         points: &[p("In R", "Nothing to do in R: RCraft keeps what runs itself, in Results and in the do-file run's own log, so no Stata log file is written.")],
+    },
+    Guide {
+        command: "levelsof",
+        about: "Lists the distinct values of a variable",
+        points: &[
+            p(
+                "The values",
+                "Sorted, each number as Stata keeps it in a macro (%18.0g, so a float 0.1 is \
+                 .1000000014901161), text in compound quotes unless clean, missing values only \
+                 with missing; left in r(levels), with r(r) and r(N), as Stata 19 does.",
+            ),
+            p(
+                "local()",
+                "The macro is set from r(levels) once the line has run in R, so the lines after it \
+                 (a foreach over it, most often) use the data's own values.",
+            ),
+        ],
     },
     Guide {
         command: "lincom",
@@ -901,7 +919,7 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
         "saveold" => "save",
         "return" => "ereturn",
         "run" | "include" => "do",
-        "global" | "macro" | "tempvar" | "tempname" | "tempfile" => "local",
+        "global" | "macro" | "tempvar" | "tempname" | "tempfile" | "unab" => "local",
         "forvalues" | "while" | "continue" => "foreach",
         "cmdlog" => "log",
         other => other,

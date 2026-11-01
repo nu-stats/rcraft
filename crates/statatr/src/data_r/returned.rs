@@ -599,6 +599,7 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 
 /// The `e()` and `r()` names that are macros (text) in Stata.
 const TEXT_NAMES: &[&str] = &[
+    "levels",
     "cmd",
     "cmd2",
     "cmdline",
@@ -830,6 +831,7 @@ pub(super) const R_SUMMARIZE_DETAIL: &[&str] = &[
 ];
 pub(super) const R_MEANONLY: &[&str] = &["N", "sum_w", "mean", "min", "max", "sum"];
 pub(super) const R_COUNT: &[&str] = &["N"];
+pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
 pub(super) const R_TEST: &[&str] = &["drop", "df_r", "F", "df", "p", "chi2"];
 pub(super) const R_LINCOM: &[&str] = &["df", "ub", "lb", "p", "t", "z", "level", "se", "estimate"];
 pub(super) const R_TAB1: &[&str] = &["N", "r"];

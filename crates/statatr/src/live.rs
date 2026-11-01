@@ -18,8 +18,8 @@
 
 use std::collections::BTreeSet;
 
-use crate::data_r::{Line, Translation};
-use crate::dofile::{dry_run, NoFiles, Options};
+use crate::data_r::{Line, Translation, ValueCode};
+use crate::dofile::{dry_run, Event, NoFiles, Options, Run};
 use crate::reader::{read, Item};
 
 /// The Stata so far, run as a do-file is (macros set, loops run) but without
@@ -44,6 +44,10 @@ pub struct Step {
     /// The packages its `ssc install` lines ask for, for the window to offer
     /// the R package of the same name (P2B.11).
     pub ssc: Vec<String>,
+    /// R must work a value out first (`local m = r(mean)`): run this out of
+    /// sight, give what it printed to [`Live::give`], and step the same text
+    /// again. Nothing else is in the step, and nothing was kept.
+    pub ask: Option<String>,
 }
 
 /// The Stata of one session so far.
@@ -61,7 +65,13 @@ pub struct Live {
     globals: Vec<String>,
     /// How many `ssc install` lines have been seen.
     ssc: usize,
+    /// What R printed for each value it was asked for, in order; each step
+    /// runs the Stata so far again with them.
+    answers: Vec<Result<String, String>>,
 }
+
+/// Why a value from R is not asked for in the middle of several lines.
+const ON_ITS_OWN: &str = "in the Command window and the Script Editor a value only R knows is worked out on a line of its own, after the lines before it have run (run the lines before it first, or the whole file with File > Run do-file)";
 
 impl Live {
     pub fn new() -> Live {
@@ -80,35 +90,35 @@ impl Live {
                 lines: t.lines,
                 code,
                 ssc: Vec::new(),
+                ask: None,
             };
         }
         let mut whole = self.source.clone();
         whole.push_str(text.trim_end_matches(['\n', '\r']));
         whole.push('\n');
         let program = read(&whole);
-        let t = run(&whole);
-        let lines: Vec<Line> = t.lines.get(self.done..).unwrap_or_default().to_vec();
-        let mut code = String::new();
-        let new: Vec<&String> = t
-            .helpers
-            .iter()
-            .filter(|h| !self.sent.contains(*h))
-            .collect();
-        if !new.is_empty() {
-            let names: Vec<&str> = new.iter().filter_map(|h| helper_name(h)).collect();
-            code.push_str(&format!("{HELPERS_BEGIN} {}\n", names.join(", ")));
-            for h in &new {
-                code.push_str(h);
-                code.push('\n');
+        let t = loop {
+            let (t, ask) = self.replay(&whole);
+            match ask {
+                None => break t,
+                // the value is read now, before any line of this text has run
+                Some(v) if t.lines.len() <= self.done => {
+                    let mut code = self.helpers_code(&t.helpers);
+                    code.push_str(&v.code);
+                    return Step {
+                        ask: Some(code),
+                        ..Step::default()
+                    };
+                }
+                // lines of this text come first and have not run: R would give
+                // the value from before them
+                Some(_) => self.answers.push(Err(ON_ITS_OWN.into())),
             }
-            code.push_str(HELPERS_END);
-            code.push('\n');
-        }
+        };
+        let lines: Vec<Line> = t.lines.get(self.done..).unwrap_or_default().to_vec();
+        let mut code = self.helpers_code(&t.helpers);
         for l in &lines {
             code.push_str(&l.script());
-        }
-        for h in new {
-            self.sent.insert(h.clone());
         }
         self.done = t.lines.len();
         self.source = whole;
@@ -127,7 +137,59 @@ impl Live {
         }
         let ssc = t.ssc.get(self.ssc..).unwrap_or_default().to_vec();
         self.ssc = t.ssc.len();
-        Step { lines, code, ssc }
+        Step {
+            lines,
+            code,
+            ssc,
+            ask: None,
+        }
+    }
+
+    /// What R printed for the last [`Step::ask`], or why it could not; then
+    /// the same text is stepped again.
+    pub fn give(&mut self, printed: Result<String, String>) {
+        self.answers.push(printed);
+    }
+
+    /// `text` run with the answers R has given so far, in the order they were
+    /// asked; and the next question, if it needs another.
+    fn replay(&self, text: &str) -> (Translation, Option<ValueCode>) {
+        let mut run = Run::new(text, &NoFiles, Options::default());
+        let mut used = 0;
+        loop {
+            match run.next_event() {
+                Event::Line => {}
+                Event::Ask(v) => match self.answers.get(used) {
+                    Some(a) => {
+                        run.give(a.clone());
+                        used += 1;
+                    }
+                    None => return (run.finish().translation, Some(v)),
+                },
+                Event::Done => return (run.finish().translation, None),
+            }
+        }
+    }
+
+    /// The helpers R does not have yet, between the lines Results folds;
+    /// they count as sent.
+    fn helpers_code(&mut self, helpers: &[String]) -> String {
+        let new: Vec<&String> = helpers.iter().filter(|h| !self.sent.contains(*h)).collect();
+        if new.is_empty() {
+            return String::new();
+        }
+        let names: Vec<&str> = new.iter().filter_map(|h| helper_name(h)).collect();
+        let mut code = format!("{HELPERS_BEGIN} {}\n", names.join(", "));
+        for h in &new {
+            code.push_str(h);
+            code.push('\n');
+        }
+        code.push_str(HELPERS_END);
+        code.push('\n');
+        for h in new {
+            self.sent.insert(h.clone());
+        }
+        code
     }
 
     /// The R name of the data in memory, as the translator follows it.
@@ -196,6 +258,40 @@ mod tests {
         let next = live.step("summarize price");
         assert_eq!(next.lines.len(), 1, "{:?}", next.lines);
         assert!(next.lines.iter().all(|l| l.result.is_ok()));
+    }
+
+    #[test]
+    fn a_value_only_r_knows_is_asked_for_on_a_line_of_its_own() {
+        let mut live = Live::new();
+        live.step("use auto");
+        live.step("summarize price");
+        let ask = live.step("local m = r(mean)");
+        let code = ask.ask.clone().unwrap_or_default();
+        assert!(code.contains("%18.0g") && ask.lines.is_empty(), "{ask:?}");
+        // R's answer, then the same line again
+        live.give(Ok("  6165.256756756757\n".into()));
+        let set = live.step("local m = r(mean)");
+        assert!(set.ask.is_none() && set.lines.len() == 1, "{set:?}");
+        let used = live.step("generate d = price - `m'");
+        assert_eq!(
+            used.lines[0].stata,
+            "generate d = price - 6165.256756756757"
+        );
+        assert!(used.lines[0].result.is_ok());
+        // asked again later, the answer before is replayed and not asked for
+        assert!(live.step("display `m'").ask.is_none());
+        // in the middle of several lines R would answer too early: said so
+        let both = live.step("summarize mpg\nlocal k = r(mean)\ndisplay `k'");
+        assert!(both.ask.is_none());
+        let reasons: Vec<String> = both
+            .lines
+            .iter()
+            .filter_map(|l| l.result.as_ref().err().map(|e| e.reason.clone()))
+            .collect();
+        assert!(
+            reasons.iter().any(|r| r.contains("on a line of its own")),
+            "{reasons:?}"
+        );
     }
 
     #[test]

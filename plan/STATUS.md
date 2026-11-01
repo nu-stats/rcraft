@@ -2567,3 +2567,41 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   value only R knows (`local m = r(mean)` typed there says it is known only when the do-file runs); the share of
   lines translated per tier (`docs/coverage.md`, P2C.8); StatCraft's probe do-files and public replication
   packages as inputs (P2C.9).
+
+## P2C part two: the data's names, levelsof, values from R in Stata mode, 2026-10-31
+
+- **The data's variable names from R** (`statatr::dofile`, `Need::Names`): where a varlist has a pattern, a range or
+  `_all` (`foreach v of varlist x1-x10`, `regress y x*`, `keep inc*`), the runner asks R for the names of the data
+  in memory and makes the varlist Stata's way before the translator sees it (`dofile/varlist.rs`): `x*`, `x?` and
+  `x~` the names that match, `a-c` the names between in the data's order, `_all` every one, an abbreviation the
+  one name it stands for; factor-variable operators, `#`, parentheses and `=` are kept. Stata's errors as Stata 19
+  gave them: `x ambiguous abbreviation`, `variable zz* not found`, `x~ ambiguous abbreviation`. The names are
+  asked once and kept while the lines leave them alone (summarize, the models, display, ...), and asked again after
+  one that may change them. The models, which refused `x*` and `x1-x3` before, now take them. A plain name is
+  still taken as written (an abbreviation without a pattern is not looked up; R says so if the data has no such
+  variable). A dry run has no names: such a loop is known only when the do-file runs.
+- **`levelsof`** (translator): the sorted distinct values, printed and left in `r(levels)`, `r(r)` and `r(N)` as
+  Stata 19 does (numbers in %18.0g, so a float 0.1 is `.1000000014901161`; text in compound quotes unless `clean`;
+  `""` first and `.` last with `missing`; `separate()`); `local()` is set from `r(levels)` once the line has run in
+  R, so `levelsof g, local(gs)` then `foreach k of local gs` loops over the data's own values.
+- **`unab name : varlist`**, and a stored result in a macro (`` `r(levels)' ``, `` `e(cmd)' ``; Stata 19 writes a
+  number there in %18.0g, as `= r()` does).
+- **Macro functions that read the data:** `: variable label x` and `: label (x) #` from the labels R keeps;
+  `: label set #` from the do-file's own `label define` (the value itself when the set has no text for it, as in
+  Stata). `: type`, `: format` and `: value label` are refused with the reason: R does not keep Stata's storage
+  types, display formats or the names of value-label sets.
+- **Values from R in Stata mode:** a typed line that needs one (`local m = r(mean)`, a loop over `x1-x5`) is worked
+  out by R out of sight, then the line is translated with the answer (`live::Step::ask`, `Live::give`); each later
+  step runs the Stata so far again with the answers given, in order. Where lines of the same text would have to
+  run first (several lines run at once from the Script Editor), the value is not asked for and the line says so.
+  The Script Editor's two-pane view goes through the do-file layer too, so its loops show round by round.
+- **The corpus:** `aware.do` checks a range in a loop and a model, `unab`, `levelsof` with `local()`, `if` and
+  `r(levels)` in a macro, and a variable label read back against Stata 19: 14 more results, 152 in all, all
+  matching. `label`, `levelsof` and `unab` are Verified.
+- **Tests:** the varlist rules from Stata 19; a run whose made-up R gives names, levels and a label (names asked
+  once, then again after `generate`); Live asking and replaying; in the app, a typed `local m = r(mean)` and a
+  typed loop over `x-y` with a real R, and the window's do-file with a range.
+- **Not done:** abbreviations in plain varlists and in expressions (`generate z = pri*2`), varlists inside options
+  (`by()`, `vce(cluster ...)`), patterns inside interactions (`c.x*#i.g`), `ds`; `: type`, `: format`,
+  `: value label`; programs, `input` blocks, Mata; the coverage per tier (P2C.8) and StatCraft's probe do-files as
+  inputs (P2C.9).

@@ -339,7 +339,7 @@ skipped. It never gives a silent wrong answer.
   rules R does not share: missing values sorting high, variable
   abbreviations and wildcards, `_n`/`_N`, `by` state, `preserve`/`restore`,
   macros, storage types. Installed on first use, with the user's yes.
-  (done differently 2026-10-31: there is no package to install. Stata's rules live in RCraft's helpers, written into the script itself, and in the do-file runner (`statatr::dofile`: macros, loops, `if`, `while`, files). Not yet: abbreviated variable names, wildcards and ranges in a varlist, which need the data's names.)
+  (done differently 2026-10-31: there is no package to install. Stata's rules live in RCraft's helpers, written into the script itself, and in the do-file runner (`statatr::dofile`: macros, loops, `if`, `while`, files). Wildcards, ranges and `_all` in varlists use the data's names from R (part two, the same day); not yet: abbreviations in plain varlists and expressions.)
 - P2C.5 Emit: idiomatic R where Stata and R agree, calls into
   `rcraftstata` where they differ; a line map kept
   (done 2026-10-31: each line keeps its file, line, text as written and loop round, `dofile::Origin`.)
@@ -357,7 +357,7 @@ skipped. It never gives a silent wrong answer.
 - P2C.9 Verification: StatCraft's probe do-files as the first inputs,
   recorded Stata results in a private corpus (never committed), compared to
   about 8 significant digits; a command is `Verified` only on a match
-  (started 2026-10-31: `control.do` in the corpus checks macros, loops and include against Stata 19; StatCraft's probe do-files and public replication packages are still to come.)
+  (started 2026-10-31: `control.do` and `aware.do` in the corpus check macros, loops, include, varlists from the data, levelsof and unab against Stata 19; StatCraft's probe do-files and public replication packages are still to come.)
 - P2C.10 Known limits stated up front: Stata's random draws, Mata, compiled
   plugins, interactive commands
   (done 2026-10-31: the scan lists those the do-file uses.)

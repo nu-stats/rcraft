@@ -25,9 +25,8 @@ pub trait Env {
 /// Why a line's macros could not all be replaced.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Stop {
-    /// R works it out when the do-file runs: the value of this expression,
-    /// or (`display`) the text `display` prints.
-    Ask { exp: String, display: bool },
+    /// R works it out when the do-file runs.
+    Ask(Need),
     /// It is known only when the do-file runs, or R could not work it out;
     /// why, in words.
     Later(String),
@@ -35,6 +34,30 @@ pub enum Stop {
     Not(String),
     /// Stata stops here with this error.
     Stata(String),
+}
+
+/// What R is asked for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Need {
+    /// The value of this expression, as a macro keeps it.
+    Value(String),
+    /// The text `display` prints for this.
+    Display(String),
+    /// The names of the data's variables, in their order.
+    Names,
+    /// What this R prints, as it is; and what it is, in words.
+    R(String, String),
+}
+
+impl Need {
+    /// What is asked for, in words.
+    pub fn what(&self) -> String {
+        match self {
+            Need::Value(e) | Need::Display(e) => e.clone(),
+            Need::Names => "the names of the data's variables".into(),
+            Need::R(_, what) => what.clone(),
+        }
+    }
 }
 
 const ESC_TICK: char = '\u{E000}';
@@ -135,6 +158,15 @@ fn local_value(inside: &str, env: &mut dyn Env) -> Result<String, Stop> {
             env.set_local(name, new.clone());
             return Ok(if pre.is_empty() { old } else { new });
         }
+    }
+    // `r(levels)', `e(cmd)', `c(pwd)': a stored result, as `=r(levels)' gives
+    // it (Stata 19: `r(mean)' is %18.0g, as a macro keeps a number)
+    let stored = inside.len() > 3
+        && matches!(inside.as_bytes().first(), Some(b'r' | b'e' | b's' | b'c'))
+        && inside.get(1..2) == Some("(")
+        && inside.ends_with(')');
+    if stored {
+        return env.inline(inside);
     }
     env.local(inside)
 }

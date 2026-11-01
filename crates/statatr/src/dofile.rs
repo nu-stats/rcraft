@@ -22,6 +22,7 @@ mod eval;
 mod format;
 mod macros;
 mod scan;
+mod varlist;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
@@ -30,7 +31,7 @@ use crate::data_r::{Line, RCode, Translation, Translator, ValueCode};
 use crate::reader::{self, Command, ForeachList, Group, Item, Opener, Prefix, Span};
 
 pub use format::g as stata_g;
-pub use macros::{expand, words, Env, Stop};
+pub use macros::{expand, words, Env, Need, Stop};
 pub use scan::{
     quarto, r_script, report, scan, status, CommandUse, FileRole, FileStatus, Ran, Scan, Status,
 };
@@ -145,6 +146,99 @@ pub const KNOWN_WHEN_RUN: &str = "known only when the do-file runs";
 pub const MAX_LINES: usize = 200_000;
 /// Most times a loop goes round.
 pub const MAX_ROUNDS: usize = 100_000;
+
+/// The commands whose main part is a varlist (with factor variables for the
+/// models): there a pattern, a range or `_all` is made the data's names.
+const VARLIST: &[&str] = &[
+    "summarize",
+    "tabulate",
+    "tab1",
+    "tab2",
+    "correlate",
+    "pwcorr",
+    "regress",
+    "logit",
+    "probit",
+    "poisson",
+    "nbreg",
+    "ologit",
+    "oprobit",
+    "mlogit",
+    "xtreg",
+    "ivregress",
+    "stcox",
+    "keep",
+    "drop",
+    "order",
+    "sort",
+    "list",
+    "describe",
+    "destring",
+    "tostring",
+    "histogram",
+    "kdensity",
+    "scatter",
+    "line",
+    "levelsof",
+];
+
+/// Commands that leave the data's variable names as they were.
+const NAMES_STAY: &[&str] = &[
+    "display",
+    "summarize",
+    "tabulate",
+    "tab1",
+    "tab2",
+    "correlate",
+    "pwcorr",
+    "ttest",
+    "regress",
+    "logit",
+    "probit",
+    "poisson",
+    "nbreg",
+    "ologit",
+    "oprobit",
+    "mlogit",
+    "xtreg",
+    "ivregress",
+    "anova",
+    "stcox",
+    "test",
+    "lincom",
+    "margins",
+    "estat",
+    "list",
+    "describe",
+    "count",
+    "histogram",
+    "kdensity",
+    "scatter",
+    "line",
+    "twoway",
+    "graph",
+    "lowess",
+    "set",
+    "version",
+    "log",
+    "cmdlog",
+    "pwd",
+    "cd",
+    "matrix",
+    "scalar",
+    "ereturn",
+    "return",
+    "ssc",
+    "levelsof",
+    "xtset",
+    "label",
+    "sort",
+    "gsort",
+    "browse",
+    "pause",
+    "more",
+];
+
 /// Deepest nesting of files run from files.
 const MAX_FILES_DEEP: usize = 32;
 
@@ -209,6 +303,10 @@ pub struct Run<'f> {
     pending: Vec<(String, String)>,
     waiting: Option<ValueCode>,
     done: bool,
+    /// The data's variable names, as R last gave them, while they hold.
+    vars: Option<Vec<String>>,
+    /// A local the line just added sets from what it left (`levelsof, local()`).
+    then: Option<(String, Need)>,
 }
 
 /// What doing an item came to.
@@ -218,7 +316,7 @@ enum Flow {
     /// Done; a line was added.
     Line,
     /// R must work out this first.
-    Ask { exp: String, display: bool },
+    Ask(Need),
 }
 
 impl<'f> Run<'f> {
@@ -252,6 +350,8 @@ impl<'f> Run<'f> {
             pending: Vec::new(),
             waiting: None,
             done: false,
+            vars: None,
+            then: None,
         }
     }
 
@@ -292,11 +392,23 @@ impl<'f> Run<'f> {
             match self.advance() {
                 Flow::Next => {}
                 Flow::Line => return Event::Line,
-                Flow::Ask { exp, display } => {
-                    let code = if display {
-                        self.t.display_code(&exp)
-                    } else {
-                        self.t.value_code(&exp)
+                Flow::Ask(need) => {
+                    let code = match &need {
+                        Need::Value(exp) => self.t.value_code(exp),
+                        Need::Display(rest) => self.t.display_code(rest),
+                        Need::Names => match self.t.data() {
+                            Some(d) => Ok(ValueCode {
+                                code: format!("cat(names({d}), sep = \"\n\")"),
+                                text: true,
+                            }),
+                            None => Err(crate::expr_r::Untranslated {
+                                reason: "there is no data in memory".into(),
+                            }),
+                        },
+                        Need::R(code, _) => Ok(ValueCode {
+                            code: code.clone(),
+                            text: true,
+                        }),
                     };
                     match code {
                         Ok(code) => {
@@ -306,7 +418,7 @@ impl<'f> Run<'f> {
                         // R cannot be asked: the item is done again without it
                         Err(e) => self.answers.push(Err(format!(
                             "{} is not translated: {}",
-                            exp.trim(),
+                            need.what().trim(),
                             e.reason
                         ))),
                     }
@@ -351,6 +463,21 @@ impl<'f> Run<'f> {
 
     fn advance(&mut self) -> Flow {
         let depth = self.frames.len();
+        // a local the line before set from what it left in R, now it has run
+        if let Some((name, need)) = self.then.clone() {
+            self.asked = 0;
+            match self.ask(need) {
+                Ok(v) => self.set_local_now(&name, Macro::Text(v)),
+                Err(Stop::Ask(n)) => return Flow::Ask(n),
+                Err(e) => self.set_local_now(
+                    &name,
+                    Macro::Later(format!("is set from what a line left, {}", stop_reason(&e))),
+                ),
+            }
+            self.then = None;
+            self.answers.clear();
+            return Flow::Next;
+        }
         let Some(top) = self.frames.last() else {
             self.done = true;
             return Flow::Next;
@@ -430,7 +557,7 @@ impl<'f> Run<'f> {
                         self.answers.clear();
                         Flow::Next
                     }
-                    Err(Stop::Ask { exp, display }) => Flow::Ask { exp, display },
+                    Err(Stop::Ask(need)) => Flow::Ask(need),
                     other => {
                         self.frames.pop();
                         self.answers.clear();
@@ -467,7 +594,7 @@ impl<'f> Run<'f> {
         let written = c.text.clone();
         let expanded = match macros::expand(&written, self) {
             Ok(t) => self.map_paths(&t),
-            Err(Stop::Ask { exp, display }) => return Flow::Ask { exp, display },
+            Err(Stop::Ask(need)) => return Flow::Ask(need),
             Err(e) => {
                 self.done_item(depth);
                 let what = if matches!(e, Stop::Later(_)) {
@@ -525,7 +652,7 @@ impl<'f> Run<'f> {
             "local" | "global" => {
                 let global = c.name == "global";
                 match self.define(&rest, global) {
-                    Err(Stop::Ask { exp, display }) => Flow::Ask { exp, display },
+                    Err(Stop::Ask(need)) => Flow::Ask(need),
                     Ok(info) => {
                         self.done_item(depth);
                         self.push(nothing(c), What::Macro, Some(info), written);
@@ -618,6 +745,47 @@ impl<'f> Run<'f> {
                     });
                 }
                 self.push(line, What::Macro, Some(made.join(", ")), written);
+                Flow::Line
+            }
+            "unab" => {
+                let (name, list) = rest.split_once(':').unwrap_or(("", ""));
+                let name = name.trim();
+                let list = list.split(',').next().unwrap_or("").trim();
+                if !macros::is_name(name) || list.is_empty() {
+                    self.done_item(depth);
+                    let line = self.t.refused(
+                        c.span,
+                        c.text.clone(),
+                        "Stata stops here with an error: unab name : varlist",
+                    );
+                    self.push(line, What::Command, None, written);
+                    return Flow::Line;
+                }
+                let vars = match self.vars_now() {
+                    Err(Stop::Ask(need)) => return Flow::Ask(need),
+                    Err(e) => Err(stop_reason(&e)),
+                    Ok(None) => Err(format!("the data's variable names are {KNOWN_WHEN_RUN}")),
+                    Ok(Some(v)) => varlist::expand(list, &v)
+                        .map_err(|e| format!("Stata stops here with an error: {e}")),
+                };
+                self.done_item(depth);
+                match vars {
+                    Ok(v) => {
+                        let info = show(name, &v);
+                        self.set_local_now(name, Macro::Text(v));
+                        self.push(nothing(c), What::Macro, Some(info), written);
+                    }
+                    Err(why) => {
+                        self.set_local_now(name, Macro::Later(format!("is set by unab: {why}")));
+                        let what = if why.contains(KNOWN_WHEN_RUN) {
+                            What::Later
+                        } else {
+                            What::Command
+                        };
+                        let line = self.t.refused(c.span, c.text.clone(), why);
+                        self.push(line, what, None, written);
+                    }
+                }
                 Flow::Line
             }
             "do" | "run" | "include" => {
@@ -714,20 +882,86 @@ impl<'f> Run<'f> {
                 Flow::Line
             }
             _ => {
+                // a pattern, range or _all in a varlist: the data's names
+                let mut c = c.clone();
+                let mut info = None;
+                let main = c.parts.main.clone();
+                if VARLIST.contains(&c.name.as_str()) && varlist::needs_names(&main) {
+                    match self.vars_now() {
+                        Err(Stop::Ask(need)) => return Flow::Ask(need),
+                        Ok(Some(vars)) => match varlist::expand(&main, &vars) {
+                            Ok(m) => {
+                                if m != main {
+                                    info = Some(format!("the variables: {m}"));
+                                    c.parts.main = m;
+                                }
+                            }
+                            Err(e) => {
+                                self.done_item(depth);
+                                let line = self.t.refused(
+                                    c.span,
+                                    c.text.clone(),
+                                    format!("Stata stops here with an error: {e}"),
+                                );
+                                self.push(line, What::Command, None, written);
+                                return Flow::Line;
+                            }
+                        },
+                        // as written: the translator takes what it can
+                        Ok(None) | Err(_) => {}
+                    }
+                }
+                let c = &c;
                 self.done_item(depth);
                 if c.name == "clear" && matches!(rest.trim(), "all" | "*") {
                     self.programs.clear();
                 }
                 let line = self.t.command(c);
+                // levelsof, local(name): the local is set from r(levels) once the line has run
+                if c.name == "levelsof" && line.result.is_ok() {
+                    let local = c.options.iter().find(|o| o.is("local", 3));
+                    if let Some(name) = local
+                        .and_then(|o| o.arg.as_deref())
+                        .map(str::trim)
+                        .filter(|n| macros::is_name(n))
+                    {
+                        self.then = Some((name.to_string(), Need::Value("r(levels)".into())));
+                    }
+                }
                 let index = self.lines.len();
                 self.file_refs(c, index);
                 if c.name == "cd" && line.result.is_ok() {
                     let dir = clean_path(&c.parts.main);
                     self.cwd = join(&self.cwd, &dir);
                 }
-                self.push(line, What::Command, None, written);
+                self.push(line, What::Command, info, written);
                 Flow::Line
             }
+        }
+    }
+
+    /// The data's variable names, from R (asked again only after a line
+    /// that may have changed them); `None` when there are no data, or no R
+    /// to ask (a dry run).
+    fn vars_now(&mut self) -> Result<Option<Vec<String>>, Stop> {
+        if self.t.data().is_none() {
+            return Ok(None);
+        }
+        if let Some(v) = &self.vars {
+            return Ok(Some(v.clone()));
+        }
+        match self.ask(Need::Names) {
+            Ok(text) => {
+                let v: Vec<String> = text
+                    .lines()
+                    .map(|l| l.trim().to_string())
+                    .filter(|l| !l.is_empty())
+                    .collect();
+                self.vars = Some(v.clone());
+                Ok(Some(v))
+            }
+            Err(Stop::Later(_)) => Ok(None),
+            Err(e) => Err(e),
         }
     }
 
@@ -773,7 +1007,7 @@ impl<'f> Run<'f> {
             match eval::eval_text(exp) {
                 Ok(v) => v.macro_text(),
                 Err(eval::NotHere::Stata(m)) => return Err(Stop::Stata(m)),
-                Err(eval::NotHere::Later) => match self.ask(exp.trim(), false) {
+                Err(eval::NotHere::Later) => match self.ask(Need::Value(exp.trim().to_string())) {
                     Ok(v) => v,
                     Err(Stop::Later(why)) => {
                         self.set_macro(
@@ -816,15 +1050,12 @@ impl<'f> Run<'f> {
 
     /// A value from R for the item being done: the next answer given, or a
     /// question if it has not been asked yet.
-    fn ask(&mut self, exp: &str, display: bool) -> Result<String, Stop> {
+    fn ask(&mut self, need: Need) -> Result<String, Stop> {
         if let Some(a) = self.answers.get(self.asked).cloned() {
             self.asked += 1;
             return a.map_err(Stop::Later);
         }
-        Err(Stop::Ask {
-            exp: exp.to_string(),
-            display,
-        })
+        Err(Stop::Ask(need))
     }
 
     fn group(&mut self, g: &Group, depth: usize) -> Flow {
@@ -844,7 +1075,7 @@ impl<'f> Run<'f> {
                 let written = format!("foreach {name} {header} {text} {{");
                 let expanded = match macros::expand(&text, self) {
                     Ok(t) => t,
-                    Err(Stop::Ask { exp, display }) => return Flow::Ask { exp, display },
+                    Err(Stop::Ask(need)) => return Flow::Ask(need),
                     Err(e) => return self.refuse_block(g, depth, written, &e),
                 };
                 let values = match list {
@@ -853,6 +1084,7 @@ impl<'f> Run<'f> {
                 };
                 let values = match values {
                     Ok(v) => v,
+                    Err(Stop::Ask(need)) => return Flow::Ask(need),
                     Err(e) => return self.refuse_block(g, depth, written, &e),
                 };
                 let shown = format!("foreach {name} {header} {} {{", expanded.trim());
@@ -863,7 +1095,7 @@ impl<'f> Run<'f> {
                 let written = format!("forvalues {name} = {range} {{");
                 let expanded = match macros::expand(range, self) {
                     Ok(t) => t,
-                    Err(Stop::Ask { exp, display }) => return Flow::Ask { exp, display },
+                    Err(Stop::Ask(need)) => return Flow::Ask(need),
                     Err(e) => return self.refuse_block(g, depth, written, &e),
                 };
                 let values = match forvalues(&expanded) {
@@ -877,7 +1109,7 @@ impl<'f> Run<'f> {
             Opener::While { condition } => {
                 let written = format!("while {condition} {{");
                 match self.condition(condition) {
-                    Err(Stop::Ask { exp, display }) => Flow::Ask { exp, display },
+                    Err(Stop::Ask(need)) => Flow::Ask(need),
                     Err(e) => self.refuse_block(g, depth, written, &e),
                     Ok(None) => self.refuse_block(
                         g,
@@ -911,7 +1143,7 @@ impl<'f> Run<'f> {
             Opener::If { condition } => {
                 let written = format!("{}if {condition} {{", if g.else_if { "else " } else { "" });
                 match self.condition(condition) {
-                    Err(Stop::Ask { exp, display }) => Flow::Ask { exp, display },
+                    Err(Stop::Ask(need)) => Flow::Ask(need),
                     Err(e) => self.refuse_block(g, depth, written, &e),
                     Ok(None) => self.refuse_block(
                         g,
@@ -1071,7 +1303,7 @@ impl<'f> Run<'f> {
             Ok(eval::Val::Str(_)) => Ok(None),
             Err(eval::NotHere::Stata(m)) => Err(Stop::Stata(m)),
             Err(eval::NotHere::Later) => {
-                let v = self.ask(text.trim(), false)?;
+                let v = self.ask(Need::Value(text.trim().to_string()))?;
                 Ok(Some(v.trim() != "0"))
             }
         }
@@ -1091,16 +1323,18 @@ impl<'f> Run<'f> {
             "numlist" => numlist(list).map_err(Stop::Stata),
             "newlist" => Ok(words(list)),
             "varlist" => {
-                let ws = words(list);
-                if let Some(w) = ws
-                    .iter()
-                    .find(|w| w.contains(['*', '?', '~', '-']) || *w == "_all")
-                {
-                    return Err(Stop::Not(format!(
-                        "foreach over a varlist with {w} needs the names of the data's variables, which the translator does not have yet"
-                    )));
+                if !varlist::needs_names(list) {
+                    return Ok(words(list));
                 }
-                Ok(ws)
+                match self.vars_now()? {
+                    Some(vars) => varlist::expand(list, &vars)
+                        .map(|t| words(&t))
+                        .map_err(Stop::Stata),
+                    None => Err(Stop::Later(format!(
+                        "foreach over {}: the data's variable names are {KNOWN_WHEN_RUN}",
+                        list.trim()
+                    ))),
+                }
             }
             other => Err(Stop::Stata(format!(
                 "foreach ... of {other}: Stata has no such list"
@@ -1242,6 +1476,14 @@ impl<'f> Run<'f> {
     // ---------------- lines ----------------
 
     fn push(&mut self, line: Line, what: What, info: Option<String>, written: String) {
+        // a line that may have changed the data's variables: R is asked their names again
+        if matches!(what, What::Command | What::Later) {
+            let word = scan::command_word(&line.stata);
+            let full = crate::lang::commands::resolve(&word);
+            if line.result.is_err() || !NAMES_STAY.contains(&full) {
+                self.vars = None;
+            }
+        }
         let file = self
             .frames
             .iter()
@@ -1406,7 +1648,7 @@ impl Env for Run<'_> {
         match eval::eval_text(exp) {
             Ok(v) => Ok(v.macro_text()),
             Err(eval::NotHere::Stata(m)) => Err(Stop::Stata(m)),
-            Err(eval::NotHere::Later) => self.ask(exp.trim(), false),
+            Err(eval::NotHere::Later) => self.ask(Need::Value(exp.trim().to_string())),
         }
     }
 
@@ -1475,7 +1717,58 @@ impl Env for Run<'_> {
                 }
                 Ok(out)
             }
-            "display" | "di" | "dis" | "disp" | "displ" | "displa" => self.ask(rest.trim(), true),
+            "display" | "di" | "dis" | "disp" | "displ" | "displa" => self.ask(Need::Display(rest.trim().to_string())),
+            "variable" if split_word(rest).0 == "label" => {
+                let var = split_word(rest).1.trim();
+                let d = self
+                    .t
+                    .data()
+                    .ok_or_else(|| Stop::Stata("no variables defined".into()))?
+                    .to_string();
+                let v = crate::expr_r::r_text(var);
+                self.ask(Need::R(
+                    format!("cat({{ l <- attr({d}[[{v}]], \"label\", exact = TRUE); if (is.null(l)) \"\" else l }})"),
+                    format!("the label of {var}"),
+                ))
+            }
+            // `: label (var) #` from the data's labels; `: label set #` from the do-file's label define
+            "label" => {
+                let arg = rest.trim();
+                let number = |value: &str| -> Result<f64, Stop> {
+                    value
+                        .parse()
+                        .map_err(|_| Stop::Stata(format!(": label: {value} is not a number")))
+                };
+                if let Some(inner) = arg.strip_prefix('(') {
+                    let (var, value) = inner.split_once(')').unwrap_or((inner, ""));
+                    let value = value.split(',').next().unwrap_or("").trim();
+                    let x = number(value)?;
+                    let d = self
+                        .t
+                        .data()
+                        .ok_or_else(|| Stop::Stata("no variables defined".into()))?
+                        .to_string();
+                    let v = crate::expr_r::r_text(var.trim());
+                    return self.ask(Need::R(
+                        format!(
+                            "cat({{ l <- attr({d}[[{v}]], \"labels\", exact = TRUE); k <- names(l)[!is.na(l) & l == {}]; if (length(k)) k[1] else {} }})",
+                            crate::expr_r::r_number(x),
+                            crate::expr_r::r_text(value)
+                        ),
+                        format!("the label of {value} in {}", var.trim()),
+                    ));
+                }
+                let (set, value) = split_word(arg);
+                let x = number(value.split(',').next().unwrap_or("").trim())?;
+                self.t.label_text(set, x).ok_or_else(|| {
+                    Stop::Not(format!(
+                        ": label {set}: the value label {set} is not defined in the do-file (a value label read with the data has no name in R)"
+                    ))
+                })
+            }
+            "type" | "value" | "format" => Err(Stop::Not(format!(
+                "the macro function : {word} is not translated: R does not keep Stata's storage types, value-label names or display formats"
+            ))),
             _ => {
                 let name: Vec<&str> = text.split_whitespace().take(2).collect();
                 Err(Stop::Not(format!(
@@ -1566,7 +1859,7 @@ fn stop_reason(e: &Stop) -> String {
         Stop::Later(why) => why.clone(),
         Stop::Not(why) => why.clone(),
         Stop::Stata(m) => format!("Stata stops here with an error: {m}"),
-        Stop::Ask { exp, .. } => format!("{exp} is {KNOWN_WHEN_RUN}"),
+        Stop::Ask(need) => format!("{} is {KNOWN_WHEN_RUN}", need.what()),
     }
 }
 

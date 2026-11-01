@@ -205,7 +205,7 @@ fn cd_moves_the_folder_and_paths_can_be_mapped() {
 #[test]
 fn what_is_not_run_says_why() {
     let d = run(
-        "program define hello\n  display \"hi\"\nend\nhello\nmata:\n  x = 1\nend\nforeach v of varlist x* {\n  summarize `v'\n}\nlocal t : variable label price",
+        "program define hello\n  display \"hi\"\nend\nhello\nmata:\n  x = 1\nend\nuse auto\nforeach v of varlist x* {\n  summarize `v'\n}\nlocal t : type price",
     );
     let s = shown(&d);
     assert!(
@@ -214,13 +214,14 @@ fn what_is_not_run_says_why() {
     );
     assert!(s[1].contains("not: this runs hello"), "{s:?}");
     assert!(s[2].contains("Mata"), "{s:?}");
+    // a dry run has no names to ask for
     assert!(
-        s[3].contains("needs the names of the data's variables"),
+        s[4].contains("Later") && s[4].contains("variable names are known only when"),
         "{s:?}"
     );
-    assert!(s[4].contains("inside a block that is not run"), "{s:?}");
+    assert!(s[5].contains("inside a block that is not run"), "{s:?}");
     assert!(
-        s[5].contains("variable label is not translated yet"),
+        s[6].contains(": type is not translated: R does not keep"),
         "{s:?}"
     );
     let sc = scan(&d);
@@ -330,4 +331,79 @@ fn paths_are_joined_and_mapped() {
         ),
         "use \"/s/x\""
     );
+}
+
+/// A run whose R is made up: the data's names, r(levels) and a label.
+fn run_with(text: &str, names_asked: &mut usize) -> DoFile {
+    let mut r = Run::new(text, &NoFiles, Options::default());
+    loop {
+        match r.next_event() {
+            Event::Line => {}
+            Event::Ask(v) => {
+                let answer = if v.code.contains("cat(names(") {
+                    *names_asked += 1;
+                    "y\nx1\nx2\nx3\nprice\ng".to_string()
+                } else if v.code.contains("\"levels\"") {
+                    "1 2".to_string()
+                } else if v.code.contains("\"label\"") {
+                    "First x".to_string()
+                } else {
+                    return r.finish();
+                };
+                r.give(Ok(answer));
+            }
+            Event::Done => return r.finish(),
+        }
+    }
+}
+
+#[test]
+fn the_datas_names_come_from_r_when_a_varlist_needs_them() {
+    let mut asked = 0;
+    let d = run_with(
+        "use d\nforeach v of varlist x* {\n  summarize `v'\n}\nregress y x1-x3\nlevelsof g, local(gs)\n\
+         foreach k of local gs {\n  display `k'\n}\nunab u : x* pri\ndisplay \"`u'\"\n\
+         local lab : variable label x1\nlabel define yn 0 \"no\" 1 \"yes\"\nlocal t : label yn 1\n\
+         local t2 : label yn 7\ndisplay \"`lab' `t' `t2'\"\nkeep x~\ngenerate z = 1\nsummarize x*",
+        &mut asked,
+    );
+    let s = shown(&d);
+    assert_eq!(
+        stata_lines(&d, "summarize"),
+        [
+            "summarize x1",
+            "summarize x2",
+            "summarize x3",
+            "summarize x*"
+        ],
+        "{s:?}"
+    );
+    let reg = s
+        .iter()
+        .find(|l| l.starts_with("regress"))
+        .cloned()
+        .unwrap_or_default();
+    assert!(reg.contains("the variables: y x1 x2 x3"), "{reg}");
+    assert!(d
+        .translation
+        .lines
+        .iter()
+        .any(|l| l.stata == "regress y x1-x3" && l.result.is_ok()));
+    assert_eq!(
+        stata_lines(&d, "display"),
+        [
+            "display 1",
+            "display 2",
+            "display \"x1 x2 x3 price\"",
+            "display \"First x yes 7\""
+        ],
+        "{s:?}"
+    );
+    assert!(
+        s.iter()
+            .any(|l| l.starts_with("keep x~") && l.contains("x~ ambiguous abbreviation")),
+        "{s:?}"
+    );
+    // asked once, kept while the lines leave the names alone, asked again after generate
+    assert_eq!(asked, 2, "{s:?}");
 }

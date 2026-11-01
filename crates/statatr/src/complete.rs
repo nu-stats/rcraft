@@ -89,6 +89,7 @@ pub const COMMANDS: &[&str] = &[
     "kdensity",
     "keep",
     "label",
+    "levelsof",
     "lincom",
     "line",
     "list",
@@ -139,6 +140,7 @@ pub const COMMANDS: &[&str] = &[
     "tostring",
     "ttest",
     "twoway",
+    "unab",
     "use",
     "version",
     "while",
@@ -228,6 +230,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("label", &["add", "modify", "replace"]),
+    ("levelsof", &["clean", "local(", "missing", "separate("]),
     ("lincom", &["eform", "irr", "level(", "or", "rrr"]),
     ("line", &["by(", "legend(", "nodraw", "sort"]),
     (
@@ -1038,6 +1041,7 @@ mod tests {
             "tempfile",
             "tempname",
             "tempvar",
+            "unab",
             "while",
         ];
         for cmd in COMMANDS.iter().filter(|c| !reader.contains(c)) {

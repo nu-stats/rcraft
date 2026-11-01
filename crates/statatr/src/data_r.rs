@@ -252,6 +252,25 @@ impl Translator {
         }
     }
 
+    /// The R name of the data in memory, if there is any.
+    pub fn data(&self) -> Option<&str> {
+        self.s.data.as_deref()
+    }
+
+    /// The text a value label set the do-file defined gives `value`: the
+    /// value itself when the set has no text for it (as `: label set #`);
+    /// `None` when the do-file did not define the set.
+    pub fn label_text(&self, set: &str, value: f64) -> Option<String> {
+        let pairs = self.s.label_sets.get(set)?;
+        Some(
+            pairs
+                .iter()
+                .find(|(v, _)| *v == value)
+                .map(|(_, t)| t.clone())
+                .unwrap_or_else(|| crate::dofile::stata_g(value, 18)),
+        )
+    }
+
     /// The helpers the lines so far call: each one's name and its R.
     pub fn helpers(&self) -> Vec<(&'static str, &'static str)> {
         self.s
@@ -371,6 +390,7 @@ const LEAVE_DATA_ALONE: &[&str] = &[
     "list",
     "describe",
     "count",
+    "levelsof",
     "test",
     "lincom",
     "estat",
@@ -400,6 +420,26 @@ const FLOAT_HELPER: &str = "stata_float <- function(x) {\n  y <- readBin(writeBi
 /// A column with decimals rounded to float, as `import delimited` stores it
 /// (whole numbers stay as they are: Stata keeps them exactly).
 const IMPORT_FLOAT_HELPER: &str = "stata_import_float <- function(d) {\n  for (n in names(d)) {\n    v <- d[[n]]\n    if (is.numeric(v) && any(!is.na(v) & v != trunc(v))) d[[n]] <- stata_float(v)\n  }\n  d\n}";
+
+/// `levelsof`'s values as Stata 19 writes them: sorted, numbers in %18.0g
+/// (missing left out, or `.` last with `missing`), text in compound quotes
+/// (`""` first with `missing`; `clean` without quotes); r(r) the number of
+/// values and r(N) the rows that count.
+const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, sep = " ", missing = FALSE) {
+  if (is.character(x)) {
+    x[is.na(x)] <- ""
+    keep <- if (missing) rep(TRUE, length(x)) else x != ""
+    v <- sort(unique(x[keep]), method = "radix")
+    s <- if (clean) v else paste0("`\"", v, "\"'")
+  } else {
+    x <- as.numeric(x)
+    keep <- if (missing) rep(TRUE, length(x)) else !is.na(x)
+    v <- sort(unique(x[!is.na(x)]))
+    s <- vapply(v, function(z) stata_fmt(z, "%18.0g", trim = TRUE), "")
+    if (missing && anyNA(x)) s <- c(s, ".")
+  }
+  list(levels = paste(s, collapse = sep), r = length(s), N = sum(keep))
+}"#;
 
 /// Names for Excel columns, A to Z, AA, AB ..., from the `first`-th column.
 const EXCEL_NAMES_HELPER: &str = "stata_excel_names <- function(n, first = 1) {\n  vapply(seq_len(n) + first - 1, function(i) {\n    s <- \"\"\n    while (i > 0) {\n      s <- paste0(LETTERS[(i - 1) %% 26 + 1], s)\n      i <- (i - 1) %/% 26\n    }\n    s\n  }, \"\")\n}";
@@ -459,6 +499,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_scalar" => scalars::SCALAR_HELPER,
         "stata_tables" => tables::TABLES_HELPER,
         "stata_import_float" => IMPORT_FLOAT_HELPER,
+        "stata_levelsof" => LEVELSOF_HELPER,
         "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
         _ => FLOAT_HELPER,
     }
@@ -1068,6 +1109,7 @@ impl Session {
             "order" => self.order(c, &opts, out),
             "label" => self.label(c, &opts, out),
             "count" => self.count(c, out),
+            "levelsof" => self.levelsof(c, &opts, out),
             "list" => self.list(c, &opts, out),
             "describe" => self.describe(c, out),
             "set" => self.set(c, out),
@@ -1872,6 +1914,56 @@ impl Session {
         self.r_new = Some((returned::R_COUNT, "count".into()));
         if !Self::quiet(c) {
             out.line("cat(format(stata_r$N, big.mark = \",\"), \"\\n\")");
+        }
+        Ok(())
+    }
+
+    /// `levelsof`: the distinct values, printed and left in r(levels) as
+    /// Stata 19 writes them (numbers in %18.0g, text in compound quotes);
+    /// `local()` is set from r(levels) by the do-file runner once it has run.
+    fn levelsof(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        let d = self.data()?;
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            return Err(no("by with levelsof is not translated yet"));
+        }
+        if let Some(o) = opts.other(&[("clean", 1), ("local", 3), ("missing", 4), ("separate", 3)])
+        {
+            return Err(no(format!(
+                "levelsof with the option {o} is not translated yet"
+            )));
+        }
+        let vars = names(&c.parts.main)?;
+        let [var] = vars.as_slice() else {
+            return Err(no(
+                "levelsof takes one variable (Stata: too many variables specified)",
+            ));
+        };
+        let rows = match self.condition(c, out)? {
+            Some(cond) => format!("dplyr::filter({d}, {cond})"),
+            None => d.to_string(),
+        };
+        let sep = opts.arg("separate", 3).unwrap_or_else(|| " ".into());
+        out.package("dplyr");
+        self.helpers.insert("stata_fmt");
+        self.helpers.insert("stata_levelsof");
+        out.line(format!(
+            "stata_r <- stata_levelsof({rows}[[{}]], clean = {}, sep = {}, missing = {})",
+            r_text(var),
+            if opts.has("clean", 1) {
+                "TRUE"
+            } else {
+                "FALSE"
+            },
+            r_text(&sep),
+            if opts.has("missing", 4) {
+                "TRUE"
+            } else {
+                "FALSE"
+            },
+        ));
+        self.r_new = Some((returned::R_LEVELSOF, "levelsof".into()));
+        if !Self::quiet(c) {
+            out.line("cat(stata_r$levels, \"\\n\", sep = \"\")");
         }
         Ok(())
     }

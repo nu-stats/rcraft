@@ -14,9 +14,9 @@ use std::path::Path;
 
 use eframe::egui::{self, RichText};
 use rcraft_statatr::complete::{self, Completion, Context};
-use rcraft_statatr::data_r::{translate, Translation, STATA_COMMENT};
+use rcraft_statatr::data_r::{Translation, STATA_COMMENT};
+use rcraft_statatr::dofile::{dry_run, NoFiles, Options};
 use rcraft_statatr::live::{Live, HELPERS_BEGIN, HELPERS_END};
-use rcraft_statatr::reader::read;
 
 use crate::look::Palette;
 
@@ -43,6 +43,9 @@ pub struct StataMode {
     at: Option<usize>,
     /// The script's translation, with the text it was made from.
     view: Option<(String, Translation)>,
+    /// A typed line waiting for a value R works out out of sight: the
+    /// question, and the line to step again with the answer.
+    pub asking: Option<(rcraft_engine::QueryId, rcraft_engine::Source, String)>,
 }
 
 impl StataMode {
@@ -83,7 +86,9 @@ impl StataMode {
     /// The script's translation, made again only when the script changed.
     pub fn translation(&mut self, script: &str) -> &Translation {
         if self.view.as_ref().is_none_or(|(s, _)| s != script) {
-            self.view = Some((script.to_string(), translate(&read(script))));
+            // run as a do-file is (macros set, loops round by round), without R
+            let t = dry_run(script, &NoFiles, Options::default()).translation;
+            self.view = Some((script.to_string(), t));
         }
         let (_, t) = self
             .view

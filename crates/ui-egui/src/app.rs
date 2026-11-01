@@ -651,6 +651,13 @@ impl App {
                     // the translator moves on only if R takes the line
                     let before = self.stata.live.clone();
                     let step = self.stata.live.step(&text);
+                    // a value only R knows first (local m = r(mean)): asked out of
+                    // sight, and the line stepped again with the answer
+                    if let Some(code) = step.ask {
+                        let q = engine.query(&code);
+                        self.stata.asking = Some((q, source, text));
+                        return;
+                    }
                     match engine.submit(source.clone(), &step.code) {
                         Ok(_) => {
                             self.message = None;
@@ -1210,6 +1217,28 @@ impl App {
             Some(HelpOut::Run(code)) => actions.push(Action::Submit(Source::Typed, code)),
             Some(HelpOut::FindPackages(topic)) => actions.push(Action::FindPackagesFor(topic)),
             None => {}
+        }
+
+        // a typed Stata line waiting for a value from R
+        if let Some((q, source, text)) = self.stata.asking.clone() {
+            let answer = match &self.engine {
+                EngineState::Ready(e) => e.query_result(q).map(|r| {
+                    if r.ok {
+                        Ok(r.text.clone())
+                    } else {
+                        Err(format!("R could not work the value out: {}", r.text.trim()))
+                    }
+                }),
+                _ => Some(Err("R is not running".into())),
+            };
+            match answer {
+                Some(a) => {
+                    self.stata.asking = None;
+                    self.stata.live.give(a);
+                    actions.push(Action::SubmitStata(source, text));
+                }
+                None => ctx.request_repaint_after(Duration::from_millis(30)),
+            }
         }
 
         // the do-file run moves on as R lets it, in the session it started in
@@ -2457,7 +2486,10 @@ impl App {
     pub fn is_settled(&self) -> bool {
         match &self.engine {
             EngineState::Ready(e) => {
-                !e.is_working() && !self.help_window.is_busy() && !self.dofile.is_running()
+                !e.is_working()
+                    && !self.help_window.is_busy()
+                    && !self.dofile.is_running()
+                    && self.stata.asking.is_none()
             }
             EngineState::Failed(_) => true,
             EngineState::Starting(_) => false,
@@ -3643,7 +3675,7 @@ mod tests {
         let _ = std::fs::write(
             &dofile,
             "import delimited d.csv, clear\nsummarize y\nlocal m = r(mean)\ngenerate dy = y - `m'\n\
-             foreach v of varlist x y {\n  quietly summarize `v'\n  display \"@`v' \" r(max)\n}\n\
+             foreach v of varlist x-y {\n  quietly summarize `v'\n  display \"@`v' \" r(max)\n}\n\
              bogus line\ndisplay \"after\"\nregress y nosuchvar\ndisplay \"end\"\n",
         );
         let stopped = |a: &App| {
@@ -3682,6 +3714,46 @@ mod tests {
         );
         // the data it left are shown
         assert!(frames_until(&mut app, &ctx, |a| a.dataset.as_deref() == Some("d")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P2C part two: a typed Stata line whose value only R knows is worked
+    /// out by R first, and the lines after it use it.
+    #[test]
+    fn a_typed_stata_line_gets_a_value_from_r() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("rcraft-typed-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join("d.csv"), "x,y\n1,2\n2,4\n3,7\n");
+        let file = dir.join("d.csv").display().to_string().replace('\\', "/");
+        app.perform(&ctx, Action::SetStataMode(true));
+        let run = |app: &mut App, line: &str| {
+            app.perform(&ctx, Action::SubmitStata(Source::Typed, line.to_string()));
+            assert!(frames_until(app, &ctx, |a| a.is_settled()), "{line}");
+        };
+        run(&mut app, &format!("import delimited \"{file}\", clear"));
+        let ok = app
+            .engine()
+            .and_then(|e| e.history().entries().last().and_then(|h| h.outcome));
+        if ok != Some(Outcome::Ok) {
+            eprintln!("skipped: readr and dplyr are needed");
+            return;
+        }
+        run(&mut app, "summarize y");
+        run(&mut app, "local m = r(mean)");
+        run(&mut app, "display `m' * 3");
+        assert!(newest_text(&app).contains("13"), "{}", newest_text(&app));
+        // a varlist with a range: the data's names from R
+        run(&mut app, "foreach v of varlist x-y {\ndisplay \"[`v']\"\n}");
+        let text = newest_text(&app);
+        assert!(text.contains("[x]") && text.contains("[y]"), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

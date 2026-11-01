@@ -16,7 +16,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("correlate", &["descriptives"]),
     ("count", &["control", "descriptives"]),
     ("egen", &["descriptives"]),
-    ("foreach", &["control"]),
+    ("foreach", &["aware", "control"]),
     ("forvalues", &["control"]),
     ("generate", &["control", "data", "descriptives"]),
     ("global", &["control"]),
@@ -24,6 +24,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     (
         "import",
         &[
+            "aware",
             "control",
             "data",
             "descriptives",
@@ -34,6 +35,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ),
     ("include", &["control"]),
     ("ivregress", &["panel"]),
+    ("label", &["aware"]),
+    ("levelsof", &["aware"]),
     ("lincom", &["regress"]),
     ("local", &["control"]),
     ("logit", &["likelihood"]),
@@ -46,16 +49,17 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("probit", &["likelihood"]),
     ("pwcorr", &["descriptives"]),
     ("recode", &["data"]),
-    ("regress", &["control", "regress"]),
+    ("regress", &["aware", "control", "regress"]),
     ("replace", &["data"]),
     ("sort", &["data"]),
     ("stcox", &["likelihood"]),
     ("stset", &["likelihood"]),
-    ("summarize", &["control", "descriptives"]),
+    ("summarize", &["aware", "control", "descriptives"]),
     ("tabulate", &["descriptives"]),
     ("tempvar", &["control"]),
     ("test", &["regress"]),
     ("ttest", &["descriptives"]),
+    ("unab", &["aware"]),
     ("while", &["control"]),
     ("xtreg", &["likelihood", "panel"]),
     ("xtset", &["likelihood", "panel"]),
@@ -83,7 +87,7 @@ mod tests {
         for c in names {
             assert!(crate::complete::COMMANDS.contains(&c), "{c}");
         }
-        assert_eq!(files("regress"), Some(&["control", "regress"][..]));
+        assert_eq!(files("regress"), Some(&["aware", "control", "regress"][..]));
         assert_eq!(files("xtlogit"), None);
     }
 }

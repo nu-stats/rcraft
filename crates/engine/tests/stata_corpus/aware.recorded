@@ -1,0 +1,15 @@
+* Stata 19.0's results for aware.do, recorded by cargo xtask stata-record
+@ mean_x       .14761666666666665
+@ mean_w     -.082200000000000009
+@ mean_z       .25206666666666666
+@ b_z      .063318947539719908
+@ nvars                        4
+@ levels_r                        2
+@ levels_N                       60
+@ ymean_0       1.2587433333333331
+@ ymean_1       2.0328966666666668
+@ ord_r                        3
+@ ord_first                        1
+@ x_second       .35199999999999998
+@ lab_ok                        1
+@ c_mean       2.0833333333333335
