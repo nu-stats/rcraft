@@ -34,6 +34,9 @@ pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robu
   # the weights the model was given (1 without): frequency ones count as copies
   pw <- fit$prior.weights
   X <- stats::model.matrix(fit)
+  # a column omitted for collinearity has zero rows, as in Stata's e(V)
+  full <- colnames(X)
+  X <- X[, !is.na(stats::coef(fit))[full], drop = FALSE]
   eta <- fit$linear.predictors
   y <- fit$y
   fam <- fit$family
@@ -62,7 +65,10 @@ pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robu
     }
   }
   dimnames(V) <- list(colnames(X), colnames(X))
-  V
+  if (length(full) == ncol(X)) return(V)
+  out <- matrix(0, length(full), length(full), dimnames = list(full, full))
+  out[colnames(X), colnames(X)] <- V
+  out
 }"#;
 
 /// The variance of nbreg's coefficients and `ln(alpha)` together, from the
@@ -103,10 +109,13 @@ pub(super) const NBREG_VCOV_HELPER: &str = r#"stata_nbreg_vcov <- function(fit) 
 /// sit at about 1e-11. The fit is then refreshed from the polished estimates
 /// (one `glm` step from there moves them by no more than the score).
 pub(super) const PROBIT_NEWTON_HELPER: &str = r#"stata_probit_newton <- function(fit) {
-  X <- stats::model.matrix(fit)
+  # a column omitted for collinearity stays out (0 to start glm again)
+  full <- stats::coef(fit)
+  est <- !is.na(full)
+  X <- stats::model.matrix(fit)[, est, drop = FALSE]
   y <- fit$y
   off <- if (is.null(fit$offset)) 0 else fit$offset
-  b <- stats::coef(fit)
+  b <- full[est]
   pw <- fit$prior.weights
   for (i in 1:25) {
     eta <- drop(X %*% b) + off
@@ -118,11 +127,20 @@ pub(super) const PROBIT_NEWTON_HELPER: &str = r#"stata_probit_newton <- function
     b <- b + step
     if (max(abs(step)) < 1e-15 * (1 + max(abs(b)))) break
   }
+  start <- rep(0, length(full))
+  start[est] <- b
+  # glm's check for collinear columns follows epsilon / 1000: with one left
+  # out, the first fit's epsilon leaves it out again
+  eps <- if (all(est)) 1e-15 else 1e-12
   # weights that are not whole numbers make binomial() warn; Stata takes them
-  withCallingHandlers(
-    stats::update(fit, start = unname(b), control = stats::glm.control(epsilon = 1e-15, maxit = 1)),
+  out <- withCallingHandlers(
+    stats::update(fit, start = start, control = stats::glm.control(epsilon = eps, maxit = 1)),
     warning = function(w) if (grepl("non-integer", conditionMessage(w))) invokeRestart("muffleWarning")
   )
+  # the terms stata_collinear fitted it without
+  out$omitted <- fit$omitted
+  out$stata_written <- fit$stata_written
+  out
 }"#;
 
 /// mlogit's coefficients as one named vector, in the order of `vcov()`.
@@ -159,7 +177,7 @@ stata_ml_header <- function(fit, robust = FALSE, nobs = NULL) {
   ll <- l[["ll"]]
   ll0 <- l[["ll_0"]]
   n <- if (is.null(nobs)) NROW(stats::fitted(fit)) else nobs
-  keep <- !grepl("(Intercept)", names(stata_b), fixed = TRUE) & !grepl("^/", names(stata_b))
+  keep <- !grepl("(Intercept)", names(stata_b), fixed = TRUE) & !grepl("^/", names(stata_b)) & !is.na(stata_b)
   q <- sum(keep)
   cat(sprintf("Number of obs   = %10d\n", n))
   if (q > 0 && robust) {
@@ -305,19 +323,27 @@ impl Session {
                     "stata_estimates <- stata_perfect(stata_estimates{})",
                     if self.quiet(c) { ", notes = FALSE" } else { "" }
                 ));
+                self.helpers.insert("stata_collinear");
+                out.line("stata_estimates <- stata_collinear(stata_estimates)");
                 if fit == Fit::Probit {
                     self.helpers.insert("stata_probit_newton");
                     out.line("stata_estimates <- stata_probit_newton(stata_estimates)");
                 }
-                out.caveat("the outcome is 1 where it is not 0 (and not missing), as Stata takes it");
+                out.caveat(
+                    "the outcome is 1 where it is not 0 (and not missing), as Stata takes it",
+                );
                 out.caveat(
                     "a variable that predicts the outcome perfectly is dealt with as Stata does: \
                      omitted with the rows it decides, or the fit stops with Stata's message",
                 );
             }
-            Fit::Poisson => out.line(format!(
-                "stata_estimates <- stats::glm({dep} ~ {right}, family = stats::poisson(), data = {src}{weights}, {control})"
-            )),
+            Fit::Poisson => {
+                out.line(format!(
+                    "stata_estimates <- stats::glm({dep} ~ {right}, family = stats::poisson(), data = {src}{weights}, {control})"
+                ));
+                self.helpers.insert("stata_collinear");
+                out.line("stata_estimates <- stata_collinear(stata_estimates)");
+            }
             Fit::Nbreg => {
                 out.package("MASS");
                 out.line(format!(
@@ -326,7 +352,11 @@ impl Session {
             }
             Fit::Ologit | Fit::Oprobit => {
                 out.package("MASS");
-                let method = if fit == Fit::Ologit { "logistic" } else { "probit" };
+                let method = if fit == Fit::Ologit {
+                    "logistic"
+                } else {
+                    "probit"
+                };
                 out.line(format!(
                     "stata_estimates <- MASS::polr(factor({dep}) ~ {right}, data = {src}{weights}, method = \"{method}\", Hess = TRUE, model = TRUE, control = list(reltol = 1e-14, maxit = 1000))"
                 ));
@@ -345,7 +375,10 @@ impl Session {
                     Some(b) => {
                         let b = b.trim();
                         if b.parse::<f64>().is_err() {
-                            return Err(no(format!("baseoutcome({b}) needs a value of {}", spec.dep)));
+                            return Err(no(format!(
+                                "baseoutcome({b}) needs a value of {}",
+                                spec.dep
+                            )));
                         }
                         out.line(format!("stata_base <- {}", r_text(b)));
                     }
@@ -481,6 +514,9 @@ impl Session {
         }
         self.helpers.insert("stata_ml_header");
         self.helpers.insert("stata_coefs");
+        if matches!(fit, Fit::Logit | Fit::Probit | Fit::Poisson) {
+            out.line("stata_omitted_notes()");
+        }
         out.line(format!(
             "stata_ml_header(stata_estimates, robust = {}{})",
             r_logical(robust),

@@ -377,6 +377,13 @@ skipped. It never gives a silent wrong answer.
   - The storage types' `c()` constants are translated.
   - `_natscale` uses StatCraft's decoded rule.
   Observations in `plan/stata/errors-and-normal.md`. Still to come: `poisson` to 8 digits, whose starting point is not yet known.)
+- P2C.13 Collinear regressors as Stata omits them
+  (done 2026-11-01:
+  - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.
+  - `logit`, `probit` and `poisson` drop the later one in the order written.
+  - Stata's 1e-13 tolerance, the `note:` lines, `0  (omitted)` rows, `o.` columns in `e(b)`, `_b[]` of 0, and `e(rank)`/`e(df_m)` counting only what is estimated.
+  - `collinear.do` in the corpus.
+  Still to come: two factors interacted (`i.g#i.h`), and the other models.)
 
 ## Phase 3: Data
 

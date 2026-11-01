@@ -3,10 +3,11 @@
 //! Each layout was read off Stata 19's output (never its program files):
 //! the widths and formats of every column, where the separators fall, how a
 //! long name is shortened or split, how two-way tables wrap at a linesize of
-//! 80, and how `regress` groups a factor's levels. A table whose shape was
-//! not checked against Stata (a factor with value labels, an omitted
-//! variable, two factors interacted, labels wider than Stata's column) is
-//! printed as before, in R's layout, and says so.
+//! 80, and how `regress` groups a factor's levels. A term omitted for
+//! collinearity is a row `0  (omitted)` (probe 288). A table whose shape was
+//! not checked against Stata (a factor with value labels, an omitted term in
+//! an interaction, two factors interacted, labels wider than Stata's column)
+//! is printed as before, in R's layout, and says so.
 
 /// The printers, and the small pieces they share.
 pub(super) const TABLES_HELPER: &str = r##"stata_tab_pad <- function(s, w) formatC(as.character(s), width = w)
@@ -100,22 +101,25 @@ stata_coef_rows <- function(nm) {
   blank <- FALSE
   seen <- character(0)
   key <- function(n) {
-    if (grepl("^[0-9]+\\.[A-Za-z_][A-Za-z0-9_]*$", n)) return(sub("^[0-9]+\\.", "", n))
+    if (grepl("^[0-9]+o?\\.[A-Za-z_][A-Za-z0-9_]*$", n)) return(sub("^[0-9]+o?\\.", "", n))
     if (grepl("^[0-9]+\\.[A-Za-z_][A-Za-z0-9_]*(#c\\.[A-Za-z_][A-Za-z0-9_]*)+$", n)) return(sub("^[0-9]+\\.", "", n))
     NA_character_
   }
   shown <- nm[!grepl("(^|#)[0-9]+b\\.", nm)]
-  if (any(grepl("(^|#)([0-9]+)?o\\.", shown))) return(NULL)
+  # a term omitted for collinearity is a row of its own, 0 (omitted); one in
+  # an interaction was not checked
+  if (any(grepl("#", shown, fixed = TRUE) & grepl("(^|#)([0-9]+)?o\\.", shown))) return(NULL)
   keys <- vapply(shown, key, "")
   for (n in shown) {
     k <- keys[[n]]
     if (is.na(k)) {
+      plain <- sub("^o\\.", "", n)
       # a plain variable or the constant; an interaction of continuous
       # variables, or of two factors, was not checked
-      if (grepl("#", n, fixed = TRUE) || grepl(".", n, fixed = TRUE)) return(NULL)
+      if (grepl("#", plain, fixed = TRUE) || grepl(".", plain, fixed = TRUE)) return(NULL)
       if (blank) rows[[length(rows) + 1]] <- list(kind = "blank")
       blank <- FALSE
-      rows[[length(rows) + 1]] <- list(kind = "row", label = n, col = n)
+      rows[[length(rows) + 1]] <- list(kind = "row", label = plain, col = n, omitted = plain != n)
       next
     }
     if (k %in% seen) next
@@ -125,12 +129,14 @@ stata_coef_rows <- function(nm) {
     if (!group) {
       if (blank) rows[[length(rows) + 1]] <- list(kind = "blank")
       blank <- FALSE
-      rows[[length(rows) + 1]] <- list(kind = "row", label = n, col = n)
+      rows[[length(rows) + 1]] <- list(kind = "row", label = sub("o\\.", ".", n), col = n,
+                                       omitted = grepl("^[0-9]+o\\.", n))
       next
     }
     rows[[length(rows) + 1]] <- list(kind = "blank")
     rows[[length(rows) + 1]] <- list(kind = "head", label = k)
-    for (l in levels) rows[[length(rows) + 1]] <- list(kind = "level", label = sub("\\..*$", "", l), col = l)
+    for (l in levels) rows[[length(rows) + 1]] <- list(kind = "level", label = sub("o?\\..*$", "", l), col = l,
+                                                       omitted = grepl("^[0-9]+o\\.", l))
     blank <- TRUE
   }
   rows
@@ -200,6 +206,10 @@ stata_regress_print <- function(level = 0.95) {
       next
     }
     label <- if (r$kind == "level") paste0(pad(r$label, 11), " ") else pad(stata_tab_abbrev(r$label), 12)
+    if (isTRUE(r$omitted)) {
+      cat(label, " |", pad("0", 11), "  (omitted)\n", sep = "")
+      next
+    }
     bi <- b[[r$col]]
     si <- se[[r$col]]
     t <- bi / si

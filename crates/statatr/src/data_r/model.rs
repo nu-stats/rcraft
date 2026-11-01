@@ -111,6 +111,87 @@ pub(super) const COEFS_HELPER: &str = r#"stata_coefs <- function(b, V, df = Inf,
   invisible(tab)
 }"#;
 
+/// Collinear regressors, as Stata omits them (StatCraft's decoding of
+/// probes 286 and 288, read off Stata 19's output). The columns, about
+/// their weighted means when there is a constant, are swept one at a time;
+/// a column goes when what is left of it is at most 1e-13 of its raw sum of
+/// squares. `regress` sweeps the column with the most left next (the earlier
+/// on a tie), so the smallest of a collinear set goes. The
+/// maximum-likelihood models sweep them in the order written, so the later
+/// one goes. R's own check differs in both: its tolerance (glm's is far
+/// tighter, so a float `a = x + 10` stays in) and, for `regress`, its order.
+///
+/// When R's choice is not Stata's, the model is fitted again without the
+/// terms Stata omits. They are kept in `$omitted` with the terms' order as
+/// written (`$stata_written`), so `e(b)` has `o.x` in its place.
+/// `stata_omitted_notes()` prints Stata's note for each, from `e(b)`.
+pub(super) const COLLINEAR_HELPER: &str = r#"stata_collinear <- function(fit, sweep = FALSE) {
+  X <- stats::model.matrix(fit)
+  w <- stats::weights(fit)
+  if (is.null(w)) w <- rep(1, nrow(X))
+  cons <- colnames(X) == "(Intercept)"
+  Z <- X[, !cons, drop = FALSE]
+  # cross products about the (weighted) means, when there is a constant
+  mid <- if (any(cons)) colSums(w * Z) / sum(w) else rep(0, ncol(Z))
+  C <- sweep(Z, 2, mid)
+  A <- crossprod(C * w, C)
+  raw <- colSums(w * Z^2)
+  swept <- dropped <- rep(FALSE, ncol(Z))
+  repeat {
+    for (j in which(!swept & !dropped)) {
+      if (A[j, j] <= 1e-13 * max(raw[j], .Machine$double.xmin)) dropped[j] <- TRUE
+    }
+    left <- which(!swept & !dropped)
+    if (!length(left)) break
+    # regress sweeps the largest left first (the earlier on a tie: identical
+    # columns can differ in the last bits of R's cross products), the others
+    # in order
+    p <- if (sweep) {
+      s <- diag(A)[left]
+      left[which(s >= max(s) * (1 - 1e-12))[1]]
+    } else {
+      left[1]
+    }
+    swept[p] <- TRUE
+    left <- which(!swept & !dropped)
+    if (length(left)) A[left, left] <- A[left, left] - outer(A[left, p], A[p, left]) / A[p, p]
+  }
+  om <- colnames(Z)[dropped]
+  b <- stats::coef(fit)
+  na <- names(b)[is.na(b)]
+  if (setequal(om, na)) return(fit)
+  labs <- attr(stats::terms(fit), "term.labels")
+  # the whole terms Stata omits go; what R still leaves out (a factor's
+  # level, which a formula cannot drop) must be Stata's too
+  extra <- intersect(om, labs)
+  cannot <- function() {
+    stop("the regressors are collinear in a way RCraft cannot yet leave out as Stata does: Stata omits ",
+         paste(om, collapse = ", "), "; R ", paste(na, collapse = ", "), call. = FALSE)
+  }
+  if (!all(setdiff(om, labs) %in% na) || !length(extra)) cannot()
+  norm <- function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":")
+  written <- vapply(labs, norm, "")
+  f <- if (length(extra) == length(labs)) {
+    stats::update(stats::formula(fit), . ~ 1)
+  } else {
+    stats::formula(stats::drop.terms(stats::terms(fit), dropx = which(labs %in% extra), keep.response = TRUE))
+  }
+  call <- stats::update(fit, formula. = f, evaluate = FALSE)
+  out <- suppressWarnings(eval(call, parent.frame()))
+  b2 <- stats::coef(out)
+  if (!setequal(names(b2)[is.na(b2)], setdiff(om, extra))) cannot()
+  out$omitted <- extra
+  out$stata_written <- unname(written)
+  out
+}
+stata_omitted_notes <- function() {
+  nm <- colnames(stata_e$b)
+  nm <- sub("^[^:]*:", "", nm)
+  om <- nm[grepl("^([0-9]+)?o\\.[^#]*$", nm)]
+  for (n in om) cat("note: ", sub("o\\.", ".", sub("^o\\.", "", n)), " omitted because of collinearity.\n", sep = "")
+  invisible(NULL)
+}"#;
+
 /// Stata's `ib2.x`: a factor whose first level, the base, is the one chosen.
 /// Unlike `relevel()` it works on data that lack the base level, as the rows
 /// `predict` and `margins` make do (every row set to one level).
@@ -182,6 +263,8 @@ impl Session {
             "stata_estimates <- stats::lm({} ~ {right}, data = {src}{weights})",
             r_name(&spec.dep)
         ));
+        self.helpers.insert("stata_collinear");
+        out.line("stata_estimates <- stata_collinear(stata_estimates, sweep = TRUE)");
         out.line(keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
@@ -264,6 +347,7 @@ impl Session {
         if self.quiet(c) {
             return Ok(());
         }
+        out.line("stata_omitted_notes()");
         if !beta && w.is_none() {
             // Stata's table, from e(); R's layout where its shape was not checked
             for h in ["stata_tables", "stata_fmt", "stata_coefs"] {

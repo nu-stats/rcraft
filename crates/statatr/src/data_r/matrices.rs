@@ -50,6 +50,8 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
       written <- c(written, paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":"))
     }
   }
+  # a model fitted again without its collinear terms keeps the order as written
+  if (!is.null(fit[["stata_written"]])) written <- fit[["stata_written"]]
   part <- function(p) {
     if (p == "(Intercept)") return(list(kind = "cons", key = p))
     m <- regmatches(p, regexec("^(factor\\(([^()]+)\\))(.+)$", p))[[1]]

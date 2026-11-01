@@ -76,3 +76,25 @@ In 112 sweeps, almost all with n = 10 or 15, Stata's r(min) is not 0 but 2^-55 o
 there is one unit above q · 10^k (0.1 as `0x1.999999999999bp-4`). So Stata computes those steps another
 way, not yet found. Those lines differ only in that residue, but a residue against 0 fails any relative
 check, so they count as different.
+
+## Collinear regressors (P2C.13)
+
+This uses StatCraft's decoding of probes 286 and 288 (`plan/stata/factor-variables.md` there), checked
+again here against Stata 19 in the corpus file `collinear.do` (26 results).
+
+The columns are swept one at a time, about their weighted means when there is a constant. A column goes
+when what is left of it is at most 1e-13 of its raw sum of squares:
+- `regress` sweeps the column with the most left next (the earlier on a tie), so the smallest of a
+  collinear set goes, whatever the order written;
+- `logit`, `probit` and `poisson` sweep in the order written, so the later one goes.
+
+On the corpus data, `regress y ten x` (with `ten = x + 10`, a float) omits `x`, not `ten`: float rounding
+leaves `x` the smaller.
+
+RCraft works out Stata's set in R after the fit (`stata_collinear`). Where R's choice differs, it fits
+again without Stata's terms and records them, so `e(b)` has `o.x` in its place and `_b[x]` is 0. R's
+`glm` checks with a tolerance of `epsilon / 1000`, so it kept `ten` and the fit failed.
+
+Stata prints `note: x omitted because of collinearity.` for each, before the table, and a row
+`x |          0  (omitted)`. Two factors interacted (`i.g#i.h`) are not laid out as Stata's yet: they
+stop with the reason.

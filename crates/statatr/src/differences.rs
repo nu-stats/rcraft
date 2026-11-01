@@ -507,6 +507,12 @@ pub const GUIDES: &[Guide] = &[
                  omitted with the rows it decides, or the fit stops with Stata's message. R's \
                  glm() would go on with huge estimates.",
             ),
+            p(
+                "Collinear regressors",
+                "The later of a collinear set, in the order written, is omitted with Stata's note \
+                 and tolerance, as for poisson. R's glm() checks far more tightly, so a variable \
+                 stored as float that is nearly another plus a constant stays in and the fit fails.",
+            ),
             ML_SE,
             ML_ROBUST,
             ML_DIGITS,
@@ -674,6 +680,12 @@ pub const GUIDES: &[Guide] = &[
         command: "regress",
         about: "Linear regression",
         points: &[
+            p(
+                "Collinear regressors",
+                "The smallest of a collinear set is omitted, whatever the order written, as Stata \
+                 does (it takes the column with the most variation left at each step), with \
+                 Stata's note and a 0 (omitted) row. R's lm() would drop the later one.",
+            ),
             p(
                 "Robust errors",
                 "robust is HC1, as Stata's: the sandwich times N / (N - k). R's sandwich \

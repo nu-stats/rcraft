@@ -2742,3 +2742,30 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   - `normalden()` and `lnnormal()`: R's agree only to about 4e-9 in the tails.
   - Collinear variables in `logit`, `poisson` and `regress` with interacted factors, reached for the first
     time: Stata omits them, R stops.
+
+## P2C.13: collinear regressors, 2026-11-01
+
+- **What works:** `regress`, `logit`, `probit` and `poisson` omit collinear regressors as Stata 19 does:
+  - Stata's choice and its 1e-13 tolerance;
+  - `note: x omitted because of collinearity.`;
+  - a `0  (omitted)` row in `regress`'s table (a factor's level too: `2  |  0  (omitted)`);
+  - `o.x` and `2o.g` columns in `e(b)` with zero rows in `e(V)`, and `_b[x]` of 0;
+  - `e(rank)` and `e(df_m)` counting only what is estimated.
+  The whole `regress y x x3 w v` of probe 288 is Stata's, line for line.
+- **How:** the R helper `stata_collinear` runs after the fit. It uses StatCraft's decoding of probes 286 and
+  288:
+  - columns about their means are swept one at a time;
+  - `regress` takes the one with the most left next, so the smallest of a collinear set goes;
+  - the likelihood models take them in the order written.
+  Where R's choice differs, the model is fitted again without Stata's terms, which are kept in `$omitted`
+  with the order as written. R's `glm` checks with a tolerance of `epsilon / 1000`, so a float `x + 10` stayed
+  in and the fit failed ("computationally singular"). Identical columns tie, and the earlier is kept, within
+  1e-12 (R's cross products can differ in the last bit).
+- **The corpus:** `collinear.do` (26 results from Stata 19, tolerance 1e-6 for the likelihood models)
+  passes; `regress`, `logit`, `probit` and `poisson` list it.
+- **Numbers:** R errors on the probes fell from 461 to 453. The compared lines are unchanged (5,508 of 5,626),
+  since the probes that fit collinear models compare no `display` after them.
+- **The probe trace** (`RCRAFT_PROBE_TRACE`) now prints each traced line's R and what R printed.
+- **Not done:** two factors interacted (`i.g#i.h`), which stop with the reason; collinearity in the other
+  models (`nbreg`, `ologit`, `mlogit`, ...); `logit`'s coefficients agree with Stata's to about 7 digits
+  (Stata stops at its own tolerance).

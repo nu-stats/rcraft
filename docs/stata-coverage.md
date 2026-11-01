@@ -86,7 +86,7 @@ runs a do-file: 179,362 lines ran, and 126,618 of them were translated.
 | Different | 113 | 4 | 3 |
 | Not compared: after the probe's first R error, where the do-file window stops | 215 | 207 | 199 |
 | Printed by Stata, not translated (counted from P2C.12) | 823 | | |
-| Translated lines that R stopped at | 461 | 429 | 399 |
+| Translated lines that R stopped at | 453 | 429 | 399 |
 
 The 113 that differ are all `_natscale`, nearly all with n = 10 or 15. There Stata's r(min) is a residue of
 its arithmetic (2^-55 or −2^-54) where RCraft gives 0, and a residue against 0 fails any relative check
@@ -104,13 +104,13 @@ The 5 that agree to 6 digits, not 8:
 - Four convergence values of `xtreg, pa` (`e(dif)`, `e(p)` near 0). They are compared for the first time now
   that the probes' data is made.
 
-Most of the 461 R errors come from the probes' setting rather than from RCraft:
+Most of the 453 R errors come from the probes' setting rather than from RCraft:
 - graphs exported as SVG, which need the R package svglite;
 - files another probe or StatCraft wrote (`use`, `import`, `list`);
 - files the probe writes with `file write`, which is not translated.
 
-Lines reached for the first time show two gaps: collinear variables in `logit`, `poisson` and `regress`
-with interacted factors, which Stata drops and R stops at.
+Collinear regressors in `logit`, `poisson` and `regress`, reached for the first time once the probes' data was
+made, are now omitted as Stata omits them (P2C.13). What is left there is two factors interacted (`i.g#i.h`).
 
 The probe run also lists the lines Stata printed that were refused, by reason, most lines first. The largest
 groups now are:
@@ -143,7 +143,7 @@ reason:
 
 1. `bsample` (3,489 lines, and the draws after it), `file` and the date functions (`clock()`, `monthly()`,
    `yw()`, ...), with time-series operators.
-2. Collinear variables in models: Stata omits them and goes on.
+2. Two factors interacted in a model (`i.g#i.h`), which Stata lays out cell by cell.
 3. Programs (`program define`), `gettoken`, the other random functions (`runiformint()`, `rbinomial()`, ...),
    and the models not yet translated (lasso, xtregar, newey, prais).
 4. The last digits: `poisson`'s starting point and `_natscale`'s residue for n = 10 and 15.

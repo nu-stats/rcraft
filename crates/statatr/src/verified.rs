@@ -41,18 +41,18 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("levelsof", &["aware"]),
     ("lincom", &["regress"]),
     ("local", &["control"]),
-    ("logit", &["likelihood"]),
+    ("logit", &["collinear", "likelihood"]),
     ("margins", &["regress"]),
     ("mlogit", &["likelihood"]),
     ("ologit", &["likelihood"]),
     ("oprobit", &["likelihood"]),
-    ("poisson", &["likelihood"]),
+    ("poisson", &["collinear", "likelihood"]),
     ("predict", &["regress"]),
     ("preserve", &["made"]),
-    ("probit", &["likelihood"]),
+    ("probit", &["collinear", "likelihood"]),
     ("pwcorr", &["descriptives"]),
     ("recode", &["data"]),
-    ("regress", &["aware", "control", "regress"]),
+    ("regress", &["aware", "collinear", "control", "regress"]),
     ("replace", &["data", "random"]),
     ("restore", &["made"]),
     ("set", &["made", "random"]),
@@ -103,7 +103,10 @@ mod tests {
         for c in names {
             assert!(crate::complete::COMMANDS.contains(&c), "{c}");
         }
-        assert_eq!(files("regress"), Some(&["aware", "control", "regress"][..]));
+        assert_eq!(
+            files("regress"),
+            Some(&["aware", "collinear", "control", "regress"][..])
+        );
         assert_eq!(files("xtlogit"), None);
         let functions: Vec<&str> = VERIFIED_FUNCTIONS.iter().map(|(f, _)| *f).collect();
         let mut sorted = functions.clone();

@@ -51,10 +51,14 @@ stata_bget <- function(key, se = FALSE) {
   }
   i <- match(stata_canon(key), st)
   if (is.na(i)) {
-    # a base or omitted level of a factor variable: Stata holds a zero
+    # a base or omitted level of a factor variable, or a term the model was
+    # fitted again without (collinear): Stata holds a zero
     if (stata_base_level(stata_canon(key))) return(0)
+    if (stata_canon(key) %in% stata_estimates[["omitted"]]) return(0)
     stop("[", shown, "] not found")
   }
+  # a term R left out for collinearity: 0 in Stata's e(b) and e(V)
+  if (is.na(stata_b[i])) return(0)
   if (se) sqrt(stata_vcov[nm[i], nm[i]]) else unname(stata_b[i])
 }
 stata_base_level <- function(k) {
@@ -272,7 +276,8 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     z <- bk / s
     drop(t(z) %*% solve(Vk / outer(s, s), z))
   }
-  slopes <- !grepl("(Intercept)", names(b), fixed = TRUE) & !startsWith(names(b), "/")
+  # a term omitted for collinearity is no slope: Stata counts only the estimated ones
+  slopes <- !grepl("(Intercept)", names(b), fixed = TRUE) & !startsWith(names(b), "/") & !is.na(b)
   cons <- any(grepl("(Intercept)", names(b), fixed = TRUE))
   fw <- identical(wtype, "fweight")
   e <- list()
@@ -296,7 +301,7 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     if (!is.null(ll_0)) l[["ll_0"]] <- ll_0
     q <- sum(slopes)
     chi2 <- if (robust) wald(slopes) else 2 * (l[["ll"]] - l[["ll_0"]])
-    put(rank = length(b), N = N, k = length(b), k_eq = k_eq, k_dv = 1, converged = 1, rc = 0)
+    put(rank = sum(!is.na(b)), N = N, k = length(b), k_eq = k_eq, k_dv = 1, converged = 1, rc = 0)
     if (!is.null(G)) put(N_clust = G)
     put(ll = l[["ll"]], k_eq_model = k_eq_model, ll_0 = l[["ll_0"]])
     for (n in names(aux)) e[[n]] <<- aux[[n]]

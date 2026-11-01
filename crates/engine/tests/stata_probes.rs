@@ -6,7 +6,8 @@
 //! run this, and `RCRAFT_STATA_PROBE` to part of a name for one probe. It is
 //! skipped otherwise.
 //! `RCRAFT_PROBE_TRACE` prints each line whose Stata holds that text, with what
-//! became of it, to follow one probe.
+//! became of it and what R printed, to follow one probe (`RCRAFT_STATA_PROBE`
+//! picks the probes whose folder names hold its text).
 //!
 //! Compared: each `display`, `return list` and `ereturn list` at the top of a
 //! probe (not in a loop or a block, so it ran once, in order, in both), each
@@ -167,6 +168,9 @@ fn run_probe(e: &mut Engine, folder: &str, text: &str, budget: Duration) -> Prob
                     } else {
                         (false, String::new())
                     };
+                    if std::env::var("RCRAFT_PROBE_TRACE").is_ok_and(|t| line.stata.contains(&t)) {
+                        eprintln!("{}\n{printed}", line.script());
+                    }
                     p.all.push((command.clone(), translated, ok));
                     if translated && !ok {
                         if origin.file == 0 && p.first_error.is_none() {
