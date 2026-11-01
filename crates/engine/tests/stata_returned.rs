@@ -1219,6 +1219,79 @@ fn display_formats_are_statas() {
     );
 }
 
+/// `%21x`, the double's own bits, against StatCraft's (`values::hex`, checked
+/// against Stata in StatCraft's probes 000, 031 and 034). Each double goes to
+/// R as a hexadecimal literal, so it arrives exactly.
+#[test]
+fn the_hex_format_is_the_doubles_bits() {
+    use rcraft_statatr::values::hex::to_hex;
+    let Some(mut e) = engine() else { return };
+    ok(&mut e, &translate(&read("display 1\n")).script());
+    let mut values = vec![
+        0.0,
+        -0.0,
+        1.0,
+        -1.0,
+        std::f64::consts::PI,
+        1.0 / 3.0,
+        0.1,
+        14.89934065934066,
+        37.20193946425765,
+        f64::MAX,
+        f64::MIN_POSITIVE,
+        5e-324,
+        2.5e-310,
+        -123456789.125,
+        1e15 - 0.1,
+    ];
+    // a spread of exponents and mantissas, made by arithmetic
+    let mut x: f64 = 0.7390851332151607;
+    for k in -60..60 {
+        x = (x * 1.618033988749895).fract() + 0.5;
+        values.push(x * 2f64.powi(k * 17));
+    }
+    let literal = |v: f64| {
+        let bits = v.to_bits();
+        let sign = if v.is_sign_negative() { "-" } else { "" };
+        let mantissa = bits & ((1u64 << 52) - 1);
+        let biased = ((bits >> 52) & 0x7ff) as i32;
+        if biased == 0 {
+            format!("{sign}0x0.{mantissa:013x}p-1022")
+        } else {
+            format!("{sign}0x1.{mantissa:013x}p{}", biased - 1023)
+        }
+    };
+    let calls: Vec<String> = values
+        .iter()
+        .map(|v| format!("stata_fmt({}, \"%21x\")", literal(*v)))
+        .chain(std::iter::once("stata_fmt(NA_real_, \"%21x\")".to_string()))
+        .collect();
+    let want: Vec<String> = values
+        .iter()
+        .map(|v| to_hex(*v))
+        .chain(std::iter::once("+1.0000000000000X+3ff".to_string()))
+        .collect();
+    let text = ok(
+        &mut e,
+        &format!("cat(c({}), sep = \"\\n\")", calls.join(", ")),
+    );
+    let got: Vec<&str> = text.lines().collect();
+    assert_eq!(got.len(), want.len(), "{text}");
+    let wrong: Vec<String> = got
+        .iter()
+        .zip(&want)
+        .zip(&values)
+        .filter(|((g, w), _)| *g != *w)
+        .map(|((g, w), v)| format!("{v:e}: {g} against {w}"))
+        .collect();
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+    // in display, as a probe writes it
+    assert!(translate(&read("display %21x 1/3 \" \" %21x 2\n"))
+        .lines
+        .iter()
+        .all(|l| l.result.is_ok()));
+}
+
 /// `display` itself, and the lists, against what Stata printed.
 #[test]
 fn display_and_the_lists_print_as_stata() {

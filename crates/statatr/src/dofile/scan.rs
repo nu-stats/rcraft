@@ -204,7 +204,7 @@ pub fn scan(d: &DoFile) -> Scan {
 }
 
 /// The first word of a Stata line, after its prefixes.
-pub(super) fn command_word(text: &str) -> String {
+pub fn command_word(text: &str) -> String {
     let mut rest = text;
     loop {
         let t = rest.trim_start();

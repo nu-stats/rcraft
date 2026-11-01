@@ -805,7 +805,7 @@ impl Session {
                 self.kinds.insert(g, Kind::Number);
             }
             "report" => {
-                if Self::quiet(c) {
+                if self.quiet(c) {
                     return Ok(());
                 }
                 out.line(format!(

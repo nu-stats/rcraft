@@ -249,10 +249,28 @@ impl Translator<'_> {
             }
             Expr::Number(v) => Ok((r_number(*v), Kind::Number)),
             Expr::Text(s) => Ok((r_text(s), Kind::Text)),
+            Expr::Name(n)
+                if n.split_once('.')
+                    .is_some_and(|(ops, _)| crate::lang::expr::is_ts_ops(ops)) =>
+            {
+                Err(no(format!(
+                    "{n}: time-series operators (L., F., D., S.) are not translated yet"
+                )))
+            }
             Expr::Name(n) => Ok(match n.as_str() {
                 "_n" => ("dplyr::row_number()".into(), Kind::Number),
                 "_N" => ("dplyr::n()".into(), Kind::Number),
                 "_pi" => ("pi".into(), Kind::Number),
+                // what the last capture came to: 0, or missing after an error
+                "_rc" => {
+                    self.caveat(
+                        "_rc is 0 when the line under capture ran and missing when it failed: R's errors are not Stata's, so its error numbers (111, 198, ...) are not known",
+                    );
+                    (
+                        "get0(\"stata_rc\", envir = globalenv(), ifnotfound = 0)".into(),
+                        Kind::Number,
+                    )
+                }
                 // a variable before a scalar of the same name, as in Stata
                 _ => match (self.kind_of)(n) {
                     Some(k) => (r_name(n), k),
@@ -321,6 +339,17 @@ impl Translator<'_> {
     }
 
     fn binary(&mut self, op: BinaryOp, a: &Expr, b: &Expr) -> Result<(String, Kind), Untranslated> {
+        // .a to .z are all NA in R, so how they compare (. < .a < .b) is lost
+        let extended = |e: &Expr| matches!(e, Expr::Number(v) if is_missing(*v) && missing_code(*v).is_some_and(|c| c > 0));
+        let compares = matches!(
+            op,
+            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
+        );
+        if compares && (extended(a) || extended(b)) {
+            return Err(no(
+                "a comparison with an extended missing value (.a to .z) is not translated: they are all NA in R, so their order is lost",
+            ));
+        }
         let (ac, ak) = self.expr(a)?;
         let (bc, bk) = self.expr(b)?;
         let text = ak == Kind::Text || bk == Kind::Text;
@@ -925,8 +954,11 @@ mod tests {
                 "{text}: {r:?}"
             );
         }
-        let r = translate("x == .a", &none, Use::Condition);
+        // an extended missing value as a value has a caveat; compared, it is refused
+        let r = translate(".a", &none, Use::Value);
         assert!(r.is_ok_and(|r| r.caveats.iter().any(|c| c.contains("extended missing"))));
+        let r = translate("x == .a", &none, Use::Condition);
+        assert!(r.is_err_and(|e| e.reason.contains("their order is lost")));
         let r = translate("regexm(s, \"^a\")", &none, Use::Condition);
         assert!(r.is_ok_and(|r| r.caveats.iter().any(|c| c.contains("dialects"))));
     }

@@ -52,11 +52,14 @@ enum Waiting {
     Nothing,
     /// `setwd()` to the folder the do-file runs in.
     Setup(CommandId),
+    /// A line's R, with the helpers sent along with it: if R stops there
+    /// (a line R cannot read runs nothing), they are sent again.
     Line {
         index: usize,
         id: CommandId,
+        helpers: Vec<&'static str>,
     },
-    Value(QueryId),
+    Value(QueryId, Vec<&'static str>),
 }
 
 /// A problem the user is asked about: the line, and what went wrong.
@@ -189,10 +192,13 @@ impl DoFileWindow {
             return None;
         }
         // what it waits for
-        match r.waiting {
+        match std::mem::replace(&mut r.waiting, Waiting::Nothing) {
             Waiting::Nothing => {}
             Waiting::Setup(id) => match outcome(engine, id) {
-                None => return None,
+                None => {
+                    r.waiting = Waiting::Setup(id);
+                    return None;
+                }
                 Some(Outcome::Ok) => r.waiting = Waiting::Nothing,
                 Some(_) => {
                     r.stopped = true;
@@ -201,8 +207,16 @@ impl DoFileWindow {
                     return None;
                 }
             },
-            Waiting::Line { index, id } => {
-                let o = outcome(engine, id)?;
+            Waiting::Line { index, id, helpers } => {
+                let Some(o) = outcome(engine, id) else {
+                    r.waiting = Waiting::Line { index, id, helpers };
+                    return None;
+                };
+                if o != Outcome::Ok {
+                    for h in &helpers {
+                        r.sent.remove(h);
+                    }
+                }
                 let (text, error) = printed(engine, id);
                 if let Some(p) = r.printed.get_mut(index) {
                     *p = text;
@@ -226,8 +240,16 @@ impl DoFileWindow {
                     }
                 }
             }
-            Waiting::Value(q) => {
-                let answer = engine.query_result(q)?;
+            Waiting::Value(q, helpers) => {
+                let Some(answer) = engine.query_result(q) else {
+                    r.waiting = Waiting::Value(q, helpers);
+                    return None;
+                };
+                if !answer.ok {
+                    for h in &helpers {
+                        r.sent.remove(h);
+                    }
+                }
                 let given = if answer.ok {
                     Ok(answer.text.clone())
                 } else {
@@ -264,7 +286,7 @@ impl DoFileWindow {
             // each line made so far, in order, before the run goes on
             let index = r.ran.len();
             if let Some(line) = run.lines().get(index).cloned() {
-                let (code, new) = helpers_code(run, &mut r.sent);
+                let (code, helpers) = helpers_code(run, &r.sent);
                 r.printed.push(String::new());
                 match &line.result {
                     Err(e) => {
@@ -277,12 +299,13 @@ impl DoFileWindow {
                             return None;
                         }
                     }
-                    Ok(rc) if rc.code.is_empty() && !new => r.ran.push(Ran::Ok),
+                    Ok(rc) if rc.code.is_empty() && helpers.is_empty() => r.ran.push(Ran::Ok),
                     Ok(_) => {
                         let code = code + &line.script();
                         r.ran.push(Ran::Ok);
+                        r.sent.extend(helpers.iter().copied());
                         match engine.submit(Source::Script, &code) {
-                            Ok(id) => r.waiting = Waiting::Line { index, id },
+                            Ok(id) => r.waiting = Waiting::Line { index, id, helpers },
                             Err(e) => {
                                 r.stopped = true;
                                 self.message = Some(e.to_string());
@@ -296,9 +319,10 @@ impl DoFileWindow {
             match run.next_event() {
                 Event::Line => {}
                 Event::Ask(v) => {
-                    let (code, _) = helpers_code(run, &mut r.sent);
+                    let (code, helpers) = helpers_code(run, &r.sent);
                     let code = code + &v.code;
-                    r.waiting = Waiting::Value(engine.query(&code));
+                    r.sent.extend(helpers.iter().copied());
+                    r.waiting = Waiting::Value(engine.query(&code), helpers);
                     return None;
                 }
                 Event::Done => {
@@ -805,15 +829,16 @@ enum Save {
 }
 
 /// The helpers the run calls that R has not been given yet, between the
-/// lines Results folds; and whether there were any.
-fn helpers_code(run: &Run<'_>, sent: &mut BTreeSet<&'static str>) -> (String, bool) {
+/// lines Results folds; and their names, which count as sent once the R
+/// they go with has run.
+fn helpers_code(run: &Run<'_>, sent: &BTreeSet<&'static str>) -> (String, Vec<&'static str>) {
     let new: Vec<(&'static str, &'static str)> = run
         .helpers()
         .into_iter()
         .filter(|(n, _)| !sent.contains(n))
         .collect();
     if new.is_empty() {
-        return (String::new(), false);
+        return (String::new(), Vec::new());
     }
     let names: Vec<&str> = new.iter().map(|(n, _)| *n).collect();
     let mut code = format!(
@@ -821,14 +846,13 @@ fn helpers_code(run: &Run<'_>, sent: &mut BTreeSet<&'static str>) -> (String, bo
         rcraft_statatr::live::HELPERS_BEGIN,
         names.join(", ")
     );
-    for (n, h) in &new {
+    for (_, h) in &new {
         code.push_str(h);
         code.push('\n');
-        sent.insert(n);
     }
     code.push_str(rcraft_statatr::live::HELPERS_END);
     code.push('\n');
-    (code, true)
+    (code, names)
 }
 
 fn outcome(engine: &Engine, id: CommandId) -> Option<Outcome> {

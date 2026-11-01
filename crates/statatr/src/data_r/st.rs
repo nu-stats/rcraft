@@ -238,7 +238,7 @@ impl Session {
         }
         self.helpers.insert("stata_stset");
         let call = format!("stata_stset({})", args.join(", "));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             out.line(format!("invisible(utils::capture.output({d} <- {call}))"));
         } else {
             out.line(format!("{d} <- {call}"));
@@ -353,7 +353,7 @@ impl Session {
             r_text(if ties == "exact" { "exactp" } else { ties })
         );
         self.keep_e(c, out, &args, "");
-        if !Self::quiet(c) {
+        if !self.quiet(c) {
             out.line(format!(
                 "stata_stcox_header(stata_m, robust = {})",
                 r_logical(robust || cluster.is_some())

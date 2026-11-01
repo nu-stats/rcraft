@@ -22,6 +22,7 @@
 //! and hold for this copy: nothing here comes from Stata's program files.
 
 pub mod complete;
+pub mod coverage;
 pub mod data_r;
 pub mod differences;
 pub mod dofile;

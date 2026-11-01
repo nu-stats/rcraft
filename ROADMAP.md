@@ -354,10 +354,12 @@ skipped. It never gives a silent wrong answer.
   statistics, 3 panel/survival/survey/IV, 4 graphs, 5 programs and chosen
   SSC commands; the share of lines translated per tier is shown in
   `docs/coverage.md`
+  (done 2026-11-01: `statatr::coverage` puts each command in its tier and sums dry runs; the table for StatCraft's 381 probe do-files is in `docs/stata-coverage.md`, since `docs/coverage.md` is the menus' generated inventory.)
 - P2C.9 Verification: StatCraft's probe do-files as the first inputs,
   recorded Stata results in a private corpus (never committed), compared to
   about 8 significant digits; a command is `Verified` only on a match
   (started 2026-10-31: `control.do` and `aware.do` in the corpus check macros, loops, include, varlists from the data, levelsof and unab against Stata 19; StatCraft's probe do-files and public replication packages are still to come.)
+  (done 2026-11-01 for StatCraft's probes: `engine/tests/stata_probes.rs` runs each of them on R and sets its top-level display, return list and ereturn list against Stata 19's log, to 8 significant digits, with the counts in `docs/stata-coverage.md`; `made.do` in the corpus makes expand, preserve, restore, set obs and tokenize Verified. Public replication packages are still to come.)
 - P2C.10 Known limits stated up front: Stata's random draws, Mata, compiled
   plugins, interactive commands
   (done 2026-10-31: the scan lists those the do-file uses.)

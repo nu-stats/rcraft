@@ -45,7 +45,15 @@ pub struct StataMode {
     view: Option<(String, Translation)>,
     /// A typed line waiting for a value R works out out of sight: the
     /// question, and the line to step again with the answer.
-    pub asking: Option<(rcraft_engine::QueryId, rcraft_engine::Source, String)>,
+    pub asking: Option<(
+        rcraft_engine::QueryId,
+        rcraft_engine::Source,
+        String,
+        Vec<String>,
+    )>,
+    /// The last Stata step R was given, and the helpers it carried: if R
+    /// stopped there they are given again with the next step.
+    pub sent_with: Option<(rcraft_engine::CommandId, Vec<String>)>,
 }
 
 impl StataMode {

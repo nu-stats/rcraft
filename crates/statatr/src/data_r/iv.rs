@@ -451,7 +451,7 @@ impl Session {
             r_number(level),
             r_logical(opts.has("first", 5))
         );
-        if Self::quiet(c) {
+        if self.quiet(c) {
             out.line(format!(
                 "invisible(utils::capture.output(stata_estimates <- {call}))"
             ));

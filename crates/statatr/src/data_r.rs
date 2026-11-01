@@ -186,10 +186,22 @@ impl Translator {
 
     /// The next command.
     pub fn command(&mut self, c: &Command) -> Line {
+        let result = self.s.command(c);
+        if let Err(e) = &result {
+            self.s.not_translated(&c.text, &e.reason);
+        }
+        if c.prefixes.contains(&Prefix::Capture) {
+            self.s.rc_lost = result.as_ref().err().map(|_| {
+                format!(
+                    "_rc is not known: the line under capture before it was not translated ({})",
+                    c.text.trim()
+                )
+            });
+        }
         Line {
             span: c.span,
             stata: c.text.clone(),
-            result: self.s.command(c),
+            result,
         }
     }
 
@@ -199,8 +211,16 @@ impl Translator {
     /// so the data, e() and r() before it are no longer relied on; only a
     /// `display` is known to leave them alone.
     pub fn refused(&mut self, span: Span, stata: String, reason: impl Into<String>) -> Line {
+        let reason = reason.into();
         let word = stata.split_whitespace().next().unwrap_or("");
         let display = word.len() >= 2 && "display".starts_with(word);
+        if word.len() >= 3 && "capture".starts_with(word) {
+            self.s.rc_lost = Some(format!(
+                "_rc is not known: the line under capture before it was not translated ({})",
+                stata.trim()
+            ));
+        }
+        self.s.not_translated(&stata, &reason);
         if !display {
             let why = format!("a line before it was not translated: {}", stata.trim());
             self.s.esample = false;
@@ -372,6 +392,74 @@ const MODELS: &[&str] = &[
 /// Commands that leave the values of existing variables and the set of rows
 /// as they were (a new variable, a new order or a label does not matter to
 /// `margins`). Anything else may have changed the data.
+/// How a line refused for a lost variable says so.
+const LOST_VAR: &str = "is not known here: the line that makes it was not translated";
+
+/// The variables (or scalar) a generate, egen, predict, replace or scalar line
+/// makes or changes.
+fn new_vars(c: &Command) -> Vec<String> {
+    let main = c.parts.main.split('=').next().unwrap_or("");
+    let mut words: Vec<&str> = main.split_whitespace().collect();
+    if words.first().is_some_and(|w| storage(w).is_some()) {
+        words.remove(0);
+    }
+    match c.name.as_str() {
+        "generate" | "egen" => words
+            .first()
+            .map(|w| vec![w.to_string()])
+            .unwrap_or_default(),
+        "predict" => words.iter().map(|w| w.to_string()).collect(),
+        // scalar [define] name = exp
+        "scalar" if c.parts.main.contains('=') => words
+            .iter()
+            .find(|w| !matches!(**w, "define" | "scalar"))
+            .map(|w| vec![w.to_string()])
+            .unwrap_or_default(),
+        // its values after a replace that did not run are not known either
+        "replace" => words
+            .first()
+            .map(|w| vec![w.to_string()])
+            .unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
+/// Commands that replace the data in memory or change its rows; when one is
+/// not translated, the lines after it cannot know the data.
+const REPLACE_DATA: &[&str] = &[
+    "append",
+    "bsample",
+    "collapse",
+    "contract",
+    "cross",
+    "cwf",
+    "drop",
+    "duplicates",
+    "expand",
+    "fillin",
+    "frame",
+    "frames",
+    "gsort",
+    "import",
+    "infile",
+    "infix",
+    "input",
+    "insheet",
+    "joinby",
+    "keep",
+    "merge",
+    "reshape",
+    "restore",
+    "sample",
+    "set",
+    "sort",
+    "stack",
+    "sysuse",
+    "use",
+    "webuse",
+    "xpose",
+];
+
 const LEAVE_DATA_ALONE: &[&str] = &[
     "histogram",
     "kdensity",
@@ -381,6 +469,7 @@ const LEAVE_DATA_ALONE: &[&str] = &[
     "twoway",
     "graph",
     "summarize",
+    "preserve",
     "tabulate",
     "correlate",
     "tab1",
@@ -425,6 +514,31 @@ const IMPORT_FLOAT_HELPER: &str = "stata_import_float <- function(d) {\n  for (n
 /// (missing left out, or `.` last with `missing`), text in compound quotes
 /// (`""` first with `missing`; `clean` without quotes); r(r) the number of
 /// values and r(N) the rows that count.
+/// `expand`: each row's copies after all the rows, in order, as Stata 19 puts
+/// them; a count is rounded, and one below 1 or missing leaves the row once.
+const EXPAND_HELPER: &str = r#"stata_expand <- function(d, n, gen = NULL) {
+  n <- floor(n + 0.5)
+  n[is.na(n) | n < 1] <- 1
+  extra <- rep(seq_len(nrow(d)), n - 1)
+  out <- d[c(seq_len(nrow(d)), extra), , drop = FALSE]
+  rownames(out) <- NULL
+  if (!is.null(gen)) out[[gen]] <- c(rep(0, nrow(d)), rep(1, length(extra)))
+  out
+}"#;
+
+/// `set obs n`: the data made longer to n rows, the new ones missing (`""`
+/// in a string variable); with no data, n rows and no variables.
+const SET_OBS_HELPER: &str = r#"stata_set_obs <- function(d, n) {
+  if (is.null(d)) return(structure(list(), names = character(0), row.names = c(NA, -as.integer(n)), class = "data.frame"))
+  old <- nrow(d)
+  if (n < old) stop("set obs ", n, ": the data has ", old, " rows, and set obs does not drop any")
+  if (n == old) return(d)
+  d <- d[c(seq_len(old), rep(NA_integer_, n - old)), , drop = FALSE]
+  rownames(d) <- NULL
+  for (v in names(d)) if (is.character(d[[v]])) d[[v]][(old + 1):n] <- ""
+  d
+}"#;
+
 const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, sep = " ", missing = FALSE) {
   if (is.character(x)) {
     x[is.na(x)] <- ""
@@ -500,6 +614,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tables" => tables::TABLES_HELPER,
         "stata_import_float" => IMPORT_FLOAT_HELPER,
         "stata_levelsof" => LEVELSOF_HELPER,
+        "stata_set_obs" => SET_OBS_HELPER,
+        "stata_expand" => EXPAND_HELPER,
         "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
         _ => FLOAT_HELPER,
     }
@@ -510,6 +626,13 @@ fn helper_code(name: &str) -> &'static str {
 struct Session {
     /// The R name of the data frame "in memory".
     data: Option<String>,
+    /// Why `_rc` is not known: the last line under capture was not translated.
+    rc_lost: Option<String>,
+    /// Why the data is not known: a line that replaces it or changes its rows
+    /// was not translated.
+    data_lost: Option<String>,
+    /// Variables a line that was not translated would have made, and that line.
+    lost_vars: BTreeMap<String, String>,
     /// The file it came from (for `save` without a name).
     file: Option<String>,
     /// Variable types made by the do-file itself.
@@ -558,6 +681,38 @@ struct Session {
     helpers: BTreeSet<&'static str>,
     /// The packages `ssc install` asked for, in order.
     ssc: Vec<String>,
+    /// What `preserve` kept, for `restore`.
+    preserved: Option<Box<Preserved>>,
+    /// The command being translated asked whether it is quiet, so it hides
+    /// its own output.
+    quiet_asked: std::cell::Cell<bool>,
+}
+
+/// Whether a line prints nothing, as Stata decides: the innermost of
+/// quietly, noisily and capture (which is quiet) wins, so capture noisily
+/// prints and noisily quietly does not.
+fn silent(c: &Command) -> bool {
+    let mut quiet = false;
+    for p in &c.prefixes {
+        match p {
+            Prefix::Quietly | Prefix::Capture => quiet = true,
+            Prefix::Noisily => quiet = false,
+            _ => {}
+        }
+    }
+    quiet
+}
+
+/// The data and what the translator knows of it, as `preserve` left them.
+#[derive(Default, Clone)]
+struct Preserved {
+    data: Option<String>,
+    file: Option<String>,
+    kinds: BTreeMap<String, Kind>,
+    label_sets: BTreeMap<String, Vec<(f64, String)>>,
+    panel: Option<String>,
+    panel_time: Option<String>,
+    stset: Option<st::StSet>,
 }
 
 /// Collects one command's R.
@@ -777,6 +932,7 @@ impl Session {
 
     fn expr(&self, text: &str, use_: Use, out: &mut Out) -> Result<String, Untranslated> {
         self.esample_ok(text)?;
+        self.rc_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
         let r = expr_r::translate_with(text, &kinds, &ret, use_)?;
@@ -784,6 +940,25 @@ impl Session {
             out.caveat(c);
         }
         Ok(r.code)
+    }
+
+    /// `_rc` only while the last line under capture was translated.
+    fn rc_ok(&self, text: &str) -> Result<(), Untranslated> {
+        let Some(why) = &self.rc_lost else {
+            return Ok(());
+        };
+        let b = text.as_bytes();
+        let word = |i: usize| {
+            b.get(i)
+                .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
+        };
+        let uses = text
+            .match_indices("_rc")
+            .any(|(i, _)| !(i > 0 && word(i - 1)) && !word(i + 3));
+        if uses {
+            return Err(no(why.clone()));
+        }
+        Ok(())
     }
 
     /// `e(sample)` only while `stata_esample` still lines up with the rows.
@@ -801,6 +976,7 @@ impl Session {
 
     fn value(&self, text: &str, out: &mut Out) -> Result<(String, Kind), Untranslated> {
         self.esample_ok(text)?;
+        self.rc_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
         let r = expr_r::translate_with(text, &kinds, &ret, Use::Value)?;
@@ -811,9 +987,75 @@ impl Session {
     }
 
     fn data(&self) -> Result<String, Untranslated> {
+        if let (None, Some(why)) = (&self.data, &self.data_lost) {
+            return Err(no(why.clone()));
+        }
         self.data
             .clone()
             .ok_or_else(|| no("no data is in memory at this point (no use or import before it)"))
+    }
+
+    /// A line Stata runs that is not translated: if it replaces the data or
+    /// changes its rows, what is in memory after it is not known.
+    fn not_translated(&mut self, stata: &str, reason: &str) {
+        // a line Stata stops at with an error leaves the data as it was
+        if reason.contains("Stata stops here") || reason.contains("(Stata: ") {
+            return;
+        }
+        if let Some(c) = crate::reader::read(stata.trim()).commands().first() {
+            for v in new_vars(c) {
+                self.lost_vars.insert(v, stata.trim().to_string());
+            }
+        }
+        // a line refused for a variable that is not there changed nothing more
+        if reason.contains(LOST_VAR) {
+            return;
+        }
+        let word = crate::dofile::command_name(stata.trim());
+        let full = crate::reader::read(&word)
+            .commands()
+            .first()
+            .map(|c| c.name.clone())
+            .unwrap_or(word);
+        if REPLACE_DATA.contains(&full.as_str()) && self.data.is_some() {
+            self.data = None;
+            self.data_lost = Some(format!(
+                "the data in memory is not known here: a line before it that changes the data was not translated ({})",
+                stata.trim()
+            ));
+        }
+    }
+
+    /// Why a line cannot run: it names a variable whose making line was not
+    /// translated (a name in quotes does not count).
+    fn uses_lost(&self, c: &Command) -> Option<String> {
+        if self.lost_vars.is_empty() {
+            return None;
+        }
+        let mut word = String::new();
+        let mut quoted = false;
+        let mut found = None;
+        // a scalar set again is known again: only what it is set to counts
+        let text = match (c.name.as_str(), c.text.split_once('=')) {
+            ("scalar", Some((_, exp))) => exp,
+            _ => c.text.as_str(),
+        };
+        for ch in text.chars().chain(std::iter::once(' ')) {
+            if ch == '"' {
+                quoted = !quoted;
+            }
+            if !quoted && (ch.is_alphanumeric() || ch == '_') {
+                word.push(ch);
+                continue;
+            }
+            if let Some(line) = self.lost_vars.get(&word) {
+                found = Some((word.clone(), line.clone()));
+                break;
+            }
+            word.clear();
+        }
+        let (v, line) = found?;
+        Some(format!("{v} {LOST_VAR} ({line})"))
     }
 
     /// The `if` and `in` of a command as one condition.
@@ -963,7 +1205,7 @@ impl Session {
             "for (stata_g in stata_by_groups({})) {{",
             args.join(", ")
         ));
-        if !Self::quiet(c) {
+        if !self.quiet(c) {
             out.line("cat(\"\\n-> \", stata_g$label, \"\\n\", sep = \"\")");
         }
         out.line(format!("stata_d <- {d}[stata_g$rows, , drop = FALSE]"));
@@ -996,6 +1238,9 @@ impl Session {
     }
 
     fn command(&mut self, c: &Command) -> Result<RCode, Untranslated> {
+        if let Some(why) = self.uses_lost(c) {
+            return Err(no(why));
+        }
         if c.prefixes.iter().any(|p| matches!(p, Prefix::Frame(_))) {
             self.esample = false;
             self.changed_since_fit = true;
@@ -1011,6 +1256,7 @@ impl Session {
         self.esample_new = false;
         self.r_new = None;
         self.e_new = false;
+        self.quiet_asked.set(false);
         self.scalars_read.borrow_mut().clear();
         if MODELS.contains(&c.name.as_str()) {
             self.fit_robust = false;
@@ -1082,14 +1328,32 @@ impl Session {
                 && !bysort
         };
         done?;
+        for v in new_vars(c) {
+            self.lost_vars.remove(&v);
+        }
         if MODELS.contains(&c.name.as_str()) {
             self.weighted_fit = c.parts.weight.is_some();
             self.fit_fweight = matches!(&c.parts.weight, Some(w) if w.kind == crate::lang::syntax::WeightKind::Frequency);
         }
+        // quietly (or capture): what the line prints is not shown
+        if silent(c) && !self.quiet_asked.get() && !out.code.is_empty() {
+            let body = out.code.join(
+                "
+",
+            );
+            out.code = vec![format!(
+                "invisible(utils::capture.output({{
+{body}
+}}))"
+            )];
+        }
         if c.prefixes.contains(&Prefix::Capture) {
-            // capture: an error is ignored and the do-file goes on
+            // capture: an error is ignored and the do-file goes on; _rc says
+            // whether there was one
             let body = out.code.join("\n");
-            out.code = vec![format!("try({{\n{body}\n}}, silent = TRUE)")];
+            out.code = vec![format!(
+                "stata_rc <- tryCatch({{\n{body}\n0\n}}, error = function(e) NA_real_)"
+            )];
         }
         out.done()
     }
@@ -1117,6 +1381,7 @@ impl Session {
                 if let Some(d) = self.data.take() {
                     out.line(format!("rm({d})"));
                 }
+                self.data_lost = None;
                 self.kinds.clear();
                 Ok(())
             }
@@ -1124,6 +1389,9 @@ impl Session {
                 out.caveat("nothing to do in R: version sets how Stata reads the do-file");
                 Ok(())
             }
+            "preserve" => self.preserve(c, &opts, out),
+            "expand" => self.expand(c, &opts, out),
+            "restore" => self.restore(c, &opts, out),
             "recode" => self.recode(c, &opts, out),
             "egen" => self.egen(c, &opts, out),
             "merge" => self.merge(c, &opts, out),
@@ -1218,8 +1486,11 @@ impl Session {
         }
     }
 
-    fn quiet(c: &Command) -> bool {
-        c.prefixes.contains(&Prefix::Quietly)
+    /// Whether the line prints nothing; the command then leaves its output out
+    /// itself, and the line's R is not wrapped to hide it.
+    fn quiet(&self, c: &Command) -> bool {
+        self.quiet_asked.set(true);
+        silent(c)
     }
 
     // ---------------- files ----------------
@@ -1912,7 +2183,7 @@ impl Session {
         // r(N), as Stata leaves it
         out.line(format!("stata_r <- list(N = {n})"));
         self.r_new = Some((returned::R_COUNT, "count".into()));
-        if !Self::quiet(c) {
+        if !self.quiet(c) {
             out.line("cat(format(stata_r$N, big.mark = \",\"), \"\\n\")");
         }
         Ok(())
@@ -1962,7 +2233,7 @@ impl Session {
             },
         ));
         self.r_new = Some((returned::R_LEVELSOF, "levelsof".into()));
-        if !Self::quiet(c) {
+        if !self.quiet(c) {
             out.line("cat(stata_r$levels, \"\\n\", sep = \"\")");
         }
         Ok(())
@@ -1970,7 +2241,7 @@ impl Session {
 
     fn list(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
         let d = self.data()?;
-        if Self::quiet(c) {
+        if self.quiet(c) {
             return Ok(());
         }
         if let Some(o) = opts.other(&[
@@ -2017,7 +2288,7 @@ impl Session {
         // Stata's r(), quietly or not
         out.line(format!("stata_r <- list(k = ncol({d}), N = nrow({d}))"));
         self.r_new = Some((returned::R_DESCRIBE, "describe".into()));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             return Ok(());
         }
         if !opts.has("short", 1) {
@@ -2059,6 +2330,119 @@ impl Session {
         Ok(())
     }
 
+    /// `expand [=]exp [if] [in] [, generate(newvar)]`.
+    fn expand(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("generate", 1)]) {
+            return Err(no(format!("expand with the option {o} is not translated")));
+        }
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            return Err(no("expand with by: is not translated yet"));
+        }
+        let d = self.data()?;
+        let exp = c.parts.main.trim().trim_start_matches('=').trim();
+        if exp.is_empty() {
+            return Err(no("expand needs a count (Stata: invalid syntax)"));
+        }
+        let n = self.expr(exp, Use::Value, out)?;
+        let n = match self.condition(c, out)? {
+            Some(cond) => format!("dplyr::if_else({cond}, as.numeric({n}), 1)"),
+            None => n,
+        };
+        let gen = match opts.arg("generate", 1) {
+            Some(g) => {
+                let g = g.trim().to_string();
+                if self.kinds.contains_key(&g) {
+                    return Err(no(format!(
+                        "expand: {g} already exists (Stata: variable {g} already defined)"
+                    )));
+                }
+                out.caveat("Stata labels the new variable's 0 and 1 (original, duplicated); here it has no value labels");
+                self.kinds.insert(g.clone(), Kind::Number);
+                format!(", gen = {}", r_text(&g))
+            }
+            None => String::new(),
+        };
+        self.helpers.insert("stata_expand");
+        out.package("dplyr");
+        out.line(format!(
+            "{d} <- stata_expand({d}, dplyr::transmute({d}, stata_n = {n})$stata_n{gen})"
+        ));
+        Ok(())
+    }
+
+    /// `preserve`: a copy of the data in R, and of what is known of it.
+    fn preserve(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[]) {
+            return Err(no(format!(
+                "preserve with the option {o} is not translated"
+            )));
+        }
+        if !c.parts.main.trim().is_empty() {
+            return Err(no(
+                "preserve takes no words after it (Stata: invalid syntax)",
+            ));
+        }
+        out.line(match &self.data {
+            Some(d) => format!("stata_preserved <- {d}"),
+            None => "stata_preserved <- NULL".into(),
+        });
+        out.caveat("if the do-file ends before restore, Stata puts the preserved data back; R keeps the data as it is then");
+        self.preserved = Some(Box::new(Preserved {
+            data: self.data.clone(),
+            file: self.file.clone(),
+            kinds: self.kinds.clone(),
+            label_sets: self.label_sets.clone(),
+            panel: self.panel.clone(),
+            panel_time: self.panel_time.clone(),
+            stset: self.stset.clone(),
+        }));
+        Ok(())
+    }
+
+    /// `restore`: the data `preserve` kept, again; with `preserve` the copy
+    /// stays for another restore, with `not` it is dropped unused.
+    fn restore(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("preserve", 8), ("not", 3)]) {
+            return Err(no(format!("restore with the option {o} is not translated")));
+        }
+        if !c.parts.main.trim().is_empty() {
+            return Err(no(
+                "restore takes no words after it (Stata: invalid syntax)",
+            ));
+        }
+        let Some(p) = self.preserved.clone() else {
+            return Err(no(
+                "restore: nothing was preserved before it (Stata: no preserve)",
+            ));
+        };
+        if opts.has("not", 3) {
+            out.line("rm(stata_preserved)");
+            self.preserved = None;
+            return Ok(());
+        }
+        if let Some(now) = self.data.as_ref().filter(|d| Some(*d) != p.data.as_ref()) {
+            out.line(format!("rm({now})"));
+        }
+        if let Some(d) = &p.data {
+            out.line(format!("{d} <- stata_preserved"));
+        }
+        if !opts.has("preserve", 8) {
+            out.line("rm(stata_preserved)");
+            self.preserved = None;
+        }
+        self.data = p.data;
+        self.file = p.file;
+        self.kinds = p.kinds;
+        self.label_sets = p.label_sets;
+        self.panel = p.panel;
+        self.panel_time = p.panel_time;
+        self.stset = p.stset;
+        // the rows may not be the ones the last model was fitted on
+        self.esample = false;
+        self.changed_since_fit = true;
+        Ok(())
+    }
+
     fn set(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let (what, rest) = first_word(&c.parts.main);
         match what {
@@ -2071,6 +2455,25 @@ impl Session {
                 out.caveat(
                     "R's random numbers are not Stata's: the same seed does not give the same draws",
                 );
+                Ok(())
+            }
+            "obs" => {
+                let n: u64 = rest.trim().parse().map_err(|_| {
+                    no(format!(
+                        "set obs {}: only a whole number is translated",
+                        rest.trim()
+                    ))
+                })?;
+                self.helpers.insert("stata_set_obs");
+                match self.data.clone() {
+                    Some(d) => out.line(format!("{d} <- stata_set_obs({d}, {n})")),
+                    None => {
+                        out.line(format!("data <- stata_set_obs(NULL, {n})"));
+                        self.data = Some("data".into());
+                        self.file = None;
+                        self.kinds.clear();
+                    }
+                }
                 Ok(())
             }
             "more" | "linesize" | "varabbrev" | "trace" | "rmsg" | "type" | "maxvar"
@@ -2361,5 +2764,116 @@ mod tests {
             script.contains("#   note: R's random numbers are not Stata's"),
             "{script}"
         );
+    }
+
+    #[test]
+    fn set_obs_and_capture_and_rc() {
+        let out = r("clear
+set obs 3
+generate x = _n
+set obs 5");
+        assert_eq!(out[1], "data <- stata_set_obs(NULL, 3)");
+        assert_eq!(out[3], "data <- stata_set_obs(data, 5)");
+        assert!(r("set obs many")[0].starts_with("NOT: set obs many"));
+        let out = r("use s
+capture drop nosuch
+display _rc");
+        assert!(out[1].starts_with("stata_rc <- tryCatch("), "{out:?}");
+        assert!(out[2].contains("stata_rc"), "{out:?}");
+        // a line under capture that is not translated leaves _rc unknown
+        let out = r("use s
+capture frobnicate
+display _rc
+capture drop x
+display _rc");
+        assert!(out[2].starts_with("NOT: _rc is not known"), "{out:?}");
+        assert!(out[4].contains("stata_rc"), "{out:?}");
+    }
+
+    #[test]
+    fn preserve_and_restore_bring_the_data_back() {
+        let out = r("use a
+preserve
+use b
+restore
+summarize x
+restore");
+        assert_eq!(out[1], "stata_preserved <- a");
+        assert_eq!(
+            out[3],
+            "rm(b)
+a <- stata_preserved
+rm(stata_preserved)"
+        );
+        assert!(out[4].contains("a"), "{out:?}");
+        assert!(
+            out[5].starts_with("NOT: restore: nothing was preserved"),
+            "{out:?}"
+        );
+        let out = r("use a
+preserve
+keep if x > 1
+restore, preserve
+restore, not");
+        assert_eq!(out[3], "a <- stata_preserved");
+        assert_eq!(out[4], "rm(stata_preserved)");
+    }
+
+    #[test]
+    fn quietly_and_capture_hide_what_a_line_prints() {
+        let out = r(concat!(
+            "use s\nquietly display \"hidden\"\ncapture display \"hidden\"\n",
+            "capture noisily display \"shown\"\nnoisily quietly display \"hidden\"\n",
+            "quietly noisily display \"shown\"\ndisplay \"shown\"\n",
+        ));
+        let hidden: Vec<bool> = out
+            .iter()
+            .skip(1)
+            .map(|c| c.contains("capture.output("))
+            .collect();
+        assert_eq!(hidden, [true, true, false, true, false, false], "{out:?}");
+        // a line that changes the data and is not translated: the data after it is not known
+        let out = r("use a\nframe change other\ndisplay _N\nuse b\ndisplay _N");
+        assert!(
+            out[2].starts_with("NOT: the data in memory is not known here"),
+            "{out:?}"
+        );
+        assert!(!out[4].starts_with("NOT"), "{out:?}");
+        let out = r("use a\nkeep if runiform() < .5\nsummarize x\nlabel variable x \"X\"");
+        assert!(
+            out[2].starts_with("NOT: the data in memory is not known here"),
+            "{out:?}"
+        );
+        // .a to .z are all NA in R: how they compare is not translated
+        let out = r("display . < .a
+display . == .");
+        assert!(
+            out[0].starts_with("NOT: a comparison with an extended missing value"),
+            "{out:?}"
+        );
+        assert!(!out[1].starts_with("NOT"), "{out:?}");
+        // a variable whose line was not translated: the lines that use it say so
+        let out = r(concat!(
+            "use a\ngenerate double y = runiform()\ngenerate z = y * 2\nregress z x\n",
+            "display \"y is fine in text\"\ngenerate y = 1\nsummarize y\ngenerate w = L.x\n",
+        ));
+        assert!(
+            out[2].starts_with("NOT: y is not known here: the line that makes it"),
+            "{out:?}"
+        );
+        assert!(out[3].starts_with("NOT: z is not known here"), "{out:?}");
+        assert!(!out[4].starts_with("NOT"), "{out:?}");
+        assert!(out[6].starts_with("NOT: y is not known"), "{out:?}");
+        assert!(out[7].contains("time-series operators"), "{out:?}");
+        let out = r("use a
+scalar s = r(nope)
+generate z = x * s
+scalar s = 2
+generate w = x * s");
+        assert!(out[2].starts_with("NOT: s is not known here"), "{out:?}");
+        assert!(!out[4].starts_with("NOT"), "{out:?}");
+        // a command that hides its own output is not wrapped again
+        let out = r("use s\nquietly summarize x");
+        assert!(!out[1].contains("capture.output("), "{out:?}");
     }
 }

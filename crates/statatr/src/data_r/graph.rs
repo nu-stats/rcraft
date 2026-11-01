@@ -1010,7 +1010,7 @@ impl Session {
         }
         out.package("ggplot2");
         out.line(format!("stata_graph <- {}", plot.join(" +\n  ")));
-        if !Self::quiet(c) && !opts.has("nodraw", 6) {
+        if !self.quiet(c) && !opts.has("nodraw", 6) {
             out.line("print(stata_graph)");
         }
         let looks: Vec<String> = c

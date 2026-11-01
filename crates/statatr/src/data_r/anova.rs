@@ -358,7 +358,7 @@ impl Session {
                 "",
             );
         }
-        if Self::quiet(c) {
+        if self.quiet(c) {
             return Ok(());
         }
         self.helpers.insert("stata_anova");

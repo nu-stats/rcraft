@@ -2605,3 +2605,56 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   (`by()`, `vce(cluster ...)`), patterns inside interactions (`c.x*#i.g`), `ds`; `: type`, `: format`,
   `: value label`; programs, `input` blocks, Mata; the coverage per tier (P2C.8) and StatCraft's probe do-files as
   inputs (P2C.9).
+
+## P2C.8 and P2C.9: coverage by tier, StatCraft's probes run on R, 2026-11-01
+
+- **Coverage by tier (P2C.8):** `statatr::coverage` puts each command in a tier (1 data management and control
+  flow, 2 core statistics, 3 panel, survival, survey, IV and the other models, 4 graphs, 5 programs and SSC
+  commands) and sums dry runs. `tests/many_dofiles.rs` runs it over a folder (`RCRAFT_DOFILES_DIR`) and writes the
+  table with `RCRAFT_COVERAGE_TABLE`. The table for StatCraft's 381 probe do-files is in `docs/stata-coverage.md`
+  (`docs/coverage.md` is the menus' generated inventory, so it was not used).
+- **Probes run on R (P2C.9):** `engine/tests/stata_probes.rs` (`RCRAFT_STATA_PROBES` = StatCraft's private corpus)
+  runs each probe line by line in a fresh R, as the do-file window does. Each top-level `display`, `return list`
+  and `ereturn list` before the probe's first R error is paired with the line Stata echoed with the same text
+  and compared to 8 significant digits, with `%21x` read back to the double. Stata's logs stay in the corpus;
+  only counts are written down.
+- **What the probes found, and what was done about it:**
+  - Missing features, now translated:
+    - `set obs` (with no data, and to add rows);
+    - one-line `if exp command` and `else command`;
+    - `tokenize` (Stata 19's rules: every numbered local cleared, outer quotes off, `==` `>=` `<=` `!=` `~=` kept
+      whole);
+    - `display %21x`;
+    - `preserve` / `restore`;
+    - `expand` (copies after all the rows, in order, as Stata 19 puts them);
+    - `_rc` after `capture` (0 or missing: R's errors are not Stata's numbers).
+  - Silent wrong results, now refused with the reason:
+    - `quietly display` and a plain `capture` printed (now Stata's rule: the innermost of quietly, noisily and
+      capture wins);
+    - a line that uses a variable or scalar whose `generate` / `replace` / `egen` / `predict` / `scalar` line was not
+      translated ran on the old values or none;
+    - a line after a refused line that replaces the data or changes its rows (`frame`, `merge`, `drop`, `sort`,
+      ...) used the data from before it;
+    - a `local` whose new value could not be worked out kept its old value;
+    - macros a refused `gettoken` or `levelsof, local()` would set, `macval()`, class members and Stata's own `S_`
+      globals expanded to nothing;
+    - comparisons with `.a`–`.z` (all NA in R) gave the wrong answer;
+    - time-series operators (`L.x`) reached R as they are;
+    - `display` of a value from the data with no data known.
+  - Lost helpers: a helper sent together with a line R could not read was never defined, though it counted as
+    sent; later lines then failed with `could not find function`. The do-file window, typed Stata lines (`Live`,
+    now with `Step::helpers` and `Live::unsend`) and the harness now send it again.
+- **Numbers** (StatCraft's 385 recorded probes): 192 of 196 compared lines match Stata 19 to 8 significant digits
+  and 1 more to 6. R errors on translated lines fell from 1,494 to 399, most of them the probes' setting (svglite
+  not installed, files other probes wrote). The dry share translated is 31.8%; most of the rest follows from the
+  random-number functions. `docs/stata-coverage.md` has the tables.
+- **The corpus:** `made.do` (16 results, recorded with `cargo xtask stata-record`) checks `set obs`, `expand`,
+  `preserve` / `restore`, `tokenize`, one-line `if` / `else`, `_rc` and `quietly` against Stata 19; all match, so
+  expand, preserve, restore, set and tokenize are Verified. The corpus now checks 168 results.
+- **Not done:**
+  - Stata's random numbers. `runiform()`, `rnormal()` and `rgamma()` make most of the probes' data. StatCraft has
+    them exactly (mt64, checked bit for bit against Stata 19), but R would need them from RCraft's side.
+  - `gettoken`, programs, the date functions (`clock()`, `monthly()`, ...), `_natscale`, `bsample`, `file`,
+    lasso, xtregar, and time-series operators.
+  - `capture noisily` does not print R's error message.
+  - Public replication packages as inputs.

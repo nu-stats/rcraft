@@ -407,3 +407,144 @@ fn the_datas_names_come_from_r_when_a_varlist_needs_them() {
     // asked once, kept while the lines leave the names alone, asked again after generate
     assert_eq!(asked, 2, "{s:?}");
 }
+
+/// What Stata 19 printed for each (made-up text): every numbered local is
+/// cleared, quotes hold words together, each parse() character is a token.
+#[test]
+fn tokenize_sets_the_positional_locals_as_stata_does() {
+    let d = run(concat!(
+        "local 5 \"old\"\nlocal 9 \"nine\"\n",
+        "tokenize \"a b c\"\ndisplay \"A[`1'][`2'][`3'][`4'][`5'][`9']\"\n",
+        "tokenize `\"one \"two three\" four\"'\ndisplay `\"B[`1'][`2'][`3'][`4']\"'\n",
+        "tokenize \"a,b,,c\", parse(\",\")\ndisplay \"C[`1'][`2'][`3'][`4'][`5'][`6'][`7']\"\n",
+        "tokenize\ndisplay \"D[`1'][`2']\"\n",
+        "local s \"x  y\"\ntokenize `s'\ndisplay \"E[`1'][`2'][`3']\"\n",
+        "tokenize \"p=q r\", parse(\"= \")\ndisplay \"F[`1'][`2'][`3'][`4'][`5'][`6']\"\n",
+    ));
+    let got: Vec<String> = stata_lines(&d, "display")
+        .iter()
+        .map(|s| {
+            let s = s.trim_start_matches("display ").trim_start_matches('`');
+            s.trim_matches(|c| c == '"' || c == '\'').to_string()
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            "A[a][b][c][][][]",
+            "B[one][two three][four][]",
+            "C[a][,][b][,][,][c][]",
+            "D[][]",
+            "E[x][y][]",
+            "F[p][=][q][r][][]",
+        ],
+        "{:?}",
+        shown(&d)
+    );
+    // neighbouring parse() characters: Stata 19 keeps ==, >=, <=, != and ~=
+    // together (even when = is not one of them), and nothing else
+    let cases = [
+        ("a==b", "=", "[a][==][b][]"),
+        ("a>=b", "=>", "[a][>=][b][]"),
+        ("a=>b", "=>", "[a][=][>][b]"),
+        ("a,;b", ",;", "[a][,][;][b]"),
+        ("a<>b", "<>", "[a][<][>][b]"),
+        ("a!=b", "!=", "[a][!=][b][]"),
+        ("a~=b", "~=", "[a][~=][b][]"),
+        ("a+=b", "+=", "[a][+][=][b]"),
+        ("a>>b", ">", "[a][>][>][b]"),
+        ("a<=b", "<", "[a][<=][b][]"),
+        ("a<=b", "=", "[a<][=][b][]"),
+    ];
+    for (text, parse, want) in cases {
+        let d = run(&format!(
+            "tokenize \"{text}\", parse(\"{parse}\")\ndisplay \"[`1'][`2'][`3'][`4']\"\n"
+        ));
+        assert_eq!(
+            stata_lines(&d, "display"),
+            [format!("display \"{want}\"")],
+            "{text} with {parse}"
+        );
+    }
+}
+
+/// `if exp command` and `else command` on one line each.
+#[test]
+fn one_line_if_and_else_run_the_command_the_condition_picks() {
+    let d = run(concat!(
+        "local k 2\n",
+        "if `k' == 2 display \"two\"\nelse display \"not two\"\n",
+        "if `k' == 3 display \"three\"\nelse display \"not three\"\n",
+        "if \"`k'\" == \"2\" & `k' > 1 local m yes\ndisplay \"m=`m'\"\n",
+    ));
+    assert_eq!(
+        stata_lines(&d, "display"),
+        [
+            "display \"two\"",
+            "display \"not three\"",
+            "display \"m=yes\""
+        ],
+        "{:?}",
+        shown(&d)
+    );
+    let s = shown(&d);
+    assert!(
+        s.iter()
+            .any(|l| l.contains("false: the command after it is skipped")),
+        "{s:?}"
+    );
+    assert!(
+        s.iter()
+            .any(|l| l.contains("the if before it was true: skipped")),
+        "{s:?}"
+    );
+    // a condition only R knows waits for the run
+    let later = run("if _rc display \"failed\"\n");
+    assert_eq!(later.origins[0].what, What::Later, "{:?}", shown(&later));
+}
+
+/// A macro a line that was not run would have set, or a form of macro
+/// RCraft does not have, stops the lines that use it instead of being empty.
+#[test]
+fn macros_not_known_are_said_so_not_left_empty() {
+    let d = run(concat!(
+        "local s \"a b\"\ngettoken first s : s\ndisplay \"[`first'] [`s']\"\n",
+        "local one \"x\"\ndisplay \"[`macval(one)']\"\ndisplay \"[$S_level]\"\n",
+        "global S_mine 3\ndisplay \"$S_mine\"\n",
+    ));
+    let s = shown(&d);
+    let not = |start: &str| {
+        s.iter()
+            .find(|l| l.starts_with(start))
+            .is_some_and(|l| l.contains("| not: "))
+    };
+    assert!(not("gettoken"), "{s:?}");
+    assert!(
+        s.iter()
+            .any(|l| l.contains("`first' is not known: gettoken first s : s was not translated")),
+        "{s:?}"
+    );
+    assert!(
+        s.iter()
+            .any(|l| l.contains("macval(one)") && l.contains("not translated yet")),
+        "{s:?}"
+    );
+    assert!(
+        s.iter()
+            .any(|l| l.contains("$S_level is one of the globals Stata sets itself")),
+        "{s:?}"
+    );
+    // an S_ global the do-file sets itself is its own
+    assert!(s.iter().any(|l| l.starts_with("display \"3\"")), "{s:?}");
+}
+
+/// A local whose new value cannot be worked out does not keep its old one.
+#[test]
+fn a_local_that_cannot_be_set_does_not_keep_its_old_value() {
+    let d = run(
+        "local s 2\nlocal s `=r(N)' more\ndisplay \"`s'\"\nlocal r 1\nlocal r = `s' + 1\ndisplay \"`r'\"\n",
+    );
+    let s = shown(&d);
+    assert!(!s.iter().any(|l| l.starts_with("display \"1\"")), "{s:?}");
+    assert!(!s.iter().any(|l| l.starts_with("display \"2\"")), "{s:?}");
+}

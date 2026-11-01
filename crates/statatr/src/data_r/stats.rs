@@ -367,13 +367,9 @@ impl Session {
         out.line(format!(
             "stata_summarize({src}{}{wargs}, ret = TRUE{})",
             if detail { ", detail = TRUE" } else { "" },
-            if Self::quiet(c) {
-                ", print = FALSE"
-            } else {
-                ""
-            }
+            if self.quiet(c) { ", print = FALSE" } else { "" }
         ));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             return Ok(());
         }
         if detail || w.is_some() {
@@ -481,7 +477,7 @@ impl Session {
         self.helpers.insert("stata_tables");
         self.helpers.insert("stata_fmt");
         let call = format!("stata_tabulate({}{wargs}, ret = TRUE)", args.join(", "));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             // nothing shown, r() still left
             out.line(format!("invisible(utils::capture.output({call}))"));
             return Ok(());
@@ -531,7 +527,7 @@ impl Session {
         args.push("ret = TRUE".into());
         self.r_new = Some((super::returned::R_CORRELATE, "correlate".into()));
         let call = format!("stata_correlate({})", args.join(", "));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             out.line(format!("invisible(utils::capture.output({call}))"));
             return Ok(());
         }
@@ -645,7 +641,7 @@ impl Session {
             r_logical(equal)
         ));
         self.r_new = Some((super::returned::R_TTEST, "ttest".into()));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             return Ok(());
         }
         out.line(format!("print(stats::t.test({}))", args.join(", ")));
@@ -847,7 +843,7 @@ impl Session {
             self.r_new = Some((super::returned::R_TAB1, "tab1".into()));
         }
         let call = format!("stata_tab1({})", args.join(", "));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             // nothing shown, r() still left
             out.line(format!("invisible(utils::capture.output({call}))"));
             return Ok(());
@@ -916,7 +912,7 @@ impl Session {
             self.r_new = Some((super::returned::R_TAB2, "tab2".into()));
         }
         let call = format!("stata_tab2({})", args.join(", "));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             // nothing shown, r() still left
             out.line(format!("invisible(utils::capture.output({call}))"));
             return Ok(());
@@ -991,7 +987,7 @@ impl Session {
         args.push("ret = TRUE".into());
         self.r_new = Some((super::returned::R_CORRELATE, "pwcorr".into()));
         let call = format!("stata_pwcorr({})", args.join(", "));
-        if Self::quiet(c) {
+        if self.quiet(c) {
             // nothing shown, r() still left
             out.line(format!("invisible(utils::capture.output({call}))"));
             return Ok(());

@@ -33,7 +33,8 @@ use crate::reader::{self, Command, ForeachList, Group, Item, Opener, Prefix, Spa
 pub use format::g as stata_g;
 pub use macros::{expand, words, Env, Need, Stop};
 pub use scan::{
-    quarto, r_script, report, scan, status, CommandUse, FileRole, FileStatus, Ran, Scan, Status,
+    command_word as command_name, quarto, r_script, report, scan, status, CommandUse, FileRole,
+    FileStatus, Ran, Scan, Status,
 };
 
 /// The do-files a do-file runs (`do`, `run`, `include`), read from where
@@ -247,6 +248,9 @@ enum Macro {
     Text(String),
     /// Not known: why, in words.
     Later(String),
+    /// Not known even when the do-file runs: a line that sets it was not
+    /// translated. Why, in words.
+    Lost(String),
 }
 
 #[derive(Debug, Clone)]
@@ -293,6 +297,8 @@ pub struct Run<'f> {
     origins: Vec<Origin>,
     refs: Vec<FileRef>,
     programs: BTreeSet<String>,
+    /// What the last one-line `if exp command` came to, for an `else` after it.
+    one_line_if: Option<bool>,
     temp: usize,
     cwd: String,
     written: BTreeSet<String>,
@@ -342,6 +348,7 @@ impl<'f> Run<'f> {
             origins: Vec::new(),
             refs: Vec::new(),
             programs: BTreeSet::new(),
+            one_line_if: None,
             temp: 0,
             cwd,
             written: BTreeSet::new(),
@@ -602,6 +609,20 @@ impl<'f> Run<'f> {
                 } else {
                     What::Command
                 };
+                // a macro this line sets does not keep the value it had before
+                if matches!(c.name.as_str(), "local" | "global") {
+                    let rest = after_word(&c.text, &c.written);
+                    let name = rest.split_whitespace().next().unwrap_or("");
+                    let name = name.split(['=', ':']).next().unwrap_or("");
+                    if macros::is_name(name) {
+                        let why = format!("was not set: {}", stop_reason(&e));
+                        let m = match &e {
+                            Stop::Later(_) => Macro::Later(why),
+                            _ => Macro::Lost(why),
+                        };
+                        self.set_macro(name, c.name == "global", m);
+                    }
+                }
                 let line = self.t.refused(c.span, written.clone(), stop_reason(&e));
                 self.push(line, what, None, written);
                 return Flow::Line;
@@ -611,7 +632,16 @@ impl<'f> Run<'f> {
             self.done_item(depth);
             return Flow::Next;
         }
-        let program = reader::read(&expanded);
+        // a one-line `else command` reads as a line only after its if
+        let program = if c.name == "else" {
+            let mut c2 = c.clone();
+            c2.text = expanded.clone();
+            reader::Program {
+                items: vec![Item::Command(c2)],
+            }
+        } else {
+            reader::read(&expanded)
+        };
         let mut c2 = match program.items.as_slice() {
             [Item::Command(c2)] => c2.clone(),
             [Item::Problem(p)] => {
@@ -710,6 +740,57 @@ impl<'f> Run<'f> {
                 self.push(line, What::Command, None, written);
                 Flow::Line
             }
+            // gettoken is not run yet: the macros it sets are not known after it
+            "gettoken" => {
+                self.done_item(depth);
+                let names = rest.split_once(':').map(|(n, _)| n).unwrap_or("");
+                let why = format!("{} was not translated", c.text.trim());
+                let mut global = false;
+                for n in names.split_whitespace() {
+                    match n {
+                        "(local)" => global = false,
+                        "(global)" => global = true,
+                        n if macros::is_name(n) => {
+                            self.set_macro(n, global, Macro::Lost(why.clone()))
+                        }
+                        _ => {}
+                    }
+                }
+                let line = self
+                    .t
+                    .refused(c.span, c.text.clone(), "gettoken is not translated yet");
+                self.line_with(line, What::Command, None, written)
+            }
+            // the positional locals `1', `2', ... from text, as Stata 19 sets
+            // them: every numbered local is cleared first
+            "tokenize" => {
+                self.done_item(depth);
+                let (text, parse) = match tokenize_parts(&rest) {
+                    Ok(x) => x,
+                    Err(why) => {
+                        let line = self.t.refused(c.span, c.text.clone(), why);
+                        return self.line_with(line, What::Command, None, written);
+                    }
+                };
+                let tokens = tokenize(&text, &parse);
+                if let Some(l) = self.locals_mut() {
+                    l.retain(|k, _| !k.bytes().all(|b| b.is_ascii_digit()));
+                }
+                for (i, t) in tokens.iter().enumerate() {
+                    self.set_local_now(&(i + 1).to_string(), Macro::Text(t.clone()));
+                }
+                let info = if tokens.is_empty() {
+                    "no tokens: `1' and the rest are empty".to_string()
+                } else {
+                    tokens
+                        .iter()
+                        .enumerate()
+                        .map(|(i, t)| format!("`{}' = {t}", i + 1))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                };
+                self.line_with(nothing(c), What::Macro, Some(info), written)
+            }
             "tempvar" | "tempname" | "tempfile" => {
                 self.done_item(depth);
                 let names = words(&rest);
@@ -791,6 +872,109 @@ impl<'f> Run<'f> {
             "do" | "run" | "include" => {
                 self.done_item(depth);
                 self.run_file(c, &rest, written)
+            }
+            // `if exp command` on one line: the expression runs until what
+            // cannot continue it, and the command after it runs if it is true
+            "if" => {
+                self.one_line_if = None;
+                let refuse = |s: &mut Self, why: &str| {
+                    s.done_item(depth);
+                    let line = s.t.refused(c.span, c.text.clone(), why);
+                    s.line_with(line, What::Command, None, written.clone())
+                };
+                let Ok((_, end)) = crate::lang::expr::parse_prefix(&rest) else {
+                    return refuse(
+                        self,
+                        "the condition after if cannot be read (Stata: invalid syntax)",
+                    );
+                };
+                let (condition, then) = rest.split_at(end);
+                if then.trim().is_empty() {
+                    return refuse(
+                        self,
+                        "if needs a command or { after its condition (Stata: invalid syntax)",
+                    );
+                }
+                let go = match self.condition(condition) {
+                    Err(Stop::Ask(need)) => return Flow::Ask(need),
+                    Err(e) => {
+                        self.done_item(depth);
+                        let what = if matches!(e, Stop::Later(_)) {
+                            What::Later
+                        } else {
+                            What::Command
+                        };
+                        let line = self.t.refused(c.span, c.text.clone(), stop_reason(&e));
+                        return self.line_with(line, what, None, written);
+                    }
+                    Ok(None) => {
+                        return refuse(self, "the condition is text (Stata: type mismatch)")
+                    }
+                    Ok(Some(go)) => go,
+                };
+                self.one_line_if = Some(go);
+                if !go {
+                    self.done_item(depth);
+                    self.push_control(
+                        c.span,
+                        c.text.clone(),
+                        "false: the command after it is skipped".into(),
+                        written,
+                    );
+                    return Flow::Line;
+                }
+                let program = reader::read(then.trim());
+                let [Item::Command(inner)] = program.items.as_slice() else {
+                    return refuse(
+                        self,
+                        "the command after if is not one command, which is not translated",
+                    );
+                };
+                let mut inner = inner.clone();
+                inner.span = c.span;
+                let mut prefixes = c.prefixes.clone();
+                prefixes.append(&mut inner.prefixes);
+                inner.prefixes = prefixes;
+                self.run_command(&inner, depth, written)
+            }
+            // `else command` after a one-line if: the command runs if that was false
+            "else" => {
+                let then = rest.trim();
+                match self.one_line_if.take() {
+                    Some(false) => {
+                        let program = reader::read(then);
+                        let [Item::Command(inner)] = program.items.as_slice() else {
+                            self.done_item(depth);
+                            let line = self.t.refused(c.span, c.text.clone(), "the command after else is not one command, which is not translated");
+                            return self.line_with(line, What::Command, None, written);
+                        };
+                        let mut inner = inner.clone();
+                        inner.span = c.span;
+                        let mut prefixes = c.prefixes.clone();
+                        prefixes.append(&mut inner.prefixes);
+                        inner.prefixes = prefixes;
+                        self.run_command(&inner, depth, written)
+                    }
+                    Some(true) => {
+                        self.done_item(depth);
+                        self.push_control(
+                            c.span,
+                            c.text.clone(),
+                            "the if before it was true: skipped".into(),
+                            written,
+                        );
+                        Flow::Line
+                    }
+                    None => {
+                        self.done_item(depth);
+                        let line = self.t.refused(
+                            c.span,
+                            c.text.clone(),
+                            "else with no one-line if just before it, or one that was not run",
+                        );
+                        self.line_with(line, What::Command, None, written)
+                    }
+                }
             }
             "exit" => {
                 self.done_item(depth);
@@ -917,6 +1101,20 @@ impl<'f> Run<'f> {
                     self.programs.clear();
                 }
                 let line = self.t.command(c);
+                // a local() it would have set is not known after it
+                if line.result.is_err() {
+                    for o in c.options.iter().filter(|o| o.is("local", 3)) {
+                        if let Some(n) = o
+                            .arg
+                            .as_deref()
+                            .map(str::trim)
+                            .filter(|n| macros::is_name(n))
+                        {
+                            let why = format!("{} was not translated", c.text.trim());
+                            self.set_local_now(n, Macro::Lost(why));
+                        }
+                    }
+                }
                 // levelsof, local(name): the local is set from r(levels) once the line has run
                 if c.name == "levelsof" && line.result.is_ok() {
                     let local = c.options.iter().find(|o| o.is("local", 3));
@@ -1017,6 +1215,10 @@ impl<'f> Run<'f> {
                         );
                         return Err(Stop::Later(format!("{} is {why}", exp.trim())));
                     }
+                    Err(Stop::Not(why)) => {
+                        self.set_macro(name, global, Macro::Lost(format!("was not set: {why}")));
+                        return Err(Stop::Not(why));
+                    }
                     Err(e) => return Err(e),
                 },
             }
@@ -1028,7 +1230,7 @@ impl<'f> Run<'f> {
                     return Err(Stop::Later(why));
                 }
                 Err(Stop::Not(why)) => {
-                    self.set_macro(name, global, Macro::Later(format!("was not set: {why}")));
+                    self.set_macro(name, global, Macro::Lost(format!("was not set: {why}")));
                     return Err(Stop::Not(why));
                 }
                 Err(e) => return Err(e),
@@ -1628,6 +1830,11 @@ impl Env for Run<'_> {
         match self.locals().and_then(|l| l.get(name)) {
             Some(Macro::Text(t)) => Ok(t.clone()),
             Some(Macro::Later(why)) => Err(Stop::Later(format!("`{name}' {why}"))),
+            Some(Macro::Lost(why)) => Err(Stop::Not(format!("`{name}' is not known: {why}"))),
+            // macval(), a class member (`.a.b'): forms of macro RCraft does not have
+            None if name.contains(['(', '.']) => Err(Stop::Not(format!(
+                "`{name}': this form of macro (macval(), class members) is not translated yet"
+            ))),
             None => Ok(String::new()),
         }
     }
@@ -1636,6 +1843,11 @@ impl Env for Run<'_> {
         match self.globals.get(name) {
             Some(Macro::Text(t)) => Ok(t.clone()),
             Some(Macro::Later(why)) => Err(Stop::Later(format!("${name} {why}"))),
+            Some(Macro::Lost(why)) => Err(Stop::Not(format!("${name} is not known: {why}"))),
+            // the S_ globals Stata sets itself (S_level, ...) are not kept
+            None if name.starts_with("S_") => Err(Stop::Not(format!(
+                "${name} is one of the globals Stata sets itself, which RCraft does not keep"
+            ))),
             None => Ok(String::new()),
         }
     }
@@ -1845,6 +2057,114 @@ pub fn dry_run(text: &str, files: &dyn Files, opts: Options) -> DoFile {
 }
 
 // ---------------- helpers ----------------
+
+/// `tokenize`'s text and its `parse()` characters.
+fn tokenize_parts(rest: &str) -> Result<(String, String), String> {
+    let chars: Vec<char> = rest.chars().collect();
+    let at = |k: usize| chars.get(k).copied();
+    let mut i = 0;
+    let mut comma = None;
+    while let Some(ch) = at(i) {
+        match ch {
+            '`' if at(i + 1) == Some('"') => i = compound_end(&chars, i),
+            '"' => i = closing_quote(&chars, i + 1) + 1,
+            ',' => {
+                comma = Some(i);
+                break;
+            }
+            _ => i += 1,
+        }
+    }
+    let Some(comma) = comma else {
+        return Ok((macros::unquote(rest.trim()), String::new()));
+    };
+    let text: String = chars.iter().take(comma).collect();
+    let opts: String = chars.iter().skip(comma + 1).collect();
+    let opts = opts.trim();
+    let inner = opts
+        .strip_prefix("parse(")
+        .or_else(|| opts.strip_prefix("p("))
+        .and_then(|o| o.strip_suffix(')'))
+        .ok_or_else(|| format!("tokenize with the option {opts} is not translated"))?;
+    Ok((macros::unquote(text.trim()), macros::unquote(inner.trim())))
+}
+
+/// Where the `"` closing a quote is, from `from` on (the end if none).
+fn closing_quote(chars: &[char], from: usize) -> usize {
+    (from..chars.len())
+        .find(|&k| chars.get(k) == Some(&'"'))
+        .unwrap_or(chars.len())
+}
+
+/// Where a compound quote opened at `i` ends (just after its `"'`).
+fn compound_end(chars: &[char], i: usize) -> usize {
+    let at = |k: usize| chars.get(k).copied();
+    let mut depth = 0;
+    let mut k = i;
+    while let Some(ch) = at(k) {
+        if ch == '`' && at(k + 1) == Some('"') {
+            depth += 1;
+            k += 2;
+        } else if ch == '"' && at(k + 1) == Some('\'') {
+            depth -= 1;
+            k += 2;
+            if depth == 0 {
+                return k;
+            }
+        } else {
+            k += 1;
+        }
+    }
+    chars.len()
+}
+
+/// The tokens of `text`: spaces separate, quotes hold words together and
+/// are taken off, and each `parse` character is a token of its own.
+fn tokenize(text: &str, parse: &str) -> Vec<String> {
+    let chars: Vec<char> = text.chars().collect();
+    let at = |k: usize| chars.get(k).copied();
+    let between =
+        |a: usize, b: usize| -> String { chars.iter().skip(a).take(b.saturating_sub(a)).collect() };
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut i = 0;
+    let flush = |cur: &mut String, out: &mut Vec<String>| {
+        if !cur.is_empty() {
+            out.push(std::mem::take(cur));
+        }
+    };
+    while let Some(ch) = at(i) {
+        if ch == '`' && at(i + 1) == Some('"') {
+            flush(&mut cur, &mut out);
+            let end = compound_end(&chars, i);
+            out.push(between(i + 2, end.saturating_sub(2)));
+            i = end;
+        } else if ch == '"' {
+            flush(&mut cur, &mut out);
+            let end = closing_quote(&chars, i + 1);
+            out.push(between(i + 1, end));
+            i = end + 1;
+        } else if ch.is_whitespace() {
+            flush(&mut cur, &mut out);
+            i += 1;
+        } else if parse.contains(ch) {
+            flush(&mut cur, &mut out);
+            // ==, >=, <=, != and ~= stay one token, = a parse character or not
+            if "=><!~".contains(ch) && at(i + 1) == Some('=') {
+                out.push(format!("{ch}="));
+                i += 2;
+            } else {
+                out.push(ch.to_string());
+                i += 1;
+            }
+        } else {
+            cur.push(ch);
+            i += 1;
+        }
+    }
+    flush(&mut cur, &mut out);
+    out
+}
 
 fn nothing(c: &Command) -> Line {
     Line {

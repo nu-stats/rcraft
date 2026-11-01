@@ -649,17 +649,25 @@ impl App {
                 let mut offer = Vec::new();
                 if let EngineState::Ready(engine) = &mut self.engine {
                     // the translator moves on only if R takes the line
+                    // the helpers sent with the step before, again if R stopped there
+                    if let Some((id, helpers)) = self.stata.sent_with.take() {
+                        let o = engine.history().get(id).and_then(|h| h.outcome);
+                        if o.is_some_and(|o| o != Outcome::Ok) {
+                            self.stata.live.unsend(&helpers);
+                        }
+                    }
                     let before = self.stata.live.clone();
                     let step = self.stata.live.step(&text);
                     // a value only R knows first (local m = r(mean)): asked out of
                     // sight, and the line stepped again with the answer
                     if let Some(code) = step.ask {
                         let q = engine.query(&code);
-                        self.stata.asking = Some((q, source, text));
+                        self.stata.asking = Some((q, source, text, step.helpers));
                         return;
                     }
                     match engine.submit(source.clone(), &step.code) {
-                        Ok(_) => {
+                        Ok(id) => {
+                            self.stata.sent_with = Some((id, step.helpers.clone()));
                             self.message = None;
                             if source == Source::Typed {
                                 self.stata.typed(text.trim());
@@ -1220,9 +1228,12 @@ impl App {
         }
 
         // a typed Stata line waiting for a value from R
-        if let Some((q, source, text)) = self.stata.asking.clone() {
+        if let Some((q, source, text, helpers)) = self.stata.asking.clone() {
             let answer = match &self.engine {
                 EngineState::Ready(e) => e.query_result(q).map(|r| {
+                    if !r.ok {
+                        self.stata.live.unsend(&helpers);
+                    }
                     if r.ok {
                         Ok(r.text.clone())
                     } else {

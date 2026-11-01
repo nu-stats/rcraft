@@ -1,0 +1,17 @@
+* Stata 19.0's results for made.do, recorded by cargo xtask stata-record
+@ obs_sum                    4.375
+@ obs_new_missing                        2
+@ exp_N                       12
+@ exp_dup_sum       5.4583333333333339
+@ exp_8th_v                     .625
+@ exp_9th_v                     .625
+@ exp_last_v       2.3333333333333335
+@ pre_N                        5
+@ post_N                       12
+@ post_sum       14.166666666666668
+@ tok_sum                      6.5
+@ if_else                        1
+@ else_ran                        2
+@ rc_failed                        1
+@ rc_ok                        0
+@ quiet_mean       1.2440476190476191

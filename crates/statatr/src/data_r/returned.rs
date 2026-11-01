@@ -92,9 +92,16 @@ stata_list_returned <- function(x, p) {
 }"##;
 
 /// Stata's display formats, `%w.dg`, `%w.df`, `%w.de` (each with `c` for
-/// commas, `-` to justify left, `0` to fill with zeros) and `%ws`, decoded in
-/// Stata 19 (the P2B.6 notes have the rules), and `display` itself.
+/// commas, `-` to justify left, `0` to fill with zeros), `%ws` and `%21x`,
+/// decoded in Stata 19 (the P2B.6 notes have the rules), and `display` itself.
+/// `%21x` is the double's own bits: `+1.921fb54442d18X+001` is
+/// (1 + 0x921fb54442d18 / 2^52) * 2^1, zero `+0.0000000000000X-3ff` and `.`
+/// `+1.0000000000000X+3ff` (StatCraft's probes 000, 031 and 034).
 pub(super) const FORMAT_HELPER: &str = r##"stata_fmt <- function(x, fmt = "%10.0g", trim = FALSE) {
+  if (fmt %in% c("%21x", "%-21x")) {
+    if (is.character(x)) stop("type mismatch")
+    return(stata_hex(x))
+  }
   m <- regmatches(fmt, regexec("^%(-?)(0?)([0-9]+)(\\.([0-9]+))?([gfes])(c?)$", fmt))[[1]]
   if (length(m) == 0) stop("invalid %format")
   left <- m[2] == "-"
@@ -220,6 +227,31 @@ stata_display <- function(...) {
   }
   cat(out, "\n", sep = "")
   invisible(NULL)
+}
+stata_hex <- function(x) {
+  if (is.na(x)) return("+1.0000000000000X+3ff")
+  s <- if (x < 0 || (x == 0 && 1 / x < 0)) "-" else "+"
+  ax <- abs(x)
+  if (ax == 0) return(paste0(s, "0.0000000000000X-3ff"))
+  if (ax < 2^-1022) {
+    # subnormal: the bits are ax / 2^-1074, after a leading 0
+    m <- ax * 2^1022 * 2^52
+    lead <- "0"
+    e <- -1023
+  } else {
+    e <- floor(log2(ax))
+    while (ax / 2^e >= 2) e <- e + 1
+    while (ax / 2^e < 1) e <- e - 1
+    m <- (ax / 2^e - 1) * 2^52
+    lead <- "1"
+  }
+  h <- character(13)
+  for (i in 13:1) {
+    r <- m %% 16
+    h[i] <- c(0:9, letters[1:6])[r + 1]
+    m <- (m - r) / 16
+  }
+  paste0(s, lead, ".", paste(h, collapse = ""), "X", if (e < 0) "-" else "+", sprintf("%03x", as.integer(abs(e))))
 }"##;
 
 /// What a model leaves in `e()`, built from what its translation left in R
@@ -1200,16 +1232,16 @@ impl Session {
         let (code, kind) = self.value(e, out)?;
         let scalar = |n: &str| self.scalars.contains_key(n) && self.kind_of(n).is_none();
         let data_free = !mentions_data(e, &scalar);
-        Ok(match (&self.data, data_free) {
-            (Some(d), false) => {
-                out.package("dplyr");
-                (
-                    format!("dplyr::transmute({d}, stata_v = {code})$stata_v[1]"),
-                    kind,
-                )
-            }
-            _ => (code, kind),
-        })
+        if data_free {
+            return Ok((code, kind));
+        }
+        // a value from the data, with no data known: said why, not run without it
+        let d = self.data()?;
+        out.package("dplyr");
+        Ok((
+            format!("dplyr::transmute({d}, stata_v = {code})$stata_v[1]"),
+            kind,
+        ))
     }
 
     /// `ereturn list` and `return list`.
@@ -1321,6 +1353,10 @@ fn quoted(chars: &[char], start: usize) -> Option<(String, usize)> {
 
 /// The display formats `stata_fmt` has.
 pub(super) fn valid_format(f: &str) -> bool {
+    // the hexadecimal form, which shows a double exactly
+    if matches!(f, "%21x" | "%-21x") {
+        return true;
+    }
     let b = f.as_bytes();
     if b.first() != Some(&b'%') {
         return false;
@@ -1492,7 +1528,7 @@ pub(super) fn percent(level: f64) -> f64 {
 /// A call that prints, run as `quietly` asks: nothing shown, but what it
 /// leaves (r()) still left.
 pub(super) fn quietly(c: &Command, call: String) -> String {
-    if c.prefixes.contains(&crate::reader::Prefix::Quietly) {
+    if super::silent(c) {
         format!("invisible(utils::capture.output({call}))")
     } else {
         call

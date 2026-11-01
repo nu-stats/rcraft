@@ -261,7 +261,7 @@ impl Session {
                  b[colnames(X) == \"(Intercept)\"] <- NA; b })",
             );
         }
-        if Self::quiet(c) {
+        if self.quiet(c) {
             return Ok(());
         }
         if !beta && w.is_none() {

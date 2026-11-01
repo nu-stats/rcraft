@@ -106,7 +106,7 @@ impl Session {
         match word {
             "list" | "l" | "li" | "lis" | "dir" | "di" => {
                 self.helpers.insert("stata_fmt");
-                if Self::quiet(c) {
+                if self.quiet(c) {
                     return Ok(());
                 }
                 out.line(format!("stata_scalar_list({list})"));

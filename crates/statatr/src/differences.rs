@@ -163,6 +163,14 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "capture",
+        about: "Runs a line and goes on if it fails; _rc says whether it did",
+        points: &[
+            p("In R", "The line's R runs in tryCatch(): an error is kept from stopping the do-file, as in Stata."),
+            p("_rc", "_rc is 0 when the line ran and missing when it failed, so if _rc, if _rc == 0 and if _rc != 0 pick what Stata would pick. R's errors are not Stata's, so Stata's error numbers (111, 198, ...) are not known; when the line under capture was not translated, _rc is not known at all and the lines that read it say so."),
+        ],
+    },
+    Guide {
         command: "cd",
         about: "Changes the folder the do-file works in",
         points: &[
@@ -248,6 +256,10 @@ pub const GUIDES: &[Guide] = &[
                 "Variables",
                 "A variable in an expression means its first row, as in Stata.",
             ),
+            p(
+                "%21x",
+                "The double's own bits in hexadecimal, as Stata writes them (+1.921fb54442d18X+001), worked out from the double in R; a missing value is Stata's . (+1.0000000000000X+3ff).",
+            ),
             p("Colours", "as text, as result and as error are left out: R prints plain text."),
         ],
     },
@@ -288,6 +300,14 @@ pub const GUIDES: &[Guide] = &[
         command: "exit",
         about: "Ends the do-file",
         points: &[p("In R", "Nothing to do in R: the lines after it are not run, as in Stata.")],
+    },
+    Guide {
+        command: "expand",
+        about: "Copies rows",
+        points: &[
+            p("The new rows", "Each row's copies go after all the rows, in the rows' order, as Stata 19 puts them; a count is rounded, and one below 1 or missing leaves the row once."),
+            p("generate()", "The new variable is 0 for the rows there before and 1 for the copies; Stata also gives 0 and 1 value labels, which RCraft does not."),
+        ],
     },
     Guide {
         command: "foreach",
@@ -349,6 +369,14 @@ pub const GUIDES: &[Guide] = &[
                  width() or discrete say otherwise. R's hist() uses Sturges' rule.",
             ),
             GRAPH,
+        ],
+    },
+    Guide {
+        command: "if",
+        about: "if and else: blocks, and one command on the same line",
+        points: &[
+            p("How they run", "RCraft works the condition out (R does when it needs the data or a stored result, after the lines before it) and gives R only the lines that run, as Stata does: if exp { ... } else { ... }, and if exp command with else command on the next line."),
+            p("On one line", "In if exp command, the condition runs as far as an expression can go, as in Stata: if _rc == 0 display \"ok\" runs display."),
         ],
     },
     Guide {
@@ -420,6 +448,7 @@ pub const GUIDES: &[Guide] = &[
             p("Values only R knows", "A value from the data or a stored result (local m = r(mean), local n = _N) is worked out by R when the do-file runs, after the lines before it, and the lines after it use that value. The R script saved after a run holds the value it had then. A dry run says such lines are known only when the do-file runs."),
             p("Macro functions", "word count, word # of, the list functions (uniq, dups, sort, sizeof, retokenize, -, |, &, in, ==, ===, posof), length, strlen, subinstr and display are done as Stata 19 does them; variable label and label (var) # come from the data's labels in R, and label set # from the do-file's own label define. type, format and value label are not translated: R does not keep Stata's storage types, display formats or the names of value-label sets."),
             p("unab", "unab gets the data's variable names from R and expands the varlist as Stata does."),
+            p("tokenize", "tokenize sets `1', `2', ... as Stata 19 does: every numbered local is cleared first, the outer quotes are taken off, quotes inside hold words together, and each parse() character is a word of its own."),
             p("Temporary names", "tempvar and tempname give __000000, __000001, ... as Stata does; tempfile gives a file in a folder of RCraft's own."),
         ],
     },
@@ -600,6 +629,14 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "preserve",
+        about: "Keeps a copy of the data, which restore brings back",
+        points: &[
+            p("In R", "preserve keeps a copy of the data frame (stata_preserved) and what RCraft knows of it: its variables' types, the value labels defined and xtset or stset; restore puts them back and drops the copy. restore, preserve keeps the copy and restore, not drops it unused."),
+            p("At the end", "If the do-file ends before restore, Stata puts the preserved data back by itself; the R session keeps the data as it was at the end."),
+        ],
+    },
+    Guide {
         command: "pwd",
         about: "Prints the folder the do-file works in",
         points: &[p("In R", "getwd(), printed as a line.")],
@@ -713,6 +750,10 @@ pub const GUIDES: &[Guide] = &[
         command: "set",
         about: "Settings",
         points: &[
+            p(
+                "set obs",
+                "With no data, a data frame of that many rows and no variables; with data, new rows at the end, missing (\"\" in a string variable). A number written out is translated; set obs does not drop rows.",
+            ),
             p(
                 "set seed",
                 "R's random numbers are not Stata's: the same seed does not give the same draws.",
@@ -919,7 +960,9 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
         "saveold" => "save",
         "return" => "ereturn",
         "run" | "include" => "do",
-        "global" | "macro" | "tempvar" | "tempname" | "tempfile" | "unab" => "local",
+        "global" | "macro" | "tempvar" | "tempname" | "tempfile" | "unab" | "tokenize" => "local",
+        "restore" => "preserve",
+        "else" => "if",
         "forvalues" | "while" | "continue" => "foreach",
         "cmdlog" => "log",
         other => other,

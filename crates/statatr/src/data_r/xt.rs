@@ -396,7 +396,7 @@ impl Session {
             }
         );
         // the table is printed as the fit is made; quietly keeps it to itself
-        if Self::quiet(c) {
+        if self.quiet(c) {
             out.line(format!(
                 "invisible(utils::capture.output(stata_estimates <- {call}))"
             ));

@@ -48,6 +48,10 @@ pub struct Step {
     /// sight, give what it printed to [`Live::give`], and step the same text
     /// again. Nothing else is in the step, and nothing was kept.
     pub ask: Option<String>,
+    /// The helpers `code` (or `ask`) gives R. If R stops there (a line R
+    /// cannot read runs nothing), hand them to [`Live::unsend`] so the next
+    /// step gives them again.
+    pub helpers: Vec<String>,
 }
 
 /// The Stata of one session so far.
@@ -89,8 +93,7 @@ impl Live {
             return Step {
                 lines: t.lines,
                 code,
-                ssc: Vec::new(),
-                ask: None,
+                ..Step::default()
             };
         }
         let mut whole = self.source.clone();
@@ -103,10 +106,11 @@ impl Live {
                 None => break t,
                 // the value is read now, before any line of this text has run
                 Some(v) if t.lines.len() <= self.done => {
-                    let mut code = self.helpers_code(&t.helpers);
+                    let (mut code, helpers) = self.helpers_code(&t.helpers);
                     code.push_str(&v.code);
                     return Step {
                         ask: Some(code),
+                        helpers,
                         ..Step::default()
                     };
                 }
@@ -116,7 +120,7 @@ impl Live {
             }
         };
         let lines: Vec<Line> = t.lines.get(self.done..).unwrap_or_default().to_vec();
-        let mut code = self.helpers_code(&t.helpers);
+        let (mut code, helpers) = self.helpers_code(&t.helpers);
         for l in &lines {
             code.push_str(&l.script());
         }
@@ -142,7 +146,14 @@ impl Live {
             code,
             ssc,
             ask: None,
+            helpers,
         }
+    }
+
+    /// The helpers of a step R stopped at, to be given again.
+    pub fn unsend(&mut self, names: &[String]) {
+        self.sent
+            .retain(|h| !helper_name(h).is_some_and(|n| names.iter().any(|m| m == n)));
     }
 
     /// What R printed for the last [`Step::ask`], or why it could not; then
@@ -171,12 +182,12 @@ impl Live {
         }
     }
 
-    /// The helpers R does not have yet, between the lines Results folds;
-    /// they count as sent.
-    fn helpers_code(&mut self, helpers: &[String]) -> String {
+    /// The helpers R does not have yet, between the lines Results folds,
+    /// and their names; they count as sent.
+    fn helpers_code(&mut self, helpers: &[String]) -> (String, Vec<String>) {
         let new: Vec<&String> = helpers.iter().filter(|h| !self.sent.contains(*h)).collect();
         if new.is_empty() {
-            return String::new();
+            return (String::new(), Vec::new());
         }
         let names: Vec<&str> = new.iter().filter_map(|h| helper_name(h)).collect();
         let mut code = format!("{HELPERS_BEGIN} {}\n", names.join(", "));
@@ -189,7 +200,7 @@ impl Live {
         for h in new {
             self.sent.insert(h.clone());
         }
-        code
+        (code, names.iter().map(|n| n.to_string()).collect())
     }
 
     /// The R name of the data in memory, as the translator follows it.

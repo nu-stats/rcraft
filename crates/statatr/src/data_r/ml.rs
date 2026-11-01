@@ -303,7 +303,7 @@ impl Session {
                 self.helpers.insert("stata_perfect");
                 out.line(format!(
                     "stata_estimates <- stata_perfect(stata_estimates{})",
-                    if Self::quiet(c) { ", notes = FALSE" } else { "" }
+                    if self.quiet(c) { ", notes = FALSE" } else { "" }
                 ));
                 if fit == Fit::Probit {
                     self.helpers.insert("stata_probit_newton");
@@ -476,7 +476,7 @@ impl Session {
         };
         let args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &w);
         self.keep_e(c, out, &args, "");
-        if Self::quiet(c) {
+        if self.quiet(c) {
             return Ok(());
         }
         self.helpers.insert("stata_ml_header");

@@ -282,7 +282,7 @@ impl Session {
         for h in ["stata_matrix_list", "stata_fmt"] {
             self.helpers.insert(h);
         }
-        if Self::quiet(c) {
+        if self.quiet(c) {
             return Ok(());
         }
         out.line(format!("stata_matrix_list({})", args.join(", ")));
