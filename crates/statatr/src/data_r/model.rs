@@ -129,8 +129,12 @@ pub(super) const COLLINEAR_HELPER: &str = r#"stata_collinear <- function(fit, sw
   X <- stats::model.matrix(fit)
   w <- stats::weights(fit)
   if (is.null(w)) w <- rep(1, nrow(X))
+  b0 <- stats::coef(fit)
+  # a cell R left out of an interaction coded base-last (stata_ibl) is left
+  # out by design, as Stata's base cell is, not for collinearity
+  by_design <- colnames(X) %in% names(b0)[is.na(b0)] & grepl("stata_ibl(", colnames(X), fixed = TRUE)
   cons <- colnames(X) == "(Intercept)"
-  Z <- X[, !cons, drop = FALSE]
+  Z <- X[, !cons & !by_design, drop = FALSE]
   # cross products about the (weighted) means, when there is a constant
   mid <- if (any(cons)) colSums(w * Z) / sum(w) else rep(0, ncol(Z))
   C <- sweep(Z, 2, mid)
@@ -158,7 +162,7 @@ pub(super) const COLLINEAR_HELPER: &str = r#"stata_collinear <- function(fit, sw
   }
   om <- colnames(Z)[dropped]
   b <- stats::coef(fit)
-  na <- names(b)[is.na(b)]
+  na <- setdiff(names(b)[is.na(b)], colnames(X)[by_design])
   if (setequal(om, na)) return(fit)
   labs <- attr(stats::terms(fit), "term.labels")
   # the whole terms Stata omits go; what R still leaves out (a factor's
@@ -179,7 +183,7 @@ pub(super) const COLLINEAR_HELPER: &str = r#"stata_collinear <- function(fit, sw
   call <- stats::update(fit, formula. = f, evaluate = FALSE)
   out <- suppressWarnings(eval(call, parent.frame()))
   b2 <- stats::coef(out)
-  if (!setequal(names(b2)[is.na(b2)], setdiff(om, extra))) cannot()
+  if (!setequal(setdiff(names(b2)[is.na(b2)], colnames(X)[by_design]), setdiff(om, extra))) cannot()
   out$omitted <- extra
   out$stata_written <- unname(written)
   out
@@ -195,15 +199,30 @@ stata_omitted_notes <- function() {
 /// Stata's `ib2.x`: a factor whose first level, the base, is the one chosen.
 /// Unlike `relevel()` it works on data that lack the base level, as the rows
 /// `predict` and `margins` make do (every row set to one level).
+///
+/// `stata_ibl(x, base)` puts the base level last instead (the lowest when
+/// `base` is ""). It codes the factors of an interaction whose main effects
+/// are not in the model (`i.g#i.h` alone): R then gives every cell a column
+/// and leaves out the last, the one where every factor is at its base,
+/// which is the cell Stata leaves out.
 pub(super) const IB_HELPER: &str = r#"stata_ib <- function(x, base) {
   lv <- as.character(sort(unique(x[!is.na(x)])))
   factor(x, levels = c(base, setdiff(lv, base)))
+}
+stata_ibl <- function(x, base) {
+  lv <- as.character(sort(unique(x[!is.na(x)])))
+  if (base == "") base <- lv[1]
+  factor(x, levels = c(setdiff(lv, base), base))
 }"#;
 
 impl Session {
     /// The helpers a model's terms call.
     pub(super) fn helpers_for(&mut self, spec: &Spec) {
-        if spec.factors.values().any(|e| e.starts_with("stata_ib(")) {
+        if spec
+            .terms
+            .iter()
+            .any(|t| t.contains("stata_ib(") || t.contains("stata_ibl("))
+        {
             self.helpers.insert("stata_ib");
         }
     }
@@ -427,13 +446,44 @@ impl Spec {
         dep: &str,
         words: impl IntoIterator<Item = &'a str>,
     ) -> Result<Spec, Untranslated> {
+        let words: Vec<&str> = words.into_iter().collect();
+        // the factors whose main effects are in the model
+        let mut mains: Vec<String> = Vec::new();
+        for w in &words {
+            let parts: Vec<&str> = if w.contains("##") {
+                w.split("##").collect()
+            } else if w.contains('#') {
+                Vec::new()
+            } else {
+                vec![*w]
+            };
+            for p in parts {
+                if let Some(v) = factor_variable(p).or_else(|| bare_factor(p, w.contains('#'))) {
+                    mains.push(v.to_string());
+                }
+            }
+        }
         let mut terms = Vec::new();
         let mut factors = BTreeMap::new();
-        for w in words {
-            terms.push(term(w)?);
-            for part in w.split('#').filter(|p| !p.is_empty()) {
-                if let Some(v) = factor_variable(part) {
-                    factors.insert(v.to_string(), one(part)?);
+        for w in &words {
+            let interaction = w.contains('#');
+            let parts: Vec<&str> = w.split('#').filter(|p| !p.is_empty()).collect();
+            let pure = interaction && !w.contains("##") && parts.len() > 1;
+            let alone = pure
+                && parts.iter().all(|p| {
+                    factor_variable(p)
+                        .or_else(|| bare_factor(p, true))
+                        .is_some_and(|v| !mains.iter().any(|m| m == v))
+                });
+            terms.push(if alone { base_last(&parts)? } else { term(w)? });
+            for part in parts {
+                if let Some(v) = factor_variable(part).or_else(|| bare_factor(part, interaction)) {
+                    let r = if alone {
+                        base_last(&[part])?
+                    } else {
+                        in_interaction(part)?
+                    };
+                    factors.insert(v.to_string(), r);
                 }
             }
         }
@@ -474,6 +524,47 @@ fn factor_variable(part: &str) -> Option<&str> {
     }
     let rest = part.strip_prefix("ib")?;
     rest.split_once('.').map(|(_, v)| v)
+}
+
+/// In an interaction a bare variable is a factor (`g#h` is `i.g#i.h`).
+fn bare_factor(part: &str, interaction: bool) -> Option<&str> {
+    let part = part.trim();
+    (interaction && is_name(part)).then_some(part)
+}
+
+/// One part of an interaction in R: a bare variable is a factor there.
+fn in_interaction(part: &str) -> Result<String, Untranslated> {
+    match bare_factor(part, true) {
+        Some(v) => Ok(format!("factor({})", r_name(v))),
+        None => one(part),
+    }
+}
+
+/// An interaction of factors whose main effects are not in the model, each
+/// coded with its base level last (`stata_ibl`), so the cell R leaves out
+/// is the one Stata does: every factor at its base.
+fn base_last(parts: &[&str]) -> Result<String, Untranslated> {
+    let mut out = Vec::new();
+    for p in parts {
+        let p = p.trim();
+        let (v, base) = if let Some(v) = p.strip_prefix("i.") {
+            (v, String::new())
+        } else if let Some((base, v)) = p.strip_prefix("ib").and_then(|r| r.split_once('.')) {
+            if base.is_empty() || !base.chars().all(|c| c.is_ascii_digit()) {
+                return Err(no(format!(
+                    "{p}: only a number can name the base level (ib2.x)"
+                )));
+            }
+            (v, base.to_string())
+        } else {
+            (p, String::new())
+        };
+        if !is_name(v) {
+            return Err(no(format!("{v} is not a variable name")));
+        }
+        out.push(format!("stata_ibl({}, {})", r_name(v), r_text(&base)));
+    }
+    Ok(out.join(":"))
 }
 
 /// `level()` as a proportion; 95% when it is not given.
@@ -573,7 +664,7 @@ fn term(t: &str) -> Result<String, Untranslated> {
 fn product(parts: &[&str]) -> Result<String, Untranslated> {
     let mut seen: Vec<(String, usize)> = Vec::new();
     for p in parts {
-        let r = one(p)?;
+        let r = in_interaction(p)?;
         match seen.iter_mut().find(|(s, _)| *s == r) {
             Some(e) => e.1 += 1,
             None => seen.push((r, 1)),
@@ -676,12 +767,33 @@ mod tests {
         assert_eq!(term("c.x##c.x").as_deref(), Ok("x + I(x^2)"));
         assert_eq!(term("c.x#c.x").as_deref(), Ok("I(x^2)"));
         assert_eq!(term("c.x#c.x#i.g").as_deref(), Ok("I(x^2):factor(g)"));
+        // in an interaction a bare variable is a factor, as in Stata
         assert_eq!(
             term("a##b##c").as_deref(),
-            Ok("a + b + a:b + c + a:c + b:c + a:b:c")
+            Ok("factor(a) + factor(b) + factor(a):factor(b) + factor(c) + factor(a):factor(c) + factor(b):factor(c) + factor(a):factor(b):factor(c)")
         );
+        assert_eq!(term("g#c.x").as_deref(), Ok("factor(g):x"));
         assert!(term("i.g#i.g").is_err());
         assert_eq!(term("ib2.g").as_deref(), Ok("stata_ib(g, \"2\")"));
+        // two factors interacted with neither main effect: base levels last
+        let s = Spec::from_terms("y", ["i.g#ib2.h", "x"]).map(|s| s.terms);
+        assert_eq!(
+            s,
+            Ok(vec![
+                "stata_ibl(g, \"\"):stata_ibl(h, \"2\")".to_string(),
+                "x".into()
+            ])
+        );
+        let s = Spec::from_terms("y", ["i.g", "i.g#i.h"]).map(|s| s.terms);
+        assert_eq!(
+            s,
+            Ok(vec!["factor(g)".to_string(), "factor(g):factor(h)".into()])
+        );
+        let s = Spec::from_terms("y", ["g#h"]).map(|s| s.terms);
+        assert_eq!(
+            s,
+            Ok(vec!["stata_ibl(g, \"\"):stata_ibl(h, \"\")".to_string()])
+        );
         assert!(term("L.x").is_err(), "lags are not translated");
         assert!(term("i.2x").is_err(), "not a variable name");
     }

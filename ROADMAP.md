@@ -395,6 +395,14 @@ skipped. It never gives a silent wrong answer.
   See `plan/stata/dates.md`.)
 - P2C.15 Two factors interacted in a model (`i.g#i.h`, `i.g##i.h`): Stata's
   cells, base and empty ones, its table and `e(b)`
+  (done 2026-11-01:
+  - a bare variable in an interaction is a factor;
+  - `i.g#i.h` alone leaves out only the all-base cell, as Stata does;
+  - Stata's cell names in `e(b)`;
+  - `regress`'s table with value labels, long labels and empty cells;
+  - `matrix list` follows `set linesize`;
+  - `interactions.do` in the corpus.
+  See `plan/stata/interactions.md`.)
 - P2C.16 `bsample` and `bootstrap` with Stata's own draws (StatCraft's
   decoding), with `cluster()`
 

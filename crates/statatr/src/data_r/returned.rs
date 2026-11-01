@@ -64,7 +64,7 @@ stata_bget <- function(key, se = FALSE) {
 stata_base_level <- function(k) {
   xl <- stata_estimates$xlevels
   if (is.null(xl)) return(FALSE)
-  vars <- sub("^stata_ib\\(([^,]+),.*$", "\\1", sub("^factor\\(([^()]+)\\)$", "\\1", names(xl)))
+  vars <- sub("^stata_ibl?\\(([^,]+),.*$", "\\1", sub("^factor\\(([^()]+)\\)$", "\\1", names(xl)))
   parts <- strsplit(k, "#", fixed = TRUE)[[1]]
   all(vapply(parts, function(p) {
     m <- regmatches(p, regexec("^([0-9]+)\\.(.+)$", p))[[1]]

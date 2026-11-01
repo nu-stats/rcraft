@@ -697,6 +697,15 @@ pub const GUIDES: &[Guide] = &[
                  Stata's note and a 0 (omitted) row. R's lm() would drop the later one.",
             ),
             p(
+                "Interactions",
+                "g#h is i.g#i.h, as in Stata: in an interaction a bare variable is a factor. \
+                 i.g#i.h without its main effects estimates every cell but the one where both \
+                 are at their base, as Stata does (R alone would leave out another, giving \
+                 other coefficients); i.g##i.h is R's own coding. The cells keep Stata's names \
+                 in e(b) (1b.g#1.h, 2o.g#0b.h) and its table, value labels and empty cells \
+                 included.",
+            ),
+            p(
                 "Robust errors",
                 "robust is HC1, as Stata's: the sandwich times N / (N - k). R's sandwich \
                  package defaults to HC3, which differs.",

@@ -90,7 +90,7 @@ pub(super) const ANOVA_HELPER: &str = r##"stata_anova <- function(fit, data, seq
     kind <- "Partial SS"
   }
   stata_label <- function(s) {
-    s <- gsub('stata_ib\\(([^,]+), "[^"]*"\\)', "\\1", s)
+    s <- gsub('stata_ibl?\\(([^,]+), "[^"]*"\\)', "\\1", s)
     s <- gsub("factor\\(([^)]+)\\)", "\\1", s)
     s <- gsub("I\\(([A-Za-z_][A-Za-z0-9_]*)\\^2\\)", "c.\\1#c.\\1", s)
     gsub(":", "#", s, fixed = TRUE)

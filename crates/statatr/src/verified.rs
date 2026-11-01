@@ -41,7 +41,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("levelsof", &["aware"]),
     ("lincom", &["regress"]),
     ("local", &["control"]),
-    ("logit", &["collinear", "likelihood"]),
+    ("logit", &["collinear", "interactions", "likelihood"]),
     ("margins", &["regress"]),
     ("mlogit", &["likelihood"]),
     ("ologit", &["likelihood"]),
@@ -52,7 +52,10 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("probit", &["collinear", "likelihood"]),
     ("pwcorr", &["descriptives"]),
     ("recode", &["data"]),
-    ("regress", &["aware", "collinear", "control", "regress"]),
+    (
+        "regress",
+        &["aware", "collinear", "control", "interactions", "regress"],
+    ),
     ("replace", &["data", "random"]),
     ("restore", &["made"]),
     ("set", &["made", "random"]),
@@ -133,7 +136,7 @@ mod tests {
         }
         assert_eq!(
             files("regress"),
-            Some(&["aware", "collinear", "control", "regress"][..])
+            Some(&["aware", "collinear", "control", "interactions", "regress"][..])
         );
         assert_eq!(files("xtlogit"), None);
         let functions: Vec<&str> = VERIFIED_FUNCTIONS.iter().map(|(f, _)| *f).collect();

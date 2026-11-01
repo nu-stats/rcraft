@@ -3,11 +3,12 @@
 //! Each layout was read off Stata 19's output (never its program files):
 //! the widths and formats of every column, where the separators fall, how a
 //! long name is shortened or split, how two-way tables wrap at a linesize of
-//! 80, and how `regress` groups a factor's levels. A term omitted for
-//! collinearity is a row `0  (omitted)` (probe 288). A table whose shape was
-//! not checked against Stata (a factor with value labels, an omitted term in
-//! an interaction, two factors interacted, labels wider than Stata's column)
-//! is printed as before, in R's layout, and says so.
+//! 80, and how `regress` groups a factor's levels, two factors' cells and
+//! value labels (shortened past 11 characters). A term omitted for
+//! collinearity is a row `0  (omitted)` (probe 288), an empty cell
+//! `0  (empty)`. A table whose shape was not checked against Stata (an
+//! omitted term in an interaction with a continuous variable, a long second
+//! label in a cell) is printed as before, in R's layout, and says so.
 
 /// The printers, and the small pieces they share.
 pub(super) const TABLES_HELPER: &str = r##"stata_tab_pad <- function(s, w) formatC(as.character(s), width = w)
@@ -93,67 +94,117 @@ stata_tab2_print <- function(rname, cname, rlabs, clabs, counts, chi2 = NULL) {
   invisible(NULL)
 }
 # regress's coefficient rows from e(b)'s names: a factor with one level
-# shown inline (1.g), one with more, and any interaction with a continuous
-# variable, as a group (its name, then its levels); NULL for a shape not
-# checked against Stata
+# shown inline (1.g), one with more or with value labels, two factors
+# interacted (cells 2 1, or 2#yes with labels) and any interaction with a
+# continuous variable, as a group (its name, then its levels); NULL for a
+# shape not checked against Stata (read off Stata 19, probes 286 and P2C.15's)
 stata_coef_rows <- function(nm) {
-  rows <- list()
-  blank <- FALSE
-  seen <- character(0)
+  one_f <- "^([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)$"
+  two_f <- "^([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)#([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)$"
+  f_c <- "^[0-9]+\\.[A-Za-z_][A-Za-z0-9_]*(#c\\.[A-Za-z_][A-Za-z0-9_]*)+$"
+  parts <- function(n, re) regmatches(n, regexec(re, n))[[1]]
+  # a value's label (the data's value labels), or the value itself
+  labs <- function(v) attr(stata_data[[v]], "labels")
+  lab <- function(v, l) {
+    s <- labs(v)
+    i <- if (is.null(s)) NA else match(as.numeric(l), as.numeric(s))
+    if (is.na(i)) l else names(s)[i]
+  }
+  short <- function(s) if (nchar(s) > 11) paste0(substr(s, 1, 9), "..") else s
   key <- function(n) {
-    if (grepl("^[0-9]+o?\\.[A-Za-z_][A-Za-z0-9_]*$", n)) return(sub("^[0-9]+o?\\.", "", n))
-    if (grepl("^[0-9]+\\.[A-Za-z_][A-Za-z0-9_]*(#c\\.[A-Za-z_][A-Za-z0-9_]*)+$", n)) return(sub("^[0-9]+\\.", "", n))
+    if (grepl(one_f, n)) return(parts(n, one_f)[4])
+    if (grepl(two_f, n)) return(paste0(parts(n, two_f)[4], "#", parts(n, two_f)[7]))
+    if (grepl(f_c, n)) return(sub("^[0-9]+\\.", "", n))
     NA_character_
   }
-  shown <- nm[!grepl("(^|#)[0-9]+b\\.", nm)]
+  # which cells of two factors are shown: those estimated (a base mark
+  # stays on one), and those left out with no factor at its base (empty
+  # cells, or collinear ones)
+  shows <- function(n) {
+    if (!grepl(two_f, n)) return(!grepl("(^|#)[0-9]+b\\.", n))
+    p <- parts(n, two_f)
+    (p[3] != "o" && p[6] != "o" && !(p[3] == "b" && p[6] == "b")) || (p[3] != "b" && p[6] != "b")
+  }
+  shown <- nm[vapply(nm, shows, TRUE)]
   # a term omitted for collinearity is a row of its own, 0 (omitted); one in
-  # an interaction was not checked
-  if (any(grepl("#", shown, fixed = TRUE) & grepl("(^|#)([0-9]+)?o\\.", shown))) return(NULL)
+  # an interaction with a continuous variable was not checked
+  if (any(!grepl(two_f, shown) & grepl("#", shown, fixed = TRUE) & grepl("(^|#)([0-9]+)?o\\.", shown))) return(NULL)
   keys <- vapply(shown, key, "")
+  terms <- list()
+  seen <- character(0)
   for (n in shown) {
     k <- keys[[n]]
     if (is.na(k)) {
       plain <- sub("^o\\.", "", n)
       # a plain variable or the constant; an interaction of continuous
-      # variables, or of two factors, was not checked
+      # variables was not checked
       if (grepl("#", plain, fixed = TRUE) || grepl(".", plain, fixed = TRUE)) return(NULL)
-      if (blank) rows[[length(rows) + 1]] <- list(kind = "blank")
-      blank <- FALSE
-      rows[[length(rows) + 1]] <- list(kind = "row", label = plain, col = n, omitted = plain != n)
+      terms[[length(terms) + 1]] <- list(big = FALSE, rows = list(
+        list(kind = "row", label = plain, col = n, note = if (plain != n) "(omitted)")))
       next
     }
     if (k %in% seen) next
     seen <- c(seen, k)
     levels <- shown[!is.na(keys) & keys == k]
-    group <- length(levels) > 1 || grepl("#", k, fixed = TRUE)
-    if (!group) {
-      if (blank) rows[[length(rows) + 1]] <- list(kind = "blank")
-      blank <- FALSE
-      rows[[length(rows) + 1]] <- list(kind = "row", label = sub("o\\.", ".", n), col = n,
-                                       omitted = grepl("^[0-9]+o\\.", n))
+    if (grepl(two_f, n)) {
+      p <- parts(n, two_f)
+      v1 <- p[4]
+      v2 <- p[7]
+      sep <- if (is.null(labs(v1)) && is.null(labs(v2))) " " else "#"
+      rows <- list(list(kind = "head", label = k))
+      for (l in levels) {
+        q <- parts(l, two_f)
+        a <- lab(v1, q[2])
+        b2 <- lab(v2, q[5])
+        note <- NULL
+        if (q[3] == "o" || q[6] == "o") {
+          cnt <- sum(stata_data[[v1]] == as.numeric(q[2]) & stata_data[[v2]] == as.numeric(q[5]), na.rm = TRUE)
+          note <- if (cnt == 0) "(empty)" else "(omitted)"
+        }
+        text <- paste0(a, sep, b2)
+        if (nchar(text) <= 11) {
+          rows[[length(rows) + 1]] <- list(kind = "level", label = text, col = l, note = note)
+        } else if (sep == "#" && nchar(a) > 11 && nchar(b2) <= 11) {
+          # a long first label: shortened on a line of its own, the second below
+          rows[[length(rows) + 1]] <- list(kind = "wrap", label = short(a))
+          rows[[length(rows) + 1]] <- list(kind = "level", label = b2, col = l, note = note)
+        } else {
+          return(NULL)
+        }
+      }
+      terms[[length(terms) + 1]] <- list(big = TRUE, rows = rows)
       next
     }
-    rows[[length(rows) + 1]] <- list(kind = "blank")
-    rows[[length(rows) + 1]] <- list(kind = "head", label = k)
-    for (l in levels) rows[[length(rows) + 1]] <- list(kind = "level", label = sub("o?\\..*$", "", l), col = l,
-                                                       omitted = grepl("^[0-9]+o\\.", l))
-    blank <- TRUE
+    v <- sub("#.*$", "", k)
+    labelled <- !grepl("#", k, fixed = TRUE) && !is.null(labs(v))
+    if (length(levels) == 1 && !grepl("#", k, fixed = TRUE) && !labelled) {
+      terms[[length(terms) + 1]] <- list(big = FALSE, rows = list(
+        list(kind = "row", label = sub("o\\.", ".", n), col = n, note = if (grepl("^[0-9]+o\\.", n)) "(omitted)")))
+      next
+    }
+    rows <- list(list(kind = "head", label = k))
+    for (l in levels) {
+      lv <- sub("o?\\..*$", "", l)
+      if (labelled) lv <- short(lab(v, lv))
+      rows[[length(rows) + 1]] <- list(kind = "level", label = lv, col = l,
+                                       note = if (grepl("^[0-9]+o\\.", l)) "(omitted)")
+    }
+    # a separator goes next to an interaction or a group of more than one row
+    terms[[length(terms) + 1]] <- list(big = length(levels) > 1 || grepl("#", k, fixed = TRUE), rows = rows)
   }
-  rows
+  out <- list()
+  for (i in seq_along(terms)) {
+    if (i > 1 && (terms[[i]]$big || terms[[i - 1]]$big)) out[[length(out) + 1]] <- list(kind = "blank")
+    out <- c(out, terms[[i]]$rows)
+  }
+  out
 }
 # regress as Stata prints it, from e(); FALSE when its shape was not checked
 stata_regress_print <- function(level = 0.95) {
   e <- stata_e
   nm <- colnames(e$b)
   rows <- stata_coef_rows(nm)
-  factors <- unique(unlist(lapply(rows, function(r) if (r$kind == "head") sub("#.*$", "", r$label))))
   if (is.null(rows)) return(FALSE)
-  # factors with value labels show the labels, which was not checked
-  for (f in factors) if (!is.null(attr(stata_data[[f]], "labels"))) return(FALSE)
-  for (r in rows) if (r$kind == "row" && grepl(".", r$label, fixed = TRUE)) {
-    f <- sub("^[0-9]+\\.", "", r$label)
-    if (!is.null(attr(stata_data[[f]], "labels"))) return(FALSE)
-  }
   robust <- !is.null(e[["vcetype"]])
   count <- stata_tab_count
   pad <- stata_tab_pad
@@ -205,9 +256,14 @@ stata_regress_print <- function(level = 0.95) {
       cat(pad(stata_tab_abbrev(r$label), 12), " |\n", sep = "")
       next
     }
+    # a cell's long first label, on a line of its own
+    if (r$kind == "wrap") {
+      cat(pad(r$label, 11), " #|\n", sep = "")
+      next
+    }
     label <- if (r$kind == "level") paste0(pad(r$label, 11), " ") else pad(stata_tab_abbrev(r$label), 12)
-    if (isTRUE(r$omitted)) {
-      cat(label, " |", pad("0", 11), "  (omitted)\n", sep = "")
+    if (!is.null(r$note)) {
+      cat(label, " |", pad("0", 11), "  ", r$note, "\n", sep = "")
       next
     }
     bi <- b[[r$col]]

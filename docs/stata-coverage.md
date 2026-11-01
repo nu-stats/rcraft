@@ -76,18 +76,18 @@ The share has risen in three steps:
 
 ## Checked against Stata on R (2026-11-01)
 
-The 388 probes recorded in StatCraft's corpus are each run on R 4.4 in a fresh session, as the do-file window
-runs a do-file: 179,362 lines ran, and 135,462 of them were translated (126,618 before the dates, P2C.14).
+The 389 probes recorded in StatCraft's corpus are each run on R 4.4 in a fresh session, as the do-file window
+runs a do-file: 179,399 lines ran, and 135,471 of them were translated (126,618 before the dates, P2C.14).
 
 | | Lines | Before P2C.12 | Before P2C.11 |
 |---|---:|---:|---:|
-| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,636 | 210 | 196 |
-| The same to 8 significant digits | 5,518 | 205 | 192 |
+| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,637 | 210 | 196 |
+| The same to 8 significant digits | 5,519 | 205 | 192 |
 | The same to 6, not 8 | 5 | 1 | 1 |
 | Different | 113 | 4 | 3 |
-| Not compared: after the probe's first R error, where the do-file window stops | 215 | 207 | 199 |
-| Printed by Stata, not translated (counted from P2C.12) | 813 | | |
-| Translated lines that R stopped at | 453 | 429 | 399 |
+| Not compared: after the probe's first R error, where the do-file window stops | 213 | 207 | 199 |
+| Printed by Stata, not translated (counted from P2C.12) | 816 | | |
+| Translated lines that R stopped at | 449 | 429 | 399 |
 
 The 113 that differ are all `_natscale`, nearly all with n = 10 or 15. There Stata's r(min) is a residue of
 its arithmetic (2^-55 or −2^-54) where RCraft gives 0, and a residue against 0 fails any relative check
@@ -105,13 +105,13 @@ The 5 that agree to 6 digits, not 8:
 - Four convergence values of `xtreg, pa` (`e(dif)`, `e(p)` near 0). They are compared for the first time now
   that the probes' data is made.
 
-Most of the 453 R errors come from the probes' setting rather than from RCraft:
+Most of the 449 R errors come from the probes' setting rather than from RCraft:
 - graphs exported as SVG, which need the R package svglite;
 - files another probe or StatCraft wrote (`use`, `import`, `list`);
 - files the probe writes with `file write`, which is not translated.
 
 Collinear regressors in `logit`, `poisson` and `regress`, reached for the first time once the probes' data was
-made, are now omitted as Stata omits them (P2C.13). What is left there is two factors interacted (`i.g#i.h`).
+made, are now omitted as Stata omits them (P2C.13). Two factors interacted (`i.g#i.h`) are laid out as Stata's since P2C.15.
 
 The probe run also lists the lines Stata printed that were refused, by reason, most lines first. The largest
 groups now are:
@@ -144,7 +144,7 @@ reason:
 
 1. `bsample` (3,489 lines, and the draws after it), `file`, and time-series operators. The date and time
    functions are translated since P2C.14 (`plan/stata/dates.md`).
-2. Two factors interacted in a model (`i.g#i.h`), which Stata lays out cell by cell.
+2. Collinear terms in the other models (`nbreg`, `ologit`, `mlogit`, ...) and interactions in the likelihood models' tables.
 3. Programs (`program define`), `gettoken`, the other random functions (`runiformint()`, `rbinomial()`, ...),
    and the models not yet translated (lasso, xtregar, newey, prais).
 4. The last digits: `poisson`'s starting point and `_natscale`'s residue for n = 10 and 15.

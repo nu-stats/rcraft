@@ -15,7 +15,7 @@
 //! one of factor prefixes (`0b.`, `1.g#`) set one place to the right, names
 //! past 12 characters shortened as Stata does (`averyveryv~e`), the lower
 //! half of a symmetric matrix, and blocks of as many columns as fit in a
-//! line of 80 (Stata's width when nothing else sets one).
+//! line of 80 (Stata's width when nothing else sets one; `set linesize` sets it).
 
 use super::{no, Opts, Out, Session};
 use crate::expr_r::{r_text, Untranslated};
@@ -56,8 +56,9 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     if (p == "(Intercept)") return(list(kind = "cons", key = p))
     m <- regmatches(p, regexec("^(factor\\(([^()]+)\\))(.+)$", p))[[1]]
     if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4]))
-    m <- regmatches(p, regexec("^(stata_ib\\(([^,]+), \"[^\"]*\"\\))(.+)$", p))[[1]]
-    if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4]))
+    m <- regmatches(p, regexec("^(stata_ibl?\\(([^,]+), \"[^\"]*\"\\))(.+)$", p))[[1]]
+    # stata_ibl() keeps its base level last
+    if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4], last = startsWith(m[2], "stata_ibl(")))
     m <- regmatches(p, regexec("^I\\(([^()^]+)\\^([0-9]+)\\)$", p))[[1]]
     if (length(m)) return(list(kind = "c", key = p, var = m[2], pow = as.integer(m[3])))
     list(kind = "c", key = p, var = p, pow = 1L)
@@ -85,6 +86,31 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
       }
       fs <- Filter(function(p) p$kind == "f", q)
       cs <- Filter(function(p) p$kind == "c", q)
+      # two factors interacted: every cell, the first factor outermost; a
+      # factor at its base is marked b, one in a cell not estimated o
+      if (length(fs) == 2 && length(cs) == 0) {
+        Ls <- lapply(fs, function(f) fit$xlevels[[f$key]])
+        if (any(vapply(Ls, is.null, TRUE))) return(NULL)
+        Lns <- lapply(Ls, function(L) suppressWarnings(as.numeric(L)))
+        if (any(vapply(Lns, anyNA, TRUE))) return(NULL)
+        base <- vapply(1:2, function(j) {
+          L <- Ls[[j]]
+          if (isTRUE(fs[[j]]$last)) L[length(L)] else L[1]
+        }, "")
+        cell <- vapply(ii, function(i) {
+          paste(vapply(Filter(function(p) p$kind == "f", ps[[i]]), function(p) p$lev, ""), collapse = "#")
+        }, "")
+        for (l1 in Ls[[1]][order(Lns[[1]])]) {
+          for (l2 in Ls[[2]][order(Lns[[2]])]) {
+            i <- ii[match(paste(l1, l2, sep = "#"), cell)]
+            est <- !is.na(i) && !is.na(b[idx[i]])
+            mark <- function(l, j) if (l == base[j]) "b" else if (!est) "o" else ""
+            add(paste0(l1, mark(l1, 1), ".", fs[[1]]$var, "#", l2, mark(l2, 2), ".", fs[[2]]$var),
+                if (est) nm[idx[i]] else NA_character_)
+          }
+        }
+        next
+      }
       if (length(fs) > 1) return(NULL)
       if (length(fs) == 0) {
         name <- if (length(cs) == 1 && cs[[1]]$pow == 1) cs[[1]]$var else cont(cs, "c.")
@@ -198,7 +224,9 @@ pub(super) const MATRIX_LIST_HELPER: &str = r##"stata_matrix_list <- function(m,
   vals <- matrix(vapply(as.vector(m), function(v) stata_fmt(v, format, trim = TRUE), ""), nrow(m))
   W <- 2 + max(nchar(vals), nchar(bottom))
   L <- max(nchar(rl))
-  per <- max(1, (78 - L) %/% W)
+  # set linesize, kept in R; Stata's width is 80 when nothing sets one
+  ls <- if (exists("stata_linesize")) stata_linesize else 80
+  per <- max(1, (ls - 2 - L) %/% W)
   pad <- function(s, w) formatC(s, width = w)
   out <- character(0)
   if (blank) out <- ""

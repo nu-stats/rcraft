@@ -2795,3 +2795,28 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Notes:** `plan/stata/dates.md`; a "Dates and times" point in the differences guide.
 - **Not done:** the leap-second family (datetime/C: `Clock()`, `Cofd()`, `hhC()`, ...), which is refused with
   the reason.
+
+## P2C.15: two factors interacted, 2026-11-01
+
+- **What works:**
+  - In an interaction a bare variable is a factor, as in Stata (`g#h` is `i.g#i.h`). Before this RCraft
+    read it as a continuous variable, a different model, without saying so.
+  - `i.g#i.h` without its main effects estimates every cell but the all-base one, as Stata does. The factors
+    are coded with their base level last (`stata_ibl`), so R leaves out Stata's cell, and `stata_collinear`
+    sets that cell aside as left out by design.
+  - `i.g##i.h` and `i.g i.g#i.h` were already R's coding.
+  - `e(b)` names every cell as Stata does (`1b.g#0b.h`, `1b.g#1.h`, `2o.g#0b.h`).
+  - `regress`'s table shows the cells as `2 1`, or `2#yes` with value labels. Value labels are now shown
+    everywhere in that table: a one-level factor with labels is a group, a label past 11 characters is
+    shortened, a long first label in a cell goes on its own line, and an empty cell is `0  (empty)`.
+  - `set linesize` is kept in R, and `matrix list` wraps at it.
+- **Checked:**
+  - A do-file of nine regressions run through Stata 19 and RCraft gives identical coefficient tables.
+  - Probe 286's `matrix list e(b)` is Stata's, line for line.
+  - The factor-variable probes (286, 287, 289, 316) have no R errors left.
+  - `interactions.do` in the corpus (16 results) passes; `regress` and `logit` list it.
+- **Numbers:** on the probes, 5,519 of 5,637 compared lines match Stata to 8 digits, and the R errors fell from
+  453 to 449.
+- **Notes:** `plan/stata/interactions.md`, and an "Interactions" point on the regress help page.
+- **Not done:** three factors interacted alone (coded the same way, not checked); interactions in the
+  likelihood models' tables, still in R's layout although their `e(b)` is Stata's.

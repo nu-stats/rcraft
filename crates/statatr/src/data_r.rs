@@ -2542,8 +2542,23 @@ impl Session {
                 }
                 Ok(())
             }
-            "more" | "linesize" | "varabbrev" | "trace" | "rmsg" | "type" | "maxvar"
-            | "matsize" => {
+            // the width matrix list wraps its columns at
+            "linesize" => {
+                let n: u32 = rest.trim().parse().map_err(|_| {
+                    no(format!(
+                        "set linesize {}: only a whole number is translated",
+                        rest.trim()
+                    ))
+                })?;
+                if !(40..=255).contains(&n) {
+                    return Err(no(format!(
+                        "set linesize {n} (Stata: linesize must be between 40 and 255)"
+                    )));
+                }
+                out.line(format!("stata_linesize <- {n}"));
+                Ok(())
+            }
+            "more" | "varabbrev" | "trace" | "rmsg" | "type" | "maxvar" | "matsize" => {
                 out.caveat(format!(
                     "nothing to do in R: set {what} only changes how Stata runs or prints"
                 ));

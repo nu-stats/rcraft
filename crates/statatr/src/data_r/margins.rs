@@ -52,7 +52,7 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
   # every column of the design the product of its parts
   part_mean <- function(p, nd, sv = NULL, h = 0) {
     if (p == "(Intercept)") return(1)
-    m <- regmatches(p, regexec("^(factor|stata_ib)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", p))[[1]]
+    m <- regmatches(p, regexec("^(factor|stata_ibl?)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", p))[[1]]
     if (length(m)) return(fl(mean(as.character(nd[[m[3]]]) == m[5])))
     m <- regmatches(p, regexec("^I\\(([^()^]+)\\^([0-9]+)\\)$", p))[[1]]
     if (length(m)) return((fl(mean(nd[[m[2]]])) + if (identical(m[2], sv)) h else 0)^as.integer(m[3]))
