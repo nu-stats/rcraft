@@ -26,6 +26,7 @@
 //! without the data and are taken as written.
 
 mod anova;
+mod dates;
 mod graph;
 mod iv;
 mod margins;
@@ -300,6 +301,11 @@ impl Translator {
             .iter()
             .map(|h| (*h, helper_code(h)))
             .collect()
+    }
+
+    /// The R of a helper an expression asks for (`RExpr::helpers`).
+    pub fn helper_r(name: &str) -> &'static str {
+        helper_code(name)
     }
 
     /// The translation of `lines`, which this translator made, in order.
@@ -601,6 +607,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_lm_wvcov" => weights::LM_WVCOV_HELPER,
         "stata_coefs" => model::COEFS_HELPER,
         "stata_ib" => model::IB_HELPER,
+        "stata_dates" => dates::DATES_HELPER,
         "stata_collinear" => model::COLLINEAR_HELPER,
         "stata_glm_vcov" => ml::GLM_VCOV_HELPER,
         "stata_nbreg_vcov" => ml::NBREG_VCOV_HELPER,
@@ -757,6 +764,8 @@ struct Out {
     code: Vec<String>,
     caveats: Vec<String>,
     packages: Vec<&'static str>,
+    /// R helpers the line's expressions call.
+    helpers: Vec<&'static str>,
 }
 
 impl Out {
@@ -975,6 +984,7 @@ impl Session {
         for c in r.caveats {
             out.caveat(c);
         }
+        out.helpers.extend(r.helpers);
         Ok(r.code)
     }
 
@@ -1019,6 +1029,7 @@ impl Session {
         for c in r.caveats {
             out.caveat(c);
         }
+        out.helpers.extend(r.helpers);
         Ok((r.code, r.kind))
     }
 
@@ -1410,6 +1421,10 @@ impl Session {
             out.code = vec![format!(
                 "stata_rc <- tryCatch({{\n{body}\n0\n}}, error = function(e) stata_captured(e, {noisily}))"
             )];
+        }
+        // the R helpers the line's expressions call
+        for h in std::mem::take(&mut out.helpers) {
+            self.helpers.insert(h);
         }
         out.done()
     }

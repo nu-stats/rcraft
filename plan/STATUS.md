@@ -2769,3 +2769,29 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Not done:** two factors interacted (`i.g#i.h`), which stop with the reason; collinearity in the other
   models (`nbreg`, `ologit`, `mlogit`, ...); `logit`'s coefficients agree with Stata's to about 7 digits
   (Stata stops at its own tolerance).
+
+## P2C.14: Stata's date and time functions on R, 2026-11-01
+
+- **What works:** dates now work on columns in R, with Stata's numbers and missing values.
+  - Strings read against Stata's masks: `date()` (and `daily()`), `clock()`, `weekly()`, `monthly()`,
+    `quarterly()`, `halfyearly()` and `yearly()`, with the top year.
+  - About 40 functions of numbers: `mdy()`, `yw()`, `ym()`, `yq()`, `yh()`, `dofm()` and the others, `year()`,
+    `month()`, `day()`, `dow()`, `doy()`, `week()`, `quarter()`, `mofd()`, `wofd()`, ..., `cofd()`, `dofc()`,
+    `hh()`, `mm()`, `ss()`, `hms()`, `dhms()`, `mdyhms()`, and the conversions between hours and
+    milliseconds.
+  Before this, only a `date()` written out in the do-file, `mdy()` and five parts of a date were translated,
+  through R's own dates.
+- **How:** the rules of `values/datetime` (StatCraft's decoding, already ported to Rust for dates written
+  out) are written again in R as the helper `stata_dates` (`data_r/dates.rs`). Each distinct string is read
+  once. An expression now carries the R helpers it calls (`RExpr::helpers`), which the line passes on.
+- **Checked:** 13,177 of Stata 19's recorded answers (probes 034 and 035) were put through the R helper, and
+  13,172 are the same bit for bit. Four are `wofd()` outside 0100 to 9999, where Stata's numbers are
+  arbitrary; RCraft gives missing. `dates.do` in the corpus (23 results on columns, tolerance 0) passes, and
+  28 date functions are Verified.
+- **Numbers:**
+  - The dry share translated rose from 76.1% to 79.1% (tier 1 from 82.0% to 85.4%).
+  - On R, 135,462 of 179,362 probe lines are translated (126,618 before), and 5,518 of 5,636 compared lines
+    match Stata to 8 digits (5,508 of 5,626 before), with no new difference.
+- **Notes:** `plan/stata/dates.md`; a "Dates and times" point in the differences guide.
+- **Not done:** the leap-second family (datetime/C: `Clock()`, `Cofd()`, `hhC()`, ...), which is refused with
+  the reason.

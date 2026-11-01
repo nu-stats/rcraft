@@ -1,0 +1,24 @@
+* Stata 19.0's results for dates.do, recorded by cargo xtask stata-record
+@ d_1                    17136                        .
+@ d_6                    23435                        .
+@ d_11                        .                        .
+@ d2_2                    17136                    17136
+@ d3_4                    17136                    14214
+@ c_10            1480602163213            1480602120000
+@ c3_8            1480602163000                        .
+@ mo_1                      552                      479
+@ mo_3                        .                      555
+@ qu_1                      186                      184
+@ wk_3                     2443                        .
+@ yr_4                     2006                        .
+@ day_sum                   214707                    35795
+@ yy_sum                    24102
+@ dw_sum                       28
+@ dy_sum                     2139
+@ wn_sum                      311
+@ qt_sum                       30
+@ per_sum                    39959
+@ back_sum                   643468
+@ ywq                     -191                        .
+@ hm_sum                   153978                 13033.75
+@ dc_sum                   420339            2026689255750

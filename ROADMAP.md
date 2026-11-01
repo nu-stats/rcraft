@@ -384,6 +384,19 @@ skipped. It never gives a silent wrong answer.
   - Stata's 1e-13 tolerance, the `note:` lines, `0  (omitted)` rows, `o.` columns in `e(b)`, `_b[]` of 0, and `e(rank)`/`e(df_m)` counting only what is estimated.
   - `collinear.do` in the corpus.
   Still to come: two factors interacted (`i.g#i.h`), and the other models.)
+- P2C.14 Stata's date and time functions on R: `clock()`, `Clock()`,
+  `monthly()`, `quarterly()`, `halfyearly()`, `weekly()`, `yearly()`, `yw()`
+  and the others, with Stata's masks and missing values (StatCraft's decoding,
+  checked against Stata 19)
+  (done 2026-11-01 except the leap-second family (`Clock()`, `Cofd()`, ...):
+  - the R helper `stata_dates` runs on columns;
+  - 13,172 of 13,177 of Stata's recorded answers match bit for bit;
+  - `dates.do` in the corpus.
+  See `plan/stata/dates.md`.)
+- P2C.15 Two factors interacted in a model (`i.g#i.h`, `i.g##i.h`): Stata's
+  cells, base and empty ones, its table and `e(b)`
+- P2C.16 `bsample` and `bootstrap` with Stata's own draws (StatCraft's
+  decoding), with `cluster()`
 
 ## Phase 3: Data
 

@@ -57,6 +57,8 @@ pub struct RExpr {
     pub caveats: Vec<String>,
     /// How many of Stata's random draws it takes (`runiform()`, ...).
     pub draws: usize,
+    /// The R helpers its code calls (`stata_dates`, ...).
+    pub helpers: Vec<&'static str>,
 }
 
 /// Why an expression was not translated.
@@ -129,6 +131,7 @@ pub fn translate_drawing(
         rows,
         draws: 0,
         draw_call: None,
+        helpers: Vec::new(),
     };
     let (code, kind) = t.expr(&tree)?;
     let (code, kind) = match use_ {
@@ -150,6 +153,7 @@ pub fn translate_drawing(
         kind,
         caveats,
         draws: t.draws,
+        helpers: t.helpers,
     })
 }
 
@@ -161,7 +165,68 @@ struct Translator<'a> {
     draws: usize,
     /// The R of the expression's random draw, written as [`DRAW`] in its code.
     draw_call: Option<String>,
+    helpers: Vec<&'static str>,
 }
+
+/// Stata's date and time functions of numbers, the R helper each is
+/// (`data_r/dates.rs`), and how many arguments each takes.
+const DATE_FUNCTIONS: &[(&str, usize)] = &[
+    ("year", 1),
+    ("month", 1),
+    ("day", 1),
+    ("dow", 1),
+    ("doy", 1),
+    ("week", 1),
+    ("quarter", 1),
+    ("halfyear", 1),
+    ("wofd", 1),
+    ("mofd", 1),
+    ("qofd", 1),
+    ("hofd", 1),
+    ("yofd", 1),
+    ("dofw", 1),
+    ("dofm", 1),
+    ("dofq", 1),
+    ("dofh", 1),
+    ("dofy", 1),
+    ("cofd", 1),
+    ("dofc", 1),
+    ("hh", 1),
+    ("mm", 1),
+    ("ss", 1),
+    ("hours", 1),
+    ("minutes", 1),
+    ("seconds", 1),
+    ("msofhours", 1),
+    ("msofminutes", 1),
+    ("msofseconds", 1),
+    ("isleapyear", 1),
+    ("yw", 2),
+    ("ym", 2),
+    ("yq", 2),
+    ("yh", 2),
+    ("mdy", 3),
+    ("hms", 3),
+    ("dhms", 4),
+    ("mdyhms", 6),
+];
+
+/// Strings read as dates against a mask: Stata's name and the helper's.
+const DATE_READERS: &[(&str, &str)] = &[
+    ("date", "date"),
+    ("daily", "date"),
+    ("clock", "clock"),
+    ("weekly", "weekly"),
+    ("monthly", "monthly"),
+    ("quarterly", "quarterly"),
+    ("halfyearly", "halfyearly"),
+    ("yearly", "yearly"),
+];
+
+/// datetime/C, which counts leap seconds: not translated yet.
+const LEAP_SECOND_FUNCTIONS: &[&str] = &[
+    "Clock", "Cofd", "Cofc", "cofC", "dofC", "hhC", "mmC", "ssC", "Cmdyhms", "Cdhms", "Chms",
+];
 
 /// The name a random draw goes by in an expression's R until it is placed.
 const DRAW: &str = ".stata_draw";
@@ -787,52 +852,6 @@ impl Translator<'_> {
                 );
                 Ok((format!("as.character({})", number(&x, k)?), Kind::Text))
             }
-            "mdy" => {
-                want(3)?;
-                let mut v = Vec::new();
-                for a in args {
-                    let (c, k) = self.expr(a)?;
-                    v.push(number(&c, k)?);
-                }
-                let [m, d, y] = v.as_slice() else {
-                    return Err(no("mdy() takes 3 arguments here"));
-                };
-                Ok((
-                    format!(
-                        "as.numeric(as.Date(ISOdate({y}, {m}, {d})) - as.Date(\"1960-01-01\"))"
-                    ),
-                    Kind::Number,
-                ))
-            }
-            "year" | "month" | "day" | "dow" | "doy" => {
-                want(1)?;
-                let (d, k) = self.expr(arg(0)?)?;
-                let lt = format!(
-                    "as.POSIXlt(as.Date({}, origin = \"1960-01-01\"))",
-                    number(&d, k)?
-                );
-                let code = match name {
-                    "year" => format!("({lt}$year + 1900)"),
-                    "month" => format!("({lt}$mon + 1)"),
-                    "day" => format!("{lt}$mday"),
-                    "dow" => format!("{lt}$wday"),
-                    _ => format!("({lt}$yday + 1)"),
-                };
-                Ok((code, Kind::Number))
-            }
-            "date" => match (args.first(), args.get(1), args.len()) {
-                (Some(Expr::Text(s)), Some(Expr::Text(mask)), 2) => {
-                    let v = parse_date(s, mask, None);
-                    if is_missing(v) {
-                        Ok(("NA_real_".into(), Kind::Number))
-                    } else {
-                        Ok((r_number(v), Kind::Number))
-                    }
-                }
-                _ => Err(no(
-                    "date() of text that is only known when the file runs is not translated yet",
-                )),
-            },
             // e(sample): the rows of the last model, kept in R as stata_esample
             // (the translator lets it through only while those rows are unmoved)
             "e" => match args {
@@ -849,8 +868,80 @@ impl Translator<'_> {
                 _ => Err(no("r() takes one name, as r(mean)")),
             },
             "runiform" | "uniform" | "rnormal" | "rgamma" => self.draw(name, args),
+            n if DATE_FUNCTIONS.iter().any(|(f, _)| *f == n) => self.date_fn(n, args),
+            n if DATE_READERS.iter().any(|(f, _)| *f == n) => self.date_reader(n, args),
+            n if LEAP_SECOND_FUNCTIONS.contains(&n) => Err(no(format!(
+                "{n}() counts leap seconds (datetime/C), which is not translated yet; \
+                 datetime/c (clock(), cofd(), ...) is"
+            ))),
             _ => Err(no(format!("the function {name}() is not translated yet"))),
         }
+    }
+
+    /// A date or time function of numbers (P2C.14): the R helper of the
+    /// same name, `stata_mdy()` and so on, with Stata's missing values.
+    fn date_fn(&mut self, name: &str, args: &[Expr]) -> Result<(String, Kind), Untranslated> {
+        let n = DATE_FUNCTIONS
+            .iter()
+            .find(|(f, _)| *f == name)
+            .map_or(0, |(_, n)| *n);
+        if args.len() != n {
+            return Err(no(format!(
+                "{name}() takes {n} argument{} (Stata: invalid syntax)",
+                if n == 1 { "" } else { "s" }
+            )));
+        }
+        let mut vals = Vec::new();
+        for a in args {
+            let (c, k) = self.expr(a)?;
+            if k == Kind::Text {
+                return Err(no(format!("{name}() of a string (Stata: type mismatch)")));
+            }
+            vals.push(number(&c, k)?);
+        }
+        self.helpers.push("stata_dates");
+        Ok((format!("stata_{name}({})", vals.join(", ")), Kind::Number))
+    }
+
+    /// `date(s, mask [, topyear])`, `clock()`, `monthly()` and the others:
+    /// strings read against Stata's mask in R. A date written out is read
+    /// here.
+    fn date_reader(&mut self, name: &str, args: &[Expr]) -> Result<(String, Kind), Untranslated> {
+        let helper = DATE_READERS
+            .iter()
+            .find(|(f, _)| *f == name)
+            .map_or("date", |(_, h)| *h);
+        if !(2..=3).contains(&args.len()) {
+            return Err(no(format!(
+                "{name}() takes a string, a mask and a top year (Stata: invalid syntax)"
+            )));
+        }
+        if let [Expr::Text(s), Expr::Text(mask)] = args {
+            if helper == "date" {
+                let v = parse_date(s, mask, None);
+                return Ok((
+                    if is_missing(v) {
+                        "NA_real_".into()
+                    } else {
+                        r_number(v)
+                    },
+                    Kind::Number,
+                ));
+            }
+        }
+        let mut vals = Vec::new();
+        for (i, a) in args.iter().enumerate() {
+            let (c, k) = self.expr(a)?;
+            let text = i < 2;
+            if text && k == Kind::Number || !text && k == Kind::Text {
+                return Err(no(format!(
+                    "{name}() with these arguments (Stata: type mismatch)"
+                )));
+            }
+            vals.push(if text { c } else { number(&c, k)? });
+        }
+        self.helpers.push("stata_dates");
+        Ok((format!("stata_{helper}({})", vals.join(", ")), Kind::Number))
     }
 
     /// One of Stata's random draws, from `stata_rng` (P2C.11): the R helper
@@ -1089,6 +1180,21 @@ mod tests {
         // a date written out becomes its number (days since 1 January 1960)
         assert_eq!(code("td(01jan1960) + 1", Use::Value), "(0 + 1)");
         assert_eq!(code("date(\"2 Jan 1960\", \"DMY\")", Use::Value), "1");
+        // on a column, Stata's rules run in R (data_r/dates.rs)
+        assert_eq!(
+            code("date(s, \"DMY\", 2020)", Use::Value),
+            "stata_date(s, \"DMY\", 2020)"
+        );
+        assert_eq!(
+            code("monthly(s, \"YM\")", Use::Value),
+            "stata_monthly(s, \"YM\")"
+        );
+        assert_eq!(
+            code("year(d) + mdy(1, 2, y)", Use::Value),
+            "(stata_year(d) + stata_mdy(1, 2, y))"
+        );
+        let r = translate("dofm(m)", &none, Use::Value);
+        assert!(r.is_ok_and(|r| r.helpers == vec!["stata_dates"]));
     }
 
     #[test]
@@ -1096,7 +1202,8 @@ mod tests {
         for (text, why) in [
             ("foo(x)", "foo() is not translated"),
             ("substr(s, -2, 1)", "from the end"),
-            ("date(s, \"DMY\")", "only known when the file runs"),
+            ("Clock(s, \"DMYhms\")", "leap seconds"),
+            ("year(s, 2)", "takes 1 argument"),
             ("x +", "Stata would not read it"),
             ("_se[x]", "estimation"),
         ] {

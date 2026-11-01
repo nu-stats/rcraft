@@ -33,36 +33,30 @@ survival, survey, IV and the other models, 4 graphs (with `_natscale`, which giv
 and chosen SSC commands (`statatr::coverage::tier`). The lines are the ones the do-files run, so a loop's body
 counts once a round. The share is of the lines a dry run can judge.
 
-The share has risen in two steps:
+The share has risen in three steps:
 - Stata's own random draws (P2C.11) took it from 31.8% to 68.9%.
 - P2C.12 took it to 76.1%: `invnormal()`, `normal()`, the `c()` constants and `_natscale`. One research probe
   of StatCraft's runs `_natscale` 5,399 times, so tier 4's share mostly reflects that probe.
+- Stata's date and time functions on R (P2C.14) took it to 79.1% (tier 1 to 85.4%).
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
-| 1. Data management and control flow | 154369 | 116263 | 25554 | 12552 | 82.0% |
+| 1. Data management and control flow | 154369 | 121076 | 20741 | 12552 | 85.4% |
 | 2. Core statistics | 3225 | 542 | 2679 | 4 | 16.8% |
 | 3. Panel, survival, survey, IV and other models | 6344 | 123 | 6131 | 90 | 2.0% |
 | 4. Graphs | 5992 | 5721 | 83 | 188 | 98.6% |
 | 5. Programs and SSC commands | 182 | 12 | 169 | 1 | 6.6% |
 | Other commands | 4036 | 2 | 3957 | 77 | 0.1% |
-| **All** | 174148 | 122663 | 38573 | 12912 | 76.1% |
+| **All** | 174148 | 127476 | 33760 | 12912 | 79.1% |
 
-19063 lines are not translated only because a line before them was not (the variable, scalar, macro, data or stored result it would have made). The first causes, most lines first:
+19062 lines are not translated only because a line before them was not (the variable, scalar, macro, data or stored result it would have made). The first causes, most lines first:
 
 | Lines | Reason |
 |---:|---|
 | 3489 | bsample is not translated yet |
-| 1013 | the function clock() is not translated yet |
 | 861 | file is not translated yet |
 | 802 | the random draws here are not Stata's: a line before it that draws was not translated (bsample); a set seed after it starts them again |
-| 605 | the function yw() is not translated yet |
 | 573 | lasso is not translated yet |
-| 504 | the function halfyearly() is not translated yet |
-| 504 | the function monthly() is not translated yet |
-| 504 | the function quarterly() is not translated yet |
-| 504 | the function weekly() is not translated yet |
-| 504 | the function yearly() is not translated yet |
 | 320 | lassoselect is not translated yet |
 | 301 | the random draws here are not Stata's: a line before it that draws was not translated (bsample 1); a set seed after it starts them again |
 | 301 | the random draws here are not Stata's: a line before it that draws was not translated (bsample, cluster(g)); a set seed after it starts them again |
@@ -72,20 +66,27 @@ The share has risen in two steps:
 | 186 | this runs rhoof, a program the do-file defines; programs are not translated yet |
 | 174 | this runs pex, a program the do-file defines; programs are not translated yet |
 | 171 | predict needs a model fitted earlier in this do-file (regress, logit, ...) |
+| 162 | no data is in memory at this point (no use or import before it) |
+| 128 | lassoknots is not translated yet |
+| 121 | Clock() counts leap seconds (datetime/C), which is not translated yet; datetime/c (clock(), cofd(), ...) is |
+| 116 | mi is not translated yet |
+| 112 | format is not translated yet |
+| 100 | lpoly is not translated yet |
+| 81 | estat needs a model fitted earlier in this do-file (regress, logit, ...) |
 
 ## Checked against Stata on R (2026-11-01)
 
 The 388 probes recorded in StatCraft's corpus are each run on R 4.4 in a fresh session, as the do-file window
-runs a do-file: 179,362 lines ran, and 126,618 of them were translated.
+runs a do-file: 179,362 lines ran, and 135,462 of them were translated (126,618 before the dates, P2C.14).
 
 | | Lines | Before P2C.12 | Before P2C.11 |
 |---|---:|---:|---:|
-| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,626 | 210 | 196 |
-| The same to 8 significant digits | 5,508 | 205 | 192 |
+| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,636 | 210 | 196 |
+| The same to 8 significant digits | 5,518 | 205 | 192 |
 | The same to 6, not 8 | 5 | 1 | 1 |
 | Different | 113 | 4 | 3 |
 | Not compared: after the probe's first R error, where the do-file window stops | 215 | 207 | 199 |
-| Printed by Stata, not translated (counted from P2C.12) | 823 | | |
+| Printed by Stata, not translated (counted from P2C.12) | 813 | | |
 | Translated lines that R stopped at | 453 | 429 | 399 |
 
 The 113 that differ are all `_natscale`, nearly all with n = 10 or 15. There Stata's r(min) is a residue of
@@ -141,8 +142,8 @@ reason:
 
 ## What would move the numbers most
 
-1. `bsample` (3,489 lines, and the draws after it), `file` and the date functions (`clock()`, `monthly()`,
-   `yw()`, ...), with time-series operators.
+1. `bsample` (3,489 lines, and the draws after it), `file`, and time-series operators. The date and time
+   functions are translated since P2C.14 (`plan/stata/dates.md`).
 2. Two factors interacted in a model (`i.g#i.h`), which Stata lays out cell by cell.
 3. Programs (`program define`), `gettoken`, the other random functions (`runiformint()`, `rbinomial()`, ...),
    and the models not yet translated (lasso, xtregar, newey, prais).

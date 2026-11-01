@@ -102,6 +102,16 @@ pub const GUIDES: &[Guide] = &[
                  order() keeps them as they were, which is one of the orders Stata may give.",
             ),
             p(
+                "Dates and times",
+                "Stata's dates are numbers (days, milliseconds, months, ... since 1960), and so \
+                 they stay in R: date(), clock(), monthly() and the others read text against \
+                 Stata's masks (DMY, YMDhms, 20YMD, #) with Stata's rules, and mdy(), year(), \
+                 dofm() and the rest give Stata's numbers, checked against about 13,000 of \
+                 Stata 19's answers. They are not R Date or POSIXct values. Outside 0100 to \
+                 9999 they are missing (wofd() there gives Stata arbitrary numbers). The \
+                 leap-second functions (Clock(), Cofd(), ...) are not translated yet.",
+            ),
+            p(
                 "Random numbers",
                 "set seed, runiform(), rnormal() and rgamma() give Stata's own draws: RCraft runs \
                  Stata's generator (the 64-bit Mersenne Twister) in R, row by row as Stata \

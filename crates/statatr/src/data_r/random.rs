@@ -483,6 +483,7 @@ impl Session {
         for c in r.caveats {
             out.caveat(c);
         }
+        out.helpers.extend(r.helpers);
         Ok((r.code, r.kind, r.draws))
     }
 

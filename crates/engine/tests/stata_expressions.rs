@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 
 use rcraft_engine::{Engine, Outcome, Source};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
+use rcraft_statatr::data_r::Translator;
 use rcraft_statatr::expr_r::{translate, Kind, Use};
 
 fn engine() -> Option<Engine> {
@@ -196,8 +197,14 @@ fn translated_expressions_give_statas_answers_in_r() {
         } else {
             "isTRUE(all.equal(v, e))"
         };
+        // the R helpers the expression calls (the dates' stata_dates)
+        let helpers: String = translated
+            .helpers
+            .iter()
+            .map(|h| format!("{}\n", Translator::helper_r(h)))
+            .collect();
         let code = format!(
-            "local({{ v <- dplyr::mutate({data}, .v = {})$.v; e <- {expected}; \
+            "{helpers}local({{ v <- dplyr::mutate({data}, .v = {})$.v; e <- {expected}; \
              if (!{check}) stop(paste(format(v), collapse = ' ')) }})",
             translated.code
         );
