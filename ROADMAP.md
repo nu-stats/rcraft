@@ -367,6 +367,16 @@ skipped. It never gives a silent wrong answer.
   and `rgamma()` give Stata 19's numbers, then `runiformint()`,
   `rbinomial()` and the others
   (done 2026-11-01 for the first four: Stata's generator (mt64) and StatCraft's decoding of its normal and gamma methods, written in R (`data_r/random.rs`), its state kept in R across lines, `preserve`, `by` and typed lines; draws only for the rows an `if`/`in` selects; `random.do` in the corpus checks them exactly. Design and observations in `plan/stata/random-numbers.md`. Still to come: the other random functions, KISS32 under `version` 13 or earlier, `c(rngstate)`.)
+- P2C.12 Closer to Stata on the probes: no compared line differs, and more
+  lines are compared
+  (done 2026-11-01:
+  - `capture` gives Stata's `_rc` and `noisily` Stata's message for a name that is not there (111) and a variable already defined (110).
+  - A refused line that may fit a model hides the model before it from `estat`, `predict`, `test`, `lincom` and `margins`; commands that only read the model (`testparm`, `estimates store`, ...) do not.
+  - A refused add-on or do-file program makes the globals the do-file has not set unknown.
+  - `invnormal()` and `normal()` give Stata's doubles (Verified in `random.do`).
+  - The storage types' `c()` constants are translated.
+  - `_natscale` uses StatCraft's decoded rule.
+  Observations in `plan/stata/errors-and-normal.md`. Still to come: `poisson` to 8 digits, whose starting point is not yet known.)
 
 ## Phase 3: Data
 

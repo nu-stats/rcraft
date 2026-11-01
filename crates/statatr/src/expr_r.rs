@@ -558,6 +558,58 @@ impl Translator<'_> {
                     ),
                 })
             }
+            // R's qnorm and pnorm give Stata 19's doubles bit for bit
+            // (checked on 20,000 values, tails and subnormals included);
+            // invnormal() outside 0 < p < 1 is missing in Stata
+            "invnormal" => {
+                want(1)?;
+                let (p, pk) = self.expr(arg(0)?)?;
+                let p = number(&p, pk)?;
+                Ok((
+                    format!(
+                        "(\\(q) replace(q, !is.finite(q), NA_real_))(suppressWarnings(stats::qnorm({p})))"
+                    ),
+                    Kind::Number,
+                ))
+            }
+            // c(): the constants of Stata's storage types (read off Stata 19
+            // in %21x; the same on every machine). Settings and the session's
+            // own values (c(N), c(pwd), c(rngstate), ...) are not translated.
+            "c" => {
+                want(1)?;
+                let Some(Expr::Name(what)) = args.first() else {
+                    return Err(no("c() takes a name"));
+                };
+                let v = match what.as_str() {
+                    "pi" => "pi",
+                    "maxbyte" => "100",
+                    "minbyte" => "-127",
+                    "maxint" => "32740",
+                    "minint" => "-32767",
+                    "maxlong" => "2147483620",
+                    "minlong" => "-2147483647",
+                    "maxfloat" => "0x1.fffffep126",
+                    "minfloat" => "-0x1.fffffep126",
+                    "maxdouble" => "0x1.fffffffffffffp1022",
+                    "mindouble" => "-0x1.fffffffffffffp1022",
+                    "smallestdouble" => "0x1p-1022",
+                    "epsfloat" => "0x1p-23",
+                    "epsdouble" => "0x1p-52",
+                    "maxstrvarlen" => "2045",
+                    "maxstrlvarlen" => "2000000000",
+                    other => {
+                        return Err(no(format!(
+                            "c({other}) is not translated yet: only the constants of the storage types (c(maxlong), c(epsdouble), c(pi), ...) are"
+                        )))
+                    }
+                };
+                Ok((v.to_string(), Kind::Number))
+            }
+            "normal" => {
+                want(1)?;
+                let (z, zk) = self.expr(arg(0)?)?;
+                Ok((format!("stats::pnorm({})", number(&z, zk)?), Kind::Number))
+            }
             "max" | "min" => {
                 if args.is_empty() {
                     return Err(no(format!("{name}() needs values")));
@@ -909,6 +961,33 @@ mod tests {
             Ok(r) => r.code,
             Err(e) => panic!("{text}: {}", e.reason),
         }
+    }
+
+    #[test]
+    fn the_normal_distribution_is_rs_own() {
+        assert_eq!(
+            code("invnormal(p)", Use::Value),
+            "(\\(q) replace(q, !is.finite(q), NA_real_))(suppressWarnings(stats::qnorm(p)))"
+        );
+        assert_eq!(code("normal(z / 2)", Use::Value), "stats::pnorm((z / 2))");
+        assert_eq!(code("c(maxlong) + 1", Use::Value), "(2147483620 + 1)");
+        assert!(translate("c(pwd)", &none, Use::Value).is_err());
+        // the draw inside is taken once a row
+        let r = translate_drawing(
+            "invnormal(runiform())",
+            &none,
+            &|_, _| Err(no("")),
+            Use::Value,
+            Some("n"),
+        );
+        let r = r.map(|r| (r.code, r.draws)).map_err(|e| e.reason);
+        assert_eq!(
+            r,
+            Ok((
+                "(\\(q) replace(q, !is.finite(q), NA_real_))(suppressWarnings(stats::qnorm(stata_runiform(n))))".into(),
+                1
+            ))
+        );
     }
 
     #[test]

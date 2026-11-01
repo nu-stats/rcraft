@@ -601,7 +601,10 @@ fn what_margins_does_not_translate_says_why() {
             .lines
             .last()
             .and_then(|l| l.result.as_ref().err())
-            .is_some_and(|e| e.reason.contains("changed the rows")),
+            // an unknown command may also have fitted a model, which is said first
+            .is_some_and(|e| {
+                e.reason.contains("changed the rows") || e.reason.contains("may have fitted one")
+            }),
         "and counts as a change, since it still runs in Stata"
     );
 }

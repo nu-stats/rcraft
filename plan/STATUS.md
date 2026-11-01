@@ -2707,3 +2707,38 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
     `estat ic` runs on the model before it (probe 315: `_rc` 0 where Stata gives 321).
   - Found on the way, not fixed here: `generate x = y if _N > 5` (an `if` with the same value for every row)
     fails in R's `dplyr::if_else`.
+
+## P2C.12: closer to Stata on the probes, 2026-11-01
+
+- **No compared line differs for a reason other than one `_natscale` residue.** The four lines that differed
+  after P2C.11 now match or are refused with the reason:
+  - `capture` gives Stata's `_rc` for a name that is not there (111) and a variable already defined (110), and
+    `capture noisily` prints Stata's message (`a not found`). Any other R error keeps `_rc` missing and, under
+    `noisily`, R's message (helper `stata_captured`).
+  - A refused line that may fit a model (`qreg`, a refused `regress`, `estimates restore`) hides the model
+    before it: `estat`, `predict`, `test`, `lincom` and `margins` are refused with the reason. Commands that
+    only read the model (`testparm`, `nlcom`, `estimates store`, `margins` without `post`, ...) leave it.
+    Probe 444's `estat vce` after a refused `regress ... ibn.g` had shown the earlier model's matrix.
+  - A refused add-on (a command outside the tiers) or do-file program makes the globals the do-file has not
+    set unknown; probe 900's `$mtable_cspec` is refused, not read as empty.
+- **More lines compared:**
+  - `invnormal()` and `normal()` are R's `qnorm` and `pnorm`, bit for bit against Stata on 20,000 values.
+    `random.do` checks them (77 results, tolerance 0) and they are Verified.
+  - The storage types' `c()` constants (`c(maxlong)`, `c(epsdouble)`, `c(pi)`, ...), read off Stata 19 in
+    `%21x`, are translated.
+  - `_natscale` uses StatCraft's decoded rule. It is worked out when the line is translated, and R gets
+    exact hex doubles.
+  - `generate x = y if _N > 5`, an `if` with one value for the data, no longer fails in `dplyr::if_else`.
+- **The probe run** (`stata_probes.rs`) now also lists the lines Stata printed that were refused, by reason.
+- **Numbers:**
+  - 5,508 of 5,626 compared lines match Stata 19 to 8 digits (205 of 210 before) and 5 more to 6. The 113
+    that differ are `_natscale` cases with n = 10 or 15, where Stata's r(min) is 2^-55 rather than 0.
+  - The dry share translated is 76.1% (68.9% before).
+  - 126,618 of 179,362 lines are translated on R (114,916 before).
+- **Observations:** `plan/stata/errors-and-normal.md`.
+- **Not done:**
+  - `poisson` to 8 digits: Stata takes one Newton step from a start not yet found.
+  - `_natscale`'s residue for n = 10 and 15.
+  - `normalden()` and `lnnormal()`: R's agree only to about 4e-9 in the tails.
+  - Collinear variables in `logit`, `poisson` and `regress` with interacted factors, reached for the first
+    time: Stata omits them, R stops.

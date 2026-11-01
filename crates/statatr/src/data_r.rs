@@ -33,6 +33,7 @@ mod matrices;
 mod ml;
 mod model;
 mod more;
+mod natscale;
 mod post;
 mod random;
 mod returned;
@@ -559,8 +560,30 @@ const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, se
 /// Names for Excel columns, A to Z, AA, AB ..., from the `first`-th column.
 const EXCEL_NAMES_HELPER: &str = "stata_excel_names <- function(n, first = 1) {\n  vapply(seq_len(n) + first - 1, function(i) {\n    s <- \"\"\n    while (i > 0) {\n      s <- paste0(LETTERS[(i - 1) %% 26 + 1], s)\n      i <- (i - 1) %/% 26\n    }\n    s\n  }, \"\")\n}";
 
+/// What `capture` makes of an error in R: Stata's `_rc` and, under
+/// `noisily`, Stata's message. A name that is not there is `111` and "name
+/// not found" in Stata, as is a helper's "... not found"; "already defined"
+/// is `110` (read off Stata 19). Any other error keeps R's message and leaves
+/// `_rc` missing.
+const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
+  while (inherits(e$parent, "condition")) e <- e$parent
+  m <- sub("^! ", "", conditionMessage(e))
+  rc <- NA_real_
+  if (grepl("^object '[^']+' not found$", m)) {
+    m <- sub("^object '([^']+)' not found$", "\\1 not found", m)
+    rc <- 111
+  } else if (grepl("^[^\n]* not found$", m)) {
+    rc <- 111
+  } else if (grepl("^variable [^\n]* already defined$", m)) {
+    rc <- 110
+  }
+  if (noisily) cat(m, "\n", sep = "")
+  rc
+}"#;
+
 fn helper_code(name: &str) -> &'static str {
     match name {
+        "stata_captured" => CAPTURED_HELPER,
         "stata_excel_names" => EXCEL_NAMES_HELPER,
         "stata_stats" => more::STAT_HELPERS,
         "stata_destring" => more::DESTRING_HELPER,
@@ -647,6 +670,9 @@ struct Session {
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
     /// The model last fitted, for the commands that read it afterwards.
     estimates: Option<model::Estimates>,
+    /// Why there is no model to read: a line since the last one was not
+    /// translated, and it may have fitted one in Stata.
+    estimates_lost: Option<String>,
     /// A command since that model may have changed the data, so the copy of
     /// its estimation sample kept in R is no longer what Stata would use.
     changed_since_fit: bool,
@@ -1306,6 +1332,9 @@ impl Session {
         // who holds e() and r() now
         let r_left = self.r_new.take();
         self.track_returned(c, done.is_ok(), r_left);
+        if let Err(e) = &done {
+            self.lose_estimates(c, &e.reason);
+        }
         if done.is_ok() && MODELS.contains(&c.name.as_str()) && !self.e_new {
             self.e_ret =
                 returned::Returned::Lost(format!("e() after {} is not kept in R yet", c.name));
@@ -1373,10 +1402,12 @@ impl Session {
         }
         if c.prefixes.contains(&Prefix::Capture) {
             // capture: an error is ignored and the do-file goes on; _rc says
-            // whether there was one
+            // whether there was one, and noisily shows Stata's message
+            self.helpers.insert("stata_captured");
             let body = out.code.join("\n");
+            let noisily = if silent(c) { "FALSE" } else { "TRUE" };
             out.code = vec![format!(
-                "stata_rc <- tryCatch({{\n{body}\n0\n}}, error = function(e) NA_real_)"
+                "stata_rc <- tryCatch({{\n{body}\n0\n}}, error = function(e) stata_captured(e, {noisily}))"
             )];
         }
         out.done()
@@ -1398,6 +1429,7 @@ impl Session {
             "label" => self.label(c, &opts, out),
             "count" => self.count(c, out),
             "levelsof" => self.levelsof(c, &opts, out),
+            "_natscale" => self.natscale(c, out),
             "list" => self.list(c, &opts, out),
             "describe" => self.describe(c, out),
             "set" => self.set(c, out),
@@ -2782,6 +2814,16 @@ mod tests {
     }
 
     #[test]
+    fn an_if_with_one_value_for_the_data_is_given_each_row() {
+        let out = r(
+            "use s\ngenerate z = x if _N > 5\nreplace z = 1 if x[1] == 2\ngenerate w = x if x > 1",
+        );
+        assert!(out[1].contains("dplyr::if_else(rep_len("), "{out:?}");
+        assert!(out[2].contains("dplyr::if_else(rep_len("), "{out:?}");
+        assert!(!out[3].contains("rep_len("), "{out:?}");
+    }
+
+    #[test]
     fn random_draws_are_statas_own() {
         let out = r("set obs 6\nset seed 11\ngenerate g = mod(_n, 2)\n\
                      generate double x = runiform() if g == 1\n\
@@ -2856,7 +2898,12 @@ set obs 5");
 capture drop nosuch
 display _rc");
         assert!(out[1].starts_with("stata_rc <- tryCatch("), "{out:?}");
+        assert!(out[1].ends_with("stata_captured(e, FALSE))"), "{out:?}");
         assert!(out[2].contains("stata_rc"), "{out:?}");
+        // capture noisily shows Stata's message for the error
+        let out = r("use s
+capture noisily display nosuch");
+        assert!(out[1].ends_with("stata_captured(e, TRUE))"), "{out:?}");
         // a line under capture that is not translated leaves _rc unknown
         let out = r("use s
 capture frobnicate
@@ -2865,6 +2912,50 @@ capture drop x
 display _rc");
         assert!(out[2].starts_with("NOT: _rc is not known"), "{out:?}");
         assert!(out[4].contains("stata_rc"), "{out:?}");
+    }
+
+    #[test]
+    fn a_model_that_is_not_translated_hides_the_one_before() {
+        let out = r("use s
+regress y x
+qreg y x, nolog
+estat ic
+predict yh
+display _b[x]
+regress y x
+estat ic");
+        assert!(out[2].starts_with("NOT: qreg"), "{out:?}");
+        assert!(
+            out[3].starts_with("NOT: estat: the model Stata holds here is not known: qreg y x"),
+            "{out:?}"
+        );
+        assert!(out[4].starts_with("NOT: predict: the model"), "{out:?}");
+        assert!(out[5].starts_with("NOT: "), "{out:?}");
+        assert!(!out[7].starts_with("NOT: "), "{out:?}");
+        // a line that only fails to translate for a display reason keeps it
+        let out = r("use s
+regress y x
+list frobnicate in 1/3
+estat ic");
+        assert!(!out[3].starts_with("NOT: "), "{out:?}");
+        // so do the commands that only read the model, unless they post
+        let out = r("use s
+regress y x
+testparm x
+lincom x
+estimates store m1
+lincom x
+margins, dydx(x) post
+lincom x");
+        assert!(out[2].starts_with("NOT: "), "{out:?}");
+        assert!(!out[3].starts_with("NOT: "), "{out:?}");
+        assert!(!out[5].starts_with("NOT: "), "{out:?}");
+        assert!(out[7].starts_with("NOT: "), "{out:?}");
+        let out = r("use s
+regress y x
+estimates restore m1
+lincom x");
+        assert!(out[3].starts_with("NOT: lincom: the model"), "{out:?}");
     }
 
     #[test]

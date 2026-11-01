@@ -297,6 +297,10 @@ pub struct Run<'f> {
     origins: Vec<Origin>,
     refs: Vec<FileRef>,
     programs: BTreeSet<String>,
+    /// A line before that was not translated runs a program or an add-on,
+    /// which may set any global; the globals the do-file has not set are not
+    /// known after it.
+    globals_unknown: Option<String>,
     /// What the last one-line `if exp command` came to, for an `else` after it.
     one_line_if: Option<bool>,
     temp: usize,
@@ -348,6 +352,7 @@ impl<'f> Run<'f> {
             origins: Vec::new(),
             refs: Vec::new(),
             programs: BTreeSet::new(),
+            globals_unknown: None,
             one_line_if: None,
             temp: 0,
             cwd,
@@ -1062,6 +1067,7 @@ impl<'f> Run<'f> {
                     c.text.clone(),
                     format!("this runs {name}, a program the do-file defines; programs are not translated yet"),
                 );
+                self.globals_unknown = Some(c.text.trim().to_string());
                 self.push(line, What::Command, None, written);
                 Flow::Line
             }
@@ -1101,6 +1107,12 @@ impl<'f> Run<'f> {
                     self.programs.clear();
                 }
                 let line = self.t.command(c);
+                if let Err(e) = &line.result {
+                    // the latest one is named: it is the likeliest to have set it
+                    if may_set_globals(&c.name, &e.reason) {
+                        self.globals_unknown = Some(c.text.trim().to_string());
+                    }
+                }
                 // a local() it would have set is not known after it
                 if line.result.is_err() {
                     for o in c.options.iter().filter(|o| o.is("local", 3)) {
@@ -1848,7 +1860,12 @@ impl Env for Run<'_> {
             None if name.starts_with("S_") => Err(Stop::Not(format!(
                 "${name} is one of the globals Stata sets itself, which RCraft does not keep"
             ))),
-            None => Ok(String::new()),
+            None => match &self.globals_unknown {
+                Some(line) => Err(Stop::Not(format!(
+                    "${name} is not known: {line}, which was not translated, may have set it"
+                ))),
+                None => Ok(String::new()),
+            },
         }
     }
 
@@ -2372,6 +2389,35 @@ fn numlist(text: &str) -> Result<Vec<String>, String> {
         i += 1;
     }
     Ok(out)
+}
+
+/// Whether a command that was not translated may have set globals: one
+/// outside the tiers of Stata's commands RCraft knows (an add-on, an ado
+/// program) or a program-tier command that runs other code. A line Stata
+/// stops at, or one only R can judge, sets nothing new.
+fn may_set_globals(command: &str, reason: &str) -> bool {
+    use crate::coverage::{tier, Tier};
+    if reason.contains("Stata stops here")
+        || reason.contains("(Stata: ")
+        || reason.contains(KNOWN_WHEN_RUN)
+    {
+        return false;
+    }
+    // Stata's own commands that set up the session set no globals of their own
+    if matches!(
+        command,
+        "sysdir" | "adopath" | "which" | "log" | "cmdlog" | "cd" | "help" | "discard" | "pwd"
+    ) {
+        return false;
+    }
+    match tier(command) {
+        Tier::Other => true,
+        Tier::Programs => !matches!(
+            command,
+            "args" | "syntax" | "tokenize" | "gettoken" | "end" | "program" | "ssc" | "net" | "ado"
+        ),
+        _ => false,
+    }
 }
 
 /// A path as written: quotes off, `\` as `/`.

@@ -1,7 +1,7 @@
 * RCraft's Stata corpus (P2C.11): made-up data; Stata 19's results are in random.recorded
 * commands: expand generate replace set
-* functions: rgamma rnormal runiform
-* (Stata's own random draws: set seed, runiform(), rnormal() and rgamma() in display, macros, scalars, generate, replace, keep, expand, if blocks and loops; the rows an if or in selects; arguments that give missing; by groups)
+* functions: invnormal normal rgamma rnormal runiform
+* (Stata's own random draws: set seed, runiform(), rnormal() and rgamma() in display, macros, scalars, generate, replace, keep, expand, if blocks and loops; the rows an if or in selects; arguments that give missing; by groups; invnormal() and normal())
 * tolerance: 0
 version 19
 clear
@@ -100,3 +100,32 @@ display "@ gc_18481 " %24.17g gc[18481]
 display "@ gc_18482 " %24.17g gc[18482]
 display "@ gc_20000 " %24.17g gc[20000]
 display "@ tail_next " %24.17g runiform()
+* invnormal() and normal(): how most do-files make their data
+clear
+set obs 2000
+set seed 4321
+generate double inv = invnormal(runiform())
+replace inv = invnormal(1e-300 * runiform()) in 1/40
+replace inv = invnormal(1 - runiform()^9) in 41/80
+generate double nz = normal(inv)
+generate float fz = invnormal(runiform()) if mod(_n, 3)
+display "@ inv_1 " %24.17g inv[1]
+display "@ inv_40 " %24.17g inv[40]
+display "@ inv_77 " %24.17g inv[77]
+display "@ inv_2000 " %24.17g inv[2000]
+display "@ nz_1 " %24.17g nz[1]
+display "@ nz_40 " %24.17g nz[40]
+display "@ nz_2000 " %24.17g nz[2000]
+display "@ fz_2 " %24.17g fz[2]
+display "@ fz_3 " %24.17g fz[3]
+display "@ fz_1999 " %24.17g fz[1999]
+display "@ inv_0 " %24.17g invnormal(0)
+display "@ inv_1one " %24.17g invnormal(1)
+display "@ inv_miss " %24.17g invnormal(.)
+display "@ inv_neg " %24.17g invnormal(-2)
+display "@ inv_975 " %24.17g invnormal(.975)
+display "@ normal_miss " %24.17g normal(.)
+display "@ normal_m40 " %24.17g normal(-40)
+display "@ normal_40 " %24.17g normal(40)
+display "@ normal_m375 " %24.17g normal(-37.5)
+display "@ after_norm " %24.17g runiform()

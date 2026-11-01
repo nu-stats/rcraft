@@ -571,3 +571,44 @@ fn a_draw_that_waits_for_r_in_a_dry_run_leaves_the_draws_after_it() {
         "{s:?}"
     );
 }
+
+#[test]
+fn an_add_on_that_is_not_translated_may_set_any_global() {
+    let d = run("global mine a\nsysdir set PLUS \"p\"\nset obs 2\nmtable, at(x=1)\ndisplay \"[$mine]\"\ndisplay \"[$mtable_cspec]\"\n");
+    let s = shown(&d);
+    assert!(
+        s.iter()
+            .any(|l| l.starts_with("display \"[a]\" | Command | ")),
+        "{s:?}"
+    );
+    assert!(
+        s.iter()
+            .any(|l| l.contains("$mtable_cspec is not known: mtable, at(x=1), which was not translated, may have set it")),
+        "{s:?}"
+    );
+    // a Stata command that is refused sets no globals
+    let d = run("set obs 2\nbsample\ndisplay \"[$nothing]\"\n");
+    let s = shown(&d);
+    assert!(
+        s.iter()
+            .any(|l| l.starts_with("display \"[]\" | Command | ")),
+        "{s:?}"
+    );
+}
+
+#[test]
+fn natscale_leaves_its_labels_in_r() {
+    let d = run("clear\n_natscale 0 1.01 5\ndisplay \"s \" %21x r(min) \" \" %21x r(max) \" \" r(n)\nreturn list\n");
+    let s = shown(&d);
+    assert!(
+        d.translation.lines.iter().all(|l| l.result.is_ok()),
+        "{s:?}"
+    );
+    let code: Vec<String> = d.translation.lines.iter().map(|l| l.script()).collect();
+    assert!(
+        code.iter().any(|c| c.contains(
+            "stata_r <- list(n = 0x1.8000000000000p2, min = 0, max = 0x1.0000000000000p0, delta = 0x1.999999999999ap-3)"
+        )),
+        "{code:?}"
+    );
+}

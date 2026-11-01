@@ -74,6 +74,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
 /// Each Verified function, with the corpus files that check it (the
 /// `functions:` line of each), where a function was the point of a file.
 pub const VERIFIED_FUNCTIONS: &[(&str, &[&str])] = &[
+    ("invnormal", &["random"]),
+    ("normal", &["random"]),
     ("rgamma", &["random"]),
     ("rnormal", &["random"]),
     ("runiform", &["random"]),

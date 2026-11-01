@@ -29,29 +29,29 @@ results are committed and checked by every CI run. The probes are a wider check 
 ## Translated, by tier (2026-11-01)
 
 The tiers: 1 data management and control flow (macros and loops included), 2 core statistics, 3 panel,
-survival, survey, IV and the other models, 4 graphs, 5 programs and chosen SSC commands
-(`statatr::coverage::tier`). The lines are the ones the do-files run, so a loop's body counts once a round.
-The share is of the lines a dry run can judge.
+survival, survey, IV and the other models, 4 graphs (with `_natscale`, which gives their axis labels), 5 programs
+and chosen SSC commands (`statatr::coverage::tier`). The lines are the ones the do-files run, so a loop's body
+counts once a round. The share is of the lines a dry run can judge.
 
-With Stata's own random draws (P2C.11, `set seed`, `runiform()`, `rnormal()`, `rgamma()`), the share rose from
-31.8% to 68.9% (tier 1 from 35.7% to 77.7%), and the lines refused only because a line before them was fell
-from 85,646 to 25,350.
+The share has risen in two steps:
+- Stata's own random draws (P2C.11) took it from 31.8% to 68.9%.
+- P2C.12 took it to 76.1%: `invnormal()`, `normal()`, the `c()` constants and `_natscale`. One research probe
+  of StatCraft's runs `_natscale` 5,399 times, so tier 4's share mostly reflects that probe.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
-| 1. Data management and control flow | 154294 | 110201 | 31542 | 12551 | 77.7% |
-| 2. Core statistics | 3222 | 373 | 2845 | 4 | 11.6% |
-| 3. Panel, survival, survey, IV and other models | 6310 | 88 | 6132 | 90 | 1.4% |
-| 4. Graphs | 593 | 280 | 125 | 188 | 69.1% |
+| 1. Data management and control flow | 154369 | 116263 | 25554 | 12552 | 82.0% |
+| 2. Core statistics | 3225 | 542 | 2679 | 4 | 16.8% |
+| 3. Panel, survival, survey, IV and other models | 6344 | 123 | 6131 | 90 | 2.0% |
+| 4. Graphs | 5992 | 5721 | 83 | 188 | 98.6% |
 | 5. Programs and SSC commands | 182 | 12 | 169 | 1 | 6.6% |
-| Other commands | 9431 | 2 | 9352 | 77 | 0.0% |
-| **All** | 174032 | 110956 | 50165 | 12911 | 68.9% |
+| Other commands | 4036 | 2 | 3957 | 77 | 0.1% |
+| **All** | 174148 | 122663 | 38573 | 12912 | 76.1% |
 
-25350 lines are not translated only because a line before them was not (the variable, scalar, macro, data or stored result it would have made). The first causes, most lines first:
+19063 lines are not translated only because a line before them was not (the variable, scalar, macro, data or stored result it would have made). The first causes, most lines first:
 
 | Lines | Reason |
 |---:|---|
-| 5399 | _natscale is not translated yet |
 | 3489 | bsample is not translated yet |
 | 1013 | the function clock() is not translated yet |
 | 861 | file is not translated yet |
@@ -68,36 +68,54 @@ from 85,646 to 25,350.
 | 301 | the random draws here are not Stata's: a line before it that draws was not translated (bsample, cluster(g)); a set seed after it starts them again |
 | 300 | the random draws here are not Stata's: a line before it that draws was not translated (bsample 2); a set seed after it starts them again |
 | 240 | this runs upd, a program the do-file defines; programs are not translated yet |
-| 188 | predict needs a model fitted earlier in this do-file (regress, logit, ...) |
 | 186 | this runs rho1, a program the do-file defines; programs are not translated yet |
 | 186 | this runs rhoof, a program the do-file defines; programs are not translated yet |
+| 174 | this runs pex, a program the do-file defines; programs are not translated yet |
+| 171 | predict needs a model fitted earlier in this do-file (regress, logit, ...) |
 
 ## Checked against Stata on R (2026-11-01)
 
-The 387 probes recorded in StatCraft's corpus, each run on R 4.4 in a fresh session, as the do-file window runs
-a do-file. 179,330 lines ran, and 114,916 of them were translated (55,454 before Stata's random draws, P2C.11).
+The 388 probes recorded in StatCraft's corpus are each run on R 4.4 in a fresh session, as the do-file window
+runs a do-file: 179,362 lines ran, and 126,618 of them were translated.
 
-| | Lines | Before P2C.11 |
-|---|---:|---:|
-| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 210 | 196 |
-| The same to 8 significant digits | 205 | 192 |
-| The same to 6, not 8 (a Poisson model, which Stata stops at its convergence tolerance) | 1 | 1 |
-| Different | 4 | 3 |
-| Not compared: after the probe's first R error, where the do-file window stops | 207 | 199 |
-| Translated lines that R stopped at | 429 | 399 |
+| | Lines | Before P2C.12 | Before P2C.11 |
+|---|---:|---:|---:|
+| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,626 | 210 | 196 |
+| The same to 8 significant digits | 5,508 | 205 | 192 |
+| The same to 6, not 8 | 5 | 1 | 1 |
+| Different | 113 | 4 | 3 |
+| Not compared: after the probe's first R error, where the do-file window stops | 215 | 207 | 199 |
+| Printed by Stata, not translated (counted from P2C.12) | 823 | | |
+| Translated lines that R stopped at | 461 | 429 | 399 |
 
-The 4 that differ:
-- `capture noisily` does not print R's error message, where Stata prints its own.
-- Probe 900 reads two globals that an add-on it ran would have set (2 lines).
-- Probe 315, reached now that its data is made: `qreg` is not translated, but the refused model does not
-  clear `e()`, so `capture noisily estat ic` runs on the model before it and `_rc` is 0 where Stata gives
-  321.
+The 113 that differ are all `_natscale`, nearly all with n = 10 or 15. There Stata's r(min) is a residue of
+its arithmetic (2^-55 or −2^-54) where RCraft gives 0, and a residue against 0 fails any relative check
+(`plan/stata/errors-and-normal.md`).
 
-Most of the 429 R errors come from the probes' setting rather than from RCraft (more lines run now, so there
-are more of them):
+The four lines that differed before P2C.12 now match or are refused with the reason:
+- `capture noisily` now prints Stata's message, and `_rc` is Stata's 111 or 110.
+- Probe 315's `estat ic` after a `qreg` that is not translated is refused. It used to run on the model before
+  it.
+- Probe 900's globals from an add-on are refused. They used to read as empty.
+
+The 5 that agree to 6 digits, not 8:
+- `poisson` (probe 064). Stata stops after one Newton step from a starting point not yet found. That step,
+  from Stata's start, gives Stata's coefficients bit for bit.
+- Four convergence values of `xtreg, pa` (`e(dif)`, `e(p)` near 0). They are compared for the first time now
+  that the probes' data is made.
+
+Most of the 461 R errors come from the probes' setting rather than from RCraft:
 - graphs exported as SVG, which need the R package svglite;
 - files another probe or StatCraft wrote (`use`, `import`, `list`);
 - files the probe writes with `file write`, which is not translated.
+
+Lines reached for the first time show two gaps: collinear variables in `logit`, `poisson` and `regress`
+with interacted factors, which Stata drops and R stops at.
+
+The probe run also lists the lines Stata printed that were refused, by reason, most lines first. The largest
+groups now are:
+- `ereturn list` after models not translated (`newey`, `prais`, `var`);
+- `return list` after `power`, `mvtest`, `estat` and `filefilter`.
 
 ## What the probes changed
 
@@ -117,17 +135,15 @@ reason:
 - a `local` that could not be set, which had kept its old value;
 - `quietly display`, which printed;
 - comparisons with `.a`–`.z`;
-- time-series operators.
-
-The R errors on translated lines fell from 1,494 to 399 as these lines came to be refused.
+- time-series operators;
+- `estat`, `predict`, `test`, `lincom` and `margins` after a refused line that may have fitted a model;
+- a global the do-file has not set, after a refused add-on or program.
 
 ## What would move the numbers most
 
-Stata's random numbers were first here. Since P2C.11 (2026-11-01), `set seed`, `runiform()`, `rnormal()` and
-`rgamma()` give Stata's own draws on R (`plan/stata/random-numbers.md`). What is left:
-
-1. `_natscale` (5,399 lines) and `bsample` (3,489, and the draws after it). `invnormal()` and `normal()` are not
-   translated either, and `invnormal(runiform())` is how many probes make their data.
-2. The date functions (`clock()`, `monthly()`, `yw()`, ...) and time-series operators.
-3. Programs (`program define`), `gettoken`, `file`, the other random functions (`runiformint()`, `rbinomial()`,
-   ...), and the models not yet translated (lasso, xtregar).
+1. `bsample` (3,489 lines, and the draws after it), `file` and the date functions (`clock()`, `monthly()`,
+   `yw()`, ...), with time-series operators.
+2. Collinear variables in models: Stata omits them and goes on.
+3. Programs (`program define`), `gettoken`, the other random functions (`runiformint()`, `rbinomial()`, ...),
+   and the models not yet translated (lasso, xtregar, newey, prais).
+4. The last digits: `poisson`'s starting point and `_natscale`'s residue for n = 10 and 15.

@@ -335,9 +335,7 @@ impl Session {
             super::returned::Returned::Kept { cmd, .. } if cmd != "margins" => Some(cmd.clone()),
             _ => None,
         };
-        let est = self.estimates.clone().ok_or_else(|| {
-            no("margins needs a model fitted earlier in this do-file (regress, logit, ...)")
-        })?;
+        let est = self.estimates_for("margins")?;
         let name = est.fit.name();
         if est.fit == Fit::Margins {
             return Err(no("margins after margins, post is not translated yet"));

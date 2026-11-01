@@ -293,6 +293,7 @@ const MODELS: &[&str] = &[
 ];
 
 const GRAPHS: &[&str] = &[
+    "_natscale",
     "connected",
     "graph",
     "histogram",

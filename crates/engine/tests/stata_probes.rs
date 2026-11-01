@@ -96,6 +96,8 @@ struct Ran {
     translated: bool,
     r_ok: bool,
     printed: String,
+    /// Why it was not translated.
+    refused: String,
 }
 
 #[derive(Default)]
@@ -181,6 +183,12 @@ fn run_probe(e: &mut Engine, folder: &str, text: &str, budget: Duration) -> Prob
                                 translated,
                                 r_ok: ok,
                                 printed,
+                                refused: line
+                                    .result
+                                    .as_ref()
+                                    .err()
+                                    .map(|e| e.reason.clone())
+                                    .unwrap_or_default(),
                             },
                         );
                     }
@@ -357,6 +365,8 @@ fn statcrafts_probes_run_on_r() {
     let mut per_probe: Vec<String> = Vec::new();
     let (mut compared, mut matched, mut timed_out) = (0, 0, 0);
     let mut after_error = 0;
+    // lines Stata printed that were not translated: reason -> lines
+    let mut refused: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for name in &names {
         let dir = Path::new(&corpus).join(name);
         let (Ok(dofile), Ok(log)) = (
@@ -427,7 +437,19 @@ fn statcrafts_probes_run_on_r() {
             let Some(ran) = p.top.get(&c.span.line) else {
                 continue;
             };
-            if ran.command.is_empty() || !ran.translated {
+            if ran.command.is_empty() {
+                continue;
+            }
+            if !ran.translated {
+                let failed = stata
+                    .lines()
+                    .any(|l| l.starts_with("r(") && l.ends_with(");"));
+                if !failed {
+                    refused
+                        .entry(ran.refused.clone())
+                        .or_default()
+                        .push(format!("{name}:{}", c.span.line));
+                }
                 continue;
             }
             if !ran.r_ok {
@@ -540,6 +562,21 @@ fn statcrafts_probes_run_on_r() {
     eprintln!("\nagree to 6 significant digits, not 8 ({}):", near.len());
     for w in &near {
         eprintln!("  {}", w.chars().take(400).collect::<String>());
+    }
+    let mut why: Vec<(&String, &Vec<String>)> = refused.iter().collect();
+    why.sort_by_key(|(r, v)| (std::cmp::Reverse(v.len()), r.to_string()));
+    eprintln!(
+        "\nprinted by Stata, not translated ({}), most lines first:",
+        refused.values().map(Vec::len).sum::<usize>()
+    );
+    for (r, v) in why.iter().take(40) {
+        let at: Vec<&str> = v.iter().take(3).map(String::as_str).collect();
+        eprintln!(
+            "  {} | {} | {}",
+            v.len(),
+            r.chars().take(200).collect::<String>(),
+            at.join(", ")
+        );
     }
     eprintln!("\ndiffering ({}):", wrong.len());
     for w in &wrong {

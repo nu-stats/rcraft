@@ -369,7 +369,23 @@ stata_rnorm_tables <- list(
 
 use super::{in_range, no, Out, Session};
 use crate::expr_r::{self, Kind, Untranslated, Use};
+use crate::lang::expr::Expr;
 use crate::reader::Command;
+
+/// Whether an expression has one value for the whole data (`_N > 5`,
+/// `x[1] == 2`): no variable, no `_n`, no draw.
+fn same_for_every_row(e: &Expr) -> bool {
+    match e {
+        Expr::Number(_) | Expr::Text(_) => true,
+        Expr::Name(n) => n == "_N",
+        Expr::Subscript(_, i) => same_for_every_row(i),
+        Expr::Call(name, args) => {
+            !RANDOM_FUNCTIONS.contains(&name.as_str()) && args.iter().all(same_for_every_row)
+        }
+        Expr::Unary(_, a) => same_for_every_row(a),
+        Expr::Binary(_, a, b) => same_for_every_row(a) && same_for_every_row(b),
+    }
+}
 
 /// Stata's random-number functions: each one moves the generator on.
 const RANDOM_FUNCTIONS: &[&str] = &[
@@ -526,8 +542,16 @@ impl Session {
                  row; not translated yet",
             ));
         }
-        // where the value draws, the condition picks the same rows
-        let cond = if draws > 0 {
+        // where the value draws, the condition picks the same rows; so it
+        // does where the condition is one value, which dplyr::if_else would
+        // not take
+        let one_value = c
+            .parts
+            .if_exp
+            .as_deref()
+            .and_then(|e| crate::lang::expr::parse(e).ok())
+            .is_some_and(|e| same_for_every_row(&e));
+        let cond = if draws > 0 || one_value {
             rows
         } else {
             cond.map(|(c, _)| c)

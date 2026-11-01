@@ -854,6 +854,52 @@ const LEAVE_E_ALONE: &[&str] = &[
     "export",
 ];
 
+/// Commands that read the model Stata holds and leave it there, unless they
+/// are told to `post` their own results.
+const READ_THE_MODEL: &[&str] = &[
+    "testparm",
+    "testnl",
+    "nlcom",
+    "predictnl",
+    "lrtest",
+    "hausman",
+    "contrast",
+    "pwcompare",
+    "margins",
+    "marginsplot",
+    "lroc",
+    "lsens",
+    "lstat",
+    "vif",
+    "hettest",
+    "ovtest",
+    "imtest",
+    "dfbeta",
+    "coefplot",
+    "esttab",
+    "estout",
+    "outreg2",
+];
+
+/// Whether a line, translated or not, leaves e() and the model as they were:
+/// `estimates store` and `estimates table` do, `estimates restore` and
+/// `estimates use` do not.
+fn leaves_e_alone(c: &Command) -> bool {
+    let name = c.name.as_str();
+    if LEAVE_E_ALONE.contains(&name) {
+        return true;
+    }
+    if READ_THE_MODEL.contains(&name) {
+        return !c.options.iter().any(|o| o.is("post", 4));
+    }
+    if name == "estimates" {
+        let sub = c.parts.main.split_whitespace().next().unwrap_or("");
+        let restores = sub == "use" || (sub.len() >= 3 && "restore".starts_with(sub));
+        return !restores;
+    }
+    false
+}
+
 /// The r() each r-class command leaves here, as Stata 19's `return list`
 /// shows them (the ones RCraft keeps).
 pub(super) const R_SUMMARIZE: &[&str] = &["N", "sum_w", "mean", "Var", "sd", "min", "max", "sum"];
@@ -946,9 +992,29 @@ impl Session {
                 })
             }
         }
-        if !ok && !LEAVE_E_ALONE.contains(&name) {
+        if !ok && !leaves_e_alone(c) {
             self.e_ret = Returned::Lost(format!(
                 "{name} was not translated, and if it is an estimation command it replaced e() in Stata"
+            ));
+        }
+    }
+
+    /// After a line that is not translated: if it may be an estimation
+    /// command, the model Stata holds is not the one R fitted last, so
+    /// `predict`, `estat` and `margins` cannot read it.
+    pub(super) fn lose_estimates(&mut self, c: &Command, reason: &str) {
+        // a line Stata stops at, or one only R can judge, fits nothing new
+        if leaves_e_alone(c)
+            || reason.contains("Stata stops here")
+            || reason.contains("(Stata: ")
+            || reason.contains(crate::dofile::KNOWN_WHEN_RUN)
+        {
+            return;
+        }
+        if self.estimates.take().is_some() {
+            self.estimates_lost = Some(format!(
+                "the model Stata holds here is not known: {}, which was not translated, may have fitted one",
+                c.text.trim()
             ));
         }
     }

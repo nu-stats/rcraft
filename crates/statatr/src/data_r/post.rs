@@ -176,12 +176,15 @@ stata_ovtest <- function(fit) {
 }"#;
 
 impl Session {
-    fn estimates_for(&self, what: &str) -> Result<Estimates, Untranslated> {
-        self.estimates.clone().ok_or_else(|| {
-            no(format!(
-                "{what} needs a model fitted earlier in this do-file (regress, logit, ...)"
-            ))
-        })
+    pub(super) fn estimates_for(&self, what: &str) -> Result<Estimates, Untranslated> {
+        self.estimates
+            .clone()
+            .ok_or_else(|| match &self.estimates_lost {
+                Some(why) => no(format!("{what}: {why}")),
+                None => no(format!(
+                    "{what} needs a model fitted earlier in this do-file (regress, logit, ...)"
+                )),
+            })
     }
 
     pub(super) fn predict(
