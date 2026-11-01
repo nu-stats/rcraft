@@ -228,35 +228,39 @@ fn the_corpus_gives_statas_results() {
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 
-/// Verified is earned here: every command `statatr::verified` names is in the
-/// `commands:` of a corpus file, and every such command is named there.
+/// Verified is earned here: every command (function) `statatr::verified`
+/// names is in the `commands:` (`functions:`) of a corpus file, and every
+/// one named there is in its list.
 #[test]
 fn verified_is_what_the_corpus_checks() {
-    let dir = corpus();
-    let mut checked: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-        let p = entry.path();
-        if p.extension().is_some_and(|x| x == "do") {
-            let name = p
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            let text = std::fs::read_to_string(&p).unwrap_or_default();
-            for cmd in header(&text, "commands").unwrap_or("").split_whitespace() {
-                checked
-                    .entry(cmd.to_string())
-                    .or_default()
-                    .push(name.clone());
+    use rcraft_statatr::verified::{VERIFIED, VERIFIED_FUNCTIONS};
+    for (head, list) in [("commands", VERIFIED), ("functions", VERIFIED_FUNCTIONS)] {
+        let dir = corpus();
+        let mut checked: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let p = entry.path();
+            if p.extension().is_some_and(|x| x == "do") {
+                let name = p
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("")
+                    .to_string();
+                let text = std::fs::read_to_string(&p).unwrap_or_default();
+                for one in header(&text, head).unwrap_or("").split_whitespace() {
+                    checked
+                        .entry(one.to_string())
+                        .or_default()
+                        .push(name.clone());
+                }
             }
         }
+        for files in checked.values_mut() {
+            files.sort();
+        }
+        let verified: BTreeMap<String, Vec<String>> = list
+            .iter()
+            .map(|(c, f)| (c.to_string(), f.iter().map(|s| s.to_string()).collect()))
+            .collect();
+        assert_eq!(verified, checked, "{head}");
     }
-    for files in checked.values_mut() {
-        files.sort();
-    }
-    let verified: BTreeMap<String, Vec<String>> = rcraft_statatr::verified::VERIFIED
-        .iter()
-        .map(|(c, f)| (c.to_string(), f.iter().map(|s| s.to_string()).collect()))
-        .collect();
-    assert_eq!(verified, checked);
 }

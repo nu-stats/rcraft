@@ -34,6 +34,7 @@ mod ml;
 mod model;
 mod more;
 mod post;
+mod random;
 mod returned;
 mod scalars;
 mod st;
@@ -617,6 +618,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_set_obs" => SET_OBS_HELPER,
         "stata_expand" => EXPAND_HELPER,
         "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
+        "stata_rng" => random::RNG_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -686,6 +688,13 @@ struct Session {
     /// The command being translated asked whether it is quiet, so it hides
     /// its own output.
     quiet_asked: std::cell::Cell<bool>,
+    /// The command being translated takes Stata's random draws.
+    drew: std::cell::Cell<bool>,
+    /// Why the generator's state is not Stata's: a line that may have drawn
+    /// was not translated (until the next `set seed`).
+    rng_lost: Option<String>,
+    /// Why the draws are not mt64's: a `version` before 14.
+    rng_old: Option<String>,
 }
 
 /// Whether a line prints nothing, as Stata decides: the innermost of
@@ -1007,16 +1016,27 @@ impl Session {
                 self.lost_vars.insert(v, stata.trim().to_string());
             }
         }
-        // a line refused for a variable that is not there changed nothing more
-        if reason.contains(LOST_VAR) {
-            return;
-        }
         let word = crate::dofile::command_name(stata.trim());
         let full = crate::reader::read(&word)
             .commands()
             .first()
             .map(|c| c.name.clone())
             .unwrap_or(word);
+        // (in a dry run a line that waits for a value from R still draws when run)
+        if self.rng_lost.is_none()
+            && !reason.contains(crate::dofile::KNOWN_WHEN_RUN)
+            && random::moves_generator(stata, &full, reason)
+        {
+            self.rng_lost = Some(format!(
+                "the random draws here are not Stata's: a line before it that draws was not \
+                 translated ({}); a set seed after it starts them again",
+                stata.trim()
+            ));
+        }
+        // a line refused for a variable that is not there changed nothing more
+        if reason.contains(LOST_VAR) {
+            return;
+        }
         if REPLACE_DATA.contains(&full.as_str()) && self.data.is_some() {
             self.data = None;
             self.data_lost = Some(format!(
@@ -1257,6 +1277,7 @@ impl Session {
         self.r_new = None;
         self.e_new = false;
         self.quiet_asked.set(false);
+        self.drew.set(false);
         self.scalars_read.borrow_mut().clear();
         if MODELS.contains(&c.name.as_str()) {
             self.fit_robust = false;
@@ -1328,6 +1349,9 @@ impl Session {
                 && !bysort
         };
         done?;
+        if self.drew.get() {
+            self.helpers.insert("stata_rng");
+        }
         for v in new_vars(c) {
             self.lost_vars.remove(&v);
         }
@@ -1386,6 +1410,7 @@ impl Session {
                 Ok(())
             }
             "version" => {
+                self.version(c);
                 out.caveat("nothing to do in R: version sets how Stata reads the do-file");
                 Ok(())
             }
@@ -1744,7 +1769,7 @@ impl Session {
                 "generate with a value label (newvar:label) is not translated yet",
             ));
         }
-        let (value, kind) = self.value(rhs.trim(), out)?;
+        let (cond, value, kind) = self.drawing_value(c, rhs, out)?;
         let storage = storage(ty).ok_or_else(|| no(format!("{ty} is not a storage type")))?;
         let is_text = kind == Kind::Text;
         if is_text != (storage == Storage::Str) && ty != "float" {
@@ -1762,7 +1787,7 @@ impl Session {
         } else {
             stored(&value, storage, &mut self.helpers, out)
         };
-        let value = match self.condition(c, out)? {
+        let value = match cond {
             Some(cond) => {
                 let missing = if is_text { "\"\"" } else { "NA_real_" };
                 format!("dplyr::if_else({cond}, {value}, {missing})")
@@ -1812,8 +1837,8 @@ impl Session {
                  (each row sees the rows above already replaced); not translated yet"
             )));
         }
-        let (value, kind) = self.value(rhs.trim(), out)?;
-        let value = match self.condition(c, out)? {
+        let (cond, value, kind) = self.drawing_value(c, rhs, out)?;
+        let value = match cond {
             Some(cond) => format!("dplyr::if_else({cond}, {value}, {})", r_name(var)),
             None => value,
         };
@@ -1844,7 +1869,10 @@ impl Session {
             if !main.is_empty() {
                 return Err(no(format!("{} takes variables or rows, not both", c.name)));
             }
-            let cond = self.condition(c, out)?.unwrap_or_default();
+            let cond = self
+                .drawing_condition(c, out)?
+                .map(|(cond, _)| cond)
+                .unwrap_or_default();
             let step = if keep {
                 format!("dplyr::filter({cond})")
             } else {
@@ -2343,8 +2371,8 @@ impl Session {
         if exp.is_empty() {
             return Err(no("expand needs a count (Stata: invalid syntax)"));
         }
-        let n = self.expr(exp, Use::Value, out)?;
-        let n = match self.condition(c, out)? {
+        let (cond, n, _) = self.drawing_value(c, exp, out)?;
+        let n = match cond {
             Some(cond) => format!("dplyr::if_else({cond}, as.numeric({n}), 1)"),
             None => n,
         };
@@ -2446,17 +2474,7 @@ impl Session {
     fn set(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let (what, rest) = first_word(&c.parts.main);
         match what {
-            "seed" => {
-                let n: i64 = rest
-                    .trim()
-                    .parse()
-                    .map_err(|_| no(format!("set seed {rest}: only a number is translated")))?;
-                out.line(format!("set.seed({n})"));
-                out.caveat(
-                    "R's random numbers are not Stata's: the same seed does not give the same draws",
-                );
-                Ok(())
-            }
+            "seed" => self.set_seed(rest, out),
             "obs" => {
                 let n: u64 = rest.trim().parse().map_err(|_| {
                     no(format!(
@@ -2759,11 +2777,70 @@ mod tests {
         }
         let t = translate(&read("use s\nset seed 42\nset more off"));
         let script = t.script();
-        assert!(script.contains("set.seed(42)"), "{script}");
+        assert!(script.contains("stata_set_seed(42)"), "{script}");
+        assert!(!script.contains("set.seed("), "{script}");
+    }
+
+    #[test]
+    fn random_draws_are_statas_own() {
+        let out = r("set obs 6\nset seed 11\ngenerate g = mod(_n, 2)\n\
+                     generate double x = runiform() if g == 1\n\
+                     replace x = rnormal(10, 2) in 2/3\n\
+                     bysort g: generate y = rgamma(2.5, 1)\n\
+                     keep if runiform() < .9\n\
+                     display runiform(2, 5)\n\
+                     expand 1 + (runiform() < .5) if g == 1");
+        assert_eq!(out[1], "stata_set_seed(11)");
+        // the rows the if selects draw, one each, in order
         assert!(
-            script.contains("#   note: R's random numbers are not Stata's"),
-            "{script}"
+            out[3].ends_with("data <- data |> dplyr::mutate(x = dplyr::if_else(rep_len((!is.na(g) & g == 1), dplyr::n()), stata_runiform(rep_len((!is.na(g) & g == 1), dplyr::n())), NA_real_))"),
+            "{out:?}"
         );
+        assert!(
+            out[4].contains("stata_rnormal(rep_len(dplyr::between(dplyr::row_number(), 2, 3), dplyr::n()), 10, 2)"),
+            "{out:?}"
+        );
+        assert!(out[5].contains("dplyr::group_by(dplyr::pick(g)) |> dplyr::mutate(y = stata_float(stata_rgamma(dplyr::n(), 2.5, 1)))"), "{out:?}");
+        // the missing rule writes the value twice, so the draw is named once
+        assert!(
+            out[6].contains("dplyr::filter(local({.stata_draw <- stata_runiform(dplyr::n()); (!is.na(.stata_draw) & .stata_draw < 0.9)}))"),
+            "{out:?}"
+        );
+        assert!(out[7].contains("stata_runiform(1, 2, 5)"), "{out:?}");
+        assert!(
+            out[8].contains("stata_runiform(rep_len((!is.na(g) & g == 1), dplyr::n()))"),
+            "{out:?}"
+        );
+        assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
+        // what is not translated says why
+        for (src, why) in [
+            (
+                "set obs 2\ngenerate x = runiform() + rnormal()",
+                "second random draw",
+            ),
+            (
+                "set obs 2\ngenerate x = runiform() if runiform() < .5",
+                "both the value and the if",
+            ),
+            ("set obs 2\nsummarize if runiform() < .5", "not here yet"),
+            ("set obs 2\ngenerate x = rgamma(2)", "with 1 arguments"),
+            (
+                "set obs 2\nkeep if runiform() < .5 in 1",
+                "together with in",
+            ),
+            ("set seed 2147483648", "(Stata: '2147483648' found"),
+            (
+                "version 13\nset obs 2\ngenerate x = uniform()",
+                "older generator (KISS32)",
+            ),
+        ] {
+            let out = r(src);
+            assert!(out.iter().any(|l| l.contains(why)), "{src}: {out:?}");
+        }
+        // after a line that drew and was not translated, draws wait for a set seed
+        let out = r("set obs 2\ngenerate a = rbeta(1, 2)\ngenerate b = runiform()\nset seed 3\ngenerate c = runiform()");
+        assert!(out[2].contains("not Stata's: a line before it that draws was not translated (generate a = rbeta(1, 2))"), "{out:?}");
+        assert!(!out[4].starts_with("NOT"), "{out:?}");
     }
 
     #[test]
@@ -2839,7 +2916,7 @@ restore, not");
             "{out:?}"
         );
         assert!(!out[4].starts_with("NOT"), "{out:?}");
-        let out = r("use a\nkeep if runiform() < .5\nsummarize x\nlabel variable x \"X\"");
+        let out = r("use a\nkeep if rbeta(1, 1) < .5\nsummarize x\nlabel variable x \"X\"");
         assert!(
             out[2].starts_with("NOT: the data in memory is not known here"),
             "{out:?}"
@@ -2854,7 +2931,7 @@ display . == .");
         assert!(!out[1].starts_with("NOT"), "{out:?}");
         // a variable whose line was not translated: the lines that use it say so
         let out = r(concat!(
-            "use a\ngenerate double y = runiform()\ngenerate z = y * 2\nregress z x\n",
+            "use a\ngenerate double y = rbeta(1, 2)\ngenerate z = y * 2\nregress z x\n",
             "display \"y is fine in text\"\ngenerate y = 1\nsummarize y\ngenerate w = L.x\n",
         ));
         assert!(

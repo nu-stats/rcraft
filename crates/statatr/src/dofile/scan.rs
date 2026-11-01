@@ -100,15 +100,13 @@ pub struct Scan {
     pub limits: Vec<&'static str>,
 }
 
+/// The random functions whose draws are not Stata's yet (`runiform`, `rnormal` and
+/// `rgamma` are, P2C.11).
 const RANDOM: &[&str] = &[
-    "runiform(",
-    "rnormal(",
-    "uniform(",
     "rbinomial(",
     "rpoisson(",
     "rchi2(",
     "rbeta(",
-    "rgamma(",
     "rexponential(",
     "rlogistic(",
     "runiformint(",
@@ -157,14 +155,22 @@ pub fn scan(d: &DoFile) -> Scan {
             }
         }
         let lower = text.to_ascii_lowercase();
-        if RANDOM.iter().any(|r| lower.contains(r))
-            || lower.starts_with("set seed")
+        // a function name on its own (rt( is not the end of sqrt()
+        let calls = |f: &str| {
+            lower.match_indices(f).any(|(i, _)| {
+                !lower
+                    .get(..i)
+                    .and_then(|b| b.chars().next_back())
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_')
+            })
+        };
+        if RANDOM.iter().any(|r| calls(r))
             || matches!(
                 word.as_str(),
                 "bootstrap" | "bsample" | "simulate" | "permute" | "sample"
             )
         {
-            limit(&mut s, "Random numbers: R draws different ones than Stata, even from the same seed, so results that use them differ.");
+            limit(&mut s, "Random numbers: runiform(), rnormal() and rgamma() give Stata's own draws, but the other random functions and the commands that draw (bootstrap, bsample, simulate, ...) do not, and the draws after them wait for a set seed.");
         }
         if lower.starts_with("mata") {
             limit(&mut s, "Mata: its blocks are not run.");

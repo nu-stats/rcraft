@@ -55,6 +55,8 @@ pub struct RExpr {
     pub kind: Kind,
     /// Details the R does not keep, in words.
     pub caveats: Vec<String>,
+    /// How many of Stata's random draws it takes (`runiform()`, ...).
+    pub draws: usize,
 }
 
 /// Why an expression was not translated.
@@ -104,11 +106,29 @@ pub fn translate_with(
     returned: &Returned,
     use_: Use,
 ) -> Result<RExpr, Untranslated> {
+    translate_drawing(text, kind_of, returned, use_, None)
+}
+
+/// [`translate_with`] where Stata's random draws may be taken: `rows` is the
+/// R for the rows that draw, a count (`dplyr::n()`, `1`) or a condition, one
+/// draw a row in order (Stata draws only for the rows an `if` or `in`
+/// selects). The draws come from `stata_rng` (`data_r::random`); with `None`,
+/// a random function is refused.
+pub fn translate_drawing(
+    text: &str,
+    kind_of: &dyn Fn(&str) -> Option<Kind>,
+    returned: &Returned,
+    use_: Use,
+    rows: Option<&str>,
+) -> Result<RExpr, Untranslated> {
     let tree = parse(text).map_err(|e| no(format!("Stata would not read it: {}", e.message)))?;
     let mut t = Translator {
         kind_of,
         returned,
         caveats: Vec::new(),
+        rows,
+        draws: 0,
+        draw_call: None,
     };
     let (code, kind) = t.expr(&tree)?;
     let (code, kind) = match use_ {
@@ -116,12 +136,20 @@ pub fn translate_with(
         Use::Value if kind == Kind::Logical => (format!("as.numeric({code})"), Kind::Number),
         Use::Value => (code, kind),
     };
+    // the draw is taken once: where the R writes it more than once (the
+    // missing rule of a comparison, round()), it is drawn first and named
+    let code = match &t.draw_call {
+        Some(call) if code.matches(DRAW).count() == 1 => code.replace(DRAW, call),
+        Some(call) => format!("local({{{DRAW} <- {call}; {code}}})"),
+        None => code,
+    };
     let mut caveats = t.caveats;
     caveats.dedup();
     Ok(RExpr {
         code,
         kind,
         caveats,
+        draws: t.draws,
     })
 }
 
@@ -129,7 +157,14 @@ struct Translator<'a> {
     kind_of: &'a dyn Fn(&str) -> Option<Kind>,
     returned: &'a Returned<'a>,
     caveats: Vec<String>,
+    rows: Option<&'a str>,
+    draws: usize,
+    /// The R of the expression's random draw, written as [`DRAW`] in its code.
+    draw_call: Option<String>,
 }
+
+/// The name a random draw goes by in an expression's R until it is placed.
+const DRAW: &str = ".stata_draw";
 
 const R_RESERVED: &[&str] = &[
     "if",
@@ -761,8 +796,46 @@ impl Translator<'_> {
                 [Expr::Name(n)] => (self.returned)("r", n),
                 _ => Err(no("r() takes one name, as r(mean)")),
             },
+            "runiform" | "uniform" | "rnormal" | "rgamma" => self.draw(name, args),
             _ => Err(no(format!("the function {name}() is not translated yet"))),
         }
+    }
+
+    /// One of Stata's random draws, from `stata_rng` (P2C.11): the R helper
+    /// takes the rows that draw first, then Stata's arguments.
+    fn draw(&mut self, name: &str, args: &[Expr]) -> Result<(String, Kind), Untranslated> {
+        let Some(rows) = self.rows else {
+            return Err(no(format!(
+                "{name}() draws random numbers; Stata's own draws are translated in generate, \
+                 replace, expand, keep, drop, display, scalar and macro values, not here yet"
+            )));
+        };
+        if self.draws > 0 {
+            return Err(no(format!(
+                "{name}() is a second random draw in one expression: Stata takes them in turn \
+                 for each row; not translated yet"
+            )));
+        }
+        self.draws += 1;
+        let (r, fits) = match name {
+            "runiform" => ("stata_runiform", args.is_empty() || args.len() == 2),
+            "uniform" => ("stata_runiform", args.is_empty()),
+            "rnormal" => ("stata_rnormal", args.len() <= 2),
+            _ => ("stata_rgamma", args.len() == 2),
+        };
+        if !fits {
+            return Err(no(format!(
+                "{name}() with {} arguments is not translated",
+                args.len()
+            )));
+        }
+        let mut parts = vec![rows.to_string()];
+        for a in args {
+            let (c, k) = self.expr(a)?;
+            parts.push(number(&c, k)?);
+        }
+        self.draw_call = Some(format!("{r}({})", parts.join(", ")));
+        Ok((DRAW.to_string(), Kind::Number))
     }
 
     fn text_fn(

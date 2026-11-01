@@ -11,7 +11,7 @@
 //! does not keep, rather than coming out missing.
 
 use super::{no, Out, Session};
-use crate::expr_r::{r_text, Kind, Untranslated};
+use crate::expr_r::{r_text, Kind, Untranslated, Use};
 use crate::lang::expr::{parse_prefix, Expr};
 use crate::reader::Command;
 
@@ -1229,7 +1229,8 @@ impl Session {
         e: &str,
         out: &mut Out,
     ) -> Result<(String, Kind), Untranslated> {
-        let (code, kind) = self.value(e, out)?;
+        // a random draw is taken once, as Stata does for the first row
+        let (code, kind, _) = self.drawing(e, Use::Value, "1", out)?;
         let scalar = |n: &str| self.scalars.contains_key(n) && self.kind_of(n).is_none();
         let data_free = !mentions_data(e, &scalar);
         if data_free {

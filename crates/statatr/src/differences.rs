@@ -103,8 +103,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Random numbers",
-                "R's generators are not Stata's: set seed gives reproducible draws in R, but not \
-                 the same draws as Stata's.",
+                "set seed, runiform(), rnormal() and rgamma() give Stata's own draws: RCraft runs \
+                 Stata's generator (the 64-bit Mersenne Twister) in R, row by row as Stata \
+                 draws. The other random functions, commands that draw (bootstrap, simulate, \
+                 ...), two draws in one expression and version 13 or earlier are refused.",
             ),
             p(
                 "Returned values",
@@ -756,7 +758,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "set seed",
-                "R's random numbers are not Stata's: the same seed does not give the same draws.",
+                "stata_set_seed() starts Stata's own generator, so runiform(), rnormal() and \
+                 rgamma() then give Stata's draws. Its state is kept in R and goes on across \
+                 lines and typed commands; a line that draws and is not translated stops the \
+                 draws after it until the next set seed.",
             ),
             p(
                 "Other settings",

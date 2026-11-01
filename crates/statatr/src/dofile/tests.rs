@@ -548,3 +548,26 @@ fn a_local_that_cannot_be_set_does_not_keep_its_old_value() {
     assert!(!s.iter().any(|l| l.starts_with("display \"1\"")), "{s:?}");
     assert!(!s.iter().any(|l| l.starts_with("display \"2\"")), "{s:?}");
 }
+
+#[test]
+fn a_draw_that_waits_for_r_in_a_dry_run_leaves_the_draws_after_it() {
+    let d = run("set obs 2\nset seed 1\nlocal r = runiform()\ngenerate x = runiform()\n");
+    let s = shown(&d);
+    assert!(
+        s.iter()
+            .any(|l| l.starts_with("local r = runiform() | Later")),
+        "{s:?}"
+    );
+    assert!(
+        s.iter()
+            .any(|l| l.starts_with("generate x = runiform() | Command | ")),
+        "{s:?}"
+    );
+    assert!(
+        d.translation
+            .lines
+            .iter()
+            .all(|l| l.stata.starts_with("local") || l.result.is_ok()),
+        "{s:?}"
+    );
+}

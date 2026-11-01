@@ -362,7 +362,11 @@ skipped. It never gives a silent wrong answer.
   (done 2026-11-01 for StatCraft's probes: `engine/tests/stata_probes.rs` runs each of them on R and sets its top-level display, return list and ereturn list against Stata 19's log, to 8 significant digits, with the counts in `docs/stata-coverage.md`; `made.do` in the corpus makes expand, preserve, restore, set obs and tokenize Verified. Public replication packages are still to come.)
 - P2C.10 Known limits stated up front: Stata's random draws, Mata, compiled
   plugins, interactive commands
-  (done 2026-10-31: the scan lists those the do-file uses.)
+  (done 2026-10-31: the scan lists those the do-file uses. From 2026-11-01 runiform(), rnormal() and rgamma() are no longer among them, P2C.11.)
+- P2C.11 Stata's own random draws on R: `set seed`, `runiform()`, `rnormal()`
+  and `rgamma()` give Stata 19's numbers, then `runiformint()`,
+  `rbinomial()` and the others
+  (done 2026-11-01 for the first four: Stata's generator (mt64) and StatCraft's decoding of its normal and gamma methods, written in R (`data_r/random.rs`), its state kept in R across lines, `preserve`, `by` and typed lines; draws only for the rows an `if`/`in` selects; `random.do` in the corpus checks them exactly. Design and observations in `plan/stata/random-numbers.md`. Still to come: the other random functions, KISS32 under `version` 13 or earlier, `c(rngstate)`.)
 
 ## Phase 3: Data
 

@@ -3767,4 +3767,38 @@ mod tests {
         assert!(text.contains("[x]") && text.contains("[y]"), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    /// P2C.11: typed Stata lines draw Stata's own random numbers, in turn; a
+    /// value worked out by R out of sight (`local r = runiform()`) takes its
+    /// draw once. The numbers are Stata 19's after `set seed 11`.
+    #[test]
+    fn typed_stata_lines_draw_statas_numbers_in_turn() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(&ctx, Action::SetStataMode(true));
+        let run = |app: &mut App, line: &str| {
+            app.perform(&ctx, Action::SubmitStata(Source::Typed, line.to_string()));
+            assert!(frames_until(app, &ctx, |a| a.is_settled()), "{line}");
+        };
+        run(&mut app, "set seed 11");
+        run(&mut app, "display %21x runiform()");
+        assert!(
+            newest_text(&app).contains("+1.536165793c6e4X-003"),
+            "{}",
+            newest_text(&app)
+        );
+        run(&mut app, "local r = runiform()");
+        run(&mut app, "display %21x runiform()");
+        assert!(
+            newest_text(&app).contains("+1.831909afac7caX-002"),
+            "{}",
+            newest_text(&app)
+        );
+    }
 }
