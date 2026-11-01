@@ -2821,3 +2821,24 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Notes:** `plan/stata/interactions.md`, and an "Interactions" point on the regress help page.
 - **Not done:** three factors interacted alone (coded the same way, not checked); interactions in the
   likelihood models' tables, still in R's layout although their `e(b)` is Stata's.
+
+## P2C.16 part one: bsample with Stata's own draws, 2026-11-01
+
+- **What works:** `bsample`, `bsample #`, `bsample if`/`in`, and `bsample, cluster(v) idcluster(new)` draw the
+  rows Stata 19 draws, in its order, from Stata's generator in R (`stata_bsample` in `data_r/random.rs`,
+  StatCraft's decoding), and leave the generator where Stata leaves it.
+- **Observed here (280 samples, each with the next uniform):**
+  - with `if`, every row of the data still draws, and the rows selected take the first draws;
+  - with `idcluster()`, each cluster's copies stay together.
+  All 280 match.
+- **Corpus:** `bsample.do` (18 results: rows, order, statistics after it, a `preserve`/`restore` loop, the
+  draws after) passes; `bsample` is Verified.
+- **Numbers:**
+  - The dry share translated rose from 79.1% to 83.1%, and `bsample` is gone from the first causes.
+  - On R, 158,383 of 188,989 probe lines are translated (135,471 before), as StatCraft's resampling probes
+    now run their loops.
+  - 5,523 of 5,641 compared lines match Stata to 8 digits, with no new difference.
+- **Not done:**
+  - `bsample` with `if`/`in` and a size or `cluster()` (not observed), `strata()` and `weight()`, all refused
+    with the reason;
+  - the `bootstrap` prefix, which is P2C.16 part two.

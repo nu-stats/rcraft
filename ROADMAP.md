@@ -405,6 +405,7 @@ skipped. It never gives a silent wrong answer.
   See `plan/stata/interactions.md`.)
 - P2C.16 `bsample` and `bootstrap` with Stata's own draws (StatCraft's
   decoding), with `cluster()`
+  (`bsample` done 2026-11-01: plain, `#`, `if`/`in`, `cluster()` and `idcluster()` draw Stata's rows in its order, checked on 280 of Stata 19's samples and in `bsample.do`. Still to come: the `bootstrap` prefix.)
 
 ## Phase 3: Data
 

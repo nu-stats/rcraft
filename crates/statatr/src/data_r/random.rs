@@ -365,7 +365,109 @@ stata_rnorm_tables <- list(
     c = c(0x1.00e65f999a58p-3, 0x1.08c2c91c44cd4p-3, 0x1.16a1eb0af6bc7p-3, 0x1.24c904a25a54cp-3, 0x1.325fb7d172ccap-3, 0x1.3e70b9d761aa9p-3, 0x1.480e94a49512ap-3, 0x1.4e81673521896p-3, 0x1.516e4749b5202p-3, 0x1.50e85f426cd03p-3, 0x1.4d65177105dc6p-3, 0x1.4799eed6e482ep-3, 0x1.4052f153e6415p-3, 0x1.384fc22191e38p-3, 0x1.302e38b005445p-3, 0x1.286273da46f52p-3, 0x1.21386d99e860ap-3, 0x1.1ada8039ca97cp-3, 0x1.15596d46f2b34p-3, 0x1.10b3ee1807dc9p-3, 0x1.0cdcf948779bfp-3, 0x1.09c0952196b94p-3, 0x1.07475eb2b61ccp-3, 0x1.0559059f2da7dp-3, 0x1.03ddfa677ca28p-3, 0x1.02c0819bc7eb1p-3, 0x1.01ed528f1ef38p-3, 0x1.0153deeecac89p-3, 0x1.00e65a5fd6b22p-3, 0x1.00999522d0d66p-3, 0x1.0064b9b5b62f2p-3, 0x1.0040fabceaddep-3, 0x1.01c24a06ee1d5p-3),
     strip = c(0x1.ep+1, 0x1.1d7a2c7dba69p+5),
     wedge = c(0x1p+6, 0x1p+5, 0x1.5555555555555p+4, 0x1p+4, 0x1.999999999999ap+3, 0x1.5555555555555p+3, 0x1.2492492492492p+3, 0x1p+3, 0x1.c2972992fe516p+2, 0x1.8ff30369d1767p+2, 0x1.66f847d0b6814p+2, 0x1.4521b92096071p+2, 0x1.28b893c8848a3p+2, 0x1.1088153c15f3fp+2, 0x1.f7614f79bcc15p+1, 0x1.d318d11740d41p+1, 0x1.b33b57b21bbf3p+1, 0x1.9706feb95a519p+1, 0x1.7de3cdc8a3f68p+1, 0x1.6758f8d158984p+1, 0x1.530545ae48aacp+1, 0x1.409990e781d5ap+1, 0x1.2fd4c8a84bf16p+1, 0x1.2080ee70e5e92p+1, 0x1.1270d472f03c1p+1, 0x1.057e63145578fp+1, 0x1.f3128543afb47p+0, 0x1.dceb9f618c6d5p+0, 0x1.c8588fafd3152p+0, 0x1.b53042c26b18p+0, 0x1.a34f082ef0dbfp+0)
-)"#;
+)
+# bsample (P2C.16, StatCraft's decoding of probes 177-191): each unit, in
+# order, draws k, then each draws v; unit i falls in bin floor(N k), and a
+# bin's whole count goes to its unit with the largest v. The units drawn
+# come in ascending k, their extra copies after them. Below N, a third
+# uniform each keeps the n rows with the smallest, in that order.
+# With if, every row of the data still draws (2 _N uniforms), and the rows
+# selected take the first ones in order (40 samples of Stata 19, P2C.16).
+stata_bs_draw <- function(units, n, total = units) {
+  k <- stata_rng_u(stata_rng_words(total))[seq_len(units)]
+  v <- stata_rng_u(stata_rng_words(total))[seq_len(units)]
+  bin <- pmin(floor(units * k), units - 1)
+  o <- order(bin, -v, seq_len(units))
+  first <- o[!duplicated(bin[o])]
+  cnt <- tabulate(bin + 1, units)[bin[first] + 1]
+  chosen <- first[order(k[first])]
+  times <- cnt[match(chosen, first)]
+  rows <- c(chosen, rep(chosen, times - 1))
+  if (n < units) {
+    w <- stata_rng_u(stata_rng_words(units))
+    rows <- rows[order(w[seq_along(rows)])][seq_len(n)]
+  }
+  rows
+}
+# with cluster(): the clusters draw k and v as units do, but with R the
+# rank of each when sorted by (bin, v), the count of the bin whose
+# largest-v member is w goes to cluster R[R[w]]; they come in (bin, v) order
+stata_bs_clusters <- function(units) {
+  k <- stata_rng_u(stata_rng_words(units))
+  v <- stata_rng_u(stata_rng_words(units))
+  bin <- pmin(floor(units * k), units - 1)
+  o <- order(bin, v)
+  rank <- integer(units)
+  rank[o] <- seq_len(units) - 1L
+  count <- integer(units)
+  for (b in unique(bin[o])) {
+    members <- which(bin == b)
+    w <- members[which.max(v[members])]
+    r <- rank[rank[w] + 1L] + 1L
+    count[r] <- count[r] + length(members)
+  }
+  keep <- o[count[o] > 0]
+  list(unit = keep, count = count[keep])
+}
+stata_bsample <- function(d, n = NA, sel = NULL, cluster = NULL, idcluster = NULL) {
+  rows <- if (is.null(sel)) seq_len(nrow(d)) else which(!is.na(sel) & sel)
+  units <- if (is.null(cluster)) {
+    as.list(rows)
+  } else {
+    cv <- d[[cluster]][rows]
+    lapply(sort(unique(cv), na.last = TRUE), function(x) rows[if (is.na(x)) is.na(cv) else !is.na(cv) & cv == x])
+  }
+  N <- length(units)
+  if (is.na(n)) n <- N
+  if (n < 1 || n != floor(n)) stop("sample size invalid", call. = FALSE)
+  if (n > N) stop("resample size must not be greater than number of observations", call. = FALSE)
+  keep <- integer(0)
+  ids <- numeric(0)
+  if (!is.null(cluster) && n == N) {
+    dr <- stata_bs_clusters(N)
+    if (!all(lengths(units) == 1)) {
+      o <- order(dr$unit)
+      dr$unit <- dr$unit[o]
+      dr$count <- dr$count[o]
+    }
+    copy <- 0
+    for (u in dr$unit) {
+      copy <- copy + 1
+      keep <- c(keep, units[[u]])
+      ids <- c(ids, rep(copy, length(units[[u]])))
+    }
+    if (is.null(idcluster)) {
+      for (j in seq_along(dr$unit)) {
+        extra <- dr$count[j] - 1
+        if (extra > 0) keep <- c(keep, rep(units[[dr$unit[j]]], each = extra))
+      }
+    } else {
+      # with idcluster(), each cluster's copies together, numbered in order
+      keep <- integer(0)
+      ids <- numeric(0)
+      copy <- 0
+      for (j in seq_along(dr$unit)) {
+        r <- units[[dr$unit[j]]]
+        for (e in seq_len(dr$count[j])) {
+          copy <- copy + 1
+          keep <- c(keep, r)
+          ids <- c(ids, rep(copy, length(r)))
+        }
+      }
+    }
+  } else {
+    picks <- stata_bs_draw(N, n, if (is.null(cluster)) nrow(d) else N)
+    for (j in seq_along(picks)) {
+      r <- units[[picks[j]]]
+      keep <- c(keep, r)
+      ids <- c(ids, rep(j, length(r)))
+    }
+  }
+  out <- d[keep, , drop = FALSE]
+  rownames(out) <- NULL
+  if (!is.null(idcluster)) out[[idcluster]] <- stata_float(ids)
+  out
+}"#;
 
 use super::{in_range, no, Out, Session};
 use crate::expr_r::{self, Kind, Untranslated, Use};
@@ -570,6 +672,80 @@ impl Session {
                  translated; Stata 14 and later use the 64-bit Mersenne Twister"
             )
         });
+    }
+
+    /// `bsample [#] [if] [in] [, cluster(v) idcluster(new)]`: the data
+    /// replaced by a sample drawn with replacement, with Stata's own draws
+    /// (P2C.16, `stata_bsample`). With `if` or `in` every row still draws.
+    pub(super) fn bsample(
+        &mut self,
+        c: &Command,
+        opts: &super::Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(why) = self.rng_old.as_ref().or(self.rng_lost.as_ref()) {
+            return Err(no(why.clone()));
+        }
+        self.no_by(c, "bsample")?;
+        if let Some(o) = opts.other(&[("cluster", 2), ("idcluster", 3)]) {
+            return Err(no(format!(
+                "bsample with the option {o} is not translated yet"
+            )));
+        }
+        let d = self.data()?;
+        let size = c.parts.main.trim();
+        let n = if size.is_empty() {
+            None
+        } else {
+            match size.parse::<f64>() {
+                Ok(v) if v >= 1.0 && v.fract() == 0.0 => Some(v),
+                Ok(_) => return Err(no("bsample: sample size invalid (Stata: r(198))")),
+                Err(_) => return Err(no(
+                    "bsample with a size that is not a number written out is not translated yet",
+                )),
+            }
+        };
+        let cluster = opts.arg("cluster", 2).map(|v| v.trim().to_string());
+        let idcluster = opts.arg("idcluster", 3).map(|v| v.trim().to_string());
+        for v in cluster.iter().chain(idcluster.iter()) {
+            if !super::is_name(v) {
+                return Err(no(format!("{v} is not a variable name")));
+            }
+        }
+        if idcluster.is_some() && cluster.is_none() {
+            return Err(no("idcluster() needs cluster() (Stata: r(198))"));
+        }
+        let cond = self.condition(c, out)?;
+        // what Stata does with if or in beside a size or clusters was not observed
+        if cond.is_some() && (n.is_some() || cluster.is_some()) {
+            return Err(no(
+                "bsample with if or in and a sample size or cluster() is not translated yet",
+            ));
+        }
+        let mut args = String::new();
+        if let Some(n) = n {
+            args.push_str(&format!(", n = {}", super::r_number(n)));
+        }
+        if let Some(k) = &cond {
+            args.push_str(&format!(
+                ", sel = dplyr::transmute({d}, stata_sel = {k})$stata_sel"
+            ));
+        }
+        if let Some(v) = &cluster {
+            args.push_str(&format!(", cluster = {}", super::r_text(v)));
+        }
+        if let Some(v) = &idcluster {
+            args.push_str(&format!(", idcluster = {}", super::r_text(v)));
+            self.helpers.insert("stata_float");
+            self.kinds.insert(v.clone(), Kind::Number);
+        }
+        out.package("dplyr");
+        out.line(format!("{d} <- stata_bsample({d}{args})"));
+        self.drew.set(true);
+        out.caveat(
+            "Stata's own draws: the same seed gives the rows Stata's bsample gives, in its order",
+        );
+        Ok(())
     }
 
     /// `set seed #`: Stata's generator started again from # (its absolute

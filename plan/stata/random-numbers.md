@@ -114,3 +114,24 @@ Windows.
 - `c(rngstate)` and `set rngstate`, `set rng`, `set sortseed`. KISS32 under `version` 13 or earlier.
 - Two draws in one expression: they would need a row-by-row helper.
 - `bsample`, `bootstrap`, `simulate`: they draw, and they are not translated.
+
+## `bsample` (P2C.16)
+
+The rule is StatCraft's decoding (`plan/stata/resampling.md` there, probes 177 to 191), written in R as
+`stata_bsample` beside the generator (`data_r/random.rs`):
+- Each of the N units draws k, then each draws v (2N uniforms). Unit i falls in bin floor(N·k), and a
+  bin's whole count goes to the unit in it with the largest v.
+- The units drawn come in ascending k, their extra copies after them.
+- Below N (`bsample n`), a third uniform each keeps the n rows with the smallest, in that order.
+- With `cluster()` the counts go elsewhere, through the clusters' ranks by (bin, v).
+
+Two rules were observed here in Stata 19 (`q9`, 280 samples, each with the next uniform after it), and
+all 280 match:
+- **`if`:** with `if`, every row of the data still draws (2·_N uniforms), and the rows selected take the
+  first ones in order.
+- **`idcluster()`:** each cluster's copies stay together, numbered in cluster order; without it, extra
+  copies follow.
+
+`bsample.do` in the corpus checks the rows, their order and what follows (18 results, including five
+draws in a `preserve`/`restore` loop). Not translated yet: `bsample` with `if` and a size or `cluster()`
+(not observed), `strata()`, `weight()`, and the `bootstrap` prefix.

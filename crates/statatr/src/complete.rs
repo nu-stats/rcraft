@@ -55,6 +55,7 @@ pub struct Context<'a> {
 pub const COMMANDS: &[&str] = &[
     "anova",
     "append",
+    "bsample",
     "bysort",
     "by",
     "capture",

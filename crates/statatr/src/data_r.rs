@@ -1449,6 +1449,7 @@ impl Session {
             "list" => self.list(c, &opts, out),
             "describe" => self.describe(c, out),
             "set" => self.set(c, out),
+            "bsample" => self.bsample(c, &opts, out),
             "clear" => {
                 if let Some(d) = self.data.take() {
                     out.line(format!("rm({d})"));
@@ -2842,6 +2843,34 @@ mod tests {
         let script = t.script();
         assert!(script.contains("stata_set_seed(42)"), "{script}");
         assert!(!script.contains("set.seed("), "{script}");
+    }
+
+    #[test]
+    fn bsample_draws_stata_s_sample_in_r() {
+        let out = r("use s\nset seed 1\nbsample\nbsample 5\nbsample if x > 1\n\
+                     bsample, cluster(g) idcluster(nc)\nsummarize nc");
+        assert_eq!(out[2], "s <- stata_bsample(s)");
+        assert_eq!(out[3], "s <- stata_bsample(s, n = 5)");
+        assert!(
+            out[4].starts_with("s <- stata_bsample(s, sel = dplyr::transmute(s, stata_sel = "),
+            "{out:?}"
+        );
+        assert_eq!(
+            out[5],
+            "s <- stata_bsample(s, cluster = \"g\", idcluster = \"nc\")"
+        );
+        assert!(!out[6].starts_with("NOT: "), "{out:?}");
+        // shapes not observed in Stata, and the draws' state, say why
+        for (src, why) in [
+            ("use s\nbsample 3 if x > 1", "if or in and a sample size"),
+            ("use s\nbsample, strata(g)", "strata"),
+            ("use s\nbsample n", "not a number written out"),
+            ("use s\nbsample, idcluster(k)", "needs cluster()"),
+            ("use s\nversion 13\nbsample", "KISS32"),
+        ] {
+            let out = r(src);
+            assert!(out.iter().any(|l| l.contains(why)), "{src}: {out:?}");
+        }
     }
 
     #[test]

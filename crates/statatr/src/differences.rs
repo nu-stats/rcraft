@@ -113,10 +113,11 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Random numbers",
-                "set seed, runiform(), rnormal() and rgamma() give Stata's own draws: RCraft runs \
-                 Stata's generator (the 64-bit Mersenne Twister) in R, row by row as Stata \
-                 draws. The other random functions, commands that draw (bootstrap, simulate, \
-                 ...), two draws in one expression and version 13 or earlier are refused.",
+                "set seed, runiform(), rnormal(), rgamma() and bsample give Stata's own draws: \
+                 RCraft runs Stata's generator (the 64-bit Mersenne Twister) in R, row by row as \
+                 Stata draws, and bsample picks the rows Stata picks, in its order. The other \
+                 random functions, commands that draw (bootstrap, simulate, ...), two draws in \
+                 one expression and version 13 or earlier are refused.",
             ),
             p(
                 "Returned values",
@@ -157,6 +158,23 @@ pub const GUIDES: &[Guide] = &[
             "A string variable in one file and a number in the other stops with an error, as \
              in Stata; R's rbind() would turn both into text.",
         )],
+    },
+    Guide {
+        command: "bsample",
+        about: "Replaces the data with a sample drawn with replacement",
+        points: &[
+            p(
+                "Draws",
+                "The rows are drawn with Stata's own generator after set seed, so the same seed \
+                 gives the rows Stata's bsample gives, in its order, and the draws after it go on \
+                 as Stata's do. R's sample() would draw other rows.",
+            ),
+            p(
+                "Not yet",
+                "strata(), weight(), and if or in together with a sample size or cluster() are \
+                 refused with the reason.",
+            ),
+        ],
     },
     Guide {
         command: "by",
