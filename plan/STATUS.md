@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-10-29.
+Last updated: 2026-11-01.
 
 **Where things are:** Phases 0, 1 (except P1.2 and P1.6), 1A, 3 and 4 are built; Phase 5 and the
 first three Stata translator tasks (P2B.1 to P2B.3) too. `plan/AUDIT.md` (2026-10-29) lists every
@@ -2658,3 +2658,52 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
     lasso, xtregar, and time-series operators.
   - `capture noisily` does not print R's error message.
   - Public replication packages as inputs.
+
+## P2C.11: Stata's own random draws on R, 2026-11-01
+
+- **What works:** `set seed`, `runiform()` (and `uniform()`), `runiform(a, b)`, `rnormal()`, `rnormal(m)`,
+  `rnormal(m, s)` and `rgamma(a, b)` give Stata 19's own numbers when RCraft runs Stata on R. Where they work:
+  `generate`, `replace`, `expand`, `keep`/`drop if`, `display`, `scalar`, macro values and `if` blocks, with
+  `if`, `in` and `by`. A typed line in the Command window goes on from the last draw.
+- **How (decided and written up in `plan/stata/random-numbers.md`):**
+  - Stata's generator (the 64-bit Mersenne Twister, mt64) and StatCraft's decoding of its normal and gamma
+    methods are written in R, in the helper `stata_rng` (`statatr/src/data_r/random.rs`). Each 64-bit word is
+    four 16-bit pieces, since R has no unsigned 64-bit integers.
+  - The state lives in R, so it follows the do-file across lines, `preserve`, `by` and typed lines, and a
+    saved R script reproduces Stata's draws on its own. A Rust generator handing R the numbers through
+    `Need`/`Ask` was weighed and not taken: the script would have to carry the numbers, and the runner would
+    have to ask R for each line's rows and arguments.
+  - A row draws only when the `if`/`in` selects it, one draw a row, in order. A draw that the R would write
+    twice (the missing rule of a comparison) is drawn once and named.
+- **Observed in Stata 19 SE (made-up data):**
+  - Invalid or missing arguments give missing and use no uniform; `rnormal(m, 0)` is m.
+  - `cond()`, `&` and `|` draw for every row.
+  - `runiform(a, b)` is a + b·u − a·u.
+  - A G4PE left-tail point at or below 0 is turned down before the next uniform is drawn. StatCraft draws
+    that uniform first, so it differs from Stata there; noted for StatCraft.
+  - `uniform()` uses another generator under `version 13`.
+  - 240,000 draws (uniforms, normals, six gamma shapes, `runiform(-3, 7)`, `rnormal(10, 3)`, a float) matched
+    bit for bit.
+- **Refused with the reason:**
+  - two draws in one expression, or in both the value and the `if`;
+  - a draw in an `if` with `in`;
+  - draws in other commands;
+  - the other random functions;
+  - draws after a line that may draw and was not translated (`bsample`, `bootstrap`, `simulate`, a program,
+    `rbinomial()`, ...), until the next `set seed`;
+  - draws under `version` 13 or earlier (Stata's older KISS32).
+- **The corpus:** `random.do` checks 57 results exactly (tolerance 0), and passes on Windows, macOS and
+  Ubuntu. `runiform`, `rnormal` and `rgamma` are Verified (a new `functions:` header and
+  `verified::VERIFIED_FUNCTIONS`); `random.do` is added to `expand`, `generate`, `replace` and `set`.
+- **Numbers (StatCraft's probes):**
+  - The dry share translated rose from 31.8% to 68.9%. The lines refused only because a line before them was
+    fell from 85,646 to 25,350.
+  - On R: 205 of 210 compared lines match Stata 19 to 8 digits (192 of 196 before), and 1 more to 6. 114,916
+    of 179,330 lines are translated (55,454 before).
+- **Not done:**
+  - `runiformint()`, `rbinomial()` and the others; `c(rngstate)`; KISS32.
+  - `invnormal()` and `normal()`: `invnormal(runiform())` is how many probes make data.
+  - Found on the way, not fixed here: a model the translator refuses (`qreg`) does not clear `e()`, so a later
+    `estat ic` runs on the model before it (probe 315: `_rc` 0 where Stata gives 321).
+  - Found on the way, not fixed here: `generate x = y if _N > 5` (an `if` with the same value for every row)
+    fails in R's `dplyr::if_else`.
