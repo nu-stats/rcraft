@@ -110,19 +110,36 @@ pub(super) const FORMAT_HELPER: &str = r##"stata_fmt <- function(x, fmt = "%10.0
     while (grepl("[0-9]{4}", int)) int <- sub("([0-9])([0-9]{3})(,|$)", "\\1,\\2\\3", int)
     paste0(int, rest)
   }
-  # g and e round an exact half away from zero (f, like C, to even): a tie
-  # is a value whose digits past the last one kept are 5 and then zeros
-  # (read off the 17 digits that pin a double down: R's printf past those
-  # is not exact on every platform)
+  # g and e round an exact half away from zero (f, like C, to even). Whether
+  # a value is an exact half is worked out from the double itself, ax being
+  # m * 2^k with m whole, not from printed digits: a 17-digit form ending in
+  # 5 is most often no half (.14761666666666665 is not), and R's printf past
+  # 17 digits is not exact on every platform
   rnd <- function(kind, digits, ax) {
     out <- sprintf(paste0("%.", digits, kind), ax)
-    if (ax == 0) return(out)
-    s17 <- sprintf("%.16e", ax)
-    keep <- if (kind == "e") digits + 1 else digits + as.integer(sub("^.*e", "", s17)) + 1
-    mant <- gsub(".", "", sub("e.*$", "", s17), fixed = TRUE)
-    if (keep >= 1 && keep < 17 && grepl("^50*$", substring(mant, keep + 1))) {
-      out <- sprintf(paste0("%.", digits, kind), ax * (1 + 2^-50))
+    if (ax == 0 || !is.finite(ax) || ax < 2^-1000) return(out)
+    k <- floor(log2(ax)) - 52
+    while (ax / 2^k >= 2^53) k <- k + 1
+    while (ax / 2^k < 2^52) k <- k - 1
+    m <- ax / 2^k
+    # rounded at 10^-q: a half when ax * 2 * 10^q is whole and odd
+    q <- if (kind == "e") digits - as.integer(sub("^.*e", "", sprintf("%.16e", ax))) else digits
+    half <- if (q >= 0) {
+      # ax * 2 * 10^q is m * 5^q * 2^(k + 1 + q): whole and odd when m holds
+      # exactly -(k + 1 + q) factors of 2
+      t <- -(k + 1 + q)
+      v <- 0
+      while (t >= 0 && v <= t && m %% 2 == 0) {
+        m <- m / 2
+        v <- v + 1
+      }
+      t >= 0 && v == t
+    } else {
+      p <- -q
+      p <= 22 && ax == floor(ax) && (2 * ax) %% 10^p == 0 && ((2 * ax) / 10^p) %% 2 == 1
     }
+    # the next double up is past the half, by as little as can be
+    if (half) out <- sprintf(paste0("%.", digits, kind), ax + 2^k)
     out
   }
   e_str <- function(ax, digits) rnd("e", max(digits, 1) - 1, ax)

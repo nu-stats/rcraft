@@ -1,7 +1,9 @@
 //! P2B.10, checked against Stata: the corpus in `stata_corpus/`, made-up
 //! data and do-files of our own, whose results Stata 19 printed and
-//! `cargo xtask stata-record` kept (`NAME.recorded`). Each do-file is
-//! translated, every line of it must be, and run in a real R; every result
+//! `cargo xtask stata-record` kept (`NAME.recorded`). Each do-file is run
+//! the way RCraft runs a do-file (P2C, `statatr::dofile`: its macros, loops
+//! and included files, R asked for the values only it knows); every line
+//! must translate, and each runs in a real R; every result
 //! it prints as `@ key value` is compared with Stata's to the file's
 //! tolerance (8 significant digits, or 6 where Stata stops iterating at its
 //! tolerance). A command is Verified (`statatr::verified`) only through a
@@ -10,14 +12,13 @@
 //! Without a supported R, or without haven, dplyr, readr, MASS, nnet,
 //! sandwich and survival, the test is skipped with a note.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
-use rcraft_statatr::data_r::translate;
-use rcraft_statatr::reader::read;
+use rcraft_statatr::dofile::{Event, Files, Options, Run};
 
 fn engine() -> Option<Engine> {
     let install = find_installs(&Env::from_process())
@@ -87,6 +88,73 @@ fn corpus() -> PathBuf {
         .join("stata_corpus")
 }
 
+/// The corpus's own files, for `include`.
+struct Corpus;
+
+impl Files for Corpus {
+    fn read(&self, path: &str) -> Option<String> {
+        std::fs::read_to_string(path).ok()
+    }
+    fn exists(&self, path: &str) -> bool {
+        Path::new(path).exists()
+    }
+}
+
+/// Runs a do-file line by line in R, as the do-file window does: the
+/// helpers a line needs first, then its R; a value only R knows is worked
+/// out once the lines before it have run. What R printed, or the first
+/// problem.
+fn run_dofile(e: &mut Engine, folder: &str, text: &str) -> Result<String, String> {
+    let (o, t) = run(e, &format!("setwd(\"{folder}\")"));
+    if o != Outcome::Ok {
+        return Err(t);
+    }
+    let opts = Options {
+        name: "corpus".into(),
+        folder: folder.to_string(),
+        ..Options::default()
+    };
+    let mut r = Run::new(text, &Corpus, opts);
+    let mut sent = BTreeSet::new();
+    let mut printed = String::new();
+    let mut handled = 0;
+    loop {
+        let event = r.next_event();
+        let mut code = String::new();
+        for (name, h) in r.helpers() {
+            if sent.insert(name) {
+                code.push_str(h);
+                code.push('\n');
+            }
+        }
+        match event {
+            Event::Line => {
+                // every line the step made, in order
+                let lines = r.lines().get(handled..).unwrap_or_default().to_vec();
+                handled += lines.len();
+                for line in lines {
+                    if let Err(why) = &line.result {
+                        return Err(format!("not translated: {}\n{why:?}", line.stata));
+                    }
+                    code.push_str(&line.script());
+                    let (o, t) = run(e, &code);
+                    if o != Outcome::Ok {
+                        return Err(format!("{}\n{code}\n{t}", line.stata));
+                    }
+                    printed.push_str(&t);
+                    code.clear();
+                }
+            }
+            Event::Ask(v) => {
+                code.push_str(&v.code);
+                let (o, t) = run(e, &code);
+                r.give(if o == Outcome::Ok { Ok(t) } else { Err(t) });
+            }
+            Event::Done => return Ok(printed),
+        }
+    }
+}
+
 /// The `@ key value` lines of a do-file's output, as numbers.
 fn results(text: &str) -> BTreeMap<String, f64> {
     text.lines()
@@ -136,19 +204,11 @@ fn the_corpus_gives_statas_results() {
         let tol: f64 = header(&dofile, "tolerance")
             .and_then(|t| t.trim().parse().ok())
             .unwrap_or(1e-8);
-        let t = translate(&read(&dofile));
-        for l in &t.lines {
-            assert!(
-                l.result.is_ok(),
-                "{name}: not translated: {}\n{:?}",
-                l.stata,
-                l.result
-            );
-        }
         let folder = dir.display().to_string().replace('\\', "/");
-        let code = format!("setwd(\"{folder}\")\n{}", t.script());
-        let (outcome, text) = run(&mut e, &code);
-        assert_eq!(outcome, Outcome::Ok, "{name}:\n{text}");
+        let text = match run_dofile(&mut e, &folder, &dofile) {
+            Ok(t) => t,
+            Err(why) => panic!("{name}: {why}"),
+        };
         let got = results(&text);
         for (key, want) in &stata {
             match got.get(key) {

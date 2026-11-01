@@ -74,6 +74,10 @@ pub struct HeadlessOptions {
     pub script: Option<PathBuf>,
     /// Show the differences guide on the command of this Stata line.
     pub stata_guide: Option<String>,
+    /// Open the do-file window on this file (P2C) ...
+    pub dofile: Option<PathBuf>,
+    /// ... and run it on R.
+    pub dofile_run: bool,
     pub accent: Accent,
     /// Width and height in points.
     pub size: [u32; 2],
@@ -108,6 +112,8 @@ impl HeadlessOptions {
             stata: false,
             script: None,
             stata_guide: None,
+            dofile: None,
+            dofile_run: false,
             accent: Accent::default(),
             size: [1240, 780],
             pixels_per_point: 1.0,
@@ -150,6 +156,7 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     if let Some(line) = &options.stata_guide {
         app.show_stata_guide(line);
     }
+    let mut dofile_opened = options.dofile.is_none();
     if options.show_data {
         app.show_data(&ctx);
     }
@@ -217,6 +224,14 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
                         app.submit_typed(code);
                     }
                     next += 1;
+                    settled = 0;
+                }
+                // the do-file, once R is ready (and after the demo)
+                None if !dofile_opened && app.is_ready() => {
+                    if let Some(path) = &options.dofile {
+                        app.open_dofile(path, options.dofile_run);
+                    }
+                    dofile_opened = true;
                     settled = 0;
                 }
                 // after the demo, once the data frame has come over

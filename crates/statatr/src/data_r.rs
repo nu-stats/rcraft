@@ -136,45 +136,145 @@ impl Translation {
     }
 }
 
-/// Translates every command of `program`, in order. Blocks (`foreach`,
-/// `forvalues`, `if`, `program`, ...) are not translated yet (Phase 2C).
+/// Translates every command of `program`, in order, as written: blocks
+/// (`foreach`, `forvalues`, `if`, `program`, ...) and macros are not run
+/// here. [`crate::dofile`] runs those and hands [`Translator`] the commands
+/// one by one.
 pub fn translate(program: &Program) -> Translation {
-    let mut s = Session::default();
+    let mut t = Translator::new();
     let mut lines = Vec::new();
     for item in &program.items {
         match item {
-            Item::Command(c) => lines.push(Line {
-                span: c.span,
-                stata: c.text.clone(),
-                result: s.command(c),
-            }),
-            Item::Group(g) => lines.push(Line {
-                span: g.span,
-                stata: opener_text(&g.opener),
-                result: Err(no(
-                    "loops, if blocks and programs are translated in a later step (Phase 2C)",
-                )),
-            }),
-            Item::Problem(p) => lines.push(Line {
-                span: p.span,
-                stata: String::new(),
-                result: Err(no(format!(
-                    "the do-file reader could not read this line: {}",
-                    p.message
-                ))),
-            }),
+            Item::Command(c) => lines.push(t.command(c)),
+            Item::Group(g) => lines.push(t.refused(
+                g.span,
+                opener_text(&g.opener),
+                "loops, if blocks and programs are run by the do-file runner (crate::dofile), not here",
+            )),
+            Item::Problem(p) => lines.push(t.refused(
+                p.span,
+                String::new(),
+                format!("the do-file reader could not read this line: {}", p.message),
+            )),
         }
     }
-    Translation {
-        helpers: s
+    t.finish(lines)
+}
+
+/// The translator, a command at a time (P2C): what a command means depends
+/// on the ones before it (the data in memory, the model that left e(), the
+/// scalars), so it keeps that as it goes down the do-file.
+#[derive(Clone, Default)]
+pub struct Translator {
+    s: Session,
+}
+
+/// R that prints the value of a Stata expression, as `local name = exp` and
+/// `if exp {` need it when the do-file runs (P2C).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValueCode {
+    pub code: String,
+    /// The value is text: what R prints is kept as it is. A number is printed
+    /// in %18.0g, to be trimmed, which is how Stata keeps it in a macro.
+    pub text: bool,
+}
+
+impl Translator {
+    pub fn new() -> Translator {
+        Translator::default()
+    }
+
+    /// The next command.
+    pub fn command(&mut self, c: &Command) -> Line {
+        Line {
+            span: c.span,
+            stata: c.text.clone(),
+            result: self.s.command(c),
+        }
+    }
+
+    /// A line Stata runs that is not translated, for a reason found before
+    /// the translator saw it (a macro whose value is not known, a loop over
+    /// variables only the data name). What it may have changed is not known,
+    /// so the data, e() and r() before it are no longer relied on; only a
+    /// `display` is known to leave them alone.
+    pub fn refused(&mut self, span: Span, stata: String, reason: impl Into<String>) -> Line {
+        let word = stata.split_whitespace().next().unwrap_or("");
+        let display = word.len() >= 2 && "display".starts_with(word);
+        if !display {
+            let why = format!("a line before it was not translated: {}", stata.trim());
+            self.s.esample = false;
+            self.s.changed_since_fit = true;
+            self.s.e_ret = returned::Returned::Lost(why.clone());
+            self.s.r_ret = returned::Returned::Lost(why);
+        }
+        Line {
+            span,
+            stata,
+            result: Err(no(reason)),
+        }
+    }
+
+    /// R that prints the value of `exp` by Stata's display rules (a variable
+    /// stands for its first row). Worked out on a copy, so the do-file's
+    /// state is left as it was; the helpers it calls are kept.
+    pub fn value_code(&mut self, exp: &str) -> Result<ValueCode, Untranslated> {
+        let (code, copy, text) = match self.trial(&format!("display %18.0g ({exp})")) {
+            Ok((r, copy)) => (r.code, copy, false),
+            Err(first) if first.reason.contains("given text") => {
+                let (r, copy) = self.trial(&format!("display ({exp})"))?;
+                (r.code, copy, true)
+            }
+            Err(e) => return Err(e),
+        };
+        self.s.helpers.extend(copy.s.helpers.iter().copied());
+        Ok(ValueCode { code, text })
+    }
+
+    /// R that prints what `display rest` prints, which `local x : display
+    /// rest` keeps as it is.
+    pub fn display_code(&mut self, rest: &str) -> Result<ValueCode, Untranslated> {
+        let (r, copy) = self.trial(&format!("display {rest}"))?;
+        self.s.helpers.extend(copy.s.helpers.iter().copied());
+        Ok(ValueCode {
+            code: r.code,
+            text: true,
+        })
+    }
+
+    /// `line` translated on a copy of this translator.
+    fn trial(&self, line: &str) -> Result<(RCode, Translator), Untranslated> {
+        let mut copy = self.clone();
+        let program = crate::reader::read(line);
+        match program.items.as_slice() {
+            [Item::Command(c)] => copy.s.command(c).map(|r| (r, copy)),
+            _ => Err(no("Stata would not read this expression")),
+        }
+    }
+
+    /// The helpers the lines so far call: each one's name and its R.
+    pub fn helpers(&self) -> Vec<(&'static str, &'static str)> {
+        self.s
             .helpers
             .iter()
-            .map(|h| helper_code(h).to_string())
-            .collect(),
-        lines,
-        data: s.data.clone(),
-        value_labels: s.label_sets.keys().cloned().collect(),
-        ssc: s.ssc.clone(),
+            .map(|h| (*h, helper_code(h)))
+            .collect()
+    }
+
+    /// The translation of `lines`, which this translator made, in order.
+    pub fn finish(self, lines: Vec<Line>) -> Translation {
+        let s = self.s;
+        Translation {
+            helpers: s
+                .helpers
+                .iter()
+                .map(|h| helper_code(h).to_string())
+                .collect(),
+            lines,
+            data: s.data.clone(),
+            value_labels: s.label_sets.keys().cloned().collect(),
+            ssc: s.ssc.clone(),
+        }
     }
 }
 
@@ -365,7 +465,7 @@ fn helper_code(name: &str) -> &'static str {
 }
 
 /// What the translator knows while going down the do-file.
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct Session {
     /// The R name of the data frame "in memory".
     data: Option<String>,
@@ -485,12 +585,13 @@ fn file_name(written: &str, ext: &str) -> String {
         .trim_matches('"')
         .trim_matches('`')
         .trim_matches('\'');
-    let f = f.trim();
-    let has_ext = std::path::Path::new(f)
+    // R takes / as the folder separator everywhere; Stata on Windows takes \ too
+    let f = f.trim().replace('\\', "/");
+    let has_ext = std::path::Path::new(&f)
         .extension()
         .is_some_and(|e| !e.is_empty());
     if has_ext || ext.is_empty() {
-        f.to_string()
+        f
     } else {
         format!("{f}.{ext}")
     }
@@ -1037,6 +1138,40 @@ impl Session {
             "net" => Err(no(
                 "net fetches Stata add-ons, which are out of scope; an R package can be installed with rc install (P2B.11)",
             )),
+            "cd" => {
+                let dir = file_name(&c.parts.main, "");
+                if dir.is_empty() {
+                    // Stata on Windows prints the folder; elsewhere it goes home
+                    return Err(no("cd without a folder is not translated: Stata does different things on Windows and elsewhere"));
+                }
+                out.line(format!("setwd({})", r_text(&dir)));
+                Ok(())
+            }
+            "pwd" => {
+                out.line("cat(getwd(), \"\n\", sep = \"\")");
+                Ok(())
+            }
+            "log" | "cmdlog" => {
+                out.caveat(format!(
+                    "nothing to do in R: RCraft keeps what runs itself (Results, and the do-file run's own log), so {} writes no file",
+                    c.name
+                ));
+                Ok(())
+            }
+            "browse" | "edit" => {
+                out.caveat(format!(
+                    "nothing to do in R: {} opens Stata's Data Editor; in RCraft the data are in the Data view",
+                    c.name
+                ));
+                Ok(())
+            }
+            "pause" | "more" | "discard" | "sleep" | "beep" => {
+                out.caveat(format!(
+                    "nothing to do in R: {} only changes how Stata runs",
+                    c.name
+                ));
+                Ok(())
+            }
             other => Err(no(format!("{other} is not translated yet"))),
         }
     }
@@ -2116,7 +2251,10 @@ mod tests {
                 "use s\nstreg x, dist(weibull)",
                 "streg is not translated yet",
             ),
-            ("use s\nforeach v of varlist x y {\nsum `v'\n}", "Phase 2C"),
+            (
+                "use s\nforeach v of varlist x y {\nsum `v'\n}",
+                "do-file runner",
+            ),
             ("use s\nanova y g [aw = w]", "with weights"),
             ("use s\nset seed abc", "only a number"),
             ("use s\ngen x", "newvar = exp"),

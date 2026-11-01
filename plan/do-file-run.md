@@ -3,6 +3,11 @@
 Written 2026-10-26 after looking at StatCraft's do-file runner and searching
 for existing Stata-to-R tools. Feeds Phase 2C in `ROADMAP.md`.
 
+Built, part one, 2026-10-31 (`plan/STATUS.md`, "P2C part one"): the runner is
+`statatr::dofile` and the window `ui-egui/src/dofile_window.rs`. The R package
+proposed below was not needed: Stata's rules are in helpers written into the
+script itself and in the runner.
+
 ## The request
 
 A user uploads an existing Stata do-file into RCraft and runs it "as is", on

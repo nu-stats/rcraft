@@ -326,8 +326,10 @@ skipped. It never gives a silent wrong answer.
 - P2C.1 Open and scan (dry run): commands used, lines that translate
   cleanly, with caveats or not at all, packages needed, data files and paths
   referred to, `cd`, `log using`, `ssc install`
+  (done 2026-10-31: `statatr::dofile::scan`, the do-file gone through without R: lines clean, with notes, not translated (each reason) and known only when it runs; commands, R packages, `ssc install`, every file and folder named and whether it is there.)
 - P2C.2 Resolve paths and data: ask for the data folder, map Windows paths,
   keep paths relative to the do-file, follow `do` and `include`
+  (done 2026-10-31: it runs in its own folder (or one chosen), `cd` is followed, a backslash in a path is read as `/`, a folder not on this machine can be pointed to without changing the file; `do`, `run` and `include` are followed, `do` with its own locals and arguments.)
 - P2C.3 Front end: reuse StatCraft's do-file reader, command syntax and
   expression parsers (shared crate or vendored; see open questions)
   (done: vendored into `statatr`, not a dependency, because StatCraft is private; the
@@ -337,13 +339,17 @@ skipped. It never gives a silent wrong answer.
   rules R does not share: missing values sorting high, variable
   abbreviations and wildcards, `_n`/`_N`, `by` state, `preserve`/`restore`,
   macros, storage types. Installed on first use, with the user's yes.
+  (done differently 2026-10-31: there is no package to install. Stata's rules live in RCraft's helpers, written into the script itself, and in the do-file runner (`statatr::dofile`: macros, loops, `if`, `while`, files). Not yet: abbreviated variable names, wildcards and ranges in a varlist, which need the data's names.)
 - P2C.5 Emit: idiomatic R where Stata and R agree, calls into
   `rcraftstata` where they differ; a line map kept
+  (done 2026-10-31: each line keeps its file, line, text as written and loop round, `dofile::Origin`.)
 - P2C.6 Run: line by line in the R session with live progress, the Stata
   line beside its R, and a choice at the first problem (stop, skip,
   continue); the log is saved
+  (done 2026-10-31: File > Run do-file…, or a .do file dropped on the window; the values only R knows (`local m = r(mean)`) are worked out by R as it runs; Stop here, Go on, Go on without asking; Save log.)
 - P2C.7 Report and export: what ran, differences from Stata (linked to the
   guide in P2B.8), **Save as R script** or **Save as Quarto**
+  (done 2026-10-31: Save as R script, Save as Quarto, Save log, a line's notes linked to its page in the guide.)
 - P2C.8 Tiers of coverage: 1 data management and control flow, 2 core
   statistics, 3 panel/survival/survey/IV, 4 graphs, 5 programs and chosen
   SSC commands; the share of lines translated per tier is shown in
@@ -351,8 +357,10 @@ skipped. It never gives a silent wrong answer.
 - P2C.9 Verification: StatCraft's probe do-files as the first inputs,
   recorded Stata results in a private corpus (never committed), compared to
   about 8 significant digits; a command is `Verified` only on a match
+  (started 2026-10-31: `control.do` in the corpus checks macros, loops and include against Stata 19; StatCraft's probe do-files and public replication packages are still to come.)
 - P2C.10 Known limits stated up front: Stata's random draws, Mata, compiled
   plugins, interactive commands
+  (done 2026-10-31: the scan lists those the do-file uses.)
 
 ## Phase 3: Data
 

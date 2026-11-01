@@ -24,6 +24,7 @@
 pub mod complete;
 pub mod data_r;
 pub mod differences;
+pub mod dofile;
 pub mod expr_r;
 pub mod lang;
 pub mod live;

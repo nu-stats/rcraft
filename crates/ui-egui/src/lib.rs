@@ -9,6 +9,7 @@
 
 mod app;
 mod data_view;
+mod dofile_window;
 mod graph_view;
 mod headless;
 mod help_window;

@@ -163,6 +163,14 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "cd",
+        about: "Changes the folder the do-file works in",
+        points: &[
+            p("In R", "setwd(), with the folder as written: a relative one is taken from the folder the do-file is in then, as in Stata."),
+            p("Paths", "A \\ in a path is read as /, which R takes on every system. A folder the do-file names that is somewhere else on this machine can be pointed to before the run, in the do-file window."),
+        ],
+    },
+    Guide {
         command: "clear",
         about: "Drops the data in memory",
         points: &[p("In R", "The data frame is removed with rm(); nothing else differs.")],
@@ -220,6 +228,14 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "do",
+        about: "Runs another do-file (run quietly; include as if its lines were here)",
+        points: &[
+            p("Files", "The file is found from the folder the do-file is in then (after any cd), with .do added when it has no extension, as Stata does. RCraft reads it and runs its lines in turn; a file that is not there is said so and not run."),
+            p("Macros", "do and run give the file its own locals, with its arguments in `0', `1', ...; include shares the locals of the do-file that includes it."),
+        ],
+    },
+    Guide {
         command: "display",
         about: "Prints text and values",
         points: &[
@@ -267,6 +283,23 @@ pub const GUIDES: &[Guide] = &[
             "Stata's scalars, macros and matrices in Stata's layout; what Stata also lists and \
              RCraft does not keep (the optimizer's settings, e(ilog), ...) is named in a note.",
         )],
+    },
+    Guide {
+        command: "exit",
+        about: "Ends the do-file",
+        points: &[p("In R", "Nothing to do in R: the lines after it are not run, as in Stata.")],
+    },
+    Guide {
+        command: "foreach",
+        about: "Loops: foreach, forvalues and while (and continue)",
+        points: &[
+            p("How they run", "RCraft runs a loop itself and gives R each round's lines with the loop's macro replaced, so the R script has the loop written out round by round."),
+            p("forvalues", "Each value is the one before plus the step, as Stata does, so 0(.1)1 ends at .9999999999999999, and each is kept as Stata keeps a number in a macro (16 digits)."),
+            p("numlist", "foreach ... of numlist works its numbers out from the first and the step and keeps 15 digits, as Stata's numlists do."),
+            p("varlist", "foreach ... of varlist takes the names as written; wildcards, ranges and _all need the data's variable names, which the translator does not have yet, so such a loop is not run."),
+            p("After the loop", "The loop's macro is gone after the loop, as in Stata. A while loop whose condition is still true after 100,000 rounds is stopped and said so."),
+            p("Values only R knows", "A condition such as while r(N) > 0 is worked out by R when the do-file runs, after the lines before it have run."),
+        ],
     },
     Guide {
         command: "estat",
@@ -377,6 +410,22 @@ pub const GUIDES: &[Guide] = &[
              ignore; a value label not defined earlier in the do-file is expected from the \
              data file.",
         )],
+    },
+    Guide {
+        command: "local",
+        about: "Macros: local, global, macro drop, tempvar, tempname, tempfile",
+        points: &[
+            p("How they work", "RCraft keeps the do-file's macros itself and replaces them in each line before the line is translated, as Stata does before it runs a line: nested `x`i'', `=exp', $name and ${name}, and the escapes \\` and \\$."),
+            p("Numbers", "local x = exp keeps a number as Stata does, in %18.0g: 1/3 is .3333333333333333, 16 digits, not the full double."),
+            p("Values only R knows", "A value from the data or a stored result (local m = r(mean), local n = _N) is worked out by R when the do-file runs, after the lines before it, and the lines after it use that value. The R script saved after a run holds the value it had then. A dry run says such lines are known only when the do-file runs."),
+            p("Macro functions", "word count, word # of, the list functions (uniq, dups, sort, sizeof, retokenize, -, |, &, in, ==, ===, posof), length, strlen, subinstr and display are done as Stata 19 does them; others, such as variable label and type, are not translated yet."),
+            p("Temporary names", "tempvar and tempname give __000000, __000001, ... as Stata does; tempfile gives a file in a folder of RCraft's own."),
+        ],
+    },
+    Guide {
+        command: "log",
+        about: "Stata's log file (log and cmdlog)",
+        points: &[p("In R", "Nothing to do in R: RCraft keeps what runs itself, in Results and in the do-file run's own log, so no Stata log file is written.")],
     },
     Guide {
         command: "lincom",
@@ -531,6 +580,11 @@ pub const GUIDES: &[Guide] = &[
                  outcome's probability, as in Stata.",
             ),
         ],
+    },
+    Guide {
+        command: "pwd",
+        about: "Prints the folder the do-file works in",
+        points: &[p("In R", "getwd(), printed as a line.")],
     },
     Guide {
         command: "pwcorr",
@@ -846,6 +900,10 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
         "bysort" => "by",
         "saveold" => "save",
         "return" => "ereturn",
+        "run" | "include" => "do",
+        "global" | "macro" | "tempvar" | "tempname" | "tempfile" => "local",
+        "forvalues" | "while" | "continue" => "foreach",
+        "cmdlog" => "log",
         other => other,
     };
     GUIDES.iter().find(|g| g.command == page)
@@ -880,6 +938,7 @@ pub fn for_line(line: &str) -> Option<&'static Guide> {
 fn full(word: &str) -> String {
     const MORE: &[(&str, usize)] = &[
         ("quietly", 3),
+        ("forvalues", 4),
         ("capture", 3),
         ("noisily", 3),
         ("bysort", 3),
@@ -914,16 +973,8 @@ mod tests {
 
     #[test]
     fn every_command_offered_has_a_page() {
-        // the prefixes and blocks the reader takes, translated in a later step
-        let reader = [
-            "capture",
-            "quietly",
-            "noisily",
-            "foreach",
-            "forvalues",
-            "local",
-            "global",
-        ];
+        // the prefixes, which say nothing of their own
+        let reader = ["capture", "quietly", "noisily"];
         for cmd in crate::complete::COMMANDS
             .iter()
             .filter(|c| !reader.contains(c))

@@ -12,6 +12,8 @@
 //! --stata          Stata mode on, and the --demo lines run as Stata
 //! --script FILE    put FILE in the Script Editor
 //! --stata-guide LINE   show the differences guide on the command of LINE (`general` for all)
+//! --dofile FILE    open the do-file window on FILE (Stata)
+//! --dofile-run     ... and run it on R
 //! --data           show the Data tab instead of Results
 //! --objects        show the Objects list instead of Variables
 //! --filter TYPE    list only one type of variable (Numbers, Text, Factors, ...)
@@ -72,6 +74,8 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
             "--stata" => options.stata = true,
             "--stata-guide" => options.stata_guide = Some(value("--stata-guide")?.clone()),
             "--script" => options.script = Some(PathBuf::from(value("--script")?)),
+            "--dofile" => options.dofile = Some(PathBuf::from(value("--dofile")?)),
+            "--dofile-run" => options.dofile_run = true,
             "--data" => options.show_data = true,
             "--objects" => options.show_objects = true,
             "--filter" => options.filter = Some(value("--filter")?.clone()),

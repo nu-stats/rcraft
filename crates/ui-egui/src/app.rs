@@ -17,6 +17,7 @@ use rcraft_rpkg::describe::{describe, summary_line};
 use rcraft_rpkg::search::Filters;
 
 use crate::data_view::{self, ObjectClick, TypeFilter, VariableClick};
+use crate::dofile_window::{DoFileOut, DoFileWindow};
 use crate::graph_view::GraphView;
 use crate::help_window::{HelpOut, HelpWindow};
 use crate::import_dialog::{DialogAction, ImportDialog};
@@ -141,6 +142,8 @@ enum Action {
     /// Show this data frame as soon as R lists it (after an import).
     ShowWhenListed(String),
     OpenImport,
+    /// Ask for a do-file and open the do-file window on it (P2C).
+    OpenDoFile,
     /// A typed `rc` command, with the line as typed.
     Rc(Rc, String),
     /// A typed `rc` line that is wrong, with what is wrong.
@@ -249,6 +252,8 @@ pub struct App {
     keep_settings: bool,
     /// Stata mode for the session shown (P2B.7).
     stata: StataMode,
+    /// Run my do-file (P2C).
+    dofile: DoFileWindow,
 }
 
 impl App {
@@ -301,6 +306,7 @@ impl App {
             tab_pending: None,
             keep_settings: true,
             stata: StataMode::default(),
+            dofile: DoFileWindow::default(),
         }
     }
 
@@ -740,6 +746,17 @@ impl App {
                     engine.echo(&line, &why, Outcome::Error);
                 }
             }
+            Action::OpenDoFile => {
+                let mut chooser = rfd::FileDialog::new()
+                    .set_title("Run do-file")
+                    .add_filter("Stata do-file", &["do", "doh", "ado"]);
+                if let Some(dir) = self.engine().and_then(|e| e.working_dir()) {
+                    chooser = chooser.set_directory(dir);
+                }
+                if let Some(path) = chooser.pick_file() {
+                    self.dofile.open_file(&path);
+                }
+            }
             Action::OpenImport => {
                 self.import.set_recent(self.recent.paths());
                 self.import.open_empty();
@@ -1107,11 +1124,19 @@ impl App {
             self.results_pane(ui, &pal, &mut actions);
         });
 
-        // a file dropped on the window opens the dialog on it
+        // a file dropped on the window opens the dialog on it (a do-file, the do-file window)
         let dropped = ctx.input(|i| i.raw.dropped_files.iter().find_map(|f| f.path.clone()));
         if let Some(path) = dropped {
-            self.import.set_recent(self.recent.paths());
-            self.import.open_with(&path);
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            if matches!(ext.as_str(), "do" | "doh") {
+                self.dofile.open_file(&path);
+            } else {
+                self.import.set_recent(self.recent.paths());
+                self.import.open_with(&path);
+            }
         }
         let frames: Vec<String> = self
             .engine()
@@ -1185,6 +1210,23 @@ impl App {
             Some(HelpOut::Run(code)) => actions.push(Action::Submit(Source::Typed, code)),
             Some(HelpOut::FindPackages(topic)) => actions.push(Action::FindPackagesFor(topic)),
             None => {}
+        }
+
+        // the do-file run moves on as R lets it, in the session it started in
+        let session = self.session_name.clone();
+        let mut dofile_out = Vec::new();
+        if let EngineState::Ready(engine) = &mut self.engine {
+            dofile_out.extend(self.dofile.poll(engine, &session));
+        }
+        dofile_out.extend(self.dofile.show(ctx, &pal, &session));
+        if self.dofile.is_running() {
+            ctx.request_repaint_after(Duration::from_millis(30));
+        }
+        for out in dofile_out {
+            match out {
+                DoFileOut::Guide(line) => actions.push(Action::OpenStataGuide(line)),
+                DoFileOut::Follow(name) => self.stata.follow = Some(name),
+            }
         }
 
         if let Some(i) = self.confirm_close {
@@ -1315,6 +1357,14 @@ impl App {
             ui.menu_button("File", |ui| {
                 if ui.button("Use my file…").clicked() {
                     out.push(Action::OpenImport);
+                    ui.close_menu();
+                }
+                if ui
+                    .button("Run do-file…")
+                    .on_hover_text("Run a Stata do-file on R, unchanged")
+                    .clicked()
+                {
+                    out.push(Action::OpenDoFile);
                     ui.close_menu();
                 }
                 ui.add_enabled(false, egui::Button::new("Open script…"));
@@ -2406,7 +2456,9 @@ impl App {
     /// R is ready and nothing is running (or R could not start).
     pub fn is_settled(&self) -> bool {
         match &self.engine {
-            EngineState::Ready(e) => !e.is_working() && !self.help_window.is_busy(),
+            EngineState::Ready(e) => {
+                !e.is_working() && !self.help_window.is_busy() && !self.dofile.is_running()
+            }
             EngineState::Failed(_) => true,
             EngineState::Starting(_) => false,
         }
@@ -2605,6 +2657,15 @@ impl App {
         self.help_window.show_stata(line);
     }
 
+    /// Opens the do-file window on this file, and runs it if asked (pictures).
+    pub fn open_dofile(&mut self, path: &std::path::Path, run: bool) {
+        self.dofile.open_file(path);
+        if run {
+            let session = self.session_name.clone();
+            self.dofile.run_now(&session);
+        }
+    }
+
     /// Puts this text in the Script Editor (pictures).
     pub fn set_script(&mut self, text: &str) {
         self.script = text.to_string();
@@ -2640,6 +2701,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rcraft_statatr::dofile::Ran;
 
     #[test]
     fn shortens_the_version() {
@@ -3560,5 +3622,66 @@ mod tests {
         assert!(app.completions.is_empty());
         app.command = "plot(".into();
         assert_eq!(app.complete_rc(), None);
+    }
+
+    /// P2C: a do-file run in the window, line by line in R, a value worked out
+    /// by R on the way, and the choice at each problem.
+    #[test]
+    fn a_do_file_runs_line_by_line_and_asks_at_a_problem() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("rcraft-dofile-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::fs::write(dir.join("d.csv"), "x,y\n1,2\n2,4\n3,7\n");
+        let dofile = dir.join("run.do");
+        let _ = std::fs::write(
+            &dofile,
+            "import delimited d.csv, clear\nsummarize y\nlocal m = r(mean)\ngenerate dy = y - `m'\n\
+             foreach v of varlist x y {\n  quietly summarize `v'\n  display \"@`v' \" r(max)\n}\n\
+             bogus line\ndisplay \"after\"\nregress y nosuchvar\ndisplay \"end\"\n",
+        );
+        let stopped = |a: &App| {
+            a.dofile
+                .outcome()
+                .is_some_and(|(done, _, problem)| done || problem)
+        };
+        app.open_dofile(&dofile, true);
+        assert!(frames_until(&mut app, &ctx, stopped));
+        let log = app.dofile.log_text();
+        if log.contains("there is no package") {
+            eprintln!("skipped: readr and dplyr are needed");
+            return;
+        }
+        // the first problem: a line that is not translated
+        let (done, ran, problem) = app.dofile.outcome().unwrap_or_default();
+        assert!(!done && problem, "{log}");
+        assert_eq!(ran.last(), Some(&Ran::Skipped), "{log}");
+        assert!(log.contains("m is \"4.333333333333333\""), "{log}");
+        assert!(log.contains("@x 3") && log.contains("@y 7"), "{log}");
+        app.dofile.go_on(false);
+        // the second: R stops with an error; then on without asking
+        assert!(frames_until(&mut app, &ctx, stopped));
+        let (done, ran, problem) = app.dofile.outcome().unwrap_or_default();
+        assert!(!done && problem, "{}", app.dofile.log_text());
+        assert!(matches!(ran.last(), Some(Ran::Error(_))), "{ran:?}");
+        app.dofile.go_on(true);
+        assert!(frames_until(&mut app, &ctx, stopped));
+        let (done, ran, _) = app.dofile.outcome().unwrap_or_default();
+        assert!(done, "{ran:?}");
+        let log = app.dofile.log_text();
+        assert!(log.contains(". display \"end\"\nend"), "{log}");
+        assert!(
+            log.contains("1 stopped with an error in R, 1 were not run"),
+            "{log}"
+        );
+        // the data it left are shown
+        assert!(frames_until(&mut app, &ctx, |a| a.dataset.as_deref() == Some("d")));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

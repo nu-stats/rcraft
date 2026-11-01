@@ -1,0 +1,20 @@
+* Stata 19.0's results for control.do, recorded by cargo xtask stata-record
+@ b_x       1.4759738928131982
+@ b_w      -.99687753333407902
+@ mean_x       .14761666666666665
+@ macro_x       .14761666666666659
+@ csd_x       .97885080651385814
+@ mean_w     -.082200000000000009
+@ macro_w     -.082199999999999995
+@ csd_w       .56128260148925735
+@ n_g0                       30
+@ n_g1                       30
+@ sd_diff     -.012032810583029185
+@ total                       60
+@ i_after                        4
+@ sign_pos                        1
+@ cat3_1                       16
+@ cat3_3                       21
+@ nwords                        3
+@ third       .33333333333333331
+@ xw_mean      .047182863306564592

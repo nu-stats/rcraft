@@ -8,6 +8,8 @@
 //! yet, and says what the session holds for Tab (variables come from R; the
 //! data's R name, macros and value labels from here).
 //!
+//! Macros and loops work as in a do-file ([`crate::dofile`], without R).
+//!
 //! Each step translates everything again, which keeps one translator and no
 //! second copy of its state: a do-file is small next to what R does with it.
 //! Text the reader cannot take as commands of its own (a block left open, a
@@ -16,8 +18,15 @@
 
 use std::collections::BTreeSet;
 
-use crate::data_r::{translate, Line};
+use crate::data_r::{Line, Translation};
+use crate::dofile::{dry_run, NoFiles, Options};
 use crate::reader::{read, Item};
+
+/// The Stata so far, run as a do-file is (macros set, loops run) but without
+/// values from R: what needs one says it is known only when the do-file runs.
+fn run(text: &str) -> Translation {
+    dry_run(text, &NoFiles, Options::default()).translation
+}
 
 /// The first and last lines around the helpers in the R a step runs, so the
 /// Results window can fold them to one line (the session script keeps them).
@@ -62,10 +71,10 @@ impl Live {
     /// Translates `text` after what came before, and keeps it.
     pub fn step(&mut self, text: &str) -> Step {
         let own = read(text);
-        let keep = own.items.iter().all(|i| matches!(i, Item::Command(_)));
+        let keep = own.items.iter().all(|i| !matches!(i, Item::Problem(_)));
         if !keep {
-            // a block or a line the reader cannot take: answered on its own
-            let t = translate(&own);
+            // a block left open, or a line the reader cannot take: answered on its own
+            let t = run(text);
             let code = t.lines.iter().map(Line::script).collect();
             return Step {
                 lines: t.lines,
@@ -77,7 +86,7 @@ impl Live {
         whole.push_str(text.trim_end_matches(['\n', '\r']));
         whole.push('\n');
         let program = read(&whole);
-        let t = translate(&program);
+        let t = run(&whole);
         let lines: Vec<Line> = t.lines.get(self.done..).unwrap_or_default().to_vec();
         let mut code = String::new();
         let new: Vec<&String> = t

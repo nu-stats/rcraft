@@ -2500,3 +2500,70 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   differences guide.
 - **Tests:** the translation and refusals; in the app, `ssc install fixest` opening its install list and
   `ssc install estout` saying there is no R package of that name.
+
+## P2C part one: Run my do-file, 2026-10-31
+
+- **`statatr::dofile`** (new): a do-file gone down the way Stata goes down it. `Run` replaces each line's macros
+  (`` `name' ``, `$name`, `${name}`, nested `` `x`i'' `` inside first, `` `=exp' ``, `` `: fn' ``, `` `++i' ``, the
+  escapes `` \` `` and `\$`), sets `local`/`global` (text, `= exp`, `: function`, `++`/`--`), `macro drop/shift`,
+  `tempvar`/`tempname`/`tempfile`, runs `foreach` (in, of local/global/numlist/newlist/varlist), `forvalues`,
+  `while`, `if`/`else if`/`else`, `capture {`/`quietly {`, `continue [, break]` and `exit`, follows `do`, `run` and
+  `include` into other files (through a `Files` reader the caller gives; `do` gets its own locals and its
+  arguments, `include` shares them), keeps track of `cd`, and puts the folders the user says are elsewhere where
+  they are (`Options::map`). Every command it reaches goes to the translator in order (`data_r::Translator`, the
+  translator a command at a time, which `translate` now wraps). Each line keeps where it came from (`Origin`:
+  file, line, the text as written, the loop rounds it is in, what happened).
+- **Values only R knows** (`local m = r(mean)`, `if r(N) > 0 {`, `while ...`, `local s : display %9.2f r(sd)`):
+  `Run::next_event` stops with `Event::Ask`, the R that prints the value (the translator's own `display`, so
+  Stata's rules: a number in %18.0g, as Stata keeps it in a macro); the caller runs it after the lines before it
+  and gives back what R printed. `dry_run` gives no values: such lines say they are known only when the do-file
+  runs. Values worked out here without R (numbers, text, the operators, abs/floor/ceil/int/round/mod/min/max,
+  sqrt/exp/ln/log10, strlen/upper/lower/substr/word/wordcount/strtrim/string, `_pi`, `c(pi)`) are only the plain
+  ones; everything else goes to R, so nothing is guessed.
+- **Rules observed in Stata 19** with made-up values (probes kept out of the repository): `local x = exp` keeps
+  %18.0g without its spaces (`.3333333333333333`, `1.00000000000e+20`, `1428571428.571429`); `numlist` keeps
+  %15.0g and computes start + i*step (`0.7(0.1)1.0` is .7 .8 .9 1); `forvalues` adds the step each round and keeps
+  %18.0g (`0(.1)1` ends at `.9999999999999999`); `string()` is %9.0g; an undefined macro is empty; `$g_x` is the
+  global `g_x`; a macro's text is looked at again (an escaped `` \`i' `` kept in one is replaced where it is used);
+  the loop's macro is gone after `foreach`; `local x "a" "b"` keeps `a" "b`; `: list A - B` takes the last copy of
+  each element, `&` matches copies one for one, `==` is the same order and `===` the same elements; `: display`
+  keeps its leading spaces; `tempvar` names are `__000000`, `__000001`, ...
+- **The scan** (P2C.1, `dofile::scan`): lines that translate cleanly, with notes, not at all (each reason and how
+  often), that RCraft runs itself (macros, loops) and that need a value from R; the commands used; the R packages;
+  `ssc install`; every file and folder named (reads, writes, runs, `cd`), found or not, or made by the do-file
+  first; and what a run on R does not do as Stata does (P2C.10: random numbers, Mata, programs, plugins,
+  interactive commands).
+- **The window** (`ui-egui/src/dofile_window.rs`): File > *Run do-file…*, or a `.do` file dropped on the window.
+  It shows where the do-file runs (its own folder, *Change…*), the files not found on this machine (an absolute
+  folder can be pointed to with *Find its folder…*; the do-file is never changed), the scan, and every line with
+  its R beside it; a click shows the line in full: as written, the loop round, its R, its notes, what R printed,
+  and a link to the differences guide. *Run on R* goes to the folder, then sends each line in turn (with the
+  helpers it needs first, folded in Results) and asks R the values only it knows; at the first problem (a line
+  not translated, or R stopping with an error) it asks: *Stop here*, *Go on*, *Go on without asking*. Afterwards
+  *Save as R script…*, *Save as Quarto…* and *Save log…* (the run line by line with what R printed and each
+  note, P2C.6 and P2C.7); the data the run left are shown. Picture mode: `--dofile FILE [--dofile-run]`.
+- **Stata mode's typed lines** go through the same layer (without R), so `local`, `global` and loops work in the
+  Command window and the Script Editor too.
+- **Translator:** `cd` (setwd), `pwd`, `log`/`cmdlog`, `browse`/`edit`, `pause`, `more`, `discard` translated (the
+  last ones to nothing, with a note); a `\` in a file name is read as `/`; Tab offers the new commands, and the
+  differences guide has pages for `cd`, `do` (`run`, `include`), `exit`, macros (`local` and the rest) and loops
+  (`foreach`, `forvalues`, `while`, `continue`).
+- **The corpus:** `control.do` (with `control_setup.doh`, which it includes) checks macros, loops, `while`, `if` on
+  a stored result, `numlist`, `: word count`, `tempvar` and a macro's 16 digits against Stata 19: 19 more results,
+  138 in all, all matching. The corpus test now runs each do-file as the window does (line by line, R asked for
+  the values only it knows). `include`, `local`, `global`, `foreach`, `forvalues`, `while` and `tempvar` are
+  Verified.
+- **Found and fixed on the way:** `stata_fmt` (the R helper behind `display` and every value R works out) took a
+  17-digit form ending in 5 for an exact half and rounded it up, by a nudge large enough to change a 16th digit:
+  `%18.0g` of .14761666666666665 gave `.1476166666666668`, Stata `.1476166666666666`. Whether a value is a half is
+  now worked out from the double itself (in whole numbers, from its bits), and the nudge is one unit in the last
+  place; the format grids still match and 22 macro values from Stata 19 are added to them.
+- **Tests:** the expander, the formats, the static values, numlists and forvalues, files and paths, the scan, the
+  three outputs (`statatr`, 87 in all); the corpus in R; in the app, a do-file run with a value from R, a loop,
+  a line not translated and an R error each stopping the run to ask, the log, and the data shown.
+- **Not done:** `foreach ... of varlist` with wildcards or ranges and `levelsof` (they need the data's variable
+  names, which R would have to give the translator as it gives values); macro functions that read the data
+  (`: variable label`, `: type`, ...); programs (`program define`), `input` blocks, Mata; in the Command window, a
+  value only R knows (`local m = r(mean)` typed there says it is known only when the do-file runs); the share of
+  lines translated per tier (`docs/coverage.md`, P2C.8); StatCraft's probe do-files and public replication
+  packages as inputs (P2C.9).
