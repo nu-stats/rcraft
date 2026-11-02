@@ -63,6 +63,7 @@ pub const COMMANDS: &[&str] = &[
     "capture",
     "cd",
     "clear",
+    "clogit",
     "collapse",
     "compress",
     "connected",
@@ -165,6 +166,18 @@ pub const COMMANDS: &[&str] = &[
 pub const OPTIONS: &[(&str, &[&str])] = &[
     ("anova", &["partial", "repeated(", "sequential"]),
     ("append", &["force", "generate(", "nolabel", "nonotes"]),
+    (
+        "clogit",
+        &[
+            "baselevels",
+            "group(",
+            "level(",
+            "or",
+            "robust",
+            "strata(",
+            "vce(",
+        ],
+    ),
     ("collapse", &["by(", "cw", "fast"]),
     ("connected", &["by(", "legend(", "nodraw", "sort"]),
     ("correlate", &["covariance", "means"]),
@@ -1130,6 +1143,7 @@ mod tests {
         let line = match cmd {
             "anova" => format!("anova y g, {o}"),
             "append" => format!("append using t, {o}"),
+            "clogit" => format!("clogit y x, group(g) {o}"),
             "collapse" => format!("collapse (mean) y, {o}"),
             "connected" | "line" | "scatter" => format!("{cmd} y x, {o}"),
             "twoway" => format!("twoway scatter y x, {o}"),

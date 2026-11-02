@@ -278,7 +278,7 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   b <- stata_b
   V <- stata_vcov
   robust <- vce %in% c("robust", "cluster")
-  G <- if (vce != "cluster") NULL else if (!is.null(fit[["G"]])) fit[["G"]] else if (cmd == "ivregress") length(unique(fit$cluster)) else if (cmd == "stcox") stata_m$G else length(unique(stata_cluster))
+  G <- if (vce != "cluster") NULL else if (!is.null(fit[["G"]])) fit[["G"]] else if (cmd == "ivregress") length(unique(fit$cluster)) else if (cmd %in% c("stcox", "clogit")) stata_m$G else length(unique(stata_cluster))
   wald <- function(keep) {
     # on the scale of the errors (a correlation), so coefficients of very
     # different sizes do not make V look singular to solve()
@@ -523,6 +523,20 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     put(cmdline = cmdline, cmd2 = "stcox", vce = vce, chi2type = if (robust) "Wald" else "LR",
         method = extra$ties, ties = extra$ties, t0 = "_t0", depvar = "_t", cmd = "cox", properties = "b V")
     robust_macros()
+  } else if (cmd == "clogit") {
+    m <- stata_m
+    q <- sum(slopes)
+    chi2 <- if (robust) wald(slopes) else 2 * (m$ll - m$ll_0)
+    put(rank = q, N = m$N, k = length(b), k_eq = 1, k_dv = 1, converged = 1, rc = 0, ll = m$ll,
+        k_eq_model = 1, ll_0 = m$ll_0)
+    if (!is.null(G)) put(N_clust = G)
+    put(df_m = q, chi2 = chi2, p = stats::pchisq(chi2, q, lower.tail = FALSE), N_drop = m$N_drop,
+        N_group_drop = m$N_group_drop, r2_p = 1 - m$ll / m$ll_0)
+    put(cmdline = cmdline, cmd = "clogit", predict = "clogit_p")
+    if (m$multiple) put(multiple = "multiple")
+    put(group = m$group, chi2type = if (robust) "Wald" else "LR", vce = vce,
+        title = "Conditional (fixed-effects) logistic regression", depvar = depvar, properties = "b V")
+    robust_macros()
   } else if (cmd == "margins") {
     put(N = extra$N, cmd = "margins", est_cmd = extra$est_cmd, cmdline = cmdline, properties = "b V")
   }
@@ -530,6 +544,8 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   eb <- stata_eb(b, V, cmd, depvar)
   e$b <- eb$b
   e$V <- eb$V
+  # Stata counts the base levels' columns too
+  if (cmd == "clogit") e$k <- ncol(eb$b)
   for (n in names(after)) e[[n]] <- after[[n]]
   e
 }"##;
@@ -600,6 +616,22 @@ fn e_not_kept(cmd: &str, model: &str) -> &'static [&'static str] {
             "wmatrix",
             "W",
             "S",
+            "V_modelbased",
+        ],
+        ("clogit", _) => &[
+            "ic",
+            "ilog",
+            "gradient",
+            "Cns",
+            "ml_method",
+            "opt",
+            "user",
+            "technique",
+            "which",
+            "deriv_useminbound",
+            "marginsnotok",
+            "marginsok",
+            "marginsdefault",
             "V_modelbased",
         ],
         ("stcox", _) => &[

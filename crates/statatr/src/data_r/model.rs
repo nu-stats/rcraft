@@ -43,6 +43,7 @@ pub(super) enum Fit {
     /// `margins, post`: the margins are e(b) and e(V)
     Margins,
     Stcox,
+    Clogit,
 }
 
 impl Fit {
@@ -60,6 +61,7 @@ impl Fit {
             Fit::Ivregress => "ivregress",
             Fit::Margins => "margins",
             Fit::Stcox => "stcox",
+            Fit::Clogit => "clogit",
         }
     }
 
@@ -664,10 +666,13 @@ pub(super) fn vce(opts: &Opts) -> Result<(bool, Option<String>), Untranslated> {
         Some((a, b)) => (a.trim(), b.trim()),
         None => (v, ""),
     };
+    // Stata takes vce(r) and vce(cl v) at the shortest; ols and oim in full
+    let robust_word = !kind.is_empty() && "robust".starts_with(kind);
+    let cluster_word = kind.len() >= 2 && "cluster".starts_with(kind);
     match kind {
         "ols" | "oim" if rest.is_empty() => Ok((robust, None)),
-        "robust" if rest.is_empty() => Ok((true, None)),
-        "cluster" => {
+        _ if robust_word && rest.is_empty() => Ok((true, None)),
+        _ if cluster_word => {
             if !is_name(rest) {
                 return Err(no(format!("vce(cluster {rest}) needs one variable name")));
             }

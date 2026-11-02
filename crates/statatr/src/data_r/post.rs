@@ -226,6 +226,7 @@ impl Session {
                 &[("pr", 2), ("outcome", 3), ("xb", 2), ("stdp", 4)]
             }
             Fit::Stcox => &[("hr", 2), ("xb", 2)],
+            Fit::Clogit => &[("pc1", 3), ("pu0", 3), ("xb", 2)],
             Fit::Margins => {
                 return Err(no(
                     "predict after margins, post is not allowed, as in Stata",
@@ -378,6 +379,18 @@ impl Session {
                     format!("{} - {}", r_name(&est.dep), newdata(""))
                 }
                 Fit::Regress => newdata(""),
+                Fit::Clogit if opts.has("xb", 2) => {
+                    self.helpers.insert("stata_clogit");
+                    format!("unname(stata_clogit_xb(stata_estimates, {d}))")
+                }
+                Fit::Clogit if opts.has("pu0", 3) => {
+                    self.helpers.insert("stata_clogit");
+                    format!("stats::plogis(unname(stata_clogit_xb(stata_estimates, {d})))")
+                }
+                Fit::Clogit => {
+                    self.helpers.insert("stata_clogit");
+                    format!("unname(stata_clogit_pc1(stata_estimates, {d}))")
+                }
                 Fit::Stcox if opts.has("xb", 2) => {
                     self.helpers.insert("stata_stcox");
                     format!("unname(stata_st_xb(stata_estimates, {d}))")

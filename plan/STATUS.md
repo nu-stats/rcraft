@@ -2990,3 +2990,19 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Numbers:** the replication packages' share is 53.8% (53.3%); tier 3 went from 0.5% to 16.3%. The 36
   lag regressions in one package wait on a `merge m:m` before them.
 - **Machine:** R 4.6.2 with the packages the tests use is set up again, so the corpus runs here.
+
+## P2C.9 continued: clogit, and vce(r) and vce(cl), 2026-11-02
+
+- **clogit** (`data_r/clogit.rs`, `stata_clogit`): the exact conditional likelihood, as Stata's, fitted by
+  `survival::coxph` with a stratum per group and `method = "exact"`, so groups with several positives are
+  right. Stata's notes and its dropping of all-positive or all-negative groups and of variables that do
+  not vary within groups. survival has no robust variance for the exact method, so each row's score (x
+  times its outcome less its chance of being among the group's positives, from the elementary symmetric
+  sums) is worked out here: `vce(robust)` clusters on the group, `vce(cluster v)` checks the groups are
+  nested (r(459)), both with G / (G - 1). e() as Stata leaves it (e(k) with the base columns, e(N_drop),
+  e(N_group_drop), e(multiple)); `predict` pc1, pu0 (invlogit(xb)) and xb.
+- **vce():** `vce(r)` and `vce(cl v)` at the shortest, as Stata takes them; `ols` and `oim` in full.
+- **Checked:** `clogit.do` (21 result lines, every value, tolerance 1e-6); `clogit` is Verified.
+  Observations in `plan/stata/clogit.md`.
+- **Numbers:** the replication packages' share is 55.9% (53.8%): tier 2 26.2% (18.5%), tier 3 52.3%
+  (16.3%), most of it the `vce(clu ...)` the packages write. StatCraft's probes stay at 83.3%.

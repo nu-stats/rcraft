@@ -26,6 +26,7 @@
 //! without the data and are taken as written.
 
 mod anova;
+mod clogit;
 mod dates;
 mod graph;
 mod iv;
@@ -384,6 +385,7 @@ const WEIGHTED: &[&str] = &[
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
     "stcox",
+    "clogit",
     "regress",
     "logit",
     "probit",
@@ -595,6 +597,8 @@ const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
     rc <- 451
   } else if (grepl("^string variables not allowed in varlist", m)) {
     rc <- 109
+  } else if (m == "groups (strata) are not nested within clusters") {
+    rc <- 459
   } else if (grepl("^object '[^']+' not found$", m)) {
     m <- sub("^object '([^']+)' not found$", "\\1 not found", m)
     rc <- 111
@@ -668,6 +672,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_margins" => margins::MARGINS_HELPER,
         "stata_unconditional" => margins::UNCONDITIONAL_HELPER,
         "stata_anova" => anova::ANOVA_HELPER,
+        "stata_clogit" => clogit::CLOGIT_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_ts" => ts::TS_HELPER,
         "stata_rows_replace" => ts::ROWS_REPLACE_HELPER,
@@ -1657,6 +1662,7 @@ impl Session {
             "lowess" => self.lowess(c, &opts, out),
             "stset" => self.stset(c, &opts, out),
             "stcox" => self.stcox(c, &opts, out),
+            "clogit" => self.clogit(c, &opts, out),
             "display" => self.display(c, out),
             "ereturn" | "return" => self.list_returned(c, out),
             "matrix" => self.matrix(c, out),

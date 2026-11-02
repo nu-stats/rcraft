@@ -17,6 +17,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("assert", &["checks"]),
     ("bootstrap", &["bootstrap"]),
     ("bsample", &["bsample"]),
+    ("clogit", &["clogit"]),
     ("collapse", &["data"]),
     ("correlate", &["descriptives"]),
     ("count", &["control", "descriptives"]),
