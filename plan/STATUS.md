@@ -2921,3 +2921,22 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   left; `estimates store` / `restore`, `clogit`, `tsset` and time-series operators, `gettoken`,
   `tabulate, generate()`, `xtile`, `assert`; `fvset base first/last/frequent/none` and `fvset report`;
   running the packages on R against Stata.
+
+## P2C.9 continued: estimates store and restore, 2026-11-02
+
+- **What works:** `estimates store` (`est sto`) keeps the model with its e(), e(sample) and what `predict`,
+  `test`, `lincom` and `margins` read. `estimates restore` (`est res`) brings it all back, with Stata's note
+  `(results a are active now)`. `estimates drop` and `estimates clear` forget them.
+- **Rules from Stata 19:**
+  - a name that is not stored is `estimation result a not found`, r(111);
+  - storing with no model is refused with Stata's reason, r(301).
+- **Stored models and the data:** a line that moves the rows or changes the data afterwards clears a stored
+  model's e(sample) and its copy of the sample, as it does for the model held.
+- **Lines that were not translated:** after one, a name not stored here may have been stored in Stata
+  (`eststo`, a program), so its restore is refused rather than guessed.
+- **Corpus:** `estimates.do` (9 results), with Stata 19's results recorded. `estimates` is Verified, with a
+  guide page.
+- **Numbers:** the packages' share is 53.1% (tier 2 from 10.4% to 17.2%); StatCraft's probes stay at 83.3%.
+- **Not done:** `estimates dir`, `table`, `replay`, `save` and `use`.
+- **Note:** Pinokio reinstalled its miniforge on 2026-11-02 at 12:13, which removed the R environment this
+  machine used (`hev-r`). The R tests skip here until R is back; GitHub CI runs them on all three platforms.

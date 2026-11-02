@@ -226,8 +226,7 @@ impl Translator {
         self.s.not_translated(&stata, &reason);
         if !display {
             let why = format!("a line before it was not translated: {}", stata.trim());
-            self.s.esample = false;
-            self.s.changed_since_fit = true;
+            self.s.rows_unknown();
             self.s.e_ret = returned::Returned::Lost(why.clone());
             self.s.r_ret = returned::Returned::Lost(why);
         }
@@ -469,6 +468,10 @@ const REPLACE_DATA: &[&str] = &[
 ];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "estimates",
+    "erase",
+    "rm",
+    "fvset",
     "histogram",
     "kdensity",
     "scatter",
@@ -689,6 +692,11 @@ struct Session {
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
     /// The model last fitted, for the commands that read it afterwards.
     estimates: Option<model::Estimates>,
+    /// The models `estimates store` kept, by name.
+    stored_fits: BTreeMap<String, returned::StoredFit>,
+    /// A line that was not translated may have stored a model too (eststo,
+    /// a program), so a name missing from `stored_fits` may be in Stata.
+    stores_lost: bool,
     /// Why there is no model to read: a line since the last one was not
     /// translated, and it may have fitted one in Stata.
     estimates_lost: Option<String>,
@@ -1063,11 +1071,25 @@ impl Session {
 
     /// A line Stata runs that is not translated: if it replaces the data or
     /// changes its rows, what is in memory after it is not known.
+    /// A line may have moved the rows or changed the data: the model held,
+    /// and those `estimates store` kept, no longer mark Stata's e(sample).
+    fn rows_unknown(&mut self) {
+        self.esample = false;
+        self.changed_since_fit = true;
+        for f in self.stored_fits.values_mut() {
+            f.esample = false;
+            f.changed_since_fit = true;
+        }
+    }
+
     fn not_translated(&mut self, stata: &str, reason: &str) {
         // a line Stata stops at with an error leaves the data as it was
         if reason.contains("Stata stops here") || reason.contains("(Stata: ") {
             return;
         }
+        // it may have stored a model (eststo, a program), so a name
+        // `estimates store` did not keep may be stored in Stata
+        self.stores_lost = true;
         if let Some(c) = crate::reader::read(stata.trim()).commands().first() {
             for v in new_vars(c) {
                 self.lost_vars.insert(v, stata.trim().to_string());
@@ -1319,13 +1341,11 @@ impl Session {
             return Err(no(why));
         }
         if c.prefixes.iter().any(|p| matches!(p, Prefix::Frame(_))) {
-            self.esample = false;
-            self.changed_since_fit = true;
+            self.rows_unknown();
             return Err(no("frames (frame name:) are translated in a later step"));
         }
         if c.parts.weight.is_some() && !WEIGHTED.contains(&c.name.as_str()) {
-            self.esample = false;
-            self.changed_since_fit = true;
+            self.rows_unknown();
             return Err(no(format!("{} with weights is not translated yet", c.name)));
         }
         if let Some(c2) = self.restated(c) {
@@ -1376,6 +1396,11 @@ impl Session {
         // a line that is not translated still runs in Stata, so it counts too
         if done.is_err() || !LEAVE_DATA_ALONE.contains(&c.name.as_str()) {
             self.changed_since_fit = done.is_err() || !MODELS.contains(&c.name.as_str());
+            if self.changed_since_fit {
+                for f in self.stored_fits.values_mut() {
+                    f.changed_since_fit = true;
+                }
+            }
         }
         // e(sample) holds while the rows stay where the model found them
         let name = c.name.as_str();
@@ -1383,33 +1408,38 @@ impl Session {
             .prefixes
             .iter()
             .any(|p| matches!(p, Prefix::By { sort: true, .. }));
+        // values may change (Stata's e(sample) is a mark on the rows, so it
+        // stays); rows may not be sorted, added or dropped
+        let values_only = matches!(
+            name,
+            "replace"
+                | "recode"
+                | "egen"
+                | "label"
+                | "rename"
+                | "destring"
+                | "tostring"
+                | "encode"
+                | "decode"
+                | "format"
+                | "order"
+                | "compress"
+        ) || (matches!(name, "drop" | "keep")
+            && c.parts.if_exp.is_none()
+            && c.parts.in_range.is_none());
+        let rows_stay = done.is_ok()
+            && !bysort
+            && !matches!(name, "sort" | "gsort")
+            && (MODELS.contains(&name) || LEAVE_DATA_ALONE.contains(&name) || values_only);
+        if !rows_stay {
+            for f in self.stored_fits.values_mut() {
+                f.esample = false;
+            }
+        }
         self.esample = if MODELS.contains(&name) {
             done.is_ok() && self.esample_new && !by
         } else {
-            // values may change (Stata's e(sample) is a mark on the rows, so
-            // it stays); rows may not be sorted, added or dropped
-            let values_only = matches!(
-                name,
-                "replace"
-                    | "recode"
-                    | "egen"
-                    | "label"
-                    | "rename"
-                    | "destring"
-                    | "tostring"
-                    | "encode"
-                    | "decode"
-                    | "format"
-                    | "order"
-                    | "compress"
-            ) || (matches!(name, "drop" | "keep")
-                && c.parts.if_exp.is_none()
-                && c.parts.in_range.is_none());
-            self.esample
-                && done.is_ok()
-                && (LEAVE_DATA_ALONE.contains(&name) || values_only)
-                && !matches!(name, "sort" | "gsort")
-                && !bysort
+            self.esample && rows_stay
         };
         done?;
         if self.drew.get() {
@@ -1471,6 +1501,7 @@ impl Session {
             "list" => self.list(c, &opts, out),
             "describe" => self.describe(c, out),
             "set" => self.set(c, out),
+            "estimates" => self.estimates_cmd(c, out),
             "erase" | "rm" => self.erase(c, out),
             "fvset" => self.fvset(c, out),
             "compress" => {
@@ -3213,6 +3244,41 @@ append using t, force");
     }
 
     #[test]
+    fn estimates_store_and_restore() {
+        let out = r("use s
+estimates store a
+regress y x
+est sto a
+logit d x
+est res a
+predict p
+estimates drop a
+estimates restore a
+estimates restore zz");
+        assert!(
+            out[1].starts_with("NOT: estimates store: no model"),
+            "{out:?}"
+        );
+        assert!(out[3].contains("stata_stored[[\"a\"]] <- mget("), "{out:?}");
+        assert!(out[5].contains("list2env(stata_stored[[\"a\"]]"), "{out:?}");
+        assert!(out[5].contains("(results a are active now)"), "{out:?}");
+        // predict reads the model restored: regress's linear prediction
+        assert!(!out[6].starts_with("NOT"), "{out:?}");
+        assert!(!out[6].contains("type = \"response\""), "{out:?}");
+        // a name no longer stored is Stata's error, r(111)
+        assert_eq!(out[8], "stop(\"estimation result a not found\")");
+        assert_eq!(out[9], "stop(\"estimation result zz not found\")");
+        // after a line that was not translated it may be stored in Stata
+        let out = r("use s
+regress y x
+eststo m: logit d x
+estimates restore m
+predict p");
+        assert!(out[3].starts_with("NOT: estimates restore m"), "{out:?}");
+        assert!(out[4].starts_with("NOT"), "{out:?}");
+    }
+
+    #[test]
     fn set_obs_and_capture_and_rc() {
         let out = r("clear
 set obs 3
@@ -3278,11 +3344,14 @@ lincom x");
         assert!(!out[3].starts_with("NOT: "), "{out:?}");
         assert!(!out[5].starts_with("NOT: "), "{out:?}");
         assert!(out[7].starts_with("NOT: "), "{out:?}");
+        // (after a line that was not translated, m1 may have been stored in Stata)
         let out = r("use s
+frobnicate
 regress y x
 estimates restore m1
 lincom x");
-        assert!(out[3].starts_with("NOT: lincom: the model"), "{out:?}");
+        assert!(out[3].starts_with("NOT: estimates restore m1"), "{out:?}");
+        assert!(out[4].starts_with("NOT: lincom: the model"), "{out:?}");
     }
 
     #[test]

@@ -405,6 +405,25 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "estimates",
+        about: "Keeps fitted models by name and brings them back",
+        points: &[
+            p(
+                "Store and restore",
+                "estimates store keeps the model with its e(), e(sample) and what predict, test \
+                 and margins read; estimates restore brings it back, with Stata's note \
+                 (results a are active now). drop and clear forget them, and a name that is not \
+                 stored is Stata's error, r(111).",
+            ),
+            p(
+                "Not yet",
+                "estimates dir, table, replay, save and use, and options, are not translated. A \
+                 name stored by a line that was not translated (eststo, a program) is not known, \
+                 so a restore of it is refused rather than guessed.",
+            ),
+        ],
+    },
+    Guide {
         command: "fvset",
         about: "Chooses a factor variable's base level",
         points: &[p(

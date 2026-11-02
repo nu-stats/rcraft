@@ -57,4 +57,14 @@ real replication packages use most where RCraft refused them. Only what Stata di
 - `estimates restore m1` prints `(results m1 are active now)`, and `_b[]` is m1's again.
 - `estimates dir` lists name, command, dependent variable, number of parameters and title.
 - `estimates clear` drops them all. A later `estimates restore m1` prints `estimation result m1 not found`,
-  r(111).
+  r(111). `estimates drop` of a name not stored prints the same message, r(111).
+- `estimates drop *` drops them all. `estimates dir` with nothing stored prints nothing.
+- Storing again under a name already stored replaces it.
+- `estimates store m0` before any model prints `last estimation results not found, nothing to store`,
+  r(301).
+- `estimates store 1bad` prints `1bad invalid name`, r(7).
+- Abbreviations: `est sto` and `est res` (and `rest`) work. `est st`, `estimates s` and `est cl` print
+  `subcommand estimates st is unrecognized` (and so on), r(198). `est r m1` is taken, but it is not restore:
+  it prints no note.
+- After `estimates restore a`, `predict` uses model a, `_b[]` and `e()` are a's, and `e(cmd)` is
+  `regress`.

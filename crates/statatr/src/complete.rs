@@ -79,6 +79,7 @@ pub const COMMANDS: &[&str] = &[
     "erase",
     "ereturn",
     "estat",
+    "estimates",
     "exit",
     "expand",
     "foreach",

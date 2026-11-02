@@ -21,6 +21,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("count", &["control", "descriptives"]),
     ("egen", &["descriptives"]),
     ("erase", &["replication"]),
+    ("estimates", &["estimates"]),
     ("expand", &["made", "random"]),
     ("foreach", &["aware", "control"]),
     ("forvalues", &["control"]),

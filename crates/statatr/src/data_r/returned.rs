@@ -734,6 +734,163 @@ const MATRIX_NAMES: &[&str] = &[
     "S",
 ];
 
+/// A model `estimates store` kept, and what the translator knew of it then.
+#[derive(Debug, Clone)]
+pub(super) struct StoredFit {
+    estimates: Option<super::model::Estimates>,
+    estimates_lost: Option<String>,
+    e_ret: Returned,
+    weighted_fit: bool,
+    fit_fweight: bool,
+    plain_regress: bool,
+    fit_robust: bool,
+    fit_cluster: bool,
+    /// Its `stata_esample` still marks the rows, and its copy of the
+    /// estimation sample is still the data's; a line since that moves the
+    /// rows or changes the data clears these, as it does for the model held.
+    pub(super) esample: bool,
+    pub(super) changed_since_fit: bool,
+}
+
+/// The R objects a fit leaves, which `estimates store` keeps together.
+const FIT_OBJECTS: &str = "c(\"stata_estimates\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_e\", \"stata_esample\", \"stata_data\", \"stata_cluster\", \"stata_levels\", \"stata_base\", \"stata_rows\")";
+
+impl Session {
+    /// `estimates store`, `restore`, `drop` and `clear` (Stata 19: `sto` and
+    /// `res` are the shortest; a name not stored is r(111), storing with no
+    /// model r(301)).
+    pub(super) fn estimates_cmd(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let (sub, rest) = super::first_word(&c.parts.main);
+        if !c.options.is_empty() {
+            return Err(no(format!(
+                "estimates {sub} with options is not translated yet"
+            )));
+        }
+        let one_name = |what: &str| -> Result<String, Untranslated> {
+            let (name, more) = super::first_word(rest);
+            if name.is_empty() || !more.is_empty() {
+                return Err(no(format!("estimates {what} needs one name")));
+            }
+            if !super::is_name(name) {
+                return Err(no(format!("(Stata: {name} invalid name)")));
+            }
+            Ok(name.to_string())
+        };
+        match sub {
+            s if s.len() >= 3 && "store".starts_with(s) => {
+                let name = one_name("store")?;
+                if matches!(self.e_ret, Returned::Nothing) {
+                    return Err(no(
+                        "estimates store: no model is fitted before it in this do-file (Stata: last estimation results not found, nothing to store)",
+                    ));
+                }
+                self.stored_fits.insert(
+                    name.clone(),
+                    StoredFit {
+                        estimates: self.estimates.clone(),
+                        estimates_lost: self.estimates_lost.clone(),
+                        e_ret: self.e_ret.clone(),
+                        weighted_fit: self.weighted_fit,
+                        fit_fweight: self.fit_fweight,
+                        plain_regress: self.plain_regress,
+                        fit_robust: self.fit_robust,
+                        fit_cluster: self.fit_cluster,
+                        esample: self.esample,
+                        changed_since_fit: self.changed_since_fit,
+                    },
+                );
+                out.line("if (!exists(\"stata_stored\")) stata_stored <- list()");
+                out.line(format!(
+                    "stata_stored[[{}]] <- mget(intersect({FIT_OBJECTS}, ls()))",
+                    r_text(&name)
+                ));
+                Ok(())
+            }
+            s if s.len() >= 3 && "restore".starts_with(s) => {
+                let name = one_name("restore")?;
+                let Some(f) = self.stored_fits.get(&name).cloned() else {
+                    return self.not_stored("restore", &name, out);
+                };
+                self.estimates = f.estimates;
+                self.estimates_lost = f.estimates_lost;
+                self.e_ret = f.e_ret;
+                self.weighted_fit = f.weighted_fit;
+                self.fit_fweight = f.fit_fweight;
+                self.plain_regress = f.plain_regress;
+                self.fit_robust = f.fit_robust;
+                self.fit_cluster = f.fit_cluster;
+                self.esample = f.esample;
+                self.changed_since_fit = f.changed_since_fit;
+                let n = r_text(&name);
+                out.line(format!(
+                    "if (!exists(\"stata_stored\") || is.null(stata_stored[[{n}]])) stop({})",
+                    r_text(&format!("estimation result {name} not found"))
+                ));
+                out.line(format!("rm(list = intersect({FIT_OBJECTS}, ls()))"));
+                out.line(format!(
+                    "invisible(list2env(stata_stored[[{n}]], environment()))"
+                ));
+                out.line(format!(
+                    "cat({})",
+                    r_text(&format!("(results {name} are active now)\n"))
+                ));
+                Ok(())
+            }
+            "clear" => {
+                if !rest.is_empty() {
+                    return Err(no("estimates clear takes no names"));
+                }
+                self.stored_fits.clear();
+                out.line("stata_stored <- list()");
+                Ok(())
+            }
+            "drop" => {
+                let names: Vec<&str> = rest.split_whitespace().collect();
+                if names.is_empty() {
+                    return Err(no("estimates drop needs names"));
+                }
+                if names.iter().any(|n| *n == "_all" || *n == "*") {
+                    self.stored_fits.clear();
+                    out.line("stata_stored <- list()");
+                    return Ok(());
+                }
+                if let Some(n) = names.iter().find(|n| !self.stored_fits.contains_key(**n)) {
+                    return self.not_stored("drop", n, out);
+                }
+                for n in &names {
+                    self.stored_fits.remove(*n);
+                }
+                out.line(format!(
+                    "stata_stored[c({})] <- NULL",
+                    names
+                        .iter()
+                        .map(|n| r_text(n))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                Ok(())
+            }
+            other => Err(no(format!("estimates {other} is not translated yet"))),
+        }
+    }
+
+    /// `estimates restore` or `drop` of a name `estimates store` did not
+    /// keep: Stata's error when no line that was not translated could have
+    /// stored it (eststo, a program), refused otherwise.
+    fn not_stored(&mut self, what: &str, name: &str, out: &mut Out) -> Result<(), Untranslated> {
+        if self.stores_lost {
+            return Err(no(format!(
+                "estimates {what} {name}: no line translated before it stored {name}, and one that was not may have"
+            )));
+        }
+        out.line(format!(
+            "stop({})",
+            r_text(&format!("estimation result {name} not found"))
+        ));
+        Ok(())
+    }
+}
+
 /// Who left the values `e()` or `r()` would read.
 #[derive(Debug, Clone, Default)]
 pub(super) enum Returned {
