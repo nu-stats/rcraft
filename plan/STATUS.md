@@ -3006,3 +3006,14 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   Observations in `plan/stata/clogit.md`.
 - **Numbers:** the replication packages' share is 55.9% (53.8%): tier 2 26.2% (18.5%), tier 3 52.3%
   (16.3%), most of it the `vce(clu ...)` the packages write. StatCraft's probes stay at 83.3%.
+
+## P2C.9 continued: gettoken, 2026-11-02
+
+- **gettoken** (`dofile.rs`): the first token of a macro and what is left, as Stata 19 takes them: leading
+  blanks skipped, the rest keeping its delimiter, quotes taken off, a `parse()` character a token of its
+  own (`<=` and `==` together), `match()` for a token in parentheses, and `(global)` and `(local)` on any
+  name. A macro not known makes the macros it sets not known. `quotes`, `qed()` and `bind` are refused.
+- **Checked:** 15 cases against Stata 19 in `dofile::tests`, and three lines in `made.do` (the `|`-list
+  loop the packages use, `match()`, a `while` over a list); `gettoken` is Verified. Observations in
+  `plan/stata/gettoken.md`.
+- **Numbers:** the replication packages' share is 56.5% (55.9%); StatCraft's probes 83.4%.

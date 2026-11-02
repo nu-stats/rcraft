@@ -565,6 +565,7 @@ pub const GUIDES: &[Guide] = &[
             p("Macro functions", "word count, word # of, the list functions (uniq, dups, sort, sizeof, retokenize, -, |, &, in, ==, ===, posof), length, strlen, subinstr and display are done as Stata 19 does them; variable label and label (var) # come from the data's labels in R, and label set # from the do-file's own label define. type, format and value label are not translated: R does not keep Stata's storage types, display formats or the names of value-label sets."),
             p("unab", "unab gets the data's variable names from R and expands the varlist as Stata does."),
             p("tokenize", "tokenize sets `1', `2', ... as Stata 19 does: every numbered local is cleared first, the outer quotes are taken off, quotes inside hold words together, and each parse() character is a word of its own."),
+            p("gettoken", "gettoken takes the first token of a macro and what is left as Stata 19 does: leading blanks skipped, the rest keeping its delimiter (\" b c\"), quotes taken off, a parse() character a token of its own (<= and == together), and match() for a token in parentheses. The quotes, qed() and bind options are not translated yet."),
             p("Temporary names", "tempvar and tempname give __000000, __000001, ... as Stata does; tempfile gives a file in a folder of RCraft's own."),
         ],
     },
@@ -1174,7 +1175,8 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
         "saveold" => "save",
         "return" => "ereturn",
         "run" | "include" => "do",
-        "global" | "macro" | "tempvar" | "tempname" | "tempfile" | "unab" | "tokenize" => "local",
+        "global" | "macro" | "tempvar" | "tempname" | "tempfile" | "unab" | "tokenize"
+        | "gettoken" => "local",
         "restore" => "preserve",
         "else" => "if",
         "forvalues" | "while" | "continue" => "foreach",

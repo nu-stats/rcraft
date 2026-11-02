@@ -88,6 +88,7 @@ pub const COMMANDS: &[&str] = &[
     "forvalues",
     "fvset",
     "generate",
+    "gettoken",
     "global",
     "graph",
     "gsort",
@@ -192,6 +193,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("estat", &[]),
     ("expand", &["generate("]),
     ("generate", &["after(", "before("]),
+    ("gettoken", &["match(", "parse("]),
     (
         "graph",
         &[
@@ -1093,6 +1095,7 @@ mod tests {
             "tempname",
             "tempvar",
             "tokenize",
+            "gettoken",
             "unab",
             "while",
         ];
@@ -1152,6 +1155,10 @@ mod tests {
             "duplicates" => format!("duplicates drop, {o}"),
             "egen" => format!("egen z = mean(y), {o}"),
             "generate" => format!("generate z = 1, {o}"),
+            "gettoken" => format!(
+                "local s \"a b\"
+gettoken a b : s, {o}"
+            ),
             "graph" if matches!(name, "replace" | "width" | "height" | "as" | "name") => {
                 format!("scatter y x\ngraph export f.png, {o}")
             }

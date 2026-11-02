@@ -15,3 +15,6 @@
 @ rc_failed                        1
 @ rc_ok                        0
 @ quiet_mean       1.2440476190476191
+@ gettoken                      6.5 1 1
+@ gettoken_match                        2 1 5
+@ gettoken_loop                       60

@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2B.10): made-up data; Stata 19's results are in made.recorded
-* commands: expand preserve restore set tokenize
-* (data the do-file makes itself: set obs, expand, preserve and restore, tokenize, one-line if and else, _rc after capture, quietly)
+* commands: expand gettoken preserve restore set tokenize
+* (data the do-file makes itself: set obs, expand, preserve and restore, tokenize, gettoken with parse() and match(), one-line if and else, _rc after capture, quietly)
 * tolerance: 1e-8
 version 19
 clear
@@ -43,3 +43,19 @@ capture summarize v
 display "@ rc_ok " %24.17g _rc
 quietly summarize v if dup == 0
 display "@ quiet_mean " %24.17g r(mean)
+local spec "2.5 | 4 | x y"
+gettoken first rest : spec, parse("|")
+gettoken pipe rest : rest, parse("|")
+gettoken second rest : rest, parse("|")
+display "@ gettoken " %24.17g (`first' + `second') " " ("`pipe'" == "|") " " ("`rest'" == "| x y")
+local s "(3 4) 5"
+gettoken inside after : s, match(m)
+local words : word count `inside'
+display "@ gettoken_match " %24.17g `words' " " ("`m'" == "(") " " `after'
+local list "10 20 30"
+local total 0
+while "`list'" != "" {
+  gettoken one list : list
+  local total = `total' + `one'
+}
+display "@ gettoken_loop " %24.17g `total'

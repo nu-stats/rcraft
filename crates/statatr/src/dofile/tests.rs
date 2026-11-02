@@ -508,7 +508,7 @@ fn one_line_if_and_else_run_the_command_the_condition_picks() {
 #[test]
 fn macros_not_known_are_said_so_not_left_empty() {
     let d = run(concat!(
-        "local s \"a b\"\ngettoken first s : s\ndisplay \"[`first'] [`s']\"\n",
+        "local s \"a b\"\ngettoken first s : s, quotes\ndisplay \"[`first'] [`s']\"\n",
         "local one \"x\"\ndisplay \"[`macval(one)']\"\ndisplay \"[$S_level]\"\n",
         "global S_mine 3\ndisplay \"$S_mine\"\n",
     ));
@@ -521,7 +521,8 @@ fn macros_not_known_are_said_so_not_left_empty() {
     assert!(not("gettoken"), "{s:?}");
     assert!(
         s.iter()
-            .any(|l| l.contains("`first' is not known: gettoken first s : s was not translated")),
+            .any(|l| l
+                .contains("`first' is not known: gettoken first s : s, quotes was not translated")),
         "{s:?}"
     );
     assert!(
@@ -610,5 +611,58 @@ fn natscale_leaves_its_labels_in_r() {
             "stata_r <- list(n = 0x1.8000000000000p2, min = 0, max = 0x1.0000000000000p0, delta = 0x1.999999999999ap-3)"
         )),
         "{code:?}"
+    );
+}
+
+/// What Stata 19 printed for each (made-up text, `plan/stata/gettoken.md`):
+/// leading blanks skipped, the rest keeps its delimiter, a parse() character
+/// is a token of its own, quotes come off, match() takes a parenthesis.
+#[test]
+fn gettoken_takes_the_first_token_as_stata_does() {
+    let d = run(concat!(
+        "local list \"a b c\"\ngettoken f r : list\ndisplay \"A[`f'][`r']\"\n",
+        "local list `\"\"a b\" c\"'\ngettoken f r : list\ndisplay `\"B[`f'][`r']\"'\n",
+        "local s \"x y|z w\"\ngettoken a b : s, parse(\"|\")\ndisplay \"C[`a'][`b']\"\n",
+        "gettoken p b : b, parse(\"|\")\ndisplay \"D[`p'][`b']\"\n",
+        "local s \"  x|y\"\ngettoken a b : s, parse(\"|\")\ndisplay \"E[`a'][`b']\"\n",
+        "local e \"\"\ngettoken a b : e\ndisplay \"F[`a'][`b']\"\n",
+        "local s \"x<=5\"\ngettoken a b : s, parse(\"<= \")\ngettoken c d : b, parse(\"<= \")\ndisplay \"G[`a'][`b'][`c'][`d']\"\n",
+        "local s \"a   b  \"\ngettoken a b : s\ndisplay \"H[`a'][`b']\"\n",
+        "global G \"one two\"\ngettoken (global) H (local) K : (global) G\ndisplay \"I[$H][`K']\"\n",
+        "local varlist \"y x1 x2\"\ngettoken depvar explvar: varlist\ndisplay \"J[`depvar'][`explvar']\"\n",
+        "local s \"| x | y\"\ngettoken a b : s, parse(\"|\")\ngettoken a b : b, parse(\"|\")\ndisplay \"K[`a'][`b']\"\n",
+        "local s \"a\"\ngettoken a s : s\ngettoken a s : s\ndisplay \"L[`a'][`s']\"\n",
+        "local s \"(b c) d\"\ngettoken a b : s, match(m)\ndisplay \"M[`a'][`b'][`m']\"\n",
+        "local s \"a(b c)d e\"\ngettoken a b : s, match(m)\ndisplay \"N[`a'][`b'][`m']\"\n",
+        "local s \"a b\"\ngettoken a : s\ndisplay \"O[`a'][`s']\"\n",
+    ));
+    let got: Vec<String> = stata_lines(&d, "display")
+        .iter()
+        .map(|s| {
+            let s = s.trim_start_matches("display ").trim_start_matches('`');
+            s.trim_matches(|c| c == '"' || c == '\'').to_string()
+        })
+        .collect();
+    assert_eq!(
+        got,
+        [
+            "A[a][ b c]",
+            "B[a b][ c]",
+            "C[x y][|z w]",
+            "D[|][z w]",
+            "E[x][|y]",
+            "F[][]",
+            "G[x][<=5][<=][5]",
+            "H[a][   b  ]",
+            "I[one][ two]",
+            "J[y][ x1 x2]",
+            "K[x ][| y]",
+            "L[][]",
+            "M[b c][ d][(]",
+            "N[a(b][ c)d e][]",
+            "O[a][a b]",
+        ],
+        "{:?}",
+        shown(&d)
     );
 }

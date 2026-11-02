@@ -747,26 +747,53 @@ impl<'f> Run<'f> {
                 self.push(line, What::Command, None, written);
                 Flow::Line
             }
-            // gettoken is not run yet: the macros it sets are not known after it
+            // the first token of a macro, and what is left, as Stata 19 takes them
             "gettoken" => {
                 self.done_item(depth);
-                let names = rest.split_once(':').map(|(n, _)| n).unwrap_or("");
-                let why = format!("{} was not translated", c.text.trim());
-                let mut global = false;
-                for n in names.split_whitespace() {
-                    match n {
-                        "(local)" => global = false,
-                        "(global)" => global = true,
-                        n if macros::is_name(n) => {
-                            self.set_macro(n, global, Macro::Lost(why.clone()))
+                let g = match gettoken_parts(&rest) {
+                    Ok(g) => g,
+                    Err(why) => {
+                        let names = rest.split_once(':').map(|(n, _)| n).unwrap_or("");
+                        let lost = format!("{} was not translated", c.text.trim());
+                        for (n, global) in qualified_names(names) {
+                            self.set_macro(&n, global, Macro::Lost(lost.clone()));
                         }
-                        _ => {}
+                        let line = self.t.refused(c.span, c.text.clone(), why);
+                        return self.line_with(line, What::Command, None, written);
                     }
+                };
+                let (src, src_global) = g.source.clone();
+                let value = if src_global {
+                    self.globals.get(&src).cloned()
+                } else {
+                    self.locals().and_then(|l| l.get(&src).cloned())
+                };
+                let text = match value {
+                    None => String::new(),
+                    Some(Macro::Text(t)) => t,
+                    Some(Macro::Later(why) | Macro::Lost(why)) => {
+                        let unknown = |why: &str| Macro::Lost(why.to_string());
+                        for (n, global) in g.targets.iter().chain(g.matched.iter()) {
+                            self.set_macro(n, *global, unknown(&why));
+                        }
+                        let line = self.t.refused(c.span, c.text.clone(), why);
+                        return self.line_with(line, What::Command, None, written);
+                    }
+                };
+                let (token, left, paren) = gettoken(&text, &g.parse, g.matched.is_some());
+                let mut info = Vec::new();
+                if let Some((n, global)) = g.targets.first() {
+                    info.push(format!("`{n}' = {token}"));
+                    self.set_macro(n, *global, Macro::Text(token));
                 }
-                let line = self
-                    .t
-                    .refused(c.span, c.text.clone(), "gettoken is not translated yet");
-                self.line_with(line, What::Command, None, written)
+                if let Some((n, global)) = g.targets.get(1) {
+                    info.push(format!("`{n}' = {left}"));
+                    self.set_macro(n, *global, Macro::Text(left));
+                }
+                if let Some((n, global)) = &g.matched {
+                    self.set_macro(n, *global, Macro::Text(paren));
+                }
+                self.line_with(nothing(c), What::Macro, Some(info.join(", ")), written)
             }
             // the positional locals `1', `2', ... from text, as Stata 19 sets
             // them: every numbered local is cleared first
@@ -2106,6 +2133,155 @@ fn tokenize_parts(rest: &str) -> Result<(String, String), String> {
         .and_then(|o| o.strip_suffix(')'))
         .ok_or_else(|| format!("tokenize with the option {opts} is not translated"))?;
     Ok((macros::unquote(text.trim()), macros::unquote(inner.trim())))
+}
+
+/// What `gettoken` names: the macros it sets (with whether each is
+/// global), the macro it reads, its `parse()` characters and its `match()`
+/// macro.
+struct GetToken {
+    targets: Vec<(String, bool)>,
+    source: (String, bool),
+    parse: String,
+    matched: Option<(String, bool)>,
+}
+
+/// `name`, `(global) name`, `(local) name`, in order.
+fn qualified_names(text: &str) -> Vec<(String, bool)> {
+    let mut out = Vec::new();
+    let mut global = false;
+    for w in text.split_whitespace() {
+        match w {
+            "(local)" => global = false,
+            "(global)" => global = true,
+            n if macros::is_name(n) => {
+                out.push((n.to_string(), global));
+                global = false;
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// `gettoken a [b] : c [, parse("...") match(m)]`.
+fn gettoken_parts(rest: &str) -> Result<GetToken, String> {
+    let (names, after) = rest
+        .split_once(':')
+        .ok_or("gettoken needs `:` before the macro it reads")?;
+    let targets = qualified_names(names);
+    if targets.is_empty() || targets.len() > 2 {
+        return Err("gettoken takes one or two macro names before `:`".into());
+    }
+    let (src, opts) = match after.split_once(',') {
+        Some((s, o)) => (s, o.trim()),
+        None => (after, ""),
+    };
+    let source = match qualified_names(src).as_slice() {
+        [one] => one.clone(),
+        _ => return Err("gettoken reads one macro after `:`".into()),
+    };
+    let mut parse = " ".to_string();
+    let mut matched = None;
+    let mut o = opts;
+    while !o.is_empty() {
+        let (word, arg, next) = match o.find('(') {
+            Some(open) if !o[..open].contains(char::is_whitespace) => {
+                let close = o[open..]
+                    .find(')')
+                    .map(|k| k + open)
+                    .ok_or("a ( without its ) in gettoken's options")?;
+                (&o[..open], Some(&o[open + 1..close]), o[close + 1..].trim())
+            }
+            _ => match o.split_once(char::is_whitespace) {
+                Some((w, n)) => (w, None, n.trim()),
+                None => (o, None, ""),
+            },
+        };
+        match (word, arg) {
+            (w, Some(a)) if !w.is_empty() && "parse".starts_with(w) => {
+                parse = macros::unquote(a.trim());
+            }
+            (w, Some(a)) if !w.is_empty() && "match".starts_with(w) => {
+                matched = Some(
+                    qualified_names(a)
+                        .first()
+                        .cloned()
+                        .ok_or("match() needs a macro name")?,
+                );
+            }
+            _ => {
+                return Err(format!(
+                    "gettoken with the option {word} is not translated yet"
+                ))
+            }
+        }
+        o = next;
+    }
+    Ok(GetToken {
+        targets,
+        source,
+        parse,
+        matched,
+    })
+}
+
+/// The first token of `text` and the rest, as Stata 19's gettoken takes
+/// them: leading blanks skipped; a quoted token without its quotes; a
+/// `parse` character a token of its own (`<=` and `==` stay together);
+/// otherwise up to the next `parse` character, which the rest keeps. With
+/// `paren`, a token in parentheses is what is inside them, and the third
+/// value is `(` (empty otherwise).
+fn gettoken(text: &str, parse: &str, paren: bool) -> (String, String, String) {
+    let chars: Vec<char> = text.chars().collect();
+    let at = |k: usize| chars.get(k).copied();
+    let from =
+        |a: usize, b: usize| -> String { chars.iter().skip(a).take(b.saturating_sub(a)).collect() };
+    let mut i = 0;
+    while at(i) == Some(' ') {
+        i += 1;
+    }
+    let Some(first) = at(i) else {
+        return (String::new(), String::new(), String::new());
+    };
+    if paren && first == '(' {
+        let mut depth = 0usize;
+        let mut k = i;
+        while let Some(ch) = at(k) {
+            if ch == '(' {
+                depth += 1;
+            } else if ch == ')' {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return (from(i + 1, k), from(k + 1, chars.len()), "(".into());
+                }
+            }
+            k += 1;
+        }
+    }
+    if first == '`' && at(i + 1) == Some('"') {
+        let end = compound_end(&chars, i);
+        return (
+            from(i + 2, end.saturating_sub(2)),
+            from(end, chars.len()),
+            String::new(),
+        );
+    }
+    if first == '"' {
+        let end = closing_quote(&chars, i + 1);
+        return (from(i + 1, end), from(end + 1, chars.len()), String::new());
+    }
+    if parse.contains(first) {
+        let len = if "=><!~".contains(first) && at(i + 1) == Some('=') {
+            2
+        } else {
+            1
+        };
+        return (from(i, i + len), from(i + len, chars.len()), String::new());
+    }
+    let end = (i..chars.len())
+        .find(|&k| at(k).is_some_and(|ch| parse.contains(ch)))
+        .unwrap_or(chars.len());
+    (from(i, end), from(end, chars.len()), String::new())
 }
 
 /// Where the `"` closing a quote is, from `from` on (the end if none).
