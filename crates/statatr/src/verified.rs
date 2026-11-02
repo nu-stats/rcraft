@@ -13,6 +13,7 @@
 /// Each Verified command, with the corpus files that check it.
 pub const VERIFIED: &[(&str, &[&str])] = &[
     ("anova", &["panel"]),
+    ("bootstrap", &["bootstrap"]),
     ("bsample", &["bsample"]),
     ("collapse", &["data"]),
     ("correlate", &["descriptives"]),

@@ -135,3 +135,32 @@ all 280 match:
 `bsample.do` in the corpus checks the rows, their order and what follows (18 results, including five
 draws in a `preserve`/`restore` loop). Not translated yet: `bsample` with `if` and a size or `cluster()`
 (not observed), `strata()`, `weight()`, and the `bootstrap` prefix.
+
+## `bootstrap` (P2C.16 part two)
+
+`bootstrap [exp_list] [, reps(#) seed(#) nodots cluster(v) level(#)]: command`. The command is translated
+once, quietly, and run twice: on the data, for the observed values, then once per replication in a loop.
+Each replication works on `stata_bsample` of the estimation sample (`stata_bs_report`, `data_r/random.rs`).
+
+Observed in Stata 19 (`q10`, `q11`), against made-up data. The tables and messages are the same as
+Stata's, line for line:
+- **Draws:** only the estimation sample is resampled, two draws a row. After three replications on 37
+  rows of 40, the next draw is the 223rd, not the 241st.
+- **Floats:** every replicate is kept as a float, `_b`'s included; observed values are not. Rounding the
+  replicates moves standard errors in the seventh digit.
+- **Variance:** over the replicates with no missing value, on R − 1. Intervals are normal-based.
+- **Messages:** `(running cmd on estimation sample)` and the dots unless `nodots`. A command that sets no
+  `e(sample)` gets Stata's warning even with `nodots`. A dot a replication, the count every tenth, a new
+  line after each fiftieth, then ` done`.
+- **Header:** after `regress`, `logit` and `probit` the model's header with Wald chi2. Otherwise
+  `Bootstrap results` and the `Command:` lines. `(Replications based on # clusters in v)` with
+  `cluster()`.
+
+In `bootstrap.do` (9 results) the standard errors match to 1e-9. `logit`'s agree only to about 7 digits,
+as its own coefficients do.
+
+Not translated yet:
+- `strata()`, `saving()`, `bca` and the other options;
+- `_b` after other models;
+- `predict` and `estat bootstrap` after it;
+- `vce(bootstrap)` as a model option.

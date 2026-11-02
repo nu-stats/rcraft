@@ -650,6 +650,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_expand" => EXPAND_HELPER,
         "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
         "stata_rng" => random::RNG_HELPER,
+        "stata_bootstrap" => random::BOOTSTRAP_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -1450,6 +1451,7 @@ impl Session {
             "describe" => self.describe(c, out),
             "set" => self.set(c, out),
             "bsample" => self.bsample(c, &opts, out),
+            "bootstrap" => self.bootstrap(c, out),
             "clear" => {
                 if let Some(d) = self.data.take() {
                     out.line(format!("rm({d})"));
@@ -2867,6 +2869,40 @@ mod tests {
             ("use s\nbsample n", "not a number written out"),
             ("use s\nbsample, idcluster(k)", "needs cluster()"),
             ("use s\nversion 13\nbsample", "KISS32"),
+        ] {
+            let out = r(src);
+            assert!(out.iter().any(|l| l.contains(why)), "{src}: {out:?}");
+        }
+    }
+
+    #[test]
+    fn bootstrap_runs_the_command_on_stata_s_samples() {
+        let out = r("use s\nbootstrap m=r(mean), reps(5) seed(3): summarize y\ndisplay _se[m]");
+        let b = &out[1];
+        assert!(b.contains("stata_set_seed(3)"), "{b}");
+        assert!(
+            b.contains("stata_bs_begin(\"summarize\", FALSE, 5, FALSE)"),
+            "{b}"
+        );
+        assert!(
+            b.contains("stata_bsample(stata_bs_full[stata_bs_rows, , drop = FALSE])"),
+            "{b}"
+        );
+        assert!(b.contains("stata_float(stats::setNames(c("), "{b}");
+        assert!(!out[2].starts_with("NOT: "), "{out:?}");
+        let out = r("use s\nbootstrap _b, reps(4) nodots: regress y x");
+        assert!(out[1].contains("stata_bs_rows <- stata_esample"), "{out:?}");
+        for (src, why) in [
+            (
+                "use s\nbootstrap, reps(5): summarize y",
+                "expression list required",
+            ),
+            ("use s\nbootstrap r(mean), saving(f): summarize y", "saving"),
+            (
+                "use s\nbootstrap _b: anova y g",
+                "after regress, logit and probit",
+            ),
+            ("use s\nbootstrap r(mean)", "a command after a colon"),
         ] {
             let out = r(src);
             assert!(out.iter().any(|l| l.contains(why)), "{src}: {out:?}");

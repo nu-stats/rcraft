@@ -474,6 +474,47 @@ use crate::expr_r::{self, Kind, Untranslated, Use};
 use crate::lang::expr::Expr;
 use crate::reader::Command;
 
+/// Where `ch` first comes outside parentheses, brackets and quotes.
+fn top_level(text: &str, ch: char) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut quoted = false;
+    for (i, c) in text.char_indices() {
+        match c {
+            '"' => quoted = !quoted,
+            '(' | '[' if !quoted => depth += 1,
+            ')' | ']' if !quoted => depth -= 1,
+            _ if c == ch && depth == 0 && !quoted => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The items of an expression list, split at spaces outside parentheses.
+fn split_items(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0i32;
+    for c in text.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            _ => {}
+        }
+        if c.is_whitespace() && depth == 0 {
+            if !cur.is_empty() {
+                out.push(std::mem::take(&mut cur));
+            }
+        } else {
+            cur.push(c);
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
 /// Whether an expression has one value for the whole data (`_N > 5`,
 /// `x[1] == 2`): no variable, no `_n`, no draw.
 fn same_for_every_row(e: &Expr) -> bool {
@@ -513,6 +554,166 @@ const RANDOM_FUNCTIONS: &[&str] = &[
     "rweibullph",
     "uniform",
 ];
+
+/// The `bootstrap` prefix (P2C.16 part two): Stata's messages, its results
+/// table and `e()`, after the translation has run the command on the data
+/// and on `reps()` samples of its estimation sample. The rules are
+/// StatCraft's (probes 180 and 181) and were checked again here:
+/// - the replicates are kept as floats, and so is an observed value that is
+///   not `_b`;
+/// - the variance is over the replicates with no missing value, on R - 1;
+/// - intervals are normal-based;
+/// - only the estimation sample is resampled, two draws a row.
+pub(super) const BOOTSTRAP_HELPER: &str = r##"stata_bs_sum <- function(v) {
+  s <- 0
+  for (x in v) s <- s + x
+  s
+}
+stata_bs_begin <- function(cmdname, eclass, reps, nodots) {
+  if (!nodots) cat("(running ", cmdname, " on estimation sample)\n", sep = "")
+  if (!eclass) {
+    cat("\nwarning: ", cmdname, " does not set e(sample), so no observations will be\n",
+        "         excluded from the resampling because of missing values or other\n",
+        "         reasons. To exclude observations, press Break, save the data, drop\n",
+        "         any observations that are to be excluded, and rerun bootstrap.\n", sep = "")
+  }
+  if (!nodots) cat("\nBootstrap replications (", reps, "): ", sep = "")
+  invisible(NULL)
+}
+stata_bs_dot <- function(i, total, nodots) {
+  if (nodots) return(invisible(NULL))
+  cat(if (i %% 10 == 0) i else ".")
+  if (i %% 50 == 0 && i < total) cat("\n")
+  if (i == total) cat(" done\n")
+  invisible(NULL)
+}
+# _b: the model's e(b), its base and omitted columns left out, one equation's name dropped
+stata_bs_b <- function() {
+  b <- stata_e$b
+  nm <- colnames(b)
+  keep <- !grepl("(^|[:#])[0-9]*[bo]n?\\.", nm) & !grepl("(^|:)o\\.", nm)
+  stats::setNames(as.vector(b)[keep], sub("^[^:]*:", "", nm[keep]))
+}
+stata_bs_report <- function(obs, reps, exps, command, n_used, level = 0.95, model = NULL,
+                            cluster = NULL, n_units = NULL, depvar = "") {
+  names <- names(obs)
+  k <- length(obs)
+  ok <- stats::complete.cases(reps)
+  X <- reps[ok, , drop = FALSE]
+  R <- nrow(X)
+  mean <- vapply(seq_len(k), function(j) stata_bs_sum(X[, j]) / R, 0)
+  V <- matrix(0, k, k, dimnames = list(names, names))
+  for (a in seq_len(k)) for (c in seq_len(k)) {
+    v <- stata_bs_sum((X[, a] - mean[a]) * (X[, c] - mean[c])) / (R - 1)
+    V[a, c] <- if (abs(v) < 1e-300) 0 else v
+  }
+  se <- sqrt(pmax(diag(V), 0))
+  alpha <- (1 - level) / 2
+  z <- stats::qnorm(1 - alpha)
+  pad <- function(s, w) formatC(as.character(s), width = w)
+  short <- function(s) ifelse(nchar(s) > 12, paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s))), s)
+  g9 <- function(x) stata_fmt(x, "%9.0g")
+  cmd <- if (is.null(model)) NULL else model[["cmd"]]
+  title <- if (!is.null(model) && !is.null(model[["title"]])) model[["title"]] else "Bootstrap results"
+  slopes <- names != "_cons"
+  wald <- if (!is.null(model) && any(slopes)) {
+    s <- which(slopes)
+    drop(t(obs[s]) %*% solve(V[s, s, drop = FALSE], obs[s]))
+  } else NA_real_
+  cat("\n")
+  if (!is.null(cmd) && cmd %in% c("regress", "logit", "probit")) {
+    right <- function(l, v) paste0(formatC(l, width = -14), "= ", pad(v, 6))
+    q <- sum(slopes)
+    lines <- list(c(title, right("Number of obs", format(model$N, big.mark = ","))),
+                  c("", right("Replications", R)),
+                  c("", right(sprintf("Wald chi2(%d)", q), sprintf("%.2f", wald))),
+                  c("", right("Prob > chi2", sprintf("%.4f", stats::pchisq(wald, q, lower.tail = FALSE)))))
+    if (cmd == "regress") {
+      lines <- c(lines, list(c("", right("R-squared", sprintf("%.4f", model$r2))),
+                             c("", right("Adj R-squared", sprintf("%.4f", model$r2_a))),
+                             c("", right("Root MSE", sprintf("%.4f", model$rmse)))))
+    } else {
+      lines <- c(lines, list(c(paste0("Log likelihood = ", trimws(stata_fmt(model$ll, "%10.0g"))),
+                               right("Pseudo R2", sprintf("%.4f", model$r2_p)))))
+    }
+    for (l in lines) cat(formatC(l[1], width = -56), l[2], "\n", sep = "")
+  } else {
+    w <- max(nchar(n_used), nchar(R))
+    cat(formatC(title, width = -60), "Number of obs = ", pad(n_used, w), "\n", sep = "")
+    cat(strrep(" ", 60), "Replications  = ", pad(R, w), "\n\n", sep = "")
+    cat(pad("Command", 13), ": ", command, "\n", sep = "")
+    for (j in seq_len(k)) cat(pad(short(names[j]), 13), ": ", exps[j], "\n", sep = "")
+  }
+  cat("\n")
+  if (!is.null(cluster)) cat(pad(sprintf("(Replications based on %d clusters in %s)", n_units, cluster), 78), "\n", sep = "")
+  cat(strrep("-", 78), "\n", sep = "")
+  cat("             |   Observed   Bootstrap                         Normal-based\n")
+  cat(pad(short(depvar), 12), " | coefficient  std. err.      z    P>|z|     [",
+      stata_fmt(100 * level, "%9.0g", trim = TRUE), "% conf. interval]\n", sep = "")
+  cat("-------------+----------------------------------------------------------------\n")
+  for (j in seq_len(k)) {
+    b <- obs[j]
+    if (V[j, j] <= 0) {
+      cat(pad(short(names[j]), 12), " |", pad(g9(b), 11), pad(".", 11), pad(".", 9), pad(".", 8),
+          pad(".", 13), pad(".", 12), "\n", sep = "")
+      next
+    }
+    t <- b / se[j]
+    p <- 2 * stats::pnorm(-abs(t))
+    cat(pad(short(names[j]), 12), " |", pad(g9(b), 11), pad(g9(se[j]), 11), pad(sprintf("%.2f", t), 9),
+        pad(sprintf("%.3f", p), 8), pad(g9(b - z * se[j]), 13), pad(g9(b + z * se[j]), 12), "\n", sep = "")
+  }
+  cat(strrep("-", 78), "\n", sep = "")
+  row <- function(v, r) matrix(v, 1, k, dimnames = list(r, names))
+  pct <- function(v, p) {
+    v <- sort(v)
+    target <- length(v) * p / 100
+    before <- 0
+    prev <- NA_real_
+    for (x in v) {
+      after <- before + 1
+      if (after > target) return(if (!is.na(prev) && before == target) (prev + x) / 2 else x)
+      before <- after
+      prev <- x
+    }
+    prev
+  }
+  ci <- function(lo, hi) matrix(c(lo, hi), 2, k, byrow = TRUE, dimnames = list(c("ll", "ul"), names))
+  z0 <- vapply(seq_len(k), function(j) stats::qnorm(sum(X[, j] <= obs[j]) / R), 0)
+  e <- if (is.null(model)) list() else model[c("N", "r2", "r2_a", "rmse", "ll", "ll_0", "r2_p", "depvar", "title")[
+    c("N", "r2", "r2_a", "rmse", "ll", "ll_0", "r2_p", "depvar", "title") %in% names(model)]]
+  e$b <- row(obs, "y1")
+  e$V <- V
+  e$N <- n_used
+  e$N_reps <- R
+  e$N_misreps <- nrow(reps) - R
+  e$level <- 100 * level
+  e$rank <- sum(diag(V) > 0)
+  e$k_eq <- 1
+  e$k_exp <- if (is.null(model)) k else 0
+  e$k_eexp <- if (is.null(model)) 0 else k
+  e$k_extra <- 0
+  e$bs_version <- 3
+  if (!is.null(cluster)) e$N_clust <- n_units
+  e$cmd <- if (is.null(cmd)) "bootstrap" else cmd
+  e$prefix <- "bootstrap"
+  e$title <- title
+  e$command <- command
+  e$vcetype <- "Bootstrap"
+  e$vce <- "bootstrap"
+  e$properties <- "b V"
+  e$b_bs <- row(mean, "y1")
+  e$reps <- row(rep(R, k), "r1")
+  e$bias <- row(mean - obs, "bias")
+  e$z0 <- row(z0, "z0")
+  e$se <- row(se, "se")
+  e$ci_normal <- ci(obs - z * se, obs + z * se)
+  e$ci_percentile <- ci(vapply(seq_len(k), function(j) pct(X[, j], 100 * alpha), 0),
+                        vapply(seq_len(k), function(j) pct(X[, j], 100 - 100 * alpha), 0))
+  e$ci_bc <- ci(vapply(seq_len(k), function(j) pct(X[, j], 100 * stats::pnorm(2 * z0[j] - z)), 0),
+                vapply(seq_len(k), function(j) pct(X[, j], 100 * stats::pnorm(2 * z0[j] + z)), 0))
+  e
+}"##;
 
 /// Commands that draw from the generator, or run code that may.
 const DRAWING_COMMANDS: &[&str] = &[
@@ -745,6 +946,263 @@ impl Session {
         out.caveat(
             "Stata's own draws: the same seed gives the rows Stata's bsample gives, in its order",
         );
+        Ok(())
+    }
+
+    /// `bootstrap [exp_list] [, reps(#) seed(#) nodots cluster(v) level(#)]: command`
+    /// (P2C.16 part two): the command is translated once, quietly, and run on
+    /// the data for the observed values, then on `reps()` samples of its
+    /// estimation sample drawn as `bsample` draws them; `stata_bs_report`
+    /// prints Stata's table and leaves its `e()`.
+    pub(super) fn bootstrap(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(why) = self.rng_old.as_ref().or(self.rng_lost.as_ref()) {
+            return Err(no(why.clone()));
+        }
+        self.no_by(c, "bootstrap")?;
+        let text = c.text.trim();
+        let colon = top_level(text, ':')
+            .ok_or_else(|| no("bootstrap needs a command after a colon (Stata: r(198))"))?;
+        let (head, inner_text) = (
+            text.get(..colon).unwrap_or(""),
+            text.get(colon + 1..).unwrap_or(""),
+        );
+        // the command word ends at a space or the comma of its options
+        let head = head
+            .find(|ch: char| ch.is_whitespace() || ch == ',')
+            .and_then(|i| head.get(i..))
+            .unwrap_or("")
+            .trim();
+        let (explist, opt_text) = match top_level(head, ',') {
+            Some(i) => (head.get(..i).unwrap_or(""), head.get(i + 1..).unwrap_or("")),
+            None => (head, ""),
+        };
+        let opts_cmd = crate::reader::read(&format!("bootstrap , {opt_text}"));
+        let opt_list = opts_cmd
+            .commands()
+            .first()
+            .map(|c| c.options.clone())
+            .unwrap_or_default();
+        let opts = super::Opts(&opt_list);
+        if let Some(o) = opts.other(&[
+            ("reps", 1),
+            ("seed", 4),
+            ("nodots", 4),
+            ("cluster", 2),
+            ("level", 1),
+        ]) {
+            return Err(no(format!(
+                "bootstrap with the option {o} is not translated yet"
+            )));
+        }
+        let reps: u32 = match opts.arg("reps", 1) {
+            Some(r) => r.trim().parse().ok().filter(|r| *r >= 2).ok_or_else(|| {
+                no(format!(
+                    "reps({}) is not translated: a whole number of 2 or more",
+                    r.trim()
+                ))
+            })?,
+            None => 50,
+        };
+        let level = super::model::level(&opts)?;
+        let nodots = opts.has("nodots", 4);
+        let cluster = opts.arg("cluster", 2).map(|v| v.trim().to_string());
+        if let Some(v) = &cluster {
+            if !super::is_name(v) {
+                return Err(no(format!("{v} is not a variable name")));
+            }
+        }
+        let d = self.data()?;
+        // the command, run quietly as Stata does inside bootstrap
+        let program = crate::reader::read(inner_text.trim());
+        let mut inner = match program.commands().as_slice() {
+            [one] => (*one).clone(),
+            _ => return Err(no("bootstrap of more than one command is not translated")),
+        };
+        if !inner.prefixes.is_empty() || matches!(inner.name.as_str(), "bootstrap" | "bsample") {
+            return Err(no(format!(
+                "bootstrap of {} with a prefix, or of bootstrap or bsample, is not translated yet",
+                inner.name
+            )));
+        }
+        inner.prefixes.push(crate::reader::Prefix::Quietly);
+        let mut seed_line = None;
+        if let Some(s) = opts.arg("seed", 4) {
+            let mut o = Out::default();
+            self.set_seed(s.trim(), &mut o)?;
+            seed_line = Some(o.code.join("\n"));
+        }
+        let mut body = Out::default();
+        self.e_new = false;
+        self.r_new = None;
+        self.dispatch(&inner, &mut body)?;
+        let eclass = self.e_new;
+        let r_left = self.r_new.take();
+        self.track_returned(&inner, true, r_left);
+        // the statistics: _b, name=exp or exp (named _bs_1, ...)
+        let mut names: Vec<String> = Vec::new();
+        let mut exps: Vec<String> = Vec::new();
+        let mut codes: Vec<String> = Vec::new();
+        let mut by_b = false;
+        let items = split_items(explist);
+        let items = if items.is_empty() && eclass {
+            vec!["_b".to_string()]
+        } else {
+            items
+        };
+        if items.is_empty() {
+            return Err(no("bootstrap: expression list required (Stata: r(100))"));
+        }
+        let mut unnamed = 0;
+        for item in &items {
+            if item == "_b" {
+                if !eclass || !matches!(inner.name.as_str(), "regress" | "logit" | "probit") {
+                    return Err(no(
+                        "bootstrap _b is translated after regress, logit and probit; not here yet",
+                    ));
+                }
+                if items.len() > 1 {
+                    return Err(no(
+                        "bootstrap _b with other expressions is not translated yet",
+                    ));
+                }
+                by_b = true;
+                continue;
+            }
+            let (name, exp) = match item.split_once('=') {
+                Some((n, e)) if super::is_name(n.trim()) && !e.starts_with('=') => {
+                    (n.trim().to_string(), e.trim().to_string())
+                }
+                _ => {
+                    unnamed += 1;
+                    (format!("_bs_{unnamed}"), item.clone())
+                }
+            };
+            let exp = exp
+                .strip_prefix('(')
+                .and_then(|e| e.strip_suffix(')'))
+                .map_or(exp.clone(), str::to_string);
+            let (code, kind) = self.value(&exp, &mut body)?;
+            if kind == Kind::Text {
+                return Err(no(format!("{exp} is a string (Stata: type mismatch)")));
+            }
+            names.push(name);
+            exps.push(exp);
+            codes.push(code);
+        }
+        // the observed values as computed; the replicates of a named
+        // expression kept as floats, those of _b as doubles (q10, Stata 19)
+        let (stats, rep_stats) = if by_b {
+            (
+                "stata_bs_b()".to_string(),
+                "stata_float(stata_bs_b())".to_string(),
+            )
+        } else {
+            let named = format!(
+                "stats::setNames(c({}), c({}))",
+                codes.join(", "),
+                names
+                    .iter()
+                    .map(|n| super::r_text(n))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            (named.clone(), format!("stata_float({named})"))
+        };
+        let k = if by_b {
+            "length(stata_bs_obs)".to_string()
+        } else {
+            names.len().to_string()
+        };
+        for h in [
+            "stata_rng",
+            "stata_bootstrap",
+            "stata_fmt",
+            "stata_float",
+            "stata_names",
+            "stata_returned",
+        ] {
+            self.helpers.insert(h);
+        }
+        for h in std::mem::take(&mut body.helpers) {
+            self.helpers.insert(h);
+        }
+        for p in &body.packages {
+            out.package(p);
+        }
+        let code = body.code.join("\n");
+        let cmdname = inner.name.clone();
+        let command = inner_text.trim();
+        let depvar = if by_b {
+            self.estimates
+                .as_ref()
+                .map(|e| e.dep.clone())
+                .unwrap_or_default()
+        } else {
+            String::new()
+        };
+        out.line(format!("stata_bs_full <- {d}"));
+        if let Some(s) = seed_line {
+            out.line(s);
+        }
+        out.line(code.clone());
+        out.line(format!("stata_bs_obs <- {stats}"));
+        out.line(if eclass {
+            "stata_bs_rows <- stata_esample".to_string()
+        } else {
+            "stata_bs_rows <- rep(TRUE, nrow(stata_bs_full))".to_string()
+        });
+        out.line(if by_b {
+            "stata_bs_model <- stata_e"
+        } else {
+            "stata_bs_model <- NULL"
+        });
+        out.line(format!(
+            "stata_bs_begin({}, {}, {reps}, {})",
+            super::r_text(&cmdname),
+            super::stats::r_logical(eclass),
+            super::stats::r_logical(nodots)
+        ));
+        out.line(format!("stata_bs_m <- matrix(NA_real_, {reps}, {k})"));
+        let cl = cluster.as_ref().map_or(String::new(), |v| {
+            format!(", cluster = {}", super::r_text(v))
+        });
+        out.line(format!(
+            "for (stata_bs_i in seq_len({reps})) {{\n{d} <- stata_bsample(stata_bs_full[stata_bs_rows, , drop = FALSE]{cl})\nstata_bs_m[stata_bs_i, ] <- tryCatch({{\n{code}\n{rep_stats}\n}}, error = function(e) NA_real_)\nstata_bs_dot(stata_bs_i, {reps}, {})\n}}",
+            super::stats::r_logical(nodots)
+        ));
+        out.line(format!("{d} <- stata_bs_full"));
+        let units = cluster.as_ref().map_or("NULL".to_string(), |v| {
+            format!(
+                "length(unique(stata_bs_full[[{}]][stata_bs_rows]))",
+                super::r_text(v)
+            )
+        });
+        out.line(format!(
+            "stata_e <- stata_bs_report(stata_bs_obs, stata_bs_m, exps = c({}), command = {}, n_used = sum(stata_bs_rows), level = {}, model = stata_bs_model{}, n_units = {units}, depvar = {})",
+            exps.iter().map(|e| super::r_text(e)).collect::<Vec<_>>().join(", "),
+            super::r_text(command),
+            super::r_number(level),
+            cluster.as_ref().map_or(String::new(), |v| format!(", cluster = {}", super::r_text(v))),
+            super::r_text(&depvar)
+        ));
+        out.line("stata_b <- stats::setNames(as.vector(stata_e$b), colnames(stata_e$b))");
+        out.line("stata_vcov <- stata_e$V");
+        // the fit R holds is the last replication's, which nothing may read
+        out.line("stata_estimates <- NULL");
+        self.drew.set(true);
+        // e() is bootstrap's now; the model it ran is not one predict can read
+        self.e_ret = super::returned::Returned::Kept {
+            cmd: "bootstrap".into(),
+            model: String::new(),
+            names: &[],
+        };
+        self.e_new = true;
+        self.estimates = None;
+        self.estimates_lost = Some(
+            "the model here is bootstrap's: predict and estat after bootstrap are not translated yet".into(),
+        );
+        self.esample = false;
+        out.caveat("Stata's own draws: each replication resamples the estimation sample as Stata's bootstrap does");
         Ok(())
     }
 

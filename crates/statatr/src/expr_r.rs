@@ -867,6 +867,35 @@ impl Translator<'_> {
                 [Expr::Name(n)] => (self.returned)("r", n),
                 _ => Err(no("r() takes one name, as r(mean)")),
             },
+            // el(e(V), i, j): one element of a matrix e() or r() keeps;
+            // missing outside it, as in Stata
+            "el" => {
+                want(3)?;
+                let m = match arg(0)? {
+                    // through the same check as e(name): what is held must be known
+                    Expr::Call(w, a) if (w == "e" || w == "r") && a.len() == 1 => match a.first() {
+                        Some(Expr::Name(n)) if n != "sample" => {
+                            (self.returned)(w, n)?;
+                            format!("stata_{w}[[{}]]", r_text(n))
+                        }
+                        _ => return Err(no("el() of this matrix is not translated yet")),
+                    },
+                    _ => {
+                        return Err(no(
+                            "el() is translated for the matrices e() and r() keep (el(e(V), 1, 1)); not here yet",
+                        ))
+                    }
+                };
+                let (i, ik) = self.expr(arg(1)?)?;
+                let (j, jk) = self.expr(arg(2)?)?;
+                let (i, j) = (number(&i, ik)?, number(&j, jk)?);
+                Ok((
+                    format!(
+                        "(\\(m, i, j) if (is.null(m) || is.na(i) || is.na(j) || i < 1 || j < 1 || i > NROW(m) || j > NCOL(m)) NA_real_ else unname(as.matrix(m)[floor(i), floor(j)]))({m}, {i}, {j})"
+                    ),
+                    Kind::Number,
+                ))
+            }
             "runiform" | "uniform" | "rnormal" | "rgamma" => self.draw(name, args),
             n if DATE_FUNCTIONS.iter().any(|(f, _)| *f == n) => self.date_fn(n, args),
             n if DATE_READERS.iter().any(|(f, _)| *f == n) => self.date_reader(n, args),

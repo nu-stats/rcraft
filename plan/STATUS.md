@@ -2842,3 +2842,25 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   - `bsample` with `if`/`in` and a size or `cluster()` (not observed), `strata()` and `weight()`, all refused
     with the reason;
   - the `bootstrap` prefix, which is P2C.16 part two.
+
+## P2C.16 part two: the bootstrap prefix, 2026-11-01
+
+- **What works:** `bootstrap [exp_list] [, reps() seed() nodots cluster() level()]: command`, with `_b` after
+  `regress`, `logit` or `probit`, or `r()`/`e()` values, named or not (`_bs_1`, ...). The command is translated
+  once, quietly, and run in R:
+  - once on the data, for the observed values;
+  - then once per replication on `stata_bsample` of its estimation sample, using Stata's own draws.
+  `stata_bs_report` prints Stata's messages, header and table and leaves `e()`: b, V, N, N_reps, b_bs,
+  bias, se, ci_normal, ci_percentile, ci_bc and the model's scalars.
+- **Observed in Stata 19 here:**
+  - only the estimation sample is resampled (the next draw after three replications on 37 of 40 rows is
+    the 223rd);
+  - every replicate is kept as a float, `_b`'s too, and observed values are not.
+  Seven `bootstrap` runs give Stata's output line for line. The exception is `logit`, whose own
+  coefficients agree to about 7 digits.
+- **Also:** `el(e(V), i, j)` and `el(r(...), i, j)`, through the same check as `e()`.
+- **Corpus:** `bootstrap.do` (9 results, tolerance 1e-9) passes; `bootstrap` is Verified, with a guide page.
+- **Numbers:** 5,524 of 5,642 compared probe lines match Stata to 8 digits; probe 180 compares and matches
+  one more line.
+- **Not done:** `strata()`, `saving()`, `bca`, `_b` after other models, `estat bootstrap`, `predict` after it,
+  and `vce(bootstrap)`, all refused with the reason.

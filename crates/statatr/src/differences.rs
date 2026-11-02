@@ -160,6 +160,25 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "bootstrap",
+        about: "Repeats a command on samples drawn with replacement",
+        points: &[
+            p(
+                "Draws",
+                "Each replication resamples the command's estimation sample with Stata's own \
+                 generator, as bsample does, so the same seed gives Stata's standard errors. The \
+                 replicates are kept as floats, as Stata keeps them, and the observed values as \
+                 they are.",
+            ),
+            p(
+                "Not yet",
+                "Statistics are _b after regress, logit or probit, or r() and e() values; other \
+                 options (strata(), saving(), ...), predict and estat after it are refused with \
+                 the reason.",
+            ),
+        ],
+    },
+    Guide {
         command: "bsample",
         about: "Replaces the data with a sample drawn with replacement",
         points: &[

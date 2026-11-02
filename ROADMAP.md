@@ -405,7 +405,11 @@ skipped. It never gives a silent wrong answer.
   See `plan/stata/interactions.md`.)
 - P2C.16 `bsample` and `bootstrap` with Stata's own draws (StatCraft's
   decoding), with `cluster()`
-  (`bsample` done 2026-11-01: plain, `#`, `if`/`in`, `cluster()` and `idcluster()` draw Stata's rows in its order, checked on 280 of Stata 19's samples and in `bsample.do`. Still to come: the `bootstrap` prefix.)
+  (done 2026-11-01:
+  - `bsample` (plain, `#`, `if`/`in`, `cluster()`, `idcluster()`) draws Stata's rows in its order, checked on 280 of Stata 19's samples and in `bsample.do`;
+  - the `bootstrap` prefix (`_b` after regress/logit/probit, `r()`/`e()` statistics, `reps()`, `seed()`, `nodots`, `cluster()`, `level()`) gives Stata's table and standard errors, checked in `bootstrap.do`;
+  - `el()` of e()/r() matrices.
+  Still to come: `strata()`, `saving()`, `estat bootstrap`, `vce(bootstrap)`.)
 
 ## Phase 3: Data
 
