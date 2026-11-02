@@ -98,3 +98,15 @@ again without Stata's terms and records them, so `e(b)` has `o.x` in its place a
 Stata prints `note: x omitted because of collinearity.` for each, before the table, and a row
 `x |          0  (omitted)`. Two factors interacted (`i.g#i.h`) are not laid out as Stata's yet: they
 stop with the reason.
+
+### The other likelihood models (P2C.13 continued)
+
+`nbreg`, `ologit`, `oprobit` and `mlogit` omit a collinear regressor as the other likelihood models do:
+the later one in the order written, with Stata's note. `mlogit` shows `o.` in every equation and the base
+outcome's columns all `o.`. Their R fits (`glm.nb`, `polr`, `multinom`) cannot leave a column out
+themselves, so the terms Stata omits are found before the fit (`stata_collinear_rhs`), and the model is
+fitted without them and keeps them in `$omitted`. Observed in Stata 19 (`q13`), and `collinear.do` checks
+all four (35 results).
+
+`nbreg` on counts with no overdispersion: Stata's alpha goes to 0 (ln alpha about −16), and R's `glm.nb`
+fails there. It now stops with that reason, not R's own message.

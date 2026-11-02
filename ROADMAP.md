@@ -383,7 +383,7 @@ skipped. It never gives a silent wrong answer.
   - `logit`, `probit` and `poisson` drop the later one in the order written.
   - Stata's 1e-13 tolerance, the `note:` lines, `0  (omitted)` rows, `o.` columns in `e(b)`, `_b[]` of 0, and `e(rank)`/`e(df_m)` counting only what is estimated.
   - `collinear.do` in the corpus.
-  Still to come: two factors interacted (`i.g#i.h`), and the other models.)
+  Two factors interacted followed in P2C.15. `nbreg`, `ologit`, `oprobit` and `mlogit` followed later the same day: the terms are found before the fit, and `mlogit` has `o.` in every equation. Still to come: the panel, survival and IV models.)
 - P2C.14 Stata's date and time functions on R: `clock()`, `Clock()`,
   `monthly()`, `quarterly()`, `halfyearly()`, `weekly()`, `yearly()`, `yw()`
   and the others, with Stata's masks and missing values (StatCraft's decoding,

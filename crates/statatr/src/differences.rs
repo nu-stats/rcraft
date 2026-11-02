@@ -559,8 +559,10 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Collinear regressors",
                 "The later of a collinear set, in the order written, is omitted with Stata's note \
-                 and tolerance, as for poisson. R's glm() checks far more tightly, so a variable \
-                 stored as float that is nearly another plus a constant stays in and the fit fails.",
+                 and tolerance, as for poisson, nbreg, ologit, oprobit and mlogit (in every \
+                 equation). R's glm() checks far more tightly, so a variable stored as float that \
+                 is nearly another plus a constant stays in and the fit fails; polr() and \
+                 multinom() do not leave a column out at all.",
             ),
             ML_SE,
             ML_ROBUST,

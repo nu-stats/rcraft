@@ -40,7 +40,8 @@ stata_bget <- function(key, se = FALSE) {
     if (eq == "") eq <- stata_levels[1]
     if (!eq %in% stata_levels) stop("equation [", eq, "] not found")
     k <- stata_canon(key)
-    there <- k %in% sub("^[^:]*:", "", st) || (k == "_cons" && any(endsWith(nm, ":(Intercept)")))
+    there <- k %in% sub("^[^:]*:", "", st) || (k == "_cons" && any(endsWith(nm, ":(Intercept)"))) ||
+      k %in% stata_estimates[["omitted"]]
     if (eq == as.character(stata_base)) {
       if (!there) stop("[", shown, "] not found")
       return(0)
@@ -54,7 +55,7 @@ stata_bget <- function(key, se = FALSE) {
     # a base or omitted level of a factor variable, or a term the model was
     # fitted again without (collinear): Stata holds a zero
     if (stata_base_level(stata_canon(key))) return(0)
-    if (stata_canon(key) %in% stata_estimates[["omitted"]]) return(0)
+    if (sub("^[^:]*:", "", stata_canon(key)) %in% stata_estimates[["omitted"]]) return(0)
     stop("[", shown, "] not found")
   }
   # a term R left out for collinearity: 0 in Stata's e(b) and e(V)

@@ -2882,3 +2882,16 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   matches 2 of 2. The dry share is 83.3%.
 - **Not done:** `rpoisson()`, `rbeta()`, `rt()` (StatCraft has not found Stata's methods), KISS32,
   `c(rngstate)`.
+
+## P2C.13 continued: collinear terms in nbreg, ologit, oprobit and mlogit, 2026-11-02
+
+- **What works:** these four models omit a collinear regressor as Stata 19 does: the later one in the
+  order written, with Stata's note, `o.` columns in `e(b)` (in every equation for `mlogit`, whose base
+  outcome is all `o.`), `_b[]` of 0, and `e(rank)`/`e(df_m)` counting only what is estimated.
+- **How:** their R fits (`glm.nb`, `polr`, `multinom`) do not leave a collinear column out themselves.
+  `stata_collinear_rhs` finds Stata's omitted terms from the design before the fit, and the model is fitted
+  without them and keeps them in `$omitted`.
+- **Corpus:** `collinear.do` checks all four as well (35 results); `nbreg` is Verified for the first time.
+- **Also:** `nbreg` on counts with no overdispersion, where Stata's alpha goes to 0 and R's `glm.nb` fails,
+  now stops with that reason instead of R's "missing value where TRUE/FALSE needed".
+- **Not done:** collinearity in the panel, survival and IV models; `nbreg` at alpha = 0.

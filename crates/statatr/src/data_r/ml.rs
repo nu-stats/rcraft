@@ -28,6 +28,29 @@ use super::stats::r_logical;
 use super::weights::W;
 use super::*;
 
+/// nbreg, ologit, oprobit and mlogit: the terms Stata omits for
+/// collinearity are found before the fit (`stata_collinear_rhs`, in the
+/// order written) and the model is fitted without them; R's fits there
+/// would not leave the column out themselves.
+fn collinear_first(dep: &str, right: &str, src: &str) -> String {
+    format!(
+        "stata_cl <- stata_collinear_rhs({}, {src})",
+        r_text(&format!("{dep} ~ {right}"))
+    )
+}
+
+/// The formula with the right-hand side `collinear_first` left.
+fn with_rhs(response: &str) -> String {
+    format!(
+        "stats::as.formula(paste({}, stata_cl$rhs))",
+        r_text(&format!("{response} ~"))
+    )
+}
+
+/// The omitted terms kept on the fit, for `e(b)`, `_b[]` and the notes.
+const KEEP_OMITTED: &str =
+    "stata_estimates$omitted <- stata_cl$omitted\nstata_estimates$stata_written <- stata_cl$written";
+
 /// The observed information of a binary or Poisson glm, and its robust or
 /// clustered sandwich the way Stata scales them.
 pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robust = FALSE, cluster = NULL, kind = "") {
@@ -346,9 +369,13 @@ impl Session {
             }
             Fit::Nbreg => {
                 out.package("MASS");
+                self.helpers.insert("stata_collinear");
+                out.line(collinear_first(&dep, &right, &src));
                 out.line(format!(
-                    "stata_estimates <- MASS::glm.nb({dep} ~ {right}, data = {src}{weights}, {control})"
+                    "stata_estimates <- tryCatch(MASS::glm.nb({}, data = {src}{weights}, {control}), error = function(e) stop(\"nbreg: R's glm.nb could not estimate alpha; when the counts show no overdispersion Stata's alpha goes to 0, which is not reproduced (\", conditionMessage(e), \")\", call. = FALSE))",
+                    with_rhs(&dep)
                 ));
+                out.line(KEEP_OMITTED);
             }
             Fit::Ologit | Fit::Oprobit => {
                 out.package("MASS");
@@ -357,16 +384,23 @@ impl Session {
                 } else {
                     "probit"
                 };
+                self.helpers.insert("stata_collinear");
+                out.line(collinear_first(&dep, &right, &src));
                 out.line(format!(
-                    "stata_estimates <- MASS::polr(factor({dep}) ~ {right}, data = {src}{weights}, method = \"{method}\", Hess = TRUE, model = TRUE, control = list(reltol = 1e-14, maxit = 1000))"
+                    "stata_estimates <- MASS::polr({}, data = {src}{weights}, method = \"{method}\", Hess = TRUE, model = TRUE, control = list(reltol = 1e-14, maxit = 1000))",
+                    with_rhs(&format!("factor({dep})"))
                 ));
+                out.line(KEEP_OMITTED);
                 out.line("stata_levels <- stata_estimates$lev");
             }
             Fit::Mlogit => {
                 out.package("nnet");
+                self.helpers.insert("stata_collinear");
+                out.line(collinear_first(&dep, &right, &src));
                 let fit_with = |response: &str| {
                     format!(
-                        "stata_estimates <- nnet::multinom({response} ~ {right}, data = {src}{weights}, trace = FALSE, model = TRUE, maxit = 1000, reltol = 1e-14)"
+                        "stata_estimates <- nnet::multinom({}, data = {src}{weights}, trace = FALSE, model = TRUE, maxit = 1000, reltol = 1e-14)\n{KEEP_OMITTED}",
+                        with_rhs(response)
                     )
                 };
                 out.line(fit_with(&format!("factor({dep})")));
@@ -514,7 +548,16 @@ impl Session {
         }
         self.helpers.insert("stata_ml_header");
         self.helpers.insert("stata_coefs");
-        if matches!(fit, Fit::Logit | Fit::Probit | Fit::Poisson) {
+        if matches!(
+            fit,
+            Fit::Logit
+                | Fit::Probit
+                | Fit::Poisson
+                | Fit::Nbreg
+                | Fit::Ologit
+                | Fit::Oprobit
+                | Fit::Mlogit
+        ) {
             out.line("stata_omitted_notes()");
         }
         out.line(format!(

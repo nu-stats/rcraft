@@ -28,7 +28,8 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
   # R's columns, when Stata's cannot be told
   approx <- function(why) {
     st <- stata_bnames()
-    out <- list(b = matrix(b, 1, dimnames = list("y1", st)), V = V)
+    # R's own columns: without the omitted terms added below
+    out <- list(b = matrix(b[seq_along(st)], 1, dimnames = list("y1", st)), V = V)
     dimnames(out$V) <- list(st, st)
     attr(out$b, "stata_names") <- why
     attr(out$V, "stata_names") <- why
@@ -37,6 +38,11 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
   if (cmd %in% c("anova", "margins")) return(approx(paste0("Stata's e(b) after ", cmd, " has columns RCraft does not rebuild yet")))
   # a variable xtreg left out is still a column of Stata's, a zero
   om <- fit[["omitted"]]
+  # mlogit: in each equation
+  if (length(om) && cmd == "mlogit") {
+    eqs <- unique(sub(":.*$", "", names(b)))
+    om <- paste0(rep(eqs, each = length(om)), ":", om)
+  }
   if (length(om)) b <- c(b, stats::setNames(rep(NA_real_, length(om)), om))
   nm <- names(b)
   # the terms in the order the model was written
@@ -178,7 +184,8 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     for (q in eqs) {
       if (q == stata_base) {
         # the base outcome's equation: Stata's columns of the others, left out
-        n0 <- got[[1]]$n
+        # an omitted term is o. there already
+        n0 <- sub("^o\\.", "", got[[1]]$n)
         if (any(grepl("[.#]", n0))) return(approx(why))
         names_out <- c(names_out, paste0(q, ":o.", n0))
         from <- c(from, rep(NA_character_, length(n0)))

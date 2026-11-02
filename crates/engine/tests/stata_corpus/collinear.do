@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.13): made-up data; Stata 19's results are in collinear.recorded
 * Stata stops iterating at its tolerance, so the likelihood models agree to about 7 digits
-* commands: logit poisson probit regress
+* commands: logit mlogit nbreg ologit oprobit poisson probit regress
 * (collinear regressors: which one each model omits, whatever the order written; its zero in e(b); e(rank) and e(df_m))
 * tolerance: 1e-6
 version 19
@@ -48,3 +48,17 @@ poisson cnt x ten w
 display "@ q_x_ten " %24.17g _b[x] " " %24.17g _b[ten]
 display "@ q_w " %24.17g _se[w]
 display "@ q_fit " %24.17g e(ll) " " e(rank) " " e(df_m)
+generate od = cnt * (1 + mod(_n, 4))
+nbreg od x x3 w
+display "@ nb_x " %24.17g _b[x] " " %24.17g _b[x3]
+display "@ nb_w " %24.17g _se[w] " " e(rank) " " e(df_m)
+ologit ord x3 x w
+display "@ ol_x " %24.17g _b[x3] " " %24.17g _b[x]
+display "@ ol_w " %24.17g _se[w] " " e(rank) " " e(df_m)
+oprobit ord x ten
+display "@ op_x " %24.17g _b[x] " " %24.17g _b[ten]
+display "@ op_n " e(rank) " " e(df_m)
+mlogit cat3 x x3 w
+display "@ ml_1 " %24.17g _b[1:x] " " %24.17g _b[1:x3]
+display "@ ml_3 " %24.17g _b[3:w] " " %24.17g _b[2:x3]
+display "@ ml_n " e(rank) " " e(df_m)

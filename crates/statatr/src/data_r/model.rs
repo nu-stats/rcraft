@@ -129,6 +129,54 @@ pub(super) const COLLINEAR_HELPER: &str = r#"stata_collinear <- function(fit, sw
   X <- stats::model.matrix(fit)
   w <- stats::weights(fit)
   if (is.null(w)) w <- rep(1, nrow(X))
+  om <- stata_collinear_cols(X, w, sweep)
+  b <- stats::coef(fit)
+  na <- names(b)[is.na(b)]
+  if (setequal(om, na)) return(fit)
+  labs <- attr(stats::terms(fit), "term.labels")
+  # the whole terms Stata omits go; what R still leaves out (a factor's
+  # level, which a formula cannot drop) must be Stata's too
+  extra <- intersect(om, labs)
+  cannot <- function() {
+    stop("the regressors are collinear in a way RCraft cannot yet leave out as Stata does: Stata omits ",
+         paste(om, collapse = ", "), "; R ", paste(na, collapse = ", "), call. = FALSE)
+  }
+  if (!all(setdiff(om, labs) %in% na) || !length(extra)) cannot()
+  f <- if (length(extra) == length(labs)) {
+    stats::update(stats::formula(fit), . ~ 1)
+  } else {
+    stats::formula(stats::drop.terms(stats::terms(fit), dropx = which(labs %in% extra), keep.response = TRUE))
+  }
+  call <- stats::update(fit, formula. = f, evaluate = FALSE)
+  out <- suppressWarnings(eval(call, parent.frame()))
+  b2 <- stats::coef(out)
+  if (!setequal(names(b2)[is.na(b2)], setdiff(om, extra))) cannot()
+  out$omitted <- extra
+  out$stata_written <- stata_collinear_written(labs)
+  out
+}
+stata_collinear_written <- function(labs) {
+  unname(vapply(labs, function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":"), ""))
+}
+# before the fit, for the models whose R cannot leave a collinear column out
+# itself (nbreg, ologit, oprobit, mlogit): the right-hand side without the
+# terms Stata omits, in the order written (the later one goes)
+stata_collinear_rhs <- function(formula, data) {
+  mf <- stats::model.frame(stats::as.formula(formula), data, na.action = stats::na.omit)
+  tt <- stats::terms(mf)
+  X <- stats::model.matrix(tt, mf)
+  labs <- attr(tt, "term.labels")
+  om <- stata_collinear_cols(X, rep(1, nrow(X)), FALSE)
+  if (!all(om %in% labs)) {
+    stop("the regressors are collinear in a way RCraft cannot yet leave out as Stata does: Stata omits ",
+         paste(om, collapse = ", "), call. = FALSE)
+  }
+  keep <- labs[!labs %in% om]
+  list(rhs = if (length(keep)) paste(keep, collapse = " + ") else "1", omitted = om,
+       written = stata_collinear_written(labs))
+}
+# which columns Stata omits (the constant aside)
+stata_collinear_cols <- function(X, w, sweep) {
   cons <- colnames(X) == "(Intercept)"
   Z <- X[, !cons, drop = FALSE]
   # cross products about the (weighted) means, when there is a constant
@@ -156,37 +204,16 @@ pub(super) const COLLINEAR_HELPER: &str = r#"stata_collinear <- function(fit, sw
     left <- which(!swept & !dropped)
     if (length(left)) A[left, left] <- A[left, left] - outer(A[left, p], A[p, left]) / A[p, p]
   }
-  om <- colnames(Z)[dropped]
-  b <- stats::coef(fit)
-  na <- names(b)[is.na(b)]
-  if (setequal(om, na)) return(fit)
-  labs <- attr(stats::terms(fit), "term.labels")
-  # the whole terms Stata omits go; what R still leaves out (a factor's
-  # level, which a formula cannot drop) must be Stata's too
-  extra <- intersect(om, labs)
-  cannot <- function() {
-    stop("the regressors are collinear in a way RCraft cannot yet leave out as Stata does: Stata omits ",
-         paste(om, collapse = ", "), "; R ", paste(na, collapse = ", "), call. = FALSE)
-  }
-  if (!all(setdiff(om, labs) %in% na) || !length(extra)) cannot()
-  norm <- function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":")
-  written <- vapply(labs, norm, "")
-  f <- if (length(extra) == length(labs)) {
-    stats::update(stats::formula(fit), . ~ 1)
-  } else {
-    stats::formula(stats::drop.terms(stats::terms(fit), dropx = which(labs %in% extra), keep.response = TRUE))
-  }
-  call <- stats::update(fit, formula. = f, evaluate = FALSE)
-  out <- suppressWarnings(eval(call, parent.frame()))
-  b2 <- stats::coef(out)
-  if (!setequal(names(b2)[is.na(b2)], setdiff(om, extra))) cannot()
-  out$omitted <- extra
-  out$stata_written <- unname(written)
-  out
+  colnames(Z)[dropped]
 }
 stata_omitted_notes <- function() {
+  # mlogit: the terms left out, once (its base equation is all o. columns)
+  if (inherits(stata_estimates, "multinom")) {
+    for (n in stata_estimates[["omitted"]]) cat("note: ", n, " omitted because of collinearity.\n", sep = "")
+    return(invisible(NULL))
+  }
   nm <- colnames(stata_e$b)
-  nm <- sub("^[^:]*:", "", nm)
+  nm <- unique(sub("^[^:]*:", "", nm))
   om <- nm[grepl("^([0-9]+)?o\\.[^#]*$", nm)]
   for (n in om) cat("note: ", sub("o\\.", ".", sub("^o\\.", "", n)), " omitted because of collinearity.\n", sep = "")
   invisible(NULL)
