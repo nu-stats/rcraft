@@ -158,6 +158,7 @@ pub const COMMANDS: &[&str] = &[
     "use",
     "version",
     "while",
+    "xtile",
     "xtreg",
     "xtset",
 ];
@@ -453,6 +454,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("ttest", &["by(", "level(", "unequal", "unpaired"]),
     ("twoway", &["by(", "legend(", "nodraw", "sort"]),
     ("use", &["clear", "nolabel"]),
+    ("xtile", &["altdef", "cutpoints(", "nquantiles("]),
     (
         "xtreg",
         &[
@@ -1201,6 +1203,7 @@ gettoken a b : s, {o}"
             "stset" => format!("stset t, {o}"),
             "ttest" if name == "by" => format!("ttest y, {o}"),
             "ttest" => format!("ttest y == x, {o}"),
+            "xtile" => format!("xtile q = y, {o}"),
             "xtreg" => format!("xtset id t\nxtreg y x, {o}"),
             "xtset" => format!("xtset id t, {o}"),
             "tsset" => format!("tsset t, {o}"),

@@ -1,0 +1,13 @@
+* Stata 19.0's results for xtile.do, recorded by cargo xtask stata-record
+@ q4 29 68 1 4
+@ q3 29 56 1 3
+@ q2 29 43 1 2
+@ qa 29 71 1 4
+@ qi 14 34 1 4
+@ qc 29 84 1 5
+@ qci 14 42 1 5
+@ qe 29 82 1 5
+@ qt 30 39 1 4
+@ qn 17 32 1 3
+@ rows 3 2 2 5 5
+@ exists 110

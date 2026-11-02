@@ -95,22 +95,22 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
 | 1. Data management and control flow | 9393 | 6463 | 2256 | 674 | 74.1% |
-| 2. Core statistics | 2035 | 541 | 1493 | 1 | 26.6% |
+| 2. Core statistics | 2035 | 559 | 1475 | 1 | 27.5% |
 | 3. Panel, survival, survey, IV and other models | 376 | 196 | 179 | 1 | 52.3% |
 | 4. Graphs | 117 | 0 | 117 | 0 | 0.0% |
 | 5. Programs and SSC commands | 569 | 0 | 555 | 14 | 0.0% |
 | Other commands | 2657 | 824 | 1575 | 258 | 34.3% |
-| **All** | 15147 | 8024 | 6175 | 948 | 56.5% |
+| **All** | 15147 | 8042 | 6157 | 948 | 56.6% |
 
 Most of what is left comes from add-ons from SSC: `robreg`, `outreg2`, `reghdfe`, `parmest`, `cluster2`, `eststo`,
 `coefplot` and `esttab`. One package's 2,588-line file runs `robreg` and `predict` after it over a thousand
 times, and that alone is why tier 2's share is low. Of Stata's own commands, the first causes are:
-- `xtile` and `suest`.
+- `suest`.
 
 The 36 `xtreg` and `reg` lines with `f.`, `d.` and `l.` in one package now wait on a `merge m:m` before them,
 which is not translated.

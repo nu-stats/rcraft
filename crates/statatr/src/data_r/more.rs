@@ -1035,3 +1035,114 @@ impl Session {
         Ok(())
     }
 }
+
+/// `xtile`: each value's category, 1 plus how many cut points lie below it
+/// (a cut point repeated counts each time), as Stata 19 gives them; missing
+/// where the value is missing or `if` and `in` leave the row out. The cut
+/// points are Stata's percentiles of the rows kept (R's type 2; `altdef`,
+/// (n + 1)p, is type 6), or every value of `cutpoints()`'s variable.
+pub(super) const XTILE_HELPER: &str = r#"stata_xtile <- function(x, sel, nq = 2, cut = NULL, altdef = FALSE) {
+  x <- as.numeric(x)
+  use <- rep_len(sel, length(x)) & !is.na(x)
+  cuts <- if (!is.null(cut)) {
+    as.numeric(cut)[!is.na(cut)]
+  } else if (any(use)) {
+    unname(stats::quantile(x[use], seq_len(nq - 1) / nq, type = if (altdef) 6 else 2))
+  } else {
+    numeric(0)
+  }
+  out <- vapply(x, function(v) 1 + sum(cuts < v), 0)
+  out[!use] <- NA
+  out
+}"#;
+
+impl Session {
+    /// `xtile newvar = exp [if] [in], nquantiles(#) | cutpoints(var) [altdef]`.
+    pub(super) fn xtile(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "xtile")?;
+        if let Some(o) = opts.other(&[("nquantiles", 2), ("cutpoints", 1), ("altdef", 3)]) {
+            return Err(no(format!(
+                "xtile with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.weight.is_some() {
+            return Err(no("xtile with weights is not translated yet"));
+        }
+        let (lhs, rhs) = c
+            .parts
+            .main
+            .split_once('=')
+            .ok_or_else(|| no("xtile needs `newvar = exp`"))?;
+        let var = lhs.trim();
+        if !is_name(var) {
+            return Err(no(format!("{var} is not a variable name")));
+        }
+        let cut = opts.arg("cutpoints", 1).map(|v| v.trim().to_string());
+        let nq = match opts.arg("nquantiles", 2) {
+            Some(n) => match n.trim().parse::<u32>() {
+                Ok(k) if k >= 2 => k,
+                _ => {
+                    return Err(no(
+                        "nquantiles() must be a whole number of 2 or more (Stata: r(198))",
+                    ))
+                }
+            },
+            None => 2,
+        };
+        if cut.is_some() && opts.arg("nquantiles", 2).is_some() {
+            return Err(no(
+                "xtile: nquantiles() and cutpoints() may not be combined",
+            ));
+        }
+        if let Some(v) = &cut {
+            if !is_name(v) {
+                return Err(no(format!(
+                    "cutpoints({v}): only a variable name is translated"
+                )));
+            }
+        }
+        let exp = rhs.trim();
+        let (x, kind) = self.value(exp, out)?;
+        if kind == Kind::Text {
+            return Err(no("xtile of a string: Stata refuses this (type mismatch)"));
+        }
+        let sel = self.condition(c, out)?.unwrap_or_else(|| "TRUE".into());
+        let d = self.data()?;
+        self.helpers.insert("stata_xtile");
+        out.package("dplyr");
+        out.line(format!(
+            "if ({} %in% names({d})) stop(\"variable {var} already defined\")",
+            r_text(var)
+        ));
+        let how = match &cut {
+            Some(v) => format!(", cut = {}", r_name(v)),
+            None => format!(", nq = {nq}"),
+        };
+        let alt = if opts.has("altdef", 3) {
+            ", altdef = TRUE"
+        } else {
+            ""
+        };
+        out.line(format!(
+            "{d} <- dplyr::mutate({d}, {} = stata_xtile({x}, {sel}{how}{alt}))",
+            r_name(var)
+        ));
+        let label = match &cut {
+            Some(v) => format!("{exp} categorized by {v}"),
+            None => format!("{nq} quantiles of {exp}"),
+        };
+        out.line(format!(
+            "attr({d}${}, \"label\") <- {}",
+            r_name(var),
+            r_text(&label)
+        ));
+        self.kinds.insert(var.to_string(), Kind::Number);
+        out.caveat("the new variable holds whole numbers, as Stata's byte does");
+        Ok(())
+    }
+}

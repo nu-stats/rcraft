@@ -3017,3 +3017,12 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   loop the packages use, `match()`, a `while` over a list); `gettoken` is Verified. Observations in
   `plan/stata/gettoken.md`.
 - **Numbers:** the replication packages' share is 56.5% (55.9%); StatCraft's probes 83.4%.
+
+## P2C.9 continued: xtile, 2026-11-02
+
+- **xtile** (`data_r/more.rs`, `stata_xtile`): 1 plus the number of cut points below each value (repeated
+  ones each counting), the cut points Stata's percentiles of the rows `if` and `in` keep (R's type 2,
+  `altdef` type 6) or every value of `cutpoints()`'s variable; missing outside the rows kept; Stata's label.
+- **Checked:** `xtile.do` (12 result lines, every value, tolerance 0); `xtile` is Verified. Observations in
+  `plan/stata/xtile.md`.
+- **Numbers:** the replication packages' share is 56.6% (56.5%); StatCraft's probes 83.4%.

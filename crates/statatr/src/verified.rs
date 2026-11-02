@@ -82,6 +82,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("ttest", &["descriptives"]),
     ("unab", &["aware"]),
     ("while", &["control"]),
+    ("xtile", &["xtile"]),
     ("xtreg", &["likelihood", "panel"]),
     ("xtset", &["likelihood", "panel"]),
 ];
