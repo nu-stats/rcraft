@@ -1,7 +1,7 @@
 * RCraft's Stata corpus (P2C.11 continued): made-up data; Stata 19's results are in variates.recorded
 * functions: rbinomial rcauchy rchi2 rexponential rgeometric rhypergeometric rigaussian rlaplace rlogistic rnbinomial rpareto runiformint rweibull rweibullph
-* (the other random variates with Stata's own draws: each draws a column, then its sum, one value and the uniform after it are checked; arguments that give missing)
-* tolerance: 0
+* (the other random variates with Stata's own draws: each draws a column, then its sum, one value and the uniform after it are checked; arguments that give missing. macOS's log, sin and sqrt differ from Windows' and Linux's in the last bit for some arguments, so 1e-12 and not 0)
+* tolerance: 1e-12
 version 19
 clear
 set obs 400
