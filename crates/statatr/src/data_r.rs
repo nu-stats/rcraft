@@ -195,6 +195,10 @@ struct Session {
     /// The last estimation command translated (`regress`, `logit`, ...), for
     /// `predict`, `test` and `lincom`.
     estimates: Option<&'static str>,
+    /// The panel variable `xtset` names.
+    panel: Option<String>,
+    /// Whether `stset` has run (its settings are `stata_st` in R).
+    st: bool,
 }
 
 /// Collects one command's R.
@@ -559,7 +563,16 @@ impl Session {
             "correlate" => self.correlate(c, &opts, out),
             "ttest" => self.ttest(c, &opts, out),
             "regress" => self.regress(c, &opts, out),
-            "logit" | "probit" | "poisson" => self.ml_model(c, &opts, out),
+            "logit" | "probit" | "poisson" | "nbreg" | "ologit" | "oprobit" | "mlogit" => {
+                self.ml_model(c, &opts, out)
+            }
+            "xtset" => self.xtset(c, out),
+            "xtreg" => self.xtreg(c, &opts, out),
+            "ivregress" => self.ivregress(c, &opts, out),
+            "stset" => self.stset(c, &opts, out),
+            "stcox" => self.stcox(c, &opts, out),
+            "anova" => self.anova(c, &opts, out),
+            "margins" => self.margins(c, &opts, out),
             "predict" => self.predict(c, &opts, out),
             "test" => self.test(c, &opts, out),
             "lincom" => self.lincom(c, &opts, out),

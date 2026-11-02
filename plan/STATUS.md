@@ -1345,3 +1345,45 @@ whole (Stata's `%12.0g`), weights in collapse, `duplicates list`, frames, and bl
 `if`, programs: Phase 2C). `describe`, `list` and `count` print in R's layout. Abbreviated variable
 names are taken as written (they need the data). A value label that comes from the data file rather
 than a `label define` in the do-file is not available by name in R.
+
+## P2B.4 Stata's statistics commands in R, 2026-11-02
+
+`statatr::data_r` now translates `summarize` (`detail`, `meanonly`), `tabulate` (one- and two-way,
+`missing`, `chi2`, `lrchi2`, `V`, `exact`), `correlate` (`covariance`), `ttest` (one-sample, paired,
+two-sample with `by()`, `unequal`, `welch`, `unpaired`), `regress` (`robust`, `vce(cluster)`,
+`noconstant`), `logit`, `probit`, `poisson` (`exposure()`, `offset()`), `nbreg`, `ologit`,
+`oprobit`, `mlogit` (`baseoutcome()`), `anova` (partial SS), `xtset` with `xtreg` (`fe`, `re`,
+`vce(robust)`), `ivregress 2sls` (`small`, `vce(robust)`, `vce(cluster)`), `stset` with `stcox`,
+`predict` (xb, stdp, residuals, pr, n, ue), `test`, `lincom`, `margins` (a factor's levels,
+`dydx()`, `at()`, `atmeans`, `predict(xb)`) and `estat ic`. Display options (`or`, `irr`, `rrr`,
+`nohr`) are kept.
+
+Each command becomes a call to our own R functions, `crates/statatr/src/data_r/stats.R`, defined
+once at the top of the script and needing no package beyond base R. They follow Stata's rules as
+StatCraft implements them (each checked there against Stata): a listwise estimation sample; factor
+variables (`i.`, `ib#.`, `ibn.`, `ib(first|last|freq).`, `c.`, `#`, `##`) with Stata's base levels,
+cells a lower-order term covers, empty cells and coefficient names (`1b.g#co.x`); a collinear
+regressor dropped as Stata drops it (regress: the smallest of a collinear set; the ML commands: the
+later one); Stata's small-sample factors for `robust` and `cluster`; the observed information for the
+ML commands, maximized with Stata's own Newton–Raphson steps and stopping rule (`[R] maximize`) and
+Stata's starting values, so the estimates stop where Stata's stop; Swamy–Arora random effects;
+Breslow ties; Type III partial sums of squares; a five-point Jacobian for `margins`. What a command
+returns is kept under Stata's names in `stata_r` and `stata_e` (`r(mean)` is `stata_r$mean`,
+`_b[x]` is `stata_e$b[["x"]]`), ready for P2B.6.
+
+The engine test `stata_statistics` runs 22 do-files over made-up data (with missing values) in R and
+checks 254 returned values; with `RCRAFT_STATCRAFT` set, each must agree with StatCraft's to 8
+significant digits. All agree, against StatCraft built from its current source (a245039; its
+2026-10-26 build predates factor variables). A few things StatCraft does not do are checked in R
+alone: `tabulate`'s `V` and `exact` (StatCraft ignores them), and `poisson` with `exposure()`
+(StatCraft's `poisson` ignores the option; its `glm` honours it). The test writes `test _b[2.g] =
+_b[3.g]` and `lincom _b[3.g] - _b[2.g]` because StatCraft does not take the bare `2.g` there, and it
+cannot read nbreg's `/lnalpha` by name, so `e(alpha)` is checked instead.
+
+Not done in P2B.4, each saying so when met: `by:` with a statistics command, weights, time-series
+operators (`L.`, `D.`), `regress` options other than those above (`beta`, `hc2`, `hc3`), the ML
+commands with `noconstant`, `xtreg` `be`/`mle`/`pa`, `ivregress liml`/`gmm`, `stset` with entry times
+or `failure(var == #)`, `stcox` with robust errors, `margins` after ologit, mlogit, xtreg or
+ivregress, `margins` with `post`, `over()` or `gen()` in `at()`, `predict` after the ordered and
+multinomial models, `estat` other than `ic`, and `anova` with nested terms or `sequential`. The
+tables print in a compact Stata-like layout, not Stata's exactly.

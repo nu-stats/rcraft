@@ -128,7 +128,8 @@ stata_collinear <- function(X, constant, how) {
 # The estimation sample and design: rows where `cond` holds and every
 # variable is present, the coefficients (with Stata's names), and X for the
 # fitted ones (the constant last).
-stata_model <- function(d, y, terms, cond = TRUE, cons = TRUE, how = "order", extra = character()) {
+stata_model <- function(d, y, terms, cond = TRUE, cons = TRUE, how = "order", extra = character(),
+                        add_cons = cons) {
   vars <- unique(c(y, unlist(lapply(terms, function(t) vapply(stata_fv_parse(t), function(c) c$var, ""))), extra))
   ok <- rep(TRUE, nrow(d)) & cond
   ok[is.na(ok)] <- FALSE
@@ -151,7 +152,7 @@ stata_model <- function(d, y, terms, cond = TRUE, cons = TRUE, how = "order", ex
   X <- X[, !gone, drop = FALSE]
   names <- vapply(coefs, function(c) stata_fv_name(c$cells), "")
   colnames(X) <- names[fit[!gone]]
-  if (cons) {
+  if (add_cons) {
     coefs[[length(coefs) + 1]] <- list(cells = list(), kind = "fit", cons = TRUE)
     names <- c(names, "_cons")
     X <- cbind(X, `_cons` = 1)
@@ -172,7 +173,9 @@ stata_full <- function(m, b, V) {
 
 # The columns of a model's coefficients over all rows of `d` (for predict).
 stata_design <- function(d, e) {
-  X <- vapply(e$coefs, function(c) if (isTRUE(c$cons)) rep(1, nrow(d)) else stata_fv_column(d, c$cells), numeric(nrow(d)))
+  X <- vapply(e$coefs, function(c) {
+    if (isTRUE(c$cons)) rep(1, nrow(d)) else if (isTRUE(c$aux)) rep(0, nrow(d)) else stata_fv_column(d, c$cells)
+  }, numeric(nrow(d)))
   X <- matrix(X, nrow = nrow(d))
   colnames(X) <- names(e$b)
   X
@@ -459,6 +462,688 @@ stata_ml <- function(model, d, y, terms, cond = TRUE, vce = "oim", cluster = NUL
   invisible(e)
 }
 
+# Adds a parameter that is not a regressor (`/lnalpha`, `/cut1`) to a model.
+stata_aux <- function(m, names) {
+  for (n in names) m$coefs[[length(m$coefs) + 1]] <- list(cells = list(), kind = "fit", aux = TRUE)
+  m$names <- c(m$names, names)
+  m$fitted <- c(m$fitted, names)
+  m
+}
+
+stata_ml_vce <- function(fit, vce, d, cluster, rows) {
+  V <- fit$V
+  G <- NA
+  n <- nrow(fit$scores)
+  if (vce == "robust") V <- stata_sandwich(V, fit$scores)$V * n / (n - 1)
+  if (vce == "cluster") {
+    s <- stata_sandwich(V, fit$scores, stata_cluster_values(d, cluster, rows))
+    G <- s$G
+    V <- s$V * G / (G - 1)
+  }
+  list(V = V, G = G)
+}
+
+stata_ml_show <- function(e, title, eform = NULL) {
+  lines <- list("Number of obs" = e$N)
+  lines[[paste0(e$chi2type, " chi2(", e$df_m, ")")]] <- formatC(e$chi2, format = "f", digits = 2)
+  lines[["Prob > chi2"]] <- formatC(e$p, format = "f", digits = 4)
+  if (!is.null(e$r2_p)) lines[["Pseudo R2"]] <- formatC(e$r2_p, format = "f", digits = 4)
+  stata_header(paste0(title, "    Log likelihood = ", formatC(e$ll, format = "f", digits = 4)), lines)
+  stata_coef_table(e, eform)
+}
+
+# ---- nbreg ------------------------------------------------------------------
+# Mean dispersion; the parameters are the coefficients, the constant and
+# ln alpha. Stata fits the Poisson model, then the constant-only negative
+# binomial from (ln ybar, 0), then the full model from the Poisson slopes.
+
+stata_nb_f <- function(X, y) {
+  small <- y == floor(y) & y < 1e5
+  function(b, full = FALSE) {
+    k <- ncol(X)
+    theta <- b[k + 1]
+    eta <- drop(X %*% b[seq_len(k)])
+    mu <- exp(eta)
+    m <- exp(-theta)
+    lg <- lgamma(y + m) - lgamma(m)
+    for (i in which(small)) lg[i] <- sum(log(m + seq_len(y[i]) - 1))
+    mm <- m + mu
+    ll <- sum(lg - lgamma(y + 1) + y * eta - y * log(mm) - m * log1p(mu / m))
+    if (!full) return(list(ll = ll))
+    dg <- digamma(y + m) - digamma(m)
+    tg <- trigamma(y + m) - trigamma(m)
+    for (i in which(small)) {
+      j <- m + seq_len(y[i]) - 1
+      dg[i] <- sum(1 / j)
+      tg[i] <- -sum(1 / j^2)
+    }
+    s_eta <- (y - mu) * m / mm
+    h_eta <- (y + m) * mu * m / mm^2
+    d_m <- dg - log1p(mu / m) + (mu - y) / mm
+    d_mm <- tg + mu / (m * mm) - (mu - y) / mm^2
+    h_et <- m * (-mu * (mu - y) / mm^2)
+    h_theta <- -(m * d_m + m^2 * d_mm)
+    S <- cbind(X * s_eta, -m * d_m)
+    cross <- colSums(X * h_et)
+    H <- rbind(cbind(crossprod(X * h_eta, X), cross), c(cross, sum(h_theta)))
+    list(ll = ll, g = colSums(S), H = H, scores = S)
+  }
+}
+
+stata_nbreg <- function(d, y, terms, cond = TRUE, vce = "oim", cluster = NULL, eform = NULL, show = TRUE) {
+  m <- stata_model(d, y, terms, cond, TRUE, how = "order", extra = cluster)
+  X <- m$X
+  yv <- m$y
+  n <- m$n
+  if (any(yv < 0)) stop(y, " must be greater than or equal to zero", call. = FALSE)
+  k <- ncol(X)
+  ybar <- mean(yv)
+  pf <- function(b, full = FALSE) {
+    eta <- drop(X %*% b)
+    mu <- exp(eta)
+    ll <- sum(-mu + yv * eta - lgamma(yv + 1))
+    if (!full) return(list(ll = ll))
+    list(ll = ll, g = colSums(X * (yv - mu)), H = crossprod(X * mu, X), scores = X * (yv - mu))
+  }
+  pois <- stata_newton(pf, c(rep(0, k - 1), log(ybar)))
+  constant <- stata_newton(stata_nb_f(matrix(1, n, 1), yv), c(log(ybar), 0))
+  slopes <- pois$b[seq_len(k - 1)]
+  shift <- if (k > 1) sum(slopes * colMeans(X[, seq_len(k - 1), drop = FALSE])) else 0
+  fit <- stata_newton(stata_nb_f(X, yv), c(slopes, log(ybar) - shift, constant$b[2]))
+  m <- stata_aux(m, "/lnalpha")
+  b <- setNames(fit$b, m$fitted)
+  v <- stata_ml_vce(fit, vce, d, cluster, m$rows)
+  dimnames(v$V) <- list(names(b), names(b))
+  idx <- setdiff(names(b), c("_cons", "/lnalpha"))
+  chi2 <- if (vce == "oim") 2 * (fit$ll - constant$ll) else stata_wald(b, v$V, idx)
+  full <- stata_full(m, b, v$V)
+  raw <- 2 * (fit$ll - pois$ll)
+  e <- list(cmd = "nbreg", depvar = y, b = full$b, V = full$V, coefs = m$coefs, N = n,
+            ll = fit$ll, ll_0 = constant$ll, df_m = length(idx), chi2 = chi2,
+            chi2type = if (vce == "oim") "LR" else "Wald",
+            p = stats::pchisq(chi2, length(idx), lower.tail = FALSE),
+            r2_p = 1 - fit$ll / constant$ll, alpha = exp(fit$b[k + 1]), ll_c = pois$ll,
+            chi2_c = max(raw, 0), rank = k + 1, sample = seq_len(nrow(d)) %in% m$rows, vce = vce,
+            N_clust = v$G, clustvar = cluster, family = "nbreg", converged = fit$converged)
+  if (show) {
+    stata_ml_show(e, "Negative binomial regression", eform)
+    cat(sprintf("%13s | %11s\n", "alpha", stata_g(e$alpha, 11)))
+  }
+  invisible(e)
+}
+
+# ---- ologit, oprobit --------------------------------------------------------
+# P(y = j) = F(cut_j - xb) - F(cut_j-1 - xb), no constant; Stata starts with
+# the slopes at zero and the cutpoints at the cumulative shares.
+
+stata_ordered <- function(link, d, y, terms, cond = TRUE, vce = "oim", cluster = NULL, eform = NULL, show = TRUE) {
+  m <- stata_model(d, y, terms, cond, TRUE, how = "order", extra = cluster, add_cons = FALSE)
+  X <- m$X
+  n <- m$n
+  k <- ncol(X)
+  out <- sort(unique(m$y))
+  if (length(out) < 2) stop("outcome does not vary", call. = FALSE)
+  cat_ <- match(m$y, out)
+  nc <- length(out) - 1
+  Fc <- if (link == "logit") stats::plogis else stats::pnorm
+  dens <- if (link == "logit") function(z) { p <- stats::plogis(z); p * (1 - p) } else stats::dnorm
+  ddens <- if (link == "logit") function(z) { p <- stats::plogis(z); p * (1 - p) * (1 - 2 * p) } else function(z) -z * stats::dnorm(z)
+  hi <- cat_ <= nc
+  lo <- cat_ > 1
+  onehot <- function(j, ok) {
+    M <- matrix(0, n, nc)
+    M[cbind(which(ok), j[ok])] <- 1
+    M
+  }
+  Ahi <- cbind(-X * hi, onehot(pmin(cat_, nc), hi))
+  Alo <- cbind(-X * lo, onehot(pmax(cat_ - 1, 1), lo))
+  f <- function(b, full = FALSE) {
+    cuts <- b[k + seq_len(nc)]
+    if (nc > 1 && any(diff(cuts) <= 0)) return(list(ll = -Inf))
+    xb <- if (k) drop(X %*% b[seq_len(k)]) else rep(0, n)
+    u <- cuts[pmin(cat_, nc)] - xb
+    l <- cuts[pmax(cat_ - 1, 1)] - xb
+    P <- ifelse(hi & lo, Fc(u) - Fc(l), ifelse(hi, Fc(u), Fc(-l)))
+    ll <- sum(log(P))
+    if (!full) return(list(ll = ll))
+    fu <- ifelse(hi, dens(u), 0)
+    fl <- ifelse(lo, dens(l), 0)
+    S <- (Ahi * fu - Alo * fl) / P
+    H <- crossprod(S) - crossprod(Ahi * (ifelse(hi, ddens(u), 0) / P), Ahi) +
+      crossprod(Alo * (ifelse(lo, ddens(l), 0) / P), Alo)
+    list(ll = ll, g = colSums(S), H = H, scores = S)
+  }
+  shares <- cumsum(tabulate(cat_, length(out)))[seq_len(nc)] / n
+  start <- c(rep(0, k), if (link == "logit") stats::qlogis(shares) else stats::qnorm(shares))
+  ll_0 <- f(start)$ll
+  fit <- stata_newton(f, start)
+  cuts <- paste0("/cut", seq_len(nc))
+  m <- stata_aux(m, cuts)
+  b <- setNames(fit$b, m$fitted)
+  v <- stata_ml_vce(fit, vce, d, cluster, m$rows)
+  dimnames(v$V) <- list(names(b), names(b))
+  idx <- setdiff(names(b), cuts)
+  chi2 <- if (vce == "oim") 2 * (fit$ll - ll_0) else stata_wald(b, v$V, idx)
+  full <- stata_full(m, b, v$V)
+  e <- list(cmd = paste0("o", link), depvar = y, b = full$b, V = full$V, coefs = m$coefs, N = n,
+            ll = fit$ll, ll_0 = ll_0, df_m = length(idx), chi2 = chi2,
+            chi2type = if (vce == "oim") "LR" else "Wald",
+            p = stats::pchisq(chi2, length(idx), lower.tail = FALSE),
+            r2_p = 1 - fit$ll / ll_0, k_cat = length(out), cat = out, rank = length(b),
+            sample = seq_len(nrow(d)) %in% m$rows, vce = vce, N_clust = v$G, clustvar = cluster,
+            family = paste0("o", link), converged = fit$converged)
+  if (show) stata_ml_show(e, if (link == "logit") "Ordered logistic regression" else "Ordered probit regression", eform)
+  invisible(e)
+}
+
+# ---- mlogit -----------------------------------------------------------------
+# Each outcome but the base has its own coefficients; the base is the most
+# frequent outcome (the first of ties) unless baseoutcome() names one.
+# Stata starts at the constant-only model (constants ln(n_j / n_base)).
+
+stata_mlogit <- function(d, y, terms, cond = TRUE, base = NULL, vce = "oim", cluster = NULL, eform = NULL, show = TRUE) {
+  m <- stata_model(d, y, terms, cond, TRUE, how = "order", extra = cluster)
+  X <- m$X
+  n <- m$n
+  p <- ncol(X)
+  out <- sort(unique(m$y))
+  if (length(out) < 2) stop("outcome does not vary", call. = FALSE)
+  counts <- tabulate(match(m$y, out), length(out))
+  bi <- if (is.null(base)) which.max(counts) else match(base, out)
+  if (is.na(bi)) stop("outcome ", base, " not found", call. = FALSE)
+  Y <- outer(m$y, out, "==") * 1
+  others <- setdiff(seq_along(out), bi)
+  J <- length(others)
+  f <- function(b, full = FALSE) {
+    B <- matrix(b, p, J)
+    eta <- matrix(0, n, length(out))
+    eta[, others] <- X %*% B
+    mx <- apply(eta, 1, max)
+    ex <- exp(eta - mx)
+    P <- ex / rowSums(ex)
+    ll <- sum(log(P[cbind(seq_len(n), match(m$y, out))]))
+    if (!full) return(list(ll = ll))
+    S <- do.call(cbind, lapply(others, function(j) X * (Y[, j] - P[, j])))
+    H <- matrix(0, p * J, p * J)
+    for (a in seq_len(J)) for (c in seq_len(J)) {
+      w <- P[, others[a]] * ((a == c) - P[, others[c]])
+      H[(a - 1) * p + seq_len(p), (c - 1) * p + seq_len(p)] <- crossprod(X * w, X)
+    }
+    list(ll = ll, g = colSums(S), H = H, scores = S)
+  }
+  start <- unlist(lapply(others, function(j) c(rep(0, p - 1), log(counts[j] / counts[bi]))))
+  ll_0 <- f(start)$ll
+  fit <- stata_newton(f, start)
+  label <- function(v) format(v)
+  eqn <- unlist(lapply(others, function(j) paste0(label(out[j]), ":", colnames(X))))
+  b <- setNames(fit$b, eqn)
+  v <- stata_ml_vce(fit, vce, d, cluster, m$rows)
+  dimnames(v$V) <- list(eqn, eqn)
+  idx <- eqn[!grepl(":_cons$", eqn)]
+  chi2 <- if (vce == "oim") 2 * (fit$ll - ll_0) else stata_wald(b, v$V, idx)
+  # e(b): every outcome's equation, the base's as zeros under o. names
+  all <- unlist(lapply(seq_along(out), function(j) {
+    nm <- m$names
+    if (j == bi) nm <- ifelse(grepl("^o\\.", nm), nm, paste0("o.", nm))
+    paste0(label(out[j]), ":", nm)
+  }))
+  B <- setNames(rep(0, length(all)), all)
+  VV <- matrix(0, length(all), length(all), dimnames = list(all, all))
+  B[eqn] <- b
+  VV[eqn, eqn] <- v$V
+  coefs <- rep(list(list(cells = list(), kind = "fit")), length(all))
+  for (j in seq_along(all)) if (!(all[j] %in% eqn)) coefs[[j]]$kind <- if (startsWith(sub("^[^:]*:", "", all[j]), "o.")) "base" else "omitted"
+  e <- list(cmd = "mlogit", depvar = y, b = B, V = VV, coefs = coefs, N = n, ll = fit$ll, ll_0 = ll_0,
+            df_m = length(idx), chi2 = chi2, chi2type = if (vce == "oim") "LR" else "Wald",
+            p = stats::pchisq(chi2, length(idx), lower.tail = FALSE), r2_p = 1 - fit$ll / ll_0,
+            k_out = length(out), baseout = out[bi], out = out, rank = length(b),
+            sample = seq_len(nrow(d)) %in% m$rows, vce = vce, N_clust = v$G, clustvar = cluster,
+            family = "mlogit", converged = fit$converged)
+  if (show) stata_ml_show(e, "Multinomial logistic regression", eform)
+  invisible(e)
+}
+
+# ---- xtreg ------------------------------------------------------------------
+# fe: least squares on y - ybar_i + ybar, df N - n - k, regressors without
+# within variation omitted; vce(robust) clusters on the panel. re
+# (Swamy-Arora): sigma_e from fe, sigma_u from the between regression less
+# sigma_e^2 / T-bar (the harmonic mean of the group sizes), then least
+# squares on the quasi-demeaned data.
+
+stata_ols <- function(X, y) {
+  XtXi <- solve(crossprod(X))
+  b <- drop(XtXi %*% crossprod(X, y))
+  r <- drop(y - X %*% b)
+  list(b = b, XtXi = XtXi, res = r, rss = sum(r^2))
+}
+
+stata_xtreg <- function(d, y, terms, ivar, model = "re", cond = TRUE, vce = "ols", cluster = NULL, show = TRUE) {
+  if (vce == "robust") cluster <- ivar
+  m <- stata_model(d, y, terms, cond, TRUE, how = "order", extra = c(ivar, cluster))
+  g <- as.numeric(stata_num(d, ivar)[m$rows])
+  yv <- m$y
+  N <- m$n
+  ng <- length(unique(g))
+  gi <- match(g, sort(unique(g)))
+  T_i <- tabulate(gi)
+  gmean <- function(v) (rowsum(v, gi, reorder = TRUE) / T_i)[gi, , drop = FALSE]
+  slopes <- setdiff(colnames(m$X), "_cons")
+  Xs <- m$X[, slopes, drop = FALSE]
+  # the within transform, and the regressors it leaves no variation in
+  Xw <- if (length(slopes)) Xs - gmean(Xs) + matrix(colMeans(Xs), N, length(slopes), byrow = TRUE) else Xs
+  yw <- drop(yv - gmean(matrix(yv)) + mean(yv))
+  gone <- stata_collinear(Xw, TRUE, "order")
+  if (model == "fe" && any(gone)) {
+    for (nm in slopes[gone]) {
+      j <- match(nm, m$names)
+      m$coefs[[j]]$kind <- "omitted"
+      m$coefs[[j]]$cells <- lapply(m$coefs[[j]]$cells, function(c) { if (c$mark != "b") c$mark <- "o"; c })
+      message("note: ", nm, " omitted because of collinearity.")
+    }
+    m$names <- vapply(seq_along(m$coefs), function(j) if (isTRUE(m$coefs[[j]]$cons)) "_cons" else stata_fv_name(m$coefs[[j]]$cells), "")
+    m$fitted <- c(slopes[!gone], "_cons")
+  }
+  kf <- sum(!gone)
+  Xf <- cbind(Xw[, !gone, drop = FALSE], `_cons` = 1)
+  fe <- stata_ols(Xf, yw)
+  df_fe <- N - ng - kf
+  sigma_e2 <- fe$rss / df_fe
+  xb_of <- function(b, cols) drop(cbind(Xs[, cols, drop = FALSE], 1) %*% b)
+  r2s <- function(xb) {
+    c(w = stats::cor(yv - gmean(matrix(yv)), xb - gmean(matrix(xb)))^2,
+      b = stats::cor(rowsum(yv, gi) / T_i, rowsum(xb, gi) / T_i)[1]^2,
+      o = stats::cor(yv, xb)^2)
+  }
+  cl <- if (!is.null(cluster)) stata_cluster_values(d, cluster, m$rows) else NULL
+  if (model == "fe") {
+    b <- setNames(fe$b, c(slopes[!gone], "_cons"))
+    if (is.null(cl)) {
+      V <- sigma_e2 * fe$XtXi
+      df_t <- df_fe
+      G <- NA
+    } else {
+      s <- stata_sandwich(fe$XtXi, Xf * fe$res, cl)
+      G <- s$G
+      V <- s$V * (G / (G - 1)) * ((N - 1) / (N - (kf + 1)))
+      df_t <- G - 1
+    }
+    dimnames(V) <- list(names(b), names(b))
+    xb <- xb_of(b, !gone)
+    u_i <- drop(rowsum(yv - xb, gi) / T_i)
+    sigma_u <- stats::sd(u_i)
+    idx <- setdiff(names(b), "_cons")
+    F <- if (kf) stata_wald(b, V, idx) / kf else NA_real_
+    pooled <- stata_ols(cbind(Xs[, !gone, drop = FALSE], 1), yv)
+    r2 <- r2s(xb)
+    full <- stata_full(m, b, V)
+    e <- list(cmd = "xtreg", model = "fe", depvar = y, b = full$b, V = full$V, coefs = m$coefs, N = N,
+              N_g = ng, df_m = kf + ng - 1, df_b = kf, df_r = df_t, F = F, p = stats::pf(F, kf, df_t, lower.tail = FALSE),
+              r2_w = r2[["w"]], r2_b = r2[["b"]], r2_o = r2[["o"]], sigma_u = sigma_u,
+              sigma_e = sqrt(sigma_e2), rho = sigma_u^2 / (sigma_u^2 + sigma_e2),
+              corr = stats::cor(u_i[gi], xb), F_f = ((pooled$rss - fe$rss) / (ng - 1)) / (fe$rss / df_fe),
+              df_a = ng - 1, rss = fe$rss, N_clust = G, ivar = ivar, rank = kf + 1,
+              sample = seq_len(nrow(d)) %in% m$rows, vce = vce, family = "gaussian")
+  } else {
+    # the between regression on the group means
+    Xb <- cbind(rowsum(Xs, gi) / T_i, `_cons` = 1)
+    be <- stata_ols(Xb, drop(rowsum(yv, gi) / T_i))
+    s_be2 <- be$rss / (ng - ncol(Xb))
+    tbar <- ng / sum(1 / T_i)
+    su2 <- max(s_be2 - sigma_e2 / tbar, 0)
+    theta <- (1 - sqrt(sigma_e2 / (T_i * su2 + sigma_e2)))[gi]
+    Xq <- cbind(Xs - theta * gmean(Xs), `_cons` = 1 - theta)
+    yq <- drop(yv - theta * gmean(matrix(yv)))
+    gls <- stata_ols(Xq, yq)
+    K <- ncol(Xq)
+    b <- setNames(gls$b, colnames(m$X))
+    if (is.null(cl)) {
+      V <- gls$rss / (N - K) * gls$XtXi
+      G <- NA
+    } else {
+      s <- stata_sandwich(gls$XtXi, Xq * gls$res, cl)
+      G <- s$G
+      V <- s$V * (G / (G - 1)) * ((N - 1) / (N - K))
+    }
+    dimnames(V) <- list(names(b), names(b))
+    idx <- setdiff(names(b), "_cons")
+    chi2 <- stata_wald(b, V, idx)
+    r2 <- r2s(xb_of(b, rep(TRUE, length(slopes))))
+    full <- stata_full(m, b, V)
+    e <- list(cmd = "xtreg", model = "re", depvar = y, b = full$b, V = full$V, coefs = m$coefs, N = N,
+              N_g = ng, df_m = length(idx), chi2 = chi2, chi2type = "Wald",
+              p = stats::pchisq(chi2, length(idx), lower.tail = FALSE),
+              r2_w = r2[["w"]], r2_b = r2[["b"]], r2_o = r2[["o"]], sigma_u = sqrt(su2),
+              sigma_e = sqrt(sigma_e2), rho = su2 / (su2 + sigma_e2), Tbar = tbar,
+              rmse = sqrt(gls$rss / (N - K)), N_clust = G, ivar = ivar, rank = K,
+              sample = seq_len(nrow(d)) %in% m$rows, vce = vce, family = "gaussian")
+  }
+  if (show) {
+    stata_header(paste(if (model == "fe") "Fixed-effects (within)" else "Random-effects GLS", "regression"),
+                 list("Number of obs" = N, "Number of groups" = ng,
+                      "R-sq within" = formatC(e$r2_w, format = "f", digits = 4),
+                      "R-sq between" = formatC(e$r2_b, format = "f", digits = 4),
+                      "R-sq overall" = formatC(e$r2_o, format = "f", digits = 4)))
+    stata_coef_table(e)
+    cat(sprintf("%13s | %11s\n%13s | %11s\n%13s | %11s\n", "sigma_u", stata_g(e$sigma_u, 11), "sigma_e",
+                stata_g(e$sigma_e, 11), "rho", stata_g(e$rho, 11)))
+  }
+  invisible(e)
+}
+
+# ---- ivregress 2sls ---------------------------------------------------------
+# X = endogenous, exogenous, constant; Z = exogenous, instruments, constant.
+# sigma^2 = RSS/N (RSS/(N - k) with small); no finite-sample factor for
+# vce(robust) or vce(cluster) without small.
+
+stata_ivregress <- function(d, y, exog, endog, inst, cond = TRUE, small = FALSE, vce = "unadjusted",
+                            cluster = NULL, show = TRUE) {
+  vars <- unique(c(y, exog, endog, inst, cluster))
+  ok <- rep(TRUE, nrow(d)) & cond
+  ok[is.na(ok)] <- FALSE
+  for (v in vars) ok <- ok & !stata_missing(d[[v]])
+  rows <- which(ok)
+  num <- function(vs) matrix(vapply(vs, function(v) stata_num(d, v)[rows], numeric(length(rows))),
+                             length(rows), dimnames = list(NULL, vs))
+  X <- cbind(num(c(endog, exog)), `_cons` = 1)
+  Z <- cbind(num(c(exog, inst)), `_cons` = 1)
+  yv <- stata_num(d, y)[rows]
+  n <- length(rows)
+  k <- ncol(X)
+  Xh <- Z %*% solve(crossprod(Z), crossprod(Z, X))
+  ainv <- solve(crossprod(Xh, X))
+  b <- setNames(drop(ainv %*% crossprod(Xh, yv)), colnames(X))
+  u <- drop(yv - X %*% b)
+  rss <- sum(u^2)
+  tss <- sum((yv - mean(yv))^2)
+  df_r <- n - k
+  sigma2 <- if (small) rss / df_r else rss / n
+  G <- NA
+  if (vce == "cluster") {
+    s <- stata_sandwich(ainv, Xh * u, stata_cluster_values(d, cluster, rows))
+    G <- s$G
+    V <- s$V * (if (small) G / (G - 1) * (n - 1) / df_r else 1)
+  } else if (vce == "robust") {
+    V <- stata_sandwich(ainv, Xh * u)$V * (if (small) n / df_r else 1)
+  } else {
+    V <- sigma2 * ainv
+  }
+  dimnames(V) <- list(names(b), names(b))
+  idx <- setdiff(names(b), "_cons")
+  W <- stata_wald(b, V, idx)
+  r2 <- 1 - rss / tss
+  coefs <- lapply(names(b), function(nm) if (nm == "_cons") list(cells = list(), kind = "fit", cons = TRUE) else list(cells = list(list(var = nm, level = NA_real_, mark = "")), kind = "fit"))
+  e <- list(cmd = "ivregress", estimator = "2sls", depvar = y, b = b, V = V, coefs = coefs, N = n,
+            mss = tss - rss, rss = rss, rmse = sqrt(sigma2), r2 = r2, r2_a = 1 - (1 - r2) * (n - 1) / df_r,
+            df_m = k - 1, rank = k, k_endog = length(endog), N_clust = G, endog = endog,
+            exog = c(exog, inst), sample = seq_len(nrow(d)) %in% rows, vce = vce, family = "gaussian")
+  if (small) {
+    e$F <- W / length(idx)
+    e$df_r <- df_r
+    e$p <- stats::pf(e$F, length(idx), df_r, lower.tail = FALSE)
+  } else {
+    e$chi2 <- W
+    e$p <- stats::pchisq(W, length(idx), lower.tail = FALSE)
+  }
+  if (show) {
+    stata_header("Instrumental variables 2SLS regression",
+                 list("Number of obs" = n, "R-squared" = formatC(r2, format = "f", digits = 4),
+                      "Root MSE" = formatC(e$rmse, format = "f", digits = 4)))
+    stata_coef_table(e)
+    cat("Endogenous: ", paste(endog, collapse = " "), "\nExogenous:  ", paste(c(exog, inst), collapse = " "), "\n", sep = "")
+  }
+  invisible(e)
+}
+
+# ---- stcox ------------------------------------------------------------------
+# Breslow's method for ties (Stata's default), Newton-Raphson from zero.
+
+stata_stcox <- function(d, st, terms, cond = TRUE, eform = "Haz. ratio", show = TRUE) {
+  if (is.null(st)) stop("data not st; use stset", call. = FALSE)
+  m <- stata_model(d, st$time, terms, cond, FALSE, how = "order")
+  tm <- m$y
+  fail <- if (is.null(st$failure)) rep(1, m$n) else {
+    fv <- as.numeric(d[[st$failure]])[m$rows]
+    as.numeric(!is.na(fv) & fv != 0)
+  }
+  keep <- tm > 0
+  X <- m$X[keep, , drop = FALSE]
+  tm <- tm[keep]
+  fail <- fail[keep]
+  rows <- m$rows[keep]
+  n <- length(tm)
+  p <- ncol(X)
+  o <- order(-tm)
+  X <- X[o, , drop = FALSE]
+  tm <- tm[o]
+  fail <- fail[o]
+  last <- stats::ave(seq_len(n), tm, FUN = max)
+  ii <- rep(seq_len(p), p)
+  jj <- rep(seq_len(p), each = p)
+  f <- function(b, full = FALSE) {
+    xb <- drop(X %*% b)
+    w <- exp(xb)
+    S0 <- cumsum(w)[last]
+    ll <- sum((xb - log(S0))[fail == 1])
+    if (!full) return(list(ll = ll))
+    S1 <- apply(X * w, 2, cumsum)[last, , drop = FALSE]
+    S2 <- apply(X[, ii, drop = FALSE] * X[, jj, drop = FALSE] * w, 2, cumsum)[last, , drop = FALSE]
+    F1 <- fail == 1
+    E1 <- S1[F1, , drop = FALSE] / S0[F1]
+    g <- colSums(X[F1, , drop = FALSE] - E1)
+    H <- matrix(colSums(S2[F1, , drop = FALSE] / S0[F1]), p, p) - crossprod(E1)
+    list(ll = ll, g = g, H = H, scores = NULL)
+  }
+  ll_0 <- f(rep(0, p))$ll
+  fit <- stata_newton(f, rep(0, p))
+  b <- setNames(fit$b, colnames(X))
+  V <- fit$V
+  dimnames(V) <- list(names(b), names(b))
+  full <- stata_full(m, b, V)
+  chi2 <- 2 * (fit$ll - ll_0)
+  e <- list(cmd = "cox", depvar = st$time, b = full$b, V = full$V, coefs = m$coefs, N = n,
+            N_fail = sum(fail), ll = fit$ll, ll_0 = ll_0, df_m = p, chi2 = chi2, chi2type = "LR",
+            p = stats::pchisq(chi2, p, lower.tail = FALSE), rank = p,
+            sample = seq_len(nrow(d)) %in% rows, vce = "oim", family = "cox", converged = fit$converged)
+  if (show) stata_ml_show(e, "Cox regression with Breslow method for ties", eform)
+  invisible(e)
+}
+
+# ---- anova ------------------------------------------------------------------
+# regress with the terms as factors, plus Stata's partial (Type III) sums
+# of squares: each term's columns, coded to sum to zero (effects coding),
+# dropped from the full model.
+
+stata_anova <- function(d, y, terms, cond = TRUE, show = TRUE) {
+  e <- stata_regress(d, y, terms, cond, show = FALSE)
+  rows <- which(e$sample)
+  sub <- d[rows, , drop = FALSE]
+  effect_cols <- function(t) {
+    cols <- matrix(1, length(rows), 1)
+    for (c in stata_fv_parse(t)) {
+      x <- as.numeric(sub[[c$var]])
+      if (c$factor) {
+        lv <- sort(unique(x))
+        E <- vapply(lv[-1], function(l) (x == l) - (x == lv[1]), numeric(length(x)))
+        E <- matrix(E, length(x))
+      } else {
+        E <- matrix(x, length(x))
+      }
+      cols <- do.call(cbind, lapply(seq_len(ncol(cols)), function(i) cols[, i] * E))
+    }
+    cols
+  }
+  blocks <- lapply(terms, effect_cols)
+  yv <- stata_num(sub, y)
+  fit_rss <- function(keep) {
+    X <- do.call(cbind, c(list(rep(1, length(rows))), blocks[keep]))
+    q <- qr(X)
+    list(rss = sum(qr.resid(q, yv)^2), rank = q$rank)
+  }
+  full <- fit_rss(seq_along(terms))
+  for (i in seq_along(terms)) {
+    less <- fit_rss(setdiff(seq_along(terms), i))
+    e[[paste0("ss_", i)]] <- less$rss - full$rss
+    e[[paste0("df_", i)]] <- full$rank - less$rank
+    e[[paste0("F_", i)]] <- (e[[paste0("ss_", i)]] / e[[paste0("df_", i)]]) / (e$rss / e$df_r)
+  }
+  e$cmd <- "anova"
+  e$sstype <- "partial"
+  e$terms <- terms
+  if (show) {
+    cat(sprintf("\n%27s %10s %10s %10s %10s %8s\n", "Source", "Partial SS", "df", "MS", "F", "Prob>F"))
+    row <- function(nm, ss, df, F = NA) cat(sprintf("%27s %10s %10d %10s %10s %8s\n", nm, stata_g(ss), df, stata_g(ss / df),
+                                                     if (is.na(F)) "" else formatC(F, format = "f", digits = 2),
+                                                     if (is.na(F)) "" else formatC(stats::pf(F, df, e$df_r, lower.tail = FALSE), format = "f", digits = 4)))
+    row("Model", e$mss, e$df_m, e$F)
+    for (i in seq_along(terms)) row(terms[i], e[[paste0("ss_", i)]], e[[paste0("df_", i)]], e[[paste0("F_", i)]])
+    row("Residual", e$rss, e$df_r)
+    cat(sprintf("\nNumber of obs = %d   R-squared = %.4f   Root MSE = %s\n", e$N, e$r2, stata_g(e$rmse, 8, 6)))
+  }
+  invisible(e)
+}
+
+# ---- margins ----------------------------------------------------------------
+# Predictions (or dydx() derivatives) averaged over the estimation sample,
+# or at chosen values (at(), atmeans), with delta-method standard errors
+# whose Jacobian is a five-point difference (step 1e-3 of the coefficient),
+# as Stata takes it.
+
+stata_margins <- function(d, e, cond = TRUE, over = NULL, at = NULL, atmeans = FALSE, dydx = NULL,
+                          predict = NULL, show = TRUE) {
+  if (is.null(e)) stop("last estimates not found", call. = FALSE)
+  kind <- if (!is.null(predict) && predict == "xb") "xb" else switch(e$family,
+    gaussian = "xb", logit = "logit", probit = "probit", poisson = "count", nbreg = "count",
+    stop("margins after ", e$cmd, " is not translated yet", call. = FALSE))
+  ok <- e$sample & (rep(TRUE, nrow(d)) & cond)
+  ok[is.na(ok)] <- FALSE
+  sub <- d[ok, , drop = FALSE]
+  n <- nrow(sub)
+  coefs <- e$coefs
+  vars <- unique(unlist(lapply(coefs, function(c) vapply(c$cells, function(x) x$var, ""))))
+  factor_vars <- unique(unlist(lapply(coefs, function(c) vapply(Filter(function(x) !is.na(x$level), c$cells), function(x) x$var, ""))))
+  off <- rep(0, n)
+  if (!is.null(e$offset)) off <- stata_num(sub, e$offset)
+  if (!is.null(e$exposure)) off <- log(stata_num(sub, e$exposure))
+  levels_of <- function(v) sort(unique(as.numeric(sub[[v]])))
+  # a setting: for each covariate, values per observation or "at its means"
+  observed <- lapply(setNames(vars, vars), function(v) list(v = as.numeric(sub[[v]])))
+  base_setting <- if (atmeans) lapply(setNames(vars, vars), function(v) list(mean = TRUE)) else observed
+  settings <- list()
+  if (length(at)) {
+    for (a in at) {
+      grid <- expand.grid(a, KEEP.OUT.ATTRS = FALSE)
+      for (r in seq_len(nrow(grid))) {
+        s <- base_setting
+        for (v in names(grid)) s[[v]] <- list(v = rep(grid[r, v], n))
+        settings[[length(settings) + 1]] <- s
+      }
+    }
+  } else {
+    settings <- list(base_setting)
+  }
+  m_rows <- if (any(vapply(settings[[1]], function(x) isTRUE(x$mean), TRUE)) &&
+                all(vapply(settings[[1]], function(x) isTRUE(x$mean) || length(unique(x$v)) == 1, TRUE))) 1 else n
+  value_of <- function(s, cell) {
+    x <- s[[cell$var]]
+    if (isTRUE(x$mean)) {
+      v <- as.numeric(sub[[cell$var]])
+      return(rep(if (is.na(cell$level)) mean(v) else mean(v == cell$level), m_rows))
+    }
+    v <- x$v[seq_len(m_rows)]
+    if (is.na(cell$level)) v else as.numeric(v == cell$level)
+  }
+  design <- function(s) {
+    X <- vapply(coefs, function(c) {
+      if (isTRUE(c$cons)) return(rep(1, m_rows))
+      if (isTRUE(c$aux)) return(rep(0, m_rows))
+      Reduce(`*`, lapply(c$cells, function(cell) value_of(s, cell)), rep(1, m_rows))
+    }, numeric(m_rows))
+    matrix(X, m_rows)
+  }
+  # d design / d covariate w (continuous)
+  ddesign <- function(s, w) {
+    X <- vapply(coefs, function(c) {
+      hits <- which(vapply(c$cells, function(cell) cell$var == w && is.na(cell$level), TRUE))
+      if (!length(hits)) return(rep(0, m_rows))
+      rest <- lapply(c$cells[-hits[1]], function(cell) value_of(s, cell))
+      length(hits) * Reduce(`*`, rest, rep(1, m_rows))
+    }, numeric(m_rows))
+    matrix(X, m_rows)
+  }
+  offm <- off[seq_len(m_rows)]
+  if (m_rows == 1) offm <- mean(off)
+  pred <- function(eta) switch(kind, xb = eta, logit = stats::plogis(eta), probit = stats::pnorm(eta), count = exp(eta))
+  dpred <- function(eta) switch(kind, xb = rep(1, length(eta)), logit = { p <- stats::plogis(eta); p * (1 - p) },
+                                probit = stats::dnorm(eta), count = exp(eta))
+  # each margin as a function of the coefficients
+  items <- list()
+  labels <- character()
+  add <- function(label, fun) {
+    items[[length(items) + 1]] <<- fun
+    labels <<- c(labels, label)
+  }
+  at_label <- function(i) if (length(settings) > 1) paste0(i, "._at") else ""
+  for (i in seq_along(settings)) {
+    s <- settings[[i]]
+    if (!is.null(over)) {
+      for (l in levels_of(over)) {
+        s2 <- s
+        s2[[over]] <- list(v = rep(l, n))
+        X <- design(s2)
+        add(paste0(l, ".", over, if (length(settings) > 1) paste0("#", at_label(i)) else ""),
+            local({ X <- X; function(b) mean(pred(drop(X %*% b) + offm)) }))
+      }
+    } else if (length(dydx)) {
+      for (w in dydx) {
+        if (w %in% factor_vars) {
+          lv <- levels_of(w)
+          base_cells <- Filter(function(c) length(c$cells) == 1 && c$cells[[1]]$var == w && c$kind == "base", coefs)
+          base <- if (length(base_cells)) base_cells[[1]]$cells[[1]]$level else lv[1]
+          s0 <- s
+          s0[[w]] <- list(v = rep(base, n))
+          X0 <- design(s0)
+          for (l in setdiff(lv, base)) {
+            s1 <- s
+            s1[[w]] <- list(v = rep(l, n))
+            X1 <- design(s1)
+            add(paste0(l, ".", w), local({ X0 <- X0; X1 <- X1; function(b) mean(pred(drop(X1 %*% b) + offm) - pred(drop(X0 %*% b) + offm)) }))
+          }
+        } else {
+          X <- design(s)
+          D <- ddesign(s, w)
+          add(if (length(settings) > 1) paste0(w, "#", at_label(i)) else w,
+              local({ X <- X; D <- D; function(b) mean(dpred(drop(X %*% b) + offm) * drop(D %*% b)) }))
+        }
+      }
+    } else {
+      X <- design(s)
+      add(if (length(settings) > 1) at_label(i) else "_cons", local({ X <- X; function(b) mean(pred(drop(X %*% b) + offm)) }))
+    }
+  }
+  b0 <- e$b
+  est <- vapply(items, function(f) f(b0), 0)
+  J <- matrix(0, length(items), length(b0))
+  for (j in seq_along(b0)) {
+    if (e$V[j, j] == 0) next
+    h <- 1e-3 * max(abs(b0[j]), 1e-2)
+    at_k <- function(k) { bb <- b0; bb[j] <- bb[j] + k * h; vapply(items, function(f) f(bb), 0) }
+    J[, j] <- (at_k(-2) - 8 * at_k(-1) + 8 * at_k(1) - at_k(2)) / (12 * h)
+  }
+  V <- J %*% e$V %*% t(J)
+  dimnames(V) <- list(labels, labels)
+  out <- list(b = matrix(est, 1, dimnames = list("r1", labels)), V = V, N = n, Jacobian = J)
+  if (show) {
+    se <- sqrt(pmax(diag(V), 0))
+    z <- est / se
+    cat(sprintf("\n%13s | %11s %10s %8s %7s  %21s\n", "", if (length(dydx)) "dy/dx" else "Margin", "Std. err.", "z", "P>|z|", "[95% conf. interval]"))
+    cat(strrep("-", 14), "+", strrep("-", 64), "\n", sep = "")
+    for (k in seq_along(est)) cat(sprintf("%13s | %11s %10s %8.2f %7.3f %10s %10s\n", substr(labels[k], 1, 13), stata_g(est[k], 11),
+                                          stata_g(se[k]), z[k], 2 * stats::pnorm(-abs(z[k])), stata_g(est[k] - 1.959964 * se[k]),
+                                          stata_g(est[k] + 1.959964 * se[k])))
+  }
+  invisible(out)
+}
+
 # ---- predict ----------------------------------------------------------------
 
 stata_predict <- function(d, e, what, cond = TRUE) {
@@ -473,6 +1158,7 @@ stata_predict <- function(d, e, what, cond = TRUE) {
     stdp = sqrt(rowSums((X[, used, drop = FALSE] %*% e$V[used, used, drop = FALSE]) * X[, used, drop = FALSE])),
     residuals = stata_num(d, e$depvar) - xb,
     pr = if (e$family == "logit") stats::plogis(xb) else stats::pnorm(xb),
+    ue = stata_num(d, e$depvar) - xb,
     n = exp(xb),
     stop("predict: ", what, " is not available after ", e$cmd, call. = FALSE))
   ok <- rep(TRUE, nrow(d)) & cond

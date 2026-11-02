@@ -251,6 +251,93 @@ fn coef_name(t: &str) -> Option<String> {
     })
 }
 
+/// One `at()` as an R list: `x1=(1 2 3) x2=5` is
+/// `list("x1" = c(1, 2, 3), "x2" = 5)`.
+fn at_list(text: &str) -> Result<String, Untranslated> {
+    let mut parts: Vec<String> = Vec::new();
+    let mut rest = text.trim();
+    while !rest.is_empty() {
+        let (var, after) = rest
+            .split_once('=')
+            .ok_or_else(|| no(format!("at({text}): each variable needs `= values`")))?;
+        let var = var.trim();
+        if !is_name(var) {
+            return Err(no(format!(
+                "at(): `{var}` is not translated yet (only variable = values)"
+            )));
+        }
+        let after = after.trim_start();
+        let (values, next) = if let Some(inner) = after.strip_prefix('(') {
+            // the matching `)`: those of `1(1)3` belong to the numlist
+            let mut depth = 1;
+            let close = inner
+                .char_indices()
+                .find(|(_, ch)| {
+                    match ch {
+                        '(' => depth += 1,
+                        ')' => depth -= 1,
+                        _ => {}
+                    }
+                    depth == 0
+                })
+                .map(|(i, _)| i)
+                .ok_or_else(|| no(format!("at({text}): a `(` is not closed")))?;
+            (
+                inner.get(..close).unwrap_or(""),
+                inner.get(close + 1..).unwrap_or(""),
+            )
+        } else {
+            let end = after.find(char::is_whitespace).unwrap_or(after.len());
+            (
+                after.get(..end).unwrap_or(""),
+                after.get(end..).unwrap_or(""),
+            )
+        };
+        let nums = numlist(values)
+            .ok_or_else(|| no(format!("at(): `{values}` is not a list of numbers")))?;
+        let nums: Vec<String> = nums.into_iter().map(r_number).collect();
+        parts.push(format!("{} = c({})", r_text(var), nums.join(", ")));
+        rest = next.trim();
+    }
+    if parts.is_empty() {
+        return Err(no("at() needs a variable and values"));
+    }
+    Ok(format!("list({})", parts.join(", ")))
+}
+
+/// A Stata numlist: `1 2 3`, `1/3`, `0(.5)2`.
+fn numlist(text: &str) -> Option<Vec<f64>> {
+    let mut out = Vec::new();
+    for tok in text.split_whitespace() {
+        if let Some((a, b)) = tok.split_once('/') {
+            let (a, b) = (a.parse::<f64>().ok()?, b.parse::<f64>().ok()?);
+            let mut v = a;
+            while v <= b + 1e-9 {
+                out.push(v);
+                v += 1.0;
+            }
+        } else if let Some((a, rest)) = tok.split_once('(') {
+            let (step, b) = rest.split_once(')')?;
+            let (a, step, b) = (
+                a.parse::<f64>().ok()?,
+                step.parse::<f64>().ok()?,
+                b.parse::<f64>().ok()?,
+            );
+            if step <= 0.0 || (b - a) / step > 10_000.0 {
+                return None;
+            }
+            let mut k = 0.0;
+            while a + k * step <= b + 1e-9 * step {
+                out.push(a + k * step);
+                k += 1.0;
+            }
+        } else {
+            out.push(tok.parse::<f64>().ok().filter(|v| v.is_finite())?);
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
 fn r_weights(w: &[(String, f64)]) -> String {
     let parts: Vec<String> = w
         .iter()
@@ -573,12 +660,18 @@ impl Session {
         let model: &'static str = match c.name.as_str() {
             "logit" => "logit",
             "probit" => "probit",
+            "nbreg" => "nbreg",
+            "ologit" => "ologit",
+            "oprobit" => "oprobit",
+            "mlogit" => "mlogit",
             _ => "poisson",
         };
         let mut known = vec![("vce", 3), ("robust", 1), ("cluster", 2)];
         match model {
-            "logit" => known.push(("or", 2)),
+            "logit" | "ologit" => known.push(("or", 2)),
             "poisson" => known.extend([("irr", 3), ("offset", 3), ("exposure", 1)]),
+            "nbreg" => known.push(("irr", 3)),
+            "mlogit" => known.extend([("rrr", 3), ("baseoutcome", 1)]),
             _ => {}
         }
         if let Some(o) = opts.other(&known) {
@@ -605,16 +698,29 @@ impl Session {
                 args.push_str(&format!(", {a} = {}", r_text(v.trim())));
             }
         }
-        if model == "logit" && opts.has("or", 2) {
+        if opts.has("or", 2) {
             args.push_str(", eform = \"Odds ratio\"");
         }
-        if model == "poisson" && opts.has("irr", 3) {
+        if opts.has("irr", 3) {
             args.push_str(", eform = \"IRR\"");
         }
-        out.line(format!(
-            "stata_e <- stata_ml(\"{model}\", {d}, {y}, {t}{cond}{args}{})",
-            Self::show(c)
-        ));
+        if opts.has("rrr", 3) {
+            args.push_str(", eform = \"RRR\"");
+        }
+        if let Some(b) = opts.arg("baseoutcome", 1) {
+            let v = number_literal(&b)
+                .filter(|v| v != "NA_real_")
+                .ok_or_else(|| no("baseoutcome() needs a number"))?;
+            args.push_str(&format!(", base = {v}"));
+        }
+        let call = match model {
+            "nbreg" => format!("stata_nbreg({d}, {y}, {t}"),
+            "ologit" => format!("stata_ordered(\"logit\", {d}, {y}, {t}"),
+            "oprobit" => format!("stata_ordered(\"probit\", {d}, {y}, {t}"),
+            "mlogit" => format!("stata_mlogit({d}, {y}, {t}"),
+            _ => format!("stata_ml(\"{model}\", {d}, {y}, {t}"),
+        };
+        out.line(format!("stata_e <- {call}{cond}{args}{})", Self::show(c)));
         self.estimates = Some(model);
         Ok(())
     }
@@ -634,8 +740,11 @@ impl Session {
                 ("stdp", 4, "stdp"),
                 ("residuals", 1, "residuals"),
             ],
-            "poisson" => &[("n", 1, "n"), ("xb", 2, "xb"), ("stdp", 4, "stdp")],
-            _ => &[("pr", 2, "pr"), ("xb", 2, "xb"), ("stdp", 4, "stdp")],
+            "poisson" | "nbreg" => &[("n", 1, "n"), ("xb", 2, "xb"), ("stdp", 4, "stdp")],
+            "logit" | "probit" => &[("pr", 2, "pr"), ("xb", 2, "xb"), ("stdp", 4, "stdp")],
+            "ivregress" => &[("xb", 2, "xb"), ("residuals", 1, "residuals")],
+            "xtreg" => &[("xb", 2, "xb"), ("stdp", 4, "stdp"), ("ue", 2, "ue")],
+            other => return Err(no(format!("predict after {other} is not translated yet"))),
         };
         let known: Vec<(&str, usize)> = allowed.iter().map(|(o, m, _)| (*o, *m)).collect();
         if let Some(o) = opts.other(&known) {
@@ -778,12 +887,8 @@ impl Session {
         let est = self
             .estimates
             .ok_or_else(|| no("lincom needs an estimation command before it"))?;
-        let mut known = vec![("or", 2), ("irr", 3), ("eform", 2)];
-        known.retain(|(o, _)| match est {
-            "logit" => *o != "irr",
-            "poisson" => *o != "or",
-            _ => *o == "eform",
-        });
+        let _ = est;
+        let known = [("or", 2), ("irr", 3), ("rrr", 3), ("hr", 2), ("eform", 2)];
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
                 "lincom with the option {o} is not translated yet"
@@ -798,6 +903,10 @@ impl Session {
             ", eform = \"Odds ratio\""
         } else if opts.has("irr", 3) {
             ", eform = \"IRR\""
+        } else if opts.has("rrr", 3) {
+            ", eform = \"RRR\""
+        } else if opts.has("hr", 2) {
+            ", eform = \"Haz. ratio\""
         } else if opts.has("eform", 2) {
             ", eform = \"exp(b)\""
         } else {
@@ -811,6 +920,363 @@ impl Session {
         out.line(format!(
             "stata_r <- stata_lincom(stata_e, {}{constant}{eform}{})",
             r_weights(&w),
+            Self::show(c)
+        ));
+        Ok(())
+    }
+
+    pub(super) fn xtset(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        match words.as_slice() {
+            [panel] | [panel, _] if words.iter().all(|w| is_name(w)) => {
+                self.panel = Some((*panel).to_string());
+                out.caveat("nothing to run in R: the panel variable is passed to xtreg");
+                Ok(())
+            }
+            [] => Err(no("xtset without variables only shows the settings")),
+            _ => Err(no(
+                "xtset takes a panel variable and an optional time variable",
+            )),
+        }
+    }
+
+    pub(super) fn xtreg(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[
+            ("fe", 2),
+            ("re", 2),
+            ("vce", 3),
+            ("robust", 1),
+            ("cluster", 2),
+            ("i", 1),
+        ]) {
+            return Err(no(format!(
+                "xtreg with the option {o} is not translated yet"
+            )));
+        }
+        let panel = match opts.arg("i", 1) {
+            Some(v) if is_name(v.trim()) => v.trim().to_string(),
+            Some(_) => return Err(no("i() needs one variable")),
+            None => self
+                .panel
+                .clone()
+                .ok_or_else(|| no("xtreg needs the panel variable: xtset first"))?,
+        };
+        let d = self.stats_start(c, out)?;
+        let (y, t) = Self::model_spec(c)?;
+        let cond = self.cond_arg(c, out)?;
+        let (kind, cluster) = vce(opts, false)?;
+        let model = if opts.has("fe", 2) { "fe" } else { "re" };
+        let mut args = format!(", model = \"{model}\"");
+        if kind != "ols" {
+            args.push_str(&format!(", vce = \"{kind}\""));
+        }
+        if let Some(v) = cluster {
+            args.push_str(&format!(", cluster = {}", r_text(&v)));
+        }
+        out.line(format!(
+            "stata_e <- stata_xtreg({d}, {y}, {t}, ivar = {}{cond}{args}{})",
+            r_text(&panel),
+            Self::show(c)
+        ));
+        self.estimates = Some("xtreg");
+        Ok(())
+    }
+
+    pub(super) fn ivregress(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("small", 2), ("vce", 3), ("robust", 1), ("cluster", 2)]) {
+            return Err(no(format!(
+                "ivregress with the option {o} is not translated yet"
+            )));
+        }
+        let main = c.parts.main.trim();
+        let (est, rest) = first_word(main);
+        if est != "2sls" {
+            return Err(no(format!(
+                "ivregress {est} is not translated yet (2sls is)"
+            )));
+        }
+        let (open, close) = match (rest.find('('), rest.rfind(')')) {
+            (Some(a), Some(b)) if a < b => (a, b),
+            _ => return Err(no("ivregress needs (endogenous = instruments)")),
+        };
+        let inside = rest.get(open + 1..close).unwrap_or("");
+        let outside = format!(
+            "{} {}",
+            rest.get(..open).unwrap_or(""),
+            rest.get(close + 1..).unwrap_or("")
+        );
+        let (endog, inst) = inside
+            .split_once('=')
+            .ok_or_else(|| no("ivregress needs (endogenous = instruments)"))?;
+        let words: Vec<&str> = outside.split_whitespace().collect();
+        let Some((y, exog)) = words.split_first() else {
+            return Err(no("ivregress needs a dependent variable"));
+        };
+        let list = |ws: Vec<&str>| -> Result<String, Untranslated> {
+            if ws.iter().any(|w| !is_name(w)) {
+                return Err(no(
+                    "ivregress: only plain variable names are translated, not factor variables or patterns",
+                ));
+            }
+            Ok(format!(
+                "c({})",
+                ws.iter().map(|w| r_text(w)).collect::<Vec<_>>().join(", ")
+            ))
+        };
+        if !is_name(y) {
+            return Err(no(format!(
+                "{y}: the dependent variable must be a plain variable name"
+            )));
+        }
+        let endog: Vec<&str> = endog.split_whitespace().collect();
+        let inst: Vec<&str> = inst.split_whitespace().collect();
+        if endog.is_empty() || inst.len() < endog.len() {
+            return Err(no(
+                "ivregress needs at least as many instruments as endogenous variables",
+            ));
+        }
+        let d = self.stats_start(c, out)?;
+        let cond = self.cond_arg(c, out)?;
+        let (kind, cluster) = vce(opts, false)?;
+        let mut args = String::new();
+        if opts.has("small", 2) {
+            args.push_str(", small = TRUE");
+        }
+        if kind != "ols" {
+            args.push_str(&format!(", vce = \"{kind}\""));
+        }
+        if let Some(v) = cluster {
+            args.push_str(&format!(", cluster = {}", r_text(&v)));
+        }
+        out.line(format!(
+            "stata_e <- stata_ivregress({d}, {}, exog = {}, endog = {}, inst = {}{cond}{args}{})",
+            r_text(y),
+            if exog.is_empty() {
+                "character()".to_string()
+            } else {
+                list(exog.to_vec())?
+            },
+            list(endog)?,
+            list(inst)?,
+            Self::show(c)
+        ));
+        self.estimates = Some("ivregress");
+        Ok(())
+    }
+
+    pub(super) fn stset(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("failure", 1)]) {
+            return Err(no(format!(
+                "stset with the option {o} is not translated yet"
+            )));
+        }
+        let time = c.parts.main.trim();
+        if !is_name(time) {
+            return Err(no("stset takes one time variable"));
+        }
+        let failure = match opts.arg("failure", 1) {
+            Some(f) if is_name(f.trim()) => format!(", failure = {}", r_text(f.trim())),
+            Some(_) => {
+                return Err(no(
+                    "stset: failure() with values (failure(died == 1)) is not translated yet",
+                ))
+            }
+            None => String::new(),
+        };
+        self.stats_start(c, out)?;
+        out.line(format!(
+            "stata_st <- list(time = {}{failure})",
+            r_text(time)
+        ));
+        self.st = true;
+        Ok(())
+    }
+
+    pub(super) fn stcox(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("nohr", 3)]) {
+            return Err(no(format!(
+                "stcox with the option {o} is not translated yet"
+            )));
+        }
+        if !self.st {
+            return Err(no("stcox needs stset first"));
+        }
+        let d = self.stats_start(c, out)?;
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let t = terms(&words)?;
+        if t.is_empty() {
+            return Err(no("stcox needs at least one variable"));
+        }
+        let t: Vec<String> = t.iter().map(|t| r_text(t)).collect();
+        let cond = self.cond_arg(c, out)?;
+        let eform = if opts.has("nohr", 3) {
+            ", eform = NULL"
+        } else {
+            ""
+        };
+        out.line(format!(
+            "stata_e <- stata_stcox({d}, stata_st, c({}){cond}{eform}{})",
+            t.join(", "),
+            Self::show(c)
+        ));
+        self.estimates = Some("stcox");
+        Ok(())
+    }
+
+    pub(super) fn anova(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("partial", 1)]) {
+            return Err(no(format!(
+                "anova with the option {o} is not translated yet"
+            )));
+        }
+        let d = self.stats_start(c, out)?;
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let Some((y, rest)) = words.split_first() else {
+            return Err(no("anova needs a dependent variable"));
+        };
+        if !is_name(y) {
+            return Err(no(format!(
+                "{y}: the dependent variable must be a plain variable name"
+            )));
+        }
+        if rest.iter().any(|w| w.contains(['/', '|'])) {
+            return Err(no("anova: nested terms are not translated yet"));
+        }
+        // in anova a bare variable is a factor
+        let marked: Vec<String> = rest
+            .iter()
+            .map(|w| {
+                if is_name(w) {
+                    format!("i.{w}")
+                } else {
+                    (*w).to_string()
+                }
+            })
+            .collect();
+        let marked: Vec<&str> = marked.iter().map(String::as_str).collect();
+        let t = terms(&marked)?;
+        if t.is_empty() {
+            return Err(no("anova needs at least one term"));
+        }
+        let t: Vec<String> = t.iter().map(|t| r_text(t)).collect();
+        let cond = self.cond_arg(c, out)?;
+        out.line(format!(
+            "stata_e <- stata_anova({d}, {}, c({}){cond}{})",
+            r_text(y),
+            t.join(", "),
+            Self::show(c)
+        ));
+        self.estimates = Some("regress");
+        Ok(())
+    }
+
+    pub(super) fn margins(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let est = self
+            .estimates
+            .ok_or_else(|| no("margins needs an estimation command before it"))?;
+        if !matches!(est, "regress" | "logit" | "probit" | "poisson" | "nbreg") {
+            return Err(no(format!("margins after {est} is not translated yet")));
+        }
+        if let Some(o) = opts.other(&[("dydx", 4), ("at", 2), ("atmeans", 3), ("predict", 3)]) {
+            return Err(no(format!(
+                "margins with the option {o} is not translated yet"
+            )));
+        }
+        let d = self.stats_start(c, out)?;
+        let mut args = String::new();
+        let over: Vec<&str> = c.parts.main.split_whitespace().collect();
+        match over.as_slice() {
+            [] => {}
+            [v] => {
+                let v = v.strip_prefix("i.").unwrap_or(v);
+                if !is_name(v) {
+                    return Err(no(format!("margins: {v} is not a factor variable")));
+                }
+                args.push_str(&format!(", over = {}", r_text(v)));
+            }
+            _ => {
+                return Err(no(
+                    "margins over more than one factor is not translated yet",
+                ))
+            }
+        }
+        if let Some(w) = opts.arg("dydx", 4) {
+            if !over.is_empty() {
+                return Err(no(
+                    "margins with both a varlist and dydx() is not translated yet",
+                ));
+            }
+            let w = w.trim();
+            let vars: Vec<String> = if w == "*" || w == "_all" {
+                vec!["_all".into()]
+            } else {
+                w.split_whitespace()
+                    .map(|v| {
+                        let v = v.strip_prefix("i.").or(v.strip_prefix("c.")).unwrap_or(v);
+                        if is_name(v) {
+                            Ok(r_text(v))
+                        } else {
+                            Err(no(format!("dydx(): {v} is not a variable name")))
+                        }
+                    })
+                    .collect::<Result<_, _>>()?
+            };
+            args.push_str(&format!(", dydx = c({})", vars.join(", ")));
+        }
+        let ats: Vec<String> = opts
+            .0
+            .iter()
+            .filter(|o| o.is("at", 2))
+            .map(|o| at_list(&o.arg()))
+            .collect::<Result<_, _>>()?;
+        if !ats.is_empty() {
+            args.push_str(&format!(", at = list({})", ats.join(", ")));
+        }
+        if opts.has("atmeans", 3) {
+            args.push_str(", atmeans = TRUE");
+        }
+        if let Some(p) = opts.arg("predict", 3) {
+            if p.trim() != "xb" {
+                return Err(no(format!(
+                    "margins: predict({}) is not translated yet",
+                    p.trim()
+                )));
+            }
+            args.push_str(", predict = \"xb\"");
+        }
+        let cond = self.cond_arg(c, out)?;
+        out.line(format!(
+            "stata_r <- stata_margins({d}, stata_e{cond}{args}{})",
             Self::show(c)
         ));
         Ok(())
@@ -862,6 +1328,21 @@ mod tests {
         );
         assert!(terms(&["x*"]).is_err());
         assert!(terms(&["L.x"]).is_err());
+    }
+
+    #[test]
+    fn at_lists() {
+        assert_eq!(
+            at_list("x1=(1 2) x2=5").unwrap(),
+            "list(\"x1\" = c(1, 2), \"x2\" = c(5))"
+        );
+        assert_eq!(
+            at_list("x1=(0(.5)1)").unwrap(),
+            "list(\"x1\" = c(0, 0.5, 1))"
+        );
+        assert_eq!(at_list("x=(1/3)").unwrap(), "list(\"x\" = c(1, 2, 3))");
+        assert!(at_list("(mean) x1").is_err());
+        assert!(at_list("x1=gen(x1+1)").is_err());
     }
 
     #[test]

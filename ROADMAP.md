@@ -213,6 +213,10 @@ Tasks:
   maps to a chosen R function in a named package (for example `fixest`,
   `sandwich`, `survival`) and the package is offered through Phase 1A when
   missing.
+  (done: our own R functions in base R instead of packages, so nothing needs installing, with
+  Stata's samples, factor variables, collinearity, small-sample factors and Newton–Raphson
+  stopping rule; 22 do-files give the same returned values as StatCraft to 8 significant digits
+  in real R. `by:`, weights and time-series operators wait; see STATUS. P2B.4 is done)
 - P2B.5 Graph commands: `twoway`, `histogram`, `graph bar`, `scatter`,
   `line`, `kdensity` to ggplot2.
 - P2B.6 Estimates and returned values: `e()`, `r()` and `_b[]`/`_se[]`

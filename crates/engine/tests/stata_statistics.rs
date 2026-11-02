@@ -92,8 +92,18 @@ fn fixture(dir: &str) -> String {
   b <- as.numeric(0.3 * x1 - 0.5 * x2 - 2 + rnorm(n) > 0)
   cnt <- rpois(n, exp(0.1 * x1 - 0.2 * x2))
   t <- round(runif(n, 1, 3), 2)
+  oc <- as.numeric(cut(0.3 * x1 - 0.6 * x2 + rnorm(n), c(-Inf, 0, 1.5, 3, Inf)))
+  mc <- 1 + (x2 + rnorm(n) > 2) + (x2 + rnorm(n) > 3.5)
+  pid <- rep(1:16, each = 5); year <- rep(1:5, 16); ti <- rep(sample(0:1, 16, TRUE), each = 5)
+  z1 <- round(rnorm(n), 3); z2 <- round(rnorm(n), 3); u <- rnorm(n)
+  xe <- round(0.6 * z1 + 0.3 * z2 + u + rnorm(n), 3)
+  yiv <- round(1 + 0.5 * xe + 0.3 * x2 + u + rnorm(n), 3)
+  st <- round(rexp(n, exp(0.2 * x2 - 0.05 * x1)) * 10, 1) + 0.1
+  died <- rbinom(n, 1, 0.7)
+  cnb <- rnbinom(n, size = 1.5, mu = exp(0.1 * x1 - 0.2 * x2 + 0.5))
   x1[c(5, 17)] <- NA; y[9] <- NA; g[30] <- NA
-  haven::write_dta(data.frame(id = 1:n, y, x1, x2, g, h, cl, b, cnt, t), file.path('{dir}', 'study.dta'))
+  haven::write_dta(data.frame(id = 1:n, y, x1, x2, g, h, cl, b, cnt, t, oc, mc, pid, year, ti, z1, z2, xe, yiv, st, died, cnb),
+                   file.path('{dir}', 'study.dta'))
 }})"
     )
 }
@@ -177,6 +187,60 @@ const CASES: &[(&str, &str)] = &[
     ),
 ];
 
+/// The cases of the second part: models with more than one equation or
+/// their own settings.
+const MORE_CASES: &[(&str, &str)] = &[
+    (
+        "nbreg",
+        "nbreg cnb x1 x2\n= _b[x1]\n= _se[x1]\n= _se[_cons]\n= e(alpha)\n= e(ll)\n= e(ll_0)\n= e(chi2)\n= e(chi2_c)\n\
+         nbreg cnb x1, vce(robust)\n= _se[x1]\npredict nb\nsummarize nb\n= r(mean)",
+    ),
+    (
+        "ordered",
+        "ologit oc x1 x2\n= _b[x1]\n= _se[x2]\n= _b[/cut1]\n= _se[/cut3]\n= e(ll)\n= e(ll_0)\n= e(chi2)\n\
+         oprobit oc x1 x2\n= _b[x1]\n= _se[/cut2]\n= e(ll)\nologit oc x1, vce(robust)\n= _se[x1]",
+    ),
+    (
+        "mlogit",
+        "mlogit mc x1 x2\n= _b[2:x1]\n= _se[3:x2]\n= _b[3:_cons]\n= e(ll)\n= e(chi2)\n= e(k_out)\n\
+         mlogit mc x2, baseoutcome(3)\n= _b[1:x2]\n= _se[2:_cons]",
+    ),
+    (
+        "xtreg",
+        "xtset pid year\nxtreg y x1 x2, fe\n= _b[x1]\n= _se[x1]\n= _b[_cons]\n= e(sigma_u)\n= e(sigma_e)\n= e(rho)\n= e(r2_w)\n= e(r2_b)\n= e(r2_o)\n= e(F)\n= e(F_f)\n= e(corr)\n\
+         xtreg y x1 x2 ti, fe\n= _b[x2]\n= e(df_m)\n\
+         xtreg y x1 x2, re\n= _b[x1]\n= _se[x1]\n= _se[_cons]\n= e(sigma_u)\n= e(chi2)\n= e(r2_o)\n= e(Tbar)\n\
+         xtreg y x1 x2, fe vce(robust)\n= _se[x1]\n= e(F)\nxtreg y x1 x2 ti, re vce(robust)\n= _se[x2]\n= _se[ti]",
+    ),
+    (
+        "ivregress",
+        "ivregress 2sls yiv x2 (xe = z1 z2)\n= _b[xe]\n= _se[xe]\n= _se[_cons]\n= e(r2)\n= e(rmse)\n= e(chi2)\n\
+         ivregress 2sls yiv x2 (xe = z1 z2), small\n= _se[xe]\n= e(F)\n\
+         ivregress 2sls yiv x2 (xe = z1 z2), vce(robust)\n= _se[x2]",
+    ),
+    (
+        "anova",
+        "anova y g##h\n= e(ss_1)\n= e(df_1)\n= e(F_1)\n= e(ss_2)\n= e(ss_3)\n= e(F_3)\n= e(mss)\n= e(rss)\n= e(F)\n= e(r2)\n= e(rmse)\n= _b[2.g#1.h]\n\
+         anova y g c.x2\n= e(ss_1)\n= e(ss_2)\n= e(F_2)",
+    ),
+    (
+        "margins",
+        "regress y x1 x2 i.g\nmargins, dydx(x1)\n= el(r(b),1,1)\n= el(r(V),1,1)\nmargins g\n= el(r(b),1,2)\n= el(r(V),3,3)\n\
+         logit b x1 x2 i.h\nmargins, dydx(x1 h)\n= el(r(b),1,1)\n= el(r(V),1,1)\n= el(r(b),1,2)\n= el(r(V),2,2)\n\
+         margins h\n= el(r(b),1,2)\n= el(r(V),1,1)\nmargins, at(x1=(5 10 15))\n= el(r(b),1,3)\n= el(r(V),2,2)\n\
+         margins, at(x2=2) atmeans\n= el(r(b),1,1)\n= el(r(V),1,1)\npoisson cnt x1 x2\nmargins, dydx(x2)\n= el(r(b),1,1)\n= el(r(V),1,1)\n= r(N)",
+    ),
+    (
+        "estat",
+        "regress y x1 x2\nestat ic\n= el(r(S),1,5)\n= el(r(S),1,6)\nlogit b x1\nestat ic\n= el(r(S),1,2)\n= el(r(S),1,6)",
+    ),
+    (
+        "stcox",
+        "stset st, failure(died)\nstcox x1 x2\n= _b[x1]\n= _se[x1]\n= e(ll)\n= e(ll_0)\n= e(chi2)\n= e(N_fail)\n\
+         stcox x2 i.h, nohr\n= _b[1.h]\n= _se[1.h]",
+    ),
+];
+
 /// A check as R: `r(k)`, `e(k)`, `_b[n]` and `_se[n]`.
 fn r_value(check: &str) -> String {
     let inner = |s: &str, open: &str, close: char| {
@@ -184,7 +248,16 @@ fn r_value(check: &str) -> String {
             .and_then(|r| r.strip_suffix(close))
             .map(str::to_string)
     };
-    if let Some(k) = inner(check, "r(", ')') {
+    if let Some(args) = inner(check, "el(", ')') {
+        // el(r(b),1,2): an element of a returned matrix
+        let mut it = args.rsplitn(3, ',');
+        let (j, i, m) = (
+            it.next().unwrap_or("1"),
+            it.next().unwrap_or("1"),
+            it.next().unwrap_or(""),
+        );
+        format!("{}[{i}, {j}]", r_value(m.trim()))
+    } else if let Some(k) = inner(check, "r(", ')') {
         format!("stata_r[[\"{k}\"]]")
     } else if let Some(k) = inner(check, "e(", ')') {
         format!("stata_e[[\"{k}\"]]")
@@ -232,7 +305,7 @@ fn statistics_commands_translate_and_run_like_stata() {
     );
 
     let mut wrong = Vec::new();
-    for (name, body) in CASES {
+    for (name, body) in CASES.iter().chain(MORE_CASES) {
         // the commands, and after which of them each check comes
         let mut commands = vec![format!("use \"{d}/study.dta\", clear")];
         let mut after: Vec<(usize, String)> = Vec::new();
