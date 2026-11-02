@@ -44,12 +44,12 @@ The share has risen in five steps:
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
 | 1. Data management and control flow | 154369 | 124365 | 17452 | 12552 | 87.7% |
-| 2. Core statistics | 3225 | 582 | 2639 | 4 | 18.1% |
+| 2. Core statistics | 3225 | 583 | 2638 | 4 | 18.1% |
 | 3. Panel, survival, survey, IV and other models | 6344 | 3615 | 2639 | 90 | 57.8% |
 | 4. Graphs | 5992 | 5721 | 83 | 188 | 98.6% |
 | 5. Programs and SSC commands | 182 | 12 | 169 | 1 | 6.6% |
 | Other commands | 4036 | 17 | 3942 | 77 | 0.4% |
-| **All** | 174148 | 134312 | 26924 | 12912 | 83.3% |
+| **All** | 174148 | 134313 | 26923 | 12912 | 83.3% |
 
 17563 lines are not translated only because a line before them was not (the variable, scalar, macro, data or stored result it would have made). The first causes, most lines first:
 
@@ -95,17 +95,17 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
-| 1. Data management and control flow | 9315 | 6360 | 2281 | 674 | 73.6% |
-| 2. Core statistics | 2035 | 349 | 1685 | 1 | 17.2% |
+| 1. Data management and control flow | 9315 | 6366 | 2275 | 674 | 73.7% |
+| 2. Core statistics | 2035 | 377 | 1657 | 1 | 18.5% |
 | 3. Panel, survival, survey, IV and other models | 376 | 2 | 373 | 1 | 0.5% |
 | 4. Graphs | 117 | 0 | 117 | 0 | 0.0% |
 | 5. Programs and SSC commands | 647 | 0 | 633 | 14 | 0.0% |
 | Other commands | 2657 | 824 | 1575 | 258 | 34.3% |
-| **All** | 15147 | 7535 | 6664 | 948 | 53.1% |
+| **All** | 15147 | 7569 | 6630 | 948 | 53.3% |
 
 Most of what is left comes from add-ons from SSC: `robreg`, `outreg2`, `reghdfe`, `parmest`, `cluster2`, `eststo`,
 `coefplot` and `esttab`. One package's 2,588-line file runs `robreg` and `predict` after it over a thousand
@@ -113,8 +113,7 @@ times, and that alone is why tier 2's share is low. Of Stata's own commands, the
 - `clogit` (135);
 - `gettoken` (78);
 - `tsset` and the time-series operators (`f.`, `d.`, `l.`) in `xtreg` (about 130);
-- `tabulate, generate()` (27);
-- `xtile`, `assert` and `suest`.
+- `xtile` and `suest`.
 
 ## Checked against Stata on R (2026-11-01)
 

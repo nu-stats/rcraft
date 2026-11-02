@@ -55,6 +55,7 @@ pub struct Context<'a> {
 pub const COMMANDS: &[&str] = &[
     "anova",
     "append",
+    "assert",
     "bootstrap",
     "bsample",
     "bysort",
@@ -422,7 +423,14 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     (
         "tabulate",
         &[
-            "cell", "chi2", "column", "missing", "nolabel", "row", "sort",
+            "cell",
+            "chi2",
+            "column",
+            "generate(",
+            "missing",
+            "nolabel",
+            "row",
+            "sort",
         ],
     ),
     ("tostring", &["generate(", "replace"]),
@@ -1140,7 +1148,7 @@ mod tests {
             "poisson" | "nbreg" => format!("{cmd} c x, {o}"),
             "ologit" | "oprobit" | "mlogit" => format!("{cmd} o x, {o}"),
             "lowess" | "pwcorr" | "correlate" | "regress" | "tab2" => format!("{cmd} y x, {o}"),
-            "tabulate" if matches!(name, "missing" | "nolabel" | "sort") => {
+            "tabulate" if matches!(name, "generate" | "missing" | "nolabel" | "sort") => {
                 format!("tabulate y, {o}")
             }
             "tabulate" | "tab1" => format!("{cmd} y x, {o}"),

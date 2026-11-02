@@ -469,6 +469,7 @@ const REPLACE_DATA: &[&str] = &[
 
 const LEAVE_DATA_ALONE: &[&str] = &[
     "estimates",
+    "assert",
     "erase",
     "rm",
     "fvset",
@@ -572,8 +573,9 @@ const EXCEL_NAMES_HELPER: &str = "stata_excel_names <- function(n, first = 1) {\
 /// What `capture` makes of an error in R: Stata's `_rc` and, under
 /// `noisily`, Stata's message. A name that is not there is `111` and "name
 /// not found" in Stata, as is a helper's "... not found"; "already defined"
-/// is `110`, a file not found `601` and one that already exists `602` (read
-/// off Stata 19). Any other error keeps R's message and leaves `_rc` missing.
+/// is `110`, a file not found `601`, one that already exists `602` and a
+/// false assertion `9` (read off Stata 19). Any other error keeps R's
+/// message and leaves `_rc` missing.
 const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
   while (inherits(e$parent, "condition")) e <- e$parent
   m <- sub("^! ", "", conditionMessage(e))
@@ -582,6 +584,8 @@ const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
     rc <- 601
   } else if (grepl("^file [^\n]* already exists$", m)) {
     rc <- 602
+  } else if (grepl("(^|\n)assertion is false$", m)) {
+    rc <- 9
   } else if (grepl("^object '[^']+' not found$", m)) {
     m <- sub("^object '([^']+)' not found$", "\\1 not found", m)
     rc <- 111
@@ -594,9 +598,28 @@ const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
   rc
 }"#;
 
+/// `assert` on the rows it covers: `ok` is TRUE where the expression holds.
+const ASSERT_HELPER: &str = r#"stata_assert <- function(ok, rc0 = FALSE) {
+  n <- length(ok)
+  if (n == 0) {
+    cat("(null assertion)\n")
+    return(invisible())
+  }
+  bad <- sum(is.na(ok) | !ok)
+  if (bad == 0) return(invisible())
+  m <- "assertion is false"
+  if (n > 1) {
+    m <- paste0(format(bad, big.mark = ","), if (bad == 1) " contradiction" else " contradictions",
+      " in ", format(n, big.mark = ","), " observations\n", m)
+  }
+  if (rc0) cat(m, "\n", sep = "") else stop(m, call. = FALSE)
+  invisible()
+}"#;
+
 fn helper_code(name: &str) -> &'static str {
     match name {
         "stata_captured" => CAPTURED_HELPER,
+        "stata_assert" => ASSERT_HELPER,
         "stata_excel_names" => EXCEL_NAMES_HELPER,
         "stata_stats" => more::STAT_HELPERS,
         "stata_destring" => more::DESTRING_HELPER,
@@ -605,6 +628,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
         "stata_tabulate" => stats::TABULATE_HELPER,
+        "stata_tab_generate" => stats::TAB_GENERATE_HELPER,
         "stata_correlate" => stats::CORRELATE_HELPER,
         "stata_tab1" => stats::TAB1_HELPER,
         "stata_tab2" => stats::TAB2_HELPER,
@@ -1503,6 +1527,7 @@ impl Session {
             "set" => self.set(c, out),
             "estimates" => self.estimates_cmd(c, out),
             "erase" | "rm" => self.erase(c, out),
+            "assert" => self.assert(c, &opts, out),
             "fvset" => self.fvset(c, out),
             "compress" => {
                 if let Some(o) = opts.other(&[("nocoalesce", 10)]) {
@@ -2683,6 +2708,40 @@ impl Session {
         Ok(())
     }
 
+    /// `assert`: where it is false, Stata's count of those rows (none for a
+    /// single row), then `assertion is false` and r(9); `rc0` prints them
+    /// and goes on, and no rows is `(null assertion)` (Stata 19).
+    fn assert(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("rc0", 3)]) {
+            return Err(no(format!(
+                "assert with the option {o} is not translated yet"
+            )));
+        }
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            return Err(no("by with assert is not translated yet"));
+        }
+        if c.parts.main.trim().is_empty() {
+            return Err(no("assert needs an expression (Stata: invalid syntax)"));
+        }
+        let d = self.data()?;
+        let test = self.expr(&c.parts.main, Use::Condition, out)?;
+        let rows = match self.condition(c, out)? {
+            Some(cond) => format!("dplyr::filter({d}, {cond})"),
+            None => d,
+        };
+        out.package("dplyr");
+        self.helpers.insert("stata_assert");
+        out.line(format!(
+            "stata_assert(dplyr::pull(dplyr::mutate({rows}, stata_ok = {test}), stata_ok){})",
+            if opts.has("rc0", 3) {
+                ", rc0 = TRUE"
+            } else {
+                ""
+            }
+        ));
+        Ok(())
+    }
+
     /// `fvset base #` and `fvset base default`, `fvset clear`: the base level
     /// later models give `i.x`, as if they wrote `ib#.x` (Stata 19). It stays
     /// with the data, so a file the do-file saves keeps it.
@@ -3241,6 +3300,28 @@ append using t, force");
             out[2].contains("stata_forced(s, haven::read_dta(\"t.dta\"))"),
             "{out:?}"
         );
+    }
+
+    #[test]
+    fn assert_and_tabulate_generate() {
+        let out = r("use s
+assert x > 2 if g == 1, rc0
+assert x > 2, fast
+tabulate g if x > 0, generate(d) missing
+tabulate g h, generate(d)");
+        assert_eq!(
+            out[1],
+            "stata_assert(dplyr::pull(dplyr::mutate(dplyr::filter(s, (!is.na(g) & g == 1)), stata_ok = (is.na(x) | x > 2)), stata_ok), rc0 = TRUE)"
+        );
+        assert!(
+            out[2].starts_with("NOT: assert with the option fast"),
+            "{out:?}"
+        );
+        assert!(
+            out[3].ends_with("s <- stata_tab_generate(s, \"g\", \"d\", sel = dplyr::pull(dplyr::mutate(s, stata_sel = (is.na(x) | x > 0)), stata_sel), missing = TRUE)"),
+            "{out:?}"
+        );
+        assert!(out[4].starts_with("NOT"), "{out:?}");
     }
 
     #[test]

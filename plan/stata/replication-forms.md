@@ -68,3 +68,29 @@ real replication packages use most where RCraft refused them. Only what Stata di
   it prints no note.
 - After `estimates restore a`, `predict` uses model a, `_b[]` and `e()` are a's, and `e(cmd)` is
   `regress`.
+
+## assert
+
+- `assert exp` that holds prints nothing.
+- When it is false somewhere, it prints `23 contradictions in 60 observations` (`1 contradiction` for one; counts with
+  thousands commas, `2,143 contradictions in 2,500 observations`), then `assertion is false`, r(9). Over a single
+  observation only `assertion is false` is printed.
+- `if` and `in` limit the rows counted. A missing value counts as larger than any number (`assert x < 2` is false
+  where x is missing; `assert x > 0` holds there).
+- With no rows, it prints `(null assertion)` and r(0). With `null` and no rows: `(null assertion)`, r(8).
+- `rc0` prints the same messages and r(0). `fast` prints only `assertion is false`, r(9).
+- Under `quietly` the messages are hidden, and r(9) still stops the do-file.
+
+## tabulate, generate()
+
+- `tabulate x, generate(d)` prints the table and makes `d1`, `d2`, ... (byte), one per value in sorted order.
+- Each is 1 where x has that value and 0 elsewhere. It is missing where x is missing, and on rows that
+  `if` or `in` leave out.
+- With `missing`, a missing x gets an indicator of its own (the last), and the others are 0 there.
+- The variable labels are `x==` followed by:
+  - the value's label when x has one (`f==one`);
+  - the text for a string (`s==a`);
+  - otherwise the number in 11 characters, padded on the left: `%11.4f`, or `%11.4e` when that is wider
+    (`cat3==     1.0000`, `v==100000.0000`, `v== 1.2346e+08`, `v==-1.2346e+05`, `v==    -0.0000` for -1.5e-7);
+  - and for a missing value `x==      .` (six spaces).
+- `describe` shows these labels with the runs of spaces narrowed to one.

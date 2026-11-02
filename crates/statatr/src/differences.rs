@@ -164,6 +164,17 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "assert",
+        about: "Stops when an expression is false",
+        points: &[p(
+            "Messages",
+            "Stata's count of the rows where it is false (23 contradictions in 60 observations, \
+             none for a single row), then assertion is false and r(9); rc0 prints them and \
+             goes on, and no rows is (null assertion). A missing value counts as large, as in \
+             Stata. fast and null are not translated yet.",
+        )],
+    },
+    Guide {
         command: "bootstrap",
         about: "Repeats a command on samples drawn with replacement",
         points: &[
@@ -980,6 +991,13 @@ pub const GUIDES: &[Guide] = &[
                 "Order",
                 "Categories in the order of the values underneath, with their labels, as \
                  Stata's.",
+            ),
+            p(
+                "generate()",
+                "One indicator per value, labelled as Stata labels them (cat3== followed by the \
+                 number in 11 characters, 1.0000 padded on the left; s==a; f==one); rows the \
+                 table leaves out are missing, and with missing a missing value has an \
+                 indicator of its own.",
             ),
             p(
                 "chi2",

@@ -14,6 +14,7 @@
 pub const VERIFIED: &[(&str, &[&str])] = &[
     ("anova", &["panel"]),
     ("append", &["replication"]),
+    ("assert", &["checks"]),
     ("bootstrap", &["bootstrap"]),
     ("bsample", &["bsample"]),
     ("collapse", &["data"]),
@@ -71,7 +72,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("stcox", &["likelihood"]),
     ("stset", &["likelihood"]),
     ("summarize", &["aware", "control", "descriptives"]),
-    ("tabulate", &["descriptives"]),
+    ("tabulate", &["checks", "descriptives"]),
     ("tempvar", &["control"]),
     ("test", &["regress"]),
     ("tokenize", &["made"]),

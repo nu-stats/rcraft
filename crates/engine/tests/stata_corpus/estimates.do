@@ -11,12 +11,16 @@ estimates store b
 regress y w
 predict double p1
 estimates restore a
-display "@ a_b " %24.17g _b[x] " " %24.17g _se[w] " " e(N) " " e(df_m)
+display "@ a_b " %24.17g _b[x]
+display "@ a_se " %24.17g _se[w]
+display "@ a_n " e(N)
+display "@ a_dfm " e(df_m)
 predict double p2
 summarize p2
 display "@ a_p " %24.17g r(sum)
 est res b
-display "@ b_b " %24.17g _b[x] " " %24.17g e(ll)
+display "@ b_b " %24.17g _b[x]
+display "@ b_ll " %24.17g e(ll)
 predict double p3
 summarize p3
 display "@ b_p " %24.17g r(sum)
@@ -24,7 +28,8 @@ quietly regress y x if g == 1
 estimates store c
 estimates restore a
 estimates restore c
-display "@ c_b " %24.17g _b[x] " " e(N)
+display "@ c_b " %24.17g _b[x]
+display "@ c_n " e(N)
 generate double z2 = z^2
 estimates restore a
 predict double p4

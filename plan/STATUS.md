@@ -2940,3 +2940,17 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Not done:** `estimates dir`, `table`, `replay`, `save` and `use`.
 - **Note:** Pinokio reinstalled its miniforge on 2026-11-02 at 12:13, which removed the R environment this
   machine used (`hev-r`). The R tests skip here until R is back; GitHub CI runs them on all three platforms.
+
+## P2C.9 continued: assert and tabulate, generate(), 2026-11-02
+
+- **assert:** Stata 19's messages (`23 contradictions in 60 observations`, then `assertion is false`), r(9),
+  with if and in, `rc0` and `(null assertion)`. A missing value counts as large, as in Stata. `fast` and `null`
+  are refused.
+- **tabulate, generate():** the indicators, with Stata's labels (the number in `%11.4f`, `%11.4e` when wider),
+  missing outside the table's rows, and an indicator for missing with `missing`.
+- **Corpus:** `checks.do` (24 results); `assert` is Verified, and `tabulate` is also checked there.
+  `replication.do` and `estimates.do` now put one value on each result line: the corpus compares only the
+  first number after a key, so the lines with two or three values had been checking just the first.
+- **Numbers:** the packages' share is 53.3%.
+- **Machine:** a system R 4.6.2 appeared at 12:29 without the packages the corpus needs. The R tests skip
+  here or fail on missing packages (the Excel import test) until it is set up; GitHub CI runs them.

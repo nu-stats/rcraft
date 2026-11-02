@@ -26,11 +26,13 @@ keep id g y
 append using rep_s, force
 erase rep_s.dta
 count if missing(g)
-display "@ force_n " r(N) " " _N
+display "@ force_n " r(N)
+display "@ force_rows " _N
 summarize y
 display "@ force_y " %24.17g r(sum)
 summarize g
-display "@ force_g " %24.17g r(sum) " " r(N)
+display "@ force_g " %24.17g r(sum)
+display "@ force_gn " r(N)
 import delimited corpus.csv, clear
 keep id g
 save rep_n, replace
@@ -38,7 +40,8 @@ tostring g, replace
 append using rep_n, force
 erase rep_n.dta
 count if g == ""
-display "@ force_s " r(N) " " _N
+display "@ force_s " r(N)
+display "@ force_srows " _N
 * reshape long without j() makes _j
 import delimited corpus.csv, clear
 generate double v1 = x
@@ -46,7 +49,8 @@ generate double v2 = w
 keep id v1 v2
 reshape long v, i(id)
 summarize _j
-display "@ reshape_j " %24.17g r(sum) " " r(N)
+display "@ reshape_j " %24.17g r(sum)
+display "@ reshape_n " r(N)
 generate double p = v * _j
 summarize p
 display "@ reshape_p " %24.17g r(sum)
@@ -54,11 +58,15 @@ display "@ reshape_p " %24.17g r(sum)
 import delimited corpus.csv, clear
 fvset base 3 cat3
 regress y i.cat3 x
-display "@ fv_reg " %24.17g _b[1.cat3] " " %24.17g _b[2.cat3] " " %24.17g _se[2.cat3]
+display "@ fv_reg1 " %24.17g _b[1.cat3]
+display "@ fv_reg2 " %24.17g _b[2.cat3]
+display "@ fv_se2 " %24.17g _se[2.cat3]
 regress y cat3#f
-display "@ fv_cells " %24.17g _b[1.cat3#2.f] " " %24.17g _b[3.cat3#2.f]
+display "@ fv_cell12 " %24.17g _b[1.cat3#2.f]
+display "@ fv_cell32 " %24.17g _b[3.cat3#2.f]
 logit yb i.cat3 x
-display "@ fv_logit " %24.17g _b[1.cat3] " " %24.17g _se[1.cat3]
+display "@ fv_logit " %24.17g _b[1.cat3]
+display "@ fv_logit_se " %24.17g _se[1.cat3]
 save rep_f, replace
 import delimited corpus.csv, clear
 regress y i.cat3

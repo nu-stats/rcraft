@@ -1,0 +1,25 @@
+* Stata 19.0's results for checks.do, recorded by cargo xtask stata-record
+@ a_false 9
+@ a_if 9
+@ a_in 9
+@ a_rc0 0
+@ a_null 0
+@ a_missing 9
+@ a_missing_big 0
+@ t_d1_n 59
+@ t_d1_sum 16
+@ t_d3_sum 21
+@ t_d2_label 1
+@ t_s_n 59
+@ t_s_sum 29
+@ t_s_label 1
+@ t_if_n 50
+@ t_if_sum 17
+@ t_f_label 1
+@ t_miss_n 60
+@ t_miss_sum 1
+@ t_miss_label 1
+@ t_neg_label 1
+@ t_num_label 1
+@ t_wide_label 1
+@ t_e_label 1

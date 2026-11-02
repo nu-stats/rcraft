@@ -163,6 +163,45 @@ pub(super) const TAB_VALUES_HELPER: &str = r#"stata_tab_values <- function(v, no
   factor(labs[match(u, vals)], levels = unique(labs))
 }"#;
 
+/// `tabulate x, generate(stub)`: one indicator per value, in sorted order,
+/// labelled `x==` and the value's label, the text, or the number as Stata 19
+/// writes it there (`%11.4f`, or `%11.4e` when that is wider). Rows the table
+/// leaves out (missing x, if, in) are missing; with `missing` a missing x
+/// has its own indicator, labelled `x==` and six spaces before `.`.
+pub(super) const TAB_GENERATE_HELPER: &str = r#"stata_tab_generate <- function(d, var, stub, sel = TRUE, missing = FALSE, nolabel = FALSE) {
+  x <- d[[var]]
+  text <- is.character(x)
+  labs <- if (nolabel || text) NULL else attr(x, "labels")
+  if (!text) x <- as.numeric(unclass(x))
+  sel <- rep_len(as.logical(sel), nrow(d))
+  sel[is.na(sel)] <- FALSE
+  miss <- if (text) is.na(x) | x == "" else is.na(x)
+  use <- sel & (missing | !miss)
+  vals <- unique(x[use & !miss])
+  vals <- if (text) sort(vals, method = "radix") else sort(vals)
+  label_of <- function(v) {
+    if (text) return(v)
+    if (!is.null(labs) && any(labs == v)) return(names(labs)[match(v, labs)][1])
+    s <- sprintf("%11.4f", v)
+    if (nchar(s) > 11) s <- sprintf("%11.4e", v)
+    s
+  }
+  cols <- lapply(vals, function(v) list(is = !miss & x == v, label = label_of(v)))
+  if (missing && any(use & miss)) {
+    if (text) stop("tabulate, generate() with missing for a string variable is not translated yet")
+    cols <- c(cols, list(list(is = miss, label = "      .")))
+  }
+  made <- paste0(stub, seq_along(cols))
+  if (any(made %in% names(d))) stop("variable ", made[made %in% names(d)][1], " already defined")
+  for (k in seq_along(cols)) {
+    name <- made[k]
+    v <- ifelse(use, as.numeric(cols[[k]]$is), NA_real_)
+    attr(v, "label") <- paste0(var, "==", cols[[k]]$label)
+    d[[name]] <- v
+  }
+  d
+}"#;
+
 /// One-way and two-way `tabulate`.
 pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NULL, missing = FALSE, sort = FALSE,
                             row = FALSE, column = FALSE, cell = FALSE,
@@ -417,7 +456,7 @@ impl Session {
                 ("chi2", 4),
             ]
         } else {
-            &[("missing", 1), ("nolabel", 3), ("sort", 4)]
+            &[("missing", 1), ("nolabel", 3), ("sort", 4), ("generate", 3)]
         };
         if let Some(o) = opts.other(known) {
             return Err(no(format!(
@@ -476,13 +515,45 @@ impl Session {
         }
         self.helpers.insert("stata_tables");
         self.helpers.insert("stata_fmt");
+        // generate(): the indicators, on every row of the data
+        let generate = match opts.arg("generate", 3) {
+            Some(stub) => {
+                let stub = stub.trim();
+                if !is_name(stub) {
+                    return Err(no(format!("generate({stub}) needs a name")));
+                }
+                let d = self.data()?;
+                let sel = match self.condition(c, out)? {
+                    Some(cond) => {
+                        format!("dplyr::pull(dplyr::mutate({d}, stata_sel = {cond}), stata_sel)")
+                    }
+                    None => "TRUE".into(),
+                };
+                self.helpers.insert("stata_tab_generate");
+                out.package("dplyr");
+                Some(format!(
+                    "{d} <- stata_tab_generate({d}, {}, {}, sel = {sel}{}{})",
+                    r_text(x),
+                    r_text(stub),
+                    if opts.has("missing", 1) {
+                        ", missing = TRUE"
+                    } else {
+                        ""
+                    },
+                    if nolabel { ", nolabel = TRUE" } else { "" }
+                ))
+            }
+            None => None,
+        };
         let call = format!("stata_tabulate({}{wargs}, ret = TRUE)", args.join(", "));
         if self.quiet(c) {
             // nothing shown, r() still left
             out.line(format!("invisible(utils::capture.output({call}))"));
+            out.code.extend(generate);
             return Ok(());
         }
         out.line(call);
+        out.code.extend(generate);
         let percents = ["row", "column", "cell"]
             .iter()
             .zip([3, 3, 4])
