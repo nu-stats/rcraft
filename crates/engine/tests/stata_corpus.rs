@@ -3,8 +3,8 @@
 //! `cargo xtask stata-record` kept (`NAME.recorded`). Each do-file is run
 //! the way RCraft runs a do-file (P2C, `statatr::dofile`: its macros, loops
 //! and included files, R asked for the values only it knows); every line
-//! must translate, and each runs in a real R; every result
-//! it prints as `@ key value` is compared with Stata's to the file's
+//! must translate, and each runs in a real R; every value it prints on an
+//! `@ key value ...` line is compared with Stata's to the file's
 //! tolerance (8 significant digits, or 6 where Stata stops iterating at its
 //! tolerance). A command is Verified (`statatr::verified`) only through a
 //! file here that passes.
@@ -155,14 +155,23 @@ fn run_dofile(e: &mut Engine, folder: &str, text: &str) -> Result<String, String
     }
 }
 
-/// The `@ key value` lines of a do-file's output, as numbers.
-fn results(text: &str) -> BTreeMap<String, f64> {
+/// The `@ key value ...` lines of a do-file's output, every value as a
+/// number (`.` is missing).
+fn results(text: &str) -> BTreeMap<String, Vec<f64>> {
     text.lines()
         .filter_map(|l| {
             let mut w = l.strip_prefix("@ ")?.split_whitespace();
             let key = w.next()?;
-            let v = w.next()?;
-            let v = if v == "." { f64::NAN } else { v.parse().ok()? };
+            let v: Option<Vec<f64>> = w
+                .map(|v| {
+                    if v == "." {
+                        Some(f64::NAN)
+                    } else {
+                        v.parse().ok()
+                    }
+                })
+                .collect();
+            let v = v.filter(|v| !v.is_empty())?;
             Some((key.to_string(), v))
         })
         .collect()
@@ -211,16 +220,26 @@ fn the_corpus_gives_statas_results() {
         };
         let got = results(&text);
         for (key, want) in &stata {
-            match got.get(key) {
-                None => wrong.push(format!("{name}: {key} was not printed")),
-                Some(have) => {
-                    let same = (want.is_nan() && have.is_nan())
-                        || (have - want).abs() <= tol * want.abs().max(have.abs());
-                    if !same {
-                        wrong.push(format!(
-                            "{name}: {key} is {have}, Stata's {want} (tolerance {tol})"
-                        ));
-                    }
+            let Some(have) = got.get(key) else {
+                wrong.push(format!("{name}: {key} was not printed"));
+                continue;
+            };
+            if have.len() != want.len() {
+                wrong.push(format!(
+                    "{name}: {key} has {} values, Stata's {}",
+                    have.len(),
+                    want.len()
+                ));
+                continue;
+            }
+            for (i, (have, want)) in have.iter().zip(want).enumerate() {
+                let same = (want.is_nan() && have.is_nan())
+                    || (have - want).abs() <= tol * want.abs().max(have.abs());
+                if !same {
+                    wrong.push(format!(
+                        "{name}: {key} value {} is {have}, Stata's {want} (tolerance {tol})",
+                        i + 1
+                    ));
                 }
             }
         }
