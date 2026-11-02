@@ -291,9 +291,9 @@ impl Session {
             }
         }
         if let Some(lib) = config.library.as_ref().filter(|l| l.is_dir()) {
-            let existing = std::env::var_os("R_LIBS_USER");
-            if let Some(value) = crate::library::libs_user_value(existing.as_deref(), lib) {
-                command.env("R_LIBS_USER", value);
+            let existing = std::env::var_os("R_LIBS");
+            if let Some(value) = crate::library::libs_value(existing.as_deref(), lib) {
+                command.env("R_LIBS", value);
             }
         }
         no_console_window(&mut command);

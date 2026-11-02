@@ -30,10 +30,11 @@ pub fn user_library_dir(env: &Env) -> Option<PathBuf> {
     app_data_dir(env).map(|d| d.join("R-library"))
 }
 
-/// The value for `R_LIBS_USER`: RCraft's library first, then whatever the
-/// environment already had. R adds the folders that exist to its search path
-/// when it starts.
-pub fn libs_user_value(existing: Option<&OsStr>, library: &Path) -> Option<OsString> {
+/// The value for `R_LIBS`: RCraft's library first, then whatever the
+/// environment already had. R searches these folders, where they exist, before
+/// the user's own library (`R_LIBS_USER`), which is left to R so that packages
+/// the user installed the usual way are still found.
+pub fn libs_value(existing: Option<&OsStr>, library: &Path) -> Option<OsString> {
     let rest = existing
         .map(std::env::split_paths)
         .into_iter()
@@ -75,15 +76,15 @@ mod tests {
     #[test]
     fn the_library_goes_first_and_the_old_value_is_kept() {
         let lib = Path::new("/rc/lib");
-        let one = libs_user_value(None, lib);
+        let one = libs_value(None, lib);
         assert_eq!(one, Some(OsString::from("/rc/lib")));
         let joined = std::env::join_paths(["/other"]).unwrap_or_default();
-        let both = libs_user_value(Some(&joined), lib).unwrap_or_default();
+        let both = libs_value(Some(&joined), lib).unwrap_or_default();
         let parts: Vec<PathBuf> = std::env::split_paths(&both).collect();
         assert_eq!(
             parts,
             vec![PathBuf::from("/rc/lib"), PathBuf::from("/other")]
         );
-        assert_eq!(libs_user_value(Some(OsStr::new("")), lib), one);
+        assert_eq!(libs_value(Some(OsStr::new("")), lib), one);
     }
 }

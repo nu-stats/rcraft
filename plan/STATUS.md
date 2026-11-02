@@ -2954,3 +2954,18 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Numbers:** the packages' share is 53.3%.
 - **Machine:** a system R 4.6.2 appeared at 12:29 without the packages the corpus needs. The R tests skip
   here or fail on missing packages (the Excel import test) until it is set up; GitHub CI runs them.
+
+## P3.2 continued: the user's own R library stays on the path, 2026-11-02
+
+- RCraft gave its own library to R as `R_LIBS_USER`, which replaced R's own
+  per-user library (`%LOCALAPPDATA%\R\win-library\4.6` and the like), so
+  packages the user installed the usual way were not found. It is given as
+  `R_LIBS` now: R searches it first, then the user's library, then R's own.
+- Heads-up about this machine: Pinokio's reinstall removed the HEV R (R 4.4)
+  and a system R 4.6.2 took its place. RCraft's library still held R 4.4
+  builds, and `readr`'s compiled code would not load in 4.6. With the user's
+  go-ahead all 40 were replaced with current builds for 4.6, and the 14
+  packages CI uses were installed into the user's own R library. The corpus,
+  format and save tests run here again.
+- R keeps a library per minor version for this reason; RCraft's is one folder
+  for every R, so a user who upgrades R can meet the same failure.
