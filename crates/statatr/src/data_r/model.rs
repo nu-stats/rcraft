@@ -542,6 +542,36 @@ impl Spec {
     }
 }
 
+/// A model's words with the base levels `fvset` chose: `i.g`, and a bare `g`
+/// in an interaction, become `ib#.g`. Unchanged when no word changes.
+pub(super) fn with_bases(main: &str, bases: &BTreeMap<String, String>) -> String {
+    let mut changed = false;
+    let words: Vec<String> = main
+        .split_whitespace()
+        .map(|w| {
+            let interaction = w.contains('#');
+            w.split('#')
+                .map(|p| {
+                    let v = p.strip_prefix("i.").or(bare_factor(p, interaction));
+                    match v.and_then(|v| bases.get(v).map(|b| (v, b))) {
+                        Some((v, b)) => {
+                            changed = true;
+                            format!("ib{b}.{v}")
+                        }
+                        None => p.to_string(),
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("#")
+        })
+        .collect();
+    if changed {
+        words.join(" ")
+    } else {
+        main.to_string()
+    }
+}
+
 /// The variable of `i.g` or `ib2.g`.
 fn factor_variable(part: &str) -> Option<&str> {
     let part = part.trim();

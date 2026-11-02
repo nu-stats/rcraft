@@ -1,0 +1,20 @@
+* Stata 19.0's results for replication.do, recorded by cargo xtask stata-record
+@ erase_rc 601
+@ rm_rc 601
+@ save_rc 602
+@ force_n 60 120
+@ force_y        197.4983993768692
+@ force_g                       30 60
+@ force_s 60 120
+@ reshape_j                      180 120
+@ reshape_p      -1.0069998633116484
+@ fv_reg     -.012839263531750604      .055529857118573278       .3734697397828
+@ fv_cells       -1.192574282629149       .55271426907607568
+@ fv_logit       .16110270484824085       .87981953906511845
+@ fv_import       .69105082353496006
+@ fv_use      -.91037327847125338
+@ fv_default       .69105082353496006
+@ fv_restore      -.69105082353496083
+@ cl_reg       .13900977486273197
+@ cl_robust       .13900977486273197
+@ cl_logit       .46693426118442727

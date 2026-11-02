@@ -15,6 +15,17 @@ stata_min <- function(x) if (all(is.na(x))) NA_real_ else min(x, na.rm = TRUE)\n
 stata_max <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)\n\
 stata_pctile <- function(x, p) if (all(is.na(x))) NA_real_ else unname(stats::quantile(x, p / 100, type = 2, na.rm = TRUE))";
 
+/// `append, force`: a variable of the using data whose kind (string or
+/// number) is not the master's is missing there, `""` or `.` (Stata 19).
+pub(super) const FORCED_HELPER: &str = r#"stata_forced <- function(d, u) {
+  for (v in intersect(names(d), names(u))) {
+    if (is.character(d[[v]]) != is.character(u[[v]])) {
+      u[[v]] <- if (is.character(d[[v]])) rep("", nrow(u)) else rep(NA_real_, nrow(u))
+    }
+  }
+  u
+}"#;
+
 /// `destring`: Stata's rules for which text is a number (`""` and `.` are
 /// missing; "1,000", "5%" and "NA" are not numbers); without `force` a
 /// variable with any other text is left alone, with Stata's message.
@@ -467,7 +478,12 @@ impl Session {
         opts: &Opts,
         out: &mut Out,
     ) -> Result<(), Untranslated> {
-        if let Some(o) = opts.other(&[("generate", 3), ("nolabel", 5), ("nonotes", 5)]) {
+        if let Some(o) = opts.other(&[
+            ("generate", 3),
+            ("nolabel", 5),
+            ("nonotes", 5),
+            ("force", 5),
+        ]) {
             return Err(no(format!(
                 "append with the option {o} is not translated yet"
             )));
@@ -477,9 +493,20 @@ impl Session {
             .using
             .clone()
             .ok_or_else(|| no("append needs `using file`"))?;
+        let force = opts.has("force", 5);
+        if force {
+            self.need_helper("stata_forced");
+        }
         let reads: Vec<String> = files
             .split_whitespace()
-            .map(|f| format!("haven::read_dta({})", r_text(&file_name(f, "dta"))))
+            .map(|f| {
+                let read = format!("haven::read_dta({})", r_text(&file_name(f, "dta")));
+                if force {
+                    format!("stata_forced({d}, {read})")
+                } else {
+                    read
+                }
+            })
             .collect();
         out.package("haven");
         out.package("dplyr");
@@ -504,7 +531,11 @@ impl Session {
                 reads.join(", ")
             )),
         }
-        out.caveat("a string variable in one file and a number in the other stops with an error, as in Stata");
+        if force {
+            out.caveat("with force a variable that is a string in one file and a number in the other is missing in the appended rows, as in Stata (which notes each one)");
+        } else {
+            out.caveat("a string variable in one file and a number in the other stops with an error, as in Stata");
+        }
         Ok(())
     }
 
@@ -524,7 +555,12 @@ impl Session {
         let stubs = names(stubs)
             .map_err(|_| no("reshape needs the stub names written out (no @ or patterns)"))?;
         let i = names(&opts.arg("i", 1).ok_or_else(|| no("reshape needs i()"))?)?;
-        let j_text = opts.arg("j", 1).ok_or_else(|| no("reshape needs j()"))?;
+        // reshape long without j() names the new variable _j (Stata 19)
+        let j_text = match opts.arg("j", 1) {
+            Some(t) => t,
+            None if way == "long" => "_j".to_string(),
+            None => return Err(no("reshape wide needs j()")),
+        };
         let j = j_text.split_whitespace().next().unwrap_or("").to_string();
         if !is_name(&j) || j_text.split_whitespace().count() > 1 {
             return Err(no(

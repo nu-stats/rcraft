@@ -2895,3 +2895,29 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Also:** `nbreg` on counts with no overdispersion, where Stata's alpha goes to 0 and R's `glm.nb` fails,
   now stops with that reason instead of R's "missing value where TRUE/FALSE needed".
 - **Not done:** collinearity in the panel, survival and IV models; `nbreg` at alpha = 0.
+
+## P2C.9 continued: public replication packages as inputs, 2026-11-02
+
+- **Inputs:** 11 small public replication packages from Harvard Dataverse, each with do-files and data:
+  46 do-files that run 15,147 lines. They are kept outside the repository. The first dry run translated
+  40.5% of their lines; `tests/many_dofiles.rs` now also writes every refused line with its reason
+  (`RCRAFT_COVERAGE_LINES`).
+- **Translated from what they use:**
+  - `erase` and `rm`: Stata's message and r(601) for a file that is not there; r(602) for `save` over one;
+  - `compress`, `set niceness`, `set processors`, `set max_memory` and the like, and `set scheme`: nothing to do in R;
+  - `append, force`: the using file's values of a variable of the other kind are missing;
+  - `reshape long` without `j()` makes `_j`;
+  - `fvset base #`, `base default` and `fvset clear`: later models write `i.x` (and a bare `x` in an
+    interaction) as `ib#.x`; the choice stays with the data (save and use, preserve and restore keep it,
+    import and clear drop it);
+  - `cluster()` and `cl()` beside a model mean `vce(cluster)`, with `robust` beside them changing nothing.
+- **Fixed:** the value label sets the do-file defined were kept after new data was read, so a second
+  `label define` of the same set after `import ..., clear` was refused. They now go with the data, and a
+  file the do-file saved brings its sets back when it is used again.
+- **Observed:** `plan/stata/replication-forms.md`. **Corpus:** `replication.do` (19 results) passes;
+  `append`, `erase`, `fvset` and `reshape` are Verified, with guide pages for `compress`, `erase` and `fvset`.
+- **Numbers:** the packages' share is 52.1%, StatCraft's probes' 83.3% (`docs/stata-coverage.md`).
+- **Not done:** add-ons from SSC (`robreg`, `outreg2`, `reghdfe`, `eststo`, ...), which are most of what is
+  left; `estimates store` / `restore`, `clogit`, `tsset` and time-series operators, `gettoken`,
+  `tabulate, generate()`, `xtile`, `assert`; `fvset base first/last/frequent/none` and `fvset report`;
+  running the packages on R against Stata.

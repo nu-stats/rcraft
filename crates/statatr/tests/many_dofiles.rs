@@ -71,16 +71,29 @@ fn the_share_translated_per_tier() {
         .collect();
     files.sort();
     let mut c = Coverage::default();
+    // every line not translated, with its reason, when asked for
+    let mut refused = String::new();
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap_or_default();
+        let name = f
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
         let opts = Options {
-            name: f
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default(),
+            name: name.clone(),
             ..Options::default()
         };
-        c.add(&dry_run(&text, &NoFiles, opts));
+        let d = dry_run(&text, &NoFiles, opts);
+        for (line, origin) in d.translation.lines.iter().zip(&d.origins) {
+            let st = rcraft_statatr::dofile::status(line, origin);
+            if let (rcraft_statatr::dofile::Status::Not, Err(e)) = (st, &line.result) {
+                refused.push_str(&format!("{name}\t{}\t{}\n", line.stata.trim(), e.reason));
+            }
+        }
+        c.add(&d);
+    }
+    if let Ok(out) = std::env::var("RCRAFT_COVERAGE_LINES") {
+        std::fs::write(&out, &refused).unwrap_or_else(|e| panic!("{out}: {e}"));
     }
     let total = c.total();
     eprintln!(

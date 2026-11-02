@@ -158,7 +158,9 @@ pub const GUIDES: &[Guide] = &[
         points: &[p(
             "Types",
             "A string variable in one file and a number in the other stops with an error, as \
-             in Stata; R's rbind() would turn both into text.",
+             in Stata; R's rbind() would turn both into text. With force the using file's \
+             values of such a variable are missing (\"\" or .), as in Stata, which also prints \
+             a note for each.",
         )],
     },
     Guide {
@@ -242,6 +244,16 @@ pub const GUIDES: &[Guide] = &[
             "Precision",
             "Stata stores means and the like of float variables as floats; R keeps full \
              precision, so the 8th digit can differ.",
+        )],
+    },
+    Guide {
+        command: "compress",
+        about: "Makes variables' storage types smaller",
+        points: &[p(
+            "Nothing to do",
+            "R has no storage types (byte, int, float, str20), so compress changes nothing in R \
+             and the values stay as they are. Stata lists each variable it makes smaller and the \
+             bytes saved; RCraft prints nothing.",
         )],
     },
     Guide {
@@ -340,6 +352,16 @@ pub const GUIDES: &[Guide] = &[
         points: &[p("Codes", "The codes follow the text's sorted order from 1, as Stata's.")],
     },
     Guide {
+        command: "erase",
+        about: "Deletes a file (rm is the same)",
+        points: &[p(
+            "Missing file",
+            "A file that is not there stops with Stata's message, file ... not found, and \
+             capture gives _rc 601, as in Stata. No extension is added: erase x looks for x, \
+             not x.dta.",
+        )],
+    },
+    Guide {
         command: "ereturn",
         about: "ereturn list",
         points: &[p(
@@ -380,6 +402,18 @@ pub const GUIDES: &[Guide] = &[
             "Information criteria",
             "estat ic counts the coefficients as the degrees of freedom, as Stata does; R's \
              AIC() on a linear model also counts the variance.",
+        )],
+    },
+    Guide {
+        command: "fvset",
+        about: "Chooses a factor variable's base level",
+        points: &[p(
+            "Base levels",
+            "fvset base # (and default, and fvset clear) is kept by RCraft, and later models \
+             write i.x and a bare x in an interaction as ib#.x, which is what Stata does. The \
+             choice stays with the data as in Stata: save and use keep it, preserve and restore \
+             bring it back, and import or clear drops it. fvset base first, last, frequent and \
+             none, fvset design and fvset report are not translated yet.",
         )],
     },
     Guide {
@@ -802,7 +836,8 @@ pub const GUIDES: &[Guide] = &[
         points: &[p(
             "Order",
             "Long to wide and back with i() and j() as Stata takes them; the rows come out \
-             sorted by i and j, as Stata leaves them.",
+             sorted by i and j, as Stata leaves them. reshape long without j() names the new \
+             variable _j, as Stata does. Stata's summary table (wide -> long) is not printed.",
         )],
     },
     Guide {

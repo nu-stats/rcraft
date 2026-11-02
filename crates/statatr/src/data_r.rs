@@ -569,13 +569,17 @@ const EXCEL_NAMES_HELPER: &str = "stata_excel_names <- function(n, first = 1) {\
 /// What `capture` makes of an error in R: Stata's `_rc` and, under
 /// `noisily`, Stata's message. A name that is not there is `111` and "name
 /// not found" in Stata, as is a helper's "... not found"; "already defined"
-/// is `110` (read off Stata 19). Any other error keeps R's message and leaves
-/// `_rc` missing.
+/// is `110`, a file not found `601` and one that already exists `602` (read
+/// off Stata 19). Any other error keeps R's message and leaves `_rc` missing.
 const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
   while (inherits(e$parent, "condition")) e <- e$parent
   m <- sub("^! ", "", conditionMessage(e))
   rc <- NA_real_
-  if (grepl("^object '[^']+' not found$", m)) {
+  if (grepl("^file [^\n]* not found$", m)) {
+    rc <- 601
+  } else if (grepl("^file [^\n]* already exists$", m)) {
+    rc <- 602
+  } else if (grepl("^object '[^']+' not found$", m)) {
     m <- sub("^object '([^']+)' not found$", "\\1 not found", m)
     rc <- 111
   } else if (grepl("^[^\n]* not found$", m)) {
@@ -593,6 +597,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_excel_names" => EXCEL_NAMES_HELPER,
         "stata_stats" => more::STAT_HELPERS,
         "stata_destring" => more::DESTRING_HELPER,
+        "stata_forced" => more::FORCED_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
@@ -671,6 +676,11 @@ struct Session {
     file: Option<String>,
     /// Variable types made by the do-file itself.
     kinds: BTreeMap<String, Kind>,
+    /// The base levels `fvset base` chose: variable -> level.
+    fv_base: BTreeMap<String, String>,
+    /// What a file this do-file saved keeps with its data, as Stata does:
+    /// the `fvset` bases and the value label sets.
+    saved: BTreeMap<String, Kept>,
     /// Scalars defined so far, number or text.
     scalars: BTreeMap<String, Kind>,
     /// The scalars the command being translated reads by their bare names.
@@ -747,12 +757,20 @@ fn silent(c: &Command) -> bool {
     quiet
 }
 
+/// What a saved file keeps beside its values that the translator follows.
+#[derive(Default, Clone)]
+struct Kept {
+    fv_base: BTreeMap<String, String>,
+    label_sets: BTreeMap<String, Vec<(f64, String)>>,
+}
+
 /// The data and what the translator knows of it, as `preserve` left them.
 #[derive(Default, Clone)]
 struct Preserved {
     data: Option<String>,
     file: Option<String>,
     kinds: BTreeMap<String, Kind>,
+    fv_base: BTreeMap<String, String>,
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
     panel: Option<String>,
     panel_time: Option<String>,
@@ -1310,6 +1328,9 @@ impl Session {
             self.changed_since_fit = true;
             return Err(no(format!("{} with weights is not translated yet", c.name)));
         }
+        if let Some(c2) = self.restated(c) {
+            return self.command(&c2);
+        }
         let mut out = Out::default();
         let by = c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. }));
         self.esample_new = false;
@@ -1450,6 +1471,17 @@ impl Session {
             "list" => self.list(c, &opts, out),
             "describe" => self.describe(c, out),
             "set" => self.set(c, out),
+            "erase" | "rm" => self.erase(c, out),
+            "fvset" => self.fvset(c, out),
+            "compress" => {
+                if let Some(o) = opts.other(&[("nocoalesce", 10)]) {
+                    return Err(no(format!("compress with the option {o} is not translated")));
+                }
+                out.caveat(
+                    "nothing to do in R: R has no storage types to make smaller (Stata lists each variable it changes and the bytes saved)",
+                );
+                Ok(())
+            }
             "bsample" => self.bsample(c, &opts, out),
             "bootstrap" => self.bootstrap(c, out),
             "clear" => {
@@ -1458,6 +1490,8 @@ impl Session {
                 }
                 self.data_lost = None;
                 self.kinds.clear();
+                self.fv_base.clear();
+                self.label_sets.clear();
                 Ok(())
             }
             "version" => {
@@ -1598,6 +1632,11 @@ impl Session {
             steps.push("haven::zap_labels()".into());
         }
         self.data = Some(name.clone());
+        // the label sets and fvset bases are the file's: those it was saved
+        // with when this do-file saved it, none known otherwise
+        let kept = self.saved.get(&path).cloned().unwrap_or_default();
+        self.fv_base = kept.fv_base;
+        self.label_sets = kept.label_sets;
         self.file = Some(path);
         self.kinds.clear();
         if let Some(cond) = self.condition(c, out)? {
@@ -1630,6 +1669,13 @@ impl Session {
             ));
         }
         out.line(format!("haven::write_dta({d}, {})", r_text(&path)));
+        self.saved.insert(
+            path.clone(),
+            Kept {
+                fv_base: self.fv_base.clone(),
+                label_sets: self.label_sets.clone(),
+            },
+        );
         self.file = Some(path);
         Ok(())
     }
@@ -1790,6 +1836,8 @@ impl Session {
         self.data = Some(name);
         self.file = None;
         self.kinds.clear();
+        self.fv_base.clear();
+        self.label_sets.clear();
         Ok(())
     }
 
@@ -2470,6 +2518,7 @@ impl Session {
             data: self.data.clone(),
             file: self.file.clone(),
             kinds: self.kinds.clone(),
+            fv_base: self.fv_base.clone(),
             label_sets: self.label_sets.clone(),
             panel: self.panel.clone(),
             panel_time: self.panel_time.clone(),
@@ -2512,6 +2561,7 @@ impl Session {
         self.data = p.data;
         self.file = p.file;
         self.kinds = p.kinds;
+        self.fv_base = p.fv_base;
         self.label_sets = p.label_sets;
         self.panel = p.panel;
         self.panel_time = p.panel_time;
@@ -2541,6 +2591,8 @@ impl Session {
                         self.data = Some("data".into());
                         self.file = None;
                         self.kinds.clear();
+                        self.fv_base.clear();
+                        self.label_sets.clear();
                     }
                 }
                 Ok(())
@@ -2561,14 +2613,128 @@ impl Session {
                 out.line(format!("stata_linesize <- {n}"));
                 Ok(())
             }
-            "more" | "varabbrev" | "trace" | "rmsg" | "type" | "maxvar" | "matsize" => {
+            "more" | "varabbrev" | "trace" | "rmsg" | "type" | "maxvar" | "matsize"
+            | "niceness" | "processors" | "max_memory" | "min_memory" | "segmentsize" => {
                 out.caveat(format!(
                     "nothing to do in R: set {what} only changes how Stata runs or prints"
                 ));
                 Ok(())
             }
+            "scheme" => {
+                out.caveat("nothing to do in R: set scheme only changes how Stata's graphs look; RCraft's graphs keep their own");
+                Ok(())
+            }
             other => Err(no(format!("set {other} is not translated yet"))),
         }
+    }
+
+    /// `erase` (and `rm`): one file deleted; one that is not there stops with
+    /// Stata's message and r(601). No extension is added (Stata 19).
+    fn erase(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        if !c.options.is_empty() {
+            return Err(no(format!("{} takes no options", c.name)));
+        }
+        let main = c.parts.main.trim();
+        let one = match main.strip_prefix('"') {
+            Some(rest) => rest.strip_suffix('"').is_some_and(|f| !f.contains('"')),
+            None => !main.is_empty() && !main.contains(char::is_whitespace),
+        };
+        if !one {
+            return Err(no(format!("{} needs one file name", c.name)));
+        }
+        let path = file_name(main, "");
+        let p = r_text(&path);
+        out.line(format!(
+            "if (!file.exists({p})) stop({})",
+            r_text(&format!("file {path} not found"))
+        ));
+        out.line(format!("invisible(file.remove({p}))"));
+        Ok(())
+    }
+
+    /// `fvset base #` and `fvset base default`, `fvset clear`: the base level
+    /// later models give `i.x`, as if they wrote `ib#.x` (Stata 19). It stays
+    /// with the data, so a file the do-file saves keeps it.
+    fn fvset(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        if !c.options.is_empty() {
+            return Err(no("fvset with options is not translated yet"));
+        }
+        let (what, rest) = first_word(&c.parts.main);
+        let (base, vars) = match what {
+            "base" => {
+                let (b, vars) = first_word(rest);
+                match b {
+                    "default" => (None, vars),
+                    n if !n.is_empty() && n.chars().all(|ch| ch.is_ascii_digit()) => {
+                        (Some(n.to_string()), vars)
+                    }
+                    other => {
+                        return Err(no(format!(
+                            "fvset base {other} is not translated yet: only a number or default"
+                        )))
+                    }
+                }
+            }
+            "clear" => (None, rest),
+            other => return Err(no(format!("fvset {other} is not translated yet"))),
+        };
+        let vars = names(vars)?;
+        if vars.is_empty() {
+            return Err(no("fvset needs variable names"));
+        }
+        for v in vars {
+            match &base {
+                Some(b) => {
+                    self.fv_base.insert(v, b.clone());
+                }
+                None => {
+                    self.fv_base.remove(&v);
+                }
+            }
+        }
+        out.caveat("nothing runs in R: RCraft writes later models' i. terms with this base level (as ib#.)");
+        Ok(())
+    }
+
+    /// The line as the translators read it: `cluster(v)` beside a model is the
+    /// older `vce(cluster v)`, which `robust` does not change, and `i.x` takes
+    /// the base `fvset` chose (both read off Stata 19). `None` when nothing
+    /// changes.
+    fn restated(&self, c: &Command) -> Option<Command> {
+        if !MODELS.contains(&c.name.as_str()) {
+            return None;
+        }
+        let mut c2 = c.clone();
+        let mut changed = false;
+        let cluster = c.options.iter().find(|o| o.is("cluster", 2));
+        if let (Some(cl), false) = (cluster, c.options.iter().any(|o| o.is("vce", 3))) {
+            let v = format!("cluster {}", cl.arg().trim());
+            c2.options
+                .retain(|o| !o.is("cluster", 2) && !o.is("robust", 1));
+            c2.options.push(crate::lang::syntax::Opt {
+                name: "vce".into(),
+                arg: Some(v.clone()),
+                raw: Some(v),
+            });
+            c2.parts.options = c2
+                .options
+                .iter()
+                .map(|o| match &o.raw {
+                    Some(r) => format!("{}({r})", o.name),
+                    None => o.name.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            changed = true;
+        }
+        if !self.fv_base.is_empty() {
+            let main = model::with_bases(&c2.parts.main, &self.fv_base);
+            if main != c2.parts.main {
+                c2.parts.main = main;
+                changed = true;
+            }
+        }
+        changed.then_some(c2)
     }
 }
 
@@ -2979,6 +3145,71 @@ mod tests {
         let out = r("set obs 2\ngenerate a = rbeta(1, 2)\ngenerate b = runiform()\nset seed 3\ngenerate c = runiform()");
         assert!(out[2].contains("not Stata's: a line before it that draws was not translated (generate a = rbeta(1, 2))"), "{out:?}");
         assert!(!out[4].starts_with("NOT"), "{out:?}");
+    }
+
+    /// Forms found in published replication packages (P2C.9).
+    #[test]
+    fn forms_from_replication_packages() {
+        let out = r("erase \"a b.dta\"
+rm x.dta
+erase two words
+compress
+set niceness 6");
+        assert_eq!(
+            out[0],
+            "if (!file.exists(\"a b.dta\")) stop(\"file a b.dta not found\")\ninvisible(file.remove(\"a b.dta\"))"
+        );
+        assert!(out[1].contains("file.remove(\"x.dta\")"), "{out:?}");
+        assert!(
+            out[2].starts_with("NOT: erase needs one file name"),
+            "{out:?}"
+        );
+        assert!(!out[3].starts_with("NOT"), "{out:?}");
+        assert!(!out[4].starts_with("NOT"), "{out:?}");
+        // cluster() and cl() are vce(cluster); robust beside them goes
+        let out = r("use s
+regress y x, robust cl(g)
+regress y x, vce(cluster g)");
+        // the same R but e(cmdline), which is the line as typed
+        assert_eq!(out[1].replace("robust cl(g)", "vce(cluster g)"), out[2]);
+        // fvset base: later models write i.x as ib#.x, until default or clear
+        let out = r("use s
+fvset base 3 g
+regress y i.g
+regress y g#h
+fvset base default g
+regress y i.g");
+        assert!(out[2].contains("stata_ib(g, \"3\")"), "{out:?}");
+        assert!(out[3].contains("stata_cells(g, h, \"3\", \"\")"), "{out:?}");
+        assert!(!out[5].contains("stata_ib"), "{out:?}");
+        assert!(r("use s\nfvset base frequent g")[1].starts_with("NOT"));
+        // and the data keeps it: save and use bring it back, import drops it
+        let out = r("use s
+fvset base 2 g
+save t, replace
+import delimited c.csv, clear
+regress y i.g
+use t, clear
+regress y i.g");
+        assert!(!out[4].contains("stata_ib"), "{out:?}");
+        assert!(out[6].contains("stata_ib(g, \"2\")"), "{out:?}");
+        // a label set goes with the data it was defined in
+        let out = r("import delimited c.csv, clear
+label define yes 1 \"yes\"
+import delimited c.csv, clear
+label define yes 1 \"yes\"
+label define yes 1 \"no\"");
+        assert!(!out[3].starts_with("NOT"), "{out:?}");
+        assert!(out[4].starts_with("NOT"), "{out:?}");
+        // reshape long without j() makes _j; append with force
+        let out = r("use s
+reshape long v, i(id)
+append using t, force");
+        assert!(out[1].contains("\"_j\""), "{out:?}");
+        assert!(
+            out[2].contains("stata_forced(s, haven::read_dta(\"t.dta\"))"),
+            "{out:?}"
+        );
     }
 
     #[test]

@@ -33,29 +33,30 @@ survival, survey, IV and the other models, 4 graphs (with `_natscale`, which giv
 and chosen SSC commands (`statatr::coverage::tier`). The lines are the ones the do-files run, so a loop's body
 counts once a round. The share is of the lines a dry run can judge.
 
-The share has risen in four steps:
+The share has risen in five steps:
 - Stata's own random draws (P2C.11) took it from 31.8% to 68.9%.
 - P2C.12 took it to 76.1%: `invnormal()`, `normal()`, the `c()` constants and `_natscale`. One research probe
   of StatCraft's runs `_natscale` 5,399 times, so tier 4's share mostly reflects that probe.
 - Stata's date and time functions on R (P2C.14) took it to 79.1% (tier 1 to 85.4%).
 - `bsample` with Stata's own draws (P2C.16) took it to 83.1%: StatCraft's resampling probes run it in long loops.
+- The forms found in published replication packages (P2C.9, below) took it to 83.3%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
-| 1. Data management and control flow | 154369 | 124113 | 17704 | 12552 | 87.5% |
+| 1. Data management and control flow | 154369 | 124363 | 17454 | 12552 | 87.7% |
 | 2. Core statistics | 3225 | 542 | 2679 | 4 | 16.8% |
-| 3. Panel, survival, survey, IV and other models | 6344 | 3612 | 2642 | 90 | 57.8% |
+| 3. Panel, survival, survey, IV and other models | 6344 | 3615 | 2639 | 90 | 57.8% |
 | 4. Graphs | 5992 | 5721 | 83 | 188 | 98.6% |
 | 5. Programs and SSC commands | 182 | 12 | 169 | 1 | 6.6% |
-| Other commands | 4036 | 2 | 3957 | 77 | 0.1% |
-| **All** | 174148 | 134002 | 27234 | 12912 | 83.1% |
+| Other commands | 4036 | 17 | 3942 | 77 | 0.4% |
+| **All** | 174148 | 134270 | 26966 | 12912 | 83.3% |
 
-17810 lines are not translated only because a line before them was not (the variable, scalar, macro, data or stored result it would have made). The first causes, most lines first:
+17563 lines are not translated only because a line before them was not (the variable, scalar, macro, data or stored result it would have made). The first causes, most lines first:
 
 | Lines | Reason |
 |---:|---|
 | 861 | file is not translated yet |
-| 573 | lasso is not translated yet |
+| 600 | lasso is not translated yet |
 | 320 | lassoselect is not translated yet |
 | 240 | this runs upd, a program the do-file defines; programs are not translated yet |
 | 186 | this runs rho1, a program the do-file defines; programs are not translated yet |
@@ -66,14 +67,53 @@ The share has risen in four steps:
 | 128 | lassoknots is not translated yet |
 | 121 | Clock() counts leap seconds (datetime/C), which is not translated yet; datetime/c (clock(), cofd(), ...) is |
 | 116 | mi is not translated yet |
-| 112 | format is not translated yet |
+| 113 | format is not translated yet |
 | 100 | lpoly is not translated yet |
-| 81 | estat needs a model fitted earlier in this do-file (regress, logit, ...) |
+| 78 | estat needs a model fitted earlier in this do-file (regress, logit, ...) |
 | 77 | this runs dump, a program the do-file defines; programs are not translated yet |
 | 71 | estimates is not translated yet |
 | 68 | stepwise is not translated yet |
 | 68 | xtregar is not translated yet |
 | 62 | this runs show, a program the do-file defines; programs are not translated yet |
+
+## Public replication packages (2026-11-02)
+
+The second set of inputs is ordinary analysis code: 11 public replication packages from Harvard Dataverse,
+small ones that have both do-files and data, with 46 do-files that run 15,147 lines. Their DOIs (all under
+`10.7910/DVN/`) are 6J6BAW, ASKO93, AXYMDI, DZ8BUS, FMDLII, SI3BGA, TQN6ZN, TZEN38, XURXZN, YFBPT6 and ZNMIXH.
+They come mostly from political science and economics. The packages stay outside the repository, and only
+counts are written here. The same test measures them (`RCRAFT_DOFILES_DIR`); with `RCRAFT_COVERAGE_LINES` it
+also writes every refused line with its reason, which is how the fixes below were chosen.
+
+The first dry run translated 40.5% of the lines. These forms, each checked against Stata 19 in `replication.do`
+in the corpus, took it to 52.1%:
+- `erase` and `rm` (r(601) for a file that is not there, and r(602) for `save` over one);
+- `compress` and `set niceness` / `set scheme`, which change nothing in R;
+- `append, force`;
+- `reshape long` without `j()`;
+- `fvset base`, which stays with the data as in Stata;
+- `cluster()` and `cl()` for `vce(cluster)`;
+- the value label sets, now dropped with the data when new data is read, as in Stata.
+
+| Tier | Lines | Translated | Not translated | Known when run | Share translated |
+|---|---:|---:|---:|---:|---:|
+| 1. Data management and control flow | 9315 | 6360 | 2281 | 674 | 73.6% |
+| 2. Core statistics | 2035 | 211 | 1823 | 1 | 10.4% |
+| 3. Panel, survival, survey, IV and other models | 376 | 2 | 373 | 1 | 0.5% |
+| 4. Graphs | 117 | 0 | 117 | 0 | 0.0% |
+| 5. Programs and SSC commands | 647 | 0 | 633 | 14 | 0.0% |
+| Other commands | 2657 | 824 | 1575 | 258 | 34.3% |
+| **All** | 15147 | 7397 | 6802 | 948 | 52.1% |
+
+Most of what is left comes from add-ons from SSC: `robreg`, `outreg2`, `reghdfe`, `parmest`, `cluster2`, `eststo`,
+`coefplot` and `esttab`. One package's 2,588-line file runs `robreg` and `predict` after it over a thousand
+times, and that alone is why tier 2's share is low. Of Stata's own commands, the first causes are:
+- `estimates store` and `restore` (148 lines);
+- `clogit` (135);
+- `gettoken` (78);
+- `tsset` and the time-series operators (`f.`, `d.`, `l.`) in `xtreg` (about 130);
+- `tabulate, generate()` (27);
+- `xtile`, `assert` and `suest`.
 
 ## Checked against Stata on R (2026-11-01)
 
@@ -143,9 +183,9 @@ reason:
 
 ## What would move the numbers most
 
-1. `file`, programs the do-file defines and time-series operators. The date and time functions (P2C.14) and
-   `bsample` and `bootstrap` (P2C.16) are translated.
-2. Collinear terms in the other models (`nbreg`, `ologit`, `mlogit`, ...) and interactions in the likelihood models' tables.
-3. Programs (`program define`), `gettoken`, `rpoisson()`, `rbeta()` and `rt()`,
-   and the models not yet translated (lasso, xtregar, newey, prais).
+1. `estimates store` and `restore`, `tsset` and the time-series operators, which both sets of do-files use,
+   then `file` and the programs a do-file defines.
+2. Interactions in the likelihood models' tables, and collinear terms in the panel, survival and IV models.
+3. `gettoken`, `clogit`, `rpoisson()`, `rbeta()` and `rt()`, and the models not yet translated (lasso, xtregar,
+   newey, prais).
 4. The last digits: `poisson`'s starting point and `_natscale`'s residue for n = 10 and 15.

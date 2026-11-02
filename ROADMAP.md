@@ -360,6 +360,7 @@ skipped. It never gives a silent wrong answer.
   about 8 significant digits; a command is `Verified` only on a match
   (started 2026-10-31: `control.do` and `aware.do` in the corpus check macros, loops, include, varlists from the data, levelsof and unab against Stata 19; StatCraft's probe do-files and public replication packages are still to come.)
   (done 2026-11-01 for StatCraft's probes: `engine/tests/stata_probes.rs` runs each of them on R and sets its top-level display, return list and ereturn list against Stata 19's log, to 8 significant digits, with the counts in `docs/stata-coverage.md`; `made.do` in the corpus makes expand, preserve, restore, set obs and tokenize Verified. Public replication packages are still to come.)
+  (continued 2026-11-02: 11 public replication packages from Harvard Dataverse, 46 do-files, run dry: 40.5% of their lines translated at first, 52.1% after erase, compress, append force, reshape without j(), fvset base, cluster() and label sets going with the data; `replication.do` in the corpus checks them against Stata 19.)
 - P2C.10 Known limits stated up front: Stata's random draws, Mata, compiled
   plugins, interactive commands
   (done 2026-10-31: the scan lists those the do-file uses. From 2026-11-01 runiform(), rnormal() and rgamma() are no longer among them, P2C.11.)
