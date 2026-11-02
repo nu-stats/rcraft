@@ -2864,3 +2864,21 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   one more line.
 - **Not done:** `strata()`, `saving()`, `bca`, `_b` after other models, `estat bootstrap`, `predict` after it,
   and `vce(bootstrap)`, all refused with the reason.
+
+## P2C.11 continued: the other random functions, 2026-11-01
+
+- **What works:** these give Stata 19's own draws on R:
+  - `rexponential()`, `rlogistic()` (one argument is the scale), `rweibull()`, `rweibullph()`, `rcauchy()`,
+    `rlaplace()`, `rpareto()`, `rgeometric()`;
+  - `rigaussian()`, `rchi2()`, `runiformint()`;
+  - `rbinomial()`, `rnbinomial()` and `rhypergeometric()` in the ranges whose method is known; past them R
+    stops with the reason.
+  The code is StatCraft's decoding, written in R beside the generator. Arguments outside Stata's ranges
+  give missing and draw nothing.
+- **Observed here:** `runiformint(a, a)` takes no draw.
+- **Checked:** 34 cases of 1,500 draws each, every one followed by the next uniform, match bit for bit;
+  `variates.do` in the corpus (19 results, tolerance 0) passes. Fourteen functions are Verified.
+- **Numbers:** 5,526 of 5,644 compared probe lines match Stata to 8 digits; probe 182 (`runiformint`)
+  matches 2 of 2. The dry share is 83.3%.
+- **Not done:** `rpoisson()`, `rbeta()`, `rt()` (StatCraft has not found Stata's methods), KISS32,
+  `c(rngstate)`.

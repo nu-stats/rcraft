@@ -366,7 +366,7 @@ skipped. It never gives a silent wrong answer.
 - P2C.11 Stata's own random draws on R: `set seed`, `runiform()`, `rnormal()`
   and `rgamma()` give Stata 19's numbers, then `runiformint()`,
   `rbinomial()` and the others
-  (done 2026-11-01 for the first four: Stata's generator (mt64) and StatCraft's decoding of its normal and gamma methods, written in R (`data_r/random.rs`), its state kept in R across lines, `preserve`, `by` and typed lines; draws only for the rows an `if`/`in` selects; `random.do` in the corpus checks them exactly. Design and observations in `plan/stata/random-numbers.md`. Still to come: the other random functions, KISS32 under `version` 13 or earlier, `c(rngstate)`.)
+  (done 2026-11-01 for the first four: Stata's generator (mt64) and StatCraft's decoding of its normal and gamma methods, written in R (`data_r/random.rs`), its state kept in R across lines, `preserve`, `by` and typed lines; draws only for the rows an `if`/`in` selects; `random.do` in the corpus checks them exactly. Design and observations in `plan/stata/random-numbers.md`. The other random functions followed the same day: `rexponential()`, `rlogistic()`, `rweibull()`, `rweibullph()`, `rcauchy()`, `rlaplace()`, `rpareto()`, `rgeometric()`, `rigaussian()`, `rchi2()`, `runiformint()`, and `rbinomial()`, `rnbinomial()` and `rhypergeometric()` in the ranges whose method is known, checked on 34 × 1,500 of Stata's draws and in `variates.do`. Still to come: `rpoisson()`, `rbeta()`, `rt()`, KISS32 under `version` 13 or earlier, `c(rngstate)`.)
 - P2C.12 Closer to Stata on the probes: no compared line differs, and more
   lines are compared
   (done 2026-11-01:

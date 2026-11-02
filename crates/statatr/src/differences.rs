@@ -113,11 +113,13 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Random numbers",
-                "set seed, runiform(), rnormal(), rgamma() and bsample give Stata's own draws: \
-                 RCraft runs Stata's generator (the 64-bit Mersenne Twister) in R, row by row as \
-                 Stata draws, and bsample picks the rows Stata picks, in its order. The other \
-                 random functions, commands that draw (bootstrap, simulate, ...), two draws in \
-                 one expression and version 13 or earlier are refused.",
+                "set seed, the random functions (runiform(), rnormal(), rgamma(), rbinomial(), \
+                 runiformint(), rexponential(), ...), bsample and bootstrap give Stata's own \
+                 draws: RCraft runs Stata's generator (the 64-bit Mersenne Twister) in R, row by \
+                 row as Stata draws. rpoisson(), rbeta() and rt(), rbinomial(), rnbinomial() and \
+                 rhypergeometric() past the ranges whose method is known (they stop with the \
+                 reason), simulate and permute, two draws in one expression and version 13 or \
+                 earlier are refused.",
             ),
             p(
                 "Returned values",

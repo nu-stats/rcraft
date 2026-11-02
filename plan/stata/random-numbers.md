@@ -164,3 +164,22 @@ Not translated yet:
 - `_b` after other models;
 - `predict` and `estat bootstrap` after it;
 - `vce(bootstrap)` as a model option.
+
+## The other random variates (P2C.11 continued)
+
+These are StatCraft's decoding (`plan/stata/random-numbers.md` and `random_draws.rs` there), written in R
+beside the generator (`data_r/random.rs`), with Stata's argument ranges. Outside those ranges a call
+gives missing and draws nothing.
+- **One uniform each:** `rexponential()`, `rlogistic()` (one argument is the scale), `rweibull()`,
+  `rweibullph()`, `rcauchy()`, `rlaplace()`, `rpareto()`, `rgeometric()`.
+- **`rigaussian()`:** a normal, then one uniform.
+- **`rchi2(df)`:** twice `rgamma(df/2)`.
+- **`runiformint(a, b)`:** the top bits of a 64-bit output, drawn again while too large. `runiformint(a, a)`
+  takes no draw at all (observed here).
+- **`rbinomial()`, `rnbinomial()` and `rhypergeometric()`:** one uniform each, by inversion or a search
+  from the mode. This holds only in the ranges whose method is known: n·p up to 120, p^n of 1e-4 or more,
+  and a mean of 10 or less. Past them R stops with the reason.
+
+The check (`q12`) took 34 cases of 1,500 draws each, every case followed by the next uniform. All match
+Stata 19 bit for bit, and so do the 19 results of `variates.do`. Still not Stata's: `rpoisson()`, `rbeta()`
+and `rt()`, refused.

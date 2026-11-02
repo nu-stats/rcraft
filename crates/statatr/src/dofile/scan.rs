@@ -100,18 +100,9 @@ pub struct Scan {
     pub limits: Vec<&'static str>,
 }
 
-/// The random functions whose draws are not Stata's yet (`runiform`, `rnormal` and
-/// `rgamma` are, P2C.11).
-const RANDOM: &[&str] = &[
-    "rbinomial(",
-    "rpoisson(",
-    "rchi2(",
-    "rbeta(",
-    "rexponential(",
-    "rlogistic(",
-    "runiformint(",
-    "rt(",
-];
+/// The random functions whose draws are not Stata's yet (the others are,
+/// P2C.11 and its continuation).
+const RANDOM: &[&str] = &["rpoisson(", "rbeta(", "rt("];
 
 pub fn scan(d: &DoFile) -> Scan {
     let mut s = Scan {
@@ -167,7 +158,7 @@ pub fn scan(d: &DoFile) -> Scan {
         if RANDOM.iter().any(|r| calls(r))
             || matches!(word.as_str(), "simulate" | "permute" | "sample")
         {
-            limit(&mut s, "Random numbers: runiform(), rnormal(), rgamma(), bsample and bootstrap give Stata's own draws, but the other random functions and the commands that draw (simulate, permute, ...) do not, and the draws after them wait for a set seed.");
+            limit(&mut s, "Random numbers: most random functions (runiform(), rnormal(), rbinomial(), ...), bsample and bootstrap give Stata's own draws, but rpoisson(), rbeta(), rt() and the commands that draw (simulate, permute, ...) do not, and the draws after them wait for a set seed.");
         }
         if lower.starts_with("mata") {
             limit(&mut s, "Mata: its blocks are not run.");

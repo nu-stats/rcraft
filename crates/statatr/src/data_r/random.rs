@@ -467,6 +467,203 @@ stata_bsample <- function(d, n = NA, sel = NULL, cluster = NULL, idcluster = NUL
   rownames(out) <- NULL
   if (!is.null(idcluster)) out[[idcluster]] <- stata_float(ids)
   out
+}
+# the other random variates (P2C.11 continued): StatCraft's decoding, one
+# uniform each unless said; missing arguments, or outside Stata's domains,
+# give missing and draw nothing
+stata_rng_in <- function(v, lo, hi) !is.na(v) & v >= lo & v <= hi
+stata_rng_args <- function(rows, ...) {
+  sel <- stata_rng_rows(rows)
+  n <- length(sel)
+  c(list(sel = sel, n = n), lapply(list(...), function(a) rep_len(as.numeric(a), n)))
+}
+stata_rng_one <- function(rows, ok, f, ...) {
+  a <- stata_rng_args(rows, ...)
+  need <- a$sel & ok(a)
+  out <- rep(NA_real_, a$n)
+  if (any(need)) {
+    u <- stata_rng_u(stata_rng_words(sum(need)))
+    out[need] <- f(u, lapply(a[-(1:2)], function(x) x[need]))
+  }
+  stata_rng_out(out)
+}
+stata_rexponential <- function(rows, b) {
+  stata_rng_one(rows, function(a) stata_rng_in(a[[3]], 1e-323, 8e307), function(u, p) -p[[1]] * log(u), b)
+}
+stata_rlogistic <- function(rows, m = 0, s = 1) {
+  # rlogistic(s): one argument is the scale (translated as rlogistic(0, s))
+  stata_rng_one(rows, function(a) stata_rng_in(a[[3]], -.Machine$double.xmax, .Machine$double.xmax) &
+                  stata_rng_in(a[[4]], 0, .Machine$double.xmax),
+                function(u, p) p[[1]] + p[[2]] * log(u / (1 - u)), m, s)
+}
+stata_rweibull <- function(rows, a, b, g = 0) {
+  stata_rng_one(rows, function(x) stata_rng_in(x[[3]], 0.01, 1e6) & stata_rng_in(x[[4]], 1e-323, 8e307) &
+                  stata_rng_in(x[[5]], -8e307, 8e307),
+                function(u, p) p[[3]] + p[[2]] * exp(log(-log(u)) / p[[1]]), a, b, g)
+}
+stata_rweibullph <- function(rows, a, b, g = 0) {
+  stata_rng_one(rows, function(x) stata_rng_in(x[[3]], 0.01, 1e6) & stata_rng_in(x[[4]], 1e-323, 8e307) &
+                  stata_rng_in(x[[5]], -8e307, 8e307),
+                function(u, p) p[[3]] + exp(log(-log(u) / p[[2]]) / p[[1]]), a, b, g)
+}
+stata_rcauchy <- function(rows, a, b) {
+  stata_rng_one(rows, function(x) stata_rng_in(x[[3]], -1e300, 1e300) & stata_rng_in(x[[4]], 1e-100, 1e300),
+                function(u, p) {
+                  t <- pi * (u - 0.5)
+                  p[[1]] + p[[2]] * (sin(t) / cos(t))
+                }, a, b)
+}
+stata_rlaplace <- function(rows, m, b) {
+  stata_rng_one(rows, function(x) stata_rng_in(x[[3]], -1e300, 1e300) & stata_rng_in(x[[4]], 1e-300, 1e300),
+                function(u, p) ifelse(u < 0.5, p[[1]] + p[[2]] * log(2 * u), p[[1]] - p[[2]] * log(2 * (1 - u))), m, b)
+}
+stata_rpareto <- function(rows, a, b) {
+  stata_rng_one(rows, function(x) stata_rng_in(x[[3]], 1e-323, 8e307) & stata_rng_in(x[[4]], 1e-323, 8e307),
+                function(u, p) {
+                  v <- 1 - u
+                  ifelse(p[[1]] == 1, p[[2]] / v, p[[2]] / exp(log(v) / p[[1]]))
+                }, a, b)
+}
+stata_rgeometric <- function(rows, p) {
+  e <- .Machine$double.eps
+  stata_rng_one(rows, function(x) stata_rng_in(x[[3]], e, 1 - e), function(u, q) floor(log(u) / log(1 - q[[1]])), p)
+}
+stata_rchi2 <- function(rows, df) {
+  a <- stata_rng_args(rows, df)
+  need <- a$sel & stata_rng_in(a[[3]], 2e-4, 2e8)
+  out <- rep(NA_real_, a$n)
+  out[need] <- 2 * stata_rgamma_std(a[[3]][need] / 2)
+  stata_rng_out(out)
+}
+# Michael, Schucany and Haas on rnormal(), then one more uniform, row by row
+stata_rigaussian <- function(rows, m, s) {
+  a <- stata_rng_args(rows, m, s)
+  need <- which(a$sel & stata_rng_in(a[[3]], 1e-10, 1000) & stata_rng_in(a[[4]], 0.001, 1e10))
+  out <- rep(NA_real_, a$n)
+  for (i in need) {
+    mu <- a[[3]][i]
+    sh <- a[[4]][i]
+    z <- stata_rnorm_std(1)
+    y <- z * z
+    my <- mu * y
+    x <- mu + (mu * mu * y) / (2 * sh) - (mu / (2 * sh)) * sqrt(4 * mu * sh * y + my * my)
+    out[i] <- if (stata_rng_u(stata_rng_words(1)) <= mu / (mu + x)) x else mu / x * mu
+  }
+  stata_rng_out(out)
+}
+# the top bits of a 64-bit output, from its four 16-bit pieces
+stata_rng_top <- function(w, bits) {
+  s <- 64 - bits
+  out <- 0
+  for (j in 4:1) {
+    e <- 16 * (j - 1) - s
+    if (e >= 0) out <- out + w[[j]] * 2^e else if (e > -16) out <- out + floor(w[[j]] / 2^(-e))
+  }
+  out
+}
+stata_runiformint <- function(rows, lo, hi) {
+  a <- stata_rng_args(rows, lo, hi)
+  l <- a[[3]]
+  h <- a[[4]]
+  need <- which(a$sel & !is.na(l) & !is.na(h) & h >= l & l == floor(l) & h == floor(h) &
+                  abs(l) <= 2^53 & abs(h) <= 2^53)
+  out <- rep(NA_real_, a$n)
+  for (i in need) {
+    range <- h[i] - l[i] + 1
+    # a range of one value takes no draw
+    if (range == 1) {
+      out[i] <- l[i]
+      next
+    }
+    bits <- 1
+    while (2^bits < range) bits <- bits + 1
+    repeat {
+      r <- stata_rng_top(stata_rng_words(1), bits)
+      if (r < range) break
+    }
+    out[i] <- l[i] + r
+  }
+  stata_rng_out(out)
+}
+# the discrete ones: one uniform, inversion from the lowest value, or (the
+# binomial past n·p of 15) a search outward from the mode, lower side first
+stata_rng_invert <- function(v, lo, hi, pmf) {
+  c <- 0
+  k <- lo
+  while (k <= hi) {
+    c <- c + pmf(k)
+    if (v <= c) return(k)
+    k <- k + 1
+  }
+  hi
+}
+stata_rng_modal <- function(v, mode, lo, hi, pmf) {
+  c <- pmf(mode)
+  if (v <= c) return(mode)
+  down <- mode - 1
+  up <- mode + 1
+  while (down >= lo || up <= hi) {
+    for (k in c(down, up)) {
+      if (k >= lo && k <= hi) {
+        c <- c + pmf(k)
+        if (v <= c) return(k)
+      }
+    }
+    down <- down - 1
+    up <- up + 1
+  }
+  mode
+}
+stata_rbinomial <- function(rows, n, p) {
+  a <- stata_rng_args(rows, n, p)
+  need <- which(a$sel & stata_rng_in(a[[3]], 1, 1e11) & a[[3]] == floor(a[[3]]) & stata_rng_in(a[[4]], 1e-8, 1 - 1e-8))
+  out <- rep(NA_real_, a$n)
+  one <- function(n, p) {
+    if (p > 0.5) return(n - one(n, 1 - p))
+    # past an n·p of about 120 Stata changes method, not reproduced
+    if (n * p > 120) stop("rbinomial() with n*p past 120 is not Stata's draw yet: Stata uses another method there", call. = FALSE)
+    v <- stata_rng_u(stata_rng_words(1))
+    pmf <- function(k) exp(lgamma(n + 1) - lgamma(k + 1) - lgamma(n - k + 1) + k * log(p) + (n - k) * log1p(-p))
+    if (n * p <= 15) stata_rng_invert(v, 0, n, pmf) else stata_rng_modal(v, floor((n + 1) * p), 0, n, pmf)
+  }
+  for (i in need) out[i] <- one(a[[3]][i], a[[4]][i])
+  stata_rng_out(out)
+}
+stata_rnbinomial <- function(rows, n, p) {
+  a <- stata_rng_args(rows, n, p)
+  need <- which(a$sel & stata_rng_in(a[[3]], 1e-4, 1e5) & stata_rng_in(a[[4]], 1e-4, 1 - 1e-4))
+  out <- rep(NA_real_, a$n)
+  for (i in need) {
+    n1 <- a[[3]][i]
+    p1 <- a[[4]][i]
+    # below p^n of 1e-4 Stata mixes a gamma and a Poisson draw, not reproduced
+    if (p1^n1 < 1e-4) stop("rnbinomial() with p^n below 1e-4 is not Stata's draw yet: Stata uses another method there", call. = FALSE)
+    v <- stata_rng_u(stata_rng_words(1))
+    pmf <- function(k) exp(lgamma(n1 + k) - lgamma(n1) - lgamma(k + 1) + n1 * log(p1) + k * log1p(-p1))
+    out[i] <- stata_rng_invert(v, 0, Inf, pmf)
+  }
+  stata_rng_out(out)
+}
+stata_rhypergeometric <- function(rows, N, K, n) {
+  a <- stata_rng_args(rows, N, K, n)
+  N <- a[[3]]
+  K <- a[[4]]
+  n <- a[[5]]
+  need <- which(a$sel & stata_rng_in(N, 2, 1e6) & stata_rng_in(K, 1, N - 1) & stata_rng_in(n, 1, N - 1) &
+                  N == floor(N) & K == floor(K) & n == floor(n))
+  out <- rep(NA_real_, a$n)
+  lc <- function(x, y) lgamma(x + 1) - lgamma(y + 1) - lgamma(x - y + 1)
+  for (i in need) {
+    lo <- max(0, n[i] - (N[i] - K[i]))
+    hi <- min(n[i], K[i])
+    total <- lc(N[i], n[i])
+    # past a mean of 10 Stata uses a rejection method, not reproduced
+    if (n[i] * K[i] / N[i] > 10) stop("rhypergeometric() with a mean past 10 is not Stata's draw yet: Stata uses another method there", call. = FALSE)
+    pmf <- function(x) exp(lc(K[i], x) + lc(N[i] - K[i], n[i] - x) - total)
+    v <- stata_rng_u(stata_rng_words(1))
+    out[i] <- stata_rng_invert(v, lo, hi, pmf)
+  }
+  stata_rng_out(out)
 }"#;
 
 use super::{in_range, no, Out, Session};

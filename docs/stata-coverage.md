@@ -77,17 +77,17 @@ The share has risen in four steps:
 
 ## Checked against Stata on R (2026-11-01)
 
-The 389 probes recorded in StatCraft's corpus are each run on R 4.4 in a fresh session, as the do-file window
-runs a do-file: 188,989 lines ran, and 158,390 of them were translated (126,618 before the dates, P2C.14; 135,471 before `bsample`, P2C.16).
+The 390 probes recorded in StatCraft's corpus are each run on R 4.4 in a fresh session, as the do-file window
+runs a do-file: 189,013 lines ran, and 158,643 of them were translated (126,618 before the dates, P2C.14; 135,471 before `bsample`, P2C.16).
 
 | | Lines | Before P2C.12 | Before P2C.11 |
 |---|---:|---:|---:|
-| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,642 | 210 | 196 |
-| The same to 8 significant digits | 5,524 | 205 | 192 |
+| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,644 | 210 | 196 |
+| The same to 8 significant digits | 5,526 | 205 | 192 |
 | The same to 6, not 8 | 5 | 1 | 1 |
 | Different | 113 | 4 | 3 |
 | Not compared: after the probe's first R error, where the do-file window stops | 213 | 207 | 199 |
-| Printed by Stata, not translated (counted from P2C.12) | 805 | | |
+| Printed by Stata, not translated (counted from P2C.12) | 810 | | |
 | Translated lines that R stopped at | 449 | 429 | 399 |
 
 The 113 that differ are all `_natscale`, nearly all with n = 10 or 15. There Stata's r(min) is a residue of
@@ -146,6 +146,6 @@ reason:
 1. `file`, programs the do-file defines and time-series operators. The date and time functions (P2C.14) and
    `bsample` and `bootstrap` (P2C.16) are translated.
 2. Collinear terms in the other models (`nbreg`, `ologit`, `mlogit`, ...) and interactions in the likelihood models' tables.
-3. Programs (`program define`), `gettoken`, the other random functions (`runiformint()`, `rbinomial()`, ...),
+3. Programs (`program define`), `gettoken`, `rpoisson()`, `rbeta()` and `rt()`,
    and the models not yet translated (lasso, xtregar, newey, prais).
 4. The last digits: `poisson`'s starting point and `_natscale`'s residue for n = 10 and 15.

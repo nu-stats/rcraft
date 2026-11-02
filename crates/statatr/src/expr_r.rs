@@ -896,7 +896,10 @@ impl Translator<'_> {
                     Kind::Number,
                 ))
             }
-            "runiform" | "uniform" | "rnormal" | "rgamma" => self.draw(name, args),
+            "runiform" | "uniform" | "rnormal" | "rgamma" | "rexponential" | "rlogistic"
+            | "rweibull" | "rweibullph" | "rcauchy" | "rlaplace" | "rpareto" | "rgeometric"
+            | "rigaussian" | "rchi2" | "runiformint" | "rbinomial" | "rnbinomial"
+            | "rhypergeometric" => self.draw(name, args),
             n if DATE_FUNCTIONS.iter().any(|(f, _)| *f == n) => self.date_fn(n, args),
             n if DATE_READERS.iter().any(|(f, _)| *f == n) => self.date_reader(n, args),
             n if LEAP_SECOND_FUNCTIONS.contains(&n) => Err(no(format!(
@@ -989,19 +992,29 @@ impl Translator<'_> {
             )));
         }
         self.draws += 1;
-        let (r, fits) = match name {
-            "runiform" => ("stata_runiform", args.is_empty() || args.len() == 2),
-            "uniform" => ("stata_runiform", args.is_empty()),
-            "rnormal" => ("stata_rnormal", args.len() <= 2),
-            _ => ("stata_rgamma", args.len() == 2),
+        let n = args.len();
+        let fits = match name {
+            "runiform" => n == 0 || n == 2,
+            "uniform" => n == 0,
+            "rnormal" | "rlogistic" => n <= 2,
+            "rexponential" | "rgeometric" | "rchi2" => n == 1,
+            "rweibull" | "rweibullph" => n == 2 || n == 3,
+            "rhypergeometric" => n == 3,
+            _ => n == 2,
+        };
+        let r = if name == "uniform" {
+            "stata_runiform".to_string()
+        } else {
+            format!("stata_{name}")
         };
         if !fits {
-            return Err(no(format!(
-                "{name}() with {} arguments is not translated",
-                args.len()
-            )));
+            return Err(no(format!("{name}() with {n} arguments is not translated")));
         }
         let mut parts = vec![rows.to_string()];
+        // rlogistic(s) is the scale, about a mean of 0
+        if name == "rlogistic" && n == 1 {
+            parts.push("0".into());
+        }
         for a in args {
             let (c, k) = self.expr(a)?;
             parts.push(number(&c, k)?);
