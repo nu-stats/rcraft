@@ -742,7 +742,16 @@ impl Session {
     /// The data frame a statistics command works on: the rows an `if`/`in`
     /// keeps, with every column.
     pub(super) fn rows_for(&mut self, c: &Command, out: &mut Out) -> Result<String, Untranslated> {
-        let d = self.data()?;
+        let mut d = self.data()?;
+        // L.x and the like are worked out over every row, before if and in
+        let cols = self.ts_columns(&c.parts.main)?;
+        if MODELS.contains(&c.name.as_str()) {
+            self.fit_ts = cols.clone();
+        }
+        if let Some(cols) = cols {
+            out.package("dplyr");
+            d = format!("dplyr::mutate({d}, {cols})");
+        }
         match self.condition(c, out)? {
             Some(cond) => {
                 out.package("dplyr");

@@ -2969,3 +2969,24 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   format and save tests run here again.
 - R keeps a library per minor version for this reason; RCraft's is one folder
   for every R, so a user who upgrades R can meet the same failure.
+
+## P2C.9 continued: tsset and the time-series operators, 2026-11-02
+
+- **tsset** (`data_r/ts.rs`, `stata_tsset`): Stata 19's lines (gaps, strongly or weakly balanced panels,
+  delta), its errors (r(451) for repeated or non-integer times and times closer than delta, r(109) for a
+  string), and the data sorted by panel and time. `xtset id t` goes the same way. The settings go with the
+  data: kept by save and use and by preserve and restore, forgotten by clear, import and set obs; after
+  `use` of a file this do-file did not save, they are not known and the operators are refused.
+- **L., F., D., S.** (`stata_ts`): matched on panel and time, missing where no row has the time, over every
+  row whatever `if` keeps; a chain is one sum over x as in Stata (`D.F.x` is F.x - x). "not sorted", r(5),
+  when the data are not in time order. Under `by`, only when by names the panel.
+- **Models:** `L(1/2).x`, `L.(x y)` and chains are written out in Stata's canonical names (`LD.x`, `FD.x`,
+  `L2.x`), which become columns of the model's data and the coefficients' names; a lagged outcome works;
+  `predict` adds the same columns.
+- **replace x = L.x + 1 if ...:** done again until nothing changes, which is Stata's row-by-row result
+  when the line reads only earlier times of x; `D.x` or `F.x` of the replaced variable is refused.
+- **Checked:** `timeseries.do` (38 result lines, every value, tolerance 1e-6); `tsset` is Verified.
+  Observations in `plan/stata/timeseries.md`.
+- **Numbers:** the replication packages' share is 53.8% (53.3%); tier 3 went from 0.5% to 16.3%. The 36
+  lag regressions in one package wait on a `merge m:m` before them.
+- **Machine:** R 4.6.2 with the packages the tests use is set up again, so the corpus runs here.

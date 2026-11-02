@@ -95,25 +95,27 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
-| 1. Data management and control flow | 9315 | 6366 | 2275 | 674 | 73.7% |
+| 1. Data management and control flow | 9315 | 6380 | 2261 | 674 | 73.8% |
 | 2. Core statistics | 2035 | 377 | 1657 | 1 | 18.5% |
-| 3. Panel, survival, survey, IV and other models | 376 | 2 | 373 | 1 | 0.5% |
+| 3. Panel, survival, survey, IV and other models | 376 | 61 | 314 | 1 | 16.3% |
 | 4. Graphs | 117 | 0 | 117 | 0 | 0.0% |
 | 5. Programs and SSC commands | 647 | 0 | 633 | 14 | 0.0% |
 | Other commands | 2657 | 824 | 1575 | 258 | 34.3% |
-| **All** | 15147 | 7569 | 6630 | 948 | 53.3% |
+| **All** | 15147 | 7642 | 6557 | 948 | 53.8% |
 
 Most of what is left comes from add-ons from SSC: `robreg`, `outreg2`, `reghdfe`, `parmest`, `cluster2`, `eststo`,
 `coefplot` and `esttab`. One package's 2,588-line file runs `robreg` and `predict` after it over a thousand
 times, and that alone is why tier 2's share is low. Of Stata's own commands, the first causes are:
 - `clogit` (135);
 - `gettoken` (78);
-- `tsset` and the time-series operators (`f.`, `d.`, `l.`) in `xtreg` (about 130);
 - `xtile` and `suest`.
+
+The 36 `xtreg` and `reg` lines with `f.`, `d.` and `l.` in one package now wait on a `merge m:m` before them,
+which is not translated.
 
 ## Checked against Stata on R (2026-11-01)
 
@@ -177,14 +179,13 @@ reason:
 - a `local` that could not be set, which had kept its old value;
 - `quietly display`, which printed;
 - comparisons with `.a`–`.z`;
-- time-series operators;
+- replace with a lead or difference of its own variable (`replace x = D.x`), which Stata does row by row;
 - `estat`, `predict`, `test`, `lincom` and `margins` after a refused line that may have fitted a model;
 - a global the do-file has not set, after a refused add-on or program.
 
 ## What would move the numbers most
 
-1. `tsset` and the time-series operators, which both sets of do-files use, then `file` and the programs a
-   do-file defines.
+1. `file` and the programs a do-file defines; `merge m:m`.
 2. Interactions in the likelihood models' tables, and collinear terms in the panel, survival and IV models.
 3. `gettoken`, `clogit`, `rpoisson()`, `rbeta()` and `rt()`, and the models not yet translated (lasso, xtregar,
    newey, prais).

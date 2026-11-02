@@ -1200,6 +1200,7 @@ impl Session {
         name: &str,
     ) -> Result<(String, Kind), Untranslated> {
         match which {
+            "ts" => self.ts_code(name).map(|code| (code, Kind::Number)),
             "_b" | "_coef" | "_se" => {
                 match &self.e_ret {
                     Returned::Kept { .. } => {}

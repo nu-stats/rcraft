@@ -76,6 +76,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("tempvar", &["control"]),
     ("test", &["regress"]),
     ("tokenize", &["made"]),
+    ("tsset", &["timeseries"]),
     ("ttest", &["descriptives"]),
     ("unab", &["aware"]),
     ("while", &["control"]),

@@ -296,7 +296,12 @@ impl Session {
                 "{w}: only plain new variable names are translated (not stub*)"
             )));
         }
-        let d = self.data()?;
+        let base = self.data()?;
+        // the columns a model's L.x and the like added to its data
+        let d = match &self.fit_ts {
+            Some(cols) => format!("dplyr::mutate({base}, {cols})"),
+            None => base.clone(),
+        };
         let newdata =
             |ty: &str| format!("unname(stats::predict(stata_estimates, newdata = {d}{ty}))");
         let mut values = Vec::new();
@@ -441,7 +446,7 @@ impl Session {
         let mut sets = Vec::new();
         for (w, v) in words.iter().zip(&values) {
             out.line(format!(
-                "if ({} %in% names({d})) stop(\"variable {w} already defined\")",
+                "if ({} %in% names({base})) stop(\"variable {w} already defined\")",
                 r_text(w)
             ));
             let v = stored(v, st, &mut self.helpers, out);
@@ -452,7 +457,10 @@ impl Session {
             sets.push(format!("{} = {v}", r_name(w)));
         }
         out.package("dplyr");
-        out.line(format!("{d} <- dplyr::mutate({d}, {})", sets.join(", ")));
+        out.line(format!(
+            "{base} <- dplyr::mutate({base}, {})",
+            sets.join(", ")
+        ));
         if !fit.one_outcome() {
             out.line("rm(stata_p)");
         }

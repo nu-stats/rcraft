@@ -389,8 +389,8 @@ fn regress_says_why_it_refuses_what_it_refuses() {
         "an unknown vce should be named"
     );
     assert!(
-        refusal("use \"d.dta\"\nregress y L.x\n").contains("lags"),
-        "lags are not translated"
+        refusal("use \"d.dta\"\nregress y L.x\n").contains("tsset"),
+        "lags need tsset, which a file read here may not carry"
     );
     assert!(
         refusal("use \"d.dta\"\nregress y x, hascons\n").contains("hascons"),

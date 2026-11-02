@@ -42,6 +42,7 @@ mod scalars;
 mod st;
 mod stats;
 mod tables;
+mod ts;
 mod weights;
 mod xt;
 
@@ -468,6 +469,8 @@ const REPLACE_DATA: &[&str] = &[
 ];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "tsset",
+    "xtset",
     "estimates",
     "assert",
     "erase",
@@ -586,6 +589,12 @@ const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
     rc <- 602
   } else if (grepl("(^|\n)assertion is false$", m)) {
     rc <- 9
+  } else if (m == "not sorted") {
+    rc <- 5
+  } else if (grepl("^(repeated time values|time variable must contain only integer|time values with period less than delta)", m)) {
+    rc <- 451
+  } else if (grepl("^string variables not allowed in varlist", m)) {
+    rc <- 109
   } else if (grepl("^object '[^']+' not found$", m)) {
     m <- sub("^object '([^']+)' not found$", "\\1 not found", m)
     rc <- 111
@@ -659,6 +668,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_margins" => margins::MARGINS_HELPER,
         "stata_unconditional" => margins::UNCONDITIONAL_HELPER,
         "stata_anova" => anova::ANOVA_HELPER,
+        "stata_tsset" => ts::TSSET_HELPER,
+        "stata_ts" => ts::TS_HELPER,
+        "stata_rows_replace" => ts::ROWS_REPLACE_HELPER,
         "stata_xtset" => xt::XTSET_HELPER,
         "stata_xtreg" => xt::XTREG_HELPER,
         "stata_xt_predict" => xt::XT_PREDICT_HELPER,
@@ -750,6 +762,14 @@ struct Session {
     graph_drawn: bool,
     /// And its time variable.
     panel_time: Option<String>,
+    /// The `delta()` of `tsset` or `xtset`, as R (`None`: 1).
+    ts_delta: Option<String>,
+    /// The data came from a file this do-file did not save, so whether it
+    /// was `tsset` is not known.
+    ts_unknown: bool,
+    /// The columns the last model's time-series operators added to its
+    /// data (`dplyr::mutate()`'s arguments), for `predict`.
+    fit_ts: Option<String>,
     /// Who left the e() and r() an expression would read (P2B.6).
     e_ret: returned::Returned,
     r_ret: returned::Returned,
@@ -794,6 +814,9 @@ fn silent(c: &Command) -> bool {
 struct Kept {
     fv_base: BTreeMap<String, String>,
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
+    panel: Option<String>,
+    panel_time: Option<String>,
+    ts_delta: Option<String>,
 }
 
 /// The data and what the translator knows of it, as `preserve` left them.
@@ -806,6 +829,8 @@ struct Preserved {
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
     panel: Option<String>,
     panel_time: Option<String>,
+    ts_delta: Option<String>,
+    ts_unknown: bool,
     stset: Option<st::StSet>,
 }
 
@@ -1377,6 +1402,30 @@ impl Session {
         }
         let mut out = Out::default();
         let by = c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. }));
+        if MODELS.contains(&c.name.as_str()) {
+            self.fit_ts = None;
+        }
+        // under by, each group is a slice of the data: L.x stays right only
+        // when the groups are the panels
+        let by_vars = c.prefixes.iter().find_map(|p| match p {
+            Prefix::By { varlist, .. } => Some(varlist.trim().to_string()),
+            _ => None,
+        });
+        if let Some(v) = by_vars {
+            let text = format!(
+                "{} {}",
+                c.parts.main,
+                c.parts.if_exp.as_deref().unwrap_or("")
+            );
+            if !ts::ts_words(&text).is_empty() && self.panel.as_deref() != Some(v.as_str()) {
+                self.rows_unknown();
+                return Err(no(
+                    "by with time-series operators is translated only when by names the panel \
+                     variable (Stata stops with \"not sorted\" when by's sort order is not the \
+                     panel and time)",
+                ));
+            }
+        }
         self.esample_new = false;
         self.r_new = None;
         self.e_new = false;
@@ -1453,7 +1502,7 @@ impl Session {
             && c.parts.in_range.is_none());
         let rows_stay = done.is_ok()
             && !bysort
-            && !matches!(name, "sort" | "gsort")
+            && !matches!(name, "sort" | "gsort" | "tsset" | "xtset")
             && (MODELS.contains(&name) || LEAVE_DATA_ALONE.contains(&name) || values_only);
         if !rows_stay {
             for f in self.stored_fits.values_mut() {
@@ -1547,6 +1596,7 @@ impl Session {
                 self.data_lost = None;
                 self.kinds.clear();
                 self.fv_base.clear();
+                self.forget_ts();
                 self.label_sets.clear();
                 Ok(())
             }
@@ -1590,6 +1640,7 @@ impl Session {
             "margins" => self.margins(c, &opts, out),
             "anova" => self.anova(c, &opts, out),
             "xtset" => self.xtset(c, &opts, out),
+            "tsset" => self.tsset(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
             "ivregress" => self.ivregress(c, &opts, out),
             w if crate::lang::syntax::abbrev(w, "histogram", 4) => self.histogram(c, &opts, out),
@@ -1693,6 +1744,10 @@ impl Session {
         let kept = self.saved.get(&path).cloned().unwrap_or_default();
         self.fv_base = kept.fv_base;
         self.label_sets = kept.label_sets;
+        self.ts_unknown = !self.saved.contains_key(&path);
+        self.panel = kept.panel;
+        self.panel_time = kept.panel_time;
+        self.ts_delta = kept.ts_delta;
         self.file = Some(path);
         self.kinds.clear();
         if let Some(cond) = self.condition(c, out)? {
@@ -1730,6 +1785,9 @@ impl Session {
             Kept {
                 fv_base: self.fv_base.clone(),
                 label_sets: self.label_sets.clone(),
+                panel: self.panel.clone(),
+                panel_time: self.panel_time.clone(),
+                ts_delta: self.ts_delta.clone(),
             },
         );
         self.file = Some(path);
@@ -1893,6 +1951,7 @@ impl Session {
         self.file = None;
         self.kinds.clear();
         self.fv_base.clear();
+        self.forget_ts();
         self.label_sets.clear();
         Ok(())
     }
@@ -1992,10 +2051,44 @@ impl Session {
                  (each row sees the rows above already replaced); not translated yet"
             )));
         }
+        // and so it does for L.var: each row sees the earlier times already replaced
+        let read = format!("{rhs} {}", c.parts.if_exp.as_deref().unwrap_or(""));
+        let own: Vec<ts::TsOps> = ts::ts_words(&read)
+            .iter()
+            .filter_map(|w| ts::parse_ts(w).filter(|(_, v)| *v == var).map(|(o, _)| o))
+            .collect();
+        // only earlier times (L.x, L2.x, LD.x): then each row depends on rows
+        // before it, and doing the replace again until nothing changes gives
+        // Stata's row-by-row result
+        if own.iter().any(|o| o.shift < 1) {
+            return Err(no(format!(
+                "replace that reads {var} at this or a later time through an operator (D.{var}, \
+                 F.{var}) runs row by row in Stata (each row sees the earlier rows already \
+                 replaced, the later ones not); not translated yet"
+            )));
+        }
         let (cond, value, kind) = self.drawing_value(c, rhs, out)?;
         let value = match cond {
             Some(cond) => format!("dplyr::if_else({cond}, {value}, {})", r_name(var)),
             None => value,
+        };
+        let value = if own.is_empty() {
+            value
+        } else {
+            if self.drew.get() {
+                return Err(no(format!(
+                    "replace that reads L.{var} and draws random numbers is not translated yet"
+                )));
+            }
+            self.helpers.insert("stata_rows_replace");
+            let lagged = value.replace(
+                &format!("stata_ts({}, ", r_name(var)),
+                "stata_ts(stata_cur, ",
+            );
+            format!(
+                "stata_rows_replace(function(stata_cur) {lagged}, {})",
+                r_name(var)
+            )
         };
         out.package("dplyr");
         let d = self.data()?;
@@ -2578,6 +2671,8 @@ impl Session {
             label_sets: self.label_sets.clone(),
             panel: self.panel.clone(),
             panel_time: self.panel_time.clone(),
+            ts_delta: self.ts_delta.clone(),
+            ts_unknown: self.ts_unknown,
             stset: self.stset.clone(),
         }));
         Ok(())
@@ -2621,6 +2716,8 @@ impl Session {
         self.label_sets = p.label_sets;
         self.panel = p.panel;
         self.panel_time = p.panel_time;
+        self.ts_delta = p.ts_delta;
+        self.ts_unknown = p.ts_unknown;
         self.stset = p.stset;
         // the rows may not be the ones the last model was fitted on
         self.esample = false;
@@ -2648,6 +2745,7 @@ impl Session {
                         self.file = None;
                         self.kinds.clear();
                         self.fv_base.clear();
+                        self.forget_ts();
                         self.label_sets.clear();
                     }
                 }
@@ -2816,6 +2914,13 @@ impl Session {
                 .collect::<Vec<_>>()
                 .join(" ");
             changed = true;
+        }
+        // L(1/2).x is L.x L2.x, l.d.x is LD.x
+        if let Ok(main) = ts::expand_ts(&c2.parts.main) {
+            if main != c2.parts.main {
+                c2.parts.main = main;
+                changed = true;
+            }
         }
         if !self.fv_base.is_empty() {
             let main = model::with_bases(&c2.parts.main, &self.fv_base);
@@ -3322,6 +3427,63 @@ tabulate g h, generate(d)");
             "{out:?}"
         );
         assert!(out[4].starts_with("NOT"), "{out:?}");
+    }
+
+    #[test]
+    fn time_series_operators() {
+        let out = r("clear
+set obs 5
+generate t = _n
+generate x = _n
+generate L1 = L.x
+tsset t
+generate a = L.x + D2.x
+regress x l.d.x L(1/2).t
+predict p
+by t: generate b = L.x
+replace t = L.x
+xtset t
+generate c = L.x
+tsset t
+tsset, clear
+generate d = F.x
+tsset t
+replace x = L.x + 1 if x > 2
+replace t = D.t");
+        assert!(out[4].contains("time variable not set"), "{out:?}");
+        assert!(out[5].contains("stata_tsset(data, \"t\")"), "{out:?}");
+        assert!(
+            out[6].contains("stata_ts(x, 1, 0, 0, t, NULL, 1)")
+                && out[6].contains("stata_ts(x, 0, 2, 0, t, NULL, 1)"),
+            "{out:?}"
+        );
+        assert!(
+            out[7].contains("LD.x = stata_ts(x, 1, 1, 0, t, NULL, 1)")
+                && out[7].contains("L2.t = stata_ts(t, 2, 0, 0, t, NULL, 1)")
+                && out[7].contains("~ LD.x + L.t + L2.t"),
+            "{out:?}"
+        );
+        assert!(out[8].contains("dplyr::mutate(data, LD.x = "), "{out:?}");
+        assert!(
+            out[9].starts_with("NOT: by with time-series operators"),
+            "{out:?}"
+        );
+        assert!(!out[10].starts_with("NOT"), "{out:?}");
+        // xtset with only a panel leaves no time
+        assert!(out[12].contains("time variable not set"), "{out:?}");
+        assert!(out[15].contains("time variable not set"), "{out:?}");
+        assert!(
+            out[17].contains("stata_rows_replace(function(stata_cur) dplyr::if_else("),
+            "{out:?}"
+        );
+        assert!(
+            out[17].contains("stata_ts(stata_cur, 1, 0, 0, t, NULL, 1)"),
+            "{out:?}"
+        );
+        assert!(
+            out[18].starts_with("NOT: replace that reads t at this or a later time"),
+            "{out:?}"
+        );
     }
 
     #[test]

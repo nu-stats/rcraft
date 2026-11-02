@@ -149,6 +149,7 @@ pub const COMMANDS: &[&str] = &[
     "test",
     "tokenize",
     "tostring",
+    "tsset",
     "ttest",
     "twoway",
     "unab",
@@ -444,8 +445,26 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "tsset",
+        &[
+            "clear",
+            "clocktime",
+            "daily",
+            "delta(",
+            "format(",
+            "generic",
+            "halfyearly",
+            "monthly",
+            "noquery",
+            "quarterly",
+            "weekly",
+            "yearly",
+        ],
+    ),
+    (
         "xtset",
         &[
+            "clear",
             "clocktime",
             "daily",
             "delta(",
@@ -1163,6 +1182,7 @@ mod tests {
             "ttest" => format!("ttest y == x, {o}"),
             "xtreg" => format!("xtset id t\nxtreg y x, {o}"),
             "xtset" => format!("xtset id t, {o}"),
+            "tsset" => format!("tsset t, {o}"),
             _ => format!("{cmd} y, {o}"),
         };
         format!("use s\n{line}\n")

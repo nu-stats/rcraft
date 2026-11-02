@@ -84,6 +84,11 @@ pub fn translate(
         text,
         kind_of,
         &|which: &str, name: &str| {
+            if which == "ts" {
+                return Err(no(format!(
+                    "{name}: time-series operators need the time tsset gave, which only the commands of a do-file carry"
+                )));
+            }
             let shown = if which.starts_with('_') {
                 format!("{which}[{name}]")
             } else {
@@ -353,9 +358,10 @@ impl Translator<'_> {
                 if n.split_once('.')
                     .is_some_and(|(ops, _)| crate::lang::expr::is_ts_ops(ops)) =>
             {
-                Err(no(format!(
-                    "{n}: time-series operators (L., F., D., S.) are not translated yet"
-                )))
+                // the session knows the time and panel tsset gave
+                let r = (self.returned)("ts", n)?;
+                self.helpers.push("stata_ts");
+                Ok(r)
             }
             Expr::Name(n) => Ok(match n.as_str() {
                 "_n" => ("dplyr::row_number()".into(), Kind::Number),

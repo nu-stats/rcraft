@@ -466,7 +466,10 @@ impl Spec {
         let Some(dep) = words.next() else {
             return Err(no(format!("{name} needs a variable to explain")));
         };
-        if !is_name(dep) {
+        // a lagged outcome (L.y) is a column the data gets for the model
+        let lagged = super::ts::ts_name(dep);
+        let dep = lagged.as_deref().unwrap_or(dep);
+        if !is_name(dep) && lagged.is_none() {
             return Err(no(format!("{dep} is not a variable name")));
         }
         Spec::from_terms(dep, words)
@@ -785,9 +788,13 @@ fn one(t: &str) -> Result<String, Untranslated> {
             return Ok(format!("stata_ib({}, {})", r_name(v), r_text(base)));
         }
     }
+    // L.x, LD.x: a column the model's data gets (`Session::ts_columns`)
+    if let Some(n) = super::ts::ts_name(t) {
+        return Ok(r_name(&n));
+    }
     if t.contains('.') {
         return Err(no(format!(
-            "{t}: only i., c. and ib#. are translated (lags like L.x are not)"
+            "{t}: only i., c., ib#. and the time-series operators L., F., D. and S. are translated"
         )));
     }
     if is_name(t) {
@@ -857,7 +864,8 @@ mod tests {
         );
         let s = Spec::from_terms("y", ["g#h"]).map(|s| s.terms);
         assert_eq!(s, Ok(vec!["stata_cells(g, h, \"\", \"\")".to_string()]));
-        assert!(term("L.x").is_err(), "lags are not translated");
+        assert_eq!(term("L.x"), Ok("L.x".to_string()));
+        assert_eq!(term("l.d.x"), Ok("LD.x".to_string()));
         assert!(term("i.2x").is_err(), "not a variable name");
     }
 

@@ -247,35 +247,16 @@ impl Session {
         opts: &Opts,
         out: &mut Out,
     ) -> Result<(), Untranslated> {
-        // the units only label the time variable and delta() only matters for
-        // the time-series operators, so none of them changes what is fitted
-        let units = [
-            ("clocktime", 5),
-            ("daily", 1),
-            ("weekly", 1),
-            ("monthly", 1),
-            ("quarterly", 1),
-            ("halfyearly", 1),
-            ("yearly", 1),
-            ("generic", 1),
-            ("delta", 1),
-            ("format", 1),
-            ("noquery", 5),
-        ];
-        if let Some(o) = opts.other(&units) {
+        if let Some(o) = opts.other(super::ts::TS_OPTIONS) {
             return Err(no(format!(
                 "xtset with the option {o} is not translated yet"
             )));
         }
-        if c.options
-            .iter()
-            .any(|o| units.iter().any(|(u, m)| o.is(u, *m)))
-        {
-            out.caveat(
-                "the time unit and delta() only label the time and matter for lags, which are \
-                 not translated; nothing fitted here changes",
-            );
+        if opts.has("clear", 5) {
+            self.forget_ts();
+            return Ok(());
         }
+        super::ts::unit_caveat(c, out);
         let words: Vec<&str> = c.parts.main.split_whitespace().collect();
         let (panel, time) = match words.as_slice() {
             // xtset alone: the settings again
@@ -293,15 +274,21 @@ impl Session {
                 return Err(no(format!("{v} is not a variable name")));
             }
         }
+        // with a time it is tsset: the times checked, the data sorted
+        if let Some(time) = time {
+            let delta = match opts.arg("delta", 1) {
+                Some(d) => Some(super::ts::delta_number(&d)?),
+                None if words.is_empty() => self.ts_delta.clone(),
+                None => None,
+            };
+            return self.set_ts(Some(panel), time, delta, out);
+        }
         let d = self.data()?;
         self.helpers.insert("stata_xtset");
-        out.line(format!(
-            "stata_xtset({d}, {}{})",
-            r_text(panel),
-            time.map(|t| format!(", {}", r_text(t))).unwrap_or_default()
-        ));
+        out.line(format!("stata_xtset({d}, {})", r_text(panel)));
         self.panel = Some(panel.to_string());
-        self.panel_time = time.map(str::to_string);
+        self.panel_time = None;
+        self.ts_delta = None;
         Ok(())
     }
 

@@ -1,0 +1,38 @@
+* Stata 19.0's results for timeseries.do, recorded by cargo xtask stata-record
+@ s_lx 5 75
+@ s_fx 5 123
+@ s_dx 4 32
+@ s_sx 4 32
+@ s_l2x 4 39
+@ s_d2x 2 4
+@ s_s2x 3 48
+@ s_ldx 3 19
+@ s_ldx2 3 19
+@ s_dfx 4 32
+@ s_l0x 7 188
+@ s_lxif 2 40
+@ count 8
+@ cond 6
+@ unsorted 5
+@ sorted_again 0
+@ reg 29 .4907518 .51407734 4.0293676
+@ chain 27 -.08459597 -.25036477
+@ list 28 .47223284 -.06491141 -.09040487
+@ lists 28 .00631358 -.14732041 -.54434769 -.20899588
+@ reg_if 20 -.08706938
+@ l2d 27 -.18826203
+@ lagged_y 29 -.14562953
+@ seasonal 28 -.17727273 .36909091
+@ predict 28 7.3785712
+@ carry 8.4499998 8.4499998 8.4499998 8.4499998
+@ count_up 5 30
+@ months 19 20 22 23
+@ two_back 6.6999998 6.6999998 6.6999998 6.6999998
+@ p_sorted 1 100
+@ p_lx 3 301
+@ p_fx 3 504
+@ p_dx 3 203
+@ x_l2x 2 104
+@ delta 3 6
+@ repeated 451
+@ fraction 451
