@@ -523,6 +523,16 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     put(cmdline = cmdline, cmd2 = "stcox", vce = vce, chi2type = if (robust) "Wald" else "LR",
         method = extra$ties, ties = extra$ties, t0 = "_t0", depvar = "_t", cmd = "cox", properties = "b V")
     robust_macros()
+  } else if (cmd == "robreg") {
+    e0 <- fit$stata
+    put(N = e0$N, k_omit = 0, rank = length(b), chi2 = e0$chi2,
+        p = stats::pchisq(e0$chi2, e0$df_m, lower.tail = FALSE), k_eq = 1, k_eform = 1, scale = e0$scale,
+        df_m = e0$df_m, df_r = e0$df_r, k = e0$k, efficiency = e0$efficiency, converged = 1,
+        scale0 = e0$scale0, r2_w = e0$r2_w, r2_p = e0$r2_p)
+    put(cmdline = cmdline, vcetype = "Robust", vce = "robust",
+        indepvars = paste(setdiff(names(b), "(Intercept)"), collapse = " "), depvar = depvar,
+        predict = "robreg predict", subcmd = "m", cmd = "robreg", obf = "huber", title = e0$title,
+        properties = "b V")
   } else if (cmd == "clogit") {
     m <- stata_m
     q <- sum(slopes)
@@ -617,6 +627,14 @@ fn e_not_kept(cmd: &str, model: &str) -> &'static [&'static str] {
             "W",
             "S",
             "V_modelbased",
+        ],
+        ("robreg", _) => &[
+            "level",
+            "iterations",
+            "b0",
+            "b_init",
+            "V_modelbased",
+            "omit",
         ],
         ("clogit", _) => &[
             "ic",

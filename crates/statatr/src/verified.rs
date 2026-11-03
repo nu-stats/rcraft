@@ -70,6 +70,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("replace", &["data", "random"]),
     ("reshape", &["replication"]),
     ("restore", &["made"]),
+    ("robreg", &["robreg"]),
     ("set", &["made", "random"]),
     ("sort", &["data"]),
     ("stcox", &["likelihood"]),

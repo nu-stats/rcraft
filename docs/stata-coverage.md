@@ -95,25 +95,27 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%. `robreg m` (`robreg.do`), which one package runs in loops over and over, took it to 79.3%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
-| 1. Data management and control flow | 9393 | 6691 | 2028 | 674 | 76.7% |
-| 2. Core statistics | 2035 | 608 | 1426 | 1 | 29.9% |
+| 1. Data management and control flow | 9393 | 7314 | 1405 | 674 | 83.9% |
+| 2. Core statistics | 2035 | 1724 | 310 | 1 | 84.8% |
 | 3. Panel, survival, survey, IV and other models | 376 | 265 | 110 | 1 | 70.7% |
 | 4. Graphs | 117 | 0 | 117 | 0 | 0.0% |
 | 5. Programs and SSC commands | 569 | 0 | 555 | 14 | 0.0% |
-| Other commands | 2657 | 824 | 1575 | 258 | 34.3% |
-| **All** | 15147 | 8388 | 5811 | 948 | 59.1% |
+| Other commands | 2657 | 1957 | 442 | 258 | 81.6% |
+| **All** | 15147 | 11260 | 2939 | 948 | 79.3% |
 
-Most of what is left comes from add-ons from SSC: `robreg`, `outreg2`, `reghdfe`, `parmest`, `cluster2`, `eststo`,
-`coefplot` and `esttab`. One package's 2,588-line file runs `robreg` and `predict` after it over a thousand
-times, and that alone is why tier 2's share is low. Of Stata's own commands, the first causes are:
+Most of what is left comes from add-ons from SSC: `outreg2`, `reghdfe`, `parmest`, `cluster2`, `eststo`, `coefplot`
+and `esttab`. Of Stata's own commands, the first causes are:
+- `margins` after `clogit`, with `mcomp(bonferroni)` and `vce(unconditional)` (100);
+- graphs (117), and `graph export` after them;
 - `suest`.
 
-The 36 `xtreg` and `reg` lines with `f.`, `d.` and `l.` in one package now wait on a `merge m:m` before them,
-which is not translated.
+The 36 `xtreg` and `reg` lines with `f.`, `d.` and `l.` in one package read a file saved after `cd` to a folder
+that a dry run does not know (`${root}`); when the do-file runs, the folder is known and its tsset comes back
+with the file.
 
 ## Checked against Stata on R (2026-11-01)
 

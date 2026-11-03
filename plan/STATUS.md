@@ -3054,3 +3054,18 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Numbers:** the replication packages' share is 59.1% (58.8%). The 100 `margins` lines after `clogit`
   now stop at `mcomp(bonferroni)`; behind it are `margins` after `clogit` with `predict(pu0)` and
   `vce(unconditional)`, not translated yet.
+
+## P2C.9 continued: robreg m (SSC), 2026-11-03
+
+- **Installed** in Stata 19 here with the user's go-ahead: `moremata`, `robreg`, `ftools` and `reghdfe` from
+  SSC (into `C:\Users\jstow\ado\plus`), to observe them. Their code is not read.
+- **robreg m** (`data_r/robreg.rs`, `stata_robreg`): LAD starting values, the scale from their residuals
+  (the normalized median, the p zero residuals left out), Huber's M estimate with that scale fixed, the
+  sandwich times n / (n - p) and t tests on n - p, the empty model from the median, e() and `predict` (xb,
+  residuals, weights). Base R only. When the LAD fit is not unique (indicator variables often make it so)
+  robreg starts inside the LAD solutions and RCraft at a corner, so the estimates can differ a little; a
+  caveat says so.
+- **Checked:** `robreg.do` (12 result lines, every value, tolerance 1e-6); `robreg` is Verified.
+  Observations in `plan/stata/robreg.md`.
+- **Numbers:** the replication packages' share is 79.3% (59.1%): core statistics 84.8% (29.9%). The
+  package's loops over robreg now stop only at one `egen rowmedian()`. StatCraft's probes 83.4%.

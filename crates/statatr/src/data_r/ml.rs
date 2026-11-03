@@ -269,6 +269,7 @@ impl Session {
             Fit::Margins => return Err(no("margins is not a model to fit")),
             Fit::Stcox => return self.stcox(c, opts, out),
             Fit::Clogit => return self.clogit(c, opts, out),
+            Fit::Robreg => return self.robreg(c, opts, out),
         }
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -431,7 +432,8 @@ impl Session {
             | Fit::Ivregress
             | Fit::Margins
             | Fit::Stcox
-            | Fit::Clogit => {}
+            | Fit::Clogit
+            | Fit::Robreg => {}
         }
         match fit {
             Fit::Logit | Fit::Probit | Fit::Poisson => {
@@ -503,7 +505,8 @@ impl Session {
             | Fit::Ivregress
             | Fit::Margins
             | Fit::Stcox
-            | Fit::Clogit => {}
+            | Fit::Clogit
+            | Fit::Robreg => {}
         }
         if matches!(fit, Fit::Nbreg | Fit::Ologit | Fit::Oprobit | Fit::Mlogit)
             && (robust || cluster.is_some())

@@ -39,6 +39,7 @@ mod natscale;
 mod post;
 mod random;
 mod returned;
+mod robreg;
 mod scalars;
 mod st;
 mod stats;
@@ -386,6 +387,7 @@ const WEIGHTED: &[&str] = &[
 const MODELS: &[&str] = &[
     "stcox",
     "clogit",
+    "robreg",
     "regress",
     "logit",
     "probit",
@@ -703,6 +705,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_unconditional" => margins::UNCONDITIONAL_HELPER,
         "stata_anova" => anova::ANOVA_HELPER,
         "stata_clogit" => clogit::CLOGIT_HELPER,
+        "stata_robreg" => robreg::ROBREG_HELPER,
         "stata_xtile" => more::XTILE_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -1719,6 +1722,7 @@ impl Session {
             "stset" => self.stset(c, &opts, out),
             "stcox" => self.stcox(c, &opts, out),
             "clogit" => self.clogit(c, &opts, out),
+            "robreg" => self.robreg(c, &opts, out),
             "xtile" => self.xtile(c, &opts, out),
             "display" => self.display(c, out),
             "ereturn" | "return" => self.list_returned(c, out),
