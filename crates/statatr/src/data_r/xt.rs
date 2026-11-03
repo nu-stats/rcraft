@@ -335,10 +335,14 @@ impl Session {
         let panel = match opts.arg("i", 1) {
             Some(p) if is_name(p.trim()) => p.trim().to_string(),
             Some(p) => return Err(no(format!("i({p}) needs one variable name"))),
-            None => self
-                .panel
-                .clone()
-                .ok_or_else(|| no("must specify panelvar; use xtset"))?,
+            None => self.panel.clone().ok_or_else(|| {
+                no(if self.ts_unknown {
+                    "the data were read from a file whose xtset or tsset settings are not known \
+                     here; set them again with xtset"
+                } else {
+                    "must specify panelvar; use xtset"
+                })
+            })?,
         };
         let (robust, cluster) = vce(opts)?;
         if kind == "be" && robust {

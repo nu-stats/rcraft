@@ -829,6 +829,10 @@ impl<'f> Run<'f> {
                 self.done_item(depth);
                 let names = words(&rest);
                 if c.name == "tempfile" && self.opts.temp_folder.is_empty() {
+                    let lost = format!("{} was not translated", c.text.trim());
+                    for n in &names {
+                        self.set_local_now(n, Macro::Lost(lost.clone()));
+                    }
                     let line = self.t.refused(
                         c.span,
                         c.text.clone(),

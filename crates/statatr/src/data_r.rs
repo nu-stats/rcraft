@@ -593,6 +593,10 @@ const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
     rc <- 9
   } else if (m == "not sorted") {
     rc <- 5
+  } else if (grepl("^after merge, not all observations matched", m)) {
+    rc <- 9
+  } else if (grepl("does not uniquely identify observations in the (master|using) data$", m)) {
+    rc <- 459
   } else if (grepl("^(repeated time values|time variable must contain only integer|time values with period less than delta)", m)) {
     rc <- 451
   } else if (grepl("^string variables not allowed in varlist", m)) {
@@ -637,6 +641,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_stats" => more::STAT_HELPERS,
         "stata_destring" => more::DESTRING_HELPER,
         "stata_forced" => more::FORCED_HELPER,
+        "stata_merge" => more::MERGE_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
@@ -726,6 +731,8 @@ struct Session {
     /// What a file this do-file saved keeps with its data, as Stata does:
     /// the `fvset` bases and the value label sets.
     saved: BTreeMap<String, Kept>,
+    /// The folder the last `cd` named, when it is known (for `saved`'s keys).
+    folder: Option<String>,
     /// Scalars defined so far, number or text.
     scalars: BTreeMap<String, Kind>,
     /// The scalars the command being translated reads by their bare names.
@@ -902,6 +909,29 @@ fn first_word(s: &str) -> (&str, &str) {
 }
 
 /// A file name as written (quotes removed), with `ext` added when it has none.
+/// A path from the top: `/x`, `C:/x`, `~/x`.
+fn is_absolute(path: &str) -> bool {
+    let b = path.as_bytes();
+    path.starts_with('/')
+        || path.starts_with('~')
+        || (b.len() >= 2
+            && b.first().is_some_and(u8::is_ascii_alphabetic)
+            && b.get(1) == Some(&b':'))
+}
+
+impl Session {
+    /// The key a file has in `saved`: its path from the top when the folder
+    /// `cd` named is known, so `save f` after `cd d` is the `use d/f` later.
+    fn file_key(&self, path: &str) -> String {
+        let p = match &self.folder {
+            Some(f) if !is_absolute(path) => format!("{f}/{path}"),
+            _ => path.to_string(),
+        };
+        // Windows and macOS do not tell case apart in a file name
+        p.replace("/./", "/").replace("//", "/").to_lowercase()
+    }
+}
+
 fn file_name(written: &str, ext: &str) -> String {
     let f = written
         .trim()
@@ -1680,6 +1710,11 @@ impl Session {
                     return Err(no("cd without a folder is not translated: Stata does different things on Windows and elsewhere"));
                 }
                 out.line(format!("setwd({})", r_text(&dir)));
+                self.folder = if is_absolute(&dir) {
+                    Some(dir.trim_end_matches('/').to_string())
+                } else {
+                    self.folder.as_ref().map(|f| format!("{f}/{}", dir.trim_end_matches('/')))
+                };
                 Ok(())
             }
             "pwd" => {
@@ -1749,10 +1784,14 @@ impl Session {
         self.data = Some(name.clone());
         // the label sets and fvset bases are the file's: those it was saved
         // with when this do-file saved it, none known otherwise
-        let kept = self.saved.get(&path).cloned().unwrap_or_default();
+        let kept = self
+            .saved
+            .get(&self.file_key(&path))
+            .cloned()
+            .unwrap_or_default();
         self.fv_base = kept.fv_base;
         self.label_sets = kept.label_sets;
-        self.ts_unknown = !self.saved.contains_key(&path);
+        self.ts_unknown = !self.saved.contains_key(&self.file_key(&path));
         self.panel = kept.panel;
         self.panel_time = kept.panel_time;
         self.ts_delta = kept.ts_delta;
@@ -1789,7 +1828,7 @@ impl Session {
         }
         out.line(format!("haven::write_dta({d}, {})", r_text(&path)));
         self.saved.insert(
-            path.clone(),
+            self.file_key(&path),
             Kept {
                 fv_base: self.fv_base.clone(),
                 label_sets: self.label_sets.clone(),
@@ -3492,6 +3531,28 @@ replace t = D.t");
             out[18].starts_with("NOT: replace that reads t at this or a later time"),
             "{out:?}"
         );
+    }
+
+    #[test]
+    fn a_file_saved_after_cd_keeps_its_settings_when_read_by_its_full_path() {
+        let out = r("clear
+set obs 3
+generate t = _n
+generate x = _n
+cd \"C:/work/data\"
+tsset t
+save FOMC, replace
+use \"C:/Work/Data/fomc.dta\", clear
+generate l = L.x
+cd sub
+use \"C:/work/data/other\", clear
+generate m = L.x");
+        assert!(!out[8].starts_with("NOT"), "{out:?}");
+        assert!(
+            out[8].contains("stata_ts(x, 1, 0, 0, t, NULL, 1)"),
+            "{out:?}"
+        );
+        assert!(out[11].contains("not known here"), "{out:?}");
     }
 
     #[test]

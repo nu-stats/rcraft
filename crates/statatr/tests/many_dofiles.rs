@@ -79,8 +79,10 @@ fn the_share_translated_per_tier() {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
+        // as the app runs a do-file: with a folder for its tempfiles
         let opts = Options {
             name: name.clone(),
+            temp_folder: "C:/RCraft/temp".into(),
             ..Options::default()
         };
         let d = dry_run(&text, &NoFiles, opts);

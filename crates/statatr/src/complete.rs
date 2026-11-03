@@ -311,13 +311,16 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     (
         "merge",
         &[
+            "assert(",
             "generate(",
             "keep(",
             "keepusing(",
             "nogenerate",
             "nolabel",
             "noreport",
+            "replace",
             "sorted",
+            "update",
         ],
     ),
     (
@@ -517,7 +520,7 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("graph", &["bar", "export", "hbar", "twoway"]),
     ("import", &["delimited", "excel"]),
     ("matrix", &["list"]),
-    ("merge", &["1:1", "1:m", "m:1"]),
+    ("merge", &["1:1", "1:m", "m:1", "m:m"]),
     ("reshape", &["long", "wide"]),
     ("return", &["list"]),
     ("scalar", &["define", "dir", "drop", "list"]),

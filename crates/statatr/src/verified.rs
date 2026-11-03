@@ -52,6 +52,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("local", &["control"]),
     ("logit", &["collinear", "interactions", "likelihood"]),
     ("margins", &["regress"]),
+    ("merge", &["merge"]),
     ("mlogit", &["collinear", "likelihood"]),
     ("nbreg", &["collinear"]),
     ("ologit", &["collinear", "likelihood"]),

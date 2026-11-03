@@ -3026,3 +3026,19 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Checked:** `xtile.do` (12 result lines, every value, tolerance 0); `xtile` is Verified. Observations in
   `plan/stata/xtile.md`.
 - **Numbers:** the replication packages' share is 56.6% (56.5%); StatCraft's probes 83.4%.
+
+## P2C.9 continued: merge, every type, 2026-11-02
+
+- **merge** (`data_r/more.rs`, `stata_merge`): one rule for 1:1, m:1, 1:m, m:m and 1:1 `_n`, as Stata pairs
+  rows (the k-th with the k-th within a key, the shorter side's last row standing in); the master's rows
+  first by key, the rest after by key; `update` (4, 5) and `replace`; `keep()` with its short words and
+  match_update, match_conflict; `assert()` before `keep()`, the merged data left in memory on r(9);
+  Stata's report; `nolabel`. Empty-string keys match, as in Stata (R never looks up an empty name, so the
+  keys carry a mark). Rows with the same key keep their order, where Stata's sort may not (a caveat).
+- **Files saved after cd:** the session keeps the folder `cd` named, so `save f` after `cd d` is the same file as `use d/f` later (case aside), and its tsset, xtset, fvset and label sets come back with it. xtreg after `use` of a file whose settings are not known says so, rather than Stata's "must specify panelvar".
+- **Dry runs:** `tempfile` without a folder marks its names unknown instead of leaving them empty, and the
+  coverage run gives a folder, as the app does; 10 package lines had read `using ,`.
+- **Checked:** `merge.do` (16 result lines, every value, tolerance 0); `merge` is Verified. Observations in
+  `plan/stata/merge.md`.
+- **Numbers:** the replication packages' share is 58.8% (56.6%): tier 2 29.9%, tier 3 61.9%.
+  StatCraft's probes 83.4%.

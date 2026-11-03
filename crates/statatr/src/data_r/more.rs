@@ -17,6 +17,144 @@ stata_pctile <- function(x, p) if (all(is.na(x))) NA_real_ else unname(stats::qu
 
 /// `append, force`: a variable of the using data whose kind (string or
 /// number) is not the master's is missing there, `""` or `.` (Stata 19).
+/// `merge` as Stata 19 does it (`plan/stata/merge.md`). Within a key, the
+/// k-th row of the master goes with the k-th row of the using data, and the
+/// shorter side's last row stands in for the rows it lacks: that is 1:1,
+/// m:1, 1:m and m:m alike (`_n` keys on the row number). The master's rows
+/// come first, sorted by the key; a using row beyond them, and a row only
+/// the using data has, come after, sorted by the key. A variable in both
+/// keeps the master's value, but with `update` a missing one takes the
+/// using value (4) and two values that differ are a conflict (5), which
+/// `replace` settles for the using value. The report, `assert()` (before
+/// `keep()`, the merged data left in memory) and `keep()` as Stata has them.
+pub(super) const MERGE_HELPER: &str = r#"stata_merge <- function(d, u, keys, kind, gen = "_merge", update = FALSE, replace = FALSE,
+                        keep = NULL, assert = NULL, report = TRUE, generate = TRUE, target = NULL) {
+  for (k in keys) {
+    if (!k %in% names(d)) stop("variable ", k, " not found")
+    if (!k %in% names(u)) stop("variable ", k, " not found")
+  }
+  plain <- function(v) if (is.character(v)) v else as.numeric(v)
+  key <- function(x) {
+    if (length(keys) == 0) return(as.character(seq_len(nrow(x))))
+    # led by a mark: R never looks up an empty name ("" is a key in Stata)
+    do.call(paste, c("\002", lapply(keys, function(k) {
+      v <- x[[k]]
+      # a string is never missing in Stata: NA is ""
+      if (is.character(v)) ifelse(is.na(v), "", v) else ifelse(is.na(v), "\001", as.character(plain(v)))
+    }), sep = "\r"))
+  }
+  sorted <- function(x) {
+    if (length(keys) == 0) return(seq_len(nrow(x)))
+    do.call(order, c(lapply(keys, function(k) plain(x[[k]])), list(method = "radix", na.last = TRUE)))
+  }
+  where <- if (kind == "1:1") "master and using data" else if (kind == "1:m") "master data" else "using data"
+  kd0 <- key(d)
+  ku <- key(u)
+  klist <- paste(keys, collapse = " ")
+  if (kind %in% c("1:1", "1:m") && anyDuplicated(kd0)) stop("variable", if (length(keys) > 1) "s" else "", " ", klist, " do", if (length(keys) > 1) "" else "es", " not uniquely identify observations in the master data")
+  if (kind %in% c("1:1", "m:1") && anyDuplicated(ku)) stop("variable", if (length(keys) > 1) "s" else "", " ", klist, " do", if (length(keys) > 1) "" else "es", " not uniquely identify observations in the using data")
+  od <- sorted(d)
+  kd <- kd0[od]
+  jd <- stats::ave(seq_along(kd), kd, FUN = seq_along)
+  ju <- stats::ave(seq_along(ku), ku, FUN = seq_along)
+  nm <- table(kd)
+  nu <- table(ku)
+  nu_d <- as.vector(nu[kd])
+  pidx <- unname(stats::setNames(seq_along(ku), paste(ku, ju, sep = "\r\r"))[paste(kd, pmin(jd, nu_d), sep = "\r\r")])
+  nm_u <- as.vector(nm[ku])
+  extra <- which(!is.na(nm_u) & ju > nm_u)
+  only <- which(is.na(nm_u))
+  last <- stats::setNames(seq_along(kd), paste(kd, jd, sep = "\r\r"))
+  epart <- unname(last[paste(ku[extra], nm_u[extra], sep = "\r\r")])
+  midx <- c(od, od[epart], rep(NA_integer_, length(only)))
+  uidx <- c(pidx, extra, only)
+  code <- c(ifelse(is.na(pidx), 1, 3), rep(3, length(extra)), rep(2, length(only)))
+  # the rows after the master's own, sorted by the key
+  after <- seq_along(midx) > length(od)
+  if (any(after)) {
+    tail_u <- u[uidx[after], , drop = FALSE]
+    o <- which(after)[sorted(tail_u)]
+    midx <- c(midx[!after], midx[o])
+    uidx <- c(uidx[!after], uidx[o])
+    code <- c(code[!after], code[o])
+  }
+  out <- d[midx, , drop = FALSE]
+  new <- setdiff(names(u), names(d))
+  if (length(new)) out <- dplyr::bind_cols(out, u[uidx, new, drop = FALSE])
+  # a string missing from a row is empty in Stata, not NA
+  for (v in names(out)) {
+    if (is.character(out[[v]])) {
+      gap <- if (v %in% names(d)) is.na(midx) else is.na(uidx)
+      out[[v]][gap & is.na(out[[v]])] <- ""
+    }
+  }
+  put <- function(x, i, y) {
+    a <- attributes(x)
+    xv <- as.vector(unclass(x))
+    yv <- as.vector(unclass(y))
+    if (is.character(xv) != is.character(yv)) stop("a variable is a string in one file and a number in the other (Stata: r(106))")
+    xv[i] <- yv[i]
+    attributes(xv) <- a
+    xv
+  }
+  ux <- function(v) u[[v]][uidx]
+  for (v in intersect(names(u), names(d))) {
+    y <- ux(v)
+    from_u <- is.na(midx)
+    if (!v %in% keys && (update || replace)) {
+      xv <- as.vector(unclass(out[[v]]))
+      yv <- as.vector(unclass(y))
+      miss <- function(z) is.na(z) | (is.character(z) & z == "")
+      matched <- code >= 3
+      upd <- matched & miss(xv) & !miss(yv)
+      conf <- matched & !miss(xv) & !miss(yv) & xv != yv
+      if (update) code[upd & code < 5] <- 4
+      code[conf] <- 5
+      take <- from_u | (update & upd) | (replace & conf)
+    } else {
+      take <- from_u
+    }
+    if (any(take)) out[[v]] <- put(out[[v]], take, y)
+  }
+  labs <- c("Master only (1)" = 1, "Using only (2)" = 2, "Matched (3)" = 3, "Missing updated (4)" = 4, "Nonmissing conflict (5)" = 5)
+  if (!is.null(assert) && !all(code %in% assert)) {
+    out[[gen]] <- haven::labelled(code, labs, label = "Matching result from merge")
+    if (!is.null(target)) assign(target, out, envir = parent.frame())
+    stop("after merge, not all observations matched\n(merged result left in memory)")
+  }
+  if (!is.null(keep)) {
+    k <- code %in% keep
+    out <- out[k, , drop = FALSE]
+    code <- code[k]
+  }
+  rownames(out) <- NULL
+  if (report) {
+    n <- function(c) sum(code %in% c)
+    line <- function(label, x, tag) {
+      num <- format(x, big.mark = ",", scientific = FALSE)
+      cat(label, formatC(num, width = 45 - nchar(label)), if (is.null(tag)) "" else if (generate) paste0("  (", gen, "==", tag, ")") else "  ", "\n", sep = "")
+    }
+    cat("\n    Result                      Number of obs\n    -----------------------------------------\n")
+    line("    Not matched", n(1:2), NULL)
+    if (n(1:2) > 0) {
+      line("        from master", n(1), 1)
+      line("        from using", n(2), 2)
+    }
+    cat("\n")
+    if (update) {
+      line("    Matched", n(3:5), NULL)
+      line("        not updated", n(3), 3)
+      line("        missing updated", n(4), 4)
+      line("        nonmissing conflict", n(5), 5)
+    } else {
+      line("    Matched", n(3), 3)
+    }
+    cat("    -----------------------------------------\n")
+  }
+  if (generate) out[[gen]] <- haven::labelled(code, labs, label = "Matching result from merge")
+  out
+}"#;
+
 pub(super) const FORCED_HELPER: &str = r#"stata_forced <- function(d, u) {
   for (v in intersect(names(d), names(u))) {
     if (is.character(d[[v]]) != is.character(u[[v]])) {
@@ -383,6 +521,9 @@ impl Session {
             ("nolabel", 5),
             ("noreport", 5),
             ("sorted", 6),
+            ("update", 2),
+            ("replace", 3),
+            ("assert", 3),
         ];
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -396,17 +537,19 @@ impl Session {
             .ok_or_else(|| no("merge needs `using file`"))?;
         let path = file_name(&file, "dta");
         let (kind, keys) = first_word(&c.parts.main);
-        let keys = names(keys)?;
-        let (master_unique, using_unique) = match kind {
-            "1:1" => (true, true),
-            "m:1" => (false, true),
-            "1:m" => (true, false),
-            "m:m" => {
-                return Err(no(
-                    "merge m:m pairs the k-th rows of each key in Stata (not every combination); not translated",
-                ))
+        if !matches!(kind, "1:1" | "m:1" | "1:m" | "m:m") {
+            return Err(no(format!(
+                "merge {kind}: the old syntax without 1:1, m:1, 1:m or m:m is not translated yet"
+            )));
+        }
+        // 1:1 _n: the k-th row with the k-th row
+        let keys = if keys.trim() == "_n" {
+            if kind != "1:1" {
+                return Err(no("merge _n is 1:1 only (Stata: r(198))"));
             }
-            other => return Err(no(format!("merge {other} is not translated (expected 1:1, m:1 or 1:m)"))),
+            Vec::new()
+        } else {
+            names(keys)?
         };
         let key_vec = format!(
             "c({})",
@@ -415,10 +558,38 @@ impl Session {
                 .collect::<Vec<_>>()
                 .join(", ")
         );
-        let key_list = keys.join(" ");
+        let update = opts.has("update", 2);
+        let replace = opts.has("replace", 3);
+        if replace && !update {
+            return Err(no("merge: replace needs update (Stata: r(198))"));
+        }
+        let codes = |text: &str| -> Result<String, Untranslated> {
+            let mut out = Vec::new();
+            for w in text.split_whitespace() {
+                let w = w.to_ascii_lowercase();
+                let at = |word: &str, min: usize| w.len() >= min && word.starts_with(w.as_str());
+                out.push(if w == "1" || at("master", 3) {
+                    "1"
+                } else if w == "2" || at("using", 2) {
+                    "2"
+                } else if w == "4" || at("match_update", 7) {
+                    "4"
+                } else if w == "5" || at("match_conflict", 7) {
+                    "5"
+                } else if w == "3" || at("matched", 3) || w == "match" {
+                    "3"
+                } else {
+                    return Err(no(format!("merge: {w} is not one of master, using, match, match_update or match_conflict")));
+                });
+            }
+            Ok(format!("c({})", out.join(", ")))
+        };
         let gen = opts.arg("generate", 3).unwrap_or_else(|| "_merge".into());
+        let gen = gen.trim().to_string();
+        let generate = !opts.has("nogenerate", 5);
         out.package("haven");
         out.package("dplyr");
+        self.helpers.insert("stata_merge");
         out.line(format!("merge_using <- haven::read_dta({})", r_text(&path)));
         if let Some(k) = opts.arg("keepusing", 5) {
             out.line(format!(
@@ -426,49 +597,50 @@ impl Session {
                 select(&k)?
             ));
         }
-        if master_unique {
-            out.line(format!("if (anyDuplicated({d}[{key_vec}])) stop(\"variable {key_list} does not uniquely identify observations in the master data\")"));
+        if opts.has("nolabel", 5) {
+            out.line("merge_using <- haven::zap_labels(merge_using)");
         }
-        if using_unique {
-            out.line(format!("if (anyDuplicated(merge_using[{key_vec}])) stop(\"variable {key_list} does not uniquely identify observations in the using data\")"));
-        }
-        out.line(format!(
-            "if ({} %in% names({d})) stop(\"variable {gen} already defined\")",
-            r_text(&gen)
-        ));
-        out.line(format!("{d} <- {d} |> dplyr::mutate(merge_in_master = TRUE) |> dplyr::full_join(merge_using |> dplyr::mutate(merge_in_using = TRUE), by = {key_vec}, suffix = c(\"\", \".merge_using\"), na_matches = \"na\")"));
-        // for a variable in both files the master's value stays, except in
-        // rows only the using file has
-        out.line(format!(
-            "for (v in setdiff(intersect(names(merge_using), names({d})), {key_vec})) {{ u <- paste0(v, \".merge_using\"); if (u %in% names({d})) {{ {d}[[v]] <- dplyr::if_else(is.na({d}$merge_in_master), {d}[[u]], {d}[[v]]); {d}[[u]] <- NULL }} }}"
-        ));
-        let mut steps = vec![
-            format!("dplyr::mutate({} = haven::labelled(dplyr::case_when(!is.na(merge_in_master) & !is.na(merge_in_using) ~ 3, !is.na(merge_in_master) ~ 1, .default = 2), c(\"Master only (1)\" = 1, \"Using only (2)\" = 2, \"Matched (3)\" = 3), label = \"Matching result from merge\"))", r_name(&gen)),
-            // master rows sorted by key (stable), then the using-only rows sorted by key
-            format!("dplyr::arrange({} == 2, dplyr::pick({}))", r_name(&gen), select(&key_list)?),
-            "dplyr::select(-merge_in_master, -merge_in_using)".to_string(),
-        ];
-        if let Some(k) = opts.arg("keep", 4) {
-            let mut codes = Vec::new();
-            for w in k.split_whitespace() {
-                codes.push(match w {
-                    "master" | "1" => "1",
-                    "using" | "2" => "2",
-                    "match" | "matched" | "3" => "3",
-                    other => return Err(no(format!("merge keep({other}) is not translated"))),
-                });
-            }
-            steps.push(format!(
-                "dplyr::filter({} %in% c({}))",
-                r_name(&gen),
-                codes.join(", ")
+        if generate {
+            out.line(format!(
+                "if ({} %in% names({d})) stop(\"variable {gen} already defined\")",
+                r_text(&gen)
             ));
         }
-        if opts.has("nogenerate", 5) {
-            steps.push(format!("dplyr::select(-{})", r_name(&gen)));
+        let mut args = format!(
+            "{d}, merge_using, {key_vec}, {}, gen = {}",
+            r_text(kind),
+            r_text(&gen)
+        );
+        if update {
+            args.push_str(", update = TRUE");
         }
-        out.line(format!("{d} <- {d} |> {}", steps.join(" |> ")));
+        if replace {
+            args.push_str(", replace = TRUE");
+        }
+        if let Some(k) = opts.arg("keep", 4) {
+            args.push_str(&format!(", keep = {}", codes(&k)?));
+        }
+        if let Some(a) = opts.arg("assert", 3) {
+            args.push_str(&format!(
+                ", assert = {}, target = {}",
+                codes(&a)?,
+                r_text(&d)
+            ));
+        }
+        if opts.has("noreport", 5) || self.quiet(c) {
+            args.push_str(", report = FALSE");
+        }
+        if !generate {
+            args.push_str(", generate = FALSE");
+        }
+        out.line(format!("{d} <- stata_merge({args})"));
         out.line("rm(merge_using)");
+        if kind != "1:1" {
+            out.caveat(
+                "rows with the same key keep their order here; Stata's sort may put them in \
+                 another order",
+            );
+        }
         Ok(())
     }
 

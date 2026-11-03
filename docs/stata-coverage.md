@@ -95,17 +95,17 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
-| 1. Data management and control flow | 9393 | 6463 | 2256 | 674 | 74.1% |
-| 2. Core statistics | 2035 | 559 | 1475 | 1 | 27.5% |
-| 3. Panel, survival, survey, IV and other models | 376 | 196 | 179 | 1 | 52.3% |
+| 1. Data management and control flow | 9393 | 6691 | 2028 | 674 | 76.7% |
+| 2. Core statistics | 2035 | 608 | 1426 | 1 | 29.9% |
+| 3. Panel, survival, survey, IV and other models | 376 | 232 | 143 | 1 | 61.9% |
 | 4. Graphs | 117 | 0 | 117 | 0 | 0.0% |
 | 5. Programs and SSC commands | 569 | 0 | 555 | 14 | 0.0% |
 | Other commands | 2657 | 824 | 1575 | 258 | 34.3% |
-| **All** | 15147 | 8042 | 6157 | 948 | 56.6% |
+| **All** | 15147 | 8355 | 5844 | 948 | 58.8% |
 
 Most of what is left comes from add-ons from SSC: `robreg`, `outreg2`, `reghdfe`, `parmest`, `cluster2`, `eststo`,
 `coefplot` and `esttab`. One package's 2,588-line file runs `robreg` and `predict` after it over a thousand
@@ -183,7 +183,7 @@ reason:
 
 ## What would move the numbers most
 
-1. `file` and the programs a do-file defines; `merge m:m`.
+1. `file` and the programs a do-file defines.
 2. Interactions in the likelihood models' tables, and collinear terms in the panel, survival and IV models.
 3. `rpoisson()`, `rbeta()` and `rt()`, and the models not yet translated (lasso, xtregar,
    newey, prais).

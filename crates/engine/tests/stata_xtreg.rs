@@ -446,8 +446,14 @@ fn xtreg_agrees_with_stata_19() {
 fn xtreg_says_what_stata_says() {
     // Stata's own words, checked in Stata 19
     assert!(
-        refusal("use \"d.dta\"\nxtreg y x, fe\n").contains("must specify panelvar; use xtset"),
+        refusal("clear\nset obs 3\ngenerate y = _n\ngenerate x = _n\nxtreg y x, fe\n")
+            .contains("must specify panelvar; use xtset"),
         "xtreg before xtset"
+    );
+    // a file read here may have been xtset: that is not known
+    assert!(
+        refusal("use \"d.dta\"\nxtreg y x, fe\n").contains("settings are not known here"),
+        "xtreg after use of a file not saved here"
     );
     assert!(refusal("use \"d.dta\"\nxtset id\nxtreg y x, be robust\n").contains("be"));
     assert!(refusal("use \"d.dta\"\nxtset id\nxtreg y x, mle robust\n").contains("mle"));
