@@ -38,6 +38,7 @@ mod more;
 mod natscale;
 mod post;
 mod random;
+mod reghdfe;
 mod returned;
 mod robreg;
 mod scalars;
@@ -388,6 +389,7 @@ const MODELS: &[&str] = &[
     "stcox",
     "clogit",
     "robreg",
+    "reghdfe",
     "regress",
     "logit",
     "probit",
@@ -706,6 +708,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_anova" => anova::ANOVA_HELPER,
         "stata_clogit" => clogit::CLOGIT_HELPER,
         "stata_robreg" => robreg::ROBREG_HELPER,
+        "stata_reghdfe" => reghdfe::REGHDFE_HELPER,
         "stata_xtile" => more::XTILE_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -1723,6 +1726,7 @@ impl Session {
             "stcox" => self.stcox(c, &opts, out),
             "clogit" => self.clogit(c, &opts, out),
             "robreg" => self.robreg(c, &opts, out),
+            "reghdfe" => self.reghdfe(c, &opts, out),
             "xtile" => self.xtile(c, &opts, out),
             "display" => self.display(c, out),
             "ereturn" | "return" => self.list_returned(c, out),

@@ -63,6 +63,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("probit", &["collinear", "likelihood"]),
     ("pwcorr", &["descriptives"]),
     ("recode", &["data"]),
+    ("reghdfe", &["reghdfe"]),
     (
         "regress",
         &["aware", "collinear", "control", "interactions", "regress"],

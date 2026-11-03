@@ -228,6 +228,11 @@ impl Session {
             Fit::Stcox => &[("hr", 2), ("xb", 2)],
             Fit::Clogit => &[("pc1", 3), ("pu0", 3), ("xb", 2)],
             Fit::Robreg => &[("xb", 2), ("residuals", 1), ("weights", 1)],
+            Fit::Reghdfe => {
+                return Err(no(
+                    "predict after reghdfe is not translated yet (it needs the absorbed effects, which reghdfe keeps only with resid or savefe)",
+                ))
+            }
             Fit::Margins => {
                 return Err(no(
                     "predict after margins, post is not allowed, as in Stata",

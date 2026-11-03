@@ -45,6 +45,7 @@ pub(super) enum Fit {
     Stcox,
     Clogit,
     Robreg,
+    Reghdfe,
 }
 
 impl Fit {
@@ -64,6 +65,7 @@ impl Fit {
             Fit::Stcox => "stcox",
             Fit::Clogit => "clogit",
             Fit::Robreg => "robreg",
+            Fit::Reghdfe => "reghdfe",
         }
     }
 

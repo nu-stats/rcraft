@@ -125,6 +125,7 @@ pub const COMMANDS: &[&str] = &[
     "pwd",
     "quietly",
     "recode",
+    "reghdfe",
     "regress",
     "rename",
     "replace",
@@ -404,6 +405,17 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("recode", &["copyrest", "generate(", "prefix("]),
+    (
+        "reghdfe",
+        &[
+            "absorb(",
+            "cluster(",
+            "keepsingletons",
+            "level(",
+            "noabsorb",
+            "vce(",
+        ],
+    ),
     (
         "regress",
         &["beta", "level(", "noconstant", "robust", "vce("],
@@ -969,12 +981,13 @@ mod tests {
 
     #[test]
     fn commands_after_the_prefixes() {
-        assert_eq!(options("reg", VARS), names(&["regress"]));
+        assert_eq!(options("reg", VARS), names(&["reghdfe", "regress"]));
+        assert_eq!(options("regr", VARS), names(&["regress"]));
         assert_eq!(options("su", VARS), names(&["summarize"]));
         assert_eq!(options("ta", VARS), names(&["tab1", "tab2", "tabulate"]));
         assert_eq!(options("q", VARS), names(&["quietly"]));
-        assert_eq!(options("quietly reg", VARS), names(&["regress"]));
-        assert_eq!(options("qui: reg", VARS), names(&["regress"]));
+        assert_eq!(options("quietly regr", VARS), names(&["regress"]));
+        assert_eq!(options("qui: reg", VARS), names(&["reghdfe", "regress"]));
         assert_eq!(options("by sex: summ", VARS), names(&["summarize"]));
         assert_eq!(options("bysort sex age: gen", VARS), names(&["generate"]));
         assert_eq!(options("capture noisily tt", VARS), names(&["ttest"]));
@@ -1210,6 +1223,8 @@ gettoken a b : s, {o}"
             "stset" => format!("stset t, {o}"),
             "ttest" if name == "by" => format!("ttest y, {o}"),
             "ttest" => format!("ttest y == x, {o}"),
+            "reghdfe" if name == "absorb" || name == "noabsorb" => format!("reghdfe y x, {o}"),
+            "reghdfe" => format!("reghdfe y x, absorb(g) {o}"),
             "xtile" => format!("xtile q = y, {o}"),
             "xtreg" => format!("xtset id t\nxtreg y x, {o}"),
             "xtset" => format!("xtset id t, {o}"),

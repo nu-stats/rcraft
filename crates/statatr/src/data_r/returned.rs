@@ -278,7 +278,7 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   b <- stata_b
   V <- stata_vcov
   robust <- vce %in% c("robust", "cluster")
-  G <- if (vce != "cluster") NULL else if (!is.null(fit[["G"]])) fit[["G"]] else if (cmd == "ivregress") length(unique(fit$cluster)) else if (cmd %in% c("stcox", "clogit")) stata_m$G else length(unique(stata_cluster))
+  G <- if (vce != "cluster") NULL else if (!is.null(fit[["G"]])) fit[["G"]] else if (cmd == "ivregress") length(unique(fit$cluster)) else if (cmd %in% c("stcox", "clogit")) stata_m$G else if (cmd == "reghdfe") min(fit$stata$G) else length(unique(stata_cluster))
   wald <- function(keep) {
     # on the scale of the errors (a correlation), so coefficients of very
     # different sizes do not make V look singular to solve()
@@ -523,6 +523,30 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     put(cmdline = cmdline, cmd2 = "stcox", vce = vce, chi2type = if (robust) "Wald" else "LR",
         method = extra$ties, ties = extra$ties, t0 = "_t0", depvar = "_t", cmd = "cox", properties = "b V")
     robust_macros()
+  } else if (cmd == "reghdfe") {
+    e0 <- fit$stata
+    put(N = e0$N, rank = e0$df_m, df_r = e0$df_r, df_m = e0$df_m, tss = e0$tss, tss_within = e0$tss_within,
+        rss = e0$rss, mss = e0$mss, rmse = e0$rmse, F = e0$F, ll = e0$ll, ll_0 = e0$ll_0, r2 = e0$r2,
+        r2_within = e0$r2_within, r2_a = e0$r2_a, r2_a_within = e0$r2_a_within, sumweights = e0$N,
+        converged = 1, report_constant = 1, N_full = e0$N_full, num_singletons = e0$num_singletons,
+        drop_singletons = as.numeric(e0$num_singletons >= 0), df_a_nested = e0$df_a_nested,
+        df_a_redundant = e0$df_a_redundant, df_a_initial = e0$df_a_initial, df_a = e0$df_a,
+        N_hdfe = length(e0$absorb), N_hdfe_extended = length(e0$absorb))
+    if (length(e0$cluster)) {
+      put(N_clust = min(e0$G))
+      if (length(e0$cluster) == 2) put(N_clust1 = e0$G[1], N_clust2 = e0$G[2], N_clustervars = 2)
+    }
+    put(extended_absvars = paste(e0$absorb, collapse = " "), absvars = paste(e0$absorb, collapse = " "),
+        title2 = if (length(e0$absorb)) sprintf("Absorbing %d HDFE group%s", length(e0$absorb), if (length(e0$absorb) == 1) "" else "s") else NULL,
+        dofmethod = "pairwise clusters continuous", vce = if (vce == "unadjusted") "ols" else vce,
+        title = "HDFE Linear regression",
+        indepvars = paste(c(setdiff(names(b), "(Intercept)"), "_cons"), collapse = " "), depvar = depvar,
+        predict = "reghdfe_p", model = "ols", cmdline = cmdline, cmd = "reghdfe", properties = "b V")
+    if (vce != "unadjusted") put(vcetype = "Robust")
+    if (length(e0$cluster)) {
+      put(clustvar = paste(e0$cluster, collapse = " "), title3 = "Statistics robust to heteroskedasticity")
+      if (length(e0$cluster) == 2) put(clustvar1 = e0$cluster[1], clustvar2 = e0$cluster[2])
+    }
   } else if (cmd == "robreg") {
     e0 <- fit$stata
     put(N = e0$N, k_omit = 0, rank = length(b), chi2 = e0$chi2,
@@ -628,6 +652,7 @@ fn e_not_kept(cmd: &str, model: &str) -> &'static [&'static str] {
             "S",
             "V_modelbased",
         ],
+        ("reghdfe", _) => &["ic", "marginsnotok", "footnote", "estat_cmd", "dof_table"],
         ("robreg", _) => &[
             "level",
             "iterations",

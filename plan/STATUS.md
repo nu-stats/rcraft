@@ -3069,3 +3069,16 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   Observations in `plan/stata/robreg.md`.
 - **Numbers:** the replication packages' share is 79.3% (59.1%): core statistics 84.8% (29.9%). The
   package's loops over robreg now stop only at one `egen rowmedian()`. StatCraft's probes 83.4%.
+
+## P2C.9 continued: reghdfe (SSC), 2026-11-03
+
+- **Installed** `require` too, which reghdfe asks for (SSC, with the go-ahead for reghdfe).
+- **reghdfe** (`data_r/reghdfe.rs`, `stata_reghdfe`): one or two absorbed variables or `noabsorb`;
+  singletons dropped (again until none are left) or kept; the absorbed means taken out, `_cons` with the
+  grand means added back; reghdfe's degrees of freedom (connected groups, fixed effects nested in a cluster
+  variable); unadjusted, robust, clustered and two-way clustered errors with its small-sample factors and
+  Cameron, Gelbach and Miller's fix; e() and Stata's header. `predict` after it is refused for now.
+- **Checked:** `reghdfe.do` (12 result lines, every value, tolerance 1e-6); `reghdfe` is Verified.
+  Observations in `plan/stata/reghdfe.md`.
+- **Numbers:** the replication packages' share is 80.2% (79.3%); the add-on tier 21.1% (0%). StatCraft's
+  probes 83.4%.
