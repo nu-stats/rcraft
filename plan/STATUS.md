@@ -3042,3 +3042,15 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   `plan/stata/merge.md`.
 - **Numbers:** the replication packages' share is 58.8% (56.6%): tier 2 29.9%, tier 3 61.9%.
   StatCraft's probes 83.4%.
+
+## P2C.9 continued: display options, 2026-11-03
+
+- **Display options** (`DISPLAY_OPTIONS`, `MARGINS_DISPLAY` in `data_r.rs`): `baselevels`, `allbaselevels`,
+  `noomitted`, `vsquish`, `noemptycells`, `nofvlabel`, `cformat()`, `pformat()`, `sformat()`, `nolstretch`,
+  `fvwrap()`, `fvwrapon()`, `noci`, `nopvalues`, `noheader`, `notable` and `coeflegend` change only how
+  Stata's table looks, so every model takes them, down to the shortest form Stata 19 takes (`base`,
+  `noomit`, `cf()`, `nolstr`; `allb`, `noo` and `vsq` are refused, as Stata refuses them). `margins` takes
+  them too, with `asobserved` (its default) and `noatlegend`.
+- **Numbers:** the replication packages' share is 59.1% (58.8%). The 100 `margins` lines after `clogit`
+  now stop at `mcomp(bonferroni)`; behind it are `margins` after `clogit` with `predict(pu0)` and
+  `vce(unconditional)`, not translated yet.

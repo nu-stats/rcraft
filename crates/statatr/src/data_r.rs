@@ -470,6 +470,31 @@ const REPLACE_DATA: &[&str] = &[
     "xpose",
 ];
 
+/// Options of every model that change only how Stata's table looks, with the
+/// shortest form Stata 19 takes of each.
+const DISPLAY_OPTIONS: &[(&str, usize)] = &[
+    ("baselevels", 4),
+    ("allbaselevels", 7),
+    ("noomitted", 6),
+    ("vsquish", 7),
+    ("noemptycells", 7),
+    ("nofvlabel", 7),
+    ("cformat", 2),
+    ("pformat", 2),
+    ("sformat", 2),
+    ("nolstretch", 6),
+    ("fvwrap", 6),
+    ("fvwrapon", 8),
+    ("noci", 4),
+    ("nopvalues", 9),
+    ("noheader", 8),
+    ("notable", 7),
+    ("coeflegend", 10),
+];
+
+/// And those of `margins`: `asobserved` is its default.
+const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10)];
+
 const LEAVE_DATA_ALONE: &[&str] = &[
     "tsset",
     "xtset",
@@ -2936,11 +2961,34 @@ impl Session {
     /// the base `fvset` chose (both read off Stata 19). `None` when nothing
     /// changes.
     fn restated(&self, c: &Command) -> Option<Command> {
-        if !MODELS.contains(&c.name.as_str()) {
+        let margins = c.name == "margins";
+        if !MODELS.contains(&c.name.as_str()) && !margins {
             return None;
         }
         let mut c2 = c.clone();
         let mut changed = false;
+        // options that change only how Stata's table looks (R prints its own),
+        // in the shortest forms Stata 19 takes
+        let shown = |o: &crate::lang::syntax::Opt| {
+            DISPLAY_OPTIONS.iter().any(|(n, m)| o.is(n, *m))
+                || (margins && MARGINS_DISPLAY.iter().any(|(n, m)| o.is(n, *m)))
+        };
+        if c2.options.iter().any(shown) {
+            c2.options.retain(|o| !shown(o));
+            c2.parts.options = c2
+                .options
+                .iter()
+                .map(|o| match &o.raw {
+                    Some(r) => format!("{}({r})", o.name),
+                    None => o.name.clone(),
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            changed = true;
+        }
+        if margins {
+            return changed.then_some(c2);
+        }
         let cluster = c.options.iter().find(|o| o.is("cluster", 2));
         if let (Some(cl), false) = (cluster, c.options.iter().any(|o| o.is("vce", 3))) {
             let v = format!("cluster {}", cl.arg().trim());
@@ -3553,6 +3601,29 @@ generate m = L.x");
             "{out:?}"
         );
         assert!(out[11].contains("not known here"), "{out:?}");
+    }
+
+    #[test]
+    fn display_options_change_only_the_table() {
+        let out = r("use s
+regress y x, base cf(%5.3f) noomit vsquish
+xtset id t
+xtreg y x, fe vce(robust) baselevel
+margins, dydx(x) asobserved cformat(%5.3f)
+margins, dydx(x) aso
+regress y x, vsq");
+        assert!(out[1].contains("stats::lm(y ~ x"), "{out:?}");
+        assert!(!out[3].starts_with("NOT"), "{out:?}");
+        assert!(!out[4].starts_with("NOT"), "{out:?}");
+        // shorter than Stata takes: refused as Stata refuses them
+        assert!(
+            out[5].starts_with("NOT: margins with the option aso"),
+            "{out:?}"
+        );
+        assert!(
+            out[6].starts_with("NOT: regress with the option vsq"),
+            "{out:?}"
+        );
     }
 
     #[test]

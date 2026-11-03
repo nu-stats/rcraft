@@ -95,17 +95,17 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
 | 1. Data management and control flow | 9393 | 6691 | 2028 | 674 | 76.7% |
 | 2. Core statistics | 2035 | 608 | 1426 | 1 | 29.9% |
-| 3. Panel, survival, survey, IV and other models | 376 | 232 | 143 | 1 | 61.9% |
+| 3. Panel, survival, survey, IV and other models | 376 | 265 | 110 | 1 | 70.7% |
 | 4. Graphs | 117 | 0 | 117 | 0 | 0.0% |
 | 5. Programs and SSC commands | 569 | 0 | 555 | 14 | 0.0% |
 | Other commands | 2657 | 824 | 1575 | 258 | 34.3% |
-| **All** | 15147 | 8355 | 5844 | 948 | 58.8% |
+| **All** | 15147 | 8388 | 5811 | 948 | 59.1% |
 
 Most of what is left comes from add-ons from SSC: `robreg`, `outreg2`, `reghdfe`, `parmest`, `cluster2`, `eststo`,
 `coefplot` and `esttab`. One package's 2,588-line file runs `robreg` and `predict` after it over a thousand
