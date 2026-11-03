@@ -239,7 +239,12 @@ impl Session {
         opts: &Opts,
         out: &mut Out,
     ) -> Result<(), Untranslated> {
-        if let Some(o) = opts.other(&[("generate", 1), ("prefix", 3), ("copyrest", 4)]) {
+        if let Some(o) = opts.other(&[
+            ("generate", 1),
+            ("prefix", 3),
+            ("copyrest", 4),
+            ("label", 5),
+        ]) {
             return Err(no(format!(
                 "recode with the option {o} is not translated yet"
             )));
@@ -251,6 +256,7 @@ impl Session {
         let vars = names(main.get(..open).unwrap_or(""))?;
         let rules_text = main.get(open..).unwrap_or("");
         let mut rules = Vec::new();
+        let mut labels: Vec<(f64, String)> = Vec::new();
         for raw in rules_text.split(')') {
             let r = raw.trim().trim_start_matches('(').trim();
             if r.is_empty() {
@@ -260,13 +266,24 @@ impl Session {
                 .split_once('=')
                 .ok_or_else(|| no(format!("recode: ({r}) needs `=`")))?;
             let right = right.trim();
-            if right.contains('"') {
-                return Err(no(
-                    "recode with value labels in its rules is not translated yet",
-                ));
+            // `1 "18-29"`: the new value and its label
+            let (number, text) = match right.split_once('"') {
+                Some((n, t)) => (
+                    n.trim(),
+                    Some(t.trim_end().trim_end_matches('"').to_string()),
+                ),
+                None => (right, None),
+            };
+            let target = number_literal(number)
+                .ok_or_else(|| no(format!("recode: {number} is not a number")))?;
+            if let Some(t) = text {
+                let v = number.parse::<f64>().map_err(|_| {
+                    no(format!(
+                        "recode: a label for {number}, which is not a value"
+                    ))
+                })?;
+                labels.push((v, t));
             }
-            let target = number_literal(right)
-                .ok_or_else(|| no(format!("recode: {right} is not a number")))?;
             rules.push((left.trim().to_string(), target));
         }
         let new_names: Vec<String> = match (opts.arg("generate", 1), opts.arg("prefix", 3)) {
@@ -278,6 +295,47 @@ impl Session {
             return Err(no(
                 "recode: generate() needs one new name for each variable",
             ));
+        }
+        // labels in the rules make a label set for each new variable, named
+        // after it or label(); one already there gains them, the later text
+        // of a value winning (as Stata 19 does)
+        let mut sets = Vec::new();
+        if !labels.is_empty() {
+            if new_names.is_empty() {
+                return Err(no(
+                    "Rules defining value labels not allowed when overwriting a variable (Stata: r(198))",
+                ));
+            }
+            let given = opts.arg("label", 5).map(|l| l.trim().to_string());
+            if given.is_some() && new_names.len() > 1 {
+                return Err(no(
+                    "recode with label() and more than one variable is not translated yet",
+                ));
+            }
+            for n in &new_names {
+                let name = given.clone().unwrap_or_else(|| n.clone());
+                if !is_name(&name) {
+                    return Err(no(format!("{name} is not a label name")));
+                }
+                let set = self.label_sets.entry(name.clone()).or_default();
+                for (v, t) in &labels {
+                    match set.iter_mut().find(|(x, _)| x == v) {
+                        Some(slot) => slot.1 = t.clone(),
+                        None => set.push((*v, t.clone())),
+                    }
+                }
+                set.sort_by(|a, b| a.0.total_cmp(&b.0));
+                let body: Vec<String> = set
+                    .iter()
+                    .map(|(v, t)| format!("{} = {}", r_text(t), r_number(*v)))
+                    .collect();
+                out.line(format!(
+                    "{} <- c({})",
+                    super::label_object(&name),
+                    body.join(", ")
+                ));
+                sets.push(super::label_object(&name));
+            }
         }
         let cond = self.condition(c, out)?;
         let mut assigns = Vec::new();
@@ -301,10 +359,19 @@ impl Session {
                         Some(k) => format!("dplyr::if_else({k}, {recoded}, {outside})"),
                         None => recoded,
                     };
-                    assigns.push(format!(
-                        "{} = structure(as.numeric({value}), label = \"RECODE of {v}\")",
-                        r_name(n)
-                    ));
+                    assigns.push(match sets.get(i) {
+                        Some(set) => {
+                            out.package("haven");
+                            format!(
+                                "{} = haven::labelled(as.numeric({value}), labels = {set}, label = \"RECODE of {v}\")",
+                                r_name(n)
+                            )
+                        }
+                        None => format!(
+                            "{} = structure(as.numeric({value}), label = \"RECODE of {v}\")",
+                            r_name(n)
+                        ),
+                    });
                     self.kinds.insert(n.clone(), Kind::Number);
                 }
                 None => {
@@ -972,6 +1039,44 @@ impl Session {
         Ok(())
     }
 
+    /// `xpose, clear`: observations become variables v1, v2, ... and
+    /// variables observations; text variables are rows of missing values.
+    /// The new variables are floats, doubles with `promote`; `varname` adds
+    /// `_varname` with the old names (as Stata 19 does).
+    pub(super) fn xpose(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("clear", 5), ("varname", 7), ("promote", 7)]) {
+            return Err(no(format!(
+                "xpose with the option {o} is not translated yet"
+            )));
+        }
+        if !opts.has("clear", 5) {
+            return Err(no("you must specify ', clear' (Stata: r(198))"));
+        }
+        if !c.parts.main.trim().is_empty() || c.parts.if_exp.is_some() || c.parts.in_range.is_some()
+        {
+            return Err(no("xpose takes only options"));
+        }
+        let d = self.data()?;
+        self.need_helper("stata_xpose");
+        self.need_helper("stata_float");
+        out.line(format!(
+            "{d} <- stata_xpose({d}, varname = {}, promote = {})",
+            super::stats::r_logical(opts.has("varname", 7)),
+            super::stats::r_logical(opts.has("promote", 7))
+        ));
+        self.kinds.clear();
+        if opts.has("varname", 7) {
+            self.kinds.insert("_varname".into(), Kind::Text);
+        }
+        self.label_sets.clear();
+        Ok(())
+    }
+
     pub(super) fn duplicates(
         &mut self,
         c: &Command,
@@ -1062,7 +1167,54 @@ impl Session {
             gn = r_name(&g),
             src = r_name(var)
         ));
+        // the label set encode makes is named after the new variable
+        out.line(format!(
+            "{} <- attr({d}${}, \"labels\")",
+            label_object(&g),
+            r_name(&g)
+        ));
         self.kinds.insert(g, Kind::Number);
+        Ok(())
+    }
+
+    /// `decode v, generate(s)`: each value's label; "" where the value has
+    /// none, is missing or `if` and `in` leave the row out (Stata 19).
+    pub(super) fn decode(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("generate", 3)]) {
+            return Err(no(format!(
+                "decode with the option {o} is not translated yet"
+            )));
+        }
+        let var = c.parts.main.trim();
+        if !is_name(var) {
+            return Err(no("decode takes one variable"));
+        }
+        let g = opts
+            .arg("generate", 3)
+            .ok_or_else(|| no("decode needs generate()"))?;
+        let g = g.trim().to_string();
+        if !is_name(&g) {
+            return Err(no(format!("{g} is not a variable name")));
+        }
+        let keep = self.condition(c, out)?.unwrap_or_else(|| "TRUE".into());
+        let d = self.data()?;
+        out.package("dplyr");
+        out.line(format!(
+            "if ({} %in% names({d})) stop(\"variable {g} already defined\")",
+            r_text(&g)
+        ));
+        out.line(format!(
+            "{d} <- {d} |> dplyr::mutate({gn} = (\\(v, keep) {{ if (is.character(v)) stop(\"not possible with string variable\"); l <- attr(v, \"labels\", exact = TRUE); if (is.null(l)) stop({unl}); s <- names(l)[match(as.numeric(v), as.numeric(l))]; s[is.na(s) | !keep] <- \"\"; s }})({src}, {keep}))",
+            gn = r_name(&g),
+            src = r_name(var),
+            unl = r_text(&format!("{var} not labeled"))
+        ));
+        self.kinds.insert(g, Kind::Text);
         Ok(())
     }
 
@@ -1207,6 +1359,85 @@ impl Session {
         Ok(())
     }
 }
+
+/// `xpose`'s new data: see [`Session::xpose`].
+pub(super) const XPOSE_HELPER: &str = r#"stata_xpose <- function(d, varname = FALSE, promote = FALSE) {
+  if ("_varname" %in% names(d)) stop("xpose of data with a variable _varname is not translated yet")
+  n <- nrow(d)
+  m <- matrix(NA_real_, ncol(d), n)
+  for (j in seq_along(d)) {
+    v <- d[[j]]
+    if (!is.character(v)) m[j, ] <- as.numeric(v)
+  }
+  out <- as.data.frame(m)
+  names(out) <- paste0("v", seq_len(n))
+  if (!promote) out[] <- lapply(out, stata_float)
+  if (varname) out[["_varname"]] <- names(d)
+  out
+}"#;
+
+/// A label set for `label values v name` when the do-file does not define
+/// `name`: one the run made (encode's), else the .dta file last used's, read
+/// from its value-labels section (formats 117 to 119), as haven keeps the
+/// labels each variable has but not the names of the sets, nor the sets no
+/// variable has; none, so the values show as numbers as in Stata, when the
+/// file has no such set.
+pub(super) const DTA_LABEL_SET_HELPER: &str = r#"stata_label_set <- function(name, path) {
+  # a set made as the do-file ran (by encode, say) comes first
+  made <- paste0("label_", name)
+  if (exists(made, envir = globalenv())) return(get(made, envir = globalenv()))
+  if (is.null(path) || !file.exists(path)) return(NULL)
+  key <- paste(normalizePath(path), file.mtime(path))
+  if (!identical(attr(stata_dta_sets, "key"), key)) {
+    sets <- tryCatch(stata_dta_read_sets(path), error = function(e) list())
+    stata_dta_sets <<- structure(sets, key = key)
+  }
+  stata_dta_sets[[name]]
+}
+stata_dta_sets <- NULL
+stata_dta_read_sets <- function(path) {
+  out <- list()
+  con <- file(path, "rb")
+  on.exit(close(con))
+  h <- readBin(con, "raw", 400)
+  if (length(h) < 64 || rawToChar(h[1:11]) != "<stata_dta>") return(out)
+  rel <- suppressWarnings(as.integer(rawToChar(h[29:31])))
+  if (is.na(rel) || rel < 117) return(out)
+  endian <- if (length(grepRaw("<byteorder>MSF", h, fixed = TRUE)) > 0) "big" else "little"
+  at <- grepRaw("<map>", h, fixed = TRUE)
+  if (length(at) == 0) return(out)
+  # the map's 8-byte offsets; the 12th is the value labels', the 14th the end
+  m <- readBin(h[(at + 5):(at + 5 + 14 * 8 - 1)], "integer", 28, 4, endian = endian)
+  m <- ifelse(m < 0, m + 2^32, m)
+  lo <- if (endian == "little") m[c(TRUE, FALSE)] else m[c(FALSE, TRUE)]
+  hi <- if (endian == "little") m[c(FALSE, TRUE)] else m[c(TRUE, FALSE)]
+  off <- lo + hi * 2^32
+  seek(con, off[12])
+  r <- readBin(con, "raw", off[14] - off[12])
+  nlen <- if (rel == 117) 33 else 129
+  enc <- if (rel == 117) "latin1" else "UTF-8"
+  int <- function(at, n = 1) readBin(r[at:(at + 4 * n - 1)], "integer", n, 4, endian = endian)
+  txt <- function(b) {
+    b <- b[seq_len(match(as.raw(0), c(b, as.raw(0))) - 1)]
+    s <- rawToChar(b)
+    Encoding(s) <- enc
+    s
+  }
+  p <- 15
+  while (p + 4 <= length(r) && rawToChar(r[p:(p + 4)]) == "<lbl>") {
+    len <- int(p + 5)
+    name <- txt(r[(p + 9):(p + 8 + nlen)])
+    t0 <- p + 9 + nlen + 3
+    n <- int(t0)
+    tl <- int(t0 + 4)
+    o <- if (n > 0) int(t0 + 8, n) else integer(0)
+    v <- if (n > 0) int(t0 + 8 + 4 * n, n) else integer(0)
+    tx <- r[(t0 + 8 + 8 * n):(t0 + 7 + 8 * n + tl)]
+    out[[name]] <- stats::setNames(as.numeric(v), vapply(o, function(k) txt(tx[(k + 1):length(tx)]), ""))
+    p <- t0 + len + 6
+  }
+  out
+}"#;
 
 /// `xtile`: each value's category, 1 plus how many cut points lie below it
 /// (a cut point repeated counts each time), as Stata 19 gives them; missing

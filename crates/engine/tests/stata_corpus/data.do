@@ -13,6 +13,15 @@ display "@ x2_mean " %24.17g r(mean)
 recode ord (1 = 10) (2 3 = 20), generate(ord2)
 summarize ord2
 display "@ ord2_mean " %24.17g r(mean)
+* labels in the rules: a set named after the new variable, the later text
+* for a value winning
+recode ord (1 = 1 "low") (2 = 2 "mid") (3 = 2 "high"), generate(ord3)
+summarize ord3
+display "@ ord3_mean " %24.17g r(mean)
+decode ord3, generate(ord3s)
+generate byte ord3h = ord3s == "high"
+summarize ord3h
+display "@ ord3_high " %24.17g r(mean)
 sort y
 display "@ first_y " %24.17g y[1]
 display "@ first_id " %24.17g id[1]

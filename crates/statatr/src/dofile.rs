@@ -1594,6 +1594,21 @@ impl<'f> Run<'f> {
     }
 
     fn run_file(&mut self, c: &Command, rest: &str, written: String) -> Flow {
+        // `do file, nostop`: the run goes on past errors already
+        let (rest, options) = split_comma(rest);
+        if !options.is_empty() && options.trim() != "nostop" {
+            let line = self.t.refused(
+                c.span,
+                c.text.clone(),
+                format!(
+                    "{} with the option {} is not translated yet",
+                    c.name,
+                    options.trim()
+                ),
+            );
+            self.push(line, What::Command, None, written);
+            return Flow::Line;
+        }
         let ws = macros::tokens(rest);
         let Some(first) = ws.first() else {
             let line = self.t.refused(
@@ -2604,6 +2619,24 @@ fn may_set_globals(command: &str, reason: &str) -> bool {
         ),
         _ => false,
     }
+}
+
+/// Text before its first comma outside quotes, and the options after it.
+fn split_comma(text: &str) -> (&str, &str) {
+    let mut quote = false;
+    let mut compound = 0usize;
+    let mut prev = ' ';
+    for (i, ch) in text.char_indices() {
+        match ch {
+            '"' if prev == '`' => compound += 1,
+            '\'' if prev == '"' && compound > 0 => compound -= 1,
+            '"' if compound == 0 => quote = !quote,
+            ',' if !quote && compound == 0 => return (&text[..i], &text[i + 1..]),
+            _ => {}
+        }
+        prev = ch;
+    }
+    (text, "")
 }
 
 /// A path as written: quotes off, `\` as `/`.

@@ -3134,3 +3134,21 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Checked:** `clogit_margins.do` (6 result lines, the package's sequence, both parmest files read back);
   `parmest` is Verified. Observations in `plan/stata/margins-clogit.md`.
 - **Numbers:** the replication packages' share is 83.5% (81.9%); core statistics 90.4%.
+
+## P2C.9 continued: whole packages in Stata 19 and on R, 2026-11-03
+
+- **The run** (`crates/engine/tests/replication_e2e.rs`): each package runs from its master do-file, line by
+  line through the Engine, past any problem. R's output, the R it ran and each line's fate are written next to
+  the copy. Stata ran the same copies with `do file, nostop`. In four packages every model line both reached
+  gives Stata's numbers (ASKO93 140, FMDLII 7, TQN6ZN 231, TZEN38 252). YFBPT6's 312 differences followed an
+  `xpose` that was not translated. Table and causes in `docs/stata-coverage.md`.
+- **Fixed on the way:** `lincom` with base levels (0, as Stata; `0 (omitted)` when every term is one);
+  `label values v name` with a set from the .dta file (read from its value-labels section, as haven drops the
+  sets' names); `xtreg, fe` with `i.year` in a balanced panel stopped in R; `recode` with labels in its
+  rules; `decode`; `encode`'s label set; `xpose`; `do file, nostop`; `colsof()` and `rowsof()` of e() and r()
+  matrices.
+- **Checked:** `panel.do` (lincom with base levels), `data.do` (recode labels, decode), `made.do` (xpose);
+  `lincom` is Verified in panel, and `xpose` is Verified. Observations in `plan/stata/replication-e2e.md`.
+- **_natscale:** its step is found (Stata's 10^k, not the nearest double for k < 0), but its ends are not; the
+  113 probe lines stay. Observations in `plan/stata/natscale-residue.md`.
+- **Numbers:** the replication packages' share is 83.7% (83.5%).

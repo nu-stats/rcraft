@@ -689,6 +689,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_destring" => more::DESTRING_HELPER,
         "stata_forced" => more::FORCED_HELPER,
         "stata_merge" => more::MERGE_HELPER,
+        "stata_label_set" => more::DTA_LABEL_SET_HELPER,
+        "stata_xpose" => more::XPOSE_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
@@ -1723,8 +1725,10 @@ impl Session {
             "append" => self.append(c, &opts, out),
             "reshape" => self.reshape(c, &opts, out),
             "collapse" => self.collapse(c, &opts, out),
+            "xpose" => self.xpose(c, &opts, out),
             "duplicates" => self.duplicates(c, &opts, out),
             "encode" => self.encode(c, &opts, out),
+            "decode" => self.decode(c, &opts, out),
             "destring" => self.destring(c, &opts, out),
             "tostring" => self.tostring(c, &opts, out),
             "summarize" => self.summarize(c, &opts, out),
@@ -2546,12 +2550,23 @@ impl Session {
                         "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) structure(haven::zap_labels(v), label = attr(v, \"label\"))))"
                     ));
                 } else {
-                    if !self.label_sets.contains_key(lbl) {
-                        out.caveat(format!("the label {lbl} is not defined earlier in this do-file; it is expected from the data file"));
-                    }
-                    out.line(format!(
-                        "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) haven::labelled(as.numeric(v), labels = {}, label = attr(v, \"label\"))))",
+                    let labels = if self.label_sets.contains_key(lbl) {
                         label_object(lbl)
+                    } else {
+                        // the data file's set; none (numbers, as in Stata) if it has none
+                        out.caveat(format!("the label {lbl} is not defined earlier in this do-file; it is taken from the data file, and the values show as numbers if the file has no such label"));
+                        self.helpers.insert("stata_label_set");
+                        format!(
+                            "stata_label_set({}, {})",
+                            r_text(lbl),
+                            self.file
+                                .as_deref()
+                                .map(r_text)
+                                .unwrap_or_else(|| "NULL".into())
+                        )
+                    };
+                    out.line(format!(
+                        "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) haven::labelled(as.numeric(v), labels = {labels}, label = attr(v, \"label\"))))"
                     ));
                 }
                 Ok(())

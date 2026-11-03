@@ -82,7 +82,22 @@ pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, lev
   a <- stata_resolve(list(a), 0, "")$rows[[1]]
   b <- stata_b
   miss <- setdiff(names(a), names(b))
+  # a factor's base level (1.g where 1 is the base) is a coefficient of 0 in
+  # Stata: a level the model has, of a factor whose other levels are in b
+  xlev <- tryCatch(stata_estimates$xlevels, error = function(e) NULL)
+  base <- vapply(miss, function(m) {
+    k <- regmatches(m, regexec("^((factor|stata_ib)\\(.*\\))([^)]+)$", m))[[1]]
+    length(k) > 0 && any(startsWith(names(b), k[2])) && k[4] %in% xlev[[k[2]]]
+  }, TRUE)
+  a <- a[!names(a) %in% miss[base]]
+  miss <- miss[!base]
   if (length(miss) > 0) stop(miss[1], " not found")
+  if (length(a) == 0) {
+    # only base levels: Stata's 0 (omitted), with r(estimate) and r(se) 0
+    if (ret) assign("stata_r", list(se = 0, estimate = 0), envir = env)
+    cat(sprintf(" ( 1)  %s = 0\n\n         (1) |          0  (omitted)\n", label))
+    return(invisible(NULL))
+  }
   L <- stats::setNames(numeric(length(b)), names(b))
   L[names(a)] <- a
   est <- sum(L * b)

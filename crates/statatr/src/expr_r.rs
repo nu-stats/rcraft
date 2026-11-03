@@ -875,6 +875,26 @@ impl Translator<'_> {
             },
             // el(e(V), i, j): one element of a matrix e() or r() keeps;
             // missing outside it, as in Stata
+            // colsof(e(b)), rowsof(r(V)): the size of a matrix e() or r() keeps
+            "colsof" | "rowsof" => {
+                want(1)?;
+                let m = match arg(0)? {
+                    Expr::Call(w, a) if (w == "e" || w == "r") && a.len() == 1 => match a.first() {
+                        Some(Expr::Name(n)) if n != "sample" => {
+                            (self.returned)(&format!("{w}#matrix"), n)?;
+                            format!("stata_{w}[[{}]]", r_text(n))
+                        }
+                        _ => return Err(no(format!("{name}() of this matrix is not translated yet"))),
+                    },
+                    _ => {
+                        return Err(no(format!(
+                            "{name}() is translated for the matrices e() and r() keep (colsof(e(b))); not here yet"
+                        )))
+                    }
+                };
+                let f = if name == "colsof" { "NCOL" } else { "NROW" };
+                Ok((format!("as.numeric({f}(as.matrix({m})))"), Kind::Number))
+            }
             "el" => {
                 want(3)?;
                 let m = match arg(0)? {

@@ -125,10 +125,14 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   ff <- ls(Zf, y - ybar[gi] + mean(y))
   kf <- ncol(Zf)
   s2e <- sum(ff$e^2) / (N - n - (kf - 1))
-  # be, which re needs too for sigma_u
+  # be, which re needs too for sigma_u; fe does not, and in a balanced panel
+  # the means of i.year are the same in every panel, of rank 1
   Zb <- cbind("(Intercept)" = 1, Xbar)
-  fb <- ls(Zb, ybar)
-  s2b <- sum(fb$e^2) / (n - ncol(Zb))
+  if (type != "fe") {
+    qb <- qr(Zb)
+    s2b <- sum(qr.resid(qb, ybar)^2) / (n - qb$rank)
+  }
+  if (type == "be") fb <- ls(Zb, ybar)
   G <- NA
   if (type == "fe") {
     # Stata's name for the column: 1.g for factor(g)1

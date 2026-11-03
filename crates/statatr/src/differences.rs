@@ -815,7 +815,9 @@ pub const GUIDES: &[Guide] = &[
         points: &[p(
             "Rules",
             "The rules are taken in Stata's order, the first that matches a value deciding it; \
-             missing values are kept unless a rule names them, as in Stata.",
+             missing values are kept unless a rule names them, as in Stata. Labels in the \
+             rules (`1 \"low\"`) make a label set for each new variable, named after it or \
+             label(), as Stata does; they need generate() or prefix().",
         )],
     },
     Guide {
@@ -1291,6 +1293,17 @@ pub const GUIDES: &[Guide] = &[
                  vce() options.",
             ),
         ],
+    },
+    Guide {
+        command: "xpose",
+        about: "Turns the data so observations become variables",
+        points: &[p(
+            "In R",
+            "stata_xpose makes variables v1, v2, ... from the observations and observations \
+             from the variables; a text variable is a row of missing values, as in Stata. The \
+             new variables are rounded to float, as Stata stores them, unless promote keeps \
+             them double; varname adds _varname with the old names. Labels and formats go.",
+        )],
     },
     Guide {
         command: "xtile",

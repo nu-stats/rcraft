@@ -140,7 +140,7 @@ fn include_and_do_run_other_files() {
         ..Options::default()
     };
     let d = dry_run(
-        "include setup\ndisplay \"`x' $g\"\ndo \"sub/part.do\" arg1\nuse data\nuse missing\ndo nothing",
+        "include setup\ndisplay \"`x' $g\"\ndo \"sub/part.do\" arg1\nuse data\nuse missing\ndo nothing\ndo \"sub/part.do\" arg2, nostop\ndo sub/part, other",
         &Two,
         opts,
     );
@@ -159,7 +159,20 @@ fn include_and_do_run_other_files() {
             .any(|l| l.contains("not: the file is not there: proj/nothing.do")),
         "{s:?}"
     );
-    assert_eq!(d.files, ["", "proj/setup.do", "proj/sub/part.do"]);
+    // nostop is how the run goes already; other options are refused
+    assert!(
+        s.iter().any(|l| l.starts_with("display \"arg2 \"")),
+        "{s:?}"
+    );
+    assert!(
+        s.iter()
+            .any(|l| l.contains("do with the option other is not translated yet")),
+        "{s:?}"
+    );
+    assert_eq!(
+        d.files,
+        ["", "proj/setup.do", "proj/sub/part.do", "proj/sub/part.do"]
+    );
     let sc = scan(&d);
     let status = |p: &str| sc.files.iter().find(|f| f.path == p).map(|f| f.status);
     assert_eq!(status("proj/data.dta"), Some(FileStatus::There));

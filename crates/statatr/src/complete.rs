@@ -165,6 +165,7 @@ pub const COMMANDS: &[&str] = &[
     "use",
     "version",
     "while",
+    "xpose",
     "xtile",
     "xtreg",
     "xtset",
@@ -425,7 +426,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "star(",
         ],
     ),
-    ("recode", &["copyrest", "generate(", "prefix("]),
+    ("recode", &["copyrest", "generate(", "label(", "prefix("]),
     (
         "reghdfe",
         &[
@@ -492,6 +493,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("ttest", &["by(", "level(", "unequal", "unpaired"]),
     ("twoway", &["by(", "legend(", "nodraw", "sort"]),
     ("use", &["clear", "nolabel"]),
+    ("xpose", &["clear", "promote", "varname"]),
     ("xtile", &["altdef", "cutpoints(", "nquantiles("]),
     (
         "xtreg",
@@ -1250,6 +1252,7 @@ gettoken a b : s, {o}"
             "reghdfe" => format!("reghdfe y x, absorb(g) {o}"),
             "outreg2" => format!("regress y x\noutreg2 using t.xls, tstat bdec(3) tdec(2) {o}"),
             "xtile" => format!("xtile q = y, {o}"),
+            "xpose" => format!("xpose, clear {o}"),
             "xtreg" => format!("xtset id t\nxtreg y x, {o}"),
             "xtset" => format!("xtset id t, {o}"),
             "tsset" => format!("tsset t, {o}"),

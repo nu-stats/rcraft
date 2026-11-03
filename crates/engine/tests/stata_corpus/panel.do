@@ -1,5 +1,5 @@
 * RCraft's Stata corpus (P2B.10): made-up data; Stata 19's results are in panel.recorded
-* commands: import xtset xtreg ivregress anova
+* commands: import xtset xtreg lincom ivregress anova
 * tolerance: 1e-8
 version 19
 import delimited corpus.csv, clear
@@ -19,6 +19,14 @@ display "@ be_b_x " %24.17g _b[x]
 display "@ be_se_x " %24.17g _se[x]
 xtreg y x w, fe vce(robust)
 display "@ fer_se_x " %24.17g _se[x]
+* a factor's base level is a coefficient of 0 in lincom
+xtreg y x i.cat3, fe vce(robust)
+lincom _cons + 1.cat3 + 3.cat3
+display "@ lcb_est " %24.17g r(estimate)
+display "@ lcb_se " %24.17g r(se)
+lincom 1.cat3
+display "@ lcb0_est " %24.17g r(estimate)
+display "@ lcb0_se " %24.17g r(se)
 ivregress 2sls y w (x = z)
 display "@ iv_b_x " %24.17g _b[x]
 display "@ iv_se_x " %24.17g _se[x]

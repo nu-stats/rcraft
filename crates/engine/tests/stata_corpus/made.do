@@ -1,5 +1,5 @@
 * RCraft's Stata corpus (P2B.10): made-up data; Stata 19's results are in made.recorded
-* commands: expand gettoken preserve restore set tokenize
+* commands: expand gettoken preserve restore set tokenize xpose
 * (data the do-file makes itself: set obs, expand, preserve and restore, tokenize, gettoken with parse() and match(), one-line if and else, _rc after capture, quietly)
 * tolerance: 1e-8
 version 19
@@ -27,6 +27,25 @@ restore
 display "@ post_N " %24.17g _N
 summarize v
 display "@ post_sum " %24.17g r(sum)
+* xpose: observations become floats v1, v2, ...; text is missing
+preserve
+keep in 1/3
+generate str2 s = "ab"
+generate double w = _n / 3
+xpose, clear varname
+display "@ xp_N " %24.17g _N
+display "@ xp_v1_1 " %24.17g v1[1]
+display "@ xp_v3_1 " %24.17g v3[1]
+display "@ xp_text_missing " %24.17g missing(v2[4])
+display "@ xp_float " %24.17g v2[5]
+count if _varname == "dup" & v3 == 1
+display "@ xp_varname " %24.17g r(N)
+restore
+preserve
+keep in 1/2
+xpose, clear promote
+display "@ xpp_v2_1 " %24.17g v2[1]
+restore
 tokenize "3 1.5 , 2"
 display "@ tok_sum " %24.17g `1' + `2' + `4'
 local n = 0

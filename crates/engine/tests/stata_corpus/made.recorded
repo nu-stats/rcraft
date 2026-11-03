@@ -9,6 +9,13 @@
 @ pre_N                        5
 @ post_N                       12
 @ post_sum       14.166666666666668
+@ xp_N                        5
+@ xp_v1_1                     .625
+@ xp_v3_1                     .625
+@ xp_text_missing                        1
+@ xp_float       .66666668653488159
+@ xp_varname                        0
+@ xpp_v2_1                     1.25
 @ tok_sum                      6.5
 @ if_else                        1
 @ else_ran                        2
