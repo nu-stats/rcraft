@@ -356,6 +356,11 @@ fn scatter_twoway_bar_and_export_draw() {
         "twoway line y x, sort lp(dash) || lfit y x, lc(red) title(\"t\") yline(0) xline(-1 1)",
         "graph bar (count), over(g)",
         "twoway (bar y x, yaxis(1)) (line w x, sort yaxis(2))",
+        "regress y x w i.g
+estimates store m1
+regress y x
+estimates store m2
+coefplot (m1, label(A) offset(.1)) (m2, label(B)), bylabel(One) || m1, bylabel(Two) drop(_cons) baselevels headings(x = \"{bf:Main}\") xline(0)",
         "graph box y w, over(g, relabel(1 \"a\"))",
     ] {
         let code = script(&format!("{use_}{cmd}\n"));

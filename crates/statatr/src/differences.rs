@@ -1127,6 +1127,27 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "coefplot",
+        about: "Plots stored models' coefficients and intervals (SSC)",
+        points: &[
+            p(
+                "In R",
+                "stata_coefplot_rows works out the rows as coefplot does, from Stata's names in \
+                 e(b): _cons included, base levels with baselevels and omitted terms with omitted \
+                 (both 0), in the order they first appear with _cons last, keep(), drop() and \
+                 order() with its empty rows; intervals with the model's residual df (the normal \
+                 without one) at levels(); several plots 1/(k+1) apart, offset() moving one; \
+                 headings(); subgraphs at ||. gen() leaves those rows, as floats, as coefplot does.",
+            ),
+            p(
+                "Look",
+                "The graph is drawn by ggplot2, so it looks like R's; colours, markers and the \
+                 like are not carried over. Labels are the variable's label or name, a factor \
+                 level's value label or g=2.",
+            ),
+        ],
+    },
+    Guide {
         command: "clogit",
         about: "Conditional (fixed-effects) logistic regression",
         points: &[

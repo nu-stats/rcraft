@@ -3183,3 +3183,16 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   scale, titled with their variable's label. Each graph has its own mapping, since ggplot2 draws later.
   Every plot on axis 2, and fitted or density plots on it, are refused.
 - **Numbers:** graphs 22.2% (16.2%); the packages 83.9%.
+
+## P2C.9 continued: coefplot (SSC), 2026-11-03
+
+- **coefplot** (`data_r/coefplot.rs`): installed in Stata 19 from SSC with the user's yes, and matched to
+  what its `gen()` variables and SVG labels show. The rows from Stata's e(b) names (`_cons` in; base
+  levels with `baselevels` and omitted terms with `omitted`, as 0), in order of first appearance with
+  `_cons` last; `keep()`, `drop()`, `order()` with empty rows; t intervals with the residual df (normal
+  without one) at `levels()`; several plots 1/(k+1) apart, `offset()`; `headings()` (with `nogap`),
+  `coeflabels()`; subgraphs at `||` with `bylabel()`; `gen()` as floats; `saving()`; look-only options
+  left to ggplot2.
+- **Checked:** `coefplot.do` (53 rows of positions, estimates and interval ends from Stata 19's `gen()`,
+  to 1e-7 as they are floats); `coefplot` is Verified. Observations in `plan/stata/coefplot.md`.
+- **Numbers:** the packages' share is 84.6% (83.9%); graphs 62.4% (22.2%).

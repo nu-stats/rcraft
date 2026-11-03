@@ -194,7 +194,7 @@ stata_box_data <- function(d, vars, over = character()) {
 }"#;
 
 /// Options that change only how a graph looks; ggplot2's defaults stand in.
-const LOOK: &[(&str, usize)] = &[
+pub(super) const LOOK: &[(&str, usize)] = &[
     ("msymbol", 2),
     ("mcolor", 2),
     ("msize", 3),
@@ -1416,7 +1416,7 @@ fn kind_options(kind: &str) -> Vec<(&'static str, usize)> {
 
 /// `plot ..., opts || plot ..., opts`: the plots, split at `||` outside
 /// quotes and parentheses.
-fn split_plots(text: &str) -> Result<Vec<String>, Untranslated> {
+pub(super) fn split_plots(text: &str) -> Result<Vec<String>, Untranslated> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let (mut depth, mut quote) = (0usize, false);

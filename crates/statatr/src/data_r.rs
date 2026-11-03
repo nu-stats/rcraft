@@ -27,6 +27,7 @@
 
 mod anova;
 mod clogit;
+mod coefplot;
 mod dates;
 mod fre;
 mod graph;
@@ -691,6 +692,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_merge" => more::MERGE_HELPER,
         "stata_label_set" => more::DTA_LABEL_SET_HELPER,
         "stata_xpose" => more::XPOSE_HELPER,
+        "stata_coefplot" => coefplot::COEFPLOT_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
@@ -1792,6 +1794,7 @@ impl Session {
             "reghdfe" => self.reghdfe(c, &opts, out),
             "outreg2" => self.outreg2(c, &opts, out),
             "fre" => self.fre(c, &opts, out),
+            "coefplot" => self.coefplot(c, out),
             "parmest" => self.parmest(c, &opts, out),
             "xtile" => self.xtile(c, &opts, out),
             "display" => self.display(c, out),

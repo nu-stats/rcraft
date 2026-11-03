@@ -18,6 +18,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("bootstrap", &["bootstrap"]),
     ("bsample", &["bsample"]),
     ("clogit", &["clogit"]),
+    ("coefplot", &["coefplot"]),
     ("collapse", &["data"]),
     ("correlate", &["descriptives"]),
     ("count", &["control", "descriptives"]),
