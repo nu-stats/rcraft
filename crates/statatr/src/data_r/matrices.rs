@@ -27,7 +27,8 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
   V <- as.matrix(V)
   # R's columns, when Stata's cannot be told
   approx <- function(why) {
-    st <- stata_bnames()
+    # margins names its own columns as Stata does (1.g, 5b.g, 1._at)
+    st <- if (cmd == "margins") names(b) else stata_bnames()
     # R's own columns: without the omitted terms added below
     out <- list(b = matrix(b[seq_along(st)], 1, dimnames = list("y1", st)), V = V)
     dimnames(out$V) <- list(st, st)
@@ -198,7 +199,7 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     idx <- which(!aux)
     r <- eq_cols(idx, nm[idx])
     if (is.null(r)) return(approx(why))
-    ml <- cmd %in% c("logit", "probit", "poisson", "nbreg", "ologit", "oprobit") ||
+    ml <- cmd %in% c("logit", "probit", "poisson", "nbreg", "ologit", "oprobit", "clogit") ||
       (cmd == "xtreg" && identical(fit$type, "mle"))
     eq <- if (ml) paste0(depvar, ":") else ""
     names_out <- paste0(eq, r$n)

@@ -881,7 +881,7 @@ impl Translator<'_> {
                     // through the same check as e(name): what is held must be known
                     Expr::Call(w, a) if (w == "e" || w == "r") && a.len() == 1 => match a.first() {
                         Some(Expr::Name(n)) if n != "sample" => {
-                            (self.returned)(w, n)?;
+                            (self.returned)(&format!("{w}#matrix"), n)?;
                             format!("stata_{w}[[{}]]", r_text(n))
                         }
                         _ => return Err(no("el() of this matrix is not translated yet")),

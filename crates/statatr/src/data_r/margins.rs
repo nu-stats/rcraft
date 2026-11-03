@@ -33,13 +33,14 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
                           within = character(), at = list(), dydx = character(), eyex = character(),
                           dyex = character(), eydx = character(), factors = character(),
                           atmeans = FALSE, level = 0.95, expression = "", outcomes = NULL,
-                          compare = "", unconditional = NULL, w = NULL) {
+                          compare = "", unconditional = NULL, w = NULL, mcomp = "") {
   plain <- function(v) if (inherits(v, "haven_labelled")) as.vector(unclass(v)) else v
   data <- as.data.frame(lapply(data, plain), check.names = FALSE)
   tt <- stats::delete.response(stats::terms(fit))
   kind <- if (inherits(fit, "polr")) "polr" else if (inherits(fit, "multinom")) "multinom" else "glm"
   # after stcox the default prediction is the relative hazard, exp(xb)
-  fam <- if (inherits(fit, "glm")) fit$family else if (inherits(fit, "coxph")) list(linkinv = exp, mu.eta = exp) else stats::gaussian()
+  # after clogit, pu0 is invlogit(xb), the fixed effect taken as zero
+  fam <- if (inherits(fit, "glm")) fit$family else if (inherits(fit, "coxph")) list(linkinv = exp, mu.eta = exp) else if (inherits(fit, "stata_clogit_mfit")) list(linkinv = stats::plogis, mu.eta = stats::dlogis) else stats::gaussian()
   xnames <- if (kind == "multinom") colnames(stats::model.matrix(fit)) else names(stats::coef(fit))
   if (kind == "glm") {
     b <- b[xnames]
@@ -272,21 +273,75 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
   if (atmeans) cat("at: the covariates at their means\n")
   cat("\n")
   if (compare == "") {
+    # post after factor effects: e(b) has the base levels too, as zeros, in
+    # Stata's order (5b.actor after 4.actor)
+    full_b <- m
+    full_V <- Vm
+    fterm <- sub("^[^.]*\\.", "", labels)
+    if (any_effect && length(factors) && all(grepl("^[^.:#]+\\.[^.:#]+$", labels))) {
+      nm <- character()
+      src <- integer()
+      for (j in seq_along(labels)) {
+        v <- fterm[j]
+        if (!v %in% names(factors)) {
+          nm <- c(nm, labels[j])
+          src <- c(src, j)
+        } else if (!any(grepl(paste0("\\.", v, "$"), nm))) {
+          lvv <- levels_of(v)
+          base <- if (is.na(factors[[v]])) lvv[1] else as.numeric(factors[[v]])
+          for (l in lvv) {
+            lab <- paste0(l, ".", v)
+            nm <- c(nm, if (l == base) paste0(l, "b.", v) else lab)
+            src <- c(src, if (l == base) NA else match(lab, labels))
+          }
+        }
+      }
+      have <- !is.na(src)
+      full_b <- stats::setNames(rep(0, length(nm)), nm)
+      full_b[have] <- m[src[have]]
+      full_V <- matrix(0, length(nm), length(nm), dimnames = list(nm, nm))
+      full_V[have, have] <- Vm[src[have], src[have]]
+    }
+    if (identical(mcomp, "bonferroni")) {
+      # the p-values and intervals Bonferroni-adjusted within each term (as
+      # Stata prints them; e(b) and e(V) are not changed)
+      k <- as.numeric(table(fterm)[fterm])
+      se <- sqrt(diag(Vm))
+      z <- m / se
+      p <- pmin(1, k * 2 * (if (is.finite(df)) stats::pt(-abs(z), df) else stats::pnorm(-abs(z))))
+      q <- if (is.finite(df)) stats::qt(1 - (1 - level) / (2 * k), df) else stats::qnorm(1 - (1 - level) / (2 * k))
+      cat(sprintf("%12s | %10s %10s %8s %7s   [%2.0f%% conf. interval] (Bonferroni)\n", "", what, "std. err.", if (is.finite(df)) "t" else "z", "P>|z|", 100 * level))
+      for (j in seq_along(m)) cat(sprintf("%12s | %10.7g %10.7g %8.2f %7.3f %12.7g %12.7g\n", labels[j], m[j], se[j], z[j], p[j], m[j] - q[j] * se[j], m[j] + q[j] * se[j]))
+      return(invisible(list(b = m, V = Vm, full_b = full_b, full_V = full_V)))
+    }
     tab <- stata_coefs(m, Vm, df, level, label = what)
-    return(invisible(list(b = m, V = Vm, table = tab)))
+    return(invisible(list(b = m, V = Vm, table = tab, full_b = full_b, full_V = full_V)))
   }
   # contrasts of the margins of one term: each level against the first (r.),
   # every pair (pwcompare), or the joint test that they are all equal
   k <- length(m)
   if (k < 2) stop("a contrast needs at least two margins")
-  pairs <- if (compare == "pwcompare") utils::combn(k, 2) else rbind(1, 2:k)
+  lv <- sub("\\..*$", "", labels)
+  term <- sub("^[^.]*\\.", "", labels)
+  if (compare %in% c("r", "ar")) {
+    # each term on its own: each level against the first (r.) or the one
+    # before it (ar.)
+    pairs <- NULL
+    for (tm in unique(term)) {
+      ix <- which(term == tm)
+      if (length(ix) < 2) next
+      from <- if (compare == "r") rep(ix[1], length(ix) - 1) else ix[-length(ix)]
+      pairs <- cbind(pairs, rbind(from, ix[-1]))
+    }
+  } else {
+    pairs <- if (compare == "pwcompare") utils::combn(k, 2) else rbind(1, 2:k)
+  }
   L <- matrix(0, ncol(pairs), k)
   for (i in seq_len(ncol(pairs))) {
     L[i, pairs[2, i]] <- 1
     L[i, pairs[1, i]] <- -1
   }
-  lv <- sub("\\..*$", "", labels)
-  rownames(L) <- paste0(if (compare == "pwcompare") "" else "r", lv[pairs[2, ]], "vs", lv[pairs[1, ]], sub("^[^.]*", "", labels[1]))
+  rownames(L) <- paste0(if (compare == "pwcompare") "" else compare, lv[pairs[2, ]], "vs", lv[pairs[1, ]], ".", term[pairs[2, ]])
   cc <- drop(L %*% m)
   Vc <- L %*% Vm %*% t(L)
   dimnames(Vc) <- list(rownames(L), rownames(L))
@@ -302,6 +357,22 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
     p <- stats::pchisq(W, q, lower.tail = FALSE)
     cat(sprintf("Contrasts of predictive margins\n   df = %d   chi2 = %.2f   P>chi2 = %.4f\n", q, W, p))
     return(invisible(list(b = cc, V = Vc, chi2 = W, df = q, p = p)))
+  }
+  if (compare %in% c("r", "ar") && !is.finite(df)) {
+    # Stata's tests first: each contrast, and each term's jointly
+    cat("------------------------------------------------\n             |         df        chi2     P>chi2\n-------------+----------------------------------\n")
+    ct <- term[pairs[2, ]]
+    for (tm in unique(ct)) {
+      ix <- which(ct == tm)
+      cat(formatC(tm, width = 12), " |\n", sep = "")
+      for (i in ix) {
+        w1 <- cc[i]^2 / Vc[i, i]
+        cat(sprintf("%12s |  %9d  %10.2f     %6.4f\n", sprintf("(%s vs %s) ", lv[pairs[2, i]], lv[pairs[1, i]]), 1L, w1, stats::pchisq(w1, 1, lower.tail = FALSE)))
+      }
+      wj <- drop(t(cc[ix]) %*% solve(Vc[ix, ix, drop = FALSE], cc[ix]))
+      cat(sprintf("%12s |  %9d  %10.2f     %6.4f\n", "Joint ", length(ix), wj, stats::pchisq(wj, length(ix), lower.tail = FALSE)))
+    }
+    cat("------------------------------------------------\n\n")
   }
   tab <- stata_coefs(cc, Vc, df, level, label = "Contrast")
   invisible(list(b = cc, V = Vc, table = tab))
@@ -354,6 +425,7 @@ impl Session {
             ("pwcompare", 2),
             ("contrast", 4),
             ("vce", 3),
+            ("mcompare", 5),
         ]) {
             return Err(no(format!(
                 "margins with the option {o} is not translated yet"
@@ -371,7 +443,7 @@ impl Session {
                 }
                 if !matches!(
                     est.fit,
-                    Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson
+                    Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson | Fit::Clogit
                 ) {
                     return Err(no(format!(
                         "margins, vce(unconditional) after {name} is not translated yet"
@@ -397,12 +469,14 @@ impl Session {
         let mut terms = Vec::new();
         let mut compare = "";
         for w in c.parts.main.split_whitespace() {
-            let w = match w.strip_prefix("r.") {
-                Some(v) => {
-                    compare = "r";
-                    v
-                }
-                None => w,
+            let w = if let Some(v) = w.strip_prefix("ar.") {
+                compare = "ar";
+                v
+            } else if let Some(v) = w.strip_prefix("r.") {
+                compare = "r";
+                v
+            } else {
+                w
             };
             let mut term = Vec::new();
             for part in w.split('#') {
@@ -438,7 +512,7 @@ impl Session {
             }
             compare = "contrast";
         }
-        if !compare.is_empty() && terms.len() != 1 {
+        if !compare.is_empty() && !matches!(compare, "r" | "ar") && terms.len() != 1 {
             return Err(no(
                 "margins: a contrast of the margins of one marginlist term is translated, not more",
             ));
@@ -512,6 +586,10 @@ impl Session {
             (Some("xb"), f) if f.one_outcome() => {
                 ("link", "Linear prediction, predict(xb)".to_string())
             }
+            (None | Some("pu0"), Fit::Clogit) => (
+                "response",
+                format!("Pr({}|fixed effect is 0), predict(pu0)", est.dep),
+            ),
             (None, Fit::Regress | Fit::Xtreg | Fit::Ivregress) => {
                 ("response", "Linear prediction, predict()".to_string())
             }
@@ -608,16 +686,36 @@ impl Session {
         };
         self.helpers.insert("stata_coefs");
         self.helpers.insert("stata_margins");
+        // after clogit: its model as written, whose prediction margins takes
+        let clogit = est.fit == Fit::Clogit;
+        let model = if clogit {
+            "stata_estimates$stata_mfit"
+        } else {
+            "stata_estimates"
+        };
+        let mcomp = match opts.arg("mcompare", 5).as_deref().map(str::trim) {
+            None | Some("noadjust") => "",
+            Some(m) if m.len() >= 3 && "bonferroni".starts_with(m) => "bonferroni",
+            Some(m) => return Err(no(format!("margins, mcompare({m}) is not translated yet"))),
+        };
         let call = format!(
-            "stata_margins(stata_estimates, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond}{wts})",
+            "stata_margins({model}, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond}{wts}{mc})",
             r_logical(atmeans),
             r_number(level),
             r_text(&expression),
             r_text(compare),
             wts = if self.weighted_fit { ", w = stats::model.weights(stats::model.frame(stata_estimates))" } else { "" },
+            mc = if mcomp.is_empty() {
+                String::new()
+            } else {
+                format!(", mcomp = {}", r_text(mcomp))
+            },
             uncond = if unconditional {
                 self.helpers.insert("stata_unconditional");
-                if self.fit_cluster {
+                if clogit {
+                    // robust after clogit clusters on the group; its own clusters
+                    ", unconditional = stata_unconditional(stata_estimates, cluster = stata_estimates$stata_cluster)"
+                } else if self.fit_cluster {
                     ", unconditional = stata_unconditional(stata_estimates, cluster = stata_cluster)"
                 } else {
                     ", unconditional = stata_unconditional(stata_estimates)"
@@ -627,10 +725,11 @@ impl Session {
             }
         );
         if opts.has("post", 4) {
-            // the margins become e(b) and e(V), as for a model
+            // the margins become e(b) and e(V), as for a model (with the base
+            // levels of factor effects, as zeros)
             out.line(format!("stata_m <- {call}"));
-            out.line("stata_b <- stata_m$b");
-            out.line("stata_vcov <- stata_m$V");
+            out.line("stata_b <- if (is.null(stata_m$full_b)) stata_m$b else stata_m$full_b");
+            out.line("stata_vcov <- if (is.null(stata_m$full_V)) stata_m$V else stata_m$full_V");
             out.line("rm(stata_m)");
             self.estimates = Some(Estimates {
                 fit: Fit::Margins,
@@ -654,16 +753,18 @@ impl Session {
                 }
             }
         } else {
-            out.line(call);
-            // r(): the count, the level and what was fitted
+            out.line(format!("{call} -> stata_m"));
+            // r(): the count, the level, what was fitted, and the margins (or
+            // contrasts) with their variance, as a row vector and a matrix
             if let (Some(ec), false) = (&est_cmd, self.weighted_fit) {
                 out.line(format!(
-                    "stata_r <- list(N = sum(stata_esample), level = {}, cmd = \"margins\", est_cmd = {}, est_cmdline = stata_e$cmdline)",
+                    "stata_r <- list(N = sum(stata_esample), level = {}, cmd = \"margins\", est_cmd = {}, est_cmdline = stata_e$cmdline, b = matrix(stata_m$b, 1, dimnames = list(\"r1\", names(stata_m$b))), V = stata_m$V)",
                     r_number(super::returned::percent(level)),
                     r_text(ec)
                 ));
                 self.r_new = Some((super::returned::R_MARGINS, "margins".into()));
             }
+            out.line("rm(stata_m)");
         }
         out.caveat("averaged over the estimation sample, Stata's e(sample)");
         out.caveat("delta-method standard errors from the model's own variance, as Stata's");
@@ -799,6 +900,11 @@ fn numlist(text: &str) -> Result<Vec<f64>, Untranslated> {
 /// N / (N - 1), or with clusters the model's own (G / (G - 1), and
 /// (N - 1) / (N - k) after regress), as decoded in Stata 19.
 pub(super) const UNCONDITIONAL_HELPER: &str = r#"stata_unconditional <- function(fit, cluster = NULL) {
+  # clogit: its rows' influence on b, from the scores of the exact likelihood
+  if (!is.null(fit$stata_influence)) {
+    G <- length(unique(cluster))
+    return(list(IF = fit$stata_influence, cluster = cluster, c = G / (G - 1)))
+  }
   X <- stats::model.matrix(fit)
   N <- nrow(X)
   k <- ncol(X)

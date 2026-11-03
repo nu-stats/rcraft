@@ -3119,3 +3119,18 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Checked:** `fre.do` (its r()); `fre` is Verified. Observations in `plan/stata/fre.md`.
 - **Found on the way:** R's `attr(x, "label")` matches `labels` partially when a variable has value labels
   and no variable label; `fre` asks for it exactly.
+
+## P2C.9 continued: margins after clogit, and parmest (SSC), 2026-11-03
+
+- **margins after clogit** (`data_r/margins.rs`, `data_r/clogit.rs`): pu0 (the default) as invlogit(xb) from
+  the model as written (`stata_mfit`); `vce(unconditional)` from the rows' scores of the exact likelihood
+  times the inverse information, clustered as the model was; `ar.` contrasts (each level with the one before)
+  and `r.` term by term, with Stata's chi2 tests; `mcomp(bonferroni)` for the printed p-values and intervals;
+  `post` keeps the base levels in e(b) as zeros, under Stata's names; r(b) and r(V) without post.
+- **parmest** (`data_r/parmest.rs`): its dataset as the package saves it, for normal-deviate models.
+- **Fixed on the way:** `el(e(V), i, j)` and `el(r(b), ...)` looked their matrix up as a number and were
+  always refused; `display` and `matrix` between a model and `margins` no longer count as changing the rows;
+  clogit's e(b) has its equation, `chosen:`, as Stata's.
+- **Checked:** `clogit_margins.do` (6 result lines, the package's sequence, both parmest files read back);
+  `parmest` is Verified. Observations in `plan/stata/margins-clogit.md`.
+- **Numbers:** the replication packages' share is 83.5% (81.9%); core statistics 90.4%.

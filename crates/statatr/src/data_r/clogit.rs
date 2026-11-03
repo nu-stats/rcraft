@@ -78,6 +78,9 @@ pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data
   fit <- survival::coxph(f2, data = fd, method = "exact", control = ctl, model = TRUE)
   b <- stats::coef(fit)
   V <- stats::vcov(fit)
+  Vinfo <- V
+  S <- NULL
+  cl <- NULL
   G <- NA
   if (robust || !is.null(cluster)) {
     # each row's score: its x times its outcome less its chance of being among
@@ -112,6 +115,17 @@ pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data
   fit$stata_b <- stats::setNames(b, colnames(X)[keep])
   fit$stata_group <- group
   # for stata_eb: the terms in the order written (the omitted ones are NA in b)
+  # for margins: the model as written, pu0 = invlogit(xb), and each row's
+  # influence on b for vce(unconditional), clustered as the model was
+  fit$stata_mfit <- structure(list(terms = stats::delete.response(tt), coefficients = stats::setNames(b, colnames(X)[keep]),
+                                    xlevels = stats::.getXlevels(tt, mf), contrasts = attr(X, "contrasts")),
+                               class = "stata_clogit_mfit")
+  if (!is.null(S)) {
+    colnames(S) <- colnames(X)[keep]
+    fit$stata_influence <- S %*% Vinfo
+    colnames(fit$stata_influence) <- colnames(X)[keep]
+    fit$stata_cluster <- cl
+  }
   fit$stata_written <- vapply(attr(tt, "term.labels"), function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":"), "")
   list(fit = fit, b = bf, V = Vf, N = length(y), G = if (is.null(cluster)) NA else G,
        ll = fit$loglik[2], ll_0 = fit$loglik[1], N_drop = sum(out), N_group_drop = length(bad),

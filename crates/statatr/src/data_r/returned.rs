@@ -1016,6 +1016,7 @@ pub(super) enum Returned {
 /// Commands after which Stata 19 still holds the r() it held before
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
+    "parmest",
     "outreg2",
     "eststo",
     "estadd",
@@ -1049,6 +1050,7 @@ const LEAVE_R_ALONE: &[&str] = &[
 /// Commands that never change e() (an untranslated command not here might
 /// be an estimation command, after which e() is not known).
 const LEAVE_E_ALONE: &[&str] = &[
+    "parmest",
     "fre",
     "use",
     "save",
@@ -1243,7 +1245,7 @@ pub(super) const R_TTEST: &[&str] = &[
     "sd",
     "level",
 ];
-pub(super) const R_MARGINS: &[&str] = &["N", "level", "cmd", "est_cmd", "est_cmdline"];
+pub(super) const R_MARGINS: &[&str] = &["N", "level", "cmd", "est_cmd", "est_cmdline", "b", "V"];
 
 /// The r() Stata leaves that R has nothing to give for, and why.
 fn r_not_kept(cmd: &str, name: &str) -> Option<&'static str> {
@@ -1323,6 +1325,10 @@ impl Session {
     ) -> Result<(String, Kind), Untranslated> {
         match which {
             "ts" => self.ts_code(name).map(|code| (code, Kind::Number)),
+            // el(e(V), i, j): the matrix itself, as matrix list takes it
+            "e#matrix" | "r#matrix" => self
+                .returned_matrix(which.get(..1).unwrap_or("e"), name)
+                .map(|code| (code, Kind::Number)),
             "_b" | "_coef" | "_se" => {
                 match &self.e_ret {
                     Returned::Kept { .. } => {}

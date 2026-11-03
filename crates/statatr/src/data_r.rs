@@ -38,6 +38,7 @@ mod model;
 mod more;
 mod natscale;
 mod outreg2;
+mod parmest;
 mod post;
 mod random;
 mod reghdfe;
@@ -502,6 +503,9 @@ const DISPLAY_OPTIONS: &[(&str, usize)] = &[
 const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10)];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "display",
+    "matrix",
+    "parmest",
     "fre",
     "outreg2",
     "eststo",
@@ -726,6 +730,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_reghdfe" => reghdfe::REGHDFE_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
+        "stata_parmest" => parmest::PARMEST_HELPER,
         "stata_xtile" => more::XTILE_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -1766,6 +1771,7 @@ impl Session {
             "reghdfe" => self.reghdfe(c, &opts, out),
             "outreg2" => self.outreg2(c, &opts, out),
             "fre" => self.fre(c, &opts, out),
+            "parmest" => self.parmest(c, &opts, out),
             "xtile" => self.xtile(c, &opts, out),
             "display" => self.display(c, out),
             "ereturn" | "return" => self.list_returned(c, out),

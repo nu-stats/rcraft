@@ -61,6 +61,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("ologit", &["collinear", "likelihood"]),
     ("oprobit", &["collinear", "likelihood"]),
     ("outreg2", &["outreg2"]),
+    ("parmest", &["clogit_margins"]),
     ("poisson", &["collinear", "likelihood"]),
     ("predict", &["regress"]),
     ("preserve", &["made"]),

@@ -121,6 +121,7 @@ pub const COMMANDS: &[&str] = &[
     "oprobit",
     "order",
     "outreg2",
+    "parmest",
     "poisson",
     "predict",
     "preserve",
