@@ -43,6 +43,9 @@ pub enum Prefix {
     },
     /// `frame name:` runs the command in that data frame.
     Frame(String),
+    /// `eststo [name]:` (the SSC estout package) stores the results the
+    /// command leaves, under the name or est1, est2, ...
+    Eststo(Option<String>),
     Capture,
     Quietly,
     Noisily,
@@ -412,6 +415,18 @@ fn take_prefixes(text: &str) -> Result<(Vec<Prefix>, String), String> {
                     break;
                 }
                 prefixes.push(Prefix::Frame(name.to_string()));
+                rest = after.get(colon + 1..).unwrap_or("").trim().to_string();
+            }
+            "eststo" => {
+                let Some(colon) = top_level(after, ':') else {
+                    break;
+                };
+                let spec = after.get(..colon).unwrap_or("").trim();
+                let name = spec.split(',').next().unwrap_or("").trim();
+                if !name.is_empty() && !is_name(name) {
+                    break;
+                }
+                prefixes.push(Prefix::Eststo((!name.is_empty()).then(|| name.to_string())));
                 rest = after.get(colon + 1..).unwrap_or("").trim().to_string();
             }
             "capture" | "quietly" | "noisily" => {

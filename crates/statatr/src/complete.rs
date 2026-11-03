@@ -80,8 +80,10 @@ pub const COMMANDS: &[&str] = &[
     "encode",
     "erase",
     "ereturn",
+    "estadd",
     "estat",
     "estimates",
+    "eststo",
     "exit",
     "expand",
     "foreach",
@@ -194,6 +196,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("egen", &["by(", "missing"]),
     ("encode", &["generate("]),
     ("estat", &[]),
+    ("eststo", &["title("]),
     ("expand", &["generate("]),
     ("generate", &["after(", "before("]),
     ("gettoken", &["match(", "parse("]),
@@ -518,6 +521,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
 const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("duplicates", &["drop", "report", "tag"]),
     ("ereturn", &["list"]),
+    ("estadd", &["local", "scalar"]),
     (
         "estat",
         &[
@@ -531,6 +535,7 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
             "vce",
         ],
     ),
+    ("eststo", &["clear", "drop"]),
     ("graph", &["bar", "export", "hbar", "twoway"]),
     ("import", &["delimited", "excel"]),
     ("matrix", &["list"]),

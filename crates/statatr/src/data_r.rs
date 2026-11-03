@@ -500,6 +500,8 @@ const DISPLAY_OPTIONS: &[(&str, usize)] = &[
 const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10)];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "eststo",
+    "estadd",
     "tsset",
     "xtset",
     "estimates",
@@ -806,6 +808,11 @@ struct Session {
     graph_drawn: bool,
     /// And its time variable.
     panel_time: Option<String>,
+    /// The name the active results are stored under (`eststo`, `estimates
+    /// store` or `restore`), so `estadd` changes the stored copy too.
+    active_store: Option<String>,
+    /// e() names `estadd local` made text.
+    e_text: BTreeSet<String>,
     /// The `delta()` of `tsset` or `xtset`, as R (`None`: 1).
     ts_delta: Option<String>,
     /// The data came from a file this do-file did not save, so whether it
@@ -1589,6 +1596,19 @@ impl Session {
             self.lost_vars.remove(&v);
         }
         if MODELS.contains(&c.name.as_str()) {
+            // new results, not stored yet
+            self.active_store = None;
+        }
+        // eststo [name]: command, then the results are stored
+        let est_prefix = c.prefixes.iter().find_map(|p| match p {
+            Prefix::Eststo(n) => Some(n.clone()),
+            _ => None,
+        });
+        if let Some(name) = est_prefix {
+            let name = name.unwrap_or_else(|| format!("est{}", self.stored_fits.len() + 1));
+            self.eststo_store(&name, &mut out)?;
+        }
+        if MODELS.contains(&c.name.as_str()) {
             self.weighted_fit = c.parts.weight.is_some();
             self.fit_fweight = matches!(&c.parts.weight, Some(w) if w.kind == crate::lang::syntax::WeightKind::Frequency);
         }
@@ -1642,6 +1662,8 @@ impl Session {
             "describe" => self.describe(c, out),
             "set" => self.set(c, out),
             "estimates" => self.estimates_cmd(c, out),
+            "eststo" => self.eststo(c, &opts, out),
+            "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),
             "fvset" => self.fvset(c, out),
@@ -3662,7 +3684,7 @@ estimates restore zz");
         // after a line that was not translated it may be stored in Stata
         let out = r("use s
 regress y x
-eststo m: logit d x
+frobnicate m
 estimates restore m
 predict p");
         assert!(out[3].starts_with("NOT: estimates restore m"), "{out:?}");

@@ -1,0 +1,14 @@
+* Stata 19.0's results for estout.do, recorded by cargo xtask stata-record
+@ active 5 30
+@ other .
+@ restored 5 1.0339328
+@ prefix 22 1.0077399 1
+@ ym 7.1 3.5945361
+@ ym_stored 7.1 3.5945361
+@ auto 1
+@ auto2 1
+@ local 1
+@ replaced 2
+@ plain_store 3 22
+@ dropped 111
+@ cleared 111

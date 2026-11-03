@@ -3082,3 +3082,16 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   Observations in `plan/stata/reghdfe.md`.
 - **Numbers:** the replication packages' share is 80.2% (79.3%); the add-on tier 21.1% (0%). StatCraft's
   probes 83.4%.
+
+## P2C.9 continued: eststo and estadd (SSC estout), 2026-11-03
+
+- **eststo** (`data_r/returned.rs`, and the `eststo [name]:` prefix in `reader.rs`): stores the active
+  results as `estimates store` does, under the name or est1, est2, ... by position, with
+  `e(_estimates_name)`; `eststo name: command` fits and stores; `eststo clear` and `drop`.
+- **estadd scalar** and **local**: add to e(), and to the stored copy when the active results are stored
+  (by eststo or estimates store), as the package does; r() and e() stay.
+- **regress with a constant alone**: its Wald test now gives Stata's F(0, df) = 0, where R stopped on an
+  empty matrix.
+- **Checked:** `estout.do` (13 result lines); `eststo` and `estadd` are Verified. Observations in
+  `plan/stata/estout.md`.
+- **Numbers:** the replication packages' share is 80.7% (80.2%); the add-on tier 32.3% (21.1%).

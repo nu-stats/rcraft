@@ -280,6 +280,8 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   robust <- vce %in% c("robust", "cluster")
   G <- if (vce != "cluster") NULL else if (!is.null(fit[["G"]])) fit[["G"]] else if (cmd == "ivregress") length(unique(fit$cluster)) else if (cmd %in% c("stcox", "clogit")) stata_m$G else if (cmd == "reghdfe") min(fit$stata$G) else length(unique(stata_cluster))
   wald <- function(keep) {
+    # no slopes (a constant alone): Stata's F(0, df) is 0
+    if (!any(keep)) return(0)
     # on the scale of the errors (a correlation), so coefficients of very
     # different sizes do not make V look singular to solve()
     bk <- b[keep]
@@ -854,99 +856,127 @@ impl Session {
         match sub {
             s if s.len() >= 3 && "store".starts_with(s) => {
                 let name = one_name("store")?;
-                if matches!(self.e_ret, Returned::Nothing) {
-                    return Err(no(
-                        "estimates store: no model is fitted before it in this do-file (Stata: last estimation results not found, nothing to store)",
-                    ));
-                }
-                self.stored_fits.insert(
-                    name.clone(),
-                    StoredFit {
-                        estimates: self.estimates.clone(),
-                        estimates_lost: self.estimates_lost.clone(),
-                        e_ret: self.e_ret.clone(),
-                        weighted_fit: self.weighted_fit,
-                        fit_fweight: self.fit_fweight,
-                        plain_regress: self.plain_regress,
-                        fit_robust: self.fit_robust,
-                        fit_cluster: self.fit_cluster,
-                        esample: self.esample,
-                        changed_since_fit: self.changed_since_fit,
-                    },
-                );
-                out.line("if (!exists(\"stata_stored\")) stata_stored <- list()");
-                out.line(format!(
-                    "stata_stored[[{}]] <- mget(intersect({FIT_OBJECTS}, ls()))",
-                    r_text(&name)
-                ));
-                Ok(())
+                self.store_fit(&name, "estimates store", out)
             }
             s if s.len() >= 3 && "restore".starts_with(s) => {
                 let name = one_name("restore")?;
-                let Some(f) = self.stored_fits.get(&name).cloned() else {
-                    return self.not_stored("restore", &name, out);
-                };
-                self.estimates = f.estimates;
-                self.estimates_lost = f.estimates_lost;
-                self.e_ret = f.e_ret;
-                self.weighted_fit = f.weighted_fit;
-                self.fit_fweight = f.fit_fweight;
-                self.plain_regress = f.plain_regress;
-                self.fit_robust = f.fit_robust;
-                self.fit_cluster = f.fit_cluster;
-                self.esample = f.esample;
-                self.changed_since_fit = f.changed_since_fit;
-                let n = r_text(&name);
-                out.line(format!(
-                    "if (!exists(\"stata_stored\") || is.null(stata_stored[[{n}]])) stop({})",
-                    r_text(&format!("estimation result {name} not found"))
-                ));
-                out.line(format!("rm(list = intersect({FIT_OBJECTS}, ls()))"));
-                out.line(format!(
-                    "invisible(list2env(stata_stored[[{n}]], environment()))"
-                ));
-                out.line(format!(
-                    "cat({})",
-                    r_text(&format!("(results {name} are active now)\n"))
-                ));
-                Ok(())
+                self.restore_fit(&name, out)
             }
             "clear" => {
                 if !rest.is_empty() {
                     return Err(no("estimates clear takes no names"));
                 }
                 self.stored_fits.clear();
+                self.active_store = None;
                 out.line("stata_stored <- list()");
                 Ok(())
             }
             "drop" => {
                 let names: Vec<&str> = rest.split_whitespace().collect();
-                if names.is_empty() {
-                    return Err(no("estimates drop needs names"));
-                }
-                if names.iter().any(|n| *n == "_all" || *n == "*") {
-                    self.stored_fits.clear();
-                    out.line("stata_stored <- list()");
-                    return Ok(());
-                }
-                if let Some(n) = names.iter().find(|n| !self.stored_fits.contains_key(**n)) {
-                    return self.not_stored("drop", n, out);
-                }
-                for n in &names {
-                    self.stored_fits.remove(*n);
-                }
-                out.line(format!(
-                    "stata_stored[c({})] <- NULL",
-                    names
-                        .iter()
-                        .map(|n| r_text(n))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-                Ok(())
+                self.drop_fits(&names, out)
             }
             other => Err(no(format!("estimates {other} is not translated yet"))),
         }
+    }
+
+    /// Keeps the results now active under `name` (`estimates store`, `eststo`).
+    pub(super) fn store_fit(
+        &mut self,
+        name: &str,
+        who: &str,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if matches!(self.e_ret, Returned::Nothing) {
+            return Err(no(format!(
+                "{who}: no model is fitted before it in this do-file (Stata: last estimation results not found, nothing to store)"
+            )));
+        }
+        let name = name.to_string();
+        self.stored_fits.insert(
+            name.clone(),
+            StoredFit {
+                estimates: self.estimates.clone(),
+                estimates_lost: self.estimates_lost.clone(),
+                e_ret: self.e_ret.clone(),
+                weighted_fit: self.weighted_fit,
+                fit_fweight: self.fit_fweight,
+                plain_regress: self.plain_regress,
+                fit_robust: self.fit_robust,
+                fit_cluster: self.fit_cluster,
+                esample: self.esample,
+                changed_since_fit: self.changed_since_fit,
+            },
+        );
+        out.line("if (!exists(\"stata_stored\")) stata_stored <- list()");
+        out.line(format!(
+            "stata_stored[[{}]] <- mget(intersect({FIT_OBJECTS}, ls()))",
+            r_text(&name)
+        ));
+        self.active_store = Some(name);
+        Ok(())
+    }
+
+    /// Makes the results kept under `name` the active ones (`estimates restore`).
+    pub(super) fn restore_fit(&mut self, name: &str, out: &mut Out) -> Result<(), Untranslated> {
+        let Some(f) = self.stored_fits.get(name).cloned() else {
+            return self.not_stored("restore", name, out);
+        };
+        self.estimates = f.estimates;
+        self.estimates_lost = f.estimates_lost;
+        self.e_ret = f.e_ret;
+        self.weighted_fit = f.weighted_fit;
+        self.fit_fweight = f.fit_fweight;
+        self.plain_regress = f.plain_regress;
+        self.fit_robust = f.fit_robust;
+        self.fit_cluster = f.fit_cluster;
+        self.esample = f.esample;
+        self.changed_since_fit = f.changed_since_fit;
+        self.active_store = Some(name.to_string());
+        let n = r_text(name);
+        out.line(format!(
+            "if (!exists(\"stata_stored\") || is.null(stata_stored[[{n}]])) stop({})",
+            r_text(&format!("estimation result {name} not found"))
+        ));
+        out.line(format!("rm(list = intersect({FIT_OBJECTS}, ls()))"));
+        out.line(format!(
+            "invisible(list2env(stata_stored[[{n}]], environment()))"
+        ));
+        out.line(format!(
+            "cat({})",
+            r_text(&format!("(results {name} are active now)\n"))
+        ));
+        Ok(())
+    }
+
+    /// Drops the results kept under `names` (`_all` or `*` for all).
+    pub(super) fn drop_fits(&mut self, names: &[&str], out: &mut Out) -> Result<(), Untranslated> {
+        if names.is_empty() {
+            return Err(no("estimates drop needs names"));
+        }
+        if names.iter().any(|n| *n == "_all" || *n == "*") {
+            self.stored_fits.clear();
+            self.active_store = None;
+            out.line("stata_stored <- list()");
+            return Ok(());
+        }
+        if let Some(n) = names.iter().find(|n| !self.stored_fits.contains_key(**n)) {
+            return self.not_stored("drop", n, out);
+        }
+        for n in names {
+            self.stored_fits.remove(*n);
+            if self.active_store.as_deref() == Some(*n) {
+                self.active_store = None;
+            }
+        }
+        out.line(format!(
+            "stata_stored[c({})] <- NULL",
+            names
+                .iter()
+                .map(|n| r_text(n))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        Ok(())
     }
 
     /// `estimates restore` or `drop` of a name `estimates store` did not
@@ -986,6 +1016,8 @@ pub(super) enum Returned {
 /// Commands after which Stata 19 still holds the r() it held before
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
+    "eststo",
+    "estadd",
     "generate",
     "replace",
     "sort",
@@ -1140,6 +1172,10 @@ fn leaves_e_alone(c: &Command) -> bool {
     }
     if READ_THE_MODEL.contains(&name) {
         return !c.options.iter().any(|o| o.is("post", 4));
+    }
+    // the estout package's store and add: the active results stay
+    if name == "eststo" || name == "estadd" {
+        return true;
     }
     if name == "estimates" {
         let sub = c.parts.main.split_whitespace().next().unwrap_or("");
@@ -1329,7 +1365,7 @@ impl Session {
                                 names.join(", ")
                             )));
                         }
-                        let text = TEXT_NAMES.contains(&name);
+                        let text = TEXT_NAMES.contains(&name) || (which == "e" && self.e_text.contains(name));
                         let get = if which == "e" { "stata_eget" } else { "stata_rget" };
                         Ok((
                             format!(
@@ -1849,5 +1885,125 @@ pub(super) fn quietly(c: &Command, call: String) -> String {
         format!("invisible(utils::capture.output({call}))")
     } else {
         call
+    }
+}
+
+impl Session {
+    /// `eststo name`: the active results stored, with `e(_estimates_name)`.
+    pub(super) fn eststo_store(&mut self, name: &str, out: &mut Out) -> Result<(), Untranslated> {
+        if !super::is_name(name) {
+            return Err(no(format!("(Stata: {name} invalid name)")));
+        }
+        out.line(format!(
+            "if (exists(\"stata_e\")) stata_e[[\"_estimates_name\"]] <- {}",
+            r_text(name)
+        ));
+        self.e_text.insert("_estimates_name".into());
+        self.store_fit(name, "eststo", out)
+    }
+
+    /// `eststo [name] [, title()]`, `eststo clear`, `eststo drop names`
+    /// (the SSC estout package).
+    pub(super) fn eststo(
+        &mut self,
+        c: &Command,
+        opts: &super::Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("title", 2)]) {
+            return Err(no(format!(
+                "eststo with the option {o} is not translated yet"
+            )));
+        }
+        let (sub, rest) = super::first_word(&c.parts.main);
+        match sub {
+            "clear" => {
+                self.stored_fits.clear();
+                self.active_store = None;
+                out.line("stata_stored <- list()");
+                Ok(())
+            }
+            "drop" => {
+                let names: Vec<&str> = rest.split_whitespace().collect();
+                self.drop_fits(&names, out)
+            }
+            "" => {
+                let name = format!("est{}", self.stored_fits.len() + 1);
+                self.eststo_store(&name, out)
+            }
+            name if rest.is_empty() => self.eststo_store(name, out),
+            _ => Err(no("eststo takes one name")),
+        }
+    }
+
+    /// `estadd scalar name = exp [, replace]`, `estadd local name text`: a
+    /// value added to e(), and to the stored copy when the active results are
+    /// stored (as Stata's estout package does).
+    pub(super) fn estadd(
+        &mut self,
+        c: &Command,
+        opts: &super::Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("replace", 3), ("quietly", 1)]) {
+            return Err(no(format!(
+                "estadd with the option {o} is not translated yet"
+            )));
+        }
+        if matches!(self.e_ret, Returned::Nothing) {
+            return Err(no(
+                "estadd: no model is fitted before it in this do-file (Stata: last estimation results not found)",
+            ));
+        }
+        let (sub, rest) = super::first_word(&c.parts.main);
+        let (name, value, text) = match sub {
+            "scalar" => {
+                let (n, exp) = rest
+                    .split_once('=')
+                    .map(|(n, e)| (n.trim(), e.trim()))
+                    .or_else(|| super::first_word(rest).into())
+                    .ok_or_else(|| no("estadd scalar needs name = exp"))?;
+                let n = n.trim_start_matches("e(").trim_end_matches(')');
+                if !super::is_name(n) || exp.is_empty() {
+                    return Err(no("estadd scalar needs name = exp"));
+                }
+                let (v, kind) = self.value(exp, out)?;
+                if kind == Kind::Text {
+                    return Err(no(
+                        "estadd scalar of a string: Stata refuses this (type mismatch)",
+                    ));
+                }
+                (n.to_string(), v, false)
+            }
+            "local" => {
+                let (n, text) = super::first_word(rest);
+                if !super::is_name(n) {
+                    return Err(no("estadd local needs a name"));
+                }
+                let t = text.trim();
+                let t = t
+                    .strip_prefix("`\"")
+                    .and_then(|s| s.strip_suffix("\"'"))
+                    .or_else(|| t.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+                    .unwrap_or(t);
+                (n.to_string(), r_text(t), true)
+            }
+            other => return Err(no(format!("estadd {other} is not translated yet"))),
+        };
+        if text {
+            self.e_text.insert(name.clone());
+        } else {
+            self.e_text.remove(&name);
+        }
+        let key = r_text(&name);
+        out.line(format!("stata_e[[{key}]] <- {value}"));
+        if let Some(s) = &self.active_store {
+            out.line(format!(
+                "if (exists(\"stata_stored\") && !is.null(stata_stored[[{}]])) stata_stored[[{}]]$stata_e[[{key}]] <- stata_e[[{key}]]",
+                r_text(s),
+                r_text(s)
+            ));
+        }
+        Ok(())
     }
 }
