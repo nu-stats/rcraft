@@ -355,6 +355,7 @@ fn scatter_twoway_bar_and_export_draw() {
         "twoway (rarea w y x) (line y x, sort)",
         "twoway line y x, sort lp(dash) || lfit y x, lc(red) title(\"t\") yline(0) xline(-1 1)",
         "graph bar (count), over(g)",
+        "twoway (bar y x, yaxis(1)) (line w x, sort yaxis(2))",
         "graph box y w, over(g, relabel(1 \"a\"))",
     ] {
         let code = script(&format!("{use_}{cmd}\n"));
@@ -414,6 +415,8 @@ fn what_the_graphs_do_not_translate_says_why() {
         ("graph bar (mean), over(g)", "r(100)"),
         ("scatter y x\ngraph drop g1", "by name"),
         ("twoway bar y x, horizontal", "horizontal"),
+        ("twoway (lfit y x, yaxis(2)) (scatter y x)", "yaxis(2)"),
+        ("twoway (line y x, yaxis(2))", "every plot"),
     ] {
         let got = refusal(&format!("use s\n{cmd}\n"));
         assert!(got.contains(why), "{cmd}: {got}");

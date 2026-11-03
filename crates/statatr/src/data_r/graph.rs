@@ -156,6 +156,15 @@ stata_bar_data <- function(d, stats, vars, over = character()) {
   out$series <- factor(out$series, levels = unique(out$series))
   out
 }
+stata_axes <- function(v1, v2) {
+  r1 <- range(v1, na.rm = TRUE)
+  r2 <- range(v2, na.rm = TRUE)
+  if (!all(is.finite(c(r1, r2)))) stop("yaxis(2): no values to draw on one of the axes")
+  if (r1[1] == r1[2]) r1 <- r1 + c(-1, 1)
+  if (r2[1] == r2[2]) r2 <- r2 + c(-1, 1)
+  k <- (r1[2] - r1[1]) / (r2[2] - r2[1])
+  list(to = function(v) r1[1] + (v - r2[1]) * k, back = function(x) r2[1] + (x - r1[1]) / k)
+}
 stata_box_data <- function(d, vars, over = character()) {
   key <- if (length(over)) interaction(lapply(over, function(o) stata_tab_values(d[[o]])), drop = TRUE, lex.order = TRUE) else factor(rep("", nrow(d)))
   box <- list()
@@ -270,6 +279,8 @@ struct Layer {
     /// The R expression of the rows it draws.
     rows: String,
     opts: Vec<crate::lang::syntax::Opt>,
+    /// drawn against the second y axis, yaxis(2)
+    y2: bool,
 }
 
 impl Session {
@@ -656,12 +667,68 @@ impl Session {
             let l = self.layer(t, out)?;
             parsed.push(l);
         }
-        let first = parsed
+        // yaxis(2): its plots are mapped onto the first axis's range from the
+        // values of each axis, and the right axis shows their own scale
+        let any_y2 = parsed.iter().any(|l| l.y2);
+        let mut second_axis = None;
+        if any_y2 {
+            if parsed.iter().all(|l| l.y2) {
+                return Err(no(
+                    "twoway with every plot on yaxis(2) is not translated yet",
+                ));
+            }
+            self.y2_count += 1;
+            let k = self.y2_count;
+            self.y2_fn = format!("stata_y2_{k}");
+            let values = |two: bool| -> Result<String, Untranslated> {
+                let mut v = Vec::new();
+                for l in parsed.iter().filter(|l| l.y2 == two) {
+                    for y in &l.ys {
+                        v.push(format!("stata_num({}${})", l.rows, r_name(y)));
+                    }
+                    if l.kind == "bar" {
+                        let base = match Opts(&l.opts).arg("base", 4) {
+                            Some(b) => b
+                                .trim()
+                                .parse::<f64>()
+                                .map_err(|_| no(format!("base({b}) needs a number")))?,
+                            None => 0.0,
+                        };
+                        v.push(r_number(base));
+                    }
+                }
+                Ok(v.join(", "))
+            };
+            out.line(format!(
+                "stata_ax_{k} <- stata_axes(c({}), c({}))",
+                values(false)?,
+                values(true)?
+            ));
+            out.line(format!("stata_y2_{k} <- stata_ax_{k}$to"));
+            // the right axis's title: its one y's label, as Stata's
+            let twos: Vec<&Layer> = parsed.iter().filter(|l| l.y2).collect();
+            let title = match twos.first().and_then(|l| l.ys.first().map(|y| (l, y))) {
+                Some((l0, y))
+                    if twos
+                        .iter()
+                        .all(|l| l.ys.len() == 1 && l.ys.first() == Some(y)) =>
+                {
+                    format!("stata_varlab({}, {})", l0.rows, r_text(y))
+                }
+                _ => "NULL".to_string(),
+            };
+            second_axis = Some(format!(
+                "ggplot2::scale_y_continuous(sec.axis = ggplot2::sec_axis(stata_ax_{k}$back, name = {title}))"
+            ));
+        }
+        let ones: Vec<&Layer> = parsed.iter().filter(|l| !l.y2).collect();
+        let first = ones
             .first()
+            .copied()
             .ok_or_else(|| no("twoway needs at least one plot"))?;
         let xtitle = format!("stata_varlab({}, {})", first.rows, r_text(&first.x));
-        // the y title when every layer has the same one y, as Stata shows it
-        let same_y = parsed
+        // the y title when every layer (on the first axis) has the same one y, as Stata shows it
+        let same_y = ones
             .iter()
             .all(|l| l.ys.len() == 1 && l.ys.first() == first.ys.first());
         let ytitle = match first.ys.first() {
@@ -675,6 +742,7 @@ impl Session {
         for l in &parsed {
             layers.extend(self.layer_geoms(l, legend)?);
         }
+        layers.extend(second_axis);
         if legend {
             layers.push("ggplot2::labs(colour = NULL, fill = NULL)".to_string());
         }
@@ -760,12 +828,34 @@ impl Session {
             return Err(no("weights in a graph are not translated yet"));
         }
         let rows = self.rows_for(cmd, out)?;
+        // yaxis(1) is the default axis; yaxis(2) the second, on the right
+        let y2 = match Opts(&cmd.options)
+            .arg("yaxis", 5)
+            .map(|a| a.trim().to_string())
+        {
+            None => false,
+            Some(a) if a == "1" => false,
+            Some(a) if a == "2" => {
+                if !matches!(kind, "scatter" | "line" | "connected" | "bar" | "rarea") {
+                    return Err(no(format!(
+                        "twoway {kind} with yaxis(2) is not translated yet"
+                    )));
+                }
+                true
+            }
+            Some(a) => {
+                return Err(no(format!(
+                    "yaxis({a}) is not translated yet (1 and 2 are)"
+                )))
+            }
+        };
         Ok(Layer {
             kind,
             ys,
             x,
             rows,
             opts: cmd.options.clone(),
+            y2,
         })
     }
 
@@ -775,7 +865,13 @@ impl Session {
         self.helpers.insert("stata_tab_values");
         let lo = Opts(&l.opts);
         let mut known: Vec<(&str, usize)> = LOOK.to_vec();
-        known.extend([("sort", 4), ("by", 2), ("xline", 5), ("yline", 5)]);
+        known.extend([
+            ("sort", 4),
+            ("by", 2),
+            ("xline", 5),
+            ("yline", 5),
+            ("yaxis", 5),
+        ]);
         known.extend(TITLES.iter().map(|(o, m, _)| (*o, *m)));
         known.extend(kind_options(l.kind));
         if let Some(o) = lo.other(&known) {
@@ -785,6 +881,12 @@ impl Session {
             )));
         }
         let rows = &l.rows;
+        // a layer on the second y axis is drawn mapped onto the first (stata_y2)
+        let y2w = if l.y2 {
+            self.y2_fn.clone()
+        } else {
+            String::new()
+        };
         let x = r_text(&l.x);
         // each layer's legend label, as Stata's: the variable's label, `Fitted
         // values`, `lowess y x`, `Kernel density estimate`
@@ -807,7 +909,7 @@ impl Session {
             "scatter" | "line" | "connected" => {
                 for y in &l.ys {
                     let aes = format!(
-                        "ggplot2::aes(x = stata_num(.data[[{x}]]), y = stata_num(.data[[{}]]){})",
+                        "ggplot2::aes(x = stata_num(.data[[{x}]]), y = {y2w}(stata_num(.data[[{}]])){})",
                         r_text(y),
                         series(y)
                     );
@@ -885,7 +987,7 @@ impl Session {
                     String::new()
                 };
                 g.push(format!(
-                    "ggplot2::geom_rect(data = {rows}, ggplot2::aes(xmin = stata_num(.data[[{x}]]) - {h}, xmax = stata_num(.data[[{x}]]) + {h}, ymin = {b}, ymax = stata_num(.data[[{yv}]]){fill}), na.rm = TRUE)",
+                    "ggplot2::geom_rect(data = {rows}, ggplot2::aes(xmin = stata_num(.data[[{x}]]) - {h}, xmax = stata_num(.data[[{x}]]) + {h}, ymin = {y2w}({b}), ymax = {y2w}(stata_num(.data[[{yv}]])){fill}), na.rm = TRUE)",
                     h = r_number(w / 2.0),
                     b = r_number(base),
                     yv = r_text(y)
@@ -905,7 +1007,7 @@ impl Session {
                     String::new()
                 };
                 g.push(format!(
-                    "ggplot2::geom_ribbon(data = {rows}, ggplot2::aes(x = stata_num(.data[[{x}]]), ymin = stata_num(.data[[{y1}]]), ymax = stata_num(.data[[{y2}]]){fill}), orientation = \"x\")"
+                    "ggplot2::geom_ribbon(data = {rows}, ggplot2::aes(x = stata_num(.data[[{x}]]), ymin = {y2w}(stata_num(.data[[{y1}]])), ymax = {y2w}(stata_num(.data[[{y2}]])){fill}), orientation = \"x\")"
                 ));
             }
             "kdensity" => {

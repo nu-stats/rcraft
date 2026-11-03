@@ -830,6 +830,9 @@ struct Session {
     graph_drawn: bool,
     /// an extended missing value (.a to .z) was stored, which R keeps as NA
     extended_missing: std::cell::Cell<bool>,
+    /// the R function that maps the second y axis onto the first, per graph
+    y2_fn: String,
+    y2_count: usize,
     /// And its time variable.
     panel_time: Option<String>,
     /// The name the active results are stored under (`eststo`, `estimates

@@ -3175,3 +3175,11 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   (`e(N_hdfe)`, `e(df_a_initial)`, `e(absvars)` `_cons`, 141). `fre` is refused once the do-file stores an
   extended missing value, which R keeps as one NA (131).
 - **Numbers:** the probes: 159,638 of 190,347 lines translated (83.9%); 5,561 of 5,679 compared lines match Stata to 8 digits and 5 more to 6; the 113 that differ are all `_natscale`.
+
+## P2B.5 continued: a second y axis, 2026-11-03
+
+- **yaxis(2)** (`data_r/graph.rs`): the plots on it (scatter, line, connected, bar, rarea) are mapped onto
+  the first axis's range from the values of each axis (`stata_axes`), and the right axis shows their own
+  scale, titled with their variable's label. Each graph has its own mapping, since ggplot2 draws later.
+  Every plot on axis 2, and fitted or density plots on it, are refused.
+- **Numbers:** graphs 22.2% (16.2%); the packages 83.9%.

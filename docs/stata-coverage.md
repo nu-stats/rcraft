@@ -95,21 +95,21 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%. `robreg m` (`robreg.do`), which one package runs in loops over and over, took it to 79.3%. `reghdfe` (`reghdfe.do`), with two-way clustering, to 80.2%. `eststo` and `estadd` (`estout.do`) to 80.7%. `outreg2` (`outreg2.do`), its files byte for byte, to 81.9%. `fre`, and `margins` after `clogit` with `parmest` (`clogit_margins.do`), to 83.5%. `xpose` (`made.do`), which one package turns its simulated estimates with, took it to 83.7%. The graphs below took it to 83.9%: `twoway bar` and `rarea`, plots split at `||`, `graph box`, `graph bar (count)`, `xline()` and `yline()`, `graph drop _all`, and the look-only short forms Stata 19 accepts; tier 4 went from 0% to 16.2%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%. `robreg m` (`robreg.do`), which one package runs in loops over and over, took it to 79.3%. `reghdfe` (`reghdfe.do`), with two-way clustering, to 80.2%. `eststo` and `estadd` (`estout.do`) to 80.7%. `outreg2` (`outreg2.do`), its files byte for byte, to 81.9%. `fre`, and `margins` after `clogit` with `parmest` (`clogit_margins.do`), to 83.5%. `xpose` (`made.do`), which one package turns its simulated estimates with, took it to 83.7%. The graphs below took it to 83.9%: `twoway bar` and `rarea`, plots split at `||`, `graph box`, `graph bar (count)`, `xline()` and `yline()`, `graph drop _all`, and the look-only short forms Stata 19 accepts; tier 4 went from 0% to 16.2%. A second y axis (`yaxis(2)`) took tier 4 to 22.2%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
 | 1. Data management and control flow | 9393 | 7345 | 1374 | 674 | 84.2% |
 | 2. Core statistics | 2035 | 1838 | 196 | 1 | 90.4% |
 | 3. Panel, survival, survey, IV and other models | 376 | 265 | 110 | 1 | 70.7% |
-| 4. Graphs | 117 | 19 | 98 | 0 | 16.2% |
+| 4. Graphs | 117 | 26 | 91 | 0 | 22.2% |
 | 5. Programs and SSC commands | 569 | 377 | 178 | 14 | 67.9% |
 | Other commands | 2657 | 2065 | 334 | 258 | 86.1% |
-| **All** | 15147 | 11909 | 2290 | 948 | 83.9% |
+| **All** | 15147 | 11916 | 2283 | 948 | 83.9% |
 
 Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `coefplot`, `esttab`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:
-- graphs (98 of 117): `graph export` after `coefplot`, `grstyle` and `marginsplot` (64), a second y axis (`yaxis(2)`, 7), `saving()` and `graph combine`;
+- graphs (91 of 117): `graph export` after `coefplot`, `grstyle` and `marginsplot` (64), `saving()` and `graph combine`;
 - `suest`.
 
 The 36 `xtreg` and `reg` lines with `f.`, `d.` and `l.` in one package read a file saved after `cd` to a folder
