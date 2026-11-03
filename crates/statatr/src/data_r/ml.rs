@@ -378,6 +378,9 @@ impl Session {
                     "stata_estimates <- tryCatch(MASS::glm.nb({}, data = {src}{weights}, {control}), error = function(e) stop(\"nbreg: R's glm.nb could not estimate alpha; when the counts show no overdispersion Stata's alpha goes to 0, which is not reproduced (\", conditionMessage(e), \")\", call. = FALSE))",
                     with_rhs(&dep)
                 ));
+                // glm.nb may also stop at a theta that only means alpha is 0;
+                // Stata's numbers there come from its own path to the boundary
+                out.line("if (1 / stata_estimates$theta < 1e-6) stop(\"nbreg: alpha goes to 0 here (the counts show no overdispersion), where Stata's estimates come from its own path to the boundary, which is not reproduced\", call. = FALSE)");
                 out.line(KEEP_OMITTED);
             }
             Fit::Ologit | Fit::Oprobit => {

@@ -95,21 +95,21 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%. `robreg m` (`robreg.do`), which one package runs in loops over and over, took it to 79.3%. `reghdfe` (`reghdfe.do`), with two-way clustering, to 80.2%. `eststo` and `estadd` (`estout.do`) to 80.7%. `outreg2` (`outreg2.do`), its files byte for byte, to 81.9%. `fre`, and `margins` after `clogit` with `parmest` (`clogit_margins.do`), to 83.5%. `xpose` (`made.do`), which one package turns its simulated estimates with, took it to 83.7%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%. `robreg m` (`robreg.do`), which one package runs in loops over and over, took it to 79.3%. `reghdfe` (`reghdfe.do`), with two-way clustering, to 80.2%. `eststo` and `estadd` (`estout.do`) to 80.7%. `outreg2` (`outreg2.do`), its files byte for byte, to 81.9%. `fre`, and `margins` after `clogit` with `parmest` (`clogit_margins.do`), to 83.5%. `xpose` (`made.do`), which one package turns its simulated estimates with, took it to 83.7%. The graphs below took it to 83.9%: `twoway bar` and `rarea`, plots split at `||`, `graph box`, `graph bar (count)`, `xline()` and `yline()`, `graph drop _all`, and the look-only short forms Stata 19 accepts; tier 4 went from 0% to 16.2%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
 | 1. Data management and control flow | 9393 | 7345 | 1374 | 674 | 84.2% |
 | 2. Core statistics | 2035 | 1838 | 196 | 1 | 90.4% |
 | 3. Panel, survival, survey, IV and other models | 376 | 265 | 110 | 1 | 70.7% |
-| 4. Graphs | 117 | 0 | 117 | 0 | 0.0% |
+| 4. Graphs | 117 | 19 | 98 | 0 | 16.2% |
 | 5. Programs and SSC commands | 569 | 377 | 178 | 14 | 67.9% |
 | Other commands | 2657 | 2065 | 334 | 258 | 86.1% |
-| **All** | 15147 | 11890 | 2309 | 948 | 83.7% |
+| **All** | 15147 | 11909 | 2290 | 948 | 83.9% |
 
 Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `coefplot`, `esttab`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:
-- graphs (117), and `graph export` after them;
+- graphs (98 of 117): `graph export` after `coefplot`, `grstyle` and `marginsplot` (64), a second y axis (`yaxis(2)`, 7), `saving()` and `graph combine`;
 - `suest`.
 
 The 36 `xtreg` and `reg` lines with `f.`, `d.` and `l.` in one package read a file saved after `cd` to a folder
@@ -153,20 +153,20 @@ The run also found, and fixed:
   was singular).
 - `recode` with labels in its rules, `decode`, `encode`'s label set, and `do file, nostop`.
 
-## Checked against Stata on R (2026-11-01)
+## Checked against Stata on R (2026-11-03)
 
-The 390 probes recorded in StatCraft's corpus are each run on R 4.4 in a fresh session, as the do-file window
-runs a do-file: 189,013 lines ran, and 158,643 of them were translated (126,618 before the dates, P2C.14; 135,471 before `bsample`, P2C.16).
+The 406 probes recorded in StatCraft's corpus are each run on R 4.6 in a fresh session, as the do-file window
+runs a do-file: 190,347 lines ran, and 159,638 of them (83.9%) were translated (158,643 of 189,013 in 390 probes on 2026-11-01; 126,618 before the dates, P2C.14; 135,471 before `bsample`, P2C.16).
 
 | | Lines | Before P2C.12 | Before P2C.11 |
 |---|---:|---:|---:|
-| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,644 | 210 | 196 |
-| The same to 8 significant digits | 5,526 | 205 | 192 |
+| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,679 | 210 | 196 |
+| The same to 8 significant digits | 5,561 | 205 | 192 |
 | The same to 6, not 8 | 5 | 1 | 1 |
 | Different | 113 | 4 | 3 |
-| Not compared: after the probe's first R error, where the do-file window stops | 213 | 207 | 199 |
-| Printed by Stata, not translated (counted from P2C.12) | 810 | | |
-| Translated lines that R stopped at | 449 | 429 | 399 |
+| Not compared: after the probe's first R error, where the do-file window stops | 254 | 207 | 199 |
+| Printed by Stata, not translated (counted from P2C.12) | 817 | | |
+| Translated lines that R stopped at | 530 | 429 | 399 |
 
 The 113 that differ are all `_natscale`, nearly all with n = 10 or 15. There Stata's r(min) is a residue of
 its arithmetic (2^-55 or −2^-54) where RCraft gives 0, and a residue against 0 fails any relative check
@@ -190,7 +190,7 @@ The 5 that agree to 6 digits, not 8:
 - Four convergence values of `xtreg, pa` (`e(dif)`, `e(p)` near 0). They are compared for the first time now
   that the probes' data is made.
 
-Most of the 449 R errors come from the probes' setting rather than from RCraft:
+Most of the 530 R errors come from the probes' setting rather than from RCraft:
 - graphs exported as SVG, which need the R package svglite;
 - files another probe or StatCraft wrote (`use`, `import`, `list`);
 - files the probe writes with `file write`, which is not translated.

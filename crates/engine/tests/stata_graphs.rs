@@ -351,6 +351,11 @@ fn scatter_twoway_bar_and_export_draw() {
         "scatter y x, by(g)",
         "graph bar (mean) y (median) w, over(g)",
         "graph hbar y, over(g) over(yb)",
+        "twoway bar y x, barwidth(0.5) base(1)",
+        "twoway (rarea w y x) (line y x, sort)",
+        "twoway line y x, sort lp(dash) || lfit y x, lc(red) title(\"t\") yline(0) xline(-1 1)",
+        "graph bar (count), over(g)",
+        "graph box y w, over(g, relabel(1 \"a\"))",
     ] {
         let code = script(&format!("{use_}{cmd}\n"));
         let text = ok(&mut e, &code);
@@ -406,6 +411,9 @@ fn what_the_graphs_do_not_translate_says_why() {
         ("scatter y x [fw=f]", "weights"),
         ("kdensity y, kernel(foo)", "kernel(foo)"),
         ("graph bar (iqr) y", "(iqr)"),
+        ("graph bar (mean), over(g)", "r(100)"),
+        ("scatter y x\ngraph drop g1", "by name"),
+        ("twoway bar y x, horizontal", "horizontal"),
     ] {
         let got = refusal(&format!("use s\n{cmd}\n"));
         assert!(got.contains(why), "{cmd}: {got}");

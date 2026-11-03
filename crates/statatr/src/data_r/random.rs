@@ -980,6 +980,12 @@ impl Session {
             }
             self.drew.set(true);
         }
+        if r.caveats
+            .iter()
+            .any(|c| c.contains("extended missing values"))
+        {
+            self.extended_missing.set(true);
+        }
         for c in r.caveats {
             out.caveat(c);
         }

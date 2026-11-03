@@ -828,6 +828,8 @@ struct Session {
     stset: Option<st::StSet>,
     /// A graph was drawn, so `graph export` has one to write.
     graph_drawn: bool,
+    /// an extended missing value (.a to .z) was stored, which R keeps as NA
+    extended_missing: std::cell::Cell<bool>,
     /// And its time variable.
     panel_time: Option<String>,
     /// The name the active results are stored under (`eststo`, `estimates
@@ -1153,6 +1155,12 @@ impl Session {
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
         let r = expr_r::translate_with(text, &kinds, &ret, use_)?;
+        if r.caveats
+            .iter()
+            .any(|c| c.contains("extended missing values"))
+        {
+            self.extended_missing.set(true);
+        }
         for c in r.caveats {
             out.caveat(c);
         }
@@ -1198,6 +1206,12 @@ impl Session {
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
         let r = expr_r::translate_with(text, &kinds, &ret, Use::Value)?;
+        if r.caveats
+            .iter()
+            .any(|c| c.contains("extended missing values"))
+        {
+            self.extended_missing.set(true);
+        }
         for c in r.caveats {
             out.caveat(c);
         }

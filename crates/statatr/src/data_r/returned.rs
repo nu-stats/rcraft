@@ -527,19 +527,21 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     robust_macros()
   } else if (cmd == "reghdfe") {
     e0 <- fit$stata
+    # noabsorb absorbs the constant, as one group named _cons
+    ab <- if (length(e0$absorb)) e0$absorb else "_cons"
     put(N = e0$N, rank = e0$df_m, df_r = e0$df_r, df_m = e0$df_m, tss = e0$tss, tss_within = e0$tss_within,
         rss = e0$rss, mss = e0$mss, rmse = e0$rmse, F = e0$F, ll = e0$ll, ll_0 = e0$ll_0, r2 = e0$r2,
         r2_within = e0$r2_within, r2_a = e0$r2_a, r2_a_within = e0$r2_a_within, sumweights = e0$N,
         converged = 1, report_constant = 1, N_full = e0$N_full, num_singletons = e0$num_singletons,
         drop_singletons = as.numeric(e0$num_singletons >= 0), df_a_nested = e0$df_a_nested,
         df_a_redundant = e0$df_a_redundant, df_a_initial = e0$df_a_initial, df_a = e0$df_a,
-        N_hdfe = length(e0$absorb), N_hdfe_extended = length(e0$absorb))
+        N_hdfe = length(ab), N_hdfe_extended = length(ab))
     if (length(e0$cluster)) {
       put(N_clust = min(e0$G))
       if (length(e0$cluster) == 2) put(N_clust1 = e0$G[1], N_clust2 = e0$G[2], N_clustervars = 2)
     }
-    put(extended_absvars = paste(e0$absorb, collapse = " "), absvars = paste(e0$absorb, collapse = " "),
-        title2 = if (length(e0$absorb)) sprintf("Absorbing %d HDFE group%s", length(e0$absorb), if (length(e0$absorb) == 1) "" else "s") else NULL,
+    put(extended_absvars = paste(ab, collapse = " "), absvars = paste(ab, collapse = " "),
+        title2 = sprintf("Absorbing %d HDFE group%s", length(ab), if (length(ab) == 1) "" else "s"),
         dofmethod = "pairwise clusters continuous", vce = if (vce == "unadjusted") "ols" else vce,
         title = "HDFE Linear regression",
         indepvars = paste(c(setdiff(names(b), "(Intercept)"), "_cons"), collapse = " "), depvar = depvar,
@@ -892,6 +894,12 @@ impl Session {
             )));
         }
         let name = name.to_string();
+        // stored results carry their name, as e(_estimates_name)
+        out.line(format!(
+            "if (exists(\"stata_e\")) stata_e[[\"_estimates_name\"]] <- {}",
+            r_text(&name)
+        ));
+        self.e_text.insert("_estimates_name".into());
         self.stored_fits.insert(
             name.clone(),
             StoredFit {
@@ -1911,11 +1919,6 @@ impl Session {
         if !super::is_name(name) {
             return Err(no(format!("(Stata: {name} invalid name)")));
         }
-        out.line(format!(
-            "if (exists(\"stata_e\")) stata_e[[\"_estimates_name\"]] <- {}",
-            r_text(name)
-        ));
-        self.e_text.insert("_estimates_name".into());
         self.store_fit(name, "eststo", out)
     }
 

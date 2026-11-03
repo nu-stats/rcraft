@@ -78,6 +78,12 @@ impl Session {
         if vars.is_empty() {
             return Err(no("fre needs variables"));
         }
+        if self.extended_missing.get() {
+            return Err(no(
+                "fre after an extended missing value (.a to .z) was stored: R keeps them all as \
+                 one missing value, so fre's rows and counts of missing values would not be Stata's",
+            ));
+        }
         let src = self.rows_for(c, out)?;
         self.helpers.insert("stata_fre");
         self.helpers.insert("stata_fmt");

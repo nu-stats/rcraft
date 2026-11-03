@@ -3152,3 +3152,26 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **_natscale:** its step is found (Stata's 10^k, not the nearest double for k < 0), but its ends are not; the
   113 probe lines stay. Observations in `plan/stata/natscale-residue.md`.
 - **Numbers:** the replication packages' share is 83.7% (83.5%).
+
+## P2B.5 continued: graphs in the replication packages, 2026-11-03
+
+- **Graphs** (`data_r/graph.rs`): `twoway bar` (from `base()`, 0, `barwidth()` wide, 1) and `twoway rarea`;
+  `twoway plot, opts || plot, opts` split at `||` with each plot's own options, which carry the graph's
+  too; `graph box`/`hbox` (Stata's quartiles, whiskers to the adjacent values, the rest as points);
+  `graph bar (count)` with no variable counts the rows (another statistic is r(100), as in Stata);
+  `xline()` and `yline()` draw their lines; `graph drop _all`; `graph export`'s `preview()`, `fontface()`
+  and `cmyk()`, which change only the file's look.
+- **Look-only short forms:** the ones Stata 19 accepted when asked (`lp()`, `lc()`, `clp()`, `clc()`,
+  `clw()`, `mlabv()`, `mlabp()`, `mlabs()`, `mlabc()`, `mlw()`, `bc()`, `fi()`, `blw()`, `xsc()`, `ymt()`,
+  the `t1title()` family). Those that change what is drawn (`recast()`, `connect()`, `cmissing()`,
+  `jitter()`, `saving()`) stay refused.
+- **Checked:** `stata_graphs.rs` draws each form in R and refuses `graph drop` by name, `twoway bar,
+  horizontal` and `graph bar (mean)` without a variable.
+- **Numbers:** the replication packages' share is 83.9% (83.7%); graphs 16.2% (0%).
+- **The probes again** (406, two more than before: `fre` and `reghdfe`): four lines had changed or were new.
+  `nbreg` where alpha goes to 0 (probe 064): glm.nb now stops at a huge theta instead of failing, and printed
+  numbers that were not Stata's; it is refused there, as it was. `estimates store` now names the results
+  (`e(_estimates_name)`), not only `eststo` (073). `reghdfe, noabsorb` absorbs the constant as one group
+  (`e(N_hdfe)`, `e(df_a_initial)`, `e(absvars)` `_cons`, 141). `fre` is refused once the do-file stores an
+  extended missing value, which R keeps as one NA (131).
+- **Numbers:** the probes: 159,638 of 190,347 lines translated (83.9%); 5,561 of 5,679 compared lines match Stata to 8 digits and 5 more to 6; the 113 that differ are all `_natscale`.

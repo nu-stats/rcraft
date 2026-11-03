@@ -556,7 +556,10 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
         ],
     ),
     ("eststo", &["clear", "drop"]),
-    ("graph", &["bar", "export", "hbar", "twoway"]),
+    (
+        "graph",
+        &["bar", "box", "drop", "export", "hbar", "hbox", "twoway"],
+    ),
     ("import", &["delimited", "excel"]),
     ("matrix", &["list"]),
     ("merge", &["1:1", "1:m", "m:1", "m:m"]),
@@ -1017,7 +1020,7 @@ mod tests {
         assert_eq!(options("bysort sex age: gen", VARS), names(&["generate"]));
         assert_eq!(options("capture noisily tt", VARS), names(&["ttest"]));
         // a subcommand
-        assert_eq!(options("graph b", VARS), names(&["bar"]));
+        assert_eq!(options("graph b", VARS), names(&["bar", "box"]));
         assert_eq!(options("import d", VARS), names(&["delimited"]));
         assert_eq!(options("merge 1", VARS), names(&["1:1", "1:m"]));
         assert_eq!(options("scalar d", VARS), names(&["define", "dir", "drop"]));

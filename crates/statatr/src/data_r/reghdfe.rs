@@ -144,7 +144,7 @@ pub(super) const REGHDFE_HELPER: &str = r#"stata_reghdfe <- function(formula, da
   ll <- function(ss) -N / 2 * (1 + log(2 * pi * ss / N))
   fit <- stats::lm(formula, data = d)
   fit$stata <- list(N = N, N_full = N_full, num_singletons = dropped, df_r = df_r, df_m = K, df_a = df_a,
-                    df_a_initial = sum(levels_of), df_a_redundant = sum(redundant) + sum(ifelse(nested, levels_of - redundant, 0)),
+                    df_a_initial = if (length(fes)) sum(levels_of) else 1, df_a_redundant = sum(redundant) + sum(ifelse(nested, levels_of - redundant, 0)),
                     df_a_nested = sum(ifelse(nested, levels_of, 0)), rss = rss, tss = tss, tss_within = tss_w,
                     mss = tss - rss, rmse = sqrt(rss / (N - Kt)), F = Fs, r2 = r2, r2_within = r2_w,
                     r2_a = 1 - (1 - r2) * (N - 1) / (N - K - df_a_full),
