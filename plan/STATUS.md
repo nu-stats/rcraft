@@ -3110,3 +3110,12 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Checked:** `outreg2.do` (the .txt read back cell by cell; the files compared byte for byte with Stata's
   by hand); `outreg2` is Verified. Observations in `plan/stata/outreg2.md`.
 - **Numbers:** the replication packages' share is 81.9% (80.7%); the add-on tier 63.1% (32.3%).
+
+## P2C.9 continued: fre (SSC), 2026-11-03
+
+- **fre** (`data_r/fre.rs`, `stata_fre`): its tables as the package prints them (compared character by
+  character with Stata's log), value labels, a string's empty value as missing, several variables; r(N),
+  r(N_valid), r(N_missing), r(r), r(r_valid), r(r_missing), r(depvar).
+- **Checked:** `fre.do` (its r()); `fre` is Verified. Observations in `plan/stata/fre.md`.
+- **Found on the way:** R's `attr(x, "label")` matches `labels` partially when a variable has value labels
+  and no variable label; `fre` asks for it exactly.

@@ -88,6 +88,7 @@ pub const COMMANDS: &[&str] = &[
     "expand",
     "foreach",
     "forvalues",
+    "fre",
     "fvset",
     "generate",
     "gettoken",

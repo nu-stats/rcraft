@@ -29,6 +29,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("expand", &["made", "random"]),
     ("foreach", &["aware", "control"]),
     ("forvalues", &["control"]),
+    ("fre", &["fre"]),
     ("fvset", &["replication"]),
     ("generate", &["control", "data", "descriptives", "random"]),
     ("gettoken", &["made"]),

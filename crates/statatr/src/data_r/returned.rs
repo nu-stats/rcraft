@@ -1049,6 +1049,7 @@ const LEAVE_R_ALONE: &[&str] = &[
 /// Commands that never change e() (an untranslated command not here might
 /// be an estimation command, after which e() is not known).
 const LEAVE_E_ALONE: &[&str] = &[
+    "fre",
     "use",
     "save",
     "saveold",
@@ -1199,6 +1200,15 @@ pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
 pub(super) const R_TEST: &[&str] = &["drop", "df_r", "F", "df", "p", "chi2"];
 pub(super) const R_LINCOM: &[&str] = &["df", "ub", "lb", "p", "t", "z", "level", "se", "estimate"];
 pub(super) const R_TAB1: &[&str] = &["N", "r"];
+pub(super) const R_FRE: &[&str] = &[
+    "N",
+    "N_valid",
+    "N_missing",
+    "r",
+    "r_valid",
+    "r_missing",
+    "depvar",
+];
 pub(super) const R_TAB2: &[&str] = &["N", "r", "c", "chi2", "p"];
 pub(super) const R_CORRELATE: &[&str] = &["sum_w", "N", "rho", "cov_12", "Var_2", "Var_1"];
 pub(super) const R_DESCRIBE: &[&str] = &["k", "N"];

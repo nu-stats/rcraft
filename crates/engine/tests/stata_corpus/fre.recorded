@@ -1,0 +1,5 @@
+* Stata 19.0's results for fre.do, recorded by cargo xtask stata-record
+@ a 40 37 3 5 4 1 1
+@ ab 40 40 0 5 5 1
+@ s 39 37 2 3 2 1
+@ in 10 5
