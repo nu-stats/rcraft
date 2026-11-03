@@ -1175,6 +1175,25 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "outreg2",
+        about: "Writes a table of models to a file (the SSC package)",
+        points: &[
+            p(
+                "In R",
+                "stata_outreg2 writes the same .txt and .xls files as the package, byte for byte, \
+                 matched to the files it writes (not its code), for outreg2 using f.xls, tstat \
+                 bdec(#) tdec(#) with parenthesis(tstat), adjr2, r2, keep() and e(): a column per \
+                 model added to the table already in f.txt unless replace, a variable a later \
+                 model adds placed before Constant, the statistics rows in Stata's order.",
+            ),
+            p(
+                "Not yet",
+                "outreg2 without tstat, bdec() and tdec() (its own number format), with labels, \
+                 other files (.doc, .tex), stored models by name, or after factor variables.",
+            ),
+        ],
+    },
+    Guide {
         command: "reghdfe",
         about: "Regression absorbing fixed effects (the SSC package)",
         points: &[

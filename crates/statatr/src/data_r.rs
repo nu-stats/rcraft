@@ -36,6 +36,7 @@ mod ml;
 mod model;
 mod more;
 mod natscale;
+mod outreg2;
 mod post;
 mod random;
 mod reghdfe;
@@ -500,6 +501,7 @@ const DISPLAY_OPTIONS: &[(&str, usize)] = &[
 const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10)];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "outreg2",
     "eststo",
     "estadd",
     "tsset",
@@ -549,6 +551,14 @@ fn no(reason: impl Into<String>) -> Untranslated {
         reason: reason.into(),
     }
 }
+
+/// `import delimited`'s reading: a line that is empty is skipped, as in Stata, but
+/// one of delimiters alone is a row of missing values (readr would skip both).
+const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ...) {
+  lines <- readLines(file, warn = FALSE)
+  lines <- lines[nzchar(sub("\r$", "", lines))]
+  readr::read_delim(I(paste0(lines, collapse = "\n")), ..., skip_empty_rows = FALSE)
+}"#;
 
 /// R's version of Stata's float storage: a double rounded to the nearest
 /// single-precision value, missing kept missing.
@@ -673,6 +683,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_destring" => more::DESTRING_HELPER,
         "stata_forced" => more::FORCED_HELPER,
         "stata_merge" => more::MERGE_HELPER,
+        "stata_read_delim" => READ_DELIM_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
@@ -711,6 +722,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_clogit" => clogit::CLOGIT_HELPER,
         "stata_robreg" => robreg::ROBREG_HELPER,
         "stata_reghdfe" => reghdfe::REGHDFE_HELPER,
+        "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_xtile" => more::XTILE_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -1749,6 +1761,7 @@ impl Session {
             "clogit" => self.clogit(c, &opts, out),
             "robreg" => self.robreg(c, &opts, out),
             "reghdfe" => self.reghdfe(c, &opts, out),
+            "outreg2" => self.outreg2(c, &opts, out),
             "xtile" => self.xtile(c, &opts, out),
             "display" => self.display(c, out),
             "ereturn" | "return" => self.list_returned(c, out),
@@ -1921,6 +1934,7 @@ impl Session {
                     ("encoding", 8),
                     ("asdouble", 8),
                     ("asfloat", 7),
+                    ("stringcols", 7),
                 ]) {
                     return Err(no(format!(
                         "import delimited with the option {o} is not translated yet"
@@ -1950,13 +1964,34 @@ impl Session {
                 if let Some(e) = opts.arg("encoding", 8) {
                     args.push(format!("locale = readr::locale(encoding = {})", r_text(&e)));
                 }
+                // every column as text: stringcols(_all)
+                let all_text = match opts.arg("stringcols", 7).as_deref().map(str::trim) {
+                    None => false,
+                    Some("_all" | "*") => true,
+                    Some(v) => {
+                        return Err(no(format!(
+                            "import delimited with stringcols({v}) is not translated yet (stringcols(_all) is)"
+                        )))
+                    }
+                };
+                if all_text {
+                    args.push("col_types = readr::cols(.default = \"c\")".into());
+                }
                 // empty cells are missing, "NA" is text, as in Stata
                 args.push("na = \"\"".into());
                 args.push("show_col_types = FALSE".into());
-                steps.push(format!("readr::read_delim({})", args.join(", ")));
+                self.helpers.insert("stata_read_delim");
+                steps.push(format!("stata_read_delim({})", args.join(", ")));
                 steps.push("as.data.frame()".into());
+                if all_text {
+                    // an empty cell of a string is "" in Stata
+                    steps.push(
+                        "dplyr::mutate(dplyr::across(dplyr::everything(), \\(v) dplyr::coalesce(v, \"\")))"
+                            .into(),
+                    );
+                }
                 // Stata stores a column with decimals as float, unless asdouble
-                if !opts.has("asdouble", 8) {
+                if !opts.has("asdouble", 8) && !all_text {
                     self.helpers.insert("stata_float");
                     self.helpers.insert("stata_import_float");
                     steps.push("stata_import_float()".into());
@@ -1966,7 +2001,7 @@ impl Session {
                     );
                 }
                 if opts.arg("varnames", 7).as_deref() == Some("nonames") {
-                    steps.push("stats::setNames(paste0(\"v\", seq_along(.)))".into());
+                    steps.push("(\\(d) stats::setNames(d, paste0(\"v\", seq_along(d))))()".into());
                     out.caveat(
                         "columns are named v1, v2, ... as Stata does without variable names",
                     );
@@ -3210,7 +3245,7 @@ mod tests {
         );
         let out = r("import delimited using data.csv, clear\nimport excel survey.xlsx, sheet(\"Wave 2\") firstrow clear");
         assert!(out[0].starts_with(
-            "data <- readr::read_delim(\"data.csv\", na = \"\", show_col_types = FALSE)"
+            "data <- stata_read_delim(\"data.csv\", na = \"\", show_col_types = FALSE)"
         ));
         assert!(out[0].contains("dplyr::rename_with(tolower)"));
         assert!(

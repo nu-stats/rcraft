@@ -3095,3 +3095,18 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Checked:** `estout.do` (13 result lines); `eststo` and `estadd` are Verified. Observations in
   `plan/stata/estout.md`.
 - **Numbers:** the replication packages' share is 80.7% (80.2%); the add-on tier 32.3% (21.1%).
+
+## P2C.9 continued: outreg2 (SSC), and import delimited, 2026-11-03
+
+- **Installed** outreg2, parmest and fre from SSC with the user's go-ahead. SSC's `cluster2` turned out to be
+  another program (power analysis for cluster-randomized trials) and was uninstalled; the packages use
+  Mitchell Petersen's cluster2, which is not on SSC.
+- **outreg2** (`data_r/outreg2.rs`, `stata_outreg2`): `outreg2 using f.xls, tstat bdec(#) tdec(#)` with
+  `parenthesis(tstat)`, `adjr2`, `r2`, `keep()`, `e()`, `replace` writes f.txt and f.xls byte for byte as the
+  package does, a column per model. Its own number format and its LaTeX form are refused.
+- **import delimited**: `stringcols(_all)`; a line of delimiters alone is a row, as in Stata, where readr
+  dropped it (`stata_read_delim`); `varnames(nonames)` named its columns with `.` inside R's pipe, which
+  would have stopped in R.
+- **Checked:** `outreg2.do` (the .txt read back cell by cell; the files compared byte for byte with Stata's
+  by hand); `outreg2` is Verified. Observations in `plan/stata/outreg2.md`.
+- **Numbers:** the replication packages' share is 81.9% (80.7%); the add-on tier 63.1% (32.3%).

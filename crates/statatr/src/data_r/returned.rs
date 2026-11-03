@@ -1016,6 +1016,7 @@ pub(super) enum Returned {
 /// Commands after which Stata 19 still holds the r() it held before
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
+    "outreg2",
     "eststo",
     "estadd",
     "generate",
@@ -1174,7 +1175,7 @@ fn leaves_e_alone(c: &Command) -> bool {
         return !c.options.iter().any(|o| o.is("post", 4));
     }
     // the estout package's store and add: the active results stay
-    if name == "eststo" || name == "estadd" {
+    if name == "eststo" || name == "estadd" || name == "outreg2" {
         return true;
     }
     if name == "estimates" {

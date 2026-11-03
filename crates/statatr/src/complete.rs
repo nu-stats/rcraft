@@ -119,6 +119,7 @@ pub const COMMANDS: &[&str] = &[
     "ologit",
     "oprobit",
     "order",
+    "outreg2",
     "poisson",
     "predict",
     "preserve",
@@ -358,6 +359,21 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     (
         "order",
         &["after(", "alphabetic", "before(", "first", "last"],
+    ),
+    (
+        "outreg2",
+        &[
+            "adjr2",
+            "append",
+            "bdec(",
+            "e(",
+            "keep(",
+            "parenthesis(",
+            "r2",
+            "replace",
+            "tdec(",
+            "tstat",
+        ],
     ),
     (
         "poisson",
@@ -1230,6 +1246,7 @@ gettoken a b : s, {o}"
             "ttest" => format!("ttest y == x, {o}"),
             "reghdfe" if name == "absorb" || name == "noabsorb" => format!("reghdfe y x, {o}"),
             "reghdfe" => format!("reghdfe y x, absorb(g) {o}"),
+            "outreg2" => format!("regress y x\noutreg2 using t.xls, tstat bdec(3) tdec(2) {o}"),
             "xtile" => format!("xtile q = y, {o}"),
             "xtreg" => format!("xtset id t\nxtreg y x, {o}"),
             "xtset" => format!("xtset id t, {o}"),
