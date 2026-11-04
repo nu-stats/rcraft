@@ -1,13 +1,16 @@
 # RCraft
 
+**Menu-driven like Stata, accepts Stata syntax and files, but fully powered by R.**
+
 RCraft is an open-source desktop app that gives R a complete point-and-click
 front end: menus for data management, statistics and graphs, a command
 window, a data editor, results, and reports. It drives a real R
 installation, and every menu action shows the R code it ran, so you can move
 from clicking to scripting at any time.
 
-> **Status: Phase 0 (setup).** Nothing runs yet. See [ROADMAP.md](ROADMAP.md)
-> and [plan/STATUS.md](plan/STATUS.md).
+> **Status: under active development.** The R session, packages, data, catalog, core statistics and
+> graphs are built, and the Stata mode (Stata code translated to R) is in progress. See
+> [ROADMAP.md](ROADMAP.md) and [plan/STATUS.md](plan/STATUS.md).
 
 ## How it is built
 
@@ -21,7 +24,8 @@ from clicking to scripting at any time.
 
 Dual-licensed under MIT or Apache-2.0, at your option (licence files to be
 added in P0.2). RCraft is an independent project, not affiliated with the R
-Foundation or Posit.
+Foundation or Posit. Stata is a registered trademark of StataCorp LLC; RCraft is not affiliated
+with or endorsed by StataCorp.
 
 ## Running it with Pinokio
 

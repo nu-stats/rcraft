@@ -117,7 +117,7 @@ impl ApplicationHandler for SoftApp {
 impl SoftApp {
     fn open(&self, event_loop: &ActiveEventLoop) -> Result<Live, String> {
         let attributes = Window::default_attributes()
-            .with_title("RCraft")
+            .with_title(crate::WINDOW_TITLE)
             .with_inner_size(LogicalSize::new(1240.0, 780.0))
             .with_min_inner_size(LogicalSize::new(760.0, 480.0));
         let window = Arc::new(

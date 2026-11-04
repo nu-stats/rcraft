@@ -1393,6 +1393,7 @@ impl App {
                     .background_color(pal.accent),
             );
             ui.label(RichText::new("RCraft").strong());
+            ui.label(RichText::new(crate::TAGLINE).color(pal.dim));
             ui.add_space(6.0);
             ui.menu_button("File", |ui| {
                 if ui.button("Use my file…").clicked() {
