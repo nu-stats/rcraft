@@ -100,6 +100,7 @@ pub const COMMANDS: &[&str] = &[
     "histogram",
     "import",
     "include",
+    "insheet",
     "ivregress",
     "kdensity",
     "keep",
@@ -116,6 +117,7 @@ pub const COMMANDS: &[&str] = &[
     "margins",
     "matrix",
     "merge",
+    "mkmat",
     "mlogit",
     "nbreg",
     "noisily",
@@ -152,6 +154,7 @@ pub const COMMANDS: &[&str] = &[
     "stcox",
     "stset",
     "summarize",
+    "svmat",
     "syntax",
     "tab1",
     "tab2",
@@ -287,6 +290,19 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     (
+        "insheet",
+        &[
+            "case",
+            "clear",
+            "comma",
+            "delimiter(",
+            "double",
+            "names",
+            "nonames",
+            "tab",
+        ],
+    ),
+    (
         "ivregress",
         &[
             "first",
@@ -361,6 +377,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         "matrix",
         &["format(", "noblank", "nohalf", "noheader", "title("],
     ),
+    ("mkmat", &["matrix(", "nomissing"]),
     (
         "merge",
         &[
@@ -507,6 +524,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("summarize", &["detail", "format", "meanonly", "separator("]),
+    ("svmat", &["names("]),
     ("tab1", &["missing", "nolabel", "sort"]),
     (
         "tab2",
@@ -605,7 +623,10 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
         &["bar", "box", "drop", "export", "hbar", "hbox", "twoway"],
     ),
     ("import", &["delimited", "excel"]),
-    ("matrix", &["list"]),
+    (
+        "matrix",
+        &["colnames", "define", "drop", "list", "rownames"],
+    ),
     ("merge", &["1:1", "1:m", "m:1", "m:m"]),
     ("reshape", &["long", "wide"]),
     ("robreg", &["m"]),
@@ -1264,6 +1285,8 @@ gettoken a b : s, {o}"
                 format!("import excel f.xlsx, {o}")
             }
             "import" => format!("import delimited f.csv, {o}"),
+            "insheet" => format!("insheet using f.csv, {o}"),
+            "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),
             "label" => format!("label define l 1 \"a\", {o}"),
             // what predict can make depends on the model: hr after stcox, pr after

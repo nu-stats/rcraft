@@ -117,9 +117,18 @@ at the worst it fared in any run:
 |---|---:|---:|---:|---:|---:|
 | Before programs ran (main at fec1676) | 5128 | 3010 | 1366 | 752 | 68.8% |
 | With programs (2026-11-04) | 5149 | 3016 | 1376 | 757 | 68.7% |
+| With matrices and insheet (2026-11-04) | 5149 | 3060 | 1304 | 785 | 70.1% |
+| With strmatch and the trims (2026-11-04) | 5149 | 3184 | 1180 | 785 | 73.0% |
 
-Stata's matrix commands (`matrix A = J()`, element assignment, arithmetic, `mkmat`), which those
-programs are made of, are the largest part of what is left.
+Stata's matrix commands (`matrices.do`: `matrix A = ...` with `J()`, `I()`, joins, products, sums,
+transposes, `invsym()`, `inv()`, `vecdiag()`, `diag()`, `e()`; elements read and put in place; `nullmat()`;
+row and column names; `drop`; `list`; `mkmat`; `svmat`), and `insheet`, which reads the data that package's matrices
+come from, took the run lines to 50.6%. With the dry run counting a line that needs what a line known only
+when the do-file runs leaves as known when run (not as not translated), it is 64.6% of the 214,981 run lines
+a dry run judges (93,432 translated, 51,171 not, 70,378 known when run). Each line in `matrices.do` gives
+Stata 19's value, names included. `strltrim()`, `strrtrim()`, `strmatch()` and `char()` (`strings.do`), which one
+package's text cleaning starts with, took the source lines to 73.0% and the run lines to 64.9%; the trims
+now take spaces only, as Stata's do (the `ustr` ones tabs and new lines too).
 
 Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `esttab`'s `cells()` and `mlabels()`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:

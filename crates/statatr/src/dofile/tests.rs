@@ -116,8 +116,12 @@ fn a_dry_run_says_what_is_known_only_when_it_runs() {
     let s = shown(&d);
     assert!(s[2].contains("Later"), "{s:?}");
     assert!(s[3].contains("Later") && s[3].contains("`m'"), "{s:?}");
-    assert!(s[4].contains("Command"), "{s:?}");
-    assert_eq!(scan(&d).later, 2);
+    // a variable made by a line known only when run is known only when run too
+    assert!(
+        s[4].contains("Later") && s[4].contains("the line that makes it"),
+        "{s:?}"
+    );
+    assert_eq!(scan(&d).later, 3);
 }
 
 #[test]

@@ -35,6 +35,7 @@ mod graph;
 mod iv;
 mod margins;
 mod matrices;
+mod mexpr;
 mod ml;
 mod model;
 mod more;
@@ -572,6 +573,32 @@ const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ...) {
 /// single-precision value, missing kept missing.
 const FLOAT_HELPER: &str = "stata_float <- function(x) {\n  y <- readBin(writeBin(as.numeric(x), raw(), size = 4), \"double\", size = 4, n = length(x))\n  y[is.na(x) | !is.finite(y)] <- NA\n  y\n}";
 
+/// `strmatch(s, pattern)` as Stata 19: the whole string, `*` any characters
+/// (new lines too), `?` one, every other character itself (`\` and `[` too).
+const STRMATCH_HELPER: &str = r#"stata_strmatch <- function(s, p) {
+  if (!is.character(s) || !is.character(p)) stop("type mismatch (Stata: r(109))", call. = FALSE)
+  rx <- function(q) {
+    ch <- strsplit(q, "")[[1]]
+    one <- vapply(ch, function(c) if (c == "*") ".*" else if (c == "?") "." else sprintf("\\x{%x}", utf8ToInt(c)), "")
+    paste0("(?s)^", paste0(one, collapse = ""), "$")
+  }
+  n <- max(length(s), length(p))
+  s <- rep_len(s, n)
+  p <- rep_len(p, n)
+  as.numeric(vapply(seq_len(n), function(i) grepl(rx(p[i]), s[i], perl = TRUE), TRUE))
+}"#;
+
+/// `char(n)` as Stata 19: 1 to 127 that character (n truncated), missing or
+/// outside 0 to 255 ""; 0 and 128 to 255 are single bytes R's text does not
+/// hold as Stata does, so they stop.
+const CHAR_HELPER: &str = r#"stata_char <- function(n) {
+  vapply(trunc(n), function(k) {
+    if (is.na(k) || k < 0 || k > 255) return("")
+    if (k == 0 || k > 127) stop("char(", k, "): a single byte, which is not translated yet", call. = FALSE)
+    intToUtf8(k)
+  }, "")
+}"#;
+
 /// A column with decimals rounded to float, as `import delimited` stores it
 /// (whole numbers stay as they are: Stata keeps them exactly).
 const IMPORT_FLOAT_HELPER: &str = "stata_import_float <- function(d) {\n  for (n in names(d)) {\n    v <- d[[n]]\n    if (is.numeric(v) && any(!is.na(v) & v != trunc(v))) d[[n]] <- stata_float(v)\n  }\n  d\n}";
@@ -634,7 +661,12 @@ const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
   while (inherits(e$parent, "condition")) e <- e$parent
   m <- sub("^! ", "", conditionMessage(e))
   rc <- NA_real_
-  if (grepl("^file [^\n]* not found$", m)) {
+  # RCraft's own messages that name Stata's return code: Stata's words alone
+  code <- " \\(Stata: r\\(([0-9]+)\\)\\)$"
+  if (grepl(code, m)) {
+    rc <- as.numeric(sub(paste0("^.*", code), "\\1", m))
+    m <- sub(code, "", m)
+  } else if (grepl("^file [^\n]* not found$", m)) {
     rc <- 601
   } else if (grepl("^file [^\n]* already exists$", m)) {
     rc <- 602
@@ -696,6 +728,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_coefplot" => coefplot::COEFPLOT_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
+        "stata_strmatch" => STRMATCH_HELPER,
+        "stata_char" => CHAR_HELPER,
+        "stata_insheet" => more::INSHEET_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
@@ -764,6 +799,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_set_obs" => SET_OBS_HELPER,
         "stata_expand" => EXPAND_HELPER,
         "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
+        "stata_matrix" => mexpr::MATRIX_HELPER,
+        "stata_svmat" => matrices::SVMAT_HELPER,
         "stata_rng" => random::RNG_HELPER,
         "stata_bootstrap" => random::BOOTSTRAP_HELPER,
         _ => FLOAT_HELPER,
@@ -805,6 +842,10 @@ struct Session {
     stored_fits: BTreeMap<String, returned::StoredFit>,
     /// the models eststo stored, in order, for esttab without names
     eststo_names: Vec<String>,
+    /// The matrices the do-file made (`matrix A = ...`), kept in R as stata_mat.
+    user_mats: BTreeSet<String>,
+    /// Matrices a line that was not translated may have changed: name -> that line.
+    lost_mats: BTreeMap<String, String>,
     /// The programs being run, innermost last: name, class, and the r()
     /// names an r-class one has returned so far (number, text).
     programs: Vec<returned::ProgramRun>,
@@ -1259,6 +1300,26 @@ impl Session {
         if let Some(p) = self.programs.last_mut() {
             p.refused = true;
         }
+        // a matrix the line names may have changed: no longer known (before
+        // the return below, since a matrix lost earlier can look like an error)
+        let named: Vec<String> = self
+            .user_mats
+            .iter()
+            .filter(|m| matrices::may_write(stata, m))
+            .cloned()
+            .collect();
+        let mut named = named;
+        named.extend(matrices::written(stata));
+        for m in named {
+            self.user_mats.remove(&m);
+            // (the reason kept when only the run can tell)
+            let why = if reason.contains(crate::dofile::KNOWN_WHEN_RUN) {
+                format!("{}: {reason}", stata.trim())
+            } else {
+                stata.trim().to_string()
+            };
+            self.lost_mats.insert(m, why);
+        }
         // a line Stata stops at with an error leaves the data as it was
         if reason.contains("Stata stops here") || reason.contains("(Stata: ") {
             return;
@@ -1267,8 +1328,14 @@ impl Session {
         // `estimates store` did not keep may be stored in Stata
         self.stores_lost = true;
         if let Some(c) = crate::reader::read(stata.trim()).commands().first() {
+            let later = reason.contains(crate::dofile::KNOWN_WHEN_RUN);
             for v in new_vars(c) {
-                self.lost_vars.insert(v, stata.trim().to_string());
+                let line = if later {
+                    format!("{}: {reason}", stata.trim())
+                } else {
+                    stata.trim().to_string()
+                };
+                self.lost_vars.insert(v, line);
             }
         }
         let word = crate::dofile::command_name(stata.trim());
@@ -1330,6 +1397,12 @@ impl Session {
             word.clear();
         }
         let (v, line) = found?;
+        if line.contains(crate::dofile::KNOWN_WHEN_RUN) {
+            return Some(format!(
+                "{v} is {}: the line that makes it is ({line})",
+                crate::dofile::KNOWN_WHEN_RUN
+            ));
+        }
         Some(format!("{v} {LOST_VAR} ({line})"))
     }
 
@@ -1704,6 +1777,7 @@ impl Session {
             "use" => self.use_(c, &opts, out),
             "save" | "saveold" => self.save(c, &opts, out),
             "import" => self.import(c, &opts, out),
+            "insheet" => self.insheet(c, &opts, out),
             "generate" => self.generate(c, &opts, out),
             "replace" => self.replace(c, out),
             "drop" | "keep" => self.drop_keep(c, c.name == "keep", out),
@@ -1714,6 +1788,8 @@ impl Session {
             "label" => self.label(c, &opts, out),
             "count" => self.count(c, out),
             "levelsof" => self.levelsof(c, &opts, out),
+            "mkmat" => self.mkmat(c, &opts, out),
+            "svmat" => self.svmat(c, &opts, out),
             "_natscale" => self.natscale(c, out),
             "list" => self.list(c, &opts, out),
             "describe" => self.describe(c, out),

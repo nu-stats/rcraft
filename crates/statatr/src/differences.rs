@@ -505,6 +505,19 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "insheet",
+        about: "Reads a tab or comma file",
+        points: &[p(
+            "As Stata 19 reads it",
+            "A tab in the first line makes it tab, else comma. Names come from the first row \
+             when no cell of it is a number (lowercase, what is not a letter, digit or _ left \
+             out, the header kept as the label where it differs; case keeps the case), v1, v2, \
+             ... when every cell is one; decimals are floats unless double. A first row of \
+             both, headers Stata would have to make names up for, and an empty column stop \
+             rather than guess.",
+        )],
+    },
+    Guide {
         command: "ivregress",
         about: "Instrumental-variables regression",
         points: &[
@@ -669,11 +682,36 @@ pub const GUIDES: &[Guide] = &[
     },
     Guide {
         command: "matrix",
-        about: "matrix list",
+        about: "Matrices: define, elements, names, list",
+        points: &[
+            p(
+                "Columns",
+                "e(b) and e(V) have Stata's columns (base levels as zeros, o. for omitted, the \
+                 equations), printed in Stata's layout at a linesize of 80.",
+            ),
+            p(
+                "The do-file's matrices",
+                "Kept in R as stata_mat, with Stata's row and column names: r1, r2, ... and c1, \
+                 c2, ... by default; a product takes the left one's rows and the right one's \
+                 columns, a sum the right one's names, a transpose swaps them, and joins with , \
+                 and \\ number default names again (read off Stata 19). A 1x1 matrix multiplies \
+                 as a number. invsym() of a singular matrix (Stata's generalized inverse), the \
+                 Kronecker product #, submatrices (A[1..2, 3]) and cholesky() are declined.",
+            ),
+            p(
+                "When a matrix is not known",
+                "A matrix that a line not translated may have changed is declined from then on, \
+                 never guessed; nullmat() of it as well.",
+            ),
+        ],
+    },
+    Guide {
+        command: "mkmat",
+        about: "Variables into a matrix",
         points: &[p(
-            "Columns",
-            "e(b) and e(V) have Stata's columns (base levels as zeros, o. for omitted, the \
-             equations), printed in Stata's layout at a linesize of 80.",
+            "Rows",
+            "The rows kept (if, in; nomissing leaves out rows with a missing value), named r1, \
+             r2, ...; without matrix() a column vector for each variable, as Stata.",
         )],
     },
     Guide {
@@ -1024,6 +1062,16 @@ pub const GUIDES: &[Guide] = &[
                  detail and weights keep R's layout.",
             ),
         ],
+    },
+    Guide {
+        command: "svmat",
+        about: "A matrix's columns as variables",
+        points: &[p(
+            "As Stata 19",
+            "A1, A2, ... by default, the column names with names(col), stub1, stub2, ... with \
+             names(stub); floats unless double; observations added when the matrix has more \
+             rows than the data, with Stata's message; a name already taken stops (r(110)).",
+        )],
     },
     Guide {
         command: "syntax",

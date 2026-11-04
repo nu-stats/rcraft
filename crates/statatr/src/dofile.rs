@@ -1788,6 +1788,21 @@ impl<'f> Run<'f> {
             collect_commands(o, &mut commands);
         }
         for c in commands {
+            // a macro the block sets is not known after it, unless Stata
+            // stops at the block too (then it keeps its value)
+            if !matches!(e, Stop::Stata(_)) && matches!(c.name.as_str(), "local" | "global") {
+                let rest = after_word(&c.text, &c.written);
+                let name = rest.split_whitespace().next().unwrap_or("");
+                let name = name.split(['=', ':']).next().unwrap_or("");
+                if macros::is_name(name) {
+                    let why = format!("may be set inside a block that is not run: {why}");
+                    let m = match e {
+                        Stop::Later(_) => Macro::Later(why),
+                        _ => Macro::Lost(why),
+                    };
+                    self.set_macro(name, c.name == "global", m);
+                }
+            }
             let line = self.t.refused(c.span, c.text.clone(), inside.clone());
             self.push(line, what, None, c.text.clone());
         }
@@ -2061,6 +2076,11 @@ impl<'f> Run<'f> {
     // ---------------- lines ----------------
 
     fn push(&mut self, line: Line, what: What, info: Option<String>, written: String) {
+        // refused for something a line before it leaves only when the do-file runs
+        let what = match (&what, &line.result) {
+            (What::Command, Err(e)) if e.reason.contains(KNOWN_WHEN_RUN) => What::Later,
+            _ => what,
+        };
         // a line that may have changed the data's variables: R is asked their names again
         if matches!(what, What::Command | What::Later) {
             let word = scan::command_word(&line.stata);

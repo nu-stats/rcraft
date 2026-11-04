@@ -3235,3 +3235,31 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   Stata's matrix commands (`matrix A = J()`, element assignment, arithmetic, `mkmat`) are the largest gap
   left, and come next.
 - **Numbers:** the probes (413): 163,251 of 207,967 run lines translated (78.5%; 159,806 of 190,664 before programs ran); 5,566 of 5,684 compared lines match Stata to 8 digits, 5 more to 6; the 113 that differ are all `_natscale`.
+
+## Step 3 continued: Stata's matrices, and insheet, 2026-11-04
+
+- **Matrices** (`data_r/mexpr.rs`, `data_r/matrices.rs`): `matrix A = exp` with `J()`, `I()`, joins with `,`
+  and `\`, products, sums, a number or 1x1 matrix times a matrix, `/` by a number, transposes, `invsym()`,
+  `inv()`, `vecdiag()`, `diag()`, `e()` and `r()` matrices, `nullmat()`, any other function as a number;
+  `matrix A[i,j] = exp` (a matrix put with its corner there); `rownames`, `colnames`, `drop`, `list` of
+  the do-file's matrices; elements by number or name in any expression (`A[1, "x"]`, `el()`, `rowsof()`);
+  `mkmat` with if, in, nomissing and without `matrix()`. Every name follows Stata 19 as probed (a sum
+  takes the right one's names; `plan/stata/matrices.md`). A matrix a refused line may change is declined
+  from then on; one never made stops R with r(111) as Stata does. Declined: `#`, submatrices,
+  `cholesky()`, a singular `invsym()`.
+- **insheet**, as Stata 19 reads a file (its names, labels, floats, `double`, `nonames`, `case`, r(18)).
+- **svmat** (names(col), a stub, float or double, the rows it adds, r(110)), with `matrices.do`.
+- **The dry run:** macros set in a loop it cannot run are known only when run; a line refused for what
+  such a line leaves counts as known when run.
+- **Checked:** `matrices.do` (29 results against Stata 19), and three probes compared screen for screen
+  (`matrix list` of every form above matches Stata's output).
+- **Numbers:** the packages' source lines, each once: 70.1% of 5,149 (68.7%). Run lines: 50.6% translated
+  (40.0%); 64.6% of those a dry run judges once lines that wait on run-time values count as such.
+- **Strings** (`expr_r.rs`, `strings.do`, 11 results against Stata 19): `strltrim()`, `strrtrim()`,
+  `strmatch()` (`*` and `?`, every other character itself, new lines matched by `*`) and `char()` (ASCII;
+  "" when missing or past 255; a single byte stops). `trim`, `strtrim`, `ltrim`, `rtrim` and the `str`
+  forms took tabs and new lines as R's `trimws()` does; Stata's take spaces only, as now (the `ustr` ones
+  take tabs and new lines too). `float()`. TZEN38's text cleaning now stops first at `split`.
+- **Numbers:** source lines 73.0% of 5,149; run lines 64.9% of those a dry run judges.
+- **Probes (415):** 163,509 of 207,839 run lines translated (78.7%); 5,569 of 5,687 compared lines match
+  Stata to 8 digits, 5 more to 6; the 113 that differ are all `_natscale`.

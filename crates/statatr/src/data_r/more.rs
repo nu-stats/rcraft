@@ -1570,3 +1570,151 @@ impl Session {
         Ok(())
     }
 }
+
+/// `insheet`, as Stata 19 reads a file: tab or comma (a tab in the first
+/// line makes it tab), names from the first row when no cell of it is a
+/// number (lowercase, with what is not a letter, digit or _ left out, the
+/// header kept as the label where it differs), v1, v2, ... when every cell
+/// is one; decimals as float unless double. What Stata's rules there are
+/// not read off for (a first row of both, names it would have to make up,
+/// an empty column) stops rather than guess.
+pub(super) const INSHEET_HELPER: &str = r##"stata_insheet <- function(file, delim = NULL, names = NA, case = FALSE, double = FALSE, show = TRUE) {
+  if (!file.exists(file)) stop("file ", file, " not found", call. = FALSE)
+  lines <- sub("\r$", "", readLines(file, warn = FALSE))
+  lines <- lines[nzchar(lines)]
+  if (!length(lines)) stop("insheet of an empty file is not translated yet", call. = FALSE)
+  if (is.null(delim)) delim <- if (grepl("\t", lines[1], fixed = TRUE)) "\t" else ","
+  cells <- as.data.frame(readr::read_delim(I(paste0(lines, collapse = "\n")), delim = delim, col_names = FALSE,
+    col_types = readr::cols(.default = "c"), na = character(), trim_ws = FALSE, skip_empty_rows = FALSE,
+    show_col_types = FALSE))
+  num <- function(v) grepl("^[-+]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][-+]?[0-9]+)?$", v)
+  first <- unlist(cells[1, ], use.names = FALSE)
+  if (is.na(names)) {
+    names <- if (all(nzchar(first) & !num(first))) TRUE else if (all(num(first))) FALSE else
+      stop("insheet: a first row with both names and numbers is not translated yet", call. = FALSE)
+  }
+  if (names) {
+    nm <- gsub("[^A-Za-z0-9_]", "", first)
+    if (!case) nm <- tolower(nm)
+    cells <- cells[-1, , drop = FALSE]
+    if (any(!nzchar(nm) | grepl("^[0-9]", nm) | nchar(nm) > 32 | duplicated(nm)))
+      stop("insheet: names Stata would make up for these headers are not translated yet", call. = FALSE)
+  } else {
+    nm <- paste0("v", seq_along(cells))
+  }
+  d <- list()
+  for (k in seq_along(cells)) {
+    v <- cells[[k]]
+    if (!any(nzchar(v))) stop("insheet: an empty column is not translated yet", call. = FALSE)
+    if (all(num(v) | !nzchar(v))) {
+      x <- suppressWarnings(as.numeric(ifelse(nzchar(v), v, NA)))
+      if (!double && any(!is.na(x) & x != trunc(x))) x <- stata_float(x)
+      v <- x
+    }
+    if (names && first[k] != nm[k]) {
+      if (case) stop("insheet, case with a header that is not a name is not translated yet", call. = FALSE)
+      attr(v, "label") <- first[k]
+    }
+    d[[nm[k]]] <- v
+  }
+  d <- structure(d, names = nm, row.names = .set_row_names(nrow(cells)), class = "data.frame")
+  if (show) cat("(", ncol(d), " vars, ", nrow(d), " obs)\n", sep = "")
+  d
+}"##;
+
+impl Session {
+    /// `insheet using file [, clear tab comma delimiter() names nonames case double]`.
+    pub(super) fn insheet(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[
+            ("clear", 5),
+            ("tab", 3),
+            ("comma", 5),
+            ("delimiter", 5),
+            ("names", 5),
+            ("nonames", 7),
+            ("case", 4),
+            ("double", 6),
+        ]) {
+            return Err(no(format!(
+                "insheet with the option {o} is not translated yet"
+            )));
+        }
+        if !c.parts.main.trim().is_empty() {
+            return Err(no(
+                "insheet of chosen variables (varlist using) is not translated yet",
+            ));
+        }
+        let file = c
+            .using
+            .clone()
+            .ok_or_else(|| no("insheet needs using and a file"))?;
+        if !opts.has("clear", 5) {
+            if self.data.is_some() {
+                return Err(no("you must start with an empty dataset (Stata: r(18))"));
+            }
+            if let Some(why) = &self.data_lost {
+                return Err(no(format!(
+                    "insheet without clear: whether data is in memory is not known here ({why})"
+                )));
+            }
+        }
+        let path = file_name(&file, "");
+        let name = frame_name(&path);
+        let mut args = vec![r_text(&path)];
+        let delim = match (
+            opts.has("tab", 3),
+            opts.has("comma", 5),
+            opts.arg("delimiter", 5),
+        ) {
+            (true, false, None) => Some("\t".to_string()),
+            (false, true, None) => Some(",".to_string()),
+            (false, false, Some(d)) => Some(d.trim().trim_matches('"').to_string()),
+            (false, false, None) => None,
+            _ => {
+                return Err(no(
+                    "insheet: tab, comma and delimiter() are one or the other",
+                ))
+            }
+        };
+        if let Some(d) = delim {
+            if d.chars().count() != 1 {
+                return Err(no(format!(
+                    "insheet: delimiter(\"{d}\") is one character (Stata: r(198))"
+                )));
+            }
+            args.push(format!("delim = {}", r_text(&d)));
+        }
+        match (opts.has("names", 5), opts.has("nonames", 7)) {
+            (true, true) => return Err(no("insheet: names and nonames together")),
+            (true, false) => args.push("names = TRUE".into()),
+            (false, true) => args.push("names = FALSE".into()),
+            (false, false) => {}
+        }
+        if opts.has("case", 4) {
+            args.push("case = TRUE".into());
+        }
+        if opts.has("double", 6) {
+            args.push("double = TRUE".into());
+        }
+        if self.quiet(c) {
+            args.push("show = FALSE".into());
+        }
+        out.package("readr");
+        self.helpers.insert("stata_float");
+        self.helpers.insert("stata_insheet");
+        out.line(format!("{name} <- stata_insheet({})", args.join(", ")));
+        self.data = Some(name);
+        self.data_lost = None;
+        self.file = None;
+        self.kinds.clear();
+        self.fv_base.clear();
+        self.forget_ts();
+        self.label_sets.clear();
+        Ok(())
+    }
+}
