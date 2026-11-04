@@ -1,2 +1,4 @@
 * text=auto eol=lf
 *.png binary
+# Compressed test files from Husky Explorer, made by xz 5.8.3, zstd 1.5.7 and bzip2 1.0.8
+crates/rdata/fixtures/unpack/* binary
