@@ -107,6 +107,20 @@ Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`
 | Other commands | 2657 | 2104 | 295 | 258 | 87.7% |
 | **All** | 15147 | 12098 | 2101 | 948 | 85.2% |
 
+That table counts lines as a dry run runs them, so a line in a loop counts each time it runs. From
+2026-11-04 the programs a do-file defines run where they are called (`programs.do`). One package's matrix
+simulation (TZEN38's `learnalg`, called in loops) then adds about 200,000 run lines, most of them
+`matrix` commands, and the share falls to 40.0% of 214,981. So the test also counts each source line once,
+at the worst it fared in any run:
+
+| Source lines, each once | Lines | Translated | Not translated | Known when run | Share translated |
+|---|---:|---:|---:|---:|---:|
+| Before programs ran (main at fec1676) | 5128 | 3010 | 1366 | 752 | 68.8% |
+| With programs (2026-11-04) | 5149 | 3016 | 1376 | 757 | 68.7% |
+
+Stata's matrix commands (`matrix A = J()`, element assignment, arithmetic, `mkmat`), which those
+programs are made of, are the largest part of what is left.
+
 Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `esttab`'s `cells()` and `mlabels()`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:
 - graphs (44 of 117): `graph export` after `grstyle` and `marginsplot`, `saving()` in twoway and `graph combine`;
@@ -157,8 +171,8 @@ The run also found, and fixed:
 
 ## Checked against Stata on R (2026-11-04)
 
-The 412 probes recorded in StatCraft's corpus are each run on R 4.6 in a fresh session, as the do-file window
-runs a do-file: 190,664 lines ran, and 159,806 of them (83.8%) were translated (159,638 of 190,347 in 406 probes on 2026-11-03; 158,643 of 189,013 in 390 probes on 2026-11-01; 126,618 before the dates, P2C.14; 135,471 before `bsample`, P2C.16).
+The 413 probes recorded in StatCraft's corpus are each run on R 4.6 in a fresh session, as the do-file window
+runs a do-file: 207,967 lines ran, and 163,251 of them (78.5%) were translated, the programs they define now run where they are called (159,806 of 190,664 in 412 probes before; 159,638 of 190,347 in 406 probes on 2026-11-03; 158,643 of 189,013 in 390 probes on 2026-11-01; 126,618 before the dates, P2C.14; 135,471 before `bsample`, P2C.16).
 
 | | Lines | Before P2C.12 | Before P2C.11 |
 |---|---:|---:|---:|
@@ -166,7 +180,7 @@ runs a do-file: 190,664 lines ran, and 159,806 of them (83.8%) were translated (
 | The same to 8 significant digits | 5,566 | 205 | 192 |
 | The same to 6, not 8 | 5 | 1 | 1 |
 | Different | 113 | 4 | 3 |
-| Not compared: after the probe's first R error, where the do-file window stops | 233 | 207 | 199 |
+| Not compared: after the probe's first R error, where the do-file window stops | 238 | 207 | 199 |
 | Printed by Stata, not translated (counted from P2C.12) | 852 | | |
 | Translated lines that R stopped at | 530 | 429 | 399 |
 

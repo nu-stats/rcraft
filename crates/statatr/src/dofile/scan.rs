@@ -164,7 +164,7 @@ pub fn scan(d: &DoFile) -> Scan {
             limit(&mut s, "Mata: its blocks are not run.");
         }
         if lower.starts_with("program define") {
-            limit(&mut s, "Programs the do-file defines (program define ... end) are not run, nor the lines that call them.");
+            limit(&mut s, "Programs the do-file defines (program define ... end) run where they are called, with args, syntax and return; e-class programs (ereturn post) are not translated yet, and a program with a line that is not translated leaves r() unknown.");
         }
         if lower.contains("plugin") {
             limit(&mut s, "Compiled plugins are not run.");

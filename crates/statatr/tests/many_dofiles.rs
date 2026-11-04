@@ -73,6 +73,9 @@ fn the_share_translated_per_tier() {
     let mut c = Coverage::default();
     // every line not translated, with its reason, when asked for
     let mut refused = String::new();
+    // each source line once (a line in a loop or a program runs many times)
+    let mut distinct: std::collections::BTreeMap<(String, usize, usize), u8> =
+        std::collections::BTreeMap::new();
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap_or_default();
         let name = f
@@ -88,6 +91,16 @@ fn the_share_translated_per_tier() {
         let d = dry_run(&text, &NoFiles, opts);
         for (line, origin) in d.translation.lines.iter().zip(&d.origins) {
             let st = rcraft_statatr::dofile::status(line, origin);
+            // each line of the source once, at the worst it fared in any run of it
+            let rank = match st {
+                rcraft_statatr::dofile::Status::Not => 2,
+                rcraft_statatr::dofile::Status::Later => 1,
+                _ => 0,
+            };
+            let slot = distinct
+                .entry((name.clone(), origin.file, origin.span.line))
+                .or_insert(0);
+            *slot = (*slot).max(rank);
             if let (rcraft_statatr::dofile::Status::Not, Err(e)) = (st, &line.result) {
                 refused.push_str(&format!("{name}\t{}\t{}\n", line.stata.trim(), e.reason));
             }
@@ -98,6 +111,16 @@ fn the_share_translated_per_tier() {
         std::fs::write(&out, &refused).unwrap_or_else(|e| panic!("{out}: {e}"));
     }
     let total = c.total();
+    let (dt, dl, dn) = distinct.values().fold((0, 0, 0), |(t, l, n), r| match r {
+        0 => (t + 1, l, n),
+        1 => (t, l + 1, n),
+        _ => (t, l, n + 1),
+    });
+    eprintln!(
+        "source lines, each once: {}: {dt} translated, {dn} not, {dl} known only when run ({:.1}% of those a dry run judges)",
+        distinct.len(),
+        if dt + dn > 0 { 100.0 * dt as f64 / (dt + dn) as f64 } else { 0.0 }
+    );
     eprintln!(
         "{} files, {} lines: {} translated, {} not, {} known only when run ({:.1}% of those a dry run judges)",
         c.files, total.lines, total.translated, total.not, total.later, total.share()

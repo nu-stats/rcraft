@@ -381,9 +381,19 @@ fn statcrafts_probes_run_on_r() {
         };
         let folder = work.join(name);
         let _ = std::fs::create_dir_all(&folder);
-        let Some(mut e) = engine() else {
-            eprintln!("skipped: no supported R on this machine");
-            return;
+        // R may fail to start now and then (a session before it still closing):
+        // try again, and if it still will not, say which probe and go on
+        let Some(mut e) = engine().or_else(|| {
+            std::thread::sleep(Duration::from_secs(5));
+            engine()
+        }) else {
+            if per_probe.is_empty() {
+                eprintln!("skipped: no supported R on this machine");
+                return;
+            }
+            eprintln!("{name}: R did not start for it");
+            per_probe.push(format!("{name}: R did not start for it"));
+            continue;
         };
         let f = folder.display().to_string().replace('\\', "/");
         let p = run_probe(&mut e, &f, &dofile, budget);

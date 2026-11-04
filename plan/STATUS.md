@@ -3216,3 +3216,22 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   levels (`Constraint 1 dropped`, r(dropped_1), r(drop), and F(0, df) = . when none is left), `lincom`
   shows it `0 (omitted)`, both with `_rc` 0 as in Stata (`regress.do`).
 - **Numbers:** the probes (412): 159,806 of 190,664 lines translated (83.8%); 5,566 of 5,684 compared lines match Stata to 8 digits, 5 more to 6; the 113 that differ are all `_natscale`.
+
+## Step 3 begun: programs, and a second measure, 2026-11-04
+
+- **Programs** (`dofile.rs`, `dofile/progsyntax.rs`, `data_r/returned.rs`): `program define name[, rclass]
+  ... end` is kept and run where it is called, its lines translated as any, with locals of its own (`0',
+  `1' ...), `args`, `syntax` (varlist, namelist or anything; [if] [in]; flags, noCONstant, typed options
+  with defaults, `*`), `marksample` (as generate, replace and markout lines), `exit` returning from it,
+  nested calls, its temporary variables dropped when it returns, and an r-class program's `return scalar`,
+  `return local` and `return clear` as r() afterwards. A program with a line that is not translated leaves
+  r() unknown; e-class programs are not translated yet.
+- **Checked:** `programs.do` (9 results against Stata 19); the 28 StatCraft probes that define programs, none
+  differing: probe 110 went from 4 translated lines to 607, 346 from 18 to 766, 348 from 502 to 1,463.
+- **A second measure:** the packages' share counts lines as they run, so a line in a loop counts each time.
+  With programs run, one package's matrix simulation (TZEN38's `learnalg`, called in loops) adds about
+  200,000 run lines, most of them `matrix` commands, and that share falls to 40.0%. Counting each source
+  line once (`many_dofiles` prints it too): 68.7% of 5,149 lines, against 68.8% of 5,128 before programs.
+  Stata's matrix commands (`matrix A = J()`, element assignment, arithmetic, `mkmat`) are the largest gap
+  left, and come next.
+- **Numbers:** the probes (413): 163,251 of 207,967 run lines translated (78.5%; 159,806 of 190,664 before programs ran); 5,566 of 5,684 compared lines match Stata to 8 digits, 5 more to 6; the 113 that differ are all `_natscale`.

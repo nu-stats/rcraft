@@ -21,6 +21,7 @@
 mod eval;
 mod format;
 mod macros;
+mod progsyntax;
 mod scan;
 mod varlist;
 
@@ -261,10 +262,12 @@ enum Macro {
 
 #[derive(Debug, Clone)]
 enum Kind {
-    /// The do-file, or one run with `do`/`run`: its own locals.
+    /// The do-file, one run with `do`/`run`, or a program it calls (its name
+    /// and class): its own locals.
     File {
         file: usize,
         locals: BTreeMap<String, Macro>,
+        program: Option<(String, String)>,
     },
     /// A file run with `include`: the locals of the one that includes it.
     Include {
@@ -280,6 +283,15 @@ enum Kind {
         condition: String,
         rounds: usize,
     },
+}
+
+/// A program the do-file defines: its body, the file it is written in and
+/// its class (`rclass`, `eclass`, `sclass` or "" for none).
+#[derive(Debug, Clone)]
+struct ProgramDef {
+    items: Rc<Vec<Item>>,
+    file: usize,
+    class: String,
 }
 
 #[derive(Debug, Clone)]
@@ -302,7 +314,12 @@ pub struct Run<'f> {
     lines: Vec<Line>,
     origins: Vec<Origin>,
     refs: Vec<FileRef>,
-    programs: BTreeSet<String>,
+    /// The programs the do-file defined: their bodies, the file each is in,
+    /// and their class (rclass, eclass, ...).
+    programs: BTreeMap<String, ProgramDef>,
+    /// The temporary variables each program being run made, innermost last:
+    /// Stata drops them when it returns.
+    program_temps: Vec<Vec<String>>,
     /// A line before that was not translated runs a program or an add-on,
     /// which may set any global; the globals the do-file has not set are not
     /// known after it.
@@ -349,6 +366,7 @@ impl<'f> Run<'f> {
                 kind: Kind::File {
                     file: 0,
                     locals: BTreeMap::new(),
+                    program: None,
                 },
                 prefixes: Vec::new(),
             }],
@@ -357,7 +375,8 @@ impl<'f> Run<'f> {
             lines: Vec::new(),
             origins: Vec::new(),
             refs: Vec::new(),
-            programs: BTreeSet::new(),
+            programs: BTreeMap::new(),
+            program_temps: Vec::new(),
             globals_unknown: None,
             one_line_if: None,
             temp: 0,
@@ -599,9 +618,20 @@ impl<'f> Run<'f> {
                 }
             }
             _ => {
-                self.frames.pop();
+                let popped = self.frames.pop();
                 if self.frames.is_empty() {
                     self.done = true;
+                }
+                if let Some(Frame {
+                    kind:
+                        Kind::File {
+                            program: Some((name, class)),
+                            ..
+                        },
+                    ..
+                }) = popped
+                {
+                    return self.program_end(&name, &class);
                 }
                 Flow::Next
             }
@@ -853,6 +883,11 @@ impl<'f> Run<'f> {
                     } else {
                         format!("__{:06}", self.temp)
                     };
+                    if c.name == "tempvar" {
+                        if let Some(t) = self.program_temps.last_mut() {
+                            t.push(value.clone());
+                        }
+                    }
                     self.temp += 1;
                     made.push(format!("{n} is {value}"));
                     self.set_local_now(n, Macro::Text(value));
@@ -1020,6 +1055,26 @@ impl<'f> Run<'f> {
             }
             "exit" => {
                 self.done_item(depth);
+                // in a program, exit returns from it
+                if self.in_program() {
+                    self.push(
+                        nothing(c),
+                        What::Control,
+                        Some("the program returns here".into()),
+                        written,
+                    );
+                    while let Some(f) = self.frames.pop() {
+                        if let Kind::File {
+                            program: Some((name, class)),
+                            ..
+                        } = f.kind
+                        {
+                            let _ = self.program_end(&name, &class);
+                            break;
+                        }
+                    }
+                    return Flow::Line;
+                }
                 self.push(
                     nothing(c),
                     What::Control,
@@ -1097,15 +1152,181 @@ impl<'f> Run<'f> {
                 self.push(line, What::Command, None, written);
                 Flow::Line
             }
-            name if self.programs.contains(name) => {
+            // `syntax ...`: the call's text read as the program describes it
+            "syntax" if self.in_program() => {
                 self.done_item(depth);
-                let line = self.t.refused(
-                    c.span,
-                    c.text.clone(),
-                    format!("this runs {name}, a program the do-file defines; programs are not translated yet"),
+                let call = match self.locals().and_then(|l| l.get("0").cloned()) {
+                    Some(Macro::Text(t)) => t,
+                    _ => String::new(),
+                };
+                match progsyntax::locals(&rest, &call) {
+                    Ok(set) => {
+                        let shown: Vec<String> = set
+                            .iter()
+                            .filter(|(_, v)| !v.is_empty())
+                            .map(|(n, v)| format!("{n} is {v}"))
+                            .collect();
+                        for (n, v) in set {
+                            self.set_local_now(&n, Macro::Text(v));
+                        }
+                        let info = if shown.is_empty() {
+                            "the program's call, read".to_string()
+                        } else {
+                            shown.join("; ")
+                        };
+                        self.push(nothing(c), What::Control, Some(info), written);
+                    }
+                    Err(why) => {
+                        let lost = format!("syntax was not translated: {why}");
+                        for n in ["varlist", "namelist", "anything", "if", "in", "options"] {
+                            self.set_local_now(n, Macro::Lost(lost.clone()));
+                        }
+                        let line = self.t.refused(c.span, c.text.clone(), why);
+                        self.push(line, What::Command, None, written);
+                    }
+                }
+                Flow::Line
+            }
+            // `marksample touse`: 1 on the rows if and in keep, 0 where a
+            // variable of varlist is missing (unless novarlist)
+            "marksample" if self.in_program() => {
+                self.done_item(depth);
+                let (names, opts) = rest.split_once(',').unwrap_or((rest.as_str(), ""));
+                let Some(name) = words(names).first().cloned() else {
+                    let line = self
+                        .t
+                        .refused(c.span, c.text.clone(), "marksample needs a name");
+                    self.push(line, What::Command, None, written);
+                    return Flow::Line;
+                };
+                let local_text =
+                    |me: &Self, n: &str| match me.locals().and_then(|l| l.get(n).cloned()) {
+                        Some(Macro::Text(t)) => Some(t),
+                        None => Some(String::new()),
+                        _ => None,
+                    };
+                let (Some(cond_if), Some(cond_in), Some(vars)) = (
+                    local_text(self, "if"),
+                    local_text(self, "in"),
+                    local_text(self, "varlist"),
+                ) else {
+                    let line = self.t.refused(
+                        c.span,
+                        c.text.clone(),
+                        "marksample: the program's syntax was not translated",
+                    );
+                    self.push(line, What::Command, None, written);
+                    return Flow::Line;
+                };
+                let tv = format!("__{:06}", self.temp);
+                self.temp += 1;
+                self.set_local_now(&name, Macro::Text(tv.clone()));
+                if let Some(t) = self.program_temps.last_mut() {
+                    t.push(tv.clone());
+                }
+                let mut steps = vec![
+                    format!("quietly generate byte {tv} = 0"),
+                    format!("quietly replace {tv} = 1 {cond_if} {cond_in}")
+                        .trim_end()
+                        .to_string(),
+                ];
+                if !opts.contains("novarlist") {
+                    for v in vars.split_whitespace() {
+                        steps.push(format!("quietly replace {tv} = 0 if missing({v})"));
+                    }
+                }
+                for s in steps {
+                    let cmd = self.internal(c.span, &s);
+                    let line = self.t.command(&cmd);
+                    self.push(
+                        line,
+                        What::Command,
+                        Some(format!("marksample {name}: {s}")),
+                        written.clone(),
+                    );
+                }
+                Flow::Line
+            }
+            // `args a b`: a program's arguments as locals (`1' is a, `2' is b)
+            "args" if self.in_program() => {
+                self.done_item(depth);
+                for (i, n) in words(&rest).iter().enumerate() {
+                    let v = self
+                        .locals()
+                        .and_then(|l| l.get(&(i + 1).to_string()).cloned())
+                        .unwrap_or(Macro::Text(String::new()));
+                    self.set_local_now(n, v);
+                }
+                self.push(
+                    nothing(c),
+                    What::Control,
+                    Some("the program's arguments".into()),
+                    written,
                 );
-                self.globals_unknown = Some(c.text.trim().to_string());
-                self.push(line, What::Command, None, written);
+                Flow::Line
+            }
+            name if self.programs.contains_key(name) => {
+                self.done_item(depth);
+                let Some(def) = self.programs.get(name).cloned() else {
+                    return Flow::Next;
+                };
+                let deep = self
+                    .frames
+                    .iter()
+                    .filter(|f| {
+                        matches!(
+                            f.kind,
+                            Kind::File {
+                                program: Some(_),
+                                ..
+                            }
+                        )
+                    })
+                    .count();
+                if deep >= MAX_FILES_DEEP {
+                    let line = self.t.refused(
+                        c.span,
+                        c.text.clone(),
+                        format!("programs called from programs more than {MAX_FILES_DEEP} deep are not run"),
+                    );
+                    self.push(line, What::Command, None, written);
+                    return Flow::Line;
+                }
+                // `0' is what follows the name, `1', `2' ... its words
+                let mut locals = BTreeMap::new();
+                locals.insert("0".to_string(), Macro::Text(rest.trim().to_string()));
+                for (i, a) in macros::tokens(&rest).iter().enumerate() {
+                    locals.insert((i + 1).to_string(), Macro::Text(macros::unquote(a)));
+                }
+                // the R that starts it: an r-class program collects its r()
+                let class_word = if def.class.is_empty() {
+                    "-"
+                } else {
+                    def.class.as_str()
+                };
+                let begin = self.internal(
+                    c.span,
+                    &format!("_rcraft_program_begin {name} {class_word}"),
+                );
+                let mut line = self.t.command(&begin);
+                line.stata = c.text.clone();
+                self.push(
+                    line,
+                    What::Command,
+                    Some(format!("runs the program {name}")),
+                    written,
+                );
+                self.frames.push(Frame {
+                    items: def.items,
+                    at: 0,
+                    kind: Kind::File {
+                        file: def.file,
+                        locals,
+                        program: Some((name.to_string(), def.class)),
+                    },
+                    prefixes: c.prefixes.clone(),
+                });
+                self.program_temps.push(Vec::new());
                 Flow::Line
             }
             _ => {
@@ -1437,16 +1658,44 @@ impl<'f> Run<'f> {
                 });
                 Flow::Next
             }
-            Opener::Program { name } => {
+            Opener::Program { name, options } => {
                 self.done_item(depth);
-                self.programs.insert(name.clone());
                 let text = format!("program define {name}");
-                let line = self.t.refused(
-                    g.span,
-                    text.clone(),
-                    format!("programs (program define {name} ... end) are not translated yet; the lines that run {name} are not run"),
+                // a program already defined stays as it was (Stata: r(110))
+                if self.programs.contains_key(name) {
+                    let line = self.t.refused(
+                        g.span,
+                        text.clone(),
+                        format!(
+                            "program {name} already defined (Stata: r(110)); program drop it first"
+                        ),
+                    );
+                    self.push(line, What::Command, None, text);
+                    return Flow::Line;
+                }
+                let class = options
+                    .split([',', ' '])
+                    .map(str::trim)
+                    .find(|w| matches!(*w, "rclass" | "eclass" | "sclass" | "nclass"))
+                    .unwrap_or("")
+                    .to_string();
+                let file = self.current_file();
+                self.programs.insert(
+                    name.clone(),
+                    ProgramDef {
+                        items: Rc::new(g.body.clone()),
+                        file,
+                        class,
+                    },
                 );
-                self.push(line, What::Command, None, text);
+                self.push(
+                    nothing_at(g.span, text.clone()),
+                    What::Control,
+                    Some(format!(
+                        "defines the program {name}; it runs where it is called"
+                    )),
+                    text,
+                );
                 Flow::Line
             }
             Opener::Raw { kind, header, .. } => {
@@ -1682,6 +1931,7 @@ impl<'f> Run<'f> {
             Kind::File {
                 file: number,
                 locals,
+                program: None,
             }
         };
         let info = format!("runs {path}");
@@ -1693,6 +1943,75 @@ impl<'f> Run<'f> {
             prefixes,
         });
         Flow::Line
+    }
+
+    /// Whether the line being done is in a program the do-file called.
+    fn in_program(&self) -> bool {
+        self.frames
+            .iter()
+            .rev()
+            .find_map(|f| match &f.kind {
+                Kind::File { program, .. } => Some(program.is_some()),
+                _ => None,
+            })
+            .unwrap_or(false)
+    }
+
+    /// A command of RCraft's own (`_rcraft_program_begin` and the like) at a
+    /// place in the do-file.
+    fn internal(&self, span: Span, text: &str) -> Command {
+        let mut c = reader::read(text)
+            .commands()
+            .first()
+            .map(|c| (*c).clone())
+            .unwrap_or_else(|| Command {
+                span,
+                prefixes: Vec::new(),
+                name: String::new(),
+                written: String::new(),
+                known: false,
+                text: text.to_string(),
+                parts: Default::default(),
+                options: Vec::new(),
+                using: None,
+                macros: Vec::new(),
+            });
+        c.span = span;
+        c
+    }
+
+    /// A program called is done: an r-class program's r() is what it returned.
+    fn program_end(&mut self, name: &str, class: &str) -> Flow {
+        let at = self.span_here();
+        // its temporary variables go with it
+        let temps = self.program_temps.pop().unwrap_or_default().join(" ");
+        let class_word = if class.is_empty() { "-" } else { class };
+        let end = self.internal(
+            at,
+            &format!("_rcraft_program_end {name} {class_word} {temps}"),
+        );
+        let mut line = self.t.command(&end);
+        line.stata = format!("end of {name}");
+        let text = line.stata.clone();
+        self.push(
+            line,
+            What::Command,
+            Some(format!("the program {name} returns")),
+            text,
+        );
+        Flow::Line
+    }
+
+    /// The file the line being done is in.
+    fn current_file(&self) -> usize {
+        self.frames
+            .iter()
+            .rev()
+            .find_map(|f| match f.kind {
+                Kind::File { file, .. } | Kind::Include { file } => Some(file),
+                _ => None,
+            })
+            .unwrap_or(0)
     }
 
     // ---------------- macros ----------------
@@ -2388,6 +2707,15 @@ fn nothing(c: &Command) -> Line {
     Line {
         span: c.span,
         stata: c.text.clone(),
+        result: Ok(RCode::default()),
+    }
+}
+
+/// A line that runs nothing in R, at a place and with a text of its own.
+fn nothing_at(span: Span, stata: String) -> Line {
+    Line {
+        span,
+        stata,
         result: Ok(RCode::default()),
     }
 }

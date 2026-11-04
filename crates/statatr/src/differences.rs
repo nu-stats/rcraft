@@ -810,6 +810,24 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "program",
+        about: "Defines a program the do-file then runs by name",
+        points: &[
+            p(
+                "In R",
+                "There is no R function for a program: RCraft runs its lines where it is called, \
+                 each translated as any line is, with locals of its own (`0', `1' ... and args), \
+                 temporary variables dropped when it returns, exit returning from it, and an \
+                 r-class program's return scalar and return local as r() afterwards.",
+            ),
+            p(
+                "Not yet",
+                "e-class returns (ereturn post), sclass, byable programs and program list are \
+                 refused; a program with a line that is not translated leaves r() unknown.",
+            ),
+        ],
+    },
+    Guide {
         command: "recode",
         about: "Changes values by rules",
         points: &[p(
@@ -1006,6 +1024,19 @@ pub const GUIDES: &[Guide] = &[
                  detail and weights keep R's layout.",
             ),
         ],
+    },
+    Guide {
+        command: "syntax",
+        about: "Reads a program's call as the program describes it",
+        points: &[p(
+            "In R",
+            "Done as the do-file runs: the call's text sets the locals varlist (or anything, \
+             namelist), if, in and one for each option, abbreviated by its capitals \
+             (Detail, noCONstant), with real and integer defaults and * for the rest, as \
+             Stata sets them; what Stata refuses (a varlist required, an option not allowed) \
+             is refused with its message. A varlist with a pattern, weights and passthru \
+             options are not translated yet.",
+        )],
     },
     Guide {
         command: "tabulate",

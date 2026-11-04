@@ -1,0 +1,10 @@
+* Stata 19.0's results for programs.do, recorded by cargo xtask stata-record
+@ args 15.5 30 46.5 1
+@ twice 42
+@ exit 1
+@ outer 33
+@ syntax 15 4.8 5.8 4 31
+@ syntax_in 10 5.5 2 0
+@ anything 1
+@ string_opts 3
+@ temps_dropped 5

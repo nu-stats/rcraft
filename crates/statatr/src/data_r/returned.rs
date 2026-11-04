@@ -1019,11 +1019,18 @@ pub(super) enum Returned {
     },
     /// A command since may have replaced them in Stata, so they are not known.
     Lost(String),
+    /// An r-class program the do-file defines returned them: its name, and
+    /// the names it returned that are text (any name it did not is missing).
+    Program { cmd: String, texts: Vec<String> },
 }
 
 /// Commands after which Stata 19 still holds the r() it held before
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
+    // a program called and returning, and return inside it, set r() themselves
+    "_rcraft_program_begin",
+    "_rcraft_program_end",
+    "return",
     "parmest",
     "outreg2",
     "eststo",
@@ -1058,6 +1065,9 @@ const LEAVE_R_ALONE: &[&str] = &[
 /// Commands that never change e() (an untranslated command not here might
 /// be an estimation command, after which e() is not known).
 const LEAVE_E_ALONE: &[&str] = &[
+    "_rcraft_program_begin",
+    "_rcraft_program_end",
+    "return",
     "parmest",
     "fre",
     "use",
@@ -1365,6 +1375,9 @@ impl Session {
                         )))
                     }
                     Returned::Lost(why) => return Err(no(format!("{which}[{name}] is not known here: {why}"))),
+                    Returned::Program { cmd, .. } => {
+                        return Err(no(format!("{which}[{name}]: e() after the program {cmd} is not translated yet")))
+                    }
                 }
                 Ok((
                     format!(
@@ -1387,6 +1400,17 @@ impl Session {
                         "{shown}: nothing before it in this do-file leaves {which}() (R might hold an earlier run's)"
                     ))),
                     Returned::Lost(why) => Err(no(format!("{shown} is not known here: {why}"))),
+                    // what an r-class program returned; a name it did not is missing, as in Stata
+                    Returned::Program { cmd, texts, .. } => {
+                        if which == "e" {
+                            return Err(no(format!("{shown} after the program {cmd} is not translated yet")));
+                        }
+                        let text = texts.iter().any(|t| t == name);
+                        Ok((
+                            format!("stata_rget({}{})", r_text(name), if text { ", text = TRUE" } else { "" }),
+                            if text { Kind::Text } else { Kind::Number },
+                        ))
+                    }
                     Returned::Kept { cmd, model, names } => {
                         if MATRIX_NAMES.contains(&name) {
                             return Err(no(format!(
@@ -1442,6 +1466,9 @@ impl Session {
                 "matrix list {shown}: nothing before it in this do-file leaves {which}()"
             ))),
             Returned::Lost(why) => Err(no(format!("matrix list {shown}: {why}"))),
+            Returned::Program { cmd, .. } => Err(no(format!(
+                "matrix list {shown} after the program {cmd} is not translated yet"
+            ))),
             Returned::Kept { cmd, model, .. } => {
                 if which == "e" {
                     if matches!(cmd.as_str(), "anova" | "margins") {
@@ -1661,6 +1688,7 @@ impl Session {
                 )))
             }
             Returned::Lost(why) => return Err(no(format!("{} list: {why}", c.name))),
+            Returned::Program { .. } => {}
             Returned::Kept { cmd, model, .. } => {
                 if which == "e" {
                     let missing = e_not_kept(cmd, model);
@@ -2049,4 +2077,166 @@ impl Session {
         }
         Ok(())
     }
+}
+
+impl Session {
+    /// The start of a program the do-file calls: an r-class one collects
+    /// what it returns in a list of its own.
+    pub(super) fn program_begin(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let mut w = c.parts.main.split_whitespace();
+        let name = w.next().unwrap_or("").to_string();
+        let class = w.next().unwrap_or("").to_string();
+        if class == "rclass" {
+            out.line(format!("stata_rnew_{} <- list()", self.programs.len() + 1));
+        }
+        self.programs.push(ProgramRun {
+            name,
+            class,
+            ..ProgramRun::default()
+        });
+        Ok(())
+    }
+
+    /// The end of a program: an r-class one's r() is what it returned.
+    pub(super) fn program_end(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let depth = self.programs.len();
+        // the temporary variables it made are dropped, as Stata drops them
+        let temps: Vec<String> = c
+            .parts
+            .main
+            .split_whitespace()
+            .skip(2)
+            .map(str::to_string)
+            .collect();
+        if !temps.is_empty() {
+            if let Some(d) = self.data.clone() {
+                out.line(format!(
+                    "{d} <- {d}[setdiff(names({d}), c({}))]",
+                    temps
+                        .iter()
+                        .map(|t| r_text(t))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+                for t in &temps {
+                    self.kinds.remove(t);
+                }
+            }
+        }
+        let Some(run) = self.programs.pop() else {
+            return Ok(());
+        };
+        // a line in it not translated: what it returned is not known
+        if run.refused {
+            if let Some(outer) = self.programs.last_mut() {
+                outer.refused = true;
+            }
+            if run.class == "rclass" {
+                self.r_ret = Returned::Lost(format!(
+                    "a line of the program {} was not translated, so what it returns is not known",
+                    run.name
+                ));
+            }
+            return Ok(());
+        }
+        let ProgramRun {
+            name, class, texts, ..
+        } = run;
+        if class == "rclass" {
+            self.helpers.insert("stata_returned");
+            out.line(format!("stata_r <- stata_rnew_{depth}"));
+            out.line(format!("rm(stata_rnew_{depth})"));
+            self.r_ret = Returned::Program { cmd: name, texts };
+        }
+        Ok(())
+    }
+
+    /// `return scalar name = exp`, `return local name text` (or `= exp`) and
+    /// `return clear`, in an r-class program.
+    pub(super) fn program_return(
+        &mut self,
+        c: &Command,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let depth = self.programs.len();
+        let rclass = self.programs.last().is_some_and(|p| p.class == "rclass");
+        if !rclass {
+            return Err(no(
+                "return outside an r-class program (Stata refuses it: the program needs rclass)",
+            ));
+        }
+        let (sub, rest) = super::first_word(&c.parts.main);
+        let list = format!("stata_rnew_{depth}");
+        match sub {
+            "clear" => {
+                out.line(format!("{list} <- list()"));
+                if let Some(p) = self.programs.last_mut() {
+                    p.names.clear();
+                    p.texts.clear();
+                }
+                Ok(())
+            }
+            "scalar" | "local" => {
+                // name = exp, or (local) name followed by its text
+                let (name, exp) = match rest.split_once('=') {
+                    Some((n, e)) if super::is_name(n.trim()) => {
+                        (n.trim().to_string(), Some(e.trim()))
+                    }
+                    _ => {
+                        let (n, _) = super::first_word(rest);
+                        (n.to_string(), None)
+                    }
+                };
+                if !super::is_name(&name) {
+                    return Err(no(format!("return {sub} needs a name")));
+                }
+                let (value, text) = match exp {
+                    Some(e) => {
+                        let (v, kind) = self.value(e, out)?;
+                        if sub == "scalar" && kind == Kind::Text {
+                            return Err(no(
+                                "return scalar of text: Stata refuses it (type mismatch)",
+                            ));
+                        }
+                        (v, kind == Kind::Text)
+                    }
+                    None if sub == "local" => {
+                        let (_, t) = super::first_word(rest);
+                        // the text as written, its outer quotes off
+                        let t = t.trim();
+                        let t = t
+                            .strip_prefix("`\"")
+                            .and_then(|s| s.strip_suffix("\"'"))
+                            .or_else(|| t.strip_prefix('"').and_then(|s| s.strip_suffix('"')))
+                            .unwrap_or(t);
+                        (r_text(t), true)
+                    }
+                    None => return Err(no("return scalar needs name = exp")),
+                };
+                out.line(format!("{list}[[{}]] <- {value}", r_text(&name)));
+                if let Some(p) = self.programs.last_mut() {
+                    p.names.retain(|n| n != &name);
+                    p.texts.retain(|n| n != &name);
+                    p.names.push(name.clone());
+                    if text {
+                        p.texts.push(name);
+                    }
+                }
+                Ok(())
+            }
+            other => Err(no(format!("return {other} is not translated yet"))),
+        }
+    }
+}
+
+/// A program being run: its name and class, the r() names an r-class one
+/// has returned so far (all, and those that are text), and whether a line
+/// in it was not translated.
+#[derive(Debug, Clone, Default)]
+pub(super) struct ProgramRun {
+    pub(super) name: String,
+    pub(super) class: String,
+    pub(super) names: Vec<String>,
+    pub(super) texts: Vec<String>,
+    pub(super) refused: bool,
 }

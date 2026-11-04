@@ -341,7 +341,7 @@ fn opener_text(o: &Opener) -> String {
         Opener::If { condition } => format!("if {condition}"),
         Opener::Prefixed => "{".into(),
         Opener::Frame { name } => format!("frame {name}"),
-        Opener::Program { name } => format!("program {name}"),
+        Opener::Program { name, .. } => format!("program {name}"),
         Opener::Raw { kind, header, .. } => format!("{kind} {header}"),
     }
 }
@@ -805,6 +805,9 @@ struct Session {
     stored_fits: BTreeMap<String, returned::StoredFit>,
     /// the models eststo stored, in order, for esttab without names
     eststo_names: Vec<String>,
+    /// The programs being run, innermost last: name, class, and the r()
+    /// names an r-class one has returned so far (number, text).
+    programs: Vec<returned::ProgramRun>,
     /// A line that was not translated may have stored a model too (eststo,
     /// a program), so a name missing from `stored_fits` may be in Stata.
     stores_lost: bool,
@@ -1252,6 +1255,10 @@ impl Session {
     }
 
     fn not_translated(&mut self, stata: &str, reason: &str) {
+        // in a program: what it returns is no longer known
+        if let Some(p) = self.programs.last_mut() {
+            p.refused = true;
+        }
         // a line Stata stops at with an error leaves the data as it was
         if reason.contains("Stata stops here") || reason.contains("(Stata: ") {
             return;
@@ -1808,6 +1815,16 @@ impl Session {
             "parmest" => self.parmest(c, &opts, out),
             "xtile" => self.xtile(c, &opts, out),
             "display" => self.display(c, out),
+            "return"
+                if matches!(
+                    c.parts.main.split_whitespace().next(),
+                    Some("scalar" | "local" | "clear" | "matrix" | "add")
+                ) =>
+            {
+                self.program_return(c, out)
+            }
+            "_rcraft_program_begin" => self.program_begin(c, out),
+            "_rcraft_program_end" => self.program_end(c, out),
             "ereturn" | "return" => self.list_returned(c, out),
             "matrix" => self.matrix(c, out),
             "scalar" => self.scalar(c, out),

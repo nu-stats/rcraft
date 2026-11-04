@@ -114,6 +114,8 @@ pub enum Opener {
     /// `program [define] name` ... `end`: a Stata program, its body read as commands.
     Program {
         name: String,
+        /// What follows the comma: `rclass`, `eclass`, `sclass`, `byable(recall)` ...
+        options: String,
     },
     /// `mata` (or `mata:`), `python` and `input varlist` ... `end`: lines that
     /// are not Stata commands (Mata code, Python code, data), kept as written.
@@ -536,8 +538,13 @@ fn read_opener(full: &str, after: &str) -> Result<Option<Opener>, String> {
             if sub.is_empty() {
                 return Err("program define needs a name".into());
             }
+            let options = after
+                .split_once(',')
+                .map(|(_, o)| o.trim().to_string())
+                .unwrap_or_default();
             Ok(Some(Opener::Program {
                 name: sub.to_string(),
+                options,
             }))
         }
         _ => Ok(None),
@@ -1296,7 +1303,9 @@ twice price
             .map(|i| match i {
                 Item::Command(c) => format!("command {}", c.name),
                 Item::Group(g) => match &g.opener {
-                    Opener::Program { name } => format!("program {name} ({} lines)", g.body.len()),
+                    Opener::Program { name, .. } => {
+                        format!("program {name} ({} lines)", g.body.len())
+                    }
                     Opener::Raw { kind, lines, .. } => format!("{kind} ({} lines)", lines.len()),
                     other => format!("{other:?}"),
                 },

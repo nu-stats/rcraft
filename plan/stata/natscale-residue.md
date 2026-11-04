@@ -20,3 +20,19 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   minus steps, centres) and a search of about 270,000 two-level expressions in lo, hi, the range, the step,
   the label counts and Stata's 10^k. None gives r(min) and r(max) on every result. The 113 probe lines that
   differ (r(min) 0 against 2^-55) stay as they are. The comparison is not loosened.
+
+## More, 2026-11-04
+
+- Stata's `10^k` for k below 0 is the product of k tenths: `0.1*0.1` is `+1.47ae147ae147cX-007`, its `10^-2`;
+  `0.1^3` gives its `10^-3`.
+- For lo = 0 and hi = 1.03, the step and the 12 labels are the same for n = 12 to 20, but n = 12, 13, 14 give
+  r(min) 0 and r(max) `1.199999999999aX+000` (1.1), while n = 15 to 20 give r(min) 2^-55 and r(max)
+  `1.1999999999999X+000` (1.1 less a unit). So the arithmetic of the ends follows a path that depends on n.
+- hi from 1.03 to 1.099 gives the residue; 1.02 and below (11 labels) and 1.1 and above (top label inside the
+  data) do not. Moving lo by ±1e-20 changes nothing; lo = 1 or 0.5 gives L·step exactly.
+- Ruled out besides the earlier forms: r(min) as r(max) less k steps one at a time or at once, as U·step
+  less k steps one at a time, as 0 plus k steps; r(max) as r(min) plus k steps one at a time.
+- A sweep of n = 8 to 30 against hi = 1.00 to 1.40 (step 0.02), lo = 0: r(min) is 0 for n up to 14; from n = 15
+  it is positive for hi = 1.04 to 1.08 and 1.14 to 1.20, a region that moves as n grows (1.24 to 1.40 join
+  at n = 20; at n = 24 to 27 some are negative). It looks like a boundary in how the label set is chosen,
+  not a simple formula: the next step is to find what decides the path on that boundary.

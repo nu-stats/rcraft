@@ -221,20 +221,20 @@ fn what_is_not_run_says_why() {
         "program define hello\n  display \"hi\"\nend\nhello\nmata:\n  x = 1\nend\nuse auto\nforeach v of varlist x* {\n  summarize `v'\n}\nlocal t : type price",
     );
     let s = shown(&d);
-    assert!(
-        s[0].contains("not: programs (program define hello"),
-        "{s:?}"
-    );
-    assert!(s[1].contains("not: this runs hello"), "{s:?}");
-    assert!(s[2].contains("Mata"), "{s:?}");
+    // a program runs where it is called, its lines translated as any
+    assert!(s[0].contains("defines the program hello"), "{s:?}");
+    assert!(s[1].contains("runs the program hello"), "{s:?}");
+    assert!(s[2].starts_with("display \"hi\" | Command"), "{s:?}");
+    assert!(s[3].contains("the program hello returns"), "{s:?}");
+    assert!(s[4].contains("Mata"), "{s:?}");
     // a dry run has no names to ask for
     assert!(
-        s[4].contains("Later") && s[4].contains("variable names are known only when"),
+        s[6].contains("Later") && s[6].contains("variable names are known only when"),
         "{s:?}"
     );
-    assert!(s[5].contains("inside a block that is not run"), "{s:?}");
+    assert!(s[7].contains("inside a block that is not run"), "{s:?}");
     assert!(
-        s[6].contains(": type is not translated: R does not keep"),
+        s[8].contains(": type is not translated: R does not keep"),
         "{s:?}"
     );
     let sc = scan(&d);
