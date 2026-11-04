@@ -3196,3 +3196,23 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Checked:** `coefplot.do` (53 rows of positions, estimates and interval ends from Stata 19's `gen()`,
   to 1e-7 as they are floats); `coefplot` is Verified. Observations in `plan/stata/coefplot.md`.
 - **Numbers:** the packages' share is 84.6% (83.9%); graphs 62.4% (22.2%).
+
+## P2C.9 continued: esttab (SSC), and the last of YFBPT6's differences, 2026-11-04
+
+- **esttab** (`data_r/esttab.rs`): the screen table, `.txt`, `.csv` and `.tex` (booktabs or plain, a
+  caption with `title()`), matched to Stata 19's output: a3 and fixed formats, t, se, p or none, stars and
+  `star()`, `label`, base levels, N, r2, ar2, aic, bic, `scalars()`, `mtitles()`, `nonumbers`, `keep()`,
+  `drop()`, `order()`, widths. 13 screen tables and 8 files were byte for byte Stata's; `esttab.do` reads
+  four back. `esttab` is Verified.
+- **YFBPT6 against Stata** (both now running the whole package): 4,334 model lines the same and 26
+  different, from 385 and 312. What closed the gap: `destring(x)` with its variable in parentheses;
+  `egen rowmedian()` and `rowpctile()` (`data.do`); `robreg`'s LAD start from an interior-point solver
+  (quantreg's Frisch-Newton), polished to the vertex when the LAD fit is unique (its rows' dual weights
+  inside (-1, 1)): all 200 of the package's fits match to 1e-7 (`robreg.do` adds two indicator cases).
+  The remaining 26 were `display e()` after a model refused for a variable R lacks; such a line now
+  loses e() and r(), as Stata ran the model.
+- **Numbers:** the packages' share is 85.2% (84.6%).
+- **A base level interacted** (`0.treat#1.female`, new probe 580): `test` drops a constraint of only base
+  levels (`Constraint 1 dropped`, r(dropped_1), r(drop), and F(0, df) = . when none is left), `lincom`
+  shows it `0 (omitted)`, both with `_rc` 0 as in Stata (`regress.do`).
+- **Numbers:** the probes (412): 159,806 of 190,664 lines translated (83.8%); 5,566 of 5,684 compared lines match Stata to 8 digits, 5 more to 6; the 113 that differ are all `_natscale`.

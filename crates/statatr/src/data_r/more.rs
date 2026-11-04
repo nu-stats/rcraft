@@ -503,7 +503,8 @@ impl Session {
                     format!("(\\(k, s) {{ s <- rep_len(s, nrow(k)); t <- rep(0, nrow(k)); t[s] <- as.numeric(!duplicated(k[s, , drop = FALSE]) & ({complete})[s]); t }})({k}, {sel})")
                 }
             }
-            "rowtotal" | "rowmean" | "rowmax" | "rowmin" | "rownonmiss" | "rowmiss" => {
+            "rowtotal" | "rowmean" | "rowmax" | "rowmin" | "rownonmiss" | "rowmiss"
+            | "rowmedian" | "rowpctile" => {
                 let cols = format!("dplyr::pick({})", select(args)?);
                 let v = match fname {
                     "rowtotal" if opts.has("missing", 7) => {
@@ -514,6 +515,18 @@ impl Session {
                     "rowmax" => format!("do.call(pmax, c(as.list({cols}), na.rm = TRUE))"),
                     "rowmin" => format!("do.call(pmin, c(as.list({cols}), na.rm = TRUE))"),
                     "rownonmiss" => format!("as.numeric(rowSums(!is.na({cols})))"),
+                    // Stata's percentile of each row's values (R's type 2); the median is p(50)
+                    "rowmedian" | "rowpctile" => {
+                        let p = if fname == "rowmedian" {
+                            50.0
+                        } else {
+                            match opts.arg("p", 1) {
+                                None => 50.0,
+                                Some(p) => p.trim().parse::<f64>().map_err(|_| no(format!("p({p}) needs a number")))?,
+                            }
+                        };
+                        format!(r"apply(as.matrix({cols}), 1, \(r) {{ r <- r[!is.na(r)]; if (length(r)) unname(stats::quantile(r, {}, type = 2)) else NA_real_ }})", r_number(p / 100.0))
+                    }
                     _ => format!("as.numeric(rowSums(as.data.frame(lapply({cols}, \\(v) is.na(v) | v %in% \"\"))))"),
                 };
                 match &cond {
@@ -544,6 +557,8 @@ impl Session {
                 | "rowmin"
                 | "rownonmiss"
                 | "rowmiss"
+                | "rowmedian"
+                | "rowpctile"
         ) {
             if let Some(k) = &cond {
                 value = format!("dplyr::if_else({k}, {value}, NA_real_)");
@@ -1253,10 +1268,16 @@ impl Session {
             }
         };
         out.package("dplyr");
-        let vars = if c.parts.main.trim().is_empty() {
+        // `destring(x), gen(y)`: Stata 19 takes the variables in parentheses too
+        let main = c.parts.main.trim();
+        let main = main
+            .strip_prefix('(')
+            .and_then(|m| m.strip_suffix(')'))
+            .unwrap_or(main);
+        let vars = if main.trim().is_empty() {
             "_all".to_string()
         } else {
-            c.parts.main.clone()
+            main.to_string()
         };
         if opts.has("replace", 7) {
             let call = format!(

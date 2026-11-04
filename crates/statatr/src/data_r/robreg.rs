@@ -14,9 +14,10 @@
 //!   1 - sum rho(r / s) / sum rho(r0 / s); the weighted R2 is the R2 of the
 //!   final weighted fit. Its start is the median.
 //! - When the LAD fit is not unique (indicator variables often make it so),
-//!   robreg starts from a point inside the LAD solutions that its own solver
-//!   finds; RCraft starts from a corner of them, so the scale and the
-//!   estimates can differ a little from Stata's there (a caveat says so).
+//!   robreg starts from a point inside the LAD solutions; an interior-point
+//!   solver (quantreg's Frisch-Newton) lands on the same one. When it is
+//!   unique, the exact vertex. Checked in the corpus and on 200 fits of a
+//!   replication package.
 
 use super::model::{esample_line, keep_sample, level, Estimates, Fit, Spec};
 use super::*;
@@ -30,19 +31,25 @@ pub(super) const ROBREG_HELPER: &str = r#"stata_robreg <- function(formula, data
   n <- nrow(X)
   p <- ncol(X)
   if (qr(X)$rank < p) stop("robreg m with collinear variables is not translated yet")
-  # least absolute deviations: reweighted, then the exact fit through the p
-  # rows nearest it, as an exact LAD fit lies
+  # least absolute deviations by an interior-point solver (quantreg's
+  # Frisch-Newton), which lands where robreg does when the LAD fit is not
+  # unique; when it is unique (the vertex through the p nearest rows, its
+  # rows' dual weights inside (-1, 1)) it is that vertex exactly
   lad <- function(X, y) {
-    b <- drop(qr.solve(X, y))
-    for (i in 1:2000) {
-      w <- 1 / pmax(abs(drop(y - X %*% b)), 1e-12)
-      bn <- drop(solve(crossprod(X, w * X), crossprod(X, w * y)))
-      if (max(abs(bn - b)) < 1e-13 * max(1, max(abs(b)))) { b <- bn; break }
-      b <- bn
+    b <- drop(quantreg::rq.fit(X, y, tau = 0.5, method = "fn")$coefficients)
+    r <- abs(drop(y - X %*% b))
+    o <- order(r)
+    p <- ncol(X)
+    if (length(r) > p) {
+      near <- o[seq_len(p)]
+      ex <- tryCatch(drop(solve(X[near, , drop = FALSE], y[near])), error = function(e) NULL)
+      if (!is.null(ex) && sum(abs(y - X %*% ex)) <= sum(r) + 1e-9) {
+        rest <- setdiff(seq_along(y), near)
+        g <- drop(crossprod(X[rest, , drop = FALSE], sign(drop(y - X %*% ex))[rest]))
+        u <- tryCatch(drop(solve(t(X[near, , drop = FALSE]), -g)), error = function(e) NULL)
+        if (!is.null(u) && all(abs(u) < 1 - 1e-8)) b <- ex
+      }
     }
-    near <- order(abs(drop(y - X %*% b)))[seq_len(ncol(X))]
-    exact <- tryCatch(drop(solve(X[near, , drop = FALSE], y[near])), error = function(e) NULL)
-    if (!is.null(exact) && sum(abs(y - X %*% exact)) <= sum(abs(y - X %*% b)) + 1e-12) b <- exact
     b
   }
   k_for <- function(eff) {
@@ -170,6 +177,7 @@ impl Session {
         out.line(keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
+        out.package("quantreg");
         out.line(esample_line(&d, &src));
         self.esample_new = true;
         self.fit_robust = true;
@@ -194,13 +202,6 @@ impl Session {
              Huber's M estimate with that scale fixed, robust standard errors; matched to its \
              results, not its code",
         );
-        if !spec.factors.is_empty() {
-            out.caveat(
-                "with indicator variables the LAD starting fit is often not unique; robreg then \
-                 starts inside the LAD solutions and RCraft at a corner of them, so the scale and \
-                 the estimates can differ a little from Stata's",
-            );
-        }
         out.caveat("printed in R's layout, not Stata's table");
         Ok(())
     }

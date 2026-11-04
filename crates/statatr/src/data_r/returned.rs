@@ -1207,7 +1207,26 @@ pub(super) const R_SUMMARIZE_DETAIL: &[&str] = &[
 pub(super) const R_MEANONLY: &[&str] = &["N", "sum_w", "mean", "min", "max", "sum"];
 pub(super) const R_COUNT: &[&str] = &["N"];
 pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
-pub(super) const R_TEST: &[&str] = &["drop", "df_r", "F", "df", "p", "chi2"];
+/// What `test` leaves in r(), with r(dropped_1) and the like for each
+/// constraint it drops (one of base levels only)
+pub(super) const R_TEST: &[&str] = &[
+    "dropped_1",
+    "dropped_2",
+    "dropped_3",
+    "dropped_4",
+    "dropped_5",
+    "dropped_6",
+    "dropped_7",
+    "dropped_8",
+    "dropped_9",
+    "dropped_10",
+    "drop",
+    "df_r",
+    "F",
+    "df",
+    "p",
+    "chi2",
+];
 pub(super) const R_LINCOM: &[&str] = &["df", "ub", "lb", "p", "t", "z", "level", "se", "estimate"];
 pub(super) const R_TAB1: &[&str] = &["N", "r"];
 pub(super) const R_FRE: &[&str] = &[
@@ -1919,6 +1938,9 @@ impl Session {
         if !super::is_name(name) {
             return Err(no(format!("(Stata: {name} invalid name)")));
         }
+        if !self.eststo_names.iter().any(|n| n == name) {
+            self.eststo_names.push(name.to_string());
+        }
         self.store_fit(name, "eststo", out)
     }
 
@@ -1939,6 +1961,7 @@ impl Session {
         match sub {
             "clear" => {
                 self.stored_fits.clear();
+                self.eststo_names.clear();
                 self.active_store = None;
                 out.line("stata_stored <- list()");
                 Ok(())

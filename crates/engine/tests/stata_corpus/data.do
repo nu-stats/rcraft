@@ -22,6 +22,17 @@ decode ord3, generate(ord3s)
 generate byte ord3h = ord3s == "high"
 summarize ord3h
 display "@ ord3_high " %24.17g r(mean)
+* destring takes its variable in parentheses too
+tostring g, generate(gs)
+destring(gs), generate(gn)
+summarize gn
+display "@ destring_paren_mean " %24.17g r(mean)
+egen rmed = rowmedian(x w z yb)
+summarize rmed
+display "@ rowmedian_mean " %24.17g r(mean)
+egen rp25 = rowpctile(x w z yb), p(25)
+summarize rp25
+display "@ rowpctile_sum " %24.17g r(sum)
 sort y
 display "@ first_y " %24.17g y[1]
 display "@ first_id " %24.17g id[1]

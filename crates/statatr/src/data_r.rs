@@ -29,6 +29,7 @@ mod anova;
 mod clogit;
 mod coefplot;
 mod dates;
+mod esttab;
 mod fre;
 mod graph;
 mod iv;
@@ -693,6 +694,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_label_set" => more::DTA_LABEL_SET_HELPER,
         "stata_xpose" => more::XPOSE_HELPER,
         "stata_coefplot" => coefplot::COEFPLOT_HELPER,
+        "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
@@ -725,6 +727,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_names" => post::NAMES_HELPER,
         "stata_test" => post::TEST_HELPER,
         "stata_lincom" => post::LINCOM_HELPER,
+        "stata_zero_term" => post::ZERO_TERM_HELPER,
         "stata_estat" => post::ESTAT_HELPER,
         "stata_margins" => margins::MARGINS_HELPER,
         "stata_unconditional" => margins::UNCONDITIONAL_HELPER,
@@ -800,6 +803,8 @@ struct Session {
     estimates: Option<model::Estimates>,
     /// The models `estimates store` kept, by name.
     stored_fits: BTreeMap<String, returned::StoredFit>,
+    /// the models eststo stored, in order, for esttab without names
+    eststo_names: Vec<String>,
     /// A line that was not translated may have stored a model too (eststo,
     /// a program), so a name missing from `stored_fits` may be in Stata.
     stores_lost: bool,
@@ -1502,6 +1507,10 @@ impl Session {
 
     fn command(&mut self, c: &Command) -> Result<RCode, Untranslated> {
         if let Some(why) = self.uses_lost(c) {
+            // Stata has the variable and runs the line: a model there
+            // replaces e() (and r()), so neither is R's any more
+            self.track_returned(c, false, None);
+            self.lose_estimates(c, &why);
             return Err(no(why));
         }
         if c.prefixes.iter().any(|p| matches!(p, Prefix::Frame(_))) {
@@ -1704,6 +1713,7 @@ impl Session {
             "set" => self.set(c, out),
             "estimates" => self.estimates_cmd(c, out),
             "eststo" => self.eststo(c, &opts, out),
+            "esttab" => self.esttab(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),

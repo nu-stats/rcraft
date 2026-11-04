@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.9 continued): made-up data; Stata 19's results are in robreg.recorded
 * commands: robreg
-* (robreg m, the SSC package's M regression, as the replication packages run it: its coefficients, robust standard errors, scale and R-squareds; with if and efficiency(); the empty model starting at the median; predict's xb, residuals and weights)
+* (robreg m, the SSC package's M regression, as the replication packages run it: its coefficients, robust standard errors, scale and R-squareds; with if and efficiency(); the empty model starting at the median; predict's xb, residuals and weights; indicators, where the LAD start is not unique)
 * tolerance: 1e-6
 version 19
 clear
@@ -35,3 +35,10 @@ robreg m y x z, efficiency(90)
 display "@ efficiency " _b[x] " " _se[x] " " e(k) " " e(scale)
 robreg m y x
 display "@ one " _b[x] " " _b[_cons] " " _se[x] " " e(r2_p)
+* indicators, where the LAD starting fit is not unique: robreg starts inside
+* the LAD solutions, as an interior-point solver does
+robreg m y x i.g
+display "@ ig " _b[x] " " _b[2.g] " " _b[3.g] " " _b[_cons] " " e(scale)
+generate byte d = mod(_n, 3) == 0
+robreg m y d
+display "@ dummy " _b[d] " " _b[_cons] " " _se[d] " " e(scale)

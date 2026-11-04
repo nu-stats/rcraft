@@ -1178,6 +1178,27 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "esttab",
+        about: "Tables of stored models (estout package, SSC)",
+        points: &[
+            p(
+                "In R",
+                "stata_esttab lays the table out as esttab prints and writes it, matched to its \
+                 output: Stata's names in e(b) in order of first appearance with _cons last, base \
+                 levels as 0 over (.), t statistics (se, p or none) in parentheses, esttab's own \
+                 number format (three significant digits) or the format given, stars at 0.05, 0.01 \
+                 and 0.001 or star(), labels with label, N and r2, ar2, aic, bic and scalars(); \
+                 the screen table and .txt in fixed columns, .csv with =\"...\" cells, .tex with \
+                 sym stars, booktabs or plain rules, lines ending CR LF.",
+            ),
+            p(
+                "Not yet",
+                "wide, cells(), matrix(), mlabels() with its suboptions, varlabels(), .rtf (it \
+                 carries the time it was written) and not with a file are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "eststo",
         about: "Stores results and adds to them (eststo and estadd, the SSC estout package)",
         points: &[
@@ -1303,10 +1324,9 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Indicator variables",
                 "When the LAD starting fit is not unique, as indicator variables often make it, \
-                 robreg starts from a point inside the LAD solutions its own solver finds and \
-                 RCraft from a corner of them; the scale and so the estimates can then differ a \
-                 little from Stata's. With continuous variables the start is unique and they \
-                 agree.",
+                 robreg starts from a point inside the LAD solutions; RCraft finds the same one \
+                 with quantreg's interior-point solver (method fn), so the scale and the \
+                 estimates agree there too.",
             ),
             p(
                 "Not yet",

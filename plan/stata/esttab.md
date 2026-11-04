@@ -40,8 +40,31 @@ All end their lines with CR LF.
   `\sym{*} \(p<0.05\)`, ...), `\end{tabular}`, `}`. With `label b(%9.2f) se(%9.2f)`: `0.60`, `(0.09)`, the
   base `g=1` as `0.00` over `(.)`, and the name column 20 wide.
 
-## Still to observe
+## More, observed 2026-11-04
 
-- The thresholds of the exponent form; a long label (does the name column grow past 20?); value labels in
-  factor names; `star()`, `nostar`, `p`, `r2`, `scalars()`, `mtitles()`, `nonumbers`, `append`, `.rtf`; `tex`
-  without booktabs; `cells()` and `matrix()` (used by two packages); `mlabels(..., prefix() suffix())`.
+- The exponent form starts below 1e-6: 0.0000012345 is `0.00000123`, 1e-7 is `1.00e-07`. Stata's log10 is a
+  little below at the powers of 10, so 0.00001 gets 8 decimals (`0.00001000`). Large values keep one
+  decimal (`123456789.5`); whole numbers none (`10000000000`).
+- With `label`, a label longer than the 20 of the name column is cut as Stata cuts names, `A rather long
+  labe~e`; the dependent variable row shows its label (`Outcome`); a factor level its value label (`low`,
+  `middle group`). In .tex the name column is not cut.
+- `nostar`: no star column (models 13 wide); `p`: p-values to 3 decimals, `p-values in parentheses`; `r2` is
+  `R-sq` (`R-squared` with `label`), `ar2` `adj. R-sq`; `aic`, `bic`; their order N, R-sq, adj. R-sq, AIC,
+  BIC, then `scalars()` by name; `obslast` puts N last; `noobs` leaves it out. The statistics take `b()`'s
+  format unless given their own (`r2(4)`), N a count.
+- `star(* 0.10 ** 0.05 *** 0.01)`, its note `* p<0.10, ** p<0.05, *** p<0.01`; `mtitles("First" "Second")`
+  in place of the dependent variables; `nonumbers`; `nonotes addnotes("Note one" "Note two")`;
+  `varwidth(8) modelwidth(9)`; `keep(x w) order(w x)`; `drop(*.g _cons)`.
+- `not`: no parentheses and no blank lines between the coefficients.
+- `.tex` without booktabs: `\hline\hline`, `\hline`, `[1em]` between blocks; with `title()` it is
+  `\begin{table}[htbp]\centering`, `\caption{...}` after the `\sym` line, and `\end{table}` at the end.
+- `.rtf` carries the time it was written (`\creatim\yr2026...`), so it cannot be matched byte for byte.
+
+## Checked
+
+13 screen tables and 8 files (.tex booktabs and plain, .csv, .txt) from RCraft were the same as Stata 19's,
+byte for byte; `esttab.do` reads four of them back.
+
+## Not translated yet
+
+`wide`, `cells()`, `matrix()`, `mlabels()` with its suboptions, `varlabels()`, `.rtf`, `not` with a file.

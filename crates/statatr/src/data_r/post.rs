@@ -52,10 +52,36 @@ pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, 
   R <- matrix(0, length(rows), length(b), dimnames = list(NULL, names(b)))
   for (i in seq_along(rows)) {
     miss <- setdiff(names(rows[[i]]), names(b))
+    # base levels, alone or interacted, are 0: a constraint of only them is dropped
+    miss <- miss[!vapply(miss, stata_zero_term, TRUE, b = b)]
     if (length(miss) > 0) stop(miss[1], " not found")
-    R[i, names(rows[[i]])] <- rows[[i]]
+    keep <- intersect(names(rows[[i]]), names(b))
+    R[i, keep] <- rows[[i]][keep]
   }
   for (i in seq_along(labels)) cat(sprintf(" (%d)  %s\n", i, labels[i]))
+  dropped <- which(rowSums(R != 0) == 0)
+  # r(dropped_1) and the like, one for each constraint dropped
+  stata_dropped <- function(i) if (length(i)) stats::setNames(as.list(rep(1, length(i))), paste0("dropped_", i)) else list()
+  for (i in dropped) cat(sprintf("       Constraint %d dropped\n", i))
+  if (length(dropped)) {
+    R <- R[-dropped, , drop = FALSE]
+    r <- r[-dropped]
+  }
+  if (nrow(R) == 0) {
+    # every constraint dropped: no test, as Stata's F(0, df) = .
+    if (is.finite(stata_df)) {
+      cat(sprintf("\n       F(  0, %5g) =       .\n            Prob > F =         .\n", stata_df))
+      if (ret) assign("stata_r", c(stata_dropped(dropped),
+                                   list(drop = 1, df_r = stata_df, F = NA_real_, df = 0, p = NA_real_)), envir = env)
+    } else {
+      cat("\n           chi2(  0) =        .\n         Prob > chi2 =         .\n")
+      if (ret) assign("stata_r", c(stata_dropped(dropped),
+                                   list(drop = 1, chi2 = NA_real_, df = 0, p = NA_real_)), envir = env)
+    }
+    return(invisible(NULL))
+  }
+  drop_r <- c(stata_dropped(dropped),
+              list(drop = as.numeric(length(dropped) > 0)))
   d <- R %*% b - r
   W <- drop(t(d) %*% solve(R %*% stata_vcov %*% t(R), d))
   q <- nrow(R)
@@ -64,14 +90,26 @@ pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, 
     F <- W / q
     p <- stats::pf(F, q, stata_df, lower.tail = FALSE)
     cat(sprintf("\n       F(%d, %g) = %10.2f\n            Prob > F = %10.4f\n", q, stata_df, F, p))
-    if (ret) assign("stata_r", list(drop = 0, df_r = stata_df, F = F, df = q, p = p), envir = env)
+    if (ret) assign("stata_r", c(drop_r, list(df_r = stata_df, F = F, df = q, p = p)), envir = env)
     invisible(c(F = F, df = q, df_r = stata_df, p = p))
   } else {
     p <- stats::pchisq(W, q, lower.tail = FALSE)
     cat(sprintf("\n           chi2(%d) = %10.2f\n         Prob > chi2 = %10.4f\n", q, W, p))
-    if (ret) assign("stata_r", list(drop = 0, chi2 = W, df = q, p = p), envir = env)
+    if (ret) assign("stata_r", c(drop_r, list(chi2 = W, df = q, p = p)), envir = env)
     invisible(c(chi2 = W, df = q, p = p))
   }
+}"#;
+
+/// `stata_zero_term(m, b)`: whether a term R's coefficients lack is a factor's
+/// base level, alone or interacted (`factor(g)1:factor(h)2` with 1 g's base),
+/// which Stata counts as a coefficient of 0.
+pub(super) const ZERO_TERM_HELPER: &str = r#"stata_zero_term <- function(m, b) {
+  xlev <- tryCatch(stata_estimates$xlevels, error = function(e) NULL)
+  parts <- strsplit(m, ":", fixed = TRUE)[[1]]
+  all(vapply(parts, function(p) {
+    k <- regmatches(p, regexec("^((factor|stata_ib)\\(.*\\))([^)]+)$", p))[[1]]
+    length(k) > 0 && any(grepl(k[2], names(b), fixed = TRUE)) && k[4] %in% xlev[[k[2]]]
+  }, TRUE))
 }"#;
 
 /// Stata's `lincom`: one combination of the coefficients, its standard
@@ -82,13 +120,9 @@ pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, lev
   a <- stata_resolve(list(a), 0, "")$rows[[1]]
   b <- stata_b
   miss <- setdiff(names(a), names(b))
-  # a factor's base level (1.g where 1 is the base) is a coefficient of 0 in
-  # Stata: a level the model has, of a factor whose other levels are in b
-  xlev <- tryCatch(stata_estimates$xlevels, error = function(e) NULL)
-  base <- vapply(miss, function(m) {
-    k <- regmatches(m, regexec("^((factor|stata_ib)\\(.*\\))([^)]+)$", m))[[1]]
-    length(k) > 0 && any(startsWith(names(b), k[2])) && k[4] %in% xlev[[k[2]]]
-  }, TRUE)
+  # a factor's base level (1.g where 1 is the base), alone or interacted, is
+  # a coefficient of 0 in Stata
+  base <- vapply(miss, stata_zero_term, TRUE, b = b)
   a <- a[!names(a) %in% miss[base]]
   miss <- miss[!base]
   if (length(miss) > 0) stop(miss[1], " not found")
@@ -562,6 +596,7 @@ impl Session {
         let values: Vec<String> = rows.iter().map(|r| r_number(r.value)).collect();
         let labels: Vec<String> = rows.iter().map(|r| r_text(&r.label)).collect();
         self.helpers.insert("stata_test");
+        self.helpers.insert("stata_zero_term");
         self.helpers.insert("stata_names");
         self.r_new = Some((super::returned::R_TEST, "test".into()));
         let call = format!(
@@ -622,6 +657,7 @@ impl Session {
         };
         self.helpers.insert("stata_coefs");
         self.helpers.insert("stata_lincom");
+        self.helpers.insert("stata_zero_term");
         self.helpers.insert("stata_names");
         let row = Row {
             coefs,
@@ -1178,7 +1214,20 @@ stata_resolve <- function(rows, r, labels) {
       return(NA_character_)  # Stata takes it as a zero
     }
     i <- match(stata_canon(k), st)
-    if (is.na(i)) stop(k, " not found")
+    if (is.na(i)) {
+      # a base level, alone or interacted (0.treat#1.female): a level the
+      # model has of each factor, which Stata takes as a zero
+      xlev <- tryCatch(stata_estimates$xlevels, error = function(e) NULL)
+      parts <- strsplit(k, "#", fixed = TRUE)[[1]]
+      base <- length(xlev) > 0 && all(vapply(parts, function(p) {
+        m <- regmatches(p, regexec("^([0-9]+)[bno]*\\.(.+)$", p))[[1]]
+        if (!length(m)) return(FALSE)
+        key <- names(xlev)[names(xlev) == paste0("factor(", m[3], ")") | startsWith(names(xlev), paste0("stata_ib(", m[3], ","))]
+        length(key) == 1 && m[2] %in% xlev[[key]]
+      }, TRUE))
+      if (base) return(NA_character_)
+      stop(k, " not found")
+    }
     nm[i]
   }
   out <- list(rows = list(), r = numeric(0), labels = character(0))
@@ -1215,7 +1264,7 @@ stata_resolve <- function(rows, r, labels) {
     keep <- !is.na(keys)
     row <- row[keep]
     names(row) <- keys[keep]
-    if (length(row) == 0) {
+    if (length(row) == 0 && multi) {
       stop("[", stata_base, "] is the base outcome's equation, which Stata fixes at zero, so nothing is left to test")
     }
     add(row, r[i], labels[i])

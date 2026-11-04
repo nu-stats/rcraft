@@ -35,3 +35,10 @@ reproduced in R before the translation was written.
 - With an indicator variable (`i.g`), robreg's `e(b_init)` was not `qreg`'s: `2.g` was 0.3187 where qreg
   gave 0.2273, with only 3 zero residuals for 4 coefficients. It starts from a point inside the LAD
   solutions, as an interior-point solver would, not the median of that coefficient's interval (0.4197).
+
+## The start when the LAD fit is not unique, found (2026-11-03)
+
+- In one replication package, `robreg m v act` (9 countries, `act` an indicator) was run 100 times on
+  simulated draws. Starting from quantreg's Frisch-Newton interior-point LAD solution (`method = "fn"`)
+  gave Stata's coefficients in all 60 fits tested, to 1e-7; a corner of the LAD solutions gave them in 40. Where the LAD fit is unique the solver stops about 1e-5 short of the vertex, and robreg starts at the vertex itself; the vertex is unique when its rows' dual weights lie inside (-1, 1). With that rule all 200 fits (100 with the indicator, 100 with a continuous regressor) give Stata's coefficients to 1e-7.
+  `robreg m y x i.g` and `robreg m y d` (an indicator alone) match too (`robreg.do`).

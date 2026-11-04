@@ -27,6 +27,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("estadd", &["estout"]),
     ("estimates", &["estimates"]),
     ("eststo", &["estout"]),
+    ("esttab", &["esttab"]),
     ("expand", &["made", "random"]),
     ("foreach", &["aware", "control"]),
     ("forvalues", &["control"]),

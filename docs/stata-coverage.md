@@ -95,19 +95,19 @@ in the corpus, took it to 52.1%:
 - `cluster()` and `cl()` for `vce(cluster)`;
 - the value label sets, now dropped with the data when new data is read, as in Stata.
 
-Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%. `robreg m` (`robreg.do`), which one package runs in loops over and over, took it to 79.3%. `reghdfe` (`reghdfe.do`), with two-way clustering, to 80.2%. `eststo` and `estadd` (`estout.do`) to 80.7%. `outreg2` (`outreg2.do`), its files byte for byte, to 81.9%. `fre`, and `margins` after `clogit` with `parmest` (`clogit_margins.do`), to 83.5%. `xpose` (`made.do`), which one package turns its simulated estimates with, took it to 83.7%. The graphs below took it to 83.9%: `twoway bar` and `rarea`, plots split at `||`, `graph box`, `graph bar (count)`, `xline()` and `yline()`, `graph drop _all`, and the look-only short forms Stata 19 accepts; tier 4 went from 0% to 16.2%. A second y axis (`yaxis(2)`) took tier 4 to 22.2%. `coefplot` (`coefplot.do`, its `gen()` rows against Stata 19's), with the graph exports after it, took it to 62.4% and the packages to 84.6%.
+Then `estimates store`, `restore`, `drop` and `clear` (checked in `estimates.do`) took it to 53.1%, and `assert` and `tabulate, generate()` (`checks.do`) to 53.3%. `tsset` and the time-series operators (`timeseries.do`), with `replace x = L.x ...` done row by row as in Stata, took it to 53.8%; tier 3 went from 0.5% to 16.3%. `clogit` (`clogit.do`) and `vce(r)` and `vce(cl v)` as Stata abbreviates them took it to 55.9%. `gettoken` (`made.do`) took it to 56.5%. `xtile` (`xtile.do`) to 56.6%. `merge` of every type (`merge.do`), m:m among them, to 58.8%. The options that change only how a table looks (`baselevels`, `cformat()` and the like) took it to 59.1%. `robreg m` (`robreg.do`), which one package runs in loops over and over, took it to 79.3%. `reghdfe` (`reghdfe.do`), with two-way clustering, to 80.2%. `eststo` and `estadd` (`estout.do`) to 80.7%. `outreg2` (`outreg2.do`), its files byte for byte, to 81.9%. `fre`, and `margins` after `clogit` with `parmest` (`clogit_margins.do`), to 83.5%. `xpose` (`made.do`), which one package turns its simulated estimates with, took it to 83.7%. The graphs below took it to 83.9%: `twoway bar` and `rarea`, plots split at `||`, `graph box`, `graph bar (count)`, `xline()` and `yline()`, `graph drop _all`, and the look-only short forms Stata 19 accepts; tier 4 went from 0% to 16.2%. A second y axis (`yaxis(2)`) took tier 4 to 22.2%. `coefplot` (`coefplot.do`, its `gen()` rows against Stata 19's), with the graph exports after it, took it to 62.4% and the packages to 84.6%. `destring(x)` with its variable in parentheses, `egen rowmedian()` and `rowpctile()`, and `esttab` (`esttab.do`) took the packages to 85.2%.
 
 | Tier | Lines | Translated | Not translated | Known when run | Share translated |
 |---|---:|---:|---:|---:|---:|
-| 1. Data management and control flow | 9393 | 7345 | 1374 | 674 | 84.2% |
+| 1. Data management and control flow | 9393 | 7449 | 1270 | 674 | 85.4% |
 | 2. Core statistics | 2035 | 1838 | 196 | 1 | 90.4% |
 | 3. Panel, survival, survey, IV and other models | 376 | 265 | 110 | 1 | 70.7% |
 | 4. Graphs | 117 | 73 | 44 | 0 | 62.4% |
-| 5. Programs and SSC commands | 569 | 377 | 178 | 14 | 67.9% |
-| Other commands | 2657 | 2065 | 334 | 258 | 86.1% |
-| **All** | 15147 | 12010 | 2189 | 948 | 84.6% |
+| 5. Programs and SSC commands | 569 | 369 | 186 | 14 | 66.5% |
+| Other commands | 2657 | 2104 | 295 | 258 | 87.7% |
+| **All** | 15147 | 12098 | 2101 | 948 | 85.2% |
 
-Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `esttab`, and
+Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `esttab`'s `cells()` and `mlabels()`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:
 - graphs (44 of 117): `graph export` after `grstyle` and `marginsplot`, `saving()` in twoway and `graph combine`;
 - `suest`.
@@ -132,13 +132,15 @@ the do-file window does. It writes R's output, the R it ran and each line's fate
 | FMDLII | 7 | 7 | 7 | 0 | 0 | 0 |
 | TQN6ZN | 231 | 231 | 231 | 0 | 0 | 0 |
 | TZEN38 | 861 | 252 | 252 | 0 | 0 | 609 |
-| YFBPT6 | 697 | 8942 | 385 | 312 | 0 | 0 |
+| YFBPT6 | 4553 | 4423 | 4334 | 26 | 0 | 193 |
 | ZNMIXH | 899 | 216 | 117 | 7 | 76 | 699 |
 
 Every model line both runs reached gives Stata's numbers in four packages. The rest come from what
 neither could run, or what one ran on other data:
-- YFBPT6's 312 differences all follow `xpose, clear varname`. It was not translated, so the file it makes was
-  never written and later models ran on the data before it. `xpose` is now translated.
+- YFBPT6 (run again on 2026-11-04, Stata with `coefplot` installed so its run goes as far as R's): 4,334
+  model lines the same, from 385. Its 312 differences followed `xpose`, then `destring(x)` with the variable
+  in parentheses, `egen rowmedian()`, and `robreg`'s start when the LAD fit is not unique, now all fixed.
+  The 26 left were `display e()` after a model R refused for a variable it lacks, which now lose e().
 - ZNMIXH's differences come after lines R could not run on the data it had. Stata itself stops in 188 places
   there, on add-ons not installed (`winsor`, `center`, `coefplot`) and on files they would have written.
 - The packages that reached no model (AXYMDI, DZ8BUS, SI3BGA) expect their data to be opened by hand. XURXZN
@@ -153,19 +155,19 @@ The run also found, and fixed:
   was singular).
 - `recode` with labels in its rules, `decode`, `encode`'s label set, and `do file, nostop`.
 
-## Checked against Stata on R (2026-11-03)
+## Checked against Stata on R (2026-11-04)
 
-The 406 probes recorded in StatCraft's corpus are each run on R 4.6 in a fresh session, as the do-file window
-runs a do-file: 190,347 lines ran, and 159,638 of them (83.9%) were translated (158,643 of 189,013 in 390 probes on 2026-11-01; 126,618 before the dates, P2C.14; 135,471 before `bsample`, P2C.16).
+The 412 probes recorded in StatCraft's corpus are each run on R 4.6 in a fresh session, as the do-file window
+runs a do-file: 190,664 lines ran, and 159,806 of them (83.8%) were translated (159,638 of 190,347 in 406 probes on 2026-11-03; 158,643 of 189,013 in 390 probes on 2026-11-01; 126,618 before the dates, P2C.14; 135,471 before `bsample`, P2C.16).
 
 | | Lines | Before P2C.12 | Before P2C.11 |
 |---|---:|---:|---:|
-| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,679 | 210 | 196 |
-| The same to 8 significant digits | 5,561 | 205 | 192 |
+| Compared with what Stata 19 printed (`display`, `return list`, `ereturn list` at the top level) | 5,684 | 210 | 196 |
+| The same to 8 significant digits | 5,566 | 205 | 192 |
 | The same to 6, not 8 | 5 | 1 | 1 |
 | Different | 113 | 4 | 3 |
-| Not compared: after the probe's first R error, where the do-file window stops | 254 | 207 | 199 |
-| Printed by Stata, not translated (counted from P2C.12) | 817 | | |
+| Not compared: after the probe's first R error, where the do-file window stops | 233 | 207 | 199 |
+| Printed by Stata, not translated (counted from P2C.12) | 852 | | |
 | Translated lines that R stopped at | 530 | 429 | 399 |
 
 The 113 that differ are all `_natscale`, nearly all with n = 10 or 15. There Stata's r(min) is a residue of

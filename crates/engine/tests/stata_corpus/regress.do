@@ -49,3 +49,13 @@ regress y x w
 margins, dydx(w) post
 display "@ mg_b " %24.17g _b[w]
 display "@ mg_se " %24.17g _se[w]
+* a base level interacted is 0: test drops a constraint of only that, lincom shows it omitted
+regress y x i.g##i.yb
+test 0.g#1.yb
+display "@ tdrop " r(drop) " " r(df) " " r(dropped_1)
+test (0.g#1.yb) (x)
+display "@ tdrop2 " %24.17g r(F) " " r(df) " " r(drop) " " r(dropped_1)
+lincom 0.g#1.yb
+display "@ lbase " r(estimate) " " r(se)
+lincom x + 0.g#1.yb
+display "@ lbase2 " %24.17g r(estimate) " " %24.17g r(se)
