@@ -684,6 +684,12 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "estat")?;
+        {
+            let (s, _) = first_word(&c.parts.main);
+            if s.len() >= 4 && "bootstrap".starts_with(s) {
+                return self.estat_bootstrap(c, opts, out);
+            }
+        }
         // after weights: estat ic with frequency weights, and estat vce
         if self.weighted_fit {
             let (s, _) = first_word(&c.parts.main);

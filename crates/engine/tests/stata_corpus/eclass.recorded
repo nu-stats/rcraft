@@ -1,0 +1,23 @@
+* Stata 19.0's results for eclass.do, recorded by cargo xtask stata-record
+@ post 5 3 1 1 1
+@ coef 1.5 -2.25 .5 .70710678
+@ more 2 1 1 9 .01
+@ sample 5
+@ touse_gone 2
+@ V_moved 111
+@ C_moved 111
+@ V2_kept .5
+@ eb -2.25 2 2
+@ eV .01
+@ default_names 4 6
+@ no_sample 0
+@ no_V 111
+@ no_name 111
+@ clear 7 .
+@ after_regress 7 1 8 .30769231
+@ not_eclass 152
+@ top_level 152
+@ conform 503
+@ names 507
+@ not_found 111
+@ top_post 2 1

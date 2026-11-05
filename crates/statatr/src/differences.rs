@@ -116,7 +116,9 @@ pub const GUIDES: &[Guide] = &[
                 "set seed, the random functions (runiform(), rnormal(), rgamma(), rbinomial(), \
                  runiformint(), rexponential(), ...), bsample and bootstrap give Stata's own \
                  draws: RCraft runs Stata's generator (the 64-bit Mersenne Twister) in R, row by \
-                 row as Stata draws. rpoisson(), rbeta() and rt(), rbinomial(), rnbinomial() and \
+                 row as Stata draws. rt() is Stata's draw to within its last bit or so, the \
+                 draws after it exactly Stata's; rbeta() is Stata's when a shape is 1. \
+                 rpoisson(), rbeta() with neither shape 1, rbinomial(), rnbinomial() and \
                  rhypergeometric() past the ranges whose method is known (they stop with the \
                  reason), simulate and permute, two draws in one expression and version 13 or \
                  earlier are refused.",
@@ -186,10 +188,19 @@ pub const GUIDES: &[Guide] = &[
                  they are.",
             ),
             p(
+                "Options",
+                "strata() resamples within each stratum as Stata does (e(N_strata), and the \
+                 strata in the header); saving(file [, replace double]) writes the replicates \
+                 as a dataset, a variable each labelled with its expression (_b[x] is _b_x), \
+                 floats unless double; a file already there without replace is r(602) before \
+                 anything runs. estat bootstrap shows the bias and the normal, percentile and \
+                 bias-corrected intervals (bc by default, all for the three).",
+            ),
+            p(
                 "Not yet",
-                "Statistics are _b after regress, logit or probit, or r() and e() values; other \
-                 options (strata(), saving(), ...), predict and estat after it are refused with \
-                 the reason.",
+                "Statistics are _b after regress, logit or probit, or r() and e() values; bca, \
+                 strata() with cluster(), saving()'s every(), predict after it and \
+                 vce(bootstrap) are refused with the reason.",
             ),
         ],
     },
@@ -204,9 +215,15 @@ pub const GUIDES: &[Guide] = &[
                  as Stata's do. R's sample() would draw other rows.",
             ),
             p(
+                "strata()",
+                "The data sorted by stratum, then Stata's draws with the bins taken within each \
+                 stratum and a third uniform a row ordering them, so the rows come in Stata's \
+                 order; with a size, the first that many of each stratum.",
+            ),
+            p(
                 "Not yet",
-                "strata(), weight(), and if or in together with a sample size or cluster() are \
-                 refused with the reason.",
+                "weight(), strata() with cluster(), if or in, and if or in together with a \
+                 sample size or cluster() are refused with the reason.",
             ),
         ],
     },
@@ -373,15 +390,6 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
-        command: "ereturn",
-        about: "ereturn list",
-        points: &[p(
-            "What is listed",
-            "Stata's scalars, macros and matrices in Stata's layout; what Stata also lists and \
-             RCraft does not keep (the optimizer's settings, e(ilog), ...) is named in a note.",
-        )],
-    },
-    Guide {
         command: "exit",
         about: "Ends the do-file",
         points: &[p("In R", "Nothing to do in R: the lines after it are not run, as in Stata.")],
@@ -396,15 +404,24 @@ pub const GUIDES: &[Guide] = &[
     },
     Guide {
         command: "file",
-        about: "Writes a text or binary file",
+        about: "Writes a text or binary file, and reads a text file line by line",
         points: &[p(
             "As Stata 19",
             "file open (write, with replace or append, text by default or binary), file write \
              (strings, _newline(n), _tab(n), _skip(n), _char(n), (exp) as display writes it, \
              %fmt (exp), and %1bu and %1bs bytes in binary files) and file close (or _all). \
              Text files take the system's new lines (\r\n on Windows), as Stata's do. The \
-             errors stop where Stata's do (r(602), r(110), r(111)). file read, seek, query and \
-             set are not translated yet.",
+             errors stop where Stata's do (r(602), r(110), r(111)). seek, query and set are \
+             not translated yet.",
+        ),
+        p(
+            "file read",
+            "file open h using f, read and then file read h name put the next line in the \
+             local, without its end; r(status) says how the line ended (win, unix, mac, or none \
+             for a last line without one) and r(eof) is 1, the local empty, past the last line, \
+             so a while r(eof) == 0 loop goes through a file as in Stata. file open and close \
+             leave r() as it was. Binary reads (formats) and read write together are not \
+             translated yet.",
         )],
     },
     Guide {
@@ -427,6 +444,37 @@ pub const GUIDES: &[Guide] = &[
             "estat ic counts the coefficients as the degrees of freedom, as Stata does; R's \
              AIC() on a linear model also counts the variance.",
         )],
+    },
+    Guide {
+        command: "ereturn",
+        about: "Sets e() in a program that estimates, and lists or shows it",
+        points: &[
+            p(
+                "What is listed",
+                "Stata's scalars, macros and matrices in Stata's layout; what Stata also lists and \
+                 RCraft does not keep (the optimizer's settings, e(ilog), ...) is named in a note.",
+            ),
+            p(
+                "In R",
+                "e() is a named list in R, stata_e. ereturn post b V makes it new from the \
+                 do-file's matrices (which it moves, as Stata does), with depname(), obs(), \
+                 dof(), properties() and esample(), whose variable leaves the data and marks \
+                 e(sample). ereturn scalar, local and matrix add to it in the order ereturn \
+                 list shows, an empty local removes one, and ereturn display prints Stata's \
+                 coefficient table, with t when dof() was given and z otherwise.",
+            ),
+            p(
+                "Stata's rules",
+                "post and clear work anywhere; scalar, local and matrix only in an e-class \
+                 program (r(152) elsewhere). A V whose size is not b's is r(503), and one whose \
+                 names are not b's is r(507).",
+            ),
+            p(
+                "Not yet",
+                "ereturn repost, a variance matrix that is not symmetric, and predict, test, \
+                 lincom and margins after posted results are refused.",
+            ),
+        ],
     },
     Guide {
         command: "estimates",
@@ -708,8 +756,18 @@ pub const GUIDES: &[Guide] = &[
                  c2, ... by default; a product takes the left one's rows and the right one's \
                  columns, a sum the right one's names, a transpose swaps them, and joins with , \
                  and \\ number default names again (read off Stata 19). A 1x1 matrix multiplies \
-                 as a number. invsym() of a singular matrix (Stata's generalized inverse), the \
-                 Kronecker product #, submatrices (A[1..2, 3]) and cholesky() are declined.",
+                 as a number.",
+            ),
+            p(
+                "Functions",
+                "The Kronecker product # (names eq:name, numbered across the result when the \
+                 right one is typed in place), submatrices (A[1..2, 3...], A[\"a\"..\"b\", 1]), \
+                 cholesky(), corr(), hadamard(), vec(), vech(), sweep(), get(_b), get(VCE), and \
+                 invsym() of a singular matrix as Stata's generalized inverse (swept in order, \
+                 a pivot at or below 1e-13 of its first value left out as 0). trace(), det(), \
+                 diag0cnt(), issymmetric(), matmissing(), mreldif(), colnumb() and rownumb() \
+                 give numbers, missing where Stata's are. matuniform() and the Kronecker \
+                 product of matrices joined in place are declined.",
             ),
             p(
                 "When a matrix is not known",
@@ -873,8 +931,9 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "e-class returns (ereturn post), sclass, byable programs and program list are \
-                 refused; a program with a line that is not translated leaves r() unknown.",
+                "sclass, byable programs and program list are refused; a program with a line \
+                 that is not translated leaves r() unknown, and an e-class one e(). An e-class \
+                 program's ereturn lines are on the ereturn page.",
             ),
         ],
     },

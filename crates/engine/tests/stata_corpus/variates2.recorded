@@ -1,0 +1,9 @@
+* Stata 19.0's results for variates2.do, recorded by cargo xtask stata-record
+@ rt -15.300737 -.71924673 -.85030807 -1.3561323 .01155622 1
+@ rt_moments .02690011 1.3876079 200
+@ rt_next .92017623
+@ rt_below_1 1 .4078308
+@ rbeta .73564495 .25270619 .78016774 .87640841 .37675738 .82472903
+@ rbeta_moments .35833873 .00469432 .91657748
+@ rbeta_next .14732694
+@ rbeta_invalid 1 .9185373

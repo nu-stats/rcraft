@@ -4,7 +4,9 @@
 //! binary (only `%1bu` and `%1bs` pieces, as Stata takes only formats there); `replace`
 //! and `append`; strings, `_newline(n)`, `_tab(n)`, `_skip(n)`, `_char(n)`,
 //! `(exp)` and `%fmt (exp)`, and in binary files `%1bu` and `%1bs` bytes.
-//! `file read`, `seek`, `query` and `set` are not translated yet.
+//! `file read h name` reads a text file's next line into a local, with
+//! r(eof) and r(status) as Stata 19 leaves them. `seek`, `query`, `set` and
+//! binary reads are not translated yet.
 
 use super::{is_name, no, Out, Session};
 use crate::expr_r::{r_text, Kind, Untranslated};
@@ -21,6 +23,55 @@ stata_file_open <- function(h, path, append = FALSE, binary = FALSE, replace = F
   stata_files[[h]] <<- list(con = file(path, open = mode), binary = binary)
   invisible(NULL)
 }
+# read: the file's bytes, and where the next line starts
+stata_file_open_read <- function(h, path) {
+  if (!is.null(stata_files[[h]])) stop("file handle ", h, " already exists (Stata: r(110))", call. = FALSE)
+  if (!file.exists(path)) stop("file ", path, " not found (Stata: r(601))", call. = FALSE)
+  bytes <- readBin(path, "raw", n = file.size(path))
+  stata_files[[h]] <<- list(con = NULL, binary = FALSE, read = TRUE, bytes = bytes, pos = 1L)
+  invisible(NULL)
+}
+# the next line, without its end, into stata_file_line; r(status) says how it
+# ended (win for CR LF, unix for LF, mac for CR, none at the end of the file)
+# and r(eof) is 1, the line empty, past the last one
+stata_file_read <- function(h) {
+  f <- stata_file_get(h)
+  if (!isTRUE(f$read)) stop("may not read from write-only file handle ", h, " (Stata: r(198))", call. = FALSE)
+  b <- f$bytes
+  n <- length(b)
+  p <- f$pos
+  if (p > n) {
+    stata_file_line <<- ""
+    stata_r <<- list(eof = 1, status = "eof")
+    return(invisible(NULL))
+  }
+  ends <- which(b[p:n] == as.raw(10) | b[p:n] == as.raw(13))
+  if (length(ends) == 0) {
+    k <- n + 1L
+    status <- "none"
+    nxt <- n + 1L
+  } else {
+    k <- p + ends[1] - 1L
+    if (b[k] == as.raw(10)) {
+      status <- "unix"
+      nxt <- k + 1L
+    } else if (k < n && b[k + 1L] == as.raw(10)) {
+      status <- "win"
+      nxt <- k + 2L
+    } else {
+      status <- "mac"
+      nxt <- k + 1L
+    }
+  }
+  line <- if (k > p) b[p:(k - 1L)] else raw(0)
+  if (any(line == as.raw(0))) stop("RCraft: file read of a line with a NUL byte is not translated yet", call. = FALSE)
+  s <- rawToChar(line)
+  Encoding(s) <- "UTF-8"
+  stata_files[[h]]$pos <<- nxt
+  stata_file_line <<- s
+  stata_r <<- list(eof = 0, status = status)
+  invisible(NULL)
+}
 stata_file_get <- function(h) {
   f <- stata_files[[h]]
   if (is.null(f)) stop("file handle ", h, " not found (Stata: r(111))", call. = FALSE)
@@ -29,6 +80,7 @@ stata_file_get <- function(h) {
 # the pieces: text, or raw bytes (binary files only)
 stata_file_write <- function(h, ...) {
   f <- stata_file_get(h)
+  if (isTRUE(f$read)) stop("may not write to read-only file handle ", h, " (Stata: r(198))", call. = FALSE)
   for (p in list(...)) {
     if (is.raw(p)) {
       if (!f$binary) stop("bytes can be written to a binary file only (Stata: r(198))", call. = FALSE)
@@ -42,7 +94,8 @@ stata_file_write <- function(h, ...) {
 stata_file_close <- function(h = NULL) {
   hs <- if (is.null(h)) names(stata_files) else h
   for (k in hs) {
-    close(stata_file_get(k)$con)
+    con <- stata_file_get(k)$con
+    if (!is.null(con)) close(con)
     stata_files[[k]] <<- NULL
   }
   invisible(NULL)
@@ -267,9 +320,28 @@ impl Session {
                     )));
                 }
                 if opts.has("read", 1) {
-                    return Err(no(
-                        "file open for reading (file read) is not translated yet",
+                    if opts.has("write", 1) {
+                        return Err(no(
+                            "file open for reading and writing together is not translated yet",
+                        ));
+                    }
+                    if opts.has("binary", 1) {
+                        return Err(no(
+                            "file open, read binary (file read with formats) is not translated yet",
+                        ));
+                    }
+                    if opts.has("replace", 7) || opts.has("append", 1) {
+                        return Err(no("file open, read with replace or append (Stata: r(198))"));
+                    }
+                    let path = super::file_name(&file, "");
+                    self.file_lost.remove(handle);
+                    out.line(format!(
+                        "stata_file_open_read({}, {})",
+                        r_text(handle),
+                        r_text(&path)
                     ));
+                    self.file_handles.insert(handle.to_string(), false);
+                    return Ok(());
                 }
                 if !opts.has("write", 1) {
                     return Err(no("file open needs read or write (Stata: r(198))"));
@@ -344,6 +416,31 @@ impl Session {
                     return self.no_handle(handle, out);
                 }
                 out.line(format!("stata_file_close({})", r_text(handle)));
+                Ok(())
+            }
+            "read" | "r" | "re" | "rea" => {
+                let words: Vec<&str> = tail.split_whitespace().collect();
+                let [handle, name] = words.as_slice() else {
+                    if words.len() == 1 {
+                        return Err(no(
+                            "file read needs a local's name to read into (Stata: invalid syntax, r(198))",
+                        ));
+                    }
+                    return Err(no(
+                        "file read with formats (binary files) is not translated yet",
+                    ));
+                };
+                if !is_name(name) || name.starts_with('%') {
+                    return Err(no(
+                        "file read with formats (binary files) is not translated yet",
+                    ));
+                }
+                if !self.file_handles.contains_key(*handle) {
+                    return self.no_handle(handle, out);
+                }
+                self.helpers.insert("stata_returned");
+                out.line(format!("stata_file_read({})", r_text(handle)));
+                self.r_new = Some((super::returned::R_FILE_READ, "file read".into()));
                 Ok(())
             }
             other => Err(no(format!("file {other} is not translated yet"))),

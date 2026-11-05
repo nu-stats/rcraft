@@ -367,7 +367,7 @@ skipped. It never gives a silent wrong answer.
 - P2C.11 Stata's own random draws on R: `set seed`, `runiform()`, `rnormal()`
   and `rgamma()` give Stata 19's numbers, then `runiformint()`,
   `rbinomial()` and the others
-  (done 2026-11-01 for the first four: Stata's generator (mt64) and StatCraft's decoding of its normal and gamma methods, written in R (`data_r/random.rs`), its state kept in R across lines, `preserve`, `by` and typed lines; draws only for the rows an `if`/`in` selects; `random.do` in the corpus checks them exactly. Design and observations in `plan/stata/random-numbers.md`. The other random functions followed the same day: `rexponential()`, `rlogistic()`, `rweibull()`, `rweibullph()`, `rcauchy()`, `rlaplace()`, `rpareto()`, `rgeometric()`, `rigaussian()`, `rchi2()`, `runiformint()`, and `rbinomial()`, `rnbinomial()` and `rhypergeometric()` in the ranges whose method is known, checked on 34 × 1,500 of Stata's draws and in `variates.do`. Still to come: `rpoisson()`, `rbeta()`, `rt()`, KISS32 under `version` 13 or earlier, `c(rngstate)`.)
+  (done 2026-11-01 for the first four: Stata's generator (mt64) and StatCraft's decoding of its normal and gamma methods, written in R (`data_r/random.rs`), its state kept in R across lines, `preserve`, `by` and typed lines; draws only for the rows an `if`/`in` selects; `random.do` in the corpus checks them exactly. Design and observations in `plan/stata/random-numbers.md`. The other random functions followed the same day: `rexponential()`, `rlogistic()`, `rweibull()`, `rweibullph()`, `rcauchy()`, `rlaplace()`, `rpareto()`, `rgeometric()`, `rigaussian()`, `rchi2()`, `runiformint()`, and `rbinomial()`, `rnbinomial()` and `rhypergeometric()` in the ranges whose method is known, checked on 34 × 1,500 of Stata's draws and in `variates.do`. `rt()` (a ratio of uniforms, Stata's stream exactly and its draws to the last bit or so) and `rbeta()` with a shape of 1 followed on 2026-11-05 (`variates2.do`). Still to come: `rpoisson()`, `rbeta()` with neither shape 1, KISS32 under `version` 13 or earlier, `c(rngstate)`.)
 - P2C.12 Closer to Stata on the probes: no compared line differs, and more
   lines are compared
   (done 2026-11-01:
@@ -410,7 +410,7 @@ skipped. It never gives a silent wrong answer.
   - `bsample` (plain, `#`, `if`/`in`, `cluster()`, `idcluster()`) draws Stata's rows in its order, checked on 280 of Stata 19's samples and in `bsample.do`;
   - the `bootstrap` prefix (`_b` after regress/logit/probit, `r()`/`e()` statistics, `reps()`, `seed()`, `nodots`, `cluster()`, `level()`) gives Stata's table and standard errors, checked in `bootstrap.do`;
   - `el()` of e()/r() matrices.
-  Still to come: `strata()`, `saving()`, `estat bootstrap`, `vce(bootstrap)`.)
+  `strata()` (in `bsample` too), `saving()` and `estat bootstrap` followed on 2026-11-05 (`bsopts.do`). Still to come: `bca`, `vce(bootstrap)`.)
 
 ## Phase 3: Data
 

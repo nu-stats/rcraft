@@ -18,4 +18,18 @@ Read off Stata 19 by writing made-up files and reading their bytes (never its ad
 - RCraft: the handles a translated `file open` opened are known; one a refused `file open` names is not,
   and lines on it are declined. A handle never opened stops R with r(111) as Stata. Extended missing
   values (`.a`) are written as "." (they are all NA in R; the expression says so in a caveat).
-- Not translated: `file read`, `seek`, `query`, `set`, and `%2b`, `%4b`, `%4z`, `%8z`.
+- Not translated: `seek`, `query`, `set`, and `%2b`, `%4b`, `%4z`, `%8z`.
+
+## file read (2026-11-05)
+
+- `file open h using f, read` (text by default): a file not there is "file f not found", r(601). It leaves
+  r() as it was, and so does `file close`. `read write` together is accepted (RCraft declines it).
+- `file read h name`: the next line into the local, without its end. r(eof) is 0 and r(status) says how
+  the line ended: "win" for CR LF, "unix" for LF, "mac" for a CR alone, "none" for a last line with no
+  end. An empty line is an empty local. Tabs, quotes and leading or trailing spaces are kept. A line of
+  3,000 characters is read whole.
+- Past the last line: the local is empty, r(eof) is 1 and r(status) "eof", every time it is read again.
+- r() after `file read` holds r(eof) and r(status) only (a `summarize`'s r() before it is gone).
+- `file read h` with no name is "invalid syntax", r(198); on a handle opened for writing, "may not read
+  from write-only file handle h", r(198); on a handle not open, "file handle h not found", r(111).
+- RCraft reads the file's bytes when it is opened; a line with a NUL byte is declined.

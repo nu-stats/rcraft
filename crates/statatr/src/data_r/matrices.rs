@@ -404,6 +404,14 @@ impl Session {
     /// made (Stata stops, r(111)), or changed by a line not translated.
     pub(super) fn user_matrix(&self, name: &str) -> Result<String, Untranslated> {
         if self.user_mats.contains(name) {
+            // moved into e() by a line under capture, or not: R knows
+            if self.maybe_moved.contains(name) {
+                return Ok(format!(
+                    "(if (is.null(stata_mat[[{0}]])) stop({1}, call. = FALSE) else stata_mat[[{0}]])",
+                    r_text(name),
+                    r_text(&format!("matrix {name} not found (Stata: r(111))"))
+                ));
+            }
             return Ok(format!("stata_mat[[{}]]", r_text(name)));
         }
         match self.lost_mats.get(name) {
@@ -427,6 +435,7 @@ impl Session {
     /// A matrix the line makes.
     fn matrix_made(&mut self, name: &str) {
         self.lost_mats.remove(name);
+        self.maybe_moved.remove(name);
         self.user_mats.insert(name.to_string());
     }
 }

@@ -200,6 +200,10 @@ fn the_corpus_gives_statas_results() {
         .unwrap_or_default();
     names.sort();
     assert!(names.len() >= 5, "the corpus is in {}", dir.display());
+    // RCRAFT_CORPUS_ONLY runs the files whose names hold its text
+    if let Ok(only) = std::env::var("RCRAFT_CORPUS_ONLY") {
+        names.retain(|n| n.contains(only.as_str()));
+    }
     let mut wrong = Vec::new();
     for name in &names {
         let dofile = std::fs::read_to_string(dir.join(format!("{name}.do"))).unwrap_or_default();

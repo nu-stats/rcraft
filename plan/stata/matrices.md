@@ -31,10 +31,36 @@ declined from then on, `nullmat()` of them too. A matrix never made otherwise st
 - `svmat`: A1, A2, ... (or the column names, or a stub), floats unless double; more rows than the data
   add observations ("number of observations will be reset to n"); a name taken stops, r(110).
 
+## More functions (2026-11-05)
+
+- `A # B`: rows and columns `eq:name`, A's names the equations and B's the names. When B is typed in
+  place (`A # (1, 2 \ 3, 4)`) its names are numbered across the result (`b:r3 b:r4`, `y:c3 y:c4`); a
+  named B, `J()`, `I()`, `B'` and `B * 2` keep theirs (`b:r1 b:r2`). A typed-in-place A keeps its
+  default names as equations. A number on either side is "type mismatch", r(109).
+- Submatrices: `B[1..2, 2..3]`, `B[2, 1...]`, `B[1..., "q".."r"]`, `A["b", "x"]` keep their rows' and
+  columns' names. A range past the matrix or backwards is r(503); `B[1.., 2]` is "invalid syntax". An
+  expression with a submatrix inside `el()` is refused by Stata ("matrix operators that return matrices
+  not allowed in this context").
+- `cholesky(A)`: the lower triangle, A's names; not positive definite is r(506). `corr(A)`: A's names.
+  `hadamard(A, B)`: the left one's names. `vec(B)`: one column `c1`, rows `col:row` column by column;
+  `vech(A)`: the lower triangle the same way. `sweep(A, k)`: row k's name becomes column k's and the
+  other way round.
+- `invsym()` of a singular matrix: the generalized inverse StatCraft decoded (pivots in order, one not
+  positive or at or below 1e-13 of its first value left out, its row and column 0):
+  `invsym((4, 2, 2 \ 2, 1, 1 \ 2, 1, 3))` is `(.375, 0, -.25 \ 0, 0, 0 \ -.25, 0, .5)`.
+- Numbers: `trace()` and `det()` of a matrix that is not square are missing, with no error;
+  `issymmetric()` looks at the values, not the names; `matmissing()`; `mreldif(X, Y)` is the largest
+  |x - y| / (|y| + 1); `colnumb()` and `rownumb()` are missing for a name not there. They take a
+  matrix's name or `e(V)`; `trace(A')` is "A' not found", r(111).
+- A `.` in a matrix typed in place is a missing value.
+- A matrix typed in place has no names of its own: `invsym((4, 2 \ 2, 3))` has rows r1.. and columns
+  c1.., where a stored matrix with default names has them swapped (rows c1.., columns r1..), singular or
+  not.
+
 ## Declined
 
-The Kronecker product `#`, submatrices (`A[1..2, 3]`), `cholesky()`, `corr()`, `hadamard()`, `get()`,
-`vec()`, `sweep()`, row or column names with equations or factor variables, `matrix accum` and the other
+`matuniform()`, the Kronecker product of matrices joined in place or with equation names, `sweep()` on a
+zero pivot, row or column names with equations or factor variables, `matrix accum` and the other
 subcommands not listed here, `svmat` with names(eqcol) or names(matcol).
 
 ## insheet

@@ -160,10 +160,35 @@ In `bootstrap.do` (9 results) the standard errors match to 1e-9. `logit`'s agree
 as its own coefficients do.
 
 Not translated yet:
-- `strata()`, `saving()`, `bca` and the other options;
+- `bca` and the options not below;
 - `_b` after other models;
-- `predict` and `estat bootstrap` after it;
+- `predict` after it;
 - `vce(bootstrap)` as a model option.
+
+## bsample and bootstrap with strata(), saving() and estat bootstrap (2026-11-05)
+
+Read off Stata 19 with made-up data, each sample listed by an id and followed by the next uniform:
+- `bsample, strata(g)` takes 3N uniforms (the 37th is the next after 12 rows), however the data are
+  sorted. The rule that gives all ten samples recorded, in order: sort the data by g (rows keep their
+  order within a stratum); each row draws k, then each draws v, as in plain `bsample`, but a row's bin
+  is floor(N_h k) among the N_h rows of its stratum, and a bin's count goes to its largest v; the units
+  drawn go in (stratum, k) order with their extra copies after them; then each of the N rows draws w,
+  and the rows go in (stratum, w) order.
+- `bsample n, strata(g)`: the first n rows of each stratum in that order (three samples; the stream
+  moves as without n).
+- `bootstrap ..., strata(g)`: replications as above on the estimation sample; the header has the title
+  alone, then `Number of strata = 3` beside `Number of obs`; e(N_strata) and e(strata). `estat
+  bootstrap` heads it the same way (`Number of strata   =          3`).
+- `saving(f [, replace double])`: the replicates as `f.dta`, a variable each (`_bs_1`, the names given,
+  or `_b_x`, `_b_cons` for `_b`), labelled with the expression (`r(mean)`, `_b[x]`), the data labelled
+  `bootstrap: summarize`; floats (`%9.0g`) unless `double` (`%10.0g`), and with `double` the standard
+  errors come from the doubles. `(file f.dta not found)` when replacing a file not there; a file there
+  without `replace` is r(602) before anything runs, and e() is gone after it.
+- `estat bootstrap`: `bc` by default, `normal`, `percentile`, `all` (N, P, BC). Observed values and
+  standard errors in `%10.0g`, the bias and the interval ends in `%9.0g`; the `Key:` lines pad the
+  letters to the widest shown.
+- With `capture` before it, `bootstrap` took the word itself as a statistic (`bootstrap` as an
+  expression); fixed.
 
 ## The other random variates (P2C.11 continued)
 
@@ -183,3 +208,23 @@ gives missing and draws nothing.
 The check (`q12`) took 34 cases of 1,500 draws each, every case followed by the next uniform. All match
 Stata 19 bit for bit, and so do the 19 results of `variates.do`. Still not Stata's: `rpoisson()`, `rbeta()`
 and `rt()`, refused.
+
+## rt() and rbeta() (decoded here, 2026-11-05)
+
+Read off Stata 19 with `set seed s`, one draw on one row, then `runiform()` to see how many uniforms the
+draw took, against the mt64 stream RCraft already reproduces.
+- `rt(df)` is a ratio of uniforms. Each try takes two uniforms, u then w: v = b (2w - 1), t = v / u, kept
+  when u^2 <= (1 + t^2/df)^(-(df+1)/2). b is the half width of the region, sup |t| f(t)^(1/2): 1 at
+  df = 1, else exp(0.5 (log(2df/(df-1)) + (df+1)/2 log((df-1)/(df+1)))). On 116 draws at df 1, 1.5, 2,
+  3, 4, 5, 7, 10, 12.5, 30, 50, 100, 1000, 1e6 and 1e10 the next uniform is Stata's every time; the
+  draw is bit for bit at 11 of the 15 df, and one ulp of b away at df 3, 4 and 1e10 (no one formula for b
+  found gives all of them; Stata's maths library may differ from R's in the last bit). df below 1 gives
+  missing and takes no draw (0.3, 0.5, 0.9), as do 0, -1 and `.`.
+- `rbeta(a, b)`: (1, 1) is one uniform as it is; (1, 2) is the smaller of two and (2, 1) the larger (12
+  draws each, every one exact); with b = 1, exp(log(u) * (1/a)) (a = 2.5, 3, 5) and with a = 1,
+  1 - exp(log(u) * (1/b)) (b = 0.4, 3), one uniform, exact on 50 draws. Both shapes below 1 with
+  a + b <= 1 look like Johnk's method (x = u1^(1/a), y = u2^(1/b), kept when x + y <= 1, x/(x + y)):
+  the uniforms it takes are Stata's, and most draws are exact, but some are not (small x), so it is
+  not used. Other shapes take other numbers of uniforms (Cheng's BB and BC, and a ratio of Stata's
+  gammas, do not fit). An argument not above 0 or missing gives missing with no draw.
+- `rpoisson()`: not looked at again; StatCraft's notes above stand.
