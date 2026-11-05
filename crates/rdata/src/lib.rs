@@ -35,6 +35,7 @@
 pub mod display;
 pub mod sniff;
 pub mod summary;
+pub mod unpack;
 
 use std::fmt;
 use std::path::Path;

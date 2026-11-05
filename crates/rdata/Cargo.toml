@@ -12,8 +12,11 @@ authors.workspace = true
 layer = 2
 
 [dependencies]
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+lzma-rust2 = { version = "0.25.0", default-features = false, features = ["std", "xz"] }
 rcraft-core.workspace = true
 rcraft-rproto.workspace = true
+ruzstd = "0.8"
 
 [lints]
 workspace = true

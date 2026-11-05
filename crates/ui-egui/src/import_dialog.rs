@@ -1,6 +1,8 @@
 //! File > Use my file: choose a data file, see what it looks like, change how
 //! it is read, and import it. Delimited text, Excel, Stata, SPSS, SAS, Parquet,
-//! Feather and R data files are handled. The dialog shows the R code it will run (AGENTS.md:
+//! Feather and R data files are handled, also when packed in a
+//! `.zip`, `.gz`, `.bz2`, `.xz`, `.zst` or `.tar` file: the data file is unpacked
+//! next to the archive and R reads that copy. The dialog shows the R code it will run (AGENTS.md:
 //! the generated R is the product) and R's own preview of the first rows.
 
 use std::path::Path;
@@ -12,6 +14,7 @@ use rcraft_rcodegen::{
     ExcelImport, FileKind, HavenImport, HavenKind, Import, Quote, RObjectImport, DATA_EXTENSIONS,
 };
 use rcraft_rdata::sniff::{sniff_file, Encoding, SniffError, Sniffed};
+use rcraft_rdata::unpack::{self, Inner, COMPRESSED_EXTENSIONS, MAX_UNPACKED};
 
 use crate::look::Palette;
 use crate::packages::{install_code, library_dir};
@@ -73,6 +76,18 @@ pub struct ImportDialog {
     recent: Vec<(String, bool)>,
     /// The folder R works in: where the file chooser opens when the box is empty.
     folder: Option<std::path::PathBuf>,
+    /// The data file was unpacked from the archive in the path box.
+    unpacked: Option<Unpacked>,
+    /// The archive holds several data files: the user picks one.
+    choices: Vec<Inner>,
+}
+
+/// Where a data file taken out of an archive went.
+struct Unpacked {
+    /// Its name inside the archive.
+    inner: String,
+    /// The copy R reads.
+    to: std::path::PathBuf,
 }
 
 struct Footer {
@@ -158,6 +173,8 @@ impl ImportDialog {
         self.preview = Reply::NotAsked;
         self.previewed_code.clear();
         self.want_preview = true;
+        self.unpacked = None;
+        self.choices.clear();
         let path = self.path.trim().to_string();
         if path.is_empty() {
             return;
@@ -166,6 +183,55 @@ impl ImportDialog {
             self.error = Some("could not read the file: it was not found".to_string());
             return;
         }
+        match unpack::open_path(Path::new(&path), MAX_UNPACKED) {
+            Ok(None) => self.read_as(&path),
+            Ok(Some(files)) => {
+                let keep: Vec<String> = unpack::offered(&files, DATA_EXTENSIONS)
+                    .iter()
+                    .map(|f| f.name.clone())
+                    .collect();
+                let mut files: Vec<Inner> = files
+                    .into_iter()
+                    .filter(|f| keep.contains(&f.name))
+                    .collect();
+                match files.len() {
+                    0 => self.error = Some("The archive holds no files.".to_string()),
+                    1 => {
+                        if let Some(inner) = files.pop() {
+                            self.take_out(&inner);
+                        }
+                    }
+                    _ => self.choices = files,
+                }
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// Writes a data file from the archive in the path box next to it, and
+    /// looks at the copy.
+    fn take_out(&mut self, inner: &Inner) {
+        match unpack::write_beside(Path::new(self.path.trim()), inner) {
+            Ok(to) => {
+                let copy = to.to_string_lossy().into_owned();
+                self.unpacked = Some(Unpacked {
+                    inner: inner.name.clone(),
+                    to,
+                });
+                self.read_as(&copy);
+            }
+            Err(e) => {
+                self.error = Some(format!(
+                    "\"{}\" could not be taken out of the archive: {e}",
+                    inner.name
+                ));
+            }
+        }
+    }
+
+    /// Sets the choices for the data file at `path`.
+    fn read_as(&mut self, path: &str) {
+        let path = path.to_string();
         let kind = FileKind::from_path(&path);
         self.kind = Some(kind);
         self.import = match kind {
@@ -374,6 +440,18 @@ impl ImportDialog {
             ui.add_space(4.0);
             ui.label(RichText::new(why).color(pal.error));
         }
+        self.choose_inner(ui, pal);
+        if let Some(u) = &self.unpacked {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(format!(
+                    "Unpacked \"{}\" from the archive into {}. R reads that copy.",
+                    u.inner,
+                    u.to.display()
+                ))
+                .color(pal.dim),
+            );
+        }
         self.footer = None;
         let (Some(kind), Some(mut import)) = (self.kind, self.import.take()) else {
             return;
@@ -436,7 +514,16 @@ impl ImportDialog {
             self.preview_panel(ui, pal, &import);
             ui.add_space(6.0);
             ui.label(RichText::new("R code that will run").small().color(pal.dim));
-            let code = import.code();
+            let code = match &self.unpacked {
+                Some(u) => format!(
+                    "# unpacked by RCraft: {} from {}
+{}",
+                    one_line(&u.inner),
+                    one_line(self.path.trim()),
+                    import.code()
+                ),
+                None => import.code(),
+            };
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.add(
                     egui::Label::new(RichText::new(&code).monospace().small())
@@ -485,12 +572,59 @@ impl ImportDialog {
         }
     }
 
+    /// When the archive holds several data files, lists them; a click takes
+    /// that one out and looks at it.
+    fn choose_inner(&mut self, ui: &mut egui::Ui, pal: &Palette) {
+        if self.choices.is_empty() {
+            return;
+        }
+        ui.add_space(4.0);
+        ui.label(format!(
+            "This archive holds {} files. Choose the one to use:",
+            self.choices.len()
+        ));
+        let mut picked = None;
+        egui::Frame::group(ui.style()).show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .id_salt("import-inner")
+                .max_height(160.0)
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for (i, f) in self.choices.iter().enumerate() {
+                        let size = RichText::new(file_size(f.bytes.len()))
+                            .small()
+                            .color(pal.dim);
+                        ui.horizontal(|ui| {
+                            let name = RichText::new(&f.name).monospace();
+                            if ui.selectable_label(false, name).clicked() {
+                                picked = Some(i);
+                            }
+                            ui.label(size);
+                        });
+                    }
+                });
+        });
+        if let Some(i) = picked {
+            if i < self.choices.len() {
+                let inner = self.choices.swap_remove(i);
+                self.choices.clear();
+                self.take_out(&inner);
+            }
+        }
+    }
+
     /// Asks the system's file chooser for a data file, and looks at the one
     /// picked. The window waits while the chooser is open.
     fn browse(&mut self) {
+        let data_or_packed: Vec<&str> = DATA_EXTENSIONS
+            .iter()
+            .chain(COMPRESSED_EXTENSIONS)
+            .copied()
+            .collect();
         let mut chooser = rfd::FileDialog::new()
             .set_title("Choose a data file")
-            .add_filter("Data files", DATA_EXTENSIONS)
+            .add_filter("Data files", &data_or_packed)
+            .add_filter("Compressed files", COMPRESSED_EXTENSIONS)
             .add_filter("All files", &["*"]);
         if let Some(dir) = start_folder(&self.path, self.folder.as_deref(), &self.recent) {
             chooser = chooser.set_directory(dir);
@@ -853,6 +987,25 @@ fn haven_options(ui: &mut egui::Ui, spec: &mut HavenImport) {
 
 /// The folder the file chooser opens in: where the file in the box is, else the
 /// folder R works in, else where the newest recent file that is still there is.
+/// A path for an R comment: on one line.
+fn one_line(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// A file size in words, such as "12 KB".
+fn file_size(bytes: usize) -> String {
+    let b = bytes as f64;
+    if b < 1e3 {
+        format!("{bytes} bytes")
+    } else if b < 1e6 {
+        format!("{:.0} KB", b / 1e3)
+    } else if b < 1e9 {
+        format!("{:.1} MB", b / 1e6)
+    } else {
+        format!("{:.2} GB", b / 1e9)
+    }
+}
+
 fn start_folder(
     path: &str,
     working: Option<&Path>,
@@ -929,6 +1082,114 @@ mod tests {
         let mut d = ImportDialog::default();
         d.open_with(&rds);
         assert!(matches!(d.import, Some(Import::RObject(_))));
+    }
+
+    /// A compressed test file from rdata's fixtures, copied to a temporary
+    /// folder of its own (the dialog writes what it unpacks beside it).
+    fn packed(fixture: &str, name: &str) -> std::path::PathBuf {
+        let from = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../rdata/fixtures/unpack")
+            .join(fixture);
+        let dir = std::env::temp_dir().join(format!(
+            "rcraft-dialog-packed-{}-{name}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        let to = dir.join(name);
+        let _ = std::fs::copy(from, &to);
+        to
+    }
+
+    #[test]
+    fn a_packed_data_file_is_unpacked_beside_it_and_read() {
+        let archive = packed("s.zst", "small.csv.zst");
+        let mut d = ImportDialog::default();
+        d.open_with(&archive);
+        assert!(d.error.is_none(), "{:?}", d.error);
+        let copy = archive.with_file_name("small.csv");
+        assert_eq!(
+            d.unpacked.as_ref().map(|u| u.to.clone()),
+            Some(copy.clone())
+        );
+        assert_eq!(
+            std::fs::read_to_string(&copy).ok().as_deref(),
+            Some("GEOID,value\n25025,1\n25017,2\n")
+        );
+        let Some(Import::Csv(spec)) = &d.import else {
+            panic!("not a csv import: {:?}", d.import);
+        };
+        assert_eq!(spec.name, "small");
+        assert_eq!(spec.path, copy.to_string_lossy());
+
+        // the code says where the copy came from; the recent list keeps the archive
+        d.open = true;
+        let ctx = egui::Context::default();
+        let pal = Palette::new(crate::look::Accent::default(), false);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            let _ = d.show(ctx, &pal, &[], None);
+        });
+        let footer = d.footer.as_ref();
+        assert!(footer.is_some_and(|f| f.code.starts_with("# unpacked by RCraft: small.csv from ")));
+        assert_eq!(
+            footer.map(|f| f.file.clone()),
+            Some(archive.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn an_archive_of_several_files_asks_which_one() {
+        let archive = packed("both.tar.xz", "both.tar.xz");
+        let mut d = ImportDialog::default();
+        d.open_with(&archive);
+        assert!(d.error.is_none(), "{:?}", d.error);
+        assert!(d.import.is_none());
+        let names: Vec<&str> = d.choices.iter().map(|f| f.name.as_str()).collect();
+        assert_eq!(names, ["small.csv", "gen.csv"]);
+
+        // the list draws without a click
+        d.open = true;
+        let ctx = egui::Context::default();
+        let pal = Palette::new(crate::look::Accent::default(), false);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            assert!(d.show(ctx, &pal, &[], None).is_none());
+        });
+        let Some(gen) = d.choices.get(1).cloned() else {
+            return;
+        };
+        d.choices.clear();
+        d.take_out(&gen);
+        assert!(matches!(d.import, Some(Import::Csv(_))), "{:?}", d.error);
+        assert_eq!(
+            d.unpacked.as_ref().map(|u| u.to.clone()),
+            Some(archive.with_file_name("gen.csv"))
+        );
+    }
+
+    #[test]
+    fn a_damaged_or_unknown_archive_says_why() {
+        let archive = packed("gen1.zst", "gen.csv.zst");
+        let mut bytes = std::fs::read(&archive).unwrap_or_default();
+        if let Some(b) = bytes.get_mut(9000) {
+            *b ^= 0x10;
+        }
+        let _ = std::fs::write(&archive, bytes);
+        let mut d = ImportDialog::default();
+        d.open_with(&archive);
+        assert!(d.import.is_none());
+        assert!(
+            d.error.as_deref().is_some_and(|e| e.contains("damaged")),
+            "{:?}",
+            d.error
+        );
+
+        let rar = temp("a.rar", b"Rar!\x1a\x07\0\0");
+        d.open_with(&rar);
+        assert!(
+            d.error.as_deref().is_some_and(|e| e.contains("RAR")),
+            "{:?}",
+            d.error
+        );
     }
 
     #[test]

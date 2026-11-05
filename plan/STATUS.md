@@ -3236,6 +3236,33 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   left, and come next.
 - **Numbers:** the probes (413): 163,251 of 207,967 run lines translated (78.5%; 159,806 of 190,664 before programs ran); 5,566 of 5,684 compared lines match Stata to 8 digits, 5 more to 6; the 113 that differ are all `_natscale`.
 
+## P3.2 continued: compressed data files, 2026-11-04
+
+- **Use my file opens packed files** (`rdata::unpack`, layer 2): `.zip` (stored, deflate, bzip2, Zstandard and xz
+  entries; Zip64), `.gz`, `.bz2`, `.xz`, `.zst`, `.tar` and the combinations (`.tar.gz`, `.tgz`, `.tar.xz` ...).
+  The kind is told from the first bytes; archives inside archives are opened (three deep); every checksum is
+  checked, so a damaged file is refused; password-protected zips, 7-Zip and RAR get plain messages; the unpacked
+  bytes are capped at 4 GB. `.rds`/`.RData` (gzip inside, read by R) and Office files (zip with
+  `[Content_Types].xml`) are left as they are. Behaviour follows Husky Explorer's unpacker (PR 24 there).
+- **Decoders:** pure Rust only. gzip and deflate through `flate2`/`miniz_oxide`, xz through `lzma-rust2`, Zstandard
+  through `ruzstd`. bzip2 is ported from Husky Explorer's decoder (`unpack/bunzip.rs`): `bzip2-rs` checks no
+  stream CRC, reads one stream only and can panic, and the `bzip2` crate's pure-Rust backend carries the bzip2
+  licence rather than MIT/Apache. The zip and tar readers are our own and bounds-checked; a panic in a decoder
+  is caught and reported as a damaged file.
+- **Where the data goes:** R must read a real file, so the data file is written next to the archive under its
+  own name (`survey.csv.gz` gives `survey.csv`); one already there with the same bytes is reused, a different
+  one is never replaced (`survey (unpacked).csv`, then numbered). If the folder cannot be written, the copy goes
+  to `rcraft-unpacked` in the system's temporary folder. The dialog says where it went, the R code starts with
+  `# unpacked by RCraft: <name> from <archive>`, and the recent-files list keeps the archive. An archive with
+  several data files lists them (with sizes) and the user picks one. Browse's filter takes the packed endings;
+  files dropped on the window go through the same path.
+- **Tests:** the xz, zstd and bzip2 files made by the real tools (Husky Explorer's fixtures, in
+  `crates/rdata/fixtures/unpack/`, binary in `.gitattributes`), damaged, cut and capped variants, zips and tars
+  built in the tests, every cut of a zip and tar.gz and every flipped bit of a .bz2 (an error, never a panic),
+  and three dialog tests.
+- **Not done:** unpacking runs on the window's thread, so a very large archive holds the window for a few
+  seconds; the whole archive is read into memory (within the cap). Do-files (`.do`) are not unpacked.
+
 ## Step 3 continued: Stata's matrices, and insheet, 2026-11-04
 
 - **Matrices** (`data_r/mexpr.rs`, `data_r/matrices.rs`): `matrix A = exp` with `J()`, `I()`, joins with `,`
