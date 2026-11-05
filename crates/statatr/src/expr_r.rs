@@ -587,6 +587,14 @@ impl Translator<'_> {
             return Ok((format!("{r}({})", nums.join(", ")), Kind::Number));
         }
         match name {
+            // the nearest single-precision value, as Stata's float()
+            "float" => {
+                want(1)?;
+                let (x, xk) = self.expr(arg(0)?)?;
+                let x = number(&x, xk)?;
+                self.helpers.push("stata_float");
+                Ok((format!("stata_float({x})"), Kind::Number))
+            }
             "round" => {
                 let (x, xk) =
                     self.expr(args.first().ok_or_else(|| no("round() needs a value"))?)?;
@@ -785,16 +793,53 @@ impl Translator<'_> {
             "strlen" | "ustrlen" | "length" => self.text_fn("nchar", args, Kind::Number),
             "upper" | "strupper" | "ustrupper" => self.text_fn("toupper", args, Kind::Text),
             "lower" | "strlower" | "ustrlower" => self.text_fn("tolower", args, Kind::Text),
-            "trim" | "strtrim" | "ustrtrim" => self.text_fn("trimws", args, Kind::Text),
-            "ltrim" | "ustrltrim" => {
+            // Stata's trim, strtrim, ltrim, ... take spaces only; the ustr ones
+            // tabs, returns and new lines as well (read off Stata 19)
+            "trim" | "strtrim" | "ltrim" | "strltrim" | "rtrim" | "strrtrim" | "ustrtrim"
+            | "ustrltrim" | "ustrrtrim" => {
                 want(1)?;
                 let (s, _) = self.expr(arg(0)?)?;
-                Ok((format!("trimws({s}, which = \"left\")"), Kind::Text))
+                let which = match name.trim_start_matches("ustr").trim_start_matches("str") {
+                    "ltrim" => ", which = \"left\"",
+                    "rtrim" => ", which = \"right\"",
+                    _ => "",
+                };
+                let space = if name.starts_with("ustr") {
+                    ""
+                } else {
+                    ", whitespace = \" \""
+                };
+                Ok((format!("trimws({s}{which}{space})"), Kind::Text))
             }
-            "rtrim" | "ustrrtrim" => {
+            // char(n): the ASCII character; "" when missing or past 255 (Stata 19)
+            "char" => {
                 want(1)?;
-                let (s, _) = self.expr(arg(0)?)?;
-                Ok((format!("trimws({s}, which = \"right\")"), Kind::Text))
+                // a code written out that is a single byte: declined here, not in R
+                if let Some(k) = plain_number(arg(0)?).map(f64::trunc) {
+                    if k == 0.0 || (128.0..=255.0).contains(&k) {
+                        return Err(no(format!(
+                            "char({k}) is a single byte, which R's text does not hold as Stata does; not translated yet"
+                        )));
+                    }
+                }
+                let (n, nk) = self.expr(arg(0)?)?;
+                let n = number(&n, nk)?;
+                self.helpers.push("stata_char");
+                Ok((format!("stata_char({n})"), Kind::Text))
+            }
+            // strmatch(s, pattern): * any characters, ? one, the rest as written
+            "strmatch" => {
+                want(2)?;
+                let (s, sk) = self.expr(arg(0)?)?;
+                let (p, pk) = self.expr(arg(1)?)?;
+                // a variable of a type not known here is checked in R
+                if matches!(sk, Kind::Number | Kind::Logical)
+                    || matches!(pk, Kind::Number | Kind::Logical)
+                {
+                    return Err(no("strmatch() takes two strings (Stata: type mismatch)"));
+                }
+                self.helpers.push("stata_strmatch");
+                Ok((format!("stata_strmatch({s}, {p})"), Kind::Number))
             }
             "substr" | "usubstr" => {
                 want(3)?;
@@ -886,6 +931,11 @@ impl Translator<'_> {
                         }
                         _ => return Err(no(format!("{name}() of this matrix is not translated yet"))),
                     },
+                    // a matrix the do-file made
+                    Expr::Name(n) => {
+                        self.helpers.push("stata_matrix");
+                        (self.returned)("m#matrix", n)?.0
+                    }
                     _ => {
                         return Err(no(format!(
                             "{name}() is translated for the matrices e() and r() keep (colsof(e(b))); not here yet"
@@ -894,6 +944,26 @@ impl Translator<'_> {
                 };
                 let f = if name == "colsof" { "NCOL" } else { "NROW" };
                 Ok((format!("as.numeric({f}(as.matrix({m})))"), Kind::Number))
+            }
+            // A[i, j] (the parser's __matel): an element of a matrix the
+            // do-file made, by number or by its row and column names
+            "__matel" => {
+                want(3)?;
+                let Some(Expr::Text(n)) = args.first() else {
+                    return Err(no("a matrix element needs the matrix's name"));
+                };
+                self.helpers.push("stata_matrix");
+                let m = (self.returned)("m#matrix", n)?.0;
+                let index = |me: &mut Self, e: &Expr| -> Result<String, Untranslated> {
+                    let (v, k) = me.expr(e)?;
+                    Ok(if k == Kind::Text { v } else { number(&v, k)? })
+                };
+                let i = index(self, arg(1)?)?;
+                let j = index(self, arg(2)?)?;
+                Ok((
+                    format!("stata_matel({m}, {i}, {j}, {})", r_text(n)),
+                    Kind::Number,
+                ))
             }
             "el" => {
                 want(3)?;
@@ -906,6 +976,10 @@ impl Translator<'_> {
                         }
                         _ => return Err(no("el() of this matrix is not translated yet")),
                     },
+                    Expr::Name(n) => {
+                        self.helpers.push("stata_matrix");
+                        (self.returned)("m#matrix", n)?.0
+                    }
                     _ => {
                         return Err(no(
                             "el() is translated for the matrices e() and r() keep (el(e(V), 1, 1)); not here yet",

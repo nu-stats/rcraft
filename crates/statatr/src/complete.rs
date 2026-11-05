@@ -88,6 +88,7 @@ pub const COMMANDS: &[&str] = &[
     "esttab",
     "exit",
     "expand",
+    "file",
     "foreach",
     "forvalues",
     "fre",
@@ -100,6 +101,7 @@ pub const COMMANDS: &[&str] = &[
     "histogram",
     "import",
     "include",
+    "insheet",
     "ivregress",
     "kdensity",
     "keep",
@@ -116,6 +118,7 @@ pub const COMMANDS: &[&str] = &[
     "margins",
     "matrix",
     "merge",
+    "mkmat",
     "mlogit",
     "nbreg",
     "noisily",
@@ -148,10 +151,12 @@ pub const COMMANDS: &[&str] = &[
     "scatter",
     "set",
     "sort",
+    "split",
     "ssc",
     "stcox",
     "stset",
     "summarize",
+    "svmat",
     "syntax",
     "tab1",
     "tab2",
@@ -246,6 +251,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("expand", &["generate("]),
+    ("file", &["append", "binary", "replace", "text", "write"]),
     ("generate", &["after(", "before("]),
     ("gettoken", &["match(", "parse("]),
     (
@@ -284,6 +290,19 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "firstrow",
             "sheet(",
             "varnames(",
+        ],
+    ),
+    (
+        "insheet",
+        &[
+            "case",
+            "clear",
+            "comma",
+            "delimiter(",
+            "double",
+            "names",
+            "nonames",
+            "tab",
         ],
     ),
     (
@@ -361,6 +380,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         "matrix",
         &["format(", "noblank", "nohalf", "noheader", "title("],
     ),
+    ("mkmat", &["matrix(", "nomissing"]),
     (
         "merge",
         &[
@@ -493,6 +513,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("saveold", &["nolabel", "replace", "version("]),
     ("scatter", &["by(", "legend(", "nodraw", "sort"]),
     ("sort", &["stable"]),
+    ("split", &["generate(", "limit(", "notrim", "parse("]),
     (
         "stcox",
         &[
@@ -507,6 +528,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("summarize", &["detail", "format", "meanonly", "separator("]),
+    ("svmat", &["names("]),
     ("tab1", &["missing", "nolabel", "sort"]),
     (
         "tab2",
@@ -600,12 +622,16 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
         ],
     ),
     ("eststo", &["clear", "drop"]),
+    ("file", &["close", "open", "write"]),
     (
         "graph",
         &["bar", "box", "drop", "export", "hbar", "hbox", "twoway"],
     ),
     ("import", &["delimited", "excel"]),
-    ("matrix", &["list"]),
+    (
+        "matrix",
+        &["colnames", "define", "drop", "list", "rownames"],
+    ),
     ("merge", &["1:1", "1:m", "m:1", "m:m"]),
     ("reshape", &["long", "wide"]),
     ("robreg", &["m"]),
@@ -1264,6 +1290,9 @@ gettoken a b : s, {o}"
                 format!("import excel f.xlsx, {o}")
             }
             "import" => format!("import delimited f.csv, {o}"),
+            "insheet" => format!("insheet using f.csv, {o}"),
+            "file" => format!("file open h using f.txt, write {o}"),
+            "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),
             "label" => format!("label define l 1 \"a\", {o}"),
             // what predict can make depends on the model: hr after stcox, pr after

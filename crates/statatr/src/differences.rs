@@ -395,6 +395,19 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "file",
+        about: "Writes a text or binary file",
+        points: &[p(
+            "As Stata 19",
+            "file open (write, with replace or append, text by default or binary), file write \
+             (strings, _newline(n), _tab(n), _skip(n), _char(n), (exp) as display writes it, \
+             %fmt (exp), and %1bu and %1bs bytes in binary files) and file close (or _all). \
+             Text files take the system's new lines (\r\n on Windows), as Stata's do. The \
+             errors stop where Stata's do (r(602), r(110), r(111)). file read, seek, query and \
+             set are not translated yet.",
+        )],
+    },
+    Guide {
         command: "foreach",
         about: "Loops: foreach, forvalues and while (and continue)",
         points: &[
@@ -502,6 +515,19 @@ pub const GUIDES: &[Guide] = &[
             "Variable names",
             "Columns without names are v1, v2, ... as Stata names them; names that are not \
              valid Stata names are made valid by R's rules, which can differ from Stata's.",
+        )],
+    },
+    Guide {
+        command: "insheet",
+        about: "Reads a tab or comma file",
+        points: &[p(
+            "As Stata 19 reads it",
+            "A tab in the first line makes it tab, else comma. Names come from the first row \
+             when no cell of it is a number (lowercase, what is not a letter, digit or _ left \
+             out, the header kept as the label where it differs; case keeps the case), v1, v2, \
+             ... when every cell is one; decimals are floats unless double. A first row of \
+             both, headers Stata would have to make names up for, and an empty column stop \
+             rather than guess.",
         )],
     },
     Guide {
@@ -669,11 +695,36 @@ pub const GUIDES: &[Guide] = &[
     },
     Guide {
         command: "matrix",
-        about: "matrix list",
+        about: "Matrices: define, elements, names, list",
+        points: &[
+            p(
+                "Columns",
+                "e(b) and e(V) have Stata's columns (base levels as zeros, o. for omitted, the \
+                 equations), printed in Stata's layout at a linesize of 80.",
+            ),
+            p(
+                "The do-file's matrices",
+                "Kept in R as stata_mat, with Stata's row and column names: r1, r2, ... and c1, \
+                 c2, ... by default; a product takes the left one's rows and the right one's \
+                 columns, a sum the right one's names, a transpose swaps them, and joins with , \
+                 and \\ number default names again (read off Stata 19). A 1x1 matrix multiplies \
+                 as a number. invsym() of a singular matrix (Stata's generalized inverse), the \
+                 Kronecker product #, submatrices (A[1..2, 3]) and cholesky() are declined.",
+            ),
+            p(
+                "When a matrix is not known",
+                "A matrix that a line not translated may have changed is declined from then on, \
+                 never guessed; nullmat() of it as well.",
+            ),
+        ],
+    },
+    Guide {
+        command: "mkmat",
+        about: "Variables into a matrix",
         points: &[p(
-            "Columns",
-            "e(b) and e(V) have Stata's columns (base levels as zeros, o. for omitted, the \
-             equations), printed in Stata's layout at a linesize of 80.",
+            "Rows",
+            "The rows kept (if, in; nomissing leaves out rows with a missing value), named r1, \
+             r2, ...; without matrix() a column vector for each variable, as Stata.",
         )],
     },
     Guide {
@@ -965,6 +1016,18 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "split",
+        about: "Cuts a string variable into pieces",
+        points: &[p(
+            "As Stata 19",
+            "Without parse(), into words (runs of spaces as one); with parse(), at each string \
+             it gives (\" \" too) after trimming the ends (notrim keeps them), the earliest one \
+             winning, empty pieces kept and none after a last delimiter; limit() drops the \
+             pieces past it; new variables stub1, stub2, ... as text, r(k_new) and r(varlist). \
+             Parse strings that share characters and destring are declined.",
+        )],
+    },
+    Guide {
         command: "ssc",
         about: "ssc install: Stata's add-ons",
         points: &[p(
@@ -1024,6 +1087,16 @@ pub const GUIDES: &[Guide] = &[
                  detail and weights keep R's layout.",
             ),
         ],
+    },
+    Guide {
+        command: "svmat",
+        about: "A matrix's columns as variables",
+        points: &[p(
+            "As Stata 19",
+            "A1, A2, ... by default, the column names with names(col), stub1, stub2, ... with \
+             names(stub); floats unless double; observations added when the matrix has more \
+             rows than the data, with Stata's message; a name already taken stops (r(110)).",
+        )],
     },
     Guide {
         command: "syntax",

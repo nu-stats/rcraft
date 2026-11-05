@@ -728,6 +728,7 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 /// The `e()` and `r()` names that are macros (text) in Stata.
 const TEXT_NAMES: &[&str] = &[
     "levels",
+    "varlist",
     "cmd",
     "cmd2",
     "cmdline",
@@ -1217,6 +1218,8 @@ pub(super) const R_SUMMARIZE_DETAIL: &[&str] = &[
 pub(super) const R_MEANONLY: &[&str] = &["N", "sum_w", "mean", "min", "max", "sum"];
 pub(super) const R_COUNT: &[&str] = &["N"];
 pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
+/// What `split` leaves in r().
+pub(super) const R_SPLIT: &[&str] = &["k_new", "varlist"];
 /// What `test` leaves in r(), with r(dropped_1) and the like for each
 /// constraint it drops (one of base levels only)
 pub(super) const R_TEST: &[&str] = &[
@@ -1363,6 +1366,8 @@ impl Session {
         match which {
             "ts" => self.ts_code(name).map(|code| (code, Kind::Number)),
             // el(e(V), i, j): the matrix itself, as matrix list takes it
+            // a matrix the do-file made
+            "m#matrix" => self.user_matrix(name).map(|m| (m, Kind::Number)),
             "e#matrix" | "r#matrix" => self
                 .returned_matrix(which.get(..1).unwrap_or("e"), name)
                 .map(|code| (code, Kind::Number)),
@@ -1828,9 +1833,15 @@ pub(super) fn valid_format(f: &str) -> bool {
 fn mentions_data(e: &str, scalar: &dyn Fn(&str) -> bool) -> bool {
     fn walk(x: &Expr, scalar: &dyn Fn(&str) -> bool) -> bool {
         match x {
-            Expr::Name(n) => !matches!(n.as_str(), "_pi" | "c") && !scalar(n),
+            Expr::Name(n) => !matches!(n.as_str(), "_pi" | "c" | "_rc") && !scalar(n),
             Expr::Subscript(n, i) => {
                 !matches!(n.as_str(), "_b" | "_se" | "_coef") || walk(i, scalar)
+            }
+            // a matrix by name, then its indices
+            Expr::Call(name, args)
+                if matches!(name.as_str(), "rowsof" | "colsof" | "el" | "__matel") =>
+            {
+                args.iter().skip(1).any(|a| walk(a, scalar))
             }
             Expr::Call(name, args) => {
                 !matches!(name.as_str(), "e" | "r" | "scalar")

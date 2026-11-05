@@ -36,3 +36,14 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   it is positive for hi = 1.04 to 1.08 and 1.14 to 1.20, a region that moves as n grows (1.24 to 1.40 join
   at n = 20; at n = 24 to 27 some are negative). It looks like a boundary in how the label set is chosen,
   not a simple formula: the next step is to find what decides the path on that boundary.
+
+## Declined, 2026-11-04
+
+- The residue is not only lo = 0 and n of 15 or more: `_natscale 0.04495973312684305 0.6669988136939091 10`
+  (labels 0 to 0.7 by 0.1, the data starting above 0) gives r(min) 2^-55 too (probe 225, line 409).
+- So a label at 0 with a step below 1 is declined (`data_r/natscale.rs`), whatever the data and n: no
+  narrower rule holds on what has been seen. Steps of 1 or more are exact in Stata as well.
+- How often: in probe 225's 480 varied ranges the residue shows once (0.2%) and the rule declines 30 (6%);
+  in probe 226's sweeps, built around 0, the residue shows in 112 of 4,915 (2.3%) and the rule declines
+  1,479. None of the 46 packages calls `_natscale`; RCraft's own graphs choose their labels without it.
+- The probes then match on every compared `_natscale` line; the declined ones count as not translated.

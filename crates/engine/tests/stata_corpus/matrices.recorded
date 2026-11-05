@@ -1,0 +1,30 @@
+* Stata 19.0's results for matrices.do, recorded by cargo xtask stata-record
+@ product 1.5 3.5 2 3
+@ transpose 3 2
+@ sum 1.5 6
+@ joins 6 3 8 3
+@ invsym 5 -3.5 2.5
+@ inv -2 1 1.5 -.5
+@ element 9 3
+@ one by one 18 8
+@ placed 7 8 -3 28 34 39
+@ names 9 3
+@ loop 10 30
+@ nullmat 4 16 -3
+@ singular 504
+@ outside 503
+@ eb 1.9825175 -1.0367133 2.1118881 -1.0367133
+@ vecdiag .00610253 .631193 .0462476 0 .0462476
+@ se .07811869 .21505255 .79447656
+@ wald 2793.7042
+@ mkmat 12 3 13 4 7 1
+@ mkmat if 6 7 4
+@ mkmat vectors 3 1 6
+@ cross 650 1282
+@ dropped 111
+@ insheet 60 3 .352 3.0583999 12.33
+@ insheet floats .14761667 .97885082 2.1760001
+@ insheet double .14761667 .97885082 2.176
+@ insheet nonames 61
+@ svmat 3 .1 6 .1 4 5 1 1 1
+@ svmat taken 110

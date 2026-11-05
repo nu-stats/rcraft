@@ -1865,8 +1865,14 @@ fn matrix_list_prints_statas_matrices() {
     // a model whose columns RCraft does not rebuild is refused with the reason
     let why = refusal("use s\nanova y g\nmatrix list e(b)\n");
     assert!(why.contains("after anova"), "{why}");
+    // a matrix never made: translated, and R stops there as Stata does (r(111))
     let why = refusal("use s\nmatrix list A\n");
-    assert!(why.contains("only the matrices a command leaves"), "{why}");
+    assert!(
+        why.is_empty(),
+        "matrix list of no matrix is Stata's own error: {why}"
+    );
+    let why = refusal("use s\nmatrix list A[1,1]\n");
+    assert!(why.contains("only a matrix by name"), "{why}");
     let why = refusal("use s\nregress y x\nsummarize y\nmatrix list r(table)\n");
     assert!(
         why.is_empty(),

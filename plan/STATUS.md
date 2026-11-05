@@ -3262,3 +3262,49 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   and three dialog tests.
 - **Not done:** unpacking runs on the window's thread, so a very large archive holds the window for a few
   seconds; the whole archive is read into memory (within the cap). Do-files (`.do`) are not unpacked.
+
+## Step 3 continued: Stata's matrices, and insheet, 2026-11-04
+
+- **Matrices** (`data_r/mexpr.rs`, `data_r/matrices.rs`): `matrix A = exp` with `J()`, `I()`, joins with `,`
+  and `\`, products, sums, a number or 1x1 matrix times a matrix, `/` by a number, transposes, `invsym()`,
+  `inv()`, `vecdiag()`, `diag()`, `e()` and `r()` matrices, `nullmat()`, any other function as a number;
+  `matrix A[i,j] = exp` (a matrix put with its corner there); `rownames`, `colnames`, `drop`, `list` of
+  the do-file's matrices; elements by number or name in any expression (`A[1, "x"]`, `el()`, `rowsof()`);
+  `mkmat` with if, in, nomissing and without `matrix()`. Every name follows Stata 19 as probed (a sum
+  takes the right one's names; `plan/stata/matrices.md`). A matrix a refused line may change is declined
+  from then on; one never made stops R with r(111) as Stata does. Declined: `#`, submatrices,
+  `cholesky()`, a singular `invsym()`.
+- **insheet**, as Stata 19 reads a file (its names, labels, floats, `double`, `nonames`, `case`, r(18)).
+- **svmat** (names(col), a stub, float or double, the rows it adds, r(110)), with `matrices.do`.
+- **The dry run:** macros set in a loop it cannot run are known only when run; a line refused for what
+  such a line leaves counts as known when run.
+- **Checked:** `matrices.do` (29 results against Stata 19), and three probes compared screen for screen
+  (`matrix list` of every form above matches Stata's output).
+- **Numbers:** the packages' source lines, each once: 70.1% of 5,149 (68.7%). Run lines: 50.6% translated
+  (40.0%); 64.6% of those a dry run judges once lines that wait on run-time values count as such.
+- **Strings** (`expr_r.rs`, `strings.do`, 11 results against Stata 19): `strltrim()`, `strrtrim()`,
+  `strmatch()` (`*` and `?`, every other character itself, new lines matched by `*`) and `char()` (ASCII;
+  "" when missing or past 255; a single byte stops). `trim`, `strtrim`, `ltrim`, `rtrim` and the `str`
+  forms took tabs and new lines as R's `trimws()` does; Stata's take spaces only, as now (the `ustr` ones
+  take tabs and new lines too). `float()`. TZEN38's text cleaning now stops first at `split`.
+- **Numbers:** source lines 73.0% of 5,149; run lines 64.9% of those a dry run judges.
+- **Probes (415):** 163,509 of 207,839 run lines translated (78.7%); 5,569 of 5,687 compared lines match
+  Stata to 8 digits, 5 more to 6; the 113 that differ are all `_natscale`.
+
+## Step 3 done: split and file; _natscale's residue declined, 2026-11-04
+
+- **_natscale:** a label at 0 with a step below 1 is declined (Stata's end there can be 2^-55 rather than
+  0, even for 0.045 to 0.667 with 10 labels, so no narrower rule holds). None of the 46 packages calls it.
+  The probes then match on every compared `_natscale` line; probe 225 declines 30 of 480 ranges, the sweeps
+  of probe 226 1,479 of 4,915.
+- **split** (`data_r/more.rs`, `plan/stata/split.md`): words without parse(); the strings parse() gives
+  after trimming the ends (notrim), empty pieces kept, the later listed string winning a tie; limit(),
+  if and in, r(k_new) and r(varlist), r(110) and r(109). destring and overlapping parse strings declined.
+- **file** (`data_r/files.rs`, `plan/stata/file.md`): open (write, replace, append, text or binary), write
+  (strings, _n as the system writes it, _tab, _skip, _char, (exp) as display writes it, %fmt (exp); %1bu
+  and %1bs bytes in binary files) and close,
+  with Stata's r(602), r(110) and r(111); the files are byte for byte Stata's. file read is not translated.
+- **Checked:** `strings.do` (now 28 results against Stata 19), and probes compared line for line.
+- **Numbers:** source lines 73.1% of 5,149. Probes (417): 161,600 of 208,696 run lines translated (77.4%; the
+  declined `_natscale` ranges count as not translated); none of the 4,197 compared lines differs, 4,192
+  match Stata to 8 digits and 5 to 6.
