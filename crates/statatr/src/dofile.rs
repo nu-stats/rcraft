@@ -326,6 +326,10 @@ pub struct Run<'f> {
     globals_unknown: Option<String>,
     /// What the last one-line `if exp command` came to, for an `else` after it.
     one_line_if: Option<bool>,
+    /// The files run under capture (`capture do f`): the frame depth each is at,
+    /// and whether a line in it was not translated. Stata stops such a file at
+    /// its first error, which RCraft does not, so `_rc` after it is not known then.
+    captured_files: Vec<(usize, bool, String)>,
     temp: usize,
     cwd: String,
     written: BTreeSet<String>,
@@ -379,6 +383,7 @@ impl<'f> Run<'f> {
             program_temps: Vec::new(),
             globals_unknown: None,
             one_line_if: None,
+            captured_files: Vec::new(),
             temp: 0,
             cwd,
             written: BTreeSet::new(),
@@ -619,6 +624,19 @@ impl<'f> Run<'f> {
             }
             _ => {
                 let popped = self.frames.pop();
+                // a file run under capture ends: with a line in it not translated,
+                // Stata may have stopped it earlier, with an error RCraft does not know
+                if self
+                    .captured_files
+                    .last()
+                    .is_some_and(|f| f.0 == self.frames.len())
+                {
+                    if let Some((_, true, text)) = self.captured_files.pop() {
+                        self.t.lose_rc(format!(
+                            "_rc is not known: a line in the file it runs was not translated, and Stata stops such a file at its first error ({text})"
+                        ));
+                    }
+                }
                 if self.frames.is_empty() {
                     self.done = true;
                 }
@@ -1698,6 +1716,37 @@ impl<'f> Run<'f> {
                 );
                 Flow::Line
             }
+            Opener::Raw {
+                kind,
+                header,
+                lines,
+            } if kind == "input" => {
+                self.done_item(depth);
+                let text = header.trim().to_string();
+                let main = text
+                    .split_once(char::is_whitespace)
+                    .map_or("", |(_, rest)| rest)
+                    .trim()
+                    .to_string();
+                let cmd = Command {
+                    span: g.span,
+                    prefixes: g.prefixes.clone(),
+                    name: "input".into(),
+                    written: "input".into(),
+                    known: true,
+                    text: text.clone(),
+                    parts: crate::lang::syntax::Parts {
+                        main,
+                        ..Default::default()
+                    },
+                    using: None,
+                    options: Vec::new(),
+                    macros: Vec::new(),
+                };
+                let line = self.t.input(&cmd, lines);
+                self.push(line, What::Command, None, text);
+                Flow::Line
+            }
             Opener::Raw { kind, header, .. } => {
                 self.done_item(depth);
                 let why = match kind.as_str() {
@@ -1858,6 +1907,18 @@ impl<'f> Run<'f> {
     }
 
     fn run_file(&mut self, c: &Command, rest: &str, written: String) -> Flow {
+        // `capture include f` stops with r(199) in Stata 19 (probe 590) and runs
+        // nothing; what other prefixes do with include is not read off
+        if c.name == "include" && !c.prefixes.is_empty() {
+            let line = self.t.refused(
+                c.span,
+                c.text.clone(),
+                "include with a prefix (capture, quietly) is not translated: Stata 19 stops \
+                 capture include with r(199)",
+            );
+            self.push(line, What::Command, None, written);
+            return Flow::Line;
+        }
         // `do file, nostop`: the run goes on past errors already
         let (rest, options) = split_comma(rest);
         if !options.is_empty() && options.trim() != "nostop" {
@@ -1949,6 +2010,10 @@ impl<'f> Run<'f> {
                 program: None,
             }
         };
+        if c.prefixes.contains(&Prefix::Capture) {
+            self.captured_files
+                .push((self.frames.len(), false, c.text.trim().to_string()));
+        }
         let info = format!("runs {path}");
         self.push(nothing(c), What::Control, Some(info), written);
         self.frames.push(Frame {
@@ -2076,6 +2141,12 @@ impl<'f> Run<'f> {
     // ---------------- lines ----------------
 
     fn push(&mut self, line: Line, what: What, info: Option<String>, written: String) {
+        // a line not translated inside a file run under capture
+        if line.result.is_err() {
+            for f in &mut self.captured_files {
+                f.1 = true;
+            }
+        }
         // refused for something a line before it leaves only when the do-file runs
         let what = match (&what, &line.result) {
             (What::Command, Err(e)) if e.reason.contains(KNOWN_WHEN_RUN) => What::Later,

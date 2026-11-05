@@ -102,6 +102,26 @@ pub(super) const ROWS_REPLACE_HELPER: &str = r#"stata_rows_replace <- function(f
     cur <- new
   }
   cur
+}
+# the same with random draws: Stata's generator is put back before each
+# round, so every round draws the same numbers for the same rows, and it
+# ends where one round leaves it
+stata_rows_replace_draws <- function(f, x) {
+  if (!exists("stata_rng_state")) stata_set_seed(123456789)
+  env <- stata_rng_state
+  keep <- as.list(env, all.names = TRUE)
+  put_back <- function() {
+    rm(list = setdiff(ls(env, all.names = TRUE), names(keep)), envir = env)
+    for (n in names(keep)) assign(n, keep[[n]], envir = env)
+  }
+  cur <- x
+  for (i in seq_len(length(x) + 1)) {
+    put_back()
+    new <- f(cur)
+    if (identical(new, cur)) break
+    cur <- new
+  }
+  cur
 }"#;
 
 /// A chain of operators as one: the net lag (negative for a lead), the

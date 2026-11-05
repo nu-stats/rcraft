@@ -101,6 +101,7 @@ pub const COMMANDS: &[&str] = &[
     "histogram",
     "import",
     "include",
+    "input",
     "insheet",
     "ivregress",
     "kdensity",
@@ -121,6 +122,7 @@ pub const COMMANDS: &[&str] = &[
     "mkmat",
     "mlogit",
     "nbreg",
+    "newey",
     "noisily",
     "ologit",
     "oprobit",
@@ -128,6 +130,7 @@ pub const COMMANDS: &[&str] = &[
     "outreg2",
     "parmest",
     "poisson",
+    "prais",
     "predict",
     "preserve",
     "probit",
@@ -177,6 +180,7 @@ pub const COMMANDS: &[&str] = &[
     "xpose",
     "xtile",
     "xtreg",
+    "xtregar",
     "xtset",
 ];
 
@@ -408,6 +412,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "vce(",
         ],
     ),
+    ("newey", &["lag(", "level(", "noconstant"]),
     (
         "nbreg",
         &[
@@ -471,6 +476,19 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "stdp",
             "stdr",
             "xb",
+        ],
+    ),
+    (
+        "prais",
+        &[
+            "corc",
+            "level(",
+            "noconstant",
+            "nolog",
+            "rhotype(",
+            "robust",
+            "twostep",
+            "vce(",
         ],
     ),
     (
@@ -561,6 +579,10 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("use", &["clear", "nolabel"]),
     ("xpose", &["clear", "promote", "varname"]),
     ("xtile", &["altdef", "cutpoints(", "nquantiles("]),
+    (
+        "xtregar",
+        &["fe", "lbi", "level(", "re", "rhof(", "rhotype(", "twostep"],
+    ),
     (
         "xtreg",
         &[
@@ -1257,6 +1279,9 @@ mod tests {
             "at" => "x=1",
             "keep" => "match",
             "format" => "%9.2f",
+            "rhotype" => "dw",
+            "rhof" => ".5",
+            "lag" => "1",
             _ => "x",
         };
         let o = if opt.ends_with('(') {

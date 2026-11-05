@@ -518,6 +518,58 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "input",
+        about: "Data typed into the do-file",
+        points: &[p(
+            "As Stata 19",
+            "The lines up to end become the data, into empty data: float unless a type says \
+             otherwise (double(a b) types a group), strings as written, . and .a missing. \
+             Stata's echo of the lines is not printed. A value a numeric variable cannot \
+             read, a line with too few or too many values, and input into data already in \
+             memory are declined.",
+        )],
+    },
+    Guide {
+        command: "newey",
+        about: "Regression with Newey-West standard errors",
+        points: &[p(
+            "As Stata 19",
+            "Least squares, with V = n/(n - k) (X'X)^-1 S (X'X)^-1: the White sum plus the \
+             Bartlett-weighted cross products of observations l time units apart (StatCraft's \
+             decoding). Plain variable names only for now.",
+        )],
+    },
+    Guide {
+        command: "prais",
+        about: "Prais-Winsten and Cochrane-Orcutt regression",
+        points: &[p(
+            "As Stata 19",
+            "Least squares first, then rho from the residuals on the original data (or 1 - DW/2 \
+             with rhotype(dw)) and a fit on the transformed data, until rho moves by less than \
+             1e-6 (one round with twostep); corc drops the first observation; vce(robust) is \
+             HC1 on the transformed data. Plain variable names and data without gaps only.",
+        )],
+    },
+    Guide {
+        command: "xtregar",
+        about: "Fixed and random effects with AR(1) disturbances",
+        points: &[
+            p(
+                "As Stata 19",
+                "rho from Prais-Winsten on the within-demeaned data (each rhotype(), rhof(), \
+                 twostep); fe on Baltagi and Wu's transform, kept in single precision as Stata \
+                 keeps it, the constant divided by 1 - rho; re by GLS with each panel's theta; \
+                 lbi's statistics (StatCraft's decoding of Stata 19).",
+            ),
+            p(
+                "Differences",
+                "re's sigma_u and what follows from it agree with Stata to about 1 part in 1e8, \
+                 not to the last digit. Weights, factor variables, time-series operators, \
+                 predict and margins after it are not translated yet.",
+            ),
+        ],
+    },
+    Guide {
         command: "insheet",
         about: "Reads a tab or comma file",
         points: &[p(

@@ -3308,3 +3308,24 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Numbers:** source lines 73.1% of 5,149. Probes (417): 161,600 of 208,696 run lines translated (77.4%; the
   declined `_natscale` ranges count as not translated); none of the 4,197 compared lines differs, 4,192
   match Stata to 8 digits and 5 to 6.
+
+## Step 4 begun: xtregar, prais, newey and input from StatCraft's decoding, 2026-11-05
+
+- **The method:** StatCraft (our own code) already matches Stata on these; its notes on Stata's behaviour
+  (`plan/stata/panel.md`, `time-series.md`, `data-commands.md`) are written here in R, as `_natscale`,
+  the random numbers and the dates were before (`plan/stata/arpanel.md`).
+- **xtregar** (`data_r/xtregar.rs`): fe and re, every rhotype(), rhof(), twostep, lbi, and e() in
+  Stata's order. re's sigma_u agrees to about 1 part in 1e8 (StatCraft accepts a few parts in 1e7).
+- **prais and newey** (`data_r/tsreg.rs`): Prais-Winsten and Cochrane-Orcutt, twostep, rhotype(dw),
+  vce(robust); Newey-West with any lag. Plain variable names only.
+- **input** (`data_r/more.rs`), into empty data, with Stata's storage types.
+- **replace row by row:** an AR(1) series built with `replace e = .5*L.e + rnormal() if t > 1` or with
+  `e[_n-1]` under by now runs as Stata's (the generator put back before each round of the repeated
+  replace); `x[_n]`, `x[_n+k]`, `x[_N]` and `x = x[1]` too. `replace` keeps the storage type generate
+  gave (a float stays a float, row by row). Those lines built the data of the 45 xtregar probes.
+- **Found on the way:** length() counts bytes; subinstr() works on bytes (char(128) to char(255) there);
+  `_rc` after `capture do` of a file with a line not translated is not known; `capture include` declined.
+- **Checked:** `arpanel.do` (30 results against Stata 19), `strings.do` (29), and the probes.
+- **Numbers:** probes (420) 188,260 of 210,197 run lines translated (89.6%, from 77.4%); none of the 4,310
+  compared lines differs, 4,299 match Stata to 8 digits and 11 to 6 (6 of them xtregar re's sigma_u).
+  Packages: 73.0% of source lines (the declined char(0) and lone bytes outside subinstr() take 0.1).

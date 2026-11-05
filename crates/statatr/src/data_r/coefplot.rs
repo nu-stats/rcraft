@@ -433,6 +433,7 @@ impl Session {
                 r_text(&p)
             ));
             self.kinds.clear();
+            self.storage.clear();
         }
         // saving(name[, replace]): the graph kept in a file of that name
         if let Some(s) = g.arg("saving", 4) {

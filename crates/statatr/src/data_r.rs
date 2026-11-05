@@ -53,8 +53,10 @@ mod st;
 mod stats;
 mod tables;
 mod ts;
+mod tsreg;
 mod weights;
 mod xt;
+mod xtregar;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -217,6 +219,19 @@ impl Translator {
             stata: c.text.clone(),
             result,
         }
+    }
+
+    /// `_rc` is no longer known, for the reason given.
+    pub fn lose_rc(&mut self, why: String) {
+        self.s.rc_lost = Some(why);
+    }
+
+    /// `input`, with the data lines that follow it up to `end`.
+    pub fn input(&mut self, c: &Command, lines: &[String]) -> Line {
+        self.s.input_lines = Some(lines.to_vec());
+        let line = self.command(c);
+        self.s.input_lines = None;
+        line
     }
 
     /// A line Stata runs that is not translated, for a reason found before
@@ -782,6 +797,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_rows_replace" => ts::ROWS_REPLACE_HELPER,
         "stata_xtset" => xt::XTSET_HELPER,
         "stata_xtreg" => xt::XTREG_HELPER,
+        "stata_xtregar" => xtregar::XTREGAR_HELPER,
+        "stata_tsreg" => tsreg::TSREG_HELPER,
         "stata_xt_predict" => xt::XT_PREDICT_HELPER,
         "stata_xt_ic" => xt::XT_IC_HELPER,
         "stata_xt_other" => xt::XT_OTHER_HELPER,
@@ -853,6 +870,11 @@ struct Session {
     file_handles: BTreeMap<String, bool>,
     /// Handles a `file open` that was not translated may have opened.
     file_lost: BTreeSet<String>,
+    /// The storage types of the numeric variables `generate` made, so a
+    /// `replace` stores as Stata does (a float stays a float).
+    storage: BTreeMap<String, Storage>,
+    /// The data lines of the `input` being translated.
+    input_lines: Option<Vec<String>>,
     /// The programs being run, innermost last: name, class, and the r()
     /// names an r-class one has returned so far (number, text).
     programs: Vec<returned::ProgramRun>,
@@ -1598,6 +1620,12 @@ impl Session {
     }
 
     fn command(&mut self, c: &Command) -> Result<RCode, Untranslated> {
+        // a variable another command makes again: its storage is not known
+        if !matches!(c.name.as_str(), "generate" | "replace") {
+            for v in new_vars(c) {
+                self.storage.remove(&v);
+            }
+        }
         if let Some(why) = self.uses_lost(c) {
             // Stata has the variable and runs the line: a model there
             // replaces e() (and r()), so neither is R's any more
@@ -1791,6 +1819,7 @@ impl Session {
             "import" => self.import(c, &opts, out),
             "insheet" => self.insheet(c, &opts, out),
             "split" => self.split(c, &opts, out),
+            "input" => self.input(c, out),
             "file" => self.file(c, out),
             "generate" => self.generate(c, &opts, out),
             "replace" => self.replace(c, out),
@@ -1832,6 +1861,7 @@ impl Session {
                 }
                 self.data_lost = None;
                 self.kinds.clear();
+                self.storage.clear();
                 self.fv_base.clear();
                 self.forget_ts();
                 self.label_sets.clear();
@@ -1881,6 +1911,8 @@ impl Session {
             "xtset" => self.xtset(c, &opts, out),
             "tsset" => self.tsset(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
+            "xtregar" => self.xtregar(c, &opts, out),
+            "prais" | "newey" => self.tsreg(c, &opts, out),
             "ivregress" => self.ivregress(c, &opts, out),
             w if crate::lang::syntax::abbrev(w, "histogram", 4) => self.histogram(c, &opts, out),
             w if crate::lang::syntax::abbrev(w, "kdensity", 5) => self.kdensity(c, &opts, out),
@@ -2016,6 +2048,7 @@ impl Session {
         self.ts_delta = kept.ts_delta;
         self.file = Some(path);
         self.kinds.clear();
+        self.storage.clear();
         if let Some(cond) = self.condition(c, out)? {
             steps.push(format!("dplyr::filter({cond})"));
         }
@@ -2238,6 +2271,7 @@ impl Session {
         self.data = Some(name);
         self.file = None;
         self.kinds.clear();
+        self.storage.clear();
         self.fv_base.clear();
         self.forget_ts();
         self.label_sets.clear();
@@ -2314,6 +2348,9 @@ impl Session {
             var.to_string(),
             if is_text { Kind::Text } else { Kind::Number },
         );
+        if !is_text {
+            self.storage.insert(var.to_string(), storage);
+        }
         Ok(())
     }
 
@@ -2332,11 +2369,18 @@ impl Session {
         }
         // Stata replaces row by row when a row refers to the rows above it
         // (`replace x = x[_n-1] if missing(x)` carries values down a run)
+        // earlier rows (`x[_n-1]`), the row itself or later ones (`x[_N]`) in the
+        // value: then each row
+        // depends on rows above it and doing the replace again until nothing
+        // changes gives Stata's row-by-row result, as for L.x below
         let own = format!("{var}[");
-        if rhs.contains(&own) || c.parts.if_exp.as_deref().is_some_and(|e| e.contains(&own)) {
+        let earlier_only = !c.parts.if_exp.as_deref().is_some_and(|e| e.contains(&own))
+            && own_subscripts_earlier(rhs, var);
+        let own_rows = rhs.contains(&own);
+        if own_rows && !earlier_only {
             return Err(no(format!(
-                "replace that reads {var}'s own earlier rows ({var}[...]) runs row by row in Stata \
-                 (each row sees the rows above already replaced); not translated yet"
+                "replace that reads {var}'s own rows other than earlier ones ({var}[_n-1] is) runs \
+                 row by row in Stata (each row sees the rows above already replaced); not translated yet"
             )));
         }
         // and so it does for L.var: each row sees the earlier times already replaced
@@ -2356,27 +2400,54 @@ impl Session {
             )));
         }
         let (cond, value, kind) = self.drawing_value(c, rhs, out)?;
+        // a variable the do-file made keeps its storage, as in Stata: each row
+        // rounded to float before the next reads it
+        let value = match (self.storage.get(var).copied(), self.kinds.get(var)) {
+            (Some(st), Some(Kind::Number)) if kind != Kind::Text => {
+                stored(&value, st, &mut self.helpers, out)
+            }
+            _ => value,
+        };
         let value = match cond {
             Some(cond) => format!("dplyr::if_else({cond}, {value}, {})", r_name(var)),
             None => value,
         };
-        let value = if own.is_empty() {
+        let value = if own.is_empty() && !own_rows {
             value
         } else {
-            if self.drew.get() {
+            // with draws: each round draws the same numbers (the generator put
+            // back before it), so the rows that run come out as Stata's, each
+            // with its own draw; the rows the if picks must not move
+            let drew = self.drew.get();
+            let if_reads_own = c.parts.if_exp.as_deref().is_some_and(|e| {
+                ts::ts_words(e)
+                    .iter()
+                    .any(|w| ts::parse_ts(w).is_some_and(|(_, v)| v == var))
+                    || e.split(|ch: char| !(ch.is_ascii_alphanumeric() || ch == '_'))
+                        .any(|w| w == var)
+            });
+            if drew && if_reads_own {
                 return Err(no(format!(
-                    "replace that reads L.{var} and draws random numbers is not translated yet"
+                    "replace that reads L.{var} and draws random numbers, with an if that reads {var}, \
+                     is not translated yet"
                 )));
             }
+            let helper = if drew {
+                "stata_rows_replace_draws"
+            } else {
+                "stata_rows_replace"
+            };
             self.helpers.insert("stata_rows_replace");
-            let lagged = value.replace(
-                &format!("stata_ts({}, ", r_name(var)),
-                "stata_ts(stata_cur, ",
-            );
-            format!(
-                "stata_rows_replace(function(stata_cur) {lagged}, {})",
-                r_name(var)
-            )
+            let lagged = value
+                .replace(
+                    &format!("stata_ts({}, ", r_name(var)),
+                    "stata_ts(stata_cur, ",
+                )
+                .replace(
+                    &format!("dplyr::lag({}, ", r_name(var)),
+                    "dplyr::lag(stata_cur, ",
+                );
+            format!("{helper}(function(stata_cur) {lagged}, {})", r_name(var))
         };
         out.package("dplyr");
         let d = self.data()?;
@@ -3043,6 +3114,7 @@ impl Session {
                         self.data = Some("data".into());
                         self.file = None;
                         self.kinds.clear();
+                        self.storage.clear();
                         self.fv_base.clear();
                         self.forget_ts();
                         self.label_sets.clear();
@@ -3364,6 +3436,38 @@ fn excel_column(cell: &str) -> Option<usize> {
     )
 }
 
+/// Whether every `var[...]` in `exp` is an earlier row (`_n-k`, k a whole
+/// number of 1 or more) or the row itself or a later one, so the replace can
+/// be done again until it settles.
+fn own_subscripts_earlier(exp: &str, var: &str) -> bool {
+    use crate::lang::expr::{BinaryOp, Expr};
+    fn walk(e: &Expr, var: &str) -> bool {
+        match e {
+            // an earlier row (`_n-k`, done again until it settles), or the row
+            // itself or a later one (`_n`, `_n+k`, `_N`), which Stata reads
+            // before replacing it, as R does
+            Expr::Subscript(n, i) if n == var => match i.as_ref() {
+                Expr::Name(m) => m == "_n" || m == "_N",
+                Expr::Binary(op @ (BinaryOp::Sub | BinaryOp::Add), l, r) => {
+                    matches!(l.as_ref(), Expr::Name(m) if m == "_n")
+                        && matches!(r.as_ref(), Expr::Number(k)
+                            if k.fract() == 0.0 && (*k >= 1.0 || (*op == BinaryOp::Add && *k >= 0.0)))
+                }
+                _ => false,
+            },
+            Expr::Subscript(_, i) => walk(i, var),
+            Expr::Unary(_, a) => walk(a, var),
+            Expr::Binary(_, a, b) => walk(a, var) && walk(b, var),
+            Expr::Call(_, args) => args.iter().all(|a| walk(a, var)),
+            _ => true,
+        }
+    }
+    // `x = x[1]` alone: row 1 takes its own value, so every row gets the
+    // first row's value as it was
+    let first_alone = |e: &Expr| matches!(e, Expr::Subscript(n, i) if n == var && matches!(i.as_ref(), Expr::Number(k) if *k == 1.0));
+    crate::lang::expr::parse(exp).is_ok_and(|e| first_alone(&e) || walk(&e, var))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3468,10 +3572,16 @@ mod tests {
         assert_eq!(out[3], "s <- s |> dplyr::mutate(t = dplyr::if_else((is.na(x) | x > 1), substr(paste0(\"a\", s), 1, 5), \"\"))");
         assert_eq!(
             out[4],
-            "s <- s |> dplyr::mutate(y = dplyr::if_else(is.na(y), 0, y))"
+            "s <- s |> dplyr::mutate(y = dplyr::if_else(is.na(y), stata_float(0), y))"
         );
         assert_eq!(out[5], "s <- s |> dplyr::arrange(dplyr::pick(g)) |> dplyr::group_by(dplyr::pick(g)) |> dplyr::mutate(n = stata_float(dplyr::row_number())) |> dplyr::ungroup()");
-        assert!(out[6].contains("runs row by row"), "{}", out[6]);
+        // carried down row by row: each missing row takes the row above, already filled
+        assert!(
+            out[6].contains("stata_rows_replace(function(stata_cur)")
+                && out[6].contains("dplyr::lag(stata_cur, 1)"),
+            "{}",
+            out[6]
+        );
     }
 
     #[test]

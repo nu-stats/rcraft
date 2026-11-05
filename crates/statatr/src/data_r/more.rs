@@ -1051,6 +1051,7 @@ impl Session {
             "Stata stores means and the like of float variables as floats; R keeps full precision",
         );
         self.kinds.clear();
+        self.storage.clear();
         Ok(())
     }
 
@@ -1085,6 +1086,7 @@ impl Session {
             super::stats::r_logical(opts.has("promote", 7))
         ));
         self.kinds.clear();
+        self.storage.clear();
         if opts.has("varname", 7) {
             self.kinds.insert("_varname".into(), Kind::Text);
         }
@@ -1712,6 +1714,7 @@ impl Session {
         self.data_lost = None;
         self.file = None;
         self.kinds.clear();
+        self.storage.clear();
         self.fv_base.clear();
         self.forget_ts();
         self.label_sets.clear();
@@ -1871,6 +1874,190 @@ impl Session {
         out.line(format!("{d} <- stata_v$d"));
         out.line("stata_r <- stata_v$r");
         self.r_new = Some((returned::R_SPLIT, "split".into()));
+        Ok(())
+    }
+}
+
+/// Stata's storage type words before a name in `input`.
+fn input_type(w: &str) -> Option<&'static str> {
+    match w {
+        "byte" | "int" | "long" => Some("integer"),
+        "float" => Some("float"),
+        "double" => Some("double"),
+        "strL" => Some("string"),
+        s if s
+            .strip_prefix("str")
+            .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit())) =>
+        {
+            Some("string")
+        }
+        _ => None,
+    }
+}
+
+/// The values on one `input` line, split as Stata splits words.
+fn input_values(line: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = line.trim();
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix('"') {
+            let (s, tail) = after.split_once('"').unwrap_or((after, ""));
+            out.push(format!("\"{s}\""));
+            rest = tail.trim_start();
+        } else {
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            out.push(rest.get(..end).unwrap_or(rest).to_string());
+            rest = rest.get(end..).unwrap_or("").trim_start();
+        }
+    }
+    out
+}
+
+impl Session {
+    /// `input [type] var [type] var ...` and its data lines up to `end`, into
+    /// empty data: floats unless a type says otherwise (StatCraft's notes on
+    /// Stata 19, probe 229). What is not read off is declined.
+    pub(super) fn input(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let lines = self
+            .input_lines
+            .take()
+            .ok_or_else(|| no("input typed alone is not translated yet"))?;
+        if self.data.is_some() || self.data_lost.is_some() {
+            return Err(no(
+                "input into data already in memory is not translated yet (into empty data it is)",
+            ));
+        }
+        // the variables and their types; double(a b) types a group
+        let mut vars: Vec<(String, &'static str)> = Vec::new();
+        let header = c.parts.main.replace('(', " ( ").replace(')', " ) ");
+        let mut words = header.split_whitespace().peekable();
+        while let Some(w) = words.next() {
+            if let Some(t) = input_type(w) {
+                if words.peek() == Some(&"(") {
+                    words.next();
+                    for n in words.by_ref() {
+                        if n == ")" {
+                            break;
+                        }
+                        vars.push((n.to_string(), t));
+                    }
+                } else {
+                    let n = words
+                        .next()
+                        .ok_or_else(|| no("input: a type without a name"))?;
+                    vars.push((n.to_string(), t));
+                }
+            } else if w == "(" || w == ")" {
+                return Err(no("input: this list of names is not translated yet"));
+            } else {
+                vars.push((w.to_string(), "float"));
+            }
+        }
+        if vars.is_empty() {
+            return Err(no(
+                "input with no names (more rows for the data in memory) is not translated yet",
+            ));
+        }
+        for (n, _) in &vars {
+            if !is_name(n) || n.len() > 32 {
+                return Err(no(format!(
+                    "{n} is not a valid variable name (Stata: r(198))"
+                )));
+            }
+        }
+        let mut cols: Vec<Vec<String>> = vec![Vec::new(); vars.len()];
+        for line in &lines {
+            if line.contains('`') || line.contains('$') {
+                return Err(no("input lines with macros in them are not translated yet"));
+            }
+            let vals = input_values(line);
+            if vals.len() != vars.len() {
+                return Err(no(format!(
+                    "input: a line with {} values for {} variables is not translated yet",
+                    vals.len(),
+                    vars.len()
+                )));
+            }
+            for ((v, (name, t)), col) in vals.iter().zip(&vars).zip(cols.iter_mut()) {
+                let code = if *t == "string" {
+                    r_text(v.trim_matches('"'))
+                } else if v == "." {
+                    "NA".to_string()
+                } else if v.len() == 2
+                    && v.starts_with('.')
+                    && v.chars().nth(1).is_some_and(|ch| ch.is_ascii_lowercase())
+                {
+                    self.extended_missing.set(true);
+                    "NA".to_string()
+                } else {
+                    let x: f64 = v.trim_matches('"').parse().map_err(|_| {
+                        no(format!("'{v}' cannot be read as a number for {name} (Stata skips the line); not translated yet"))
+                    })?;
+                    if *t == "integer" && x.fract() != 0.0 {
+                        return Err(no(format!(
+                            "{v} into the integer variable {name} is not translated yet"
+                        )));
+                    }
+                    r_number(x)
+                };
+                col.push(code);
+            }
+        }
+        let mut parts = Vec::new();
+        for ((name, t), col) in vars.iter().zip(&cols) {
+            let v = format!("c({})", col.join(", "));
+            let v = match *t {
+                "float" => {
+                    self.helpers.insert("stata_float");
+                    format!("stata_float(as.numeric({v}))")
+                }
+                "string" => format!("as.character({v})"),
+                _ => format!("as.numeric({v})"),
+            };
+            parts.push(format!("{} = {v}", r_name(name)));
+        }
+        let n = lines.len();
+        let code = if n == 0 {
+            format!(
+                "data.frame({}, stringsAsFactors = FALSE)[0, , drop = FALSE]",
+                parts.join(", ")
+            )
+        } else {
+            format!(
+                "data.frame({}, stringsAsFactors = FALSE, check.names = FALSE)",
+                parts.join(", ")
+            )
+        };
+        out.line(format!("data <- {code}"));
+        self.data = Some("data".into());
+        self.data_lost = None;
+        self.file = None;
+        self.kinds.clear();
+        self.storage.clear();
+        self.fv_base.clear();
+        self.forget_ts();
+        self.label_sets.clear();
+        for (name, t) in &vars {
+            self.kinds.insert(
+                name.clone(),
+                if *t == "string" {
+                    Kind::Text
+                } else {
+                    Kind::Number
+                },
+            );
+            match *t {
+                "float" => {
+                    self.storage.insert(name.clone(), Storage::Float);
+                }
+                "double" => {
+                    self.storage.insert(name.clone(), Storage::Double);
+                }
+                _ => {}
+            }
+            self.lost_vars.remove(name);
+        }
+        out.caveat("the data typed in, as Stata stores it (float unless a type says otherwise); Stata's echo of the lines is not printed");
         Ok(())
     }
 }

@@ -137,6 +137,7 @@ pub fn translate_drawing(
         draws: 0,
         draw_call: None,
         helpers: Vec::new(),
+        bytes_ok: false,
     };
     let (code, kind) = t.expr(&tree)?;
     let (code, kind) = match use_ {
@@ -171,6 +172,9 @@ struct Translator<'a> {
     /// The R of the expression's random draw, written as [`DRAW`] in its code.
     draw_call: Option<String>,
     helpers: Vec<&'static str>,
+    /// Inside subinstr()'s search and replacement, which Stata works on as
+    /// bytes: there char(128) to char(255) are single bytes R can match too.
+    bytes_ok: bool,
 }
 
 /// Stata's date and time functions of numbers, the R helper each is
@@ -790,7 +794,14 @@ impl Translator<'_> {
                     Kind::Number,
                 ))
             }
-            "strlen" | "ustrlen" | "length" => self.text_fn("nchar", args, Kind::Number),
+            // length() and strlen() count bytes in Stata ("café" is 5), ustrlen()
+            // characters
+            "strlen" | "length" => {
+                want(1)?;
+                let (s, _) = self.expr(arg(0)?)?;
+                Ok((format!("nchar({s}, type = \"bytes\")"), Kind::Number))
+            }
+            "ustrlen" => self.text_fn("nchar", args, Kind::Number),
             "upper" | "strupper" | "ustrupper" => self.text_fn("toupper", args, Kind::Text),
             "lower" | "strlower" | "ustrlower" => self.text_fn("tolower", args, Kind::Text),
             // Stata's trim, strtrim, ltrim, ... take spaces only; the ustr ones
@@ -816,6 +827,10 @@ impl Translator<'_> {
                 want(1)?;
                 // a code written out that is a single byte: declined here, not in R
                 if let Some(k) = plain_number(arg(0)?).map(f64::trunc) {
+                    // a single byte where subinstr() looks for or puts bytes
+                    if self.bytes_ok && (128.0..=255.0).contains(&k) {
+                        return Ok((format!("rawToChar(as.raw({k}))"), Kind::Text));
+                    }
                     if k == 0.0 || (128.0..=255.0).contains(&k) {
                         return Err(no(format!(
                             "char({k}) is a single byte, which R's text does not hold as Stata does; not translated yet"
@@ -874,12 +889,19 @@ impl Translator<'_> {
             "subinstr" | "usubinstr" => {
                 want(4)?;
                 let (s, _) = self.expr(arg(0)?)?;
-                let (a, _) = self.expr(arg(1)?)?;
-                let (b, _) = self.expr(arg(2)?)?;
+                // subinstr() works on bytes in Stata: so does R with useBytes,
+                // and char(128) to char(255) can be searched for and put in
+                let bytes = name == "subinstr";
+                self.bytes_ok = bytes;
+                let a = self.expr(arg(1)?);
+                let b = self.expr(arg(2)?);
+                self.bytes_ok = false;
+                let ((a, _), (b, _)) = (a?, b?);
+                let ub = if bytes { ", useBytes = TRUE" } else { "" };
                 if is_missing_literal(arg(3)?) {
-                    Ok((format!("gsub({a}, {b}, {s}, fixed = TRUE)"), Kind::Text))
+                    Ok((format!("gsub({a}, {b}, {s}, fixed = TRUE{ub})"), Kind::Text))
                 } else if plain_number(arg(3)?) == Some(1.0) {
-                    Ok((format!("sub({a}, {b}, {s}, fixed = TRUE)"), Kind::Text))
+                    Ok((format!("sub({a}, {b}, {s}, fixed = TRUE{ub})"), Kind::Text))
                 } else {
                     Err(no("subinstr() replacing a count other than 1 or all (.) is not translated yet"))
                 }
@@ -1317,7 +1339,7 @@ mod tests {
         assert_eq!(code("substr(s, 2, 3)", Use::Value), "substr(s, 2, 4)");
         assert_eq!(
             code("subinstr(s, \"a\", \"b\", .)", Use::Value),
-            "gsub(\"a\", \"b\", s, fixed = TRUE)"
+            "gsub(\"a\", \"b\", s, fixed = TRUE, useBytes = TRUE)"
         );
         // a date written out becomes its number (days since 1 January 1960)
         assert_eq!(code("td(01jan1960) + 1", Use::Value), "(0 + 1)");

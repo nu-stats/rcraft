@@ -1,7 +1,7 @@
 * RCraft's Stata corpus (P2C.9 continued): made-up data; Stata 19's results are in strings.recorded
 * commands: file split
-* functions: char float ltrim rtrim strltrim strmatch strrtrim strtrim trim ustrltrim ustrrtrim ustrtrim
-* (the trims, which blanks each takes (spaces only, or tabs and new lines too for the ustr ones), strmatch()'s * and ? with every other character as itself, char() of ASCII codes, missing and past 255, and float(); split: words, parse() strings with the empty pieces they leave, notrim, limit(), if, and its r(); file open, write and close, read back with insheet)
+* functions: char float length ltrim rtrim strltrim strmatch strrtrim strtrim subinstr trim ustrltrim ustrrtrim ustrtrim
+* (the trims, which blanks each takes (spaces only, or tabs and new lines too for the ustr ones), strmatch()'s * and ? with every other character as itself, char() of ASCII codes, missing and past 255, and float(); split: words, parse() strings with the empty pieces they leave, notrim, limit(), if, and its r(); file open, write and close, read back with insheet; length() in bytes and subinstr() on bytes, with char(128) to char(255) searched for and put in)
 * tolerance: 0
 version 19
 set linesize 255
@@ -81,3 +81,11 @@ file close `fh'
 insheet using written_by_file.txt, clear double
 display "@ file read back " _N " " %21x a[1] " " b[1] " " (c[1] == "x y") " " a[2] " " b[2] " " (c[2] == "q") " " a[3] " " b[3]
 erase written_by_file.txt
+clear
+set obs 2
+generate str20 s = "café" in 1
+replace s = "plain text" in 2
+generate t = subinstr(s, char(169), "X", .)
+generate u = subinstr(s, char(195), char(200), 1)
+generate v = subinstr(s, "a", char(65) + char(66), .)
+display "@ bytes " length(s[1]) " " length(t[1]) " " length(u[1]) " " length(v[1]) " " (t[2] == "plain text") " " length(v[2]) " " (substr(t[1], 1, 3) == "caf")
