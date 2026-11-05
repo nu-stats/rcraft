@@ -119,6 +119,7 @@ at the worst it fared in any run:
 | With programs (2026-11-04) | 5149 | 3016 | 1376 | 757 | 68.7% |
 | With matrices and insheet (2026-11-04) | 5149 | 3060 | 1304 | 785 | 70.1% |
 | With strmatch and the trims (2026-11-04) | 5149 | 3184 | 1180 | 785 | 73.0% |
+| With split and file (2026-11-04) | 5149 | 3189 | 1175 | 785 | 73.1% |
 
 Stata's matrix commands (`matrices.do`: `matrix A = ...` with `J()`, `I()`, joins, products, sums,
 transposes, `invsym()`, `inv()`, `vecdiag()`, `diag()`, `e()`; elements read and put in place; `nullmat()`;
@@ -128,7 +129,11 @@ when the do-file runs leaves as known when run (not as not translated), it is 64
 a dry run judges (93,432 translated, 51,171 not, 70,378 known when run). Each line in `matrices.do` gives
 Stata 19's value, names included. `strltrim()`, `strrtrim()`, `strmatch()` and `char()` (`strings.do`), which one
 package's text cleaning starts with, took the source lines to 73.0% and the run lines to 64.9%; the trims
-now take spaces only, as Stata's do (the `ustr` ones tabs and new lines too).
+now take spaces only, as Stata's do (the `ustr` ones tabs and new lines too). `split` and `file open`, `write` and
+`close` (`strings.do`; `plan/stata/split.md` and `file.md`) translate every line of them in the packages:
+73.1%. `_natscale` with a label at 0 and a step below 1 is declined: Stata's end there can be 2^-55 rather
+than 0, a residue of its arithmetic not reproduced (`plan/stata/natscale-residue.md`); the probes then match
+Stata on every compared `_natscale` line.
 
 Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `esttab`'s `cells()` and `mlabels()`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:

@@ -3263,3 +3263,21 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Numbers:** source lines 73.0% of 5,149; run lines 64.9% of those a dry run judges.
 - **Probes (415):** 163,509 of 207,839 run lines translated (78.7%); 5,569 of 5,687 compared lines match
   Stata to 8 digits, 5 more to 6; the 113 that differ are all `_natscale`.
+
+## Step 3 done: split and file; _natscale's residue declined, 2026-11-04
+
+- **_natscale:** a label at 0 with a step below 1 is declined (Stata's end there can be 2^-55 rather than
+  0, even for 0.045 to 0.667 with 10 labels, so no narrower rule holds). None of the 46 packages calls it.
+  The probes then match on every compared `_natscale` line; probe 225 declines 30 of 480 ranges, the sweeps
+  of probe 226 1,479 of 4,915.
+- **split** (`data_r/more.rs`, `plan/stata/split.md`): words without parse(); the strings parse() gives
+  after trimming the ends (notrim), empty pieces kept, the later listed string winning a tie; limit(),
+  if and in, r(k_new) and r(varlist), r(110) and r(109). destring and overlapping parse strings declined.
+- **file** (`data_r/files.rs`, `plan/stata/file.md`): open (write, replace, append, text or binary), write
+  (strings, _n as the system writes it, _tab, _skip, _char, (exp) as display writes it, %fmt (exp); %1bu
+  and %1bs bytes in binary files) and close,
+  with Stata's r(602), r(110) and r(111); the files are byte for byte Stata's. file read is not translated.
+- **Checked:** `strings.do` (now 28 results against Stata 19), and probes compared line for line.
+- **Numbers:** source lines 73.1% of 5,149. Probes (417): 161,600 of 208,696 run lines translated (77.4%; the
+  declined `_natscale` ranges count as not translated); none of the 4,197 compared lines differs, 4,192
+  match Stata to 8 digits and 5 to 6.

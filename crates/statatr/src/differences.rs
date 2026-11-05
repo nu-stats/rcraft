@@ -395,6 +395,19 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "file",
+        about: "Writes a text or binary file",
+        points: &[p(
+            "As Stata 19",
+            "file open (write, with replace or append, text by default or binary), file write \
+             (strings, _newline(n), _tab(n), _skip(n), _char(n), (exp) as display writes it, \
+             %fmt (exp), and %1bu and %1bs bytes in binary files) and file close (or _all). \
+             Text files take the system's new lines (\r\n on Windows), as Stata's do. The \
+             errors stop where Stata's do (r(602), r(110), r(111)). file read, seek, query and \
+             set are not translated yet.",
+        )],
+    },
+    Guide {
         command: "foreach",
         about: "Loops: foreach, forvalues and while (and continue)",
         points: &[
@@ -1000,6 +1013,18 @@ pub const GUIDES: &[Guide] = &[
             "Ties",
             "Stata's sort puts rows that tie in no set order unless stable; R keeps them in \
              their current order. Missing values sort last, as in Stata.",
+        )],
+    },
+    Guide {
+        command: "split",
+        about: "Cuts a string variable into pieces",
+        points: &[p(
+            "As Stata 19",
+            "Without parse(), into words (runs of spaces as one); with parse(), at each string \
+             it gives (\" \" too) after trimming the ends (notrim keeps them), the earliest one \
+             winning, empty pieces kept and none after a last delimiter; limit() drops the \
+             pieces past it; new variables stub1, stub2, ... as text, r(k_new) and r(varlist). \
+             Parse strings that share characters and destring are declined.",
         )],
     },
     Guide {

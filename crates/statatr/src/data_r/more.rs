@@ -1718,3 +1718,159 @@ impl Session {
         Ok(())
     }
 }
+
+/// `split`, as Stata 19 cuts a string (`plan/stata/split.md`): without parse()
+/// into words; at the strings parse() gives (" " too) after trimming the ends
+/// (unless notrim), at the earliest one (the later listed on a tie), empty
+/// pieces kept and none after a last delimiter; at most limit() pieces.
+pub(super) const SPLIT_HELPER: &str = r##"stata_split <- function(d, var, parse = NULL, gen = var, limit = Inf, trim = TRUE, rows = NULL, show = TRUE) {
+  x <- d[[var]]
+  if (is.null(x)) stop("variable ", var, " not found (Stata: r(111))", call. = FALSE)
+  if (!is.character(x)) stop("numeric variables not allowed in varlist; ", var, " is a numeric variable (Stata: r(109))", call. = FALSE)
+  if (!is.null(rows)) x[is.na(rows) | !rows] <- ""
+  cut <- function(s) {
+    if (is.null(parse)) {
+      s <- trimws(s, whitespace = " ")
+      return(if (nzchar(s)) strsplit(s, " +")[[1]] else character(0))
+    }
+    if (trim) s <- trimws(s, whitespace = " ")
+    out <- character(0)
+    while (nzchar(s)) {
+      pos <- vapply(parse, function(p) as.integer(regexpr(p, s, fixed = TRUE)), 1L)
+      hit <- which(pos > 0)
+      if (!length(hit)) {
+        out <- c(out, s)
+        break
+      }
+      first <- min(pos[hit])
+      k <- max(hit[pos[hit] == first])
+      out <- c(out, substr(s, 1, first - 1))
+      s <- substring(s, first + nchar(parse[k]))
+    }
+    out
+  }
+  pieces <- lapply(x, function(s) utils::head(cut(s), limit))
+  k <- max(c(0L, lengths(pieces)))
+  nm <- paste0(gen, seq_len(k))
+  if (any(nm %in% names(d))) stop("cannot generate new variables using stub ", gen, " (Stata: r(110))", call. = FALSE)
+  for (j in seq_len(k)) d[[nm[j]]] <- vapply(pieces, function(p) if (length(p) >= j) p[j] else "", "")
+  if (show) cat("variables created as string: \n", paste(nm, collapse = "  "), "\n", sep = "")
+  list(d = d, r = list(k_new = k, varlist = paste0(nm, " ", collapse = "")))
+}"##;
+
+/// The strings in `parse()`: quoted ones as written, others word by word.
+fn parse_strings(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text.trim();
+    while !rest.is_empty() {
+        if let Some(after) = rest.strip_prefix('"') {
+            let (s, tail) = after.split_once('"').unwrap_or((after, ""));
+            out.push(s.to_string());
+            rest = tail.trim_start();
+        } else {
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            out.push(rest.get(..end).unwrap_or(rest).to_string());
+            rest = rest.get(end..).unwrap_or("").trim_start();
+        }
+    }
+    out
+}
+
+impl Session {
+    /// `split strvar [if] [in] [, generate() parse() limit() notrim]`.
+    pub(super) fn split(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let d = self.data()?;
+        if let Some(o) = opts.other(&[("generate", 3), ("parse", 1), ("limit", 1), ("notrim", 6)]) {
+            return Err(no(format!(
+                "split with the option {o} is not translated yet"
+            )));
+        }
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            return Err(no("by with split is not translated yet"));
+        }
+        let vars = names(&c.parts.main)?;
+        let [var] = vars.as_slice() else {
+            return Err(no(
+                "split takes one string variable (Stata: too many variables specified)",
+            ));
+        };
+        // the text as written: parse(" ") is a space, which the argument trims
+        let raw = opts
+            .0
+            .iter()
+            .find(|o| o.is("parse", 1))
+            .map(|o| o.raw.clone().or_else(|| o.arg.clone()).unwrap_or_default());
+        // none: words (runs of spaces as one); parse(" ") cuts at each space
+        let words = raw.is_none();
+        let parse = match raw {
+            Some(p) => parse_strings(&p),
+            None => vec![" ".to_string()],
+        };
+        if parse.is_empty() || parse.iter().any(|p| p.is_empty()) {
+            return Err(no("split, parse() needs the strings to cut at"));
+        }
+        if words && opts.has("notrim", 6) {
+            return Err(no(
+                "parsing on spaces incompatible with notrim (Stata: r(198))",
+            ));
+        }
+        // strings that could overlap: which Stata takes there is not read off
+        let shared = parse.iter().enumerate().any(|(i, a)| {
+            parse
+                .iter()
+                .skip(i + 1)
+                .any(|b| a.chars().any(|ch| b.contains(ch)))
+        });
+        if shared {
+            return Err(no(
+                "split on parse strings that share characters is not translated yet",
+            ));
+        }
+        let gen = match opts.arg("generate", 3) {
+            Some(g) if is_name(g.trim()) => g.trim().to_string(),
+            Some(g) => return Err(no(format!("generate({g}) is not a valid stub"))),
+            None => var.clone(),
+        };
+        let limit = match opts.arg("limit", 1) {
+            Some(l) => match l.trim().parse::<u32>() {
+                Ok(k) if k >= 1 => k.to_string(),
+                _ => {
+                    return Err(no(format!(
+                        "limit({l}) is a whole number of 1 or more (Stata: r(198))"
+                    )))
+                }
+            },
+            None => "Inf".to_string(),
+        };
+        let rows = match self.condition(c, out)? {
+            Some(cond) => {
+                out.package("dplyr");
+                format!(", rows = dplyr::transmute({d}, stata_v = {cond})$stata_v")
+            }
+            None => String::new(),
+        };
+        let list = parse
+            .iter()
+            .map(|p| r_text(p))
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.helpers.insert("stata_split");
+        out.line(format!(
+            "stata_v <- stata_split({d}, {}, parse = {}, gen = {}, limit = {limit}, trim = {}{rows}, show = {})",
+            r_text(var),
+            if words { "NULL".to_string() } else { format!("c({list})") },
+            r_text(&gen),
+            if opts.has("notrim", 6) { "FALSE" } else { "TRUE" },
+            if self.quiet(c) { "FALSE" } else { "TRUE" },
+        ));
+        out.line(format!("{d} <- stata_v$d"));
+        out.line("stata_r <- stata_v$r");
+        self.r_new = Some((returned::R_SPLIT, "split".into()));
+        Ok(())
+    }
+}

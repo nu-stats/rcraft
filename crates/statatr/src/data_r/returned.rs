@@ -728,6 +728,7 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 /// The `e()` and `r()` names that are macros (text) in Stata.
 const TEXT_NAMES: &[&str] = &[
     "levels",
+    "varlist",
     "cmd",
     "cmd2",
     "cmdline",
@@ -1217,6 +1218,8 @@ pub(super) const R_SUMMARIZE_DETAIL: &[&str] = &[
 pub(super) const R_MEANONLY: &[&str] = &["N", "sum_w", "mean", "min", "max", "sum"];
 pub(super) const R_COUNT: &[&str] = &["N"];
 pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
+/// What `split` leaves in r().
+pub(super) const R_SPLIT: &[&str] = &["k_new", "varlist"];
 /// What `test` leaves in r(), with r(dropped_1) and the like for each
 /// constraint it drops (one of base levels only)
 pub(super) const R_TEST: &[&str] = &[

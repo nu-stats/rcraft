@@ -30,6 +30,7 @@ mod clogit;
 mod coefplot;
 mod dates;
 mod esttab;
+mod files;
 mod fre;
 mod graph;
 mod iv;
@@ -731,6 +732,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_strmatch" => STRMATCH_HELPER,
         "stata_char" => CHAR_HELPER,
         "stata_insheet" => more::INSHEET_HELPER,
+        "stata_split" => more::SPLIT_HELPER,
+        "stata_file" => files::FILE_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
@@ -846,6 +849,10 @@ struct Session {
     user_mats: BTreeSet<String>,
     /// Matrices a line that was not translated may have changed: name -> that line.
     lost_mats: BTreeMap<String, String>,
+    /// The files `file open` opened and not closed: handle -> binary.
+    file_handles: BTreeMap<String, bool>,
+    /// Handles a `file open` that was not translated may have opened.
+    file_lost: BTreeSet<String>,
     /// The programs being run, innermost last: name, class, and the r()
     /// names an r-class one has returned so far (number, text).
     programs: Vec<returned::ProgramRun>,
@@ -1308,6 +1315,11 @@ impl Session {
             .filter(|m| matrices::may_write(stata, m))
             .cloned()
             .collect();
+        // a handle a refused file open names may be open in Stata
+        if let Some(h) = files::opened(stata) {
+            self.file_handles.remove(&h);
+            self.file_lost.insert(h);
+        }
         let mut named = named;
         named.extend(matrices::written(stata));
         for m in named {
@@ -1778,6 +1790,8 @@ impl Session {
             "save" | "saveold" => self.save(c, &opts, out),
             "import" => self.import(c, &opts, out),
             "insheet" => self.insheet(c, &opts, out),
+            "split" => self.split(c, &opts, out),
+            "file" => self.file(c, out),
             "generate" => self.generate(c, &opts, out),
             "replace" => self.replace(c, out),
             "drop" | "keep" => self.drop_keep(c, c.name == "keep", out),

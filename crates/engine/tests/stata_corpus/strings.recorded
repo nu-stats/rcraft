@@ -10,3 +10,20 @@
 @ patterns 1 0 1 0 1 1 0 0 1 0 1 1 1
 @ char 1 1 0 0 0 1
 @ float 1 0 .5 1
+@ split words 5 1
+@ split words 1 2 4 5 0 1
+@ split words 2 4 3 5 0 0
+@ split words 3 1 1 1 0 0
+@ split words 4 2 0 0 0 0
+@ split words 5 7 0 0 0 0
+@ split words 6 1 9 1 9 0
+@ split space 2 1 1 1
+@ split dot 4 1 1 1 1 1 1 1
+@ split notrim 1 1
+@ split string 3 1 1 1
+@ split two 5 1 1 1 1
+@ split if 5 1 1
+@ split taken 110
+@ file exists 602
+@ file closed 111
+@ file read back 3 +1.5555551c112daX-002 2.5 1 12345678 1.235e+08 1 -.5 1.000e-10

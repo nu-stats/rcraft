@@ -13,7 +13,8 @@
 //!
 //! The values here are L·d, U·d and d as doubles. Stata's carry the residue
 //! of its own arithmetic in the last bits (r(min) is 2^-55, not 0, for some
-//! ranges); those lines agree to 8 digits except where the label is 0.
+//! ranges); those lines agree to 8 digits except where the label is 0, and a
+//! label at 0 with a step below 1 is declined.
 
 use super::{no, Out, Session};
 use crate::expr_r::Untranslated;
@@ -212,6 +213,18 @@ impl Session {
             return Err(no("_natscale with these values is not translated yet"));
         }
         let s = natscale(lo, hi, n.floor());
+        // a label at 0 with a step below 1 (whatever the data and n: 0.045 to
+        // 0.667 with 10 shows it too): Stata's end there can be 2^-55 or
+        // -2^-54 rather than 0 (its 10^k for k below 0 is a product of
+        // tenths), and when it is has not been worked out, so it is declined
+        // rather than given as 0 (plan/stata/natscale-residue.md)
+        if s.delta < 1.0 && (s.min == 0.0 || s.max == 0.0) {
+            return Err(no(
+                "_natscale with a label at 0 and a step below 1 is not translated: Stata's r(min) or \
+                 r(max) there can carry the last bits of its own arithmetic (2^-55 rather than 0), \
+                 which are not reproduced yet",
+            ));
+        }
         self.helpers.insert("stata_returned");
         out.line(format!(
             "stata_r <- list(n = {}, min = {}, max = {}, delta = {})",

@@ -814,6 +814,14 @@ impl Translator<'_> {
             // char(n): the ASCII character; "" when missing or past 255 (Stata 19)
             "char" => {
                 want(1)?;
+                // a code written out that is a single byte: declined here, not in R
+                if let Some(k) = plain_number(arg(0)?).map(f64::trunc) {
+                    if k == 0.0 || (128.0..=255.0).contains(&k) {
+                        return Err(no(format!(
+                            "char({k}) is a single byte, which R's text does not hold as Stata does; not translated yet"
+                        )));
+                    }
+                }
                 let (n, nk) = self.expr(arg(0)?)?;
                 let n = number(&n, nk)?;
                 self.helpers.push("stata_char");

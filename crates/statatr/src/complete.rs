@@ -88,6 +88,7 @@ pub const COMMANDS: &[&str] = &[
     "esttab",
     "exit",
     "expand",
+    "file",
     "foreach",
     "forvalues",
     "fre",
@@ -150,6 +151,7 @@ pub const COMMANDS: &[&str] = &[
     "scatter",
     "set",
     "sort",
+    "split",
     "ssc",
     "stcox",
     "stset",
@@ -249,6 +251,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("expand", &["generate("]),
+    ("file", &["append", "binary", "replace", "text", "write"]),
     ("generate", &["after(", "before("]),
     ("gettoken", &["match(", "parse("]),
     (
@@ -510,6 +513,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("saveold", &["nolabel", "replace", "version("]),
     ("scatter", &["by(", "legend(", "nodraw", "sort"]),
     ("sort", &["stable"]),
+    ("split", &["generate(", "limit(", "notrim", "parse("]),
     (
         "stcox",
         &[
@@ -618,6 +622,7 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
         ],
     ),
     ("eststo", &["clear", "drop"]),
+    ("file", &["close", "open", "write"]),
     (
         "graph",
         &["bar", "box", "drop", "export", "hbar", "hbox", "twoway"],
@@ -1286,6 +1291,7 @@ gettoken a b : s, {o}"
             }
             "import" => format!("import delimited f.csv, {o}"),
             "insheet" => format!("insheet using f.csv, {o}"),
+            "file" => format!("file open h using f.txt, write {o}"),
             "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),
             "label" => format!("label define l 1 \"a\", {o}"),

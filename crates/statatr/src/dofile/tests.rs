@@ -616,7 +616,7 @@ fn an_add_on_that_is_not_translated_may_set_any_global() {
 
 #[test]
 fn natscale_leaves_its_labels_in_r() {
-    let d = run("clear\n_natscale 0 1.01 5\ndisplay \"s \" %21x r(min) \" \" %21x r(max) \" \" r(n)\nreturn list\n");
+    let d = run("clear\n_natscale 10 20.1 5\ndisplay \"s \" %21x r(min) \" \" %21x r(max) \" \" r(n)\nreturn list\n");
     let s = shown(&d);
     assert!(
         d.translation.lines.iter().all(|l| l.result.is_ok()),
@@ -625,9 +625,17 @@ fn natscale_leaves_its_labels_in_r() {
     let code: Vec<String> = d.translation.lines.iter().map(|l| l.script()).collect();
     assert!(
         code.iter().any(|c| c.contains(
-            "stata_r <- list(n = 0x1.8000000000000p2, min = 0, max = 0x1.0000000000000p0, delta = 0x1.999999999999ap-3)"
+            "stata_r <- list(n = 0x1.8000000000000p2, min = 0x1.4000000000000p3, max = 0x1.4000000000000p4, delta = 0x1.0000000000000p1)"
         )),
         "{code:?}"
+    );
+    // a label at 0 with a step below 1: Stata's r(min) can be 2^-55, so declined
+    let d = run("clear\n_natscale 0 1.01 5\n");
+    let s = shown(&d);
+    assert!(
+        s.iter()
+            .any(|l| l.contains("_natscale with a label at 0 and a step below 1")),
+        "{s:?}"
     );
 }
 
