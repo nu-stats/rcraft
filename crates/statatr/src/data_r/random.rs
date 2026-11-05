@@ -575,13 +575,15 @@ stata_rchi2 <- function(rows, df) {
 }
 # rt(df) (read off Stata 19's draws, 2026-11-05): the ratio of uniforms, u
 # then v each try, t = b (2v - 1) / u, kept when u^2 <= (1 + t^2/df)^(-(df+1)/2);
-# b, the region's half width, is 1 at df = 1. Missing, with no draw, below 1
+# b, the region's half width, is 1 at df = 1. Missing, with no draw, outside
+# Stata's 1 to 2^53 - 1
 stata_rt <- function(rows, df) {
   a <- stata_rng_args(rows, df)
-  need <- which(a$sel & stata_rng_in(a[[3]], 1, 8e307))
+  need <- which(a$sel & stata_rng_in(a[[3]], 1, 9007199254740991))
   out <- rep(NA_real_, a$n)
   for (i in need) {
     n <- a[[3]][i]
+    if (n > 1e10) stop("RCraft: rt() with more than 1e10 degrees of freedom is not translated yet (Stata's draws there were not matched)", call. = FALSE)
     b <- if (n == 1) 1 else exp(0.5 * (log(2 * n / (n - 1)) + (n + 1) / 2 * log((n - 1) / (n + 1))))
     repeat {
       w <- stata_rng_u(stata_rng_words(2))
@@ -595,10 +597,11 @@ stata_rt <- function(rows, df) {
 # rbeta(a, b) with a shape of 1 (read off Stata 19's draws, 2026-11-05):
 # (1, 1) is a uniform, (1, 2) the smaller of two and (2, 1) the larger; else
 # one uniform u, exp(log(u) (1/a)) when b is 1 and 1 - exp(log(u) (1/b)) when
-# a is. Stata's method for other shapes is not known
+# a is. Stata's method for other shapes is not known. Missing, with no draw,
+# outside Stata's a 0.05 to 1e5 and b 0.15 to 1e5
 stata_rbeta <- function(rows, a, b) {
   x <- stata_rng_args(rows, a, b)
-  need <- which(x$sel & stata_rng_in(x[[3]], 1e-323, 8e307) & stata_rng_in(x[[4]], 1e-323, 8e307))
+  need <- which(x$sel & stata_rng_in(x[[3]], 0.05, 1e5) & stata_rng_in(x[[4]], 0.15, 1e5))
   out <- rep(NA_real_, x$n)
   for (i in need) {
     p <- x[[3]][i]

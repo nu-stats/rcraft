@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.11 continued): made-up draws; Stata 19's results are in variates2.recorded
 * functions: rt rbeta
-* (rt() by the ratio of uniforms at df 1, 2.5, 4 and 30, missing below 1 with no draw; rbeta() with a shape of 1: a uniform, the smaller or larger of two, and one uniform inverted; the next uniform after each, which shows the stream is Stata's; rt() agrees to its last bit or so, hence the tolerance)
+* (rt() by the ratio of uniforms at df 1, 2.5, 4 and 30, missing outside 1 to 2^53 - 1 with no draw; rbeta() with a shape of 1: a uniform, the smaller or larger of two, and one uniform inverted; the next uniform after each, which shows the stream is Stata's; rt() agrees to its last bit or so, hence the tolerance)
 * tolerance: 1e-13
 version 19
 set linesize 255
@@ -30,3 +30,13 @@ display "@ rbeta_moments " r(mean) " " r(min) " " r(max)
 display "@ rbeta_next " runiform()
 generate double b0 = rbeta(0, 1)
 display "@ rbeta_invalid " (b0[1] >= .) " " runiform()
+set seed 303
+generate double e1 = rbeta(1, 0.15) in 1
+generate double e2 = rbeta(0.05, 1) in 1
+generate double e3 = rbeta(1, 100000) in 1
+generate double e4 = rbeta(1, 0.14999) in 1
+generate double e5 = rbeta(0.049, 1) in 1
+generate double e6 = rbeta(100001, 1) in 1
+generate double e7 = rt(1e10) in 1
+generate double e8 = rt(9007199254740992) in 1
+display "@ domains " e1[1] " " e2[1] " " e3[1] " " (e4[1] >= .) " " (e5[1] >= .) " " (e6[1] >= .) " " e7[1] " " (e8[1] >= .) " " runiform()

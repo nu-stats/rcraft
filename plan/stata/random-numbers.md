@@ -220,11 +220,20 @@ draw took, against the mt64 stream RCraft already reproduces.
   draw is bit for bit at 11 of the 15 df, and one ulp of b away at df 3, 4 and 1e10 (no one formula for b
   found gives all of them; Stata's maths library may differ from R's in the last bit). df below 1 gives
   missing and takes no draw (0.3, 0.5, 0.9), as do 0, -1 and `.`.
+- Stata's manual (`[FN] Random-number functions`) names Kinderman and Monahan (1977, 1980) for `rt()` and
+  gives its domain as 1 to 2^53 - 1: 2^53 - 1 draws and 2^53 is missing with no draw (checked). At
+  2^53 - 1 Stata turns down a try the exact test keeps (u = .7497, t = -.611), so its test there is not
+  (1 + t^2/df)^(-(df+1)/2) in any form tried (pow, log1p); at 1e10 it keeps it. RCraft refuses df above
+  1e10.
 - `rbeta(a, b)`: (1, 1) is one uniform as it is; (1, 2) is the smaller of two and (2, 1) the larger (12
   draws each, every one exact); with b = 1, exp(log(u) * (1/a)) (a = 2.5, 3, 5) and with a = 1,
   1 - exp(log(u) * (1/b)) (b = 0.4, 3), one uniform, exact on 50 draws. Both shapes below 1 with
   a + b <= 1 look like Johnk's method (x = u1^(1/a), y = u2^(1/b), kept when x + y <= 1, x/(x + y)):
   the uniforms it takes are Stata's, and most draws are exact, but some are not (small x), so it is
   not used. Other shapes take other numbers of uniforms (Cheng's BB and BC, and a ratio of Stata's
-  gammas, do not fit). An argument not above 0 or missing gives missing with no draw.
-- `rpoisson()`: not looked at again; StatCraft's notes above stand.
+  gammas, do not fit). The manual names Johnk (via Gentle 2003), Atkinson and Whittaker (1970, 1976), Devroye
+  (1986) and Schmeiser and Babu (1980), and gives the domains a 0.05 to 1e5 and b 0.15 to 1e5: outside
+  them (0.049, 0.14999, 100001, 0, -1, `.`) the result is missing with no draw (checked).
+- `rpoisson()`: not looked at again; StatCraft's notes above stand. The manual names Kemp and Kemp
+  (1990, a composition-search algorithm for low means; 1991) and Kachitvichyanukul (1982), which fits
+  StatCraft's two-stage search below a mean of about 10 and its change of method further up.

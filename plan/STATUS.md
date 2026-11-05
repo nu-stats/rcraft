@@ -3344,3 +3344,7 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Machine:** this one has R 4.4.3 without ggplot2 and quantreg, so `coefplot.do` and `robreg.do` were
   not run here; every other corpus file passes. StatCraft's probes here (288 run) have no
   compared line differing: 4,110 of 4,114 match Stata to 8 digits and 4 more to 6.
+- **Domains, from Stata's manual and checked:** `rbeta()` draws only for a in 0.05 to 1e5 and b in 0.15 to
+  1e5, `rt()` for df in 1 to 2^53 - 1 (missing, with no draw, outside); RCraft had drawn outside them.
+  `rt()` above 1e10 degrees of freedom is refused: at 2^53 - 1 Stata's acceptance test is not the one
+  found.

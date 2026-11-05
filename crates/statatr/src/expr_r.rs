@@ -1164,7 +1164,12 @@ impl Translator<'_> {
         }
         // rbeta() is Stata's only with a shape of 1; shapes written out say so now
         if let [Expr::Number(a), Expr::Number(b)] = args {
-            if name == "rbeta" && *a != 1.0 && *b != 1.0 && *a > 0.0 && *b > 0.0 {
+            if name == "rbeta"
+                && *a != 1.0
+                && *b != 1.0
+                && (0.05..=1e5).contains(a)
+                && (0.15..=1e5).contains(b)
+            {
                 return Err(no(
                     "rbeta() with neither shape 1 is not translated yet: Stata's method there is not known",
                 ));
