@@ -390,7 +390,7 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   b <- stata_b
   V <- stata_vcov
   robust <- vce %in% c("robust", "cluster")
-  G <- if (vce != "cluster") NULL else if (!is.null(fit[["G"]])) fit[["G"]] else if (cmd == "ivregress") length(unique(fit$cluster)) else if (cmd %in% c("stcox", "clogit")) stata_m$G else if (cmd == "reghdfe") min(fit$stata$G) else length(unique(stata_cluster))
+  G <- if (vce != "cluster") NULL else if (!is.null(fit[["G"]])) fit[["G"]] else if (cmd == "ivregress") length(unique(fit$cluster)) else if (cmd %in% c("stcox", "clogit", "asclogit")) stata_m$G else if (cmd == "reghdfe") min(fit$stata$G) else length(unique(stata_cluster))
   wald <- function(keep) {
     # no slopes (a constant alone): Stata's F(0, df) is 0
     if (!any(keep)) return(0)
@@ -687,6 +687,27 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
         indepvars = paste(setdiff(names(b), "(Intercept)"), collapse = " "), depvar = depvar,
         predict = "robreg predict", subcmd = "m", cmd = "robreg", obf = "huber", title = e0$title,
         properties = "b V")
+  } else if (cmd == "asclogit") {
+    m <- stata_m
+    a <- stata_a
+    q <- sum(slopes)
+    put(rank = q, N = m$N, k = length(b), k_eq = 1, converged = 1, rc = 0, ll = m$ll)
+    if (!is.null(G)) put(N_clust = G)
+    put(k_eq_model = 1, df_m = q, chi2 = wald(slopes))
+    put(p = stats::pchisq(e$chi2, q, lower.tail = FALSE), k_indvars = q, i_base = 1, k_casevars = 0,
+        alt_avg = a$alt_avg, alt_max = a$alt_max, alt_min = a$alt_min, k_alt = length(a$alts),
+        N_ic = a$N_case, N_case = a$N_case, const = 0)
+    put(cmdline = cmdline, cmd = "asclogit", title = "Alternative-specific conditional logit",
+        predict = "asclogit_p", estat_cmd = "asclogit_estat", marginsok = "default Pr XB",
+        marginsnotok = "stdp SCores", marktype = "casewise",
+        alteqs = paste(a$alts, collapse = " "))
+    for (i in seq_along(a$alts)) e[[paste0("alt", i)]] <- as.character(a$alts[i])
+    put(altvar = extra$altvar, key_N_ic = "cases", case = extra$case, depvar = depvar,
+        indvars = extra$indvars, chi2type = "Wald")
+    if (vce == "cluster") put(clustvar = clustvar)
+    put(vce = vce)
+    if (robust) put(vcetype = "Robust")
+    put(properties = "b V")
   } else if (cmd == "clogit") {
     m <- stata_m
     q <- sum(slopes)
@@ -790,6 +811,24 @@ fn e_not_kept(cmd: &str, model: &str) -> &'static [&'static str] {
             "b_init",
             "V_modelbased",
             "omit",
+        ],
+        ("asclogit", _) => &[
+            "ic",
+            "datasignaturevars",
+            "datasignature",
+            "deriv_useminbound",
+            "opt",
+            "user",
+            "ml_method",
+            "technique",
+            "which",
+            "stats",
+            "alt_casevars",
+            "altvals",
+            "altfreq",
+            "V_modelbased",
+            "ilog",
+            "gradient",
         ],
         ("clogit", _) => &[
             "ic",

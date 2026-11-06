@@ -72,6 +72,7 @@ const DATA: &[&str] = &[
     "discard",
     "display",
     "do",
+    "drawnorm",
     "drop",
     "ds",
     "duplicates",
@@ -157,6 +158,7 @@ const DATA: &[&str] = &[
 ];
 
 const STATISTICS: &[&str] = &[
+    "_pctile",
     "alpha",
     "anova",
     "centile",
@@ -209,6 +211,7 @@ const STATISTICS: &[&str] = &[
 
 const MODELS: &[&str] = &[
     "areg",
+    "asclogit",
     "arima",
     "betareg",
     "biprobit",

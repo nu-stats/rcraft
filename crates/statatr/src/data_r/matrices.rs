@@ -206,7 +206,7 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     if (is.null(r)) return(approx(why))
     ml <- cmd %in% c("logit", "probit", "poisson", "nbreg", "ologit", "oprobit", "clogit") ||
       (cmd == "xtreg" && identical(fit$type, "mle"))
-    eq <- if (ml) paste0(depvar, ":") else ""
+    eq <- if (cmd == "asclogit") paste0(fit[["stata_altvar"]], ":") else if (ml) paste0(depvar, ":") else ""
     names_out <- paste0(eq, r$n)
     from <- r$f
     # a variable named twice: its own column again right after it, omitted

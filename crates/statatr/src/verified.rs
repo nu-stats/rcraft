@@ -12,8 +12,10 @@
 
 /// Each Verified command, with the corpus files that check it.
 pub const VERIFIED: &[(&str, &[&str])] = &[
+    ("_pctile", &["asclogit"]),
     ("anova", &["panel"]),
     ("append", &["replication"]),
+    ("asclogit", &["asclogit"]),
     ("assert", &["checks"]),
     ("bootstrap", &["bootstrap"]),
     ("bsample", &["bsample"]),
@@ -24,6 +26,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("confirm", &["strings"]),
     ("correlate", &["descriptives"]),
     ("count", &["control", "descriptives"]),
+    ("drawnorm", &["asclogit"]),
     ("egen", &["descriptives"]),
     ("erase", &["replication"]),
     ("estadd", &["estout"]),

@@ -666,7 +666,8 @@ stata_rhypergeometric <- function(rows, N, K, n) {
   stata_rng_out(out)
 }"#;
 
-use super::{in_range, no, Out, Session};
+use super::{in_range, is_name, no, Opts, Out, Session, Storage};
+use crate::expr_r::r_text;
 use crate::expr_r::{self, Kind, Untranslated, Use};
 use crate::lang::expr::Expr;
 use crate::reader::Command;
@@ -1429,6 +1430,153 @@ impl Session {
         self.helpers.insert("stata_rng");
         self.rng_lost = None;
         out.line(format!("stata_set_seed({n})"));
+        Ok(())
+    }
+}
+
+/// `drawnorm`: k variables of n normal draws with the means and covariance
+/// given (Stata 19, checked with its own rnormal() stream): the draws are
+/// taken a variable at a time, n for the first, then n for the next, and
+/// each row is means + L z with L the lower Cholesky factor of the
+/// covariance; float unless `double`.
+pub(super) const DRAWNORM_HELPER: &str = r#"stata_drawnorm <- function(d, names, n, mu, V, double = FALSE) {
+  k <- length(names)
+  mu <- as.numeric(mu)
+  V <- as.matrix(V)
+  if (length(mu) != k) stop("means() must have ", k, " elements (Stata: r(503))", call. = FALSE)
+  if (!all(dim(V) == k)) stop("cov() must be ", k, " x ", k, " (Stata: r(503))", call. = FALSE)
+  L <- tryCatch(t(chol(V)), error = function(e) stop("cov() is not positive definite (Stata: r(506))", call. = FALSE))
+  # Stata 19: the deviations L z are kept in float, the means added to them;
+  # a float variable is rounded again
+  z <- matrix(stata_rnorm_std(n * k), n, k)
+  dev <- matrix(stata_float(z %*% t(L)), n, k)
+  X <- dev + matrix(mu, n, k, byrow = TRUE)
+  if (!double) X <- matrix(stata_float(X), n, k)
+  if (is.null(d)) d <- stata_set_obs(NULL, n)
+  for (j in seq_len(k)) {
+    if (names[j] %in% names(d)) stop("variable ", names[j], " already defined (Stata: r(110))", call. = FALSE)
+    d[[names[j]]] <- X[, j]
+  }
+  d
+}"#;
+
+impl Session {
+    /// `drawnorm newvarlist [, n(#) means(matrix) cov(matrix) clear double]`.
+    pub(super) fn drawnorm(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[
+            ("n", 1),
+            ("means", 1),
+            ("cov", 3),
+            ("clear", 5),
+            ("double", 6),
+        ]) {
+            return Err(no(format!(
+                "drawnorm with the option {o} is not translated yet"
+            )));
+        }
+        // the new variables: names, or a range a1-a9 of new names
+        let mut names: Vec<String> = Vec::new();
+        for w in c.parts.main.split_whitespace() {
+            if let Some((a, b)) = w.split_once('-') {
+                let split = |s: &str| {
+                    let p = s.trim_end_matches(|ch: char| ch.is_ascii_digit());
+                    s.get(p.len()..)
+                        .and_then(|d| d.parse::<u32>().ok())
+                        .map(|d| (p.to_string(), d))
+                };
+                match (split(a), split(b)) {
+                    (Some((pa, i)), Some((pb, j))) if pa == pb && i <= j && is_name(&pa) => {
+                        names.extend((i..=j).map(|k| format!("{pa}{k}")));
+                    }
+                    _ => {
+                        return Err(no(format!(
+                            "drawnorm, {w}: only a range of numbered names is translated"
+                        )))
+                    }
+                }
+            } else if is_name(w) {
+                names.push(w.to_string());
+            } else {
+                return Err(no(format!(
+                    "drawnorm, {w}: a new variable's name is needed"
+                )));
+            }
+        }
+        if names.is_empty() {
+            return Err(no("drawnorm needs the new variables (Stata: r(100))"));
+        }
+        let k = names.len();
+        let mu = match opts.arg("means", 1) {
+            Some(m) => self.matrix_expr(m.trim(), out)?.0,
+            None => format!("rep(0, {k})"),
+        };
+        let cov = match opts.arg("cov", 3) {
+            Some(v) => self.matrix_expr(v.trim(), out)?.0,
+            None => format!("diag({k})"),
+        };
+        let double = opts.has("double", 6);
+        self.helpers.insert("stata_rng");
+        self.helpers.insert("stata_float");
+        self.helpers.insert("stata_set_obs");
+        self.helpers.insert("stata_drawnorm");
+        let list = format!(
+            "c({})",
+            names
+                .iter()
+                .map(|n| r_text(n))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        match opts.arg("n", 1) {
+            Some(n) => {
+                let n: u64 = n.trim().parse().map_err(|_| {
+                    no(format!(
+                        "drawnorm, n({n}): only a whole number is translated"
+                    ))
+                })?;
+                if self.data.is_some() && !opts.has("clear", 5) {
+                    return Err(no(
+                        "drawnorm, n() with data in memory and no clear is not translated (Stata may refuse: r(4))",
+                    ));
+                }
+                out.line(format!(
+                    "data <- stata_drawnorm(NULL, {list}, {n}, {mu}, {cov}, double = {})",
+                    if double { "TRUE" } else { "FALSE" }
+                ));
+                self.data = Some("data".into());
+                self.file = None;
+                self.kinds.clear();
+                self.storage.clear();
+                self.fv_base.clear();
+                self.forget_ts();
+                self.label_sets.clear();
+            }
+            None => {
+                let d = self.data()?;
+                out.line(format!(
+                    "{d} <- stata_drawnorm({d}, {list}, nrow({d}), {mu}, {cov}, double = {})",
+                    if double { "TRUE" } else { "FALSE" }
+                ));
+            }
+        }
+        for n in &names {
+            self.kinds.insert(n.clone(), Kind::Number);
+            self.storage.insert(
+                n.clone(),
+                if double {
+                    Storage::Double
+                } else {
+                    Storage::Float
+                },
+            );
+        }
+        self.drew.set(true);
+        out.caveat("the draws are Stata's: its rnormal() stream, a variable at a time, times the Cholesky factor");
         Ok(())
     }
 }

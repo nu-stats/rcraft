@@ -277,6 +277,11 @@ impl Session {
             Fit::Stcox => &[("hr", 2), ("xb", 2)],
             Fit::Clogit => &[("pc1", 3), ("pu0", 3), ("xb", 2)],
             Fit::Robreg => &[("xb", 2), ("residuals", 1), ("weights", 1)],
+            Fit::Asclogit => {
+                return Err(no(
+                    "predict after asclogit is not translated yet",
+                ))
+            }
             Fit::Cluster2 => {
                 return Err(no(
                     "predict after cluster2 is not translated yet (Stata: cluster2 leaves no e(predict))",
@@ -712,6 +717,22 @@ impl Session {
                 )))
             }
         };
+        // after asclogit: summarize (its own layout), and vce
+        if est.fit == Fit::Asclogit {
+            if sub.len() >= 2 && "summarize".starts_with(sub) && rest.is_empty() {
+                if let Some(o) = opts.other(&[("equation", 2), ("labels", 3)]) {
+                    return Err(no(format!(
+                        "estat summarize with the option {o} is not translated yet"
+                    )));
+                }
+                return self.asclogit_summarize(out);
+            }
+            if sub != "vce" {
+                return Err(no(format!(
+                    "estat {sub} after asclogit is not translated yet"
+                )));
+            }
+        }
         if sub.is_empty() {
             return Err(no("estat needs a subcommand (ic, vce, hettest, ovtest)"));
         }

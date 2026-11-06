@@ -47,6 +47,7 @@ pub(super) enum Fit {
     Robreg,
     Reghdfe,
     Cluster2,
+    Asclogit,
 }
 
 impl Fit {
@@ -68,6 +69,7 @@ impl Fit {
             Fit::Robreg => "robreg",
             Fit::Reghdfe => "reghdfe",
             Fit::Cluster2 => "cluster2",
+            Fit::Asclogit => "asclogit",
         }
     }
 

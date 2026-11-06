@@ -78,6 +78,38 @@ pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data
   fit <- survival::coxph(f2, data = fd, method = "exact", control = ctl, model = TRUE)
   b <- stats::coef(fit)
   V <- stats::vcov(fit)
+  ll_at <- fit$loglik[2]
+  # Stata reports where its Newton-Raphson stops, which can be short of the
+  # maximum by a few parts in 1e7: with one positive outcome a group, its path
+  # is followed, from an ordinary logit's slopes (StatCraft's decoding of
+  # clogit's start, probe 243; the steps and stopping rule are Stata's ml's)
+  if (all(tapply(y, gi, sum) == 1)) {
+    lg <- suppressWarnings(stats::glm.fit(cbind(1, Xk), y, family = stats::binomial(),
+                                          control = stats::glm.control(epsilon = 1e-14, maxit = 100)))
+    b0 <- stats::coef(lg)[-1]
+    if (all(is.finite(b0))) {
+      cll <- function(bb) {
+        eta <- drop(Xk %*% bb)
+        m <- as.numeric(tapply(eta, gi, max))[gi]
+        sum(y * eta) - sum(log(as.numeric(tapply(exp(eta - m), gi, sum)))) - sum(as.numeric(tapply(m, gi, function(v) v[1])))
+      }
+      cder <- function(bb) {
+        eta <- drop(Xk %*% bb)
+        w <- exp(eta - as.numeric(tapply(eta, gi, max))[gi])
+        p <- w / as.numeric(tapply(w, gi, sum))[gi]
+        px <- rowsum(p * Xk, gi)
+        list(ll = cll(bb), g = colSums((y - p) * Xk),
+             nh = crossprod(Xk * p, Xk) - crossprod(px))
+      }
+      path <- stata_ml_path(cll, cder, b0)
+      if (path$converged) {
+        b <- stats::setNames(path$b, names(b))
+        V <- solve(cder(b)$nh)
+        dimnames(V) <- list(names(b), names(b))
+        ll_at <- cll(b)
+      }
+    }
+  }
   Vinfo <- V
   S <- NULL
   cl <- NULL
@@ -128,7 +160,7 @@ pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data
   }
   fit$stata_written <- vapply(attr(tt, "term.labels"), function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":"), "")
   list(fit = fit, b = bf, V = Vf, N = length(y), G = if (is.null(cluster)) NA else G,
-       ll = fit$loglik[2], ll_0 = fit$loglik[1], N_drop = sum(out), N_group_drop = length(bad),
+       ll = ll_at, ll_0 = fit$loglik[1], N_drop = sum(out), N_group_drop = length(bad),
        multiple = multiple, group = group)
 }
 stata_clogit_header <- function(m, robust, clustvar = NULL, group = NULL) {
@@ -218,6 +250,7 @@ impl Session {
         let src = self.rows_for(c, out)?;
         out.package("survival");
         self.helpers.insert("stata_clogit");
+        self.helpers.insert("stata_probit_newton");
         self.helpers.insert("stata_coefs");
         let quiet = self.quiet(c);
         out.line(format!(
@@ -286,6 +319,254 @@ impl Session {
             );
         }
         out.caveat("printed in R's layout, not Stata's table");
+        Ok(())
+    }
+}
+
+/// `asclogit` with alternative-specific variables only and `noconstant`:
+/// clogit's fit on the cases (Stata 19's estimates and variance are
+/// clogit's, to the last digit), with asclogit's notes, header, e() and
+/// `estat summarize` (`plan/stata/asclogit.md`).
+pub(super) const ASCLOGIT_HELPER: &str = r#"stata_asclogit_check <- function(formula, data, case, alts, vars, cluster = NULL, notes = TRUE) {
+  ok <- stats::complete.cases(stats::model.frame(formula, data, na.action = stats::na.pass)) &
+    !is.na(data[[case]]) & !is.na(data[[alts]])
+  if (!is.null(cluster)) ok <- ok & !is.na(data[[cluster]])
+  d <- data[ok, , drop = FALSE]
+  y <- as.numeric(d[[all.vars(formula)[1]]] != 0)
+  pos <- tapply(y, d[[case]], sum)
+  if (any(pos != 1)) stop("asclogit with cases that do not choose exactly one alternative is not translated yet", call. = FALSE)
+  # a variable that does not vary within a case, case by case (Stata's notes)
+  if (notes) for (v in vars) {
+    n <- sum(tapply(d[[v]], d[[case]], function(x) length(unique(x)) == 1))
+    if (n > 0) cat("note: variable ", v, " has ", n, " cases that are not alternative-specific; there is no within-case variability.\n", sep = "")
+  }
+  sz <- as.numeric(table(d[[case]]))
+  list(rows = which(ok), alt_min = min(sz), alt_avg = mean(sz), alt_max = max(sz),
+       N_case = length(sz), alts = sort(unique(d[[alts]])))
+}
+stata_asclogit_header <- function(m, a, case, alts, clustvar = NULL) {
+  e <- stata_e
+  row <- function(left, right) cat(formatC(left, width = -47, flag = "-"), right, "\n", sep = "")
+  row("Alternative-specific conditional logit", sprintf("Number of obs      = %10s", format(e$N, big.mark = ",")))
+  row(paste("Case ID variable:", case), sprintf("Number of cases    = %10s", format(e$N_case, big.mark = ",")))
+  row(paste("Alternatives variable:", alts), sprintf("Alts per case: min = %10d", as.integer(e$alt_min)))
+  row("", sprintf("               avg = %10.1f", e$alt_avg))
+  row("", sprintf("               max = %10d", as.integer(e$alt_max)))
+  cat(formatC("", width = 50), sprintf("Wald chi2(%d)    = %10.2f\n", as.integer(e$df_m), e$chi2), sep = "")
+  lab <- if (is.null(clustvar)) "Log likelihood" else "Log pseudolikelihood"
+  row(sprintf("%s = %.8g", lab, e$ll), sprintf("   Prob > chi2     = %10.4f", e$p))
+  if (!is.null(clustvar)) cat(formatC(sprintf("(Std. err. adjusted for %d clusters in %s)", as.integer(e$N_clust), clustvar), width = 78), "\n", sep = "")
+  cat("\n")
+  invisible(NULL)
+}
+stata_asclogit_summarize <- function(data, depvar, vars, eq, clustvar = NULL) {
+  d <- data[stata_esample, , drop = FALSE]
+  cat("Estimation sample asclogit", formatC("", width = 19), sprintf("Number of obs        = %10s\n\n", format(nrow(d), big.mark = ",")), sep = "")
+  if (!is.null(clustvar)) {
+    sz <- as.numeric(table(d[[clustvar]]))
+    cat(formatC("", width = 45), sprintf("Number of clusters   = %10d\n", length(sz)), sep = "")
+    cat(formatC("", width = 45), sprintf("Obs per cluster: min = %10d\n", as.integer(min(sz))), sep = "")
+    cat(formatC("", width = 45), sprintf("                 avg = %10.1f\n", mean(sz)), sep = "")
+    cat(formatC("", width = 45), sprintf("                 max = %10d\n\n", as.integer(max(sz))), sep = "")
+  }
+  line <- function(ch) cat(strrep("-", 13), ch, strrep("-", 64), "\n", sep = "")
+  # Stata 19: the mean right in 10 after the bar, the std. dev. in 11, min and
+  # max in 9, each %9.0g; the label after three spaces when there is one
+  num <- function(x, w) formatC(stata_fmt(x, "%9.0g", trim = TRUE), width = w)
+  line("-")
+  cat("    Variable |      Mean   Std. dev.     Min      Max   Label\n")
+  one <- function(v) {
+    x <- as.numeric(d[[v]])
+    l <- attr(d[[v]], "label", exact = TRUE)
+    lab <- if (is.null(l) || !nzchar(l)) "" else paste0("   ", l)
+    cat(formatC(v, width = 12), " |", num(mean(x), 10), num(stats::sd(x), 11), num(min(x), 9), num(max(x), 9), lab, "\n", sep = "")
+  }
+  line("+")
+  cat(formatC("depvar", width = -12, flag = "-"), " |\n", sep = "")
+  one(depvar)
+  line("+")
+  cat(formatC(eq, width = -12, flag = "-"), " |\n", sep = "")
+  for (v in vars) one(v)
+  line("-")
+  if (!is.null(clustvar)) cat("Std. dev. not adjusted for clustering\n")
+  invisible(NULL)
+}"#;
+
+impl Session {
+    /// `asclogit depvar indepvars [if] [in], case(v) alternatives(v)
+    /// noconstant [vce(cluster v) | vce(robust) | level(#) nolog]`.
+    pub(super) fn asclogit(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "asclogit")?;
+        if let Some(o) = opts.other(&[
+            ("case", 4),
+            ("alternatives", 3),
+            ("noconstant", 5),
+            ("robust", 1),
+            ("vce", 3),
+            ("level", 3),
+            ("nolog", 5),
+            ("log", 3),
+        ]) {
+            return Err(no(format!(
+                "asclogit with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.weight.is_some() {
+            return Err(no("asclogit with weights is not translated yet"));
+        }
+        if !opts.has("noconstant", 5) {
+            return Err(no(
+                "asclogit with the alternatives' constants is not translated yet (noconstant is)",
+            ));
+        }
+        let name_of = |o: &str, min: usize| -> Result<String, Untranslated> {
+            let v = opts
+                .arg(o, min)
+                .map(|v| v.trim().to_string())
+                .ok_or_else(|| no(format!("asclogit needs {o}() (Stata: r(198))")))?;
+            if is_name(&v) {
+                Ok(v)
+            } else {
+                Err(no(format!(
+                    "asclogit, {o}({v}): one variable name is translated"
+                )))
+            }
+        };
+        let case = name_of("case", 4)?;
+        let alts = name_of("alternatives", 3)?;
+        let level = level(opts)?;
+        let (robust, cluster) = vce(opts)?;
+        let spec = Spec::read(c, "asclogit")?;
+        if spec.terms.is_empty() || !spec.factors.is_empty() {
+            return Err(no(
+                "asclogit with factor variables or no variables is not translated yet",
+            ));
+        }
+        let vars: Vec<String> = spec.terms.clone();
+        if vars.iter().any(|v| !is_name(v)) {
+            return Err(no(
+                "asclogit with interactions or operators is not translated yet",
+            ));
+        }
+        let right = spec.right(false)?;
+        let src = self.rows_for(c, out)?;
+        out.package("survival");
+        self.helpers.insert("stata_clogit");
+        self.helpers.insert("stata_probit_newton");
+        self.helpers.insert("stata_asclogit");
+        self.helpers.insert("stata_coefs");
+        let quiet = self.quiet(c);
+        let vlist = format!(
+            "c({})",
+            vars.iter()
+                .map(|v| r_text(v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        let cl = cluster
+            .as_deref()
+            .map(|v| format!(", cluster = {}", r_text(v)))
+            .unwrap_or_default();
+        out.line(format!(
+            "stata_a <- stata_asclogit_check({} ~ {right}, data = {src}, case = {}, alts = {}, vars = {vlist}{cl}, notes = {})",
+            r_name(&spec.dep),
+            r_text(&case),
+            r_text(&alts),
+            r_logical(!quiet)
+        ));
+        out.line(format!(
+            "stata_m <- stata_clogit({} ~ {right}, data = {src}, group = {}, robust = {}{cl}, notes = FALSE)",
+            r_name(&spec.dep),
+            r_text(&case),
+            r_logical(robust || cluster.is_some()),
+        ));
+        out.line("stata_estimates <- stata_m$fit");
+        out.line(format!("stata_estimates$stata_altvar <- {}", r_text(&alts)));
+        out.line("stata_estimates$stata_asc <- stata_a");
+        out.line("stata_b <- stata_m$b");
+        out.line("stata_vcov <- stata_m$V");
+        out.line("stata_df <- Inf");
+        out.line(keep_sample(&src));
+        let d = self.data()?;
+        out.package("dplyr");
+        out.line(esample_line(&d, &src));
+        self.esample_new = true;
+        self.fit_robust = robust || cluster.is_some();
+        self.fit_cluster = cluster.is_some();
+        self.estimates = Some(Estimates {
+            fit: Fit::Asclogit,
+            dep: spec.dep.clone(),
+            factors: spec.factors.clone(),
+        });
+        let vce = if cluster.is_some() {
+            "cluster"
+        } else if robust {
+            "robust"
+        } else {
+            "oim"
+        };
+        let mut args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &None);
+        args.push_str(&format!(
+            ", extra = list(case = {}, altvar = {}, indvars = {})",
+            r_text(&case),
+            r_text(&alts),
+            r_text(&vars.join(" "))
+        ));
+        self.keep_e(c, out, &args, "");
+        self.asclogit_vars = Some((vars.clone(), alts.clone(), cluster.clone()));
+        if !quiet {
+            out.line(format!(
+                "stata_asclogit_header(stata_m, stata_a, {}, {}{})",
+                r_text(&case),
+                r_text(&alts),
+                cluster
+                    .as_deref()
+                    .map(|v| format!(", clustvar = {}", r_text(v)))
+                    .unwrap_or_default()
+            ));
+            out.line(format!(
+                "stata_coefs(stata_b, stata_vcov, stata_df, level = {}, label = \"Coefficient\")",
+                r_number(level)
+            ));
+        }
+        out.line("rm(stata_m, stata_a)");
+        out.caveat(
+            "asclogit with alternative-specific variables only and noconstant is clogit on the \
+             cases: the same estimates and variance, as in Stata 19",
+        );
+        out.caveat("printed in R's layout, not Stata's table");
+        Ok(())
+    }
+
+    /// `estat summarize` after asclogit: the estimation sample's means.
+    pub(super) fn asclogit_summarize(&mut self, out: &mut Out) -> Result<(), Untranslated> {
+        let Some((vars, alts, cluster)) = self.asclogit_vars.clone() else {
+            return Err(no(
+                "estat summarize: the asclogit before it is not known here",
+            ));
+        };
+        let est = self.estimates_for("estat")?;
+        let d = self.data()?;
+        self.helpers.insert("stata_asclogit");
+        self.helpers.insert("stata_fmt");
+        out.line(format!(
+            "stata_asclogit_summarize({d}, {}, c({}), {}{})",
+            r_text(&est.dep),
+            vars.iter()
+                .map(|v| r_text(v))
+                .collect::<Vec<_>>()
+                .join(", "),
+            r_text(&alts),
+            cluster
+                .as_deref()
+                .map(|v| format!(", clustvar = {}", r_text(v)))
+                .unwrap_or_default()
+        ));
         Ok(())
     }
 }

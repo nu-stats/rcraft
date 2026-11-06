@@ -135,6 +135,46 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "_pctile",
+        about: "Percentiles into r(r1), r(r2), ...",
+        points: &[p(
+            "As Stata 19",
+            "Stata's default percentiles (the mean of the two values at a whole rank), for \
+             percentiles() or nquantiles(); weights and altdef are not translated yet.",
+        )],
+    },
+    Guide {
+        command: "asclogit",
+        about: "Alternative-specific conditional logit",
+        points: &[
+            p(
+                "As Stata 19",
+                "With alternative-specific variables only and noconstant it is clogit on the \
+                 cases: Stata 19's estimates and variance are clogit's, to the last digit. Its \
+                 notes (cases with no within-case variability), header, e() (e(N_case), \
+                 e(k_alt), e(alteqs), alt: as the equation of e(b)), e(sample) and estat \
+                 summarize are Stata's. Like clogit, the estimates are where Stata's \
+                 Newton-Raphson stops, from an ordinary logit's slopes.",
+            ),
+            p(
+                "Not yet",
+                "The alternatives' constants (without noconstant), casevars(), \
+                 basealternative(), weights, predict and the other estat subcommands.",
+            ),
+        ],
+    },
+    Guide {
+        command: "drawnorm",
+        about: "Draws from a multivariate normal",
+        points: &[p(
+            "As Stata 19",
+            "Stata's draws, bit for bit: its rnormal() stream taken a variable at a time, the \
+             deviations L z (L the lower Cholesky factor of cov()) kept in float, the means added; \
+             a float variable is rounded again. n() with clear, means() and cov() as matrices \
+             (e(b), e(V) too), double; corr(), sds() and seed() are not translated yet.",
+        )],
+    },
+    Guide {
         command: "anova",
         about: "Analysis of variance",
         points: &[
@@ -1409,7 +1449,9 @@ pub const GUIDES: &[Guide] = &[
                  survival::coxph (one stratum per group, method = \"exact\"); several positive \
                  outcomes in a group are fine. Groups that are all positive or all negative are \
                  dropped with Stata's note, and so is a variable that does not vary within any \
-                 group.",
+                 group. With one positive outcome a group, the estimates are where Stata's \
+                 Newton-Raphson stops (from an ordinary logit's slopes, Stata's steps and \
+                 stopping rule), which can be a few parts in 1e7 short of the maximum.",
             ),
             p(
                 "Robust errors",

@@ -1145,3 +1145,90 @@ fn tab_chi2_weight(opts: &Opts, w: &Weighting) -> Result<(), Untranslated> {
         _ => Ok(()),
     }
 }
+
+/// What `_pctile` leaves in r(): r(r1), r(r2), ... (one for each percentile
+/// asked for; a number past them reads as missing, as in Stata).
+pub(super) const R_PCTILE: &[&str] = &[
+    "r1", "r2", "r3", "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15",
+    "r16", "r17", "r18", "r19", "r20", "r21", "r22", "r23", "r24", "r25", "r26", "r27", "r28",
+    "r29", "r30",
+];
+
+impl Session {
+    /// `_pctile varname [if] [in], percentiles(numlist) | nquantiles(#)`:
+    /// Stata's default percentiles (the mean of the two values at a whole
+    /// rank), into r(r1), r(r2), ...
+    pub(super) fn pctile_r(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("percentiles", 1), ("nquantiles", 1)]) {
+            return Err(no(format!(
+                "_pctile with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.weight.is_some() {
+            return Err(no("_pctile with weights is not translated yet"));
+        }
+        let var = c.parts.main.trim();
+        if !is_name(var) {
+            return Err(no("_pctile with one variable name is translated"));
+        }
+        let ps: Vec<f64> = match (opts.arg("percentiles", 1), opts.arg("nquantiles", 1)) {
+            (Some(p), None) => {
+                let mut v = Vec::new();
+                for w in p
+                    .split(|ch: char| ch == ',' || ch.is_whitespace())
+                    .filter(|w| !w.is_empty())
+                {
+                    let x: f64 = w.parse().map_err(|_| {
+                        no(format!(
+                            "_pctile, percentiles({p}): only numbers are translated (not ranges)"
+                        ))
+                    })?;
+                    if !(0.0..=100.0).contains(&x) {
+                        return Err(no(format!("_pctile, percentiles({p}): each must be between 0 and 100 (Stata: r(198))")));
+                    }
+                    v.push(x);
+                }
+                v
+            }
+            (None, Some(n)) => {
+                let n: u32 = n
+                    .trim()
+                    .parse()
+                    .map_err(|_| no("_pctile, nquantiles(): a whole number is needed"))?;
+                if n < 2 {
+                    return Err(no("_pctile, nquantiles() needs 2 or more (Stata: r(198))"));
+                }
+                (1..n)
+                    .map(|i| 100.0 * f64::from(i) / f64::from(n))
+                    .collect()
+            }
+            (None, None) => vec![50.0],
+            _ => {
+                return Err(no(
+                    "_pctile takes percentiles() or nquantiles(), not both (Stata: r(198))",
+                ))
+            }
+        };
+        if ps.len() > R_PCTILE.len() {
+            return Err(no(format!(
+                "_pctile with more than {} percentiles is not translated yet",
+                R_PCTILE.len()
+            )));
+        }
+        let src = self.rows_for(c, out)?;
+        self.helpers.insert("stata_stats");
+        let list: Vec<String> = ps.iter().map(|p| r_number(*p)).collect();
+        out.line(format!(
+            "stata_r <- local({{ x <- as.numeric({src}[[{}]]); p <- c({}); stats::setNames(as.list(vapply(p, function(q) stata_pctile(x, q), 0)), paste0(\"r\", seq_along(p))) }})",
+            r_text(var),
+            list.join(", ")
+        ));
+        self.r_new = Some((R_PCTILE, "_pctile".into()));
+        Ok(())
+    }
+}

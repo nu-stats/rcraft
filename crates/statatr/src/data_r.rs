@@ -430,6 +430,7 @@ const WEIGHTED: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "asclogit",
     "cluster2",
     "stcox",
     "clogit",
@@ -814,6 +815,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_robreg" => robreg::ROBREG_HELPER,
         "stata_reghdfe" => reghdfe::REGHDFE_HELPER,
         "stata_cluster2" => cluster2::CLUSTER2_HELPER,
+        "stata_asclogit" => clogit::ASCLOGIT_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -849,6 +851,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_matrix" => mexpr::MATRIX_HELPER,
         "stata_svmat" => matrices::SVMAT_HELPER,
         "stata_rng" => random::RNG_HELPER,
+        "stata_drawnorm" => random::DRAWNORM_HELPER,
         "stata_bootstrap" => random::BOOTSTRAP_HELPER,
         _ => FLOAT_HELPER,
     }
@@ -903,6 +906,8 @@ struct Session {
     post_lost: BTreeSet<String>,
     /// The postfiles known to be closed (postclose, postutil clear).
     post_closed: BTreeSet<String>,
+    /// After asclogit: its variables, alternatives variable and cluster, for estat summarize.
+    asclogit_vars: Option<(Vec<String>, String, Option<String>)>,
     /// The storage types of the numeric variables `generate` made, so a
     /// `replace` stores as Stata does (a float stays a float).
     storage: BTreeMap<String, Storage>,
@@ -2020,6 +2025,9 @@ impl Session {
             "robreg" => self.robreg(c, &opts, out),
             "reghdfe" => self.reghdfe(c, &opts, out),
             "cluster2" => self.cluster2(c, &opts, out),
+            "asclogit" => self.asclogit(c, &opts, out),
+            "drawnorm" => self.drawnorm(c, &opts, out),
+            "_pctile" => self.pctile_r(c, &opts, out),
             "outreg2" => self.outreg2(c, &opts, out),
             "fre" => self.fre(c, &opts, out),
             "coefplot" => self.coefplot(c, out),

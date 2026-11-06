@@ -53,8 +53,10 @@ pub struct Context<'a> {
 /// takes, and what the do-file runner (`crate::dofile`) does itself, offered
 /// in command position.
 pub const COMMANDS: &[&str] = &[
+    "_pctile",
     "anova",
     "append",
+    "asclogit",
     "assert",
     "bootstrap",
     "bsample",
@@ -77,6 +79,7 @@ pub const COMMANDS: &[&str] = &[
     "destring",
     "display",
     "do",
+    "drawnorm",
     "drop",
     "duplicates",
     "egen",
@@ -195,7 +198,20 @@ pub const COMMANDS: &[&str] = &[
 /// `(` marks one that takes an argument.
 pub const OPTIONS: &[(&str, &[&str])] = &[
     ("anova", &["partial", "repeated(", "sequential"]),
+    ("_pctile", &["nquantiles(", "percentiles("]),
     ("append", &["force", "generate(", "nolabel", "nonotes"]),
+    (
+        "asclogit",
+        &[
+            "alternatives(",
+            "case(",
+            "level(",
+            "noconstant",
+            "robust",
+            "vce(",
+        ],
+    ),
+    ("drawnorm", &["clear", "cov(", "double", "means(", "n("]),
     (
         "clogit",
         &[
@@ -1294,6 +1310,13 @@ mod tests {
             "rhotype" => "dw",
             "rhof" => ".5",
             "lag" => "1",
+            "n" => "5",
+            "percentiles" => "50",
+            "nquantiles" => "4",
+            "means" => "J(1,2,0)",
+            "cov" => "I(2)",
+            "case" => "g",
+            "alternatives" => "t",
             _ => "x",
         };
         let o = if opt.ends_with('(') {
@@ -1303,6 +1326,18 @@ mod tests {
         };
         let line = match cmd {
             "anova" => format!("anova y g, {o}"),
+            "asclogit" => {
+                let need = ["case(g)", "alternatives(t)", "noconstant"];
+                let rest: Vec<&str> = need
+                    .iter()
+                    .copied()
+                    .filter(|r| !r.starts_with(name))
+                    .collect();
+                format!("asclogit y x, {} {o}", rest.join(" "))
+            }
+            "drawnorm" if name == "n" => format!("drawnorm z1 z2, {o} clear"),
+            "drawnorm" => format!("drawnorm z1 z2, {o}"),
+            "_pctile" => format!("_pctile y, {o}"),
             "append" => format!("append using t, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),

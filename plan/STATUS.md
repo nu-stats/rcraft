@@ -3441,3 +3441,16 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **TZEN38 run whole:** 1,771 lines run, no R errors; 846 of 861 model values the same as Stata's (the 15
   others are age or a meeting level in those sets); Tables 1 and 5 the published ones, the others too
   but for _cons in some fe columns. `xtcollinear.do` has the exact case, age age and g#c.x.
+
+## asclogit, drawnorm, _pctile; clogit on Stata's path, 2026-11-06
+
+- **asclogit** (`data_r/clogit.rs`, `plan/stata/asclogit.md`): alternative-specific variables with
+  noconstant, as clogit on the cases (Stata's estimates and variance to the last digit); its notes,
+  header, e(), alt: in e(b), e(sample) and `estat summarize`.
+- **drawnorm** (`data_r/random.rs`): Stata's draws bit for bit (a variable at a time, the deviations in
+  float). **_pctile** (`data_r/stats.rs`): r(r1), r(r2), ... with Stata's default percentiles.
+- **clogit** follows Stata's Newton-Raphson from an ordinary logit's slopes (one positive a group):
+  estimates to 1.2e-12 of Stata's, where they were 6e-7 off.
+- **YFBPT6 run whole:** 4,288 of 4,549 model values the same; the 261 others are robreg on simulated
+  data, where 1e-12 upstream flips float draws; on the same data Stata's robreg gives RCraft's numbers.
+  `asclogit.do` checks the chain.
