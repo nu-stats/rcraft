@@ -3329,3 +3329,6 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Numbers:** probes (420) 188,260 of 210,197 run lines translated (89.6%, from 77.4%); none of the 4,310
   compared lines differs, 4,299 match Stata to 8 digits and 11 to 6 (6 of them xtregar re's sigma_u).
   Packages: 73.0% of source lines (the declined char(0) and lone bytes outside subinstr() take 0.1).
+- **Then:** `sign()`; a one-line `else command` after an `if { }` block inside a loop (the command was
+  read again with its `else`), and `} else command` on one line. Probe 346 went from 498 lines translated
+  to all 5,178.

@@ -575,7 +575,7 @@ impl Translator<'_> {
         let mut nums = Vec::new();
         let simple: Option<&str> = match name {
             "abs" | "exp" | "sqrt" | "sin" | "cos" | "tan" | "asin" | "acos" | "atan" | "floor"
-            | "log10" => Some(name),
+            | "sign" | "log10" => Some(name),
             "ln" | "log" => Some("log"),
             "ceil" => Some("ceiling"),
             "int" => Some("trunc"),

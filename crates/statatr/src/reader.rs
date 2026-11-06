@@ -732,6 +732,14 @@ pub fn read(source: &str) -> Program {
                         continue;
                     }
                 }
+                // `} else command` on one line
+                if !rest.is_empty() && before_brace(rest).is_none() {
+                    if let Some(f) = stack.last_mut() {
+                        f.group.otherwise = Some(vec![command(span, Vec::new(), rest, rest)]);
+                    }
+                    close(&mut program, &mut stack);
+                    continue;
+                }
                 target(&mut program, &mut stack).push(Item::Problem(Problem {
                     span,
                     message: "else needs { or if ... { after it".into(),
@@ -839,7 +847,8 @@ pub fn read(source: &str) -> Program {
             } else if !after.is_empty() && before_brace(after).is_none() {
                 // `else command` on one line
                 if let Some(f) = stack.last_mut() {
-                    f.group.otherwise = Some(vec![command(span, Vec::new(), after, t)]);
+                    // the command alone: read again by itself, it must not say else
+                    f.group.otherwise = Some(vec![command(span, Vec::new(), after, after)]);
                 }
                 close(&mut program, &mut stack);
             } else {
