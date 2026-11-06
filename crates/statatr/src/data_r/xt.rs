@@ -57,6 +57,17 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   y <- as.numeric(stats::model.response(mf))
   X <- stats::model.matrix(tt, mf)
   X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+  # a variable the constant and the ones before it explain is left out, as
+  # Stata leaves it out (the later one of a collinear set); R's qr keeps the
+  # order and moves such columns last
+  collinear <- character(0)
+  if (!type %in% c("mle", "pa") && ncol(X)) {
+    q0 <- qr(cbind(1, X), tol = 1e-9)
+    kept <- sort(q0$pivot[seq_len(q0$rank)])
+    drop0 <- setdiff(seq_len(ncol(X) + 1), kept) - 1
+    collinear <- colnames(X)[drop0]
+    if (length(drop0)) X <- X[, -drop0, drop = FALSE]
+  }
   N <- length(y)
   gi <- as.integer(factor(g))
   n <- max(gi)
@@ -66,6 +77,22 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   Xbar <- mean_i(X)
   Xd <- X - Xbar[gi, , drop = FALSE]
   varies <- colSums(Xd^2) > 1e-12 * pmax(colSums(X^2), 1)
+  # within the panels, a variable the earlier ones explain goes too: from fe,
+  # and from the fe fit re takes sigma_e from
+  wkeep <- varies
+  if (sum(varies) > 1) {
+    qw <- qr(Xd[, varies, drop = FALSE], tol = 1e-9)
+    gone <- setdiff(seq_len(sum(varies)), qw$pivot[seq_len(qw$rank)])
+    wkeep[which(varies)[gone]] <- FALSE
+    # which column of such a set Stata leaves out of fe is not known: the last in
+    # some data, another ('collinearity with the absorbed variable') in other
+    if (type == "fe" && length(gone)) stop(paste0("xtreg, fe with ", paste(colnames(Xd)[which(varies)[gone]], collapse = " "), " collinear with the other variables within the panels is not translated yet: which one Stata leaves out is not known"), call. = FALSE)
+  }
+  if (type == "fe") varies <- wkeep
+  if (type != "fe") {
+    stata_nm0 <- function(v) sub("^(factor|stata_ib)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", "\\4.\\2", v)
+    for (v in collinear) cat("note: ", stata_nm0(v), " omitted because of collinearity.\n", sep = "")
+  }
   if (type %in% c("mle", "pa")) {
     r <- stata_xt_other(y, X, gi, type, corr = corr, robust = robust, level = level)
     kb <- ncol(X) + 1
@@ -120,7 +147,7 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
     list(V = bread %*% crossprod(s) %*% bread * G / (G - 1) * (N - 1) / (N - k), G = G)
   }
   # fe, which re needs too for sigma_e
-  Xf <- Xd[, varies, drop = FALSE] + matrix(colMeans(X[, varies, drop = FALSE]), N, sum(varies), byrow = TRUE)
+  Xf <- Xd[, wkeep, drop = FALSE] + matrix(colMeans(X[, wkeep, drop = FALSE]), N, sum(wkeep), byrow = TRUE)
   Zf <- cbind("(Intercept)" = 1, Xf)
   ff <- ls(Zf, y - ybar[gi] + mean(y))
   kf <- ncol(Zf)
@@ -130,14 +157,16 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   Zb <- cbind("(Intercept)" = 1, Xbar)
   if (type != "fe") {
     qb <- qr(Zb)
-    s2b <- sum(qr.resid(qb, ybar)^2) / (n - qb$rank)
+    # no degrees of freedom left between the panels (more columns than panels):
+    # Stata 19 then has sigma_u = 0, and re is least squares on the data
+    s2b <- if (n > qb$rank) sum(qr.resid(qb, ybar)^2) / (n - qb$rank) else NA_real_
   }
   if (type == "be") fb <- ls(Zb, ybar)
   G <- NA
   if (type == "fe") {
     # Stata's name for the column: 1.g for factor(g)1
     stata_nm <- function(v) sub("^(factor|stata_ib)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", "\\4.\\2", v)
-    for (v in colnames(X)[!varies]) cat("note: ", stata_nm(v), " omitted because of collinearity.\n", sep = "")
+    for (v in c(collinear, colnames(X)[!varies])) cat("note: ", stata_nm(v), " omitted because of collinearity.\n", sep = "")
     b <- ff$b
     if (robust) {
       s <- sandwich(Zf, ff$e, ff$bread, kf)
@@ -163,7 +192,7 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
     Xs <- X
   } else {
     Tbar <- n / sum(1 / Ti)
-    s2u <- max(0, s2b - s2e / Tbar)
+    s2u <- if (is.na(s2b)) 0 else max(0, s2b - s2e / Tbar)
     theta <- 1 - sqrt(s2e / (Ti * s2u + s2e))
     th <- theta[gi]
     Zr <- cbind("(Intercept)" = 1 - th, X - th * Xbar[gi, , drop = FALSE])
@@ -188,7 +217,9 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
           between = stats::cor(ybar, drop(mean_i(xb)))^2,
           overall = stats::cor(y, xb)^2)
   k <- length(slope)
-  W <- drop(t(slope) %*% solve(V[-1, -1, drop = FALSE], slope))
+  Vs <- V[-1, -1, drop = FALSE]
+  # fewer clusters than slopes: the variance is not of full rank, and Stata's test is missing
+  W <- if (length(slope) && qr(Vs)$rank == length(slope)) drop(t(slope) %*% solve(Vs, slope)) else if (length(slope)) NA_real_ else 0
   title <- c(fe = "Fixed-effects (within) regression", be = "Between regression (regression on group means)",
              re = "Random-effects GLS regression")[[type]]
   cat(sprintf("%-48sNumber of obs     = %10d\n", title, N))
@@ -217,10 +248,11 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
     out$df_f <- c(n - 1, N - n - (kf - 1))
     out$corr <- corr_u
     # left out because they do not vary within a panel, as Stata keeps them in e(b)
-    out$omitted <- colnames(X)[!varies]
+    out$omitted <- c(collinear, colnames(X)[!varies])
     if (!robust) cat(sprintf("F test that all u_i=0: F(%d, %d) = %.2f    Prob > F = %.4f\n",
                              n - 1, N - n - (kf - 1), F_u, stats::pf(F_u, n - 1, N - n - (kf - 1), lower.tail = FALSE)))
   }
+  if (type != "fe" && length(collinear)) out$omitted <- collinear
   if (type == "re") out$theta <- theta
   # what predict and estat need afterwards: the rows used, each panel's u_i
   # (fe: ybar_i - xbar_i b - _cons; re: the BLUP), and fe's log likelihood

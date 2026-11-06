@@ -110,7 +110,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("while", &["control"]),
     ("xpose", &["made"]),
     ("xtile", &["xtile"]),
-    ("xtreg", &["likelihood", "panel"]),
+    ("xtreg", &["likelihood", "panel", "xtcollinear"]),
     ("xtregar", &["arpanel"]),
     ("xtset", &["likelihood", "panel"]),
 ];

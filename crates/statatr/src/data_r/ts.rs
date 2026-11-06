@@ -534,6 +534,57 @@ pub(super) fn delta_number(text: &str) -> Result<String, Untranslated> {
     }
 }
 
+/// Reads the `xtset`/`tsset` settings Stata keeps in a .dta file (formats
+/// 117 to 119, the characteristics `_dta[_TSpanel]`, `_dta[_TStvar]` and
+/// `_dta[_TSdelta]`, or the older `iis` and `tis`), from Stata's published
+/// description of the format. Panel, time and delta by tabs; "" when none.
+pub(super) const DTA_TS_READER: &str = r#"stata_dta_ts <- function(path) {
+  con <- file(path, "rb")
+  on.exit(close(con))
+  head <- readBin(con, "raw", 4096)
+  if (length(head) < 40 || rawToChar(head[1:11]) != "<stata_dta>") return("")
+  rel <- suppressWarnings(as.integer(rawToChar(head[29:31])))
+  if (is.na(rel) || !rel %in% 117:119) return("")
+  endian <- if (length(grepRaw("<byteorder>LSF", head, fixed = TRUE))) "little" else "big"
+  m <- grepRaw("<map>", head, fixed = TRUE)
+  if (!length(m)) return("")
+  seek(con, m - 1 + 5)
+  w <- readBin(con, "integer", 28, size = 4, endian = endian) %% 2^32
+  lo <- if (endian == "little") seq(1, 28, 2) else seq(2, 28, 2)
+  off <- w[lo] + w[-lo] * 2^32
+  seek(con, off[9])
+  if (rawToChar(readBin(con, "raw", 17)) != "<characteristics>") return("")
+  nm <- if (rel == 117) 33 else 129
+  text <- function(r) {
+    i <- match(as.raw(0), r)
+    rawToChar(if (is.na(i)) r else r[seq_len(i - 1)])
+  }
+  ch <- list()
+  repeat {
+    if (rawToChar(readBin(con, "raw", 4)) != "<ch>") break
+    len <- readBin(con, "integer", 1, size = 4, endian = endian)
+    body <- readBin(con, "raw", len)
+    if (length(body) < 2 * nm) break
+    if (text(body[seq_len(nm)]) == "_dta") ch[[text(body[nm + seq_len(nm)])]] <- text(body[-seq_len(2 * nm)])
+    readBin(con, "raw", 5)
+  }
+  time <- if (!is.null(ch[["_TStvar"]])) ch[["_TStvar"]] else ch[["tis"]]
+  if (is.null(time) || !nzchar(time)) return("")
+  panel <- if (!is.null(ch[["_TSpanel"]])) ch[["_TSpanel"]] else if (!is.null(ch[["iis"]])) ch[["iis"]] else ""
+  # the delta as %21x keeps it: +1.0000000000000X+000
+  delta <- 1
+  x <- ch[["_TSdelta"]]
+  if (!is.null(x) && grepl("^[-+][01][.][0-9a-f]{13}X[-+][0-9a-f]{3}$", x)) {
+    digits <- strtoi(strsplit(substr(x, 4, 16), "")[[1]], 16L)
+    mant <- as.integer(substr(x, 2, 2)) + sum(digits * 16^-(1:13))
+    ex <- strtoi(substr(x, 19, 21), 16L) * (if (substr(x, 18, 18) == "-") -1 else 1)
+    delta <- (if (substr(x, 1, 1) == "-") -1 else 1) * mant * 2^ex
+  } else if (!is.null(x)) {
+    return("")
+  }
+  paste(panel, time, format(delta, digits = 17), sep = intToUtf8(9))
+}"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;

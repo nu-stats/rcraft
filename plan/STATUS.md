@@ -3379,3 +3379,21 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   packages are 28,953 run lines, 92.0% translated (from 64.9%), and 78.6% of 5,187 source lines.
   Probes (425) 196,796 of 210,914 (93.3%), none different.
 - **Next:** outreg2's se, tex(), lab, ctitle(), addtext() (48 lines); which; estimates table's options.
+
+## xtset kept in a .dta, xtreg's collinearity, and results after a fit R stops in, 2026-11-06
+
+- **xtset on use** (`dofile.rs` `restore_ts`, `data_r/ts.rs` `DTA_TS_READER`): when the do-file runs,
+  a .dta it did not write is asked for the `_TSpanel`/`_TStvar`/`_TSdelta` characteristics Stata keeps,
+  and they are set again after `use`, as Stata does. TZEN38's 87 `xtreg` lines had been refused for this.
+- **xtreg** (`data_r/xt.rs`), checked in Stata 19: collinear columns omitted, the later one; re with more
+  columns than panels has sigma_u = 0; fewer clusters than slopes gives a missing Wald test (in every
+  model's e()); fe with a column collinear only within the panels stops in R (Stata's choice not known).
+  A variable named twice in a model is declined (Stata keeps an o. column). `xtcollinear.do`.
+- **After a fit R stops in:** e() and `_b[]` read after it stop, where they showed the model before.
+- **TZEN38 run whole:** 1,567 lines run (from 870), 707 model values the same as Stata's (from 252),
+  none different (`plan/stata/xtset-on-use.md`).
+- **Probes** (428): 197,083 of 211,500 run lines (93.2%). 11 compared lines differ, all in two probes
+  StatCraft added today (510 nbreg with exposure at the alpha boundary; 596 ivprobit twostep in the
+  8th digit); main's code gives the same, so they are not from this change. To fix next.
+- **Next:** probes 510 and 596; outreg2's se, tex(), lab, ctitle(), addtext(), addstat() (48 lines in
+  TZEN38, now reachable when it runs).

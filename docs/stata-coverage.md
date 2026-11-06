@@ -189,9 +189,14 @@ the do-file window does. It writes R's output, the R it ran and each line's fate
 | ASKO93 | 241 | 140 | 140 | 0 | 0 | 101 |
 | FMDLII | 7 | 7 | 7 | 0 | 0 | 0 |
 | TQN6ZN | 231 | 231 | 231 | 0 | 0 | 0 |
-| TZEN38 | 861 | 252 | 252 | 0 | 0 | 609 |
+| TZEN38 (again 2026-11-06) | 861 | 707 | 707 | 0 | 147 | 7 |
 | YFBPT6 | 4553 | 4423 | 4334 | 26 | 0 | 193 |
 | ZNMIXH | 899 | 216 | 117 | 7 | 76 | 699 |
+
+TZEN38 was run again on 2026-11-06, after RCraft learned to read the `xtset` settings a .dta keeps (Stata puts
+them back on `use`) and `xtreg`'s collinear columns (`plan/stata/xtset-on-use.md`): 707 model lines the same
+as Stata's, from 252, none different. The 147 refused in R are 21 `xtreg, fe` fits with a variable collinear
+with the others only within the panels, where which one Stata omits is not known; R stops there with a message.
 
 Every model line both runs reached gives Stata's numbers in four packages. The rest come from what
 neither could run, or what one ran on other data:

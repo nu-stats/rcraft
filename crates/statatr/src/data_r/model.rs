@@ -489,6 +489,18 @@ impl Spec {
         words: impl IntoIterator<Item = &'a str>,
     ) -> Result<Spec, Untranslated> {
         let words: Vec<&str> = words.into_iter().collect();
+        // Stata keeps a variable named twice as a column of its own, omitted
+        // (o.x in e(b)); R's formula has it once
+        if let Some(w) = words
+            .iter()
+            .enumerate()
+            .find(|(i, w)| words.iter().take(*i).any(|v| v == *w))
+            .map(|(_, w)| w)
+        {
+            return Err(no(format!(
+                "{w} named twice in the model is not translated yet (Stata keeps the second as an omitted column)"
+            )));
+        }
         // the factors whose main effects are in the model
         let mut mains: Vec<String> = Vec::new();
         for w in &words {

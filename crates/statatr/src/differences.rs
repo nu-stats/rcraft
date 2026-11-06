@@ -1299,7 +1299,16 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Robust errors",
                 "Clustered on the panel (or the cluster variable), scaled by G / (G - 1) and \
-                 (N - 1) / (N - k), as Stata's.",
+                 (N - 1) / (N - k), as Stata's. With fewer clusters than slopes the variance is \
+                 not of full rank, and the Wald test is missing, as in Stata.",
+            ),
+            p(
+                "Collinearity",
+                "A variable the constant and the ones before it explain is omitted, the later one \
+                 of a collinear set, as Stata omits it; fe also omits one that does not vary \
+                 within the panels. When re has more columns than panels, sigma_u is 0 and re is \
+                 least squares, as in Stata. fe with a variable collinear with the others only \
+                 within the panels stops in R: which one Stata leaves out there is not known yet.",
             ),
             MISSING_IN_MODELS,
             LAYOUT_R,
@@ -1313,7 +1322,9 @@ pub const GUIDES: &[Guide] = &[
             "With a time variable it is tsset: the times are checked, the data sorted by panel \
              and time, and L., F., D. and S. work as under tsset. A time unit (daily, yearly) or \
              format() makes Stata show the time as dates and gives it that format; here it shows \
-             as a number. The lags are the same.",
+             as a number. The lags are the same. A .dta file Stata saved after xtset or tsset \
+             keeps the settings, and Stata sets them again when it reads the file: when the \
+             do-file runs, RCraft reads them from the file too (the delta included).",
         )],
     },
     Guide {

@@ -568,6 +568,38 @@ impl<'f> Run<'f> {
         flow
     }
 
+    /// After `use`: the `xtset` (or `tsset`) settings the file kept, as R read
+    /// them (panel, time and delta by tabs), are set again, as Stata does.
+    fn restore_ts(&mut self, span: Span, text: &str) {
+        let parts: Vec<&str> = text.trim_end_matches(['\r', '\n']).split('\t').collect();
+        let [panel, time, delta] = parts.as_slice() else {
+            return;
+        };
+        let ok = |v: &str| macros::is_name(v);
+        if !ok(time) || !(panel.is_empty() || ok(panel)) {
+            return;
+        }
+        let delta = match delta.trim().parse::<f64>() {
+            Ok(1.0) => String::new(),
+            Ok(d) if d > 0.0 => format!(", delta({d})"),
+            _ => return,
+        };
+        let shown = if panel.is_empty() {
+            format!("tsset {time}{delta}")
+        } else {
+            format!("xtset {panel} {time}{delta}")
+        };
+        let c = self.internal(span, &format!("quietly {shown}"));
+        let mut line = self.t.command(&c);
+        line.stata = shown.clone();
+        self.push(
+            line,
+            What::Command,
+            Some("the settings Stata saved in the file, which it sets again as it reads it".into()),
+            shown,
+        );
+    }
+
     /// After a line Stata stops at with an error: the frames it is in end,
     /// as Stata ends them, up to the file (`do` goes on with its next line,
     /// as with nostop) or up to a `capture` around them, whose `_rc` is then
@@ -1432,6 +1464,30 @@ impl<'f> Run<'f> {
                         Ok(None) | Err(_) => {}
                     }
                 }
+                // use: the xtset or tsset settings Stata saved in the file, which
+                // it puts back as it reads it (only R, when the do-file runs, can look)
+                let mut saved_ts = None;
+                let there = {
+                    let first = macros::tokens(c.parts.main.split(',').next().unwrap_or(""))
+                        .into_iter()
+                        .next()
+                        .unwrap_or_default();
+                    let mut file = clean_path(&first);
+                    if !has_extension(&file) {
+                        file = format!("{file}.dta");
+                    }
+                    let path = join(&self.cwd, &file);
+                    !first.is_empty()
+                        && self.files.exists(&path)
+                        && !self.written.contains(&path.to_ascii_lowercase())
+                };
+                if let Some(code) = self.t.saved_ts_question(&c).filter(|_| there) {
+                    match self.ask(Need::R(code, "the xtset settings saved in the file".into())) {
+                        Err(Stop::Ask(need)) => return Flow::Ask(need),
+                        Ok(text) => saved_ts = Some(text),
+                        Err(_) => {}
+                    }
+                }
                 let c = &c;
                 self.done_item(depth);
                 if c.name == "clear" && matches!(rest.trim(), "all" | "*") {
@@ -1494,7 +1550,11 @@ impl<'f> Run<'f> {
                     let dir = clean_path(&c.parts.main);
                     self.cwd = join(&self.cwd, &dir);
                 }
+                let used = line.result.is_ok();
                 self.push(line, What::Command, info, written);
+                if let (true, Some(text)) = (used, saved_ts) {
+                    self.restore_ts(c.span, &text);
+                }
                 Flow::Line
             }
         }

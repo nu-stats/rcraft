@@ -17,6 +17,7 @@ use crate::reader::Command;
 
 /// Reading `stata_e`, `stata_r`, `_b[]` and `_se[]` in R, and the lists.
 pub(super) const RETURNED_HELPER: &str = r##"stata_eget <- function(name, text = FALSE) {
+  if (isTRUE(get0("stata_fit_failed"))) stop("e() is not known here: R stopped in the model before it", call. = FALSE)
   v <- if (exists("stata_e")) stata_e[[name]] else NULL
   if (is.null(v) || is.matrix(v)) return(if (text) "" else NA_real_)
   v
@@ -27,6 +28,7 @@ stata_rget <- function(name, text = FALSE) {
   v
 }
 stata_bget <- function(key, se = FALSE) {
+  if (isTRUE(get0("stata_fit_failed"))) stop("_b[] is not known here: R stopped in the model before it", call. = FALSE)
   st <- stata_bnames()
   nm <- names(stata_b)
   eq <- ""
@@ -398,7 +400,10 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     Vk <- as.matrix(V[keep, keep, drop = FALSE])
     s <- sqrt(diag(Vk))
     z <- bk / s
-    drop(t(z) %*% solve(Vk / outer(s, s), z))
+    # a variance of less than full rank (fewer clusters than slopes): Stata's test is missing
+    C <- Vk / outer(s, s)
+    if (any(!is.finite(C)) || qr(C)$rank < length(z)) return(NA_real_)
+    drop(t(z) %*% solve(C, z))
   }
   # a term omitted for collinearity is no slope: Stata counts only the estimated ones
   slopes <- !grepl("(Intercept)", names(b), fixed = TRUE) & !startsWith(names(b), "/") & !is.na(b)

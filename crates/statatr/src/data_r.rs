@@ -228,6 +228,26 @@ impl Translator {
         self.s.rc_lost = Some(why);
     }
 
+    /// For `use file`: the R that prints the `xtset` or `tsset` settings Stata
+    /// saved in the .dta (panel, time and delta, by tabs; nothing when none),
+    /// when this do-file did not save the file itself. Stata puts them back
+    /// when it reads the file.
+    pub fn saved_ts_question(&self, c: &Command) -> Option<String> {
+        // `use varlist using f` may leave the panel or time out
+        if c.name != "use" || c.using.is_some() || c.parts.main.trim().is_empty() {
+            return None;
+        }
+        let path = file_name(&c.parts.main, "dta");
+        if self.s.saved.contains_key(&self.s.file_key(&path)) {
+            return None;
+        }
+        Some(format!(
+            "cat(local({{\n{}\nstata_dta_ts({})\n}}))",
+            ts::DTA_TS_READER,
+            r_text(&path)
+        ))
+    }
+
     /// `input`, with the data lines that follow it up to `end`.
     pub fn input(&mut self, c: &Command, lines: &[String]) -> Line {
         self.s.input_lines = Some(lines.to_vec());
@@ -1835,6 +1855,20 @@ impl Session {
         if MODELS.contains(&c.name.as_str()) {
             self.weighted_fit = c.parts.weight.is_some();
             self.fit_fweight = matches!(&c.parts.weight, Some(w) if w.kind == crate::lang::syntax::WeightKind::Frequency);
+        }
+        // a new fit: the last one's results go first, so that if R stops in this
+        // one (a model RCraft declines when it sees the data), what reads e() or
+        // _b[] afterwards stops too, not shows the model before
+        if MODELS.contains(&c.name.as_str())
+            && !c.parts.main.trim().is_empty()
+            && !out.code.is_empty()
+        {
+            out.code.insert(
+                0,
+                "rm(list = intersect(c(\"stata_e\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_estimates\"), ls()))\nstata_fit_failed <- TRUE"
+                    .to_string(),
+            );
+            out.code.push("stata_fit_failed <- FALSE".to_string());
         }
         // quietly (or capture): what the line prints is not shown
         if silent(c) && !self.quiet_asked.get() && !out.code.is_empty() {
@@ -3553,6 +3587,18 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn a_variable_named_twice_in_a_model_is_declined() {
+        let out = r("use auto\nregress price mpg mpg weight");
+        assert!(out[1].contains("NOT: mpg named twice"), "{out:?}");
+        // a new fit takes the last one's results away first
+        let out = r("use auto\nregress price mpg");
+        assert!(out[1].starts_with("rm(list = intersect("), "{out:?}");
+        assert!(
+            out[1].trim_end().ends_with("stata_fit_failed <- FALSE"),
+            "{out:?}"
+        );
+    }
     #[test]
     fn files_make_and_keep_the_data_frame() {
         let out = r("use \"study hours.dta\", clear\nsave results, replace\nsave results");
