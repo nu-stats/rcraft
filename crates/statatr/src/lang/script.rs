@@ -33,9 +33,10 @@ pub fn read(source: &str) -> Vec<Line> {
     // the text after the final newline is a line too (Stata echoes it)
     for line in raw {
         let line = line.strip_suffix('\r').unwrap_or(line);
-        // Stata reads `\\` as `\`, except just before a `"` (probe 139)
-        let reduced = reduce_backslashes(line, true);
-        let line = reduced.as_str();
+        // Stata 19 keeps the backslashes as written (probe 139: `"a\\b"` shows
+        // a\\b and length("\\") is 2; checked again on 2026-11-06 with
+        // `"x \\ \hline"`, 11 characters); only version 8.2 and before halve
+        // a run, which `reduce_backslashes` does where that is asked for
         // `#delimit ;` and `#delimit cr`: commands end at `;` or at the
         // end of the line
         let trimmed = line.trim_start();

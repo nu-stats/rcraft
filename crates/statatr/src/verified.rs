@@ -70,7 +70,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("newey", &["arpanel"]),
     ("ologit", &["collinear", "likelihood"]),
     ("oprobit", &["collinear", "likelihood"]),
-    ("outreg2", &["outreg2"]),
+    ("outreg2", &["outreg2", "outreg2tex"]),
     ("parmest", &["clogit_margins"]),
     ("poisson", &["collinear", "likelihood"]),
     ("post", &["postfile"]),

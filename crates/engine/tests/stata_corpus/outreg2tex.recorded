@@ -1,0 +1,5 @@
+* Stata 19.0's results for outreg2tex.do, recorded by cargo xtask stata-record
+@ txt1 18 1 1 1 1 1 1 1
+@ tex1 20 1 1 1 1 1
+@ tex2 22 1 1 1 1
+@ tex3 18 0 1 1 1

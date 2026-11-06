@@ -33,8 +33,38 @@ data. Only the files it wrote were read, never its code. RCraft's files were com
 ## Not matched yet
 
 - Its own number format without bdec() and tdec() (`0.000887`, `(7.83e-05)`, `-1,011`, `(994.5)`).
-- `se` with `tex(fragment)`, `lab`, `ctitle()`, `addtext()`, `addstat()`.
+- `se` with `tex(fragment)`, `lab`, `ctitle()`, `addtext()`, `addstat()`: done on 2026-11-06, below.
 
 ## import delimited
 
 - Stata skips an empty line but keeps one of delimiters alone as a row of missing values (blank strings).
+
+## se, tex(fragment), label, ctitle(), addtext(), addstat() (2026-11-06)
+
+As TZEN38 runs it after `xtreg` (`outreg2 using f.tex, bdec(3) tdec(3) se tex(fragment) lab ctitle(..)
+keep(..) addtext(..) [addstat(R-squared, e(r2_o))]`). Observed in Stata 19 with made-up data, 26 files
+matched byte for byte (`outreg2tex.do` keeps the checks):
+
+- `se`: the standard error in parentheses with 3 decimals whatever `tdec()` says; the footer is
+  "Robust standard errors in parentheses" when the first column's `e(vcetype)` is Robust, else
+  "Standard errors in parentheses"; a column added keeps the table's footer.
+- `tex(fragment)`: f.tex beside f.txt: `\begin{tabular}{l` and a `c` per column `} \hline`, the rows
+  joined by ` & ` and ended by ` \`, the VARIABLES row and the last statistic ending ` \ \hline`, the
+  last statistic with a space in front, then `\multicolumn{k+1}{c}{ footer} \`, the stars line with
+  `$<$`, `\end{tabular}`. In a row's first cell `_`, `%` and `#` are escaped, nothing else; addtext()
+  values stay as written.
+- `label`: a LABELS column after the names in f.txt (the variable's label, its name when it has none,
+  nothing for an interaction, Constant), and the label in place of the name in the .tex; without
+  ctitle() the column's heading is the dependent variable's label. A column without label added to a
+  table with LABELS keeps the column.
+- `ctitle(text)` is the column's heading. `addtext(name, text, ...)` rows as written; `addstat(name,
+  exp, ...)` rows with 3 significant digits (12346, 0.0123, -0.500).
+- The statistics rows: a column alone has its model's order (Observations, R-squared, Adjusted
+  R-squared; xtreg fe: Observations, Number of id, R-squared; xtreg re: Observations, Number of id),
+  then e(), addtext() and addstat() rows. A column added to a table: Observations and the R-squareds
+  first, the Number of rows, the e() rows sorted by name, then the other rows as they were in the
+  table, then this column's. An addstat() named R-squared is a row of its own where a model gives none.
+- `keep(c.a##c.b)` is a, b and c.a#c.b; factor variables are taken when keep() leaves them out.
+
+Found on the way: Stata 19 keeps backslashes on a do-file line as written (probe 139 again: only
+version 8.2 and before halve a run); RCraft's reader halved `\` (StatCraft's front end does too).

@@ -3414,3 +3414,18 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Numbers:** probes (428) none different; 4,336 of 4,348 compared lines to 8 digits (from 4,328),
   12 to 6. Packages 78.6% of source lines.
 - **Next:** outreg2's se, tex(), lab, ctitle(), addtext(), addstat() (TZEN38, now reachable when it runs).
+
+## outreg2: se, tex(fragment), label, ctitle(), addtext(), addstat(); backslashes as written, 2026-11-06
+
+- **outreg2** (`data_r/outreg2.rs`, `plan/stata/outreg2.md`): `se`, `.tex` with `tex(fragment)`, `label`,
+  `ctitle()`, `addtext()`, `addstat()`, factor-variable models when keep() leaves them out, `a##b` in
+  keep(), xtreg's Number of panels and fe's within R-squared; the statistics rows in Stata's order (one
+  column, and columns added). 26 files byte for byte against Stata 19; `outreg2tex.do`.
+- **TZEN38 run whole:** 27 of its 48 outreg2 lines run (20 follow fe fits R declines); each column it
+  writes is the published table's, cell for cell.
+- **Backslashes** (`lang/script.rs`): the reader no longer halves `\` on a line; Stata 19 keeps them
+  (probe 139's own log; strlen checks). Probe 139: 17/17. A note for StatCraft is in the shared notes.
+- **Numbers:** probes (429) none different; 4,338 of 4,350 compared lines to 8 digits, 12 to 6.
+  Packages 78.6% of source lines (TZEN38's outreg2 lines run only when the package runs).
+- **Next:** xtreg fe with a column collinear only within the panels (which one Stata omits); then the
+  next gaps by impact.
