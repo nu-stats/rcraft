@@ -180,8 +180,12 @@ stata_collinear_rhs <- function(formula, data) {
          paste(om, collapse = ", "), call. = FALSE)
   }
   keep <- labs[!labs %in% om]
-  list(rhs = if (length(keep)) paste(keep, collapse = " + ") else "1", omitted = om,
-       written = stata_collinear_written(labs))
+  rhs <- if (length(keep)) paste(keep, collapse = " + ") else "1"
+  # the offset (exposure()/offset()) and noconstant are not terms: kept as they were
+  vars <- attr(tt, "variables")
+  for (i in attr(tt, "offset")) rhs <- paste(rhs, "+", paste(deparse(vars[[i + 1]], width.cutoff = 500L), collapse = ""))
+  if (attr(tt, "intercept") == 0) rhs <- paste(rhs, "- 1")
+  list(rhs = rhs, omitted = om, written = stata_collinear_written(labs))
 }
 # which columns Stata omits (the constant aside)
 stata_collinear_cols <- function(X, w, sweep) {

@@ -1859,10 +1859,7 @@ impl Session {
         // a new fit: the last one's results go first, so that if R stops in this
         // one (a model RCraft declines when it sees the data), what reads e() or
         // _b[] afterwards stops too, not shows the model before
-        if MODELS.contains(&c.name.as_str())
-            && !c.parts.main.trim().is_empty()
-            && !out.code.is_empty()
-        {
+        if MODELS.contains(&c.name.as_str()) && self.e_new && !out.code.is_empty() {
             out.code.insert(
                 0,
                 "rm(list = intersect(c(\"stata_e\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_estimates\"), ls()))\nstata_fit_failed <- TRUE"

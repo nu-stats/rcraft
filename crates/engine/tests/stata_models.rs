@@ -799,8 +799,10 @@ fn what_is_not_translated_after_a_model_says_why() {
         refusal("use \"d.dta\"\nnbreg y x, vce(bootstrap)\n").contains("bootstrap"),
         "a vce that is not translated is named"
     );
+    // exposure and offset together: Stata's error, r(198), when the line runs (probe 510)
     assert!(
-        refusal("use \"d.dta\"\npoisson y x, exposure(t) offset(o)\n").contains("not both"),
+        script("use \"d.dta\"\npoisson y x, exposure(t) offset(o)\n")
+            .contains("only one of offset() or exposure() can be specified (Stata: r(198))"),
         "exposure and offset together"
     );
     assert!(

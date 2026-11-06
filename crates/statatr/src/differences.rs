@@ -728,6 +728,13 @@ pub const GUIDES: &[Guide] = &[
                  is nearly another plus a constant stays in and the fit fails; polr() and \
                  multinom() do not leave a column out at all.",
             ),
+            p(
+                "Where probit stops",
+                "Stata reports where its own Newton-Raphson stops, which can be short of the \
+                 maximum by a few parts in 1e8. probit follows that path (from the constant-only \
+                 fit, with Stata's steps and stopping rule) when the model has a constant and no \
+                 offset, so its estimates are Stata's to the last digits there.",
+            ),
             ML_SE,
             ML_ROBUST,
             ML_DIGITS,
@@ -902,7 +909,18 @@ pub const GUIDES: &[Guide] = &[
     Guide {
         command: "poisson",
         about: "Poisson regression",
-        points: &[ML_SE, ML_ROBUST, ML_DIGITS, MISSING_IN_MODELS],
+        points: &[
+            p(
+                "exposure() and offset()",
+                "ln(exposure) or the offset enters with coefficient 1, kept in e(offset) as Stata \
+                 keeps it (as for nbreg); Stata's errors stop it as in Stata: an exposure not \
+                 above 0, both options, a variable not there, two variables, a string.",
+            ),
+            ML_SE,
+            ML_ROBUST,
+            ML_DIGITS,
+            MISSING_IN_MODELS,
+        ],
     },
     Guide {
         command: "predict",

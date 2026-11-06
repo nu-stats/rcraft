@@ -163,7 +163,98 @@ pub(super) const PROBIT_NEWTON_HELPER: &str = r#"stata_probit_newton <- function
   # the terms stata_collinear fitted it without
   out$omitted <- fit$omitted
   out$stata_written <- fit$stata_written
+  # Stata reports where its own Newton-Raphson stops, which can be short of
+  # the maximum (probe 596): its path from the constant-only fit is followed
+  # when the model has a constant and no offset (the start known there)
+  cons <- colnames(X) == "(Intercept)"
+  if (sum(cons) == 1 && all(off == 0)) {
+    pos <- y != 0
+    pbar <- sum(pw * pos) / sum(pw)
+    b0 <- rep(0, ncol(X))
+    b0[cons] <- stats::qnorm(pbar)
+    ll <- function(b) {
+      z <- drop(X %*% b)
+      sum(pw * ifelse(pos, stats::pnorm(z, log.p = TRUE), stats::pnorm(z, lower.tail = FALSE, log.p = TRUE)))
+    }
+    deriv <- function(b) {
+      z <- drop(X %*% b)
+      lam <- ifelse(pos, exp(stats::dnorm(z, log = TRUE) - stats::pnorm(z, log.p = TRUE)),
+                    -exp(stats::dnorm(z, log = TRUE) - stats::pnorm(z, lower.tail = FALSE, log.p = TRUE)))
+      list(ll = ll(b), g = colSums(X * (pw * lam)), nh = crossprod(X * (pw * lam * (lam + z)), X))
+    }
+    path <- stata_ml_path(ll, deriv, b0)
+    if (path$converged) {
+      bs <- path$b
+      out$coefficients[est] <- bs
+      eta <- drop(X %*% bs)
+      out$linear.predictors <- eta
+      out$fitted.values <- stats::pnorm(eta)
+      lv <- ll(bs)
+      out$deviance <- -2 * lv
+      out$aic <- -2 * lv + 2 * out$rank
+    }
+  }
   out
+}
+# Stata's Newton-Raphson (StatCraft's decoding, plan/stata/logit.md, probes
+# 061-063): the full step, halved while it lowers the likelihood, else
+# stepped forward by 1/8, 1/4, ... while it rises; where -H is not positive
+# definite, -H + lambda I; stops when g'(-H)^-1 g <= 1e-5 and the likelihood
+# moved by at most 1e-7 or the coefficients by at most 1e-6 (relative)
+stata_ml_path <- function(ll, deriv, b, max_iter = 300) {
+  concave_inv <- function(a) {
+    ok <- tryCatch({ chol(a); TRUE }, error = function(e) FALSE)
+    if (ok) return(list(inv = solve(a), nc = FALSE))
+    lambda <- 1e-4 * max(1, max(abs(diag(a))))
+    for (i in 1:80) {
+      m <- a + diag(lambda, nrow(a))
+      if (!inherits(try(chol(m), silent = TRUE), "try-error")) return(list(inv = solve(m), nc = TRUE))
+      lambda <- 2 * lambda
+    }
+    stop("the likelihood is not concave and RCraft could not step as Stata does", call. = FALSE)
+  }
+  reldif <- function(a, b) abs(a - b) / (abs(b) + 1)
+  d <- deriv(b)
+  ci <- concave_inv(d$nh)
+  prev <- NULL
+  converged <- FALSE
+  iter <- 0
+  repeat {
+    iter <- iter + 1
+    step <- drop(ci$inv %*% d$g)
+    if (!is.null(prev) && !ci$nc) {
+      nr <- sum(d$g * step)
+      if (abs(nr) <= 1e-5 && (reldif(d$ll, prev$ll) <= 1e-7 || max(reldif(b, prev$b)) <= 1e-6)) {
+        converged <- TRUE
+        break
+      }
+    }
+    if (iter > max_iter) break
+    t <- 1
+    nxt <- ll(b + t * step)
+    halved <- FALSE
+    while ((is.nan(nxt) || nxt < d$ll) && t > 1e-15) {
+      halved <- TRUE
+      t <- t / 2
+      nxt <- ll(b + t * step)
+    }
+    if (!halved) {
+      ex <- 0.125
+      repeat {
+        fu <- ll(b + (t + ex) * step)
+        if (!is.nan(fu) && fu > nxt) {
+          t <- t + ex
+          nxt <- fu
+          ex <- 2 * ex
+        } else break
+      }
+    }
+    prev <- list(b = b, ll = d$ll)
+    b <- b + t * step
+    d <- deriv(b)
+    ci <- concave_inv(d$nh)
+  }
+  list(b = b, converged = converged)
 }"#;
 
 /// mlogit's coefficients as one named vector, in the order of `vcov()`.
@@ -283,25 +374,41 @@ impl Session {
         let level = level(opts)?;
         let (robust, cluster) = vce(opts)?;
         let mut right = spec.right(opts.has("noconstant", 5))?;
+        // exposure() and offset(): Stata's errors as Stata gives them (probe 510);
+        // the checks on the data run once the rows are known, below
+        let stop = |out: &mut Out, msg: &str| {
+            out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
+        };
+        let mut offset_var: Option<(String, bool)> = None;
         match (opts.arg("exposure", 3), opts.arg("offset", 6)) {
             (Some(_), Some(_)) => {
-                return Err(no(format!(
-                    "{name}: Stata takes exposure() or offset(), not both"
-                )))
+                stop(
+                    out,
+                    "only one of offset() or exposure() can be specified (Stata: r(198))",
+                );
+                return Ok(());
             }
-            (Some(e), None) => {
-                let e = e.trim();
+            (Some(v), None) | (None, Some(v)) => {
+                let exposure = opts.arg("exposure", 3).is_some();
+                let opt = if exposure { "exposure" } else { "offset" };
+                let words: Vec<&str> = v.split_whitespace().collect();
+                if words.len() > 1 {
+                    stop(
+                        out,
+                        &format!("{opt}():  too many variables specified (Stata: r(103))"),
+                    );
+                    return Ok(());
+                }
+                let e = v.trim();
                 if !is_name(e) {
-                    return Err(no(format!("exposure({e}) needs one variable name")));
+                    return Err(no(format!("{opt}({e}) needs one variable name")));
                 }
-                right.push_str(&format!(" + offset(log({}))", r_name(e)));
-            }
-            (None, Some(o)) => {
-                let o = o.trim();
-                if !is_name(o) {
-                    return Err(no(format!("offset({o}) needs one variable name")));
+                if exposure {
+                    right.push_str(&format!(" + offset(log({}))", r_name(e)));
+                } else {
+                    right.push_str(&format!(" + offset({})", r_name(e)));
                 }
-                right.push_str(&format!(" + offset({})", r_name(o)));
+                offset_var = Some((e.to_string(), exposure));
             }
             (None, None) => {}
         }
@@ -324,6 +431,21 @@ impl Session {
         let robust = robust || matches!(w, Some((W::P, _)));
         let rows = self.rows_for(c, out)?;
         let src = self.weighted_rows(rows, &w);
+        if let Some((v, exposure)) = &offset_var {
+            let opt = if *exposure { "exposure" } else { "offset" };
+            let positive = if *exposure {
+                format!(
+                    "\n  ok <- stats::complete.cases(d[intersect(all.vars(stats::as.formula({})), names(d))])\n  if (any(x[ok] <= 0, na.rm = TRUE)) stop(\"exposure() must be greater than zero (Stata: r(459))\", call. = FALSE)",
+                    r_text(&format!("{} ~ {right}", spec.dep))
+                )
+            } else {
+                String::new()
+            };
+            out.line(format!(
+                "local({{\n  d <- {src}\n  x <- d[[{q}]]\n  if (is.null(x)) stop(\"variable {v} not found\\n(error in option {opt}()) (Stata: r(111))\", call. = FALSE)\n  if (is.character(x)) stop(\"string variables not allowed in option {opt}();\\n{v} is a string variable (Stata: r(109))\", call. = FALSE){positive}\n}})",
+                q = r_text(v)
+            ));
+        }
         let weights = match &w {
             Some((_, v)) => format!(", weights = {}", r_name(v)),
             None => String::new(),
@@ -564,7 +686,16 @@ impl Session {
         } else {
             "oim"
         };
-        let args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &w);
+        let mut args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &w);
+        // e(offset): ln(t) for exposure(t), the variable for offset()
+        if let Some((v, exposure)) = &offset_var {
+            let shown = if *exposure {
+                format!("ln({v})")
+            } else {
+                v.clone()
+            };
+            args.push_str(&format!(", extra = list(offset = {})", r_text(&shown)));
+        }
         self.keep_e(c, out, &args, "");
         if self.quiet(c) {
             return Ok(());

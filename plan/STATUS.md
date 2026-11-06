@@ -3397,3 +3397,20 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   8th digit); main's code gives the same, so they are not from this change. To fix next.
 - **Next:** probes 510 and 596; outreg2's se, tex(), lab, ctitle(), addtext(), addstat() (48 lines in
   TZEN38, now reachable when it runs).
+
+## Probes 510 and 596: exposure and offset kept in refits, probit on Stata's path, 2026-11-06
+
+- **Offsets kept** (`data_r/model.rs` `stata_collinear_rhs`): the models fitted again without their
+  collinear terms (nbreg, ologit, oprobit, ...) lost `exposure()`/`offset()` and `noconstant`, which
+  are not terms of the formula; nbreg with exposure gave a likelihood below Poisson's.
+- **exposure() and offset()** (`data_r/ml.rs`, probe 510): Stata's errors and codes (exposure not
+  above 0 r(459), both r(198), a variable not there r(111), two r(103), a string r(109)); e(offset)
+  (`ln(t)`, or the variable) in Stata's place. A line that only gives Stata's error keeps the results
+  before it (the reset of e() is for a line that keeps new ones).
+- **probit on Stata's path** (`stata_ml_path`, StatCraft's decoding of Stata's maximize): Newton-Raphson
+  from the constant-only fit with Stata's steps and stopping rule; Stata reports that iterate, which can
+  be short of the maximum (probe 596 builds ivprobit's two-step from probit fits and showed it). Used
+  with a constant and no offset; otherwise the maximum as before.
+- **Numbers:** probes (428) none different; 4,336 of 4,348 compared lines to 8 digits (from 4,328),
+  12 to 6. Packages 78.6% of source lines.
+- **Next:** outreg2's se, tex(), lab, ctitle(), addtext(), addstat() (TZEN38, now reachable when it runs).
