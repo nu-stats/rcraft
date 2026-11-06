@@ -121,6 +121,7 @@ at the worst it fared in any run:
 | With strmatch and the trims (2026-11-04) | 5149 | 3184 | 1180 | 785 | 73.0% |
 | With split and file (2026-11-04) | 5149 | 3189 | 1175 | 785 | 73.1% |
 | With xtregar, prais, newey, input (2026-11-05) | 5149 | 3187 | 1177 | 785 | 73.0% |
+| With date formats and confirm (2026-11-05) | 5149 | 3189 | 1175 | 785 | 73.1% |
 
 Stata's matrix commands (`matrices.do`: `matrix A = ...` with `J()`, `I()`, joins, products, sums,
 transposes, `invsym()`, `inv()`, `vecdiag()`, `diag()`, `e()`; elements read and put in place; `nullmat()`;
@@ -141,7 +142,9 @@ On 2026-11-05 `xtregar`, `prais`, `newey` and `input` came over from StatCraft's
 with `L.x` or `x[_n-1]` and random draws; a float kept a float). Those lines built the data of 45 xtregar
 probes: the probes went from 77.4% of their run lines translated to 89.6% (188,260 of 210,197), and none of
 the 4,310 compared lines differs from Stata (4,299 to 8 digits, 11 to 6). The packages hold at 73.0%: they
-use none of these commands.
+use none of these commands. Then `sign()`, a one-line `else` after an `if` block, Stata's date and time display
+formats (probe 033, every line Stata's byte for byte) and `confirm` took the probes to 92.9% (194,948 of
+209,914), still with no compared line different (4,309 of 4,320 to 8 digits, 11 to 6); the packages to 73.1%.
 
 Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `esttab`'s `cells()` and `mlabels()`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:

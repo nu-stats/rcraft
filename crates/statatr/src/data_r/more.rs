@@ -2061,3 +2061,134 @@ impl Session {
         Ok(())
     }
 }
+
+impl Session {
+    /// `confirm`: `[numeric|string] variable`, `new variable`, `[integer]
+    /// number`, `file` and `new file`, each stopping with Stata's message and
+    /// return code when it fails (StatCraft's notes on Stata 19, probe 120),
+    /// so `capture confirm ...` leaves Stata's `_rc`.
+    pub(super) fn confirm(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let text = super::returned::after_name(c);
+        let words: Vec<String> = input_values(text.trim());
+        let w: Vec<&str> = words.iter().map(String::as_str).collect();
+        let stop = |msg: String, rc: u32| {
+            format!(
+                "stop({}, call. = FALSE)",
+                r_text(&format!("{msg} (Stata: r({rc}))"))
+            )
+        };
+        let is_var = |s: &str| s.len() >= 3 && "variable".starts_with(s);
+        // [numeric|string] variable varlist
+        let typed = matches!(w.first().copied(), Some("numeric" | "string"));
+        let var_at = usize::from(typed);
+        if w.get(var_at).is_some_and(|s| is_var(s)) {
+            let kind = if typed { w.first().copied() } else { None };
+            let names = w.get(var_at + 1..).unwrap_or(&[]);
+            {
+                if names.is_empty() {
+                    return Err(no("confirm variable needs the variables (Stata: r(100))"));
+                }
+                if names.iter().any(|n| !is_name(n)) {
+                    return Err(no(
+                        "confirm variable with patterns or ranges is not translated yet",
+                    ));
+                }
+                let d = self.data()?;
+                let list = names
+                    .iter()
+                    .map(|n| r_text(n))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let kind_r = match kind {
+                    Some(k) => r_text(k),
+                    None => "NULL".into(),
+                };
+                self.helpers.insert("stata_confirm");
+                out.line(format!("stata_confirm_vars({d}, c({list}), {kind_r})"));
+                return Ok(());
+            }
+        }
+        match w.as_slice() {
+            ["new", v, names @ ..] if is_var(v) => {
+                if names.is_empty() {
+                    return Err(no("confirm new variable needs the names (Stata: r(100))"));
+                }
+                for n in names {
+                    if !is_name(n) || n.len() > 32 {
+                        out.line(stop(format!("{n} invalid name"), 198));
+                        return Ok(());
+                    }
+                }
+                let d = self.data()?;
+                let list = names.iter().map(|n| r_text(n)).collect::<Vec<_>>().join(", ");
+                self.helpers.insert("stata_confirm");
+                out.line(format!("stata_confirm_new({d}, c({list}))"));
+                Ok(())
+            }
+            [rest @ .., "number", s] if rest.is_empty() || rest == ["integer"] => {
+                let integer = rest == ["integer"];
+                // the text is written out (macros replaced): decided here, stopped in R
+                let x = s.trim_matches('"').parse::<f64>().ok().filter(|v| v.is_finite());
+                match x {
+                    None => out.line(stop(format!("'{s}' found where number expected"), 7)),
+                    Some(v) if integer && v.fract() != 0.0 => {
+                        out.line(stop(format!("'{s}' found where integer expected"), 7))
+                    }
+                    Some(_) => out.line("invisible(NULL)"),
+                }
+                Ok(())
+            }
+            ["file", f] | ["new", "file", f] if self.files_unknown.is_some() => Err(no(format!(
+                "confirm file: which files are there is not known here: a line before it that may write one was not translated ({})",
+                self.files_unknown.clone().unwrap_or_default()
+            ))),
+            ["file", f] => {
+                let f = &unquote_compound(f);
+                let path = super::file_name(f, "");
+                out.line(format!(
+                    "if (!file.exists({})) {}",
+                    r_text(path.trim_end_matches('/')),
+                    stop(format!("file {} not found", f.trim_matches('"')), 601)
+                ));
+                Ok(())
+            }
+            ["new", "file", f] => {
+                let f = &unquote_compound(f);
+                let path = super::file_name(f, "");
+                out.line(format!(
+                    "if (file.exists({})) {}",
+                    r_text(&path),
+                    stop(format!("file {} already exists", f.trim_matches('"')), 602)
+                ));
+                Ok(())
+            }
+            _ => Err(no(format!("confirm {} is not translated yet", w.first().unwrap_or(&"")))),
+        }
+    }
+}
+
+/// `confirm`'s R.
+pub(super) const CONFIRM_HELPER: &str = r##"stata_confirm_vars <- function(d, vars, kind = NULL) {
+  have <- if (is.null(d)) character(0) else names(d)
+  for (v in vars) {
+    # an abbreviation names the one variable it starts
+    hit <- if (v %in% have) v else { m <- have[startsWith(have, v)]; if (length(m) == 1) m else NA }
+    if (is.na(hit)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+    x <- d[[hit]]
+    if (identical(kind, "numeric") && !is.numeric(x)) stop("'", v, "' found where numeric variable expected (Stata: r(7))", call. = FALSE)
+    if (identical(kind, "string") && !is.character(x)) stop("'", v, "' found where string variable expected (Stata: r(7))", call. = FALSE)
+  }
+  invisible(NULL)
+}
+stata_confirm_new <- function(d, vars) {
+  have <- if (is.null(d)) character(0) else names(d)
+  for (v in vars) if (v %in% have) stop("variable ", v, " already defined (Stata: r(110))", call. = FALSE)
+  invisible(NULL)
+}"##;
+
+/// A file name in compound quotes (`` `"a b.txt"' ``) without them.
+fn unquote_compound(s: &str) -> String {
+    s.strip_prefix("`\"")
+        .and_then(|r| r.strip_suffix("\"'"))
+        .map_or_else(|| s.to_string(), str::to_string)
+}

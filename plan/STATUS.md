@@ -3332,3 +3332,16 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Then:** `sign()`; a one-line `else command` after an `if { }` block inside a loop (the command was
   read again with its `else`), and `} else command` on one line. Probe 346 went from 498 lines translated
   to all 5,178.
+
+## Date display formats, confirm, and file names in compound quotes, 2026-11-05
+
+- **Date and time display formats** (`stata_tfmt` in `data_r/returned.rs`, from StatCraft's decoding):
+  every `%t` unit but `%tC`, every code, Stata's widths and padding; probe 033 went from 311 lines
+  translated to 2,066, all matching Stata byte for byte (123 cases in `stata_returned.rs`).
+- **confirm** (`data_r/more.rs`): variable, numeric/string variable, new variable, [integer] number,
+  file and new file with Stata's messages and return codes (`strings.do`).
+- **Compound quotes around a file name** are taken off (they were kept, so `save `"`f'"'` wrote the
+  wrong file). `plan/stata/date-formats-confirm.md`.
+- **Numbers:** probes (421) 194,948 of 209,914 run lines translated (92.9%, from 89.6%; `sign()`, the
+  one-line else, the date formats and confirm); none of the 4,320 compared lines differs, 4,309 to 8
+  digits and 11 to 6. Packages 73.1% of source lines.

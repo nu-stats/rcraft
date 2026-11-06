@@ -748,6 +748,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_char" => CHAR_HELPER,
         "stata_insheet" => more::INSHEET_HELPER,
         "stata_split" => more::SPLIT_HELPER,
+        "stata_confirm" => more::CONFIRM_HELPER,
         "stata_file" => files::FILE_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
@@ -873,6 +874,9 @@ struct Session {
     /// The storage types of the numeric variables `generate` made, so a
     /// `replace` stores as Stata does (a float stays a float).
     storage: BTreeMap<String, Storage>,
+    /// A line not translated may have written files (save, export, using ...):
+    /// which files are there is not known after it.
+    files_unknown: Option<String>,
     /// The data lines of the `input` being translated.
     input_lines: Option<Vec<String>>,
     /// The programs being run, innermost last: name, class, and the r()
@@ -1078,11 +1082,10 @@ impl Session {
 }
 
 fn file_name(written: &str, ext: &str) -> String {
+    // quotes, and compound quotes (`"a b.dta"') around it
     let f = written
         .trim()
-        .trim_matches('"')
-        .trim_matches('`')
-        .trim_matches('\'');
+        .trim_matches(|c: char| c == '"' || c == '`' || c == '\'');
     // R takes / as the folder separator everywhere; Stata on Windows takes \ too
     let f = f.trim().replace('\\', "/");
     let has_ext = std::path::Path::new(&f)
@@ -1353,6 +1356,45 @@ impl Session {
                 stata.trim().to_string()
             };
             self.lost_mats.insert(m, why);
+        }
+        // a line that may write a file: which files are there is not known
+        {
+            let word = crate::dofile::command_name(stata.trim());
+            let low = stata.to_lowercase();
+            let writes = matches!(
+                word.as_str(),
+                "save"
+                    | "sa"
+                    | "sav"
+                    | "saveold"
+                    | "export"
+                    | "outsheet"
+                    | "outfile"
+                    | "file"
+                    | "fdasave"
+                    | "putexcel"
+                    | "putdocx"
+                    | "putpdf"
+                    | "log"
+                    | "cmdlog"
+                    | "copy"
+                    | "shell"
+                    | "erase"
+                    | "rm"
+                    | "mkdir"
+                    | "esttab"
+                    | "estout"
+                    | "outreg2"
+                    | "graph"
+                    | "gr"
+                    | "estimates"
+                    | "est"
+            ) || low.contains(" using ")
+                || low.contains("saving(")
+                || low.starts_with('!');
+            if writes && !reason.contains("Stata stops here") {
+                self.files_unknown = Some(stata.trim().to_string());
+            }
         }
         // a line Stata stops at with an error leaves the data as it was
         if reason.contains("Stata stops here") || reason.contains("(Stata: ") {
@@ -1820,6 +1862,7 @@ impl Session {
             "insheet" => self.insheet(c, &opts, out),
             "split" => self.split(c, &opts, out),
             "input" => self.input(c, out),
+            "confirm" => self.confirm(c, out),
             "file" => self.file(c, out),
             "generate" => self.generate(c, &opts, out),
             "replace" => self.replace(c, out),

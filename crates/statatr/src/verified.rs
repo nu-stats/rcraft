@@ -20,6 +20,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("clogit", &["clogit"]),
     ("coefplot", &["coefplot"]),
     ("collapse", &["data"]),
+    ("confirm", &["strings"]),
     ("correlate", &["descriptives"]),
     ("count", &["control", "descriptives"]),
     ("egen", &["descriptives"]),

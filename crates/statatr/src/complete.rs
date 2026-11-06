@@ -67,6 +67,7 @@ pub const COMMANDS: &[&str] = &[
     "coefplot",
     "collapse",
     "compress",
+    "confirm",
     "connected",
     "continue",
     "correlate",

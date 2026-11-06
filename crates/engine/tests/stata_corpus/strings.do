@@ -1,7 +1,7 @@
 * RCraft's Stata corpus (P2C.9 continued): made-up data; Stata 19's results are in strings.recorded
-* commands: file split
+* commands: confirm file split
 * functions: char float length ltrim rtrim strltrim strmatch strrtrim strtrim subinstr trim ustrltrim ustrrtrim ustrtrim
-* (the trims, which blanks each takes (spaces only, or tabs and new lines too for the ustr ones), strmatch()'s * and ? with every other character as itself, char() of ASCII codes, missing and past 255, and float(); split: words, parse() strings with the empty pieces they leave, notrim, limit(), if, and its r(); file open, write and close, read back with insheet; length() in bytes and subinstr() on bytes, with char(128) to char(255) searched for and put in)
+* (the trims, which blanks each takes (spaces only, or tabs and new lines too for the ustr ones), strmatch()'s * and ? with every other character as itself, char() of ASCII codes, missing and past 255, and float(); split: words, parse() strings with the empty pieces they leave, notrim, limit(), if, and its r(); file open, write and close, read back with insheet; length() in bytes and subinstr() on bytes, with char(128) to char(255) searched for and put in; confirm and the return codes it leaves)
 * tolerance: 0
 version 19
 set linesize 255
@@ -89,3 +89,26 @@ generate t = subinstr(s, char(169), "X", .)
 generate u = subinstr(s, char(195), char(200), 1)
 generate v = subinstr(s, "a", char(65) + char(66), .)
 display "@ bytes " length(s[1]) " " length(t[1]) " " length(u[1]) " " length(v[1]) " " (t[2] == "plain text") " " length(v[2]) " " (substr(t[1], 1, 3) == "caf")
+capture confirm variable s
+local r1 = _rc
+capture confirm variable nosuch
+local r2 = _rc
+capture confirm numeric variable s
+local r3 = _rc
+capture confirm string variable s
+local r4 = _rc
+capture confirm new variable s
+local r5 = _rc
+capture confirm new variable brandnew
+local r6 = _rc
+capture confirm number abc
+local r7 = _rc
+capture confirm integer number 3.5
+local r8 = _rc
+capture confirm number 3.5
+local r9 = _rc
+capture confirm file nosuchfile_590.txt
+local r10 = _rc
+capture confirm variable pl
+local r11 = _rc
+display "@ confirm `r1' `r2' `r3' `r4' `r5' `r6' `r7' `r8' `r9' `r10' `r11'"

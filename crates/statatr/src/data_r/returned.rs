@@ -113,10 +113,117 @@ stata_list_returned <- function(x, p) {
 /// `%21x` is the double's own bits: `+1.921fb54442d18X+001` is
 /// (1 + 0x921fb54442d18 / 2^52) * 2^1, zero `+0.0000000000000X-3ff` and `.`
 /// `+1.0000000000000X+3ff` (StatCraft's probes 000, 031 and 034).
-pub(super) const FORMAT_HELPER: &str = r##"stata_fmt <- function(x, fmt = "%10.0g", trim = FALSE) {
+pub(super) const FORMAT_HELPER: &str = r##"# Stata's date and time display formats (%td, %tcHH:MM, %tmCCYY!mnn, ...),
+# StatCraft's decoding of Stata 19 (its plan/stata/dates.md, probe 033): each
+# code's widest text sets the width, shorter text is padded to it, and a
+# value outside 01jan0100 to 31dec9999 is shown as a number in %w.0g
+stata_tfmt <- function(x, fmt) {
+  if (is.character(x)) stop("type mismatch")
+  m <- regmatches(fmt, regexec("^%(-?)(t([cdwmqhy])|d)(.*)$", fmt))[[1]]
+  if (length(m) == 0) stop("invalid %format")
+  left <- m[2] == "-"
+  unit <- if (m[3] == "d") "d" else m[4]
+  det <- m[5]
+  if (!nzchar(det)) det <- switch(unit, c = "DDmonCCYY HH:MM:SS", d = "DDmonCCYY", w = "CCYY!www", m = "CCYY!mnn",
+                                  q = "CCYY!qq", h = "CCYY!hh", y = "CCYY")
+  known <- c("DAYNAME", "Dayname", "Month", "month", "a.m.", "A.M.", ".sss", ".ss", ".s", "JJJ", "jjj", "Mon", "mon",
+             "Day", "day", "Da", "da", "CC", "cc", "YY", "yy", "NN", "nn", "DD", "dd", "WW", "ww", "HH", "hH", "Hh", "hh",
+             "MM", "mm", "SS", "ss", "am", "AM", "h", "q")
+  codes <- character(0)
+  rest <- det
+  while (nzchar(rest)) {
+    hit <- known[startsWith(rest, known)][1]
+    if (!is.na(hit)) {
+      codes <- c(codes, hit)
+      rest <- substring(rest, nchar(hit) + 1)
+      next
+    }
+    ch <- substr(rest, 1, 1)
+    rest <- substring(rest, 2)
+    if (ch == "+") next
+    if (ch == "_") { codes <- c(codes, "! "); next }
+    if (ch %in% c(".", ",", ":", "-", "/", "\\", " ")) { codes <- c(codes, paste0("!", ch)); next }
+    if (ch == "!" && nzchar(rest)) { codes <- c(codes, paste0("!", substr(rest, 1, 1))); rest <- substring(rest, 2); next }
+    stop("invalid %format")
+  }
+  wid <- function(cd) {
+    if (startsWith(cd, "!") || cd %in% c("h", "q")) return(1L)
+    if (cd %in% c("Month", "month", "DAYNAME", "Dayname")) return(9L)
+    if (cd %in% c("JJJ", "jjj", "Mon", "mon", "Day", "day", "Da", "da")) return(3L)
+    if (cd %in% c(".s", ".ss", ".sss")) return(nchar(cd))
+    if (cd %in% c("a.m.", "A.M.")) return(4L)
+    2L
+  }
+  width <- sum(vapply(codes, wid, 1L))
+  pad <- function(s) {
+    gap <- strrep(" ", max(0, width - nchar(s)))
+    if (left) paste0(s, gap) else paste0(gap, s)
+  }
+  months <- c("January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+              "November", "December")
+  days <- c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday")
+  dnum <- function(y, mo, d) as.numeric(as.Date(sprintf("%04d-%02d-%02d", y, mo, d)) - as.Date("1960-01-01"))
+  one <- function(v) {
+    if (is.na(v)) return(pad("."))
+    ms <- 0
+    day <- NA_real_
+    if (is.finite(v)) {
+      f <- floor(v)
+      if (unit == "c") { day <- floor(v / 86400000); ms <- floor(v - day * 86400000) }
+      else if (unit == "d") day <- f
+      else if (unit == "y") { if (f >= 100 && f <= 9999) day <- dnum(f, 1, 1) }
+      else {
+        per <- switch(unit, w = 52, m = 12, q = 4, h = 2)
+        y <- 1960 + floor(f / per); k <- f - floor(f / per) * per
+        if (y >= 100 && y <= 9999) day <- if (unit == "w") dnum(y, 1, 1) + 7 * k else dnum(y, k * 12 / per + 1, 1)
+      }
+    }
+    if (is.na(day) || day < -679350 || day > 2936549) {
+      s <- trimws(stata_fmt(v, sprintf("%%%d.0g", min(max(width, 1), 12))), "left")
+      return(pad(s))
+    }
+    lt <- as.POSIXlt(as.Date(day, origin = "1960-01-01"))
+    y <- lt$year + 1900; mo <- lt$mon + 1; d <- lt$mday
+    doy <- day - dnum(y, 1, 1) + 1
+    dow <- (day + 5) %% 7
+    hour <- ms %/% 3600000; minute <- ms %/% 60000 %% 60; second <- ms %/% 1000 %% 60; milli <- ms %% 1000
+    h12 <- if (hour %% 12 == 0) 12 else hour %% 12
+    num <- function(v, p, n) if (p) formatC(v, width = n, flag = "0", format = "d") else as.character(v)
+    pm <- hour >= 12
+    show <- function(cd) {
+      if (startsWith(cd, "!")) return(substring(cd, 2))
+      switch(cd,
+        CC = num(y %/% 100, TRUE, 2), cc = num(y %/% 100, FALSE, 2),
+        YY = num(y %% 100, TRUE, 2), yy = num(y %% 100, FALSE, 2),
+        JJJ = num(doy, TRUE, 3), jjj = num(doy, FALSE, 3),
+        Month = months[mo], month = tolower(months[mo]),
+        Mon = substr(months[mo], 1, 3), mon = tolower(substr(months[mo], 1, 3)),
+        NN = num(mo, TRUE, 2), nn = num(mo, FALSE, 2), DD = num(d, TRUE, 2), dd = num(d, FALSE, 2),
+        DAYNAME = formatC(days[dow + 1], width = -9), Dayname = days[dow + 1],
+        Day = substr(days[dow + 1], 1, 3), Da = substr(days[dow + 1], 1, 2),
+        day = tolower(substr(days[dow + 1], 1, 3)), da = tolower(substr(days[dow + 1], 1, 2)),
+        h = as.character((mo - 1) %/% 6 + 1), q = as.character((mo - 1) %/% 3 + 1),
+        WW = num(min((doy - 1) %/% 7 + 1, 52), TRUE, 2), ww = num(min((doy - 1) %/% 7 + 1, 52), FALSE, 2),
+        HH = num(hour, TRUE, 2), hH = num(hour, FALSE, 2), Hh = num(h12, TRUE, 2), hh = num(h12, FALSE, 2),
+        MM = num(minute, TRUE, 2), mm = num(minute, FALSE, 2), SS = num(second, TRUE, 2), ss = num(second, FALSE, 2),
+        .s = paste0(".", substr(formatC(milli, width = 3, flag = "0", format = "d"), 1, 1)),
+        .ss = paste0(".", substr(formatC(milli, width = 3, flag = "0", format = "d"), 1, 2)),
+        .sss = paste0(".", formatC(milli, width = 3, flag = "0", format = "d")),
+        am = if (pm) "pm" else "am", AM = if (pm) "PM" else "AM",
+        a.m. = if (pm) "p.m." else "a.m.", A.M. = if (pm) "P.M." else "A.M.")
+    }
+    pad(paste(vapply(codes, show, ""), collapse = ""))
+  }
+  vapply(as.numeric(x), one, "")
+}
+stata_fmt <- function(x, fmt = "%10.0g", trim = FALSE) {
   if (fmt %in% c("%21x", "%-21x")) {
     if (is.character(x)) stop("type mismatch")
     return(stata_hex(x))
+  }
+  if (grepl("^%-?(t|d)", fmt)) {
+    s <- stata_tfmt(x, fmt)
+    return(if (trim) trimws(s) else s)
   }
   m <- regmatches(fmt, regexec("^%(-?)(0?)([0-9]+)(\\.([0-9]+))?([gfes])(c?)$", fmt))[[1]]
   if (length(m) == 0) stop("invalid %format")
@@ -1787,6 +1894,9 @@ pub(super) fn valid_format(f: &str) -> bool {
     if matches!(f, "%21x" | "%-21x") {
         return true;
     }
+    if valid_date_format(f) {
+        return true;
+    }
     let b = f.as_bytes();
     if b.first() != Some(&b'%') {
         return false;
@@ -2250,4 +2360,47 @@ pub(super) struct ProgramRun {
     pub(super) names: Vec<String>,
     pub(super) texts: Vec<String>,
     pub(super) refused: bool,
+}
+
+/// A date or time display format Stata takes (`%td`, `%-tcHH:MM:SS.sss`,
+/// `%tmCCYY!mnn`, the old `%d`): its codes, `_ + !c` and `. , : - / \` and
+/// space; no width. `%tC` (leap seconds) and `%tb` are not translated.
+pub(super) fn valid_date_format(f: &str) -> bool {
+    const CODES: &[&str] = &[
+        "DAYNAME", "Dayname", "Month", "month", "a.m.", "A.M.", ".sss", ".ss", ".s", "JJJ", "jjj",
+        "Mon", "mon", "Day", "day", "Da", "da", "CC", "cc", "YY", "yy", "NN", "nn", "DD", "dd",
+        "WW", "ww", "HH", "hH", "Hh", "hh", "MM", "mm", "SS", "ss", "am", "AM", "h", "q",
+    ];
+    let Some(body) = f.strip_prefix('%') else {
+        return false;
+    };
+    let body = body.strip_prefix('-').unwrap_or(body);
+    let details = if let Some(rest) = body.strip_prefix('t') {
+        let mut cs = rest.chars();
+        match cs.next() {
+            Some('c' | 'd' | 'w' | 'm' | 'q' | 'h' | 'y') => cs.as_str(),
+            _ => return false,
+        }
+    } else if let Some(rest) = body.strip_prefix('d') {
+        rest
+    } else {
+        return false;
+    };
+    let mut rest = details;
+    while let Some(c) = rest.chars().next() {
+        if let Some(code) = CODES.iter().find(|code| rest.starts_with(*code)) {
+            rest = rest.get(code.len()..).unwrap_or("");
+            continue;
+        }
+        rest = rest.get(c.len_utf8()..).unwrap_or("");
+        match c {
+            '+' | '_' | '.' | ',' | ':' | '-' | '/' | '\\' | ' ' => {}
+            '!' => match rest.chars().next() {
+                Some(l) => rest = rest.get(l.len_utf8()..).unwrap_or(""),
+                None => return false,
+            },
+            _ => return false,
+        }
+    }
+    true
 }
