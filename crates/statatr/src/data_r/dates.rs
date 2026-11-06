@@ -390,4 +390,77 @@ stata_weekly <- function(s, mask, top = NA_real_) stata_dt_read(s, mask, "week",
 stata_monthly <- function(s, mask, top = NA_real_) stata_dt_read(s, mask, "month", top)
 stata_quarterly <- function(s, mask, top = NA_real_) stata_dt_read(s, mask, "quarter", top)
 stata_halfyearly <- function(s, mask, top = NA_real_) stata_dt_read(s, mask, "half", top)
-stata_yearly <- function(s, mask, top = NA_real_) stata_dt_read(s, mask, "year", top)"##;
+stata_yearly <- function(s, mask, top = NA_real_) stata_dt_read(s, mask, "year", top)
+# datetime/C: the 27 IERS leap seconds, each added at the end of these days
+# (StatCraft's decoding, probe 034)
+stata_dt_leapdays <- function() {
+  ymd <- matrix(c(1972,6,30, 1972,12,31, 1973,12,31, 1974,12,31, 1975,12,31, 1976,12,31, 1977,12,31,
+                  1978,12,31, 1979,12,31, 1981,6,30, 1982,6,30, 1983,6,30, 1985,6,30, 1987,12,31,
+                  1989,12,31, 1990,12,31, 1992,6,30, 1993,6,30, 1994,6,30, 1995,12,31, 1997,6,30,
+                  1998,12,31, 2005,12,31, 2008,12,31, 2012,6,30, 2015,6,30, 2016,12,31), ncol = 3, byrow = TRUE)
+  stata_dt_dn(ymd[, 1], ymd[, 2], ymd[, 3])
+}
+stata_dt_midnights <- function() (stata_dt_leapdays() + 1) * 86400000
+stata_Cofc <- function(c) {
+  c <- floor(c)
+  out <- c + 1000 * findInterval(c, stata_dt_midnights())
+  out[is.na(c) | !is.finite(c)] <- NA_real_
+  out
+}
+# the clock's time for a datetime/C value, and whether it is inside a leap second
+stata_dt_wall <- function(big) {
+  mids <- stata_dt_midnights()
+  one <- function(b) {
+    if (is.na(b) || !is.finite(b)) return(c(NA_real_, 0))
+    ins <- 0
+    for (m in mids) {
+      st <- m + 1000 * ins
+      if (b < st) break
+      if (b < st + 1000) return(c(m - 1000 + (b - st), 1))
+      ins <- ins + 1
+    }
+    c(b - 1000 * ins, 0)
+  }
+  r <- vapply(as.numeric(big), one, numeric(2))
+  list(wall = r[1, ], leap = r[2, ] == 1)
+}
+stata_cofC <- function(big) {
+  mids <- stata_dt_midnights()
+  one <- function(b) {
+    if (is.na(b) || !is.finite(b)) return(NA_real_)
+    b <- floor(b)
+    ins <- 0
+    for (m in mids) {
+      st <- m + 1000 * ins
+      if (b < st) break
+      if (b < st + 1000) return(m)
+      ins <- ins + 1
+    }
+    b - 1000 * ins
+  }
+  vapply(as.numeric(big), one, 0)
+}
+stata_Cofd <- function(d) stata_Cofc(stata_cofd(d))
+# the day the clock shows: a leap second is still its own day (Stata 19)
+stata_dofC <- function(big) stata_dofc(stata_dt_wall(big)$wall)
+stata_hhC <- function(big) stata_hh(stata_dt_wall(big)$wall)
+stata_mmC <- function(big) stata_mm(stata_dt_wall(big)$wall)
+stata_ssC <- function(big) { w <- stata_dt_wall(big); stata_ss(w$wall) + ifelse(w$leap, 1, 0) }
+stata_Cdhms <- function(d, h, m, s) stata_Cofc(stata_dhms(d, h, m, s))
+stata_Chms <- function(h, m, s) stata_Cofc(stata_hms(h, m, s))
+stata_Cmdyhms <- function(mo, d, y, h, mi, s) {
+  day <- stata_mdy(mo, d, y)
+  out <- stata_Cofc(stata_mdyhms(mo, d, y, h, mi, s))
+  # 23:59:60 only on a day a leap second was added
+  sec60 <- !is.na(s) & s >= 60
+  ok60 <- sec60 & !is.na(day) & h == 23 & mi == 59 & s < 61 & day %in% stata_dt_leapdays()
+  out[sec60] <- NA_real_
+  out[ok60] <- stata_Cofc(day[ok60] * 86400000 + 86399000) + 1000 + (s[ok60] - 60) * 1000
+  out
+}
+# Clock(): clock() read with leap seconds counted; 23:59:60 is not read yet
+stata_Clock <- function(s, mask, top = NA_real_) {
+  c <- stata_clock(s, mask, top)
+  if (any(is.na(c) & grepl(":60", s, fixed = TRUE))) stop("Clock() of 23:59:60 (a leap second) is not translated yet", call. = FALSE)
+  stata_Cofc(c)
+}"##;

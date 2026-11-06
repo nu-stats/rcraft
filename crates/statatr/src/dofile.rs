@@ -1403,6 +1403,25 @@ impl<'f> Run<'f> {
                         }
                     }
                 }
+                // a program Stata's table does not have (an add-on, or Stata's own
+                // _get_diopts and the like) can set the caller's locals (c_local):
+                // the names before its comma are not known after it
+                if let Err(e) = &line.result {
+                    if !c.known && may_set_globals(&c.name, &e.reason) {
+                        let why =
+                            format!("may be set by {}, which was not translated", c.text.trim());
+                        let names: Vec<String> = c
+                            .parts
+                            .main
+                            .split_whitespace()
+                            .filter(|w| macros::is_name(w))
+                            .map(str::to_string)
+                            .collect();
+                        for n in names {
+                            self.set_local_now(&n, Macro::Lost(why.clone()));
+                        }
+                    }
+                }
                 // levelsof, local(name): the local is set from r(levels) once the line has run
                 if c.name == "levelsof" && line.result.is_ok() {
                     let local = c.options.iter().find(|o| o.is("local", 3));

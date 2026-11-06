@@ -27,3 +27,18 @@ abbreviated. `confirm file` is declined after a line not translated that may hav
 
 A file name in compound quotes (`` save `"`f'"' ``) had its quotes kept, so `save`, `use` and the rest
 wrote or looked for the wrong file; they are taken off now.
+
+## datetime/C (leap seconds), invlogit and logit, strings repeated
+
+- `Cofc()`, `cofC()`, `Cofd()`, `dofC()`, `hhC()`, `mmC()`, `ssC()`, `Chms()`, `Cdhms()`, `Cmdyhms()`,
+  `Clock()` and `%tC`, with the 27 IERS leap seconds (StatCraft's table): a time inside a leap second
+  shows as `23:59:60` and `ssC()` gives 60.x; `cofC()` maps it to the midnight after.
+- Found here, against StatCraft's notes: `dofC()` of a time inside a leap second is the leap day itself
+  (Stata 19 gives 20819 for 31dec2016 23:59:60.25), as the clock shows it, not the day after that
+  `dofc(cofC())` gives. StatCraft's `dofbig` has the same slip.
+- `Clock()` of the text `23:59:60` stops rather than guess (not read yet). `cofc()` is not a Stata
+  function (Stata says so) and stays declined.
+- `invlogit()` and `logit()` (missing outside 0 < p < 1); `3*"ab"` repeats a string when the count is a
+  whole number written out.
+- Checked: `dates.do` (4 more results), `strings.do` (2 more); probe 034's 10,383 translated lines give
+  Stata's values but for four `wofd()` far outside the calendar, the known difference of P2C.14.

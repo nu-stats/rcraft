@@ -3345,3 +3345,11 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Numbers:** probes (421) 194,948 of 209,914 run lines translated (92.9%, from 89.6%; `sign()`, the
   one-line else, the date formats and confirm); none of the 4,320 compared lines differs, 4,309 to 8
   digits and 11 to 6. Packages 73.1% of source lines.
+- **Then:** datetime/C with the leap seconds (`Clock()`, `Cofc()`, `cofC()`, `Cofd()`, `dofC()`,
+  `hhC()`/`mmC()`/`ssC()`, `Chms()`, `Cdhms()`, `Cmdyhms()`, `%tC`); `invlogit()` and `logit()`; a string
+  times a whole number. `dofC()` inside a leap second is the leap day, which StatCraft's notes miss.
+- **Then:** a command Stata's table does not have (an add-on, or Stata's own `_get_diopts`) may set
+  the caller's locals (`c_local`): when it is not translated, the locals named before its comma are not
+  known after it (probe 594 showed them read as empty).
+- **Numbers:** probes (422) 196,061 of 210,072 run lines translated (93.3%); none of the 4,323 compared
+  lines differs, 4,312 to 8 digits and 11 to 6.

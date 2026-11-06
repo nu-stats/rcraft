@@ -119,12 +119,12 @@ pub(super) const FORMAT_HELPER: &str = r##"# Stata's date and time display forma
 # value outside 01jan0100 to 31dec9999 is shown as a number in %w.0g
 stata_tfmt <- function(x, fmt) {
   if (is.character(x)) stop("type mismatch")
-  m <- regmatches(fmt, regexec("^%(-?)(t([cdwmqhy])|d)(.*)$", fmt))[[1]]
+  m <- regmatches(fmt, regexec("^%(-?)(t([cCdwmqhy])|d)(.*)$", fmt))[[1]]
   if (length(m) == 0) stop("invalid %format")
   left <- m[2] == "-"
   unit <- if (m[3] == "d") "d" else m[4]
   det <- m[5]
-  if (!nzchar(det)) det <- switch(unit, c = "DDmonCCYY HH:MM:SS", d = "DDmonCCYY", w = "CCYY!www", m = "CCYY!mnn",
+  if (!nzchar(det)) det <- switch(unit, c = , C = "DDmonCCYY HH:MM:SS", d = "DDmonCCYY", w = "CCYY!www", m = "CCYY!mnn",
                                   q = "CCYY!qq", h = "CCYY!hh", y = "CCYY")
   known <- c("DAYNAME", "Dayname", "Month", "month", "a.m.", "A.M.", ".sss", ".ss", ".s", "JJJ", "jjj", "Mon", "mon",
              "Day", "day", "Da", "da", "CC", "cc", "YY", "yy", "NN", "nn", "DD", "dd", "WW", "ww", "HH", "hH", "Hh", "hh",
@@ -167,9 +167,12 @@ stata_tfmt <- function(x, fmt) {
     if (is.na(v)) return(pad("."))
     ms <- 0
     day <- NA_real_
+    inleap <- 0
     if (is.finite(v)) {
       f <- floor(v)
-      if (unit == "c") { day <- floor(v / 86400000); ms <- floor(v - day * 86400000) }
+      # datetime/C: the clock's time, 23:59:60 inside a leap second
+      if (unit == "C") { w <- stata_dt_wall(v); inleap <- as.numeric(w$leap); v <- w$wall }
+      if (unit %in% c("c", "C")) { day <- floor(v / 86400000); ms <- floor(v - day * 86400000) }
       else if (unit == "d") day <- f
       else if (unit == "y") { if (f >= 100 && f <= 9999) day <- dnum(f, 1, 1) }
       else {
@@ -186,7 +189,7 @@ stata_tfmt <- function(x, fmt) {
     y <- lt$year + 1900; mo <- lt$mon + 1; d <- lt$mday
     doy <- day - dnum(y, 1, 1) + 1
     dow <- (day + 5) %% 7
-    hour <- ms %/% 3600000; minute <- ms %/% 60000 %% 60; second <- ms %/% 1000 %% 60; milli <- ms %% 1000
+    hour <- ms %/% 3600000; minute <- ms %/% 60000 %% 60; second <- ms %/% 1000 %% 60 + inleap; milli <- ms %% 1000
     h12 <- if (hour %% 12 == 0) 12 else hour %% 12
     num <- function(v, p, n) if (p) formatC(v, width = n, flag = "0", format = "d") else as.character(v)
     pm <- hour >= 12
@@ -1663,6 +1666,10 @@ impl Session {
                 if !valid_format(&f) {
                     return Err(no(format!("display: the format {f} is not translated (Stata: invalid %format, or a format RCraft does not have yet)")));
                 }
+                // datetime/C reads the leap seconds from the date helpers
+                if f.contains("tC") {
+                    self.helpers.insert("stata_dates");
+                }
                 fmt = Some(f);
                 i = end;
                 continue;
@@ -2364,7 +2371,7 @@ pub(super) struct ProgramRun {
 
 /// A date or time display format Stata takes (`%td`, `%-tcHH:MM:SS.sss`,
 /// `%tmCCYY!mnn`, the old `%d`): its codes, `_ + !c` and `. , : - / \` and
-/// space; no width. `%tC` (leap seconds) and `%tb` are not translated.
+/// space; no width. `%tb` (business calendars) is not translated.
 pub(super) fn valid_date_format(f: &str) -> bool {
     const CODES: &[&str] = &[
         "DAYNAME", "Dayname", "Month", "month", "a.m.", "A.M.", ".sss", ".ss", ".s", "JJJ", "jjj",
@@ -2378,7 +2385,7 @@ pub(super) fn valid_date_format(f: &str) -> bool {
     let details = if let Some(rest) = body.strip_prefix('t') {
         let mut cs = rest.chars();
         match cs.next() {
-            Some('c' | 'd' | 'w' | 'm' | 'q' | 'h' | 'y') => cs.as_str(),
+            Some('c' | 'C' | 'd' | 'w' | 'm' | 'q' | 'h' | 'y') => cs.as_str(),
             _ => return false,
         }
     } else if let Some(rest) = body.strip_prefix('d') {

@@ -218,6 +218,17 @@ const DATE_FUNCTIONS: &[(&str, usize)] = &[
     ("hms", 3),
     ("dhms", 4),
     ("mdyhms", 6),
+    // datetime/C, with the leap seconds
+    ("Cofc", 1),
+    ("cofC", 1),
+    ("Cofd", 1),
+    ("dofC", 1),
+    ("hhC", 1),
+    ("mmC", 1),
+    ("ssC", 1),
+    ("Chms", 3),
+    ("Cdhms", 4),
+    ("Cmdyhms", 6),
 ];
 
 /// Strings read as dates against a mask: Stata's name and the helper's.
@@ -225,6 +236,7 @@ const DATE_READERS: &[(&str, &str)] = &[
     ("date", "date"),
     ("daily", "date"),
     ("clock", "clock"),
+    ("Clock", "Clock"),
     ("weekly", "weekly"),
     ("monthly", "monthly"),
     ("quarterly", "quarterly"),
@@ -233,9 +245,7 @@ const DATE_READERS: &[(&str, &str)] = &[
 ];
 
 /// datetime/C, which counts leap seconds: not translated yet.
-const LEAP_SECOND_FUNCTIONS: &[&str] = &[
-    "Clock", "Cofd", "Cofc", "cofC", "dofC", "hhC", "mmC", "ssC", "Cmdyhms", "Cdhms", "Chms",
-];
+const LEAP_SECOND_FUNCTIONS: &[&str] = &[];
 
 /// The name a random draw goes by in an expression's R until it is placed.
 const DRAW: &str = ".stata_draw";
@@ -481,6 +491,16 @@ impl Translator<'_> {
                 }
                 Ok((format!("paste0({ac}, {bc})"), Kind::Text))
             }
+            // a number times a string repeats it (3*"ab" is "ababab"); a count written out
+            BinaryOp::Mul if text => {
+                let (s, n) = if ak == Kind::Text { (&ac, b) } else { (&bc, a) };
+                match plain_number(n) {
+                    Some(k) if k >= 0.0 && k.fract() == 0.0 && (ak == Kind::Text) != (bk == Kind::Text) => {
+                        Ok((format!("strrep({s}, {k})"), Kind::Text))
+                    }
+                    _ => Err(no("a string repeated a number of times that is not a whole number written out is not translated yet")),
+                }
+            }
             BinaryOp::Add | BinaryOp::Sub | BinaryOp::Mul | BinaryOp::Pow => {
                 let sym = match op {
                     BinaryOp::Add => "+",
@@ -692,6 +712,18 @@ impl Translator<'_> {
                 want(1)?;
                 let (z, zk) = self.expr(arg(0)?)?;
                 Ok((format!("stats::pnorm({})", number(&z, zk)?), Kind::Number))
+            }
+            // invlogit(x) = e^x/(1+e^x); logit(p) = ln(p/(1-p)), missing outside 0 < p < 1
+            "invlogit" => {
+                want(1)?;
+                let (z, zk) = self.expr(arg(0)?)?;
+                Ok((format!("stats::plogis({})", number(&z, zk)?), Kind::Number))
+            }
+            "logit" => {
+                want(1)?;
+                let (p, pk) = self.expr(arg(0)?)?;
+                let p = number(&p, pk)?;
+                Ok((format!("(function(p) ifelse(!is.na(p) & p > 0 & p < 1, stats::qlogis(p), NA_real_))({p})"), Kind::Number))
             }
             "max" | "min" => {
                 if args.is_empty() {
@@ -1366,7 +1398,6 @@ mod tests {
         for (text, why) in [
             ("foo(x)", "foo() is not translated"),
             ("substr(s, -2, 1)", "from the end"),
-            ("Clock(s, \"DMYhms\")", "leap seconds"),
             ("year(s, 2)", "takes 1 argument"),
             ("x +", "Stata would not read it"),
             ("_se[x]", "estimation"),

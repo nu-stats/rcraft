@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.9 continued): made-up data; Stata 19's results are in strings.recorded
 * commands: confirm file split
-* functions: char float length ltrim rtrim strltrim strmatch strrtrim strtrim subinstr trim ustrltrim ustrrtrim ustrtrim
+* functions: char float invlogit length logit ltrim rtrim strltrim strmatch strrtrim strtrim subinstr trim ustrltrim ustrrtrim ustrtrim
 * (the trims, which blanks each takes (spaces only, or tabs and new lines too for the ustr ones), strmatch()'s * and ? with every other character as itself, char() of ASCII codes, missing and past 255, and float(); split: words, parse() strings with the empty pieces they leave, notrim, limit(), if, and its r(); file open, write and close, read back with insheet; length() in bytes and subinstr() on bytes, with char(128) to char(255) searched for and put in; confirm and the return codes it leaves)
 * tolerance: 0
 version 19
@@ -112,3 +112,5 @@ local r10 = _rc
 capture confirm variable pl
 local r11 = _rc
 display "@ confirm `r1' `r2' `r3' `r4' `r5' `r6' `r7' `r8' `r9' `r10' `r11'"
+display "@ invlogit " %21x invlogit(0.3) " " %21x invlogit(-2) " " %21x logit(0.25) " " missing(logit(1)) " " missing(logit(0))
+display "@ repeat " (3*"ab" == "ababab") " " length(char(65)*4) " " (0*"x" == "")

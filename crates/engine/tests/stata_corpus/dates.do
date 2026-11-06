@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.14): made-up data; Stata 19's results are in dates.recorded
-* functions: clock date dhms dofc dofm dofq dofw dow doy halfyearly hh hms mdy mdyhms mm mofd monthly qofd quarter quarterly ss week weekly wofd year yearly yq yw
-* (Stata's date and time functions on columns: strings read against masks, two-digit years, times, periods, and the parts of dates)
+* functions: clock date dhms dofc dofm dofq dofw dow doy halfyearly hh hms mdy mdyhms mm mofd monthly qofd quarter quarterly ss week weekly wofd year yearly yq yw Clock Cofc Cofd Cdhms Chms Cmdyhms cofC dofC hhC mmC ssC
+* (Stata's date and time functions on columns: strings read against masks, two-digit years, times, periods, and the parts of dates; datetime/C with the 27 leap seconds, a leap second itself shown as 60)
 * tolerance: 0
 version 19
 clear
@@ -88,3 +88,24 @@ summarize hm
 display "@ hm_sum " %24.17g r(sum) " " %24.17g hm[7]
 summarize dc
 display "@ dc_sum " %24.17g r(sum) " " %24.17g t[3]
+set linesize 255
+clear
+set obs 6
+generate double c = clock("30jun1972 23:59:59", "DMYhms") in 1
+replace c = clock("01jan1972 12:00:00", "DMYhms") in 2
+replace c = clock("31dec2016 23:59:59.5", "DMYhms") in 3
+replace c = clock("01jan2017 00:00:00", "DMYhms") in 4
+replace c = clock("23nov2010 12:00:00", "DMYhms") in 5
+replace c = -1000 in 6
+generate double C = Cofc(c)
+generate double back = cofC(C)
+generate double Cd = Cofd(mdy(1, 1, 2017))
+generate double lsec = Cmdyhms(12, 31, 2016, 23, 59, 60.25)
+generate double nolsec = Cmdyhms(12, 30, 2016, 23, 59, 60)
+generate double Ck = Clock("23nov2010 12:00:00", "DMYhms")
+summarize C
+display "@ Cofc_sum " %24.17g r(sum) " " %24.17g C[5] " " %24.17g C[3]
+summarize back
+display "@ cofC_sum " %24.17g r(sum) " " (back[5] == c[5])
+display "@ Cfns " %24.17g Cd[1] " " %24.17g lsec[1] " " missing(nolsec[1]) " " %24.17g Ck[1] " " %24.17g Chms(1, 2, 3) " " %24.17g Cdhms(18000, 1, 2, 3)
+display "@ Cparts " hhC(lsec[1]) " " mmC(lsec[1]) " " ssC(lsec[1]) " " dofC(lsec[1]) " " ssC(C[5]) " " hhC(C[5]) " " dofC(C[4])

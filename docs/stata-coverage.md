@@ -144,7 +144,8 @@ probes: the probes went from 77.4% of their run lines translated to 89.6% (188,2
 the 4,310 compared lines differs from Stata (4,299 to 8 digits, 11 to 6). The packages hold at 73.0%: they
 use none of these commands. Then `sign()`, a one-line `else` after an `if` block, Stata's date and time display
 formats (probe 033, every line Stata's byte for byte) and `confirm` took the probes to 92.9% (194,948 of
-209,914), still with no compared line different (4,309 of 4,320 to 8 digits, 11 to 6); the packages to 73.1%.
+209,914), still with no compared line different (4,309 of 4,320 to 8 digits, 11 to 6); the packages to 73.1%. The leap-second date functions and `%tC`, `invlogit()` and `logit()`, then took the
+probes to 93.3% (196,061 of 210,072), none different (4,312 of 4,323 to 8 digits, 11 to 6).
 
 Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `esttab`'s `cells()` and `mlabels()`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:
