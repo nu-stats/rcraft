@@ -530,6 +530,7 @@ impl<'f> Run<'f> {
         let item = top.items.get(top.at).cloned();
         self.asked = 0;
         self.pending.clear();
+        let pushed_before = self.lines.len();
         let flow = match &item {
             Some(Item::Command(c)) => self.command(c, depth - 1),
             Some(Item::Group(g)) => self.group(g, depth - 1),
@@ -548,7 +549,61 @@ impl<'f> Run<'f> {
         if !matches!(flow, Flow::Ask { .. }) {
             self.answers.clear();
         }
+        // Stata stops at an error: the loops and programs around the line end
+        // there too, up to the do-file (which goes on, as with nostop)
+        let stopped = self.lines.get(pushed_before..).is_some_and(|new| {
+            new.iter()
+                .any(|l| matches!(&l.result, Err(e) if e.reason.starts_with(STATA_STOPS)))
+        });
+        if stopped {
+            let prefixes = match &item {
+                Some(Item::Command(c)) => c.prefixes.clone(),
+                Some(Item::Group(g)) => g.prefixes.clone(),
+                _ => Vec::new(),
+            };
+            if !prefixes.contains(&Prefix::Capture) {
+                self.abandon();
+            }
+        }
         flow
+    }
+
+    /// After a line Stata stops at with an error: the frames it is in end,
+    /// as Stata ends them, up to the file (`do` goes on with its next line,
+    /// as with nostop) or up to a `capture` around them, whose `_rc` is then
+    /// that error's.
+    fn abandon(&mut self) {
+        while let Some(top) = self.frames.last() {
+            if matches!(top.kind, Kind::File { program: None, .. }) {
+                break;
+            }
+            let captured = top.prefixes.contains(&Prefix::Capture);
+            let Some(popped) = self.frames.pop() else {
+                break;
+            };
+            match popped.kind {
+                Kind::Foreach { name, .. } => self.set_local_now(
+                    &name,
+                    Macro::Lost(
+                        "the loop ended at an error, which Stata leaves this macro after".into(),
+                    ),
+                ),
+                Kind::File {
+                    program: Some((name, class)),
+                    ..
+                } => {
+                    let _ = self.program_end(&name, &class);
+                }
+                _ => {}
+            }
+            if captured {
+                self.t.lose_rc(
+                    "_rc is not known: Stata stopped at an error inside the capture before it, whose code RCraft does not keep"
+                        .to_string(),
+                );
+                break;
+            }
+        }
     }
 
     /// The item at `depth` is done: the next one is due, and the locals its
@@ -2830,11 +2885,14 @@ fn nothing_at(span: Span, stata: String) -> Line {
     }
 }
 
+/// How the reason of a line Stata stops at begins.
+const STATA_STOPS: &str = "Stata stops here with an error: ";
+
 fn stop_reason(e: &Stop) -> String {
     match e {
         Stop::Later(why) => why.clone(),
         Stop::Not(why) => why.clone(),
-        Stop::Stata(m) => format!("Stata stops here with an error: {m}"),
+        Stop::Stata(m) => format!("{STATA_STOPS}{m}"),
         Stop::Ask(need) => format!("{} is {KNOWN_WHEN_RUN}", need.what()),
     }
 }

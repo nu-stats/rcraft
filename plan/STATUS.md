@@ -3372,6 +3372,10 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   no e(sample). Matches Stata to 14-15 digits (`cluster2.do`).
 - **Numbers:** packages 78.3% of source lines (from 73.1%); probes (423) 196,229 of 210,184 run lines
   (93.4%), none of the 4,336 compared lines differs, 4,325 to 8 digits and 11 to 6.
-- **Next:** in TZEN38's matrix simulation, 32,070 run lines inside a block not run are reported as
-  "Stata stops here with an error: == 0 invalid name": to check that Stata does stop there; outreg2's
-  se, tex(), lab, ctitle(), addtext() (48 lines); which; estimates table's options.
+- **An error ends the loops and programs around it** (`dofile.rs`, `abandon`): checked in Stata 19,
+  a line Stata stops at ends the enclosing loops, blocks and program calls (up to a `capture`, whose
+  `_rc` is then not known); the file goes on as with nostop. TZEN38's `learnalg` stops in Stata at
+  `if $qtr == 0 {` (no file sets `$qtr`), so 186,028 run lines RCraft counted are not run: the
+  packages are 28,953 run lines, 92.0% translated (from 64.9%), and 78.6% of 5,187 source lines.
+  Probes (425) 196,796 of 210,914 (93.3%), none different.
+- **Next:** outreg2's se, tex(), lab, ctitle(), addtext() (48 lines); which; estimates table's options.

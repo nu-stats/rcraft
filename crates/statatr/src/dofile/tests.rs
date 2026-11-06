@@ -691,3 +691,41 @@ fn gettoken_takes_the_first_token_as_stata_does() {
         shown(&d)
     );
 }
+
+#[test]
+fn an_error_ends_the_loops_and_programs_around_it() {
+    // Stata 19: `if $qtr == 0 {` with $qtr not set stops the program at its
+    // second round (==0 invalid name, r(198)); the do-file goes on after the
+    // call, and a loop at the top ends at its first round
+    let d = run(
+        "program lp\n  forvalues i = 1/3 {\n    display \"round `i'\"\n    if `i' > 1 {\n      if $qtr == 0 {\n        display \"zero\"\n      }\n    }\n  }\n  display \"after loop\"\nend\nlp\ndisplay \"after lp\"\nforvalues i = 1/2 {\n  if $qtr == 1 {\n    display \"one\"\n  }\n  display \"top loop `i'\"\n}\ndisplay \"end\"",
+    );
+    let s = shown(&d);
+    let rounds = stata_lines(&d, "display \"round");
+    assert_eq!(rounds.len(), 2, "{s:?}");
+    assert!(stata_lines(&d, "display \"after loop").is_empty(), "{s:?}");
+    assert_eq!(stata_lines(&d, "display \"after lp").len(), 1, "{s:?}");
+    assert!(stata_lines(&d, "display \"top loop").is_empty(), "{s:?}");
+    assert_eq!(stata_lines(&d, "display \"end").len(), 1, "{s:?}");
+    // the program still returns (its temporary variables go)
+    assert!(
+        s.iter().any(|l| l.contains("the program lp returns")),
+        "{s:?}"
+    );
+}
+
+#[test]
+fn an_error_under_capture_ends_only_what_capture_runs() {
+    let d = run(
+        "program lp\n  forvalues i = 1/3 {\n    if $qtr == 0 {\n      display \"zero\"\n    }\n    display \"round `i'\"\n  }\nend\ncapture lp\ndisplay _rc\nforvalues i = 1/2 {\n  capture local x = 1 +\n  display \"go on `i'\"\n}",
+    );
+    let s = shown(&d);
+    assert!(stata_lines(&d, "display \"round").is_empty(), "{s:?}");
+    assert!(
+        s.iter()
+            .any(|l| l.starts_with("display _rc") && l.contains("_rc is not known")),
+        "{s:?}"
+    );
+    // capture on the line itself: the loop goes on
+    assert_eq!(stata_lines(&d, "display \"go on").len(), 2, "{s:?}");
+}

@@ -124,6 +124,7 @@ at the worst it fared in any run:
 | With date formats and confirm (2026-11-05) | 5149 | 3189 | 1175 | 785 | 73.1% |
 | With ibn., format, postfile, graph combine (2026-11-06) | 5149 | 3241 | 1123 | 785 | 74.3% |
 | With cluster2 (2026-11-06) | 5149 | 3416 | 948 | 785 | 78.3% |
+| An error ends the loops and programs around it (2026-11-06) | 5187 | 3457 | 941 | 789 | 78.6% |
 
 Stata's matrix commands (`matrices.do`: `matrix A = ...` with `J()`, `I()`, joins, products, sums,
 transposes, `invsym()`, `inv()`, `vecdiag()`, `diag()`, `e()`; elements read and put in place; `nullmat()`;
@@ -156,6 +157,13 @@ and laid out with `graph combine`. The packages went to 74.3%. Then `cluster2`, 
 (installed from his web page to observe it; `plan/stata/cluster2.md`, `cluster2.do`), with the `outreg2` lines after
 it, took them to 78.3%. The probes stand at 93.4% (196,229 of 210,184 run lines), none of the 4,336 compared
 lines different (4,325 to 8 digits, 11 to 6).
+
+The run lines changed most from one fix to the dry run: a line Stata stops at with an error now ends the
+loops and program calls around it, as Stata ends them, and the do-file goes on at its next line (as with
+`nostop`). TZEN38's `learnalg` reads `$qtr`, which none of its files sets, so in Stata 19 it stops at
+`if $qtr == 0 {` (`==0 invalid name`, r(198)) on its second round; RCraft had gone on round after round and
+counted 186,028 run lines Stata never runs. The run lines are now 28,953, 92.0% of those a dry run judges
+translated (19,528 translated, 1,691 not, 7,734 known when run); the source lines 78.6% of 5,187.
 
 Most of what is left comes from add-ons: `esttab`'s `cells()` and `mlabels()`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:
