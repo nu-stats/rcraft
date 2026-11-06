@@ -154,13 +154,15 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
       have <- vapply(ii, function(i) Filter(function(p) p$kind == "f", ps[[i]])[[1]]$lev, "")
       with_c <- if (length(cs)) paste0("#", cont(cs, "c.")) else ""
       with_o <- if (length(cs)) paste0("#", cont(cs, "co.")) else ""
-      # the levels in Stata's order, the base one (R's first) a zero
+      # the levels in Stata's order, the base one (R's first) a zero; with a
+      # continuous variable and not the factor's own term (g#c.x alone), R
+      # gives the first level a coefficient too, and so does Stata
       for (l in L[order(Ln)]) {
-        if (l == L[1] && !isTRUE(f$nobase)) {
+        i <- ii[match(l, have)]
+        if (l == L[1] && !isTRUE(f$nobase) && (is.na(i) || !length(cs))) {
           add(paste0(l, "b.", f$var, with_o), NA_character_)
           next
         }
-        i <- ii[match(l, have)]
         if (!is.na(i) && !is.na(b[idx[i]])) {
           add(paste0(l, ".", f$var, with_c), nm[idx[i]])
         } else if (length(cs) == 0) {
@@ -207,6 +209,13 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     eq <- if (ml) paste0(depvar, ":") else ""
     names_out <- paste0(eq, r$n)
     from <- r$f
+    # a variable named twice: its own column again right after it, omitted
+    for (v in fit[["stata_repeats"]]) {
+      p <- match(paste0(eq, v), names_out)
+      if (is.na(p)) next
+      names_out <- append(names_out, paste0(eq, "o.", v), after = p)
+      from <- append(from, NA_character_, after = p)
+    }
   }
   # cut points and the like: Stata's equation "/" (xtreg, mle's sigma_u:_cons)
   if (any(aux)) {

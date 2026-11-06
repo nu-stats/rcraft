@@ -1325,8 +1325,19 @@ pub const GUIDES: &[Guide] = &[
                 "A variable the constant and the ones before it explain is omitted, the later one \
                  of a collinear set, as Stata omits it; fe also omits one that does not vary \
                  within the panels. When re has more columns than panels, sigma_u is 0 and re is \
-                 least squares, as in Stata. fe with a variable collinear with the others only \
-                 within the panels stops in R: which one Stata leaves out there is not known yet.",
+                 least squares, as in Stata. A variable named twice is kept once, the second an \
+                 omitted column after it (o.x), as Stata keeps it.",
+            ),
+            p(
+                "Differences",
+                "fe with variables collinear only within the panels (age with time dummies): one \
+                 must be left out, and the data cannot tell which. RCraft leaves out the later \
+                 one, as Stata does when the collinearity is exact; where rounding leaves a \
+                 residual, Stata's choice rests on it ('collinearity with the absorbed \
+                 variable') and may be another of the set. A note names the coefficients that \
+                 then differ (those of the set and _cons); every other result is the same \
+                 whichever is left out: the other coefficients and their standard errors, N, \
+                 the R-squareds, sigma_u, sigma_e, rho, F and the predictions.",
             ),
             MISSING_IN_MODELS,
             LAYOUT_R,

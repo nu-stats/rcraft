@@ -44,7 +44,9 @@ pub(super) const XTSET_HELPER: &str = r#"stata_xtset <- function(d, panel, time 
 }"#;
 
 /// Stata's `xtreg`, fe, be and re, with its robust and clustered variances.
-pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, panel, type = "re", robust = FALSE, cluster = NULL, level = 0.95, corr = "exchangeable") {
+pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, panel, type = "re", robust = FALSE, cluster = NULL, level = 0.95, corr = "exchangeable", repeats = character()) {
+  # a variable named twice: Stata notes the second as omitted first
+  for (v in repeats) cat("note: ", v, " omitted because of collinearity.\n", sep = "")
   mf <- stats::model.frame(formula, data, na.action = stats::na.omit)
   rows <- match(rownames(mf), rownames(data))
   g <- data[[panel]][rows]
@@ -80,13 +82,24 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   # within the panels, a variable the earlier ones explain goes too: from fe,
   # and from the fe fit re takes sigma_e from
   wkeep <- varies
+  within_set <- character()
   if (sum(varies) > 1) {
     qw <- qr(Xd[, varies, drop = FALSE], tol = 1e-9)
     gone <- setdiff(seq_len(sum(varies)), qw$pivot[seq_len(qw$rank)])
     wkeep[which(varies)[gone]] <- FALSE
-    # which column of such a set Stata leaves out of fe is not known: the last in
-    # some data, another ('collinearity with the absorbed variable') in other
-    if (type == "fe" && length(gone)) stop(paste0("xtreg, fe with ", paste(colnames(Xd)[which(varies)[gone]], collapse = " "), " collinear with the other variables within the panels is not translated yet: which one Stata leaves out is not known"), call. = FALSE)
+    # which column of such a set Stata leaves out of fe rests on its rounding
+    # (the later one where it is exact; another, 'collinearity with the
+    # absorbed variable', where rounding leaves a residual): the later one is
+    # left out here, and the columns of the set are named, whose coefficients
+    # then may differ from Stata's; nothing else does (plan/stata/xtset-on-use.md)
+    if (type == "fe" && length(gone)) {
+      Xk <- Xd[, wkeep, drop = FALSE]
+      for (j in which(varies)[gone]) {
+        cf <- qr.coef(qr(Xk), Xd[, j])
+        within_set <- c(within_set, colnames(Xd)[j], colnames(Xk)[!is.na(cf) & abs(cf) > 1e-8])
+      }
+      within_set <- unique(within_set)
+    }
   }
   if (type == "fe") varies <- wkeep
   if (type != "fe") {
@@ -167,6 +180,15 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
     # Stata's name for the column: 1.g for factor(g)1
     stata_nm <- function(v) sub("^(factor|stata_ib)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", "\\4.\\2", v)
     for (v in c(collinear, colnames(X)[!varies])) cat("note: ", stata_nm(v), " omitted because of collinearity.\n", sep = "")
+    if (length(within_set)) {
+      nm <- stata_nm(within_set)
+      lev <- grepl("^[0-9]+[a-z]*\\.", nm)
+      # the constant moves with them (it is the grand mean less their part)
+      what <- c(nm[!lev], if (any(lev)) paste0("the ", unique(sub("^[0-9]+[a-z]*\\.", "", nm[lev])), " levels"), "_cons")
+      cat("note: these columns are collinear within the panels; Stata may omit another of them (its choice rests\n",
+          "      on rounding), and then only the coefficients of ", paste(what[-length(what)], collapse = ", "),
+          " and _cons differ.\n", sep = "")
+    }
     b <- ff$b
     if (robust) {
       s <- sandwich(Zf, ff$e, ff$bread, kf)
@@ -266,6 +288,8 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
     out$ll <- -N / 2 * (1 + log(2 * pi) + log(sum(ff$e^2) / N))
     out$ll_0 <- -N / 2 * (1 + log(2 * pi) + log(sum((y - ybar[gi])^2) / N))
   }
+  # a variable named twice: an o. column after it in e(b), as Stata keeps it
+  out$stata_repeats <- repeats
   class(out) <- "stata_xtreg"
   invisible(out)
 }
@@ -397,7 +421,30 @@ impl Session {
             ));
         }
         let level = level(opts)?;
-        let spec = Spec::read(c, "xtreg")?;
+        // a variable named again (age age): Stata keeps the second as a
+        // column of its own, omitted (o.age); the fit has it once
+        let mut repeats: Vec<String> = Vec::new();
+        let mut once = c.clone();
+        {
+            let mut seen: Vec<&str> = Vec::new();
+            let mut kept: Vec<&str> = Vec::new();
+            for (i, w) in c.parts.main.split_whitespace().enumerate() {
+                if i > 0 && is_name(w) && seen.contains(&w) {
+                    repeats.push(w.to_string());
+                    continue;
+                }
+                seen.push(w);
+                kept.push(w);
+            }
+            once.parts.main = kept.join(" ");
+        }
+        if !repeats.is_empty() && matches!(kind, "mle" | "pa") {
+            return Err(no(format!(
+                "xtreg, {kind} with {} named twice is not translated yet",
+                repeats.join(" ")
+            )));
+        }
+        let spec = Spec::read(&once, "xtreg")?;
         self.helpers_for(&spec);
         let src = self.rows_for(c, out)?;
         self.helpers.insert("stata_coefs");
@@ -418,6 +465,9 @@ impl Session {
             r_number(level),
             if kind == "pa" {
                 format!(", corr = {}", r_text(corr))
+            } else if !repeats.is_empty() {
+                let names: Vec<String> = repeats.iter().map(|s| r_text(s)).collect();
+                format!(", repeats = c({})", names.join(", "))
             } else {
                 String::new()
             }

@@ -43,3 +43,27 @@ stop with "R stopped in the model before it", where they had shown the model bef
 From 870 lines run to 1,567, and from 252 model values the same as Stata's to 707, none different;
 154 of Stata's 861 are not printed (fits declined: 21 fe with the within collinearity above, and
 lines refused).
+
+## xtreg fe with columns collinear within the panels: fitted, with a note (2026-11-06)
+
+Which column Stata leaves out was probed further (`scratchpad/fecol`, 6 made-up data sets, TZEN38's 22
+models):
+- Exact collinearity (made-up data, integers): "note: 10.meet omitted because of collinearity", the
+  later column of the set in the order written (dummies written first: age).
+- TZEN38: "note: 167.FOMCMEETING_id omitted because of collinearity with the absorbed variable", and
+  165, 166, 167 or 168 by model. Fixed for a data set (rows sorted, shuffled, doubles: the same), but
+  it rests on rounding: Stata's dependency leaves a residual of 1e-14 to 1e-13 of the columns, which
+  decides whether the in-order check (1e-13) catches it, and then a largest-pivot sweep picks between
+  dummies whose pivots tie to rounding (167 and 168 have the same attendees). Largest pivot first fits
+  where there is no tie; no rule fits every model.
+- What does not depend on the choice: the coefficients outside the set and their standard errors, N,
+  the R-squareds, sigma_u, sigma_e, rho, F, the predictions. What does: the coefficients of the set
+  (age and the year's meeting levels) and _cons.
+
+Decided with the user (option C of three: decline, flag the coefficients, or fit with a note): RCraft
+fits the model leaving out the later column (Stata's choice where the collinearity is exact) and
+prints a note naming the coefficients that may differ. TZEN38: 846 of 861 model values the same as
+Stata's, the 15 others in those sets (14 age, 1 meeting level); Tables 1 and 5 the published ones
+(line endings aside), Tables 2a to 4 too but for _cons in the fe columns where Stata left out
+another level. Also `age age` (o.age after age, as Stata) and g#c.x without g (every level in
+e(b); a zero base column had been put in).

@@ -3429,3 +3429,15 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   Packages 78.6% of source lines (TZEN38's outreg2 lines run only when the package runs).
 - **Next:** xtreg fe with a column collinear only within the panels (which one Stata omits); then the
   next gaps by impact.
+
+## xtreg fe with within-panel collinearity fitted with a note; age age; g#c.x in e(b), 2026-11-06
+
+- **xtreg fe** (`data_r/xt.rs`): which column Stata leaves out of a within-panel collinear set rests on
+  rounding (probed on 28 models, `plan/stata/xtset-on-use.md`). RCraft now fits the model, leaving out
+  the later column (Stata's choice where the collinearity is exact), and a note names the coefficients
+  that may then differ (the set's and _cons); nothing else depends on the choice. Chosen with the user.
+- **A variable named twice in xtreg** (`age age`): o.age after age in e(b), as Stata. **g#c.x without g**
+  (`data_r/matrices.rs`): every level a column of e(b); a zero base column had been put first.
+- **TZEN38 run whole:** 1,771 lines run, no R errors; 846 of 861 model values the same as Stata's (the 15
+  others are age or a meeting level in those sets); Tables 1 and 5 the published ones, the others too
+  but for _cons in some fe columns. `xtcollinear.do` has the exact case, age age and g#c.x.
