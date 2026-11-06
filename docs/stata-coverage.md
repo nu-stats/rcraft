@@ -122,6 +122,8 @@ at the worst it fared in any run:
 | With split and file (2026-11-04) | 5149 | 3189 | 1175 | 785 | 73.1% |
 | With xtregar, prais, newey, input (2026-11-05) | 5149 | 3187 | 1177 | 785 | 73.0% |
 | With date formats and confirm (2026-11-05) | 5149 | 3189 | 1175 | 785 | 73.1% |
+| With ibn., format, postfile, graph combine (2026-11-06) | 5149 | 3241 | 1123 | 785 | 74.3% |
+| With cluster2 (2026-11-06) | 5149 | 3416 | 948 | 785 | 78.3% |
 
 Stata's matrix commands (`matrices.do`: `matrix A = ...` with `J()`, `I()`, joins, products, sums,
 transposes, `invsym()`, `inv()`, `vecdiag()`, `diag()`, `e()`; elements read and put in place; `nullmat()`;
@@ -147,9 +149,17 @@ formats (probe 033, every line Stata's byte for byte) and `confirm` took the pro
 209,914), still with no compared line different (4,309 of 4,320 to 8 digits, 11 to 6); the packages to 73.1%. The leap-second date functions and `%tC`, `invlogit()` and `logit()`, then took the
 probes to 93.3% (196,061 of 210,072), none different (4,312 of 4,323 to 8 digits, 11 to 6).
 
-Most of what is left comes from add-ons: Petersen's `cluster2` (not on SSC), `esttab`'s `cells()` and `mlabels()`, and
+On 2026-11-06 the packages' gaps that need no add-on installed (`plan/stata/packages-gaps.md`): `ibn.` factor
+variables with `noconstant` (no `e(ll_0)` without a constant, as in Stata), `format`, `postfile`, `post` and
+`postclose` with Stata's storage types (`postfile.do`), and graphs kept with `name()`, `saving()` and `graph save`
+and laid out with `graph combine`. The packages went to 74.3%. Then `cluster2`, Petersen's two-way clustering
+(installed from his web page to observe it; `plan/stata/cluster2.md`, `cluster2.do`), with the `outreg2` lines after
+it, took them to 78.3%. The probes stand at 93.4% (196,229 of 210,184 run lines), none of the 4,336 compared
+lines different (4,325 to 8 digits, 11 to 6).
+
+Most of what is left comes from add-ons: `esttab`'s `cells()` and `mlabels()`, and
 `outreg2`'s LaTeX form. Of Stata's own commands, the first causes are:
-- graphs (44 of 117): `graph export` after `grstyle` and `marginsplot`, `saving()` in twoway and `graph combine`;
+- graphs: `graph export` after `grstyle` and `marginsplot`;
 - `suest`.
 
 The 36 `xtreg` and `reg` lines with `f.`, `d.` and `l.` in one package read a file saved after `cd` to a folder

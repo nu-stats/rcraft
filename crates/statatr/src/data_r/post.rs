@@ -277,6 +277,11 @@ impl Session {
             Fit::Stcox => &[("hr", 2), ("xb", 2)],
             Fit::Clogit => &[("pc1", 3), ("pu0", 3), ("xb", 2)],
             Fit::Robreg => &[("xb", 2), ("residuals", 1), ("weights", 1)],
+            Fit::Cluster2 => {
+                return Err(no(
+                    "predict after cluster2 is not translated yet (Stata: cluster2 leaves no e(predict))",
+                ))
+            }
             Fit::Reghdfe => {
                 return Err(no(
                     "predict after reghdfe is not translated yet (it needs the absorbed effects, which reghdfe keeps only with resid or savefe)",
@@ -1186,6 +1191,8 @@ stata_bnames <- function() {
     m <- regmatches(p, regexec("^factor\\(([^()]+)\\)(.+)$", p))[[1]]
     if (length(m)) return(paste0(m[3], ".", m[2]))
     m <- regmatches(p, regexec("^stata_ib\\(([^,]+), \"[^\"]*\"\\)(.+)$", p))[[1]]
+    if (length(m)) return(paste0(m[3], ".", m[2]))
+    m <- regmatches(p, regexec("^stata_ibn\\(([^()]+)\\)(.+)$", p))[[1]]
     if (length(m)) return(paste0(m[3], ".", m[2]))
     # the cells of two factors interacted alone (stata_cells, level a#b)
     m <- regmatches(p, regexec("^stata_cells\\(([^,]+), ([^,]+), \"[^\"]*\", \"[^\"]*\"\\)([^#]+)#(.+)$", p))[[1]]

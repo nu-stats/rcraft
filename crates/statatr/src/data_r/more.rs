@@ -2192,3 +2192,46 @@ fn unquote_compound(s: &str) -> String {
         .and_then(|r| r.strip_suffix("\"'"))
         .map_or_else(|| s.to_string(), str::to_string)
 }
+
+impl Session {
+    /// `format varlist %fmt` (or `format %fmt varlist`): how the variables are
+    /// shown, kept as their `format.stata` attribute (which haven writes to a
+    /// .dta file); the values do not change.
+    pub(super) fn format(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let (fmts, vars): (Vec<&str>, Vec<&str>) = words.iter().partition(|w| w.starts_with('%'));
+        let [fmt] = fmts.as_slice() else {
+            return Err(no(
+                "format with no %format, or more than one, is not translated yet",
+            ));
+        };
+        if vars.is_empty() {
+            return Err(no("format needs the variables (Stata: varlist required)"));
+        }
+        if !super::returned::valid_format(fmt) || *fmt == "%21x" {
+            return Err(no(format!(
+                "format {fmt} is not a format RCraft has yet (Stata: invalid %format)"
+            )));
+        }
+        if vars.iter().any(|v| !is_name(v)) {
+            return Err(no(
+                "format with patterns or ranges of variables is not translated yet",
+            ));
+        }
+        let d = self.data()?;
+        for v in &vars {
+            out.line(format!(
+                "if (!{0} %in% names({d})) stop(\"variable {1} not found (Stata: r(111))\", call. = FALSE)",
+                r_text(v),
+                v
+            ));
+            out.line(format!(
+                "attr({d}[[{}]], \"format.stata\") <- {}",
+                r_text(v),
+                r_text(fmt)
+            ));
+        }
+        out.caveat("the display format is kept with the variable (and in a saved .dta); R's own printing does not use it");
+        Ok(())
+    }
+}

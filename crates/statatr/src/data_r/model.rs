@@ -46,6 +46,7 @@ pub(super) enum Fit {
     Clogit,
     Robreg,
     Reghdfe,
+    Cluster2,
 }
 
 impl Fit {
@@ -66,6 +67,7 @@ impl Fit {
             Fit::Clogit => "clogit",
             Fit::Robreg => "robreg",
             Fit::Reghdfe => "reghdfe",
+            Fit::Cluster2 => "cluster2",
         }
     }
 
@@ -241,6 +243,8 @@ pub(super) const IB_HELPER: &str = r##"stata_ib <- function(x, base) {
   lv <- as.character(sort(unique(x[!is.na(x)])))
   factor(x, levels = c(base, setdiff(lv, base)))
 }
+# ibn.x: every level, none the base (with noconstant: each level's own coefficient)
+stata_ibn <- function(x) factor(x)
 stata_cells <- function(x, y, bx, by) {
   lx <- as.character(sort(unique(x[!is.na(x)])))
   ly <- as.character(sort(unique(y[!is.na(y)])))
@@ -255,11 +259,9 @@ stata_cells <- function(x, y, bx, by) {
 impl Session {
     /// The helpers a model's terms call.
     pub(super) fn helpers_for(&mut self, spec: &Spec) {
-        if spec
-            .terms
-            .iter()
-            .any(|t| t.contains("stata_ib(") || t.contains("stata_cells("))
-        {
+        if spec.terms.iter().any(|t| {
+            t.contains("stata_ib(") || t.contains("stata_ibn(") || t.contains("stata_cells(")
+        }) {
             self.helpers.insert("stata_ib");
         }
     }
@@ -533,9 +535,21 @@ impl Spec {
     pub(super) fn right(&self, noconstant: bool) -> Result<String, Untranslated> {
         // Stata keeps dropping a factor's base level without the constant; R would
         // give the first factor every level, a different model
-        if noconstant && !self.factors.is_empty() {
+        // ibn.g alone with noconstant: every level, as R gives the first factor
+        let ibn_alone = self.factors.len() == 1
+            && self.factors.values().all(|r| r.starts_with("stata_ibn("))
+            && self
+                .terms
+                .iter()
+                .any(|t| t.starts_with("stata_ibn(") && !t.contains(':') && !t.contains('*'));
+        if noconstant && !self.factors.is_empty() && !ibn_alone {
             return Err(no(
                 "noconstant with factor variables is not translated yet: R would keep every level of the first factor, Stata still leaves its base level out",
+            ));
+        }
+        if !noconstant && self.terms.iter().any(|t| t.contains("stata_ibn(")) {
+            return Err(no(
+                "ibn. with the constant is not translated yet (Stata leaves a level out for collinearity; with noconstant it is)",
             ));
         }
         let right = if self.terms.is_empty() {
@@ -779,6 +793,14 @@ fn one(t: &str) -> Result<String, Untranslated> {
     if let Some(v) = t.strip_prefix("i.") {
         return if is_name(v) {
             Ok(format!("factor({})", r_name(v)))
+        } else {
+            Err(no(format!("{v} is not a variable name")))
+        };
+    }
+    // ibn.x: no base level (taken with noconstant only, see `right`)
+    if let Some(v) = t.strip_prefix("ibn.") {
+        return if is_name(v) {
+            Ok(format!("stata_ibn({})", r_name(v)))
         } else {
             Err(no(format!("{v} is not a variable name")))
         };

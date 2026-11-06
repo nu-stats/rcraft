@@ -3353,3 +3353,25 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   known after it (probe 594 showed them read as empty).
 - **Numbers:** probes (422) 196,061 of 210,072 run lines translated (93.3%); none of the 4,323 compared
   lines differs, 4,312 to 8 digits and 11 to 6.
+
+## Packages' gaps: ibn., format, postfile, graph combine, and cluster2, 2026-11-06
+
+- **ibn.** (`data_r/model.rs`, `matrices.rs`, `post.rs`): `regress y x ibn.g, noconstant` gives every
+  level its coefficient, named `kbn.g` in e(b) and `_b[]`; ibn. without noconstant is declined. No
+  `e(ll_0)` after a regress without a constant, as Stata leaves none.
+- **format** (`data_r/more.rs`): kept as the variable's `format.stata` attribute (haven writes it).
+- **postfile, post, postclose, postutil clear** (`data_r/postfile.rs`, StatCraft's decoding checked
+  in Stata 19): Stata's storage types as values are posted (float rounded, strings cut), `type(a b)`,
+  `every()`, Stata's errors, each closing the postfile; a declined post leaves its handle unknown.
+  Probe 579: 90 of 95 lines translated, 14/14 compared match (`postfile.do`).
+- **graph name(), saving(), graph save, graph combine** (`data_r/graph.rs`): graphs kept by name or
+  in files (RCraft's own, saveRDS) and laid out with gtable.
+- **cluster2** (`data_r/cluster2.rs`; `plan/stata/cluster2.md`): Petersen's add-on, installed from his
+  page at the user's go-ahead and observed, never read: V = clustered by each dimension less clustered
+  by their cells; F and df_r from the cell-clustered (or robust) fit; Stata's header, footer and e(),
+  no e(sample). Matches Stata to 14-15 digits (`cluster2.do`).
+- **Numbers:** packages 78.3% of source lines (from 73.1%); probes (423) 196,229 of 210,184 run lines
+  (93.4%), none of the 4,336 compared lines differs, 4,325 to 8 digits and 11 to 6.
+- **Next:** in TZEN38's matrix simulation, 32,070 run lines inside a block not run are reported as
+  "Stata stops here with an error: == 0 invalid name": to check that Stata does stop there; outreg2's
+  se, tex(), lab, ctitle(), addtext() (48 lines); which; estimates table's options.

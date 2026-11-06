@@ -103,7 +103,7 @@ stata_list_returned <- function(x, p) {
     cat("\nmatrices:\n")
     for (n in mat) cat(key(n), " :  ", nrow(x[[n]]), " x ", ncol(x[[n]]), "\n", sep = "")
   }
-  if (p == "e") cat("\nfunctions:\n", key("sample"), "   \n", sep = "")
+  if (p == "e" && !identical(x$cmd, "cluster2")) cat("\nfunctions:\n", key("sample"), "   \n", sep = "")
   invisible(NULL)
 }"##;
 
@@ -465,8 +465,10 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
       put(N = N, sum_w = if (is.null(w)) N else sum(w))
     }
     put(df_m = df_m, df_r = stata_df, F = wald(slopes) / df_m, r2 = r2, rmse = sqrt(rss / (Wk - k)),
-        mss = mss, rss = rss, r2_a = 1 - rss / (Wk - k) / (tss / (N - cons)), ll = ll(rss),
-        ll_0 = if (cons) ll(tss) else NA_real_, rank = k)
+        mss = mss, rss = rss, r2_a = 1 - rss / (Wk - k) / (tss / (N - cons)), ll = ll(rss))
+    # without the constant Stata keeps no e(ll_0)
+    if (cons) put(ll_0 = ll(tss))
+    put(rank = k)
     if (cmd == "anova") {
       for (n in names(extra)) e[[n]] <- extra[[n]]
       put(cmdline = cmdline, depvar = depvar, cmd = "anova", estat_cmd = "anova_estat", properties = "b V",
@@ -661,6 +663,12 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
       put(clustvar = paste(e0$cluster, collapse = " "), title3 = "Statistics robust to heteroskedasticity")
       if (length(e0$cluster) == 2) put(clustvar1 = e0$cluster[1], clustvar2 = e0$cluster[2])
     }
+  } else if (cmd == "cluster2") {
+    e0 <- fit$stata
+    put(N = e0$N, df_m = e0$df_m, df_r = e0$df_r, F = e0$F, r2 = e0$r2, rmse = e0$rmse, mss = e0$mss,
+        rss = e0$rss, r2_a = e0$r2_a, ll = e0$ll, ll_0 = e0$ll_0)
+    put(cmd = "cluster2", depvar = depvar, method = "2-dimension clustered SEs",
+        title = "Linear regression with clustered SEs", properties = "b V")
   } else if (cmd == "robreg") {
     e0 <- fit$stata
     put(N = e0$N, k_omit = 0, rank = length(b), chi2 = e0$chi2,

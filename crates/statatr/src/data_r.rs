@@ -27,6 +27,7 @@
 
 mod anova;
 mod clogit;
+mod cluster2;
 mod coefplot;
 mod dates;
 mod esttab;
@@ -44,6 +45,7 @@ mod natscale;
 mod outreg2;
 mod parmest;
 mod post;
+mod postfile;
 mod random;
 mod reghdfe;
 mod returned;
@@ -408,6 +410,7 @@ const WEIGHTED: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "cluster2",
     "stcox",
     "clogit",
     "robreg",
@@ -749,6 +752,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_insheet" => more::INSHEET_HELPER,
         "stata_split" => more::SPLIT_HELPER,
         "stata_confirm" => more::CONFIRM_HELPER,
+        "stata_post" => postfile::POST_HELPER,
         "stata_file" => files::FILE_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
@@ -789,6 +793,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_clogit" => clogit::CLOGIT_HELPER,
         "stata_robreg" => robreg::ROBREG_HELPER,
         "stata_reghdfe" => reghdfe::REGHDFE_HELPER,
+        "stata_cluster2" => cluster2::CLUSTER2_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -806,6 +811,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ivregress" => iv::IV_HELPER,
         "stata_stset" => st::STSET_HELPER,
         "stata_graph" => graph::GRAPH_HELPER,
+        "stata_combine" => graph::COMBINE_HELPER,
         "stata_stcox" => st::STCOX_HELPER,
         "stata_phtest" => st::PHTEST_HELPER,
         "stata_returned" => returned::RETURNED_HELPER,
@@ -871,6 +877,12 @@ struct Session {
     file_handles: BTreeMap<String, bool>,
     /// Handles a `file open` that was not translated may have opened.
     file_lost: BTreeSet<String>,
+    /// The postfiles open (`postfile h ...`).
+    post_handles: BTreeSet<String>,
+    /// The postfiles a declined `post` line leaves open or closed, not known which.
+    post_lost: BTreeSet<String>,
+    /// The postfiles known to be closed (postclose, postutil clear).
+    post_closed: BTreeSet<String>,
     /// The storage types of the numeric variables `generate` made, so a
     /// `replace` stores as Stata does (a float stays a float).
     storage: BTreeMap<String, Storage>,
@@ -1863,6 +1875,8 @@ impl Session {
             "split" => self.split(c, &opts, out),
             "input" => self.input(c, out),
             "confirm" => self.confirm(c, out),
+            "format" => self.format(c, out),
+            "postfile" | "post" | "postclose" | "postutil" => self.post_cmd(c, &opts, out),
             "file" => self.file(c, out),
             "generate" => self.generate(c, &opts, out),
             "replace" => self.replace(c, out),
@@ -1974,6 +1988,7 @@ impl Session {
             "clogit" => self.clogit(c, &opts, out),
             "robreg" => self.robreg(c, &opts, out),
             "reghdfe" => self.reghdfe(c, &opts, out),
+            "cluster2" => self.cluster2(c, &opts, out),
             "outreg2" => self.outreg2(c, &opts, out),
             "fre" => self.fre(c, &opts, out),
             "coefplot" => self.coefplot(c, out),

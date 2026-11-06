@@ -65,6 +65,9 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4]))
     m <- regmatches(p, regexec("^(stata_ib\\(([^,]+), \"[^\"]*\"\\))(.+)$", p))[[1]]
     if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4]))
+    # ibn.x: every level its own column, none the base (1.x 2.x ..., as Stata names them)
+    m <- regmatches(p, regexec("^(stata_ibn\\(([^()]+)\\))(.+)$", p))[[1]]
+    if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4], nobase = TRUE))
     # two factors interacted alone: one factor of cells (stata_cells), level a#b
     m <- regmatches(p, regexec("^(stata_cells\\(([^,]+), ([^,]+), \"([^\"]*)\", \"([^\"]*)\"\\))(.+)$", p))[[1]]
     if (length(m)) return(list(kind = "cells", key = m[2], vars = m[3:4], lev = m[7]))
@@ -153,7 +156,7 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
       with_o <- if (length(cs)) paste0("#", cont(cs, "co.")) else ""
       # the levels in Stata's order, the base one (R's first) a zero
       for (l in L[order(Ln)]) {
-        if (l == L[1]) {
+        if (l == L[1] && !isTRUE(f$nobase)) {
           add(paste0(l, "b.", f$var, with_o), NA_character_)
           next
         }

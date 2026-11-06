@@ -547,7 +547,7 @@ impl Session {
 }
 
 /// Text before its first comma outside quotes and parentheses, and the rest.
-fn split_top_comma(text: &str) -> (&str, &str) {
+pub(super) fn split_top_comma(text: &str) -> (&str, &str) {
     let (mut depth, mut quote) = (0usize, false);
     for (i, ch) in text.char_indices() {
         match ch {

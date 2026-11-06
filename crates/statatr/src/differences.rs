@@ -419,6 +419,16 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "format",
+        about: "Sets how variables are shown",
+        points: &[p(
+            "In R",
+            "The display format is kept as the variable's format.stata attribute, which haven \
+             writes to a saved .dta file; the values do not change, and R's own printing does \
+             not use it. Patterns and ranges of variables are not translated yet.",
+        )],
+    },
+    Guide {
         command: "foreach",
         about: "Loops: foreach, forvalues and while (and continue)",
         points: &[
@@ -877,6 +887,19 @@ pub const GUIDES: &[Guide] = &[
         points: &[p("In R", "The columns are moved as Stata moves them (first, last, before(), after(), alphabetic); the data do not change.")],
     },
     Guide {
+        command: "postfile",
+        about: "Posts results row by row to a .dta file (postfile, post, postclose)",
+        points: &[p(
+            "As Stata 19",
+            "Each post keeps a row, each value in its variable's type as Stata stores it (float \
+             rounded to single precision, a string cut to its width; float is the default); \
+             postclose writes the file with haven. replace says \"(file name.dta not found)\" \
+             as Stata does; an existing file without replace is r(602), a wrong count of \
+             expressions r(198) and a string for a number r(109), each closing the postfile as \
+             Stata does. every(#), which only sets how often Stata writes, changes nothing.",
+        )],
+    },
+    Guide {
         command: "poisson",
         about: "Poisson regression",
         points: &[ML_SE, ML_ROBUST, ML_DIGITS, MISSING_IN_MODELS],
@@ -1315,6 +1338,28 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "cluster2",
+        about: "Least squares with errors clustered two ways (Petersen's add-on)",
+        points: &[
+            p(
+                "As Stata 19",
+                "Matched to the add-on's results, not its code: the variance clustered by \
+                 fcluster() plus the one clustered by tcluster() less the one clustered by their \
+                 cells, each with Stata's G/(G-1) (N-1)/(N-K); with one row per cell the last is \
+                 the robust one. e(F) and e(df_r) are the cell-clustered fit's (the robust one's \
+                 with one row per cell); a variance below 0 is kept and its standard error is \
+                 missing; Stata's header and footer, and no e(sample), as the add-on leaves.",
+            ),
+            p(
+                "Differences",
+                "A missing value in a cluster variable stops the R script: the add-on then fits \
+                 its parts on different rows, which RCraft does not reproduce. Collinear \
+                 variables, factor variables and predict after it are not translated yet; the \
+                 coefficient table is in R's layout.",
+            ),
+        ],
+    },
+    Guide {
         command: "clogit",
         about: "Conditional (fixed-effects) logistic regression",
         points: &[
@@ -1583,6 +1628,7 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
         "global" | "macro" | "tempvar" | "tempname" | "tempfile" | "unab" | "tokenize"
         | "gettoken" => "local",
         "restore" => "preserve",
+        "post" | "postclose" | "postutil" => "postfile",
         "estadd" => "eststo",
         "else" => "if",
         "forvalues" | "while" | "continue" => "foreach",

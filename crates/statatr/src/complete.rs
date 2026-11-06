@@ -64,6 +64,7 @@ pub const COMMANDS: &[&str] = &[
     "cd",
     "clear",
     "clogit",
+    "cluster2",
     "coefplot",
     "collapse",
     "compress",
@@ -91,6 +92,7 @@ pub const COMMANDS: &[&str] = &[
     "expand",
     "file",
     "foreach",
+    "format",
     "forvalues",
     "fre",
     "fvset",
@@ -131,6 +133,10 @@ pub const COMMANDS: &[&str] = &[
     "outreg2",
     "parmest",
     "poisson",
+    "post",
+    "postclose",
+    "postfile",
+    "postutil",
     "prais",
     "predict",
     "preserve",
@@ -202,6 +208,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "vce(",
         ],
     ),
+    ("cluster2", &["fcluster(", "tcluster("]),
     (
         "coefplot",
         &[
@@ -262,10 +269,12 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     (
         "graph",
         &[
-            "as(", "height(", "legend(", "name(", "nodraw", "over(", "replace", "stack", "width(",
+            "as(", "height(", "legend(", "name(", "nodraw", "over(", "replace", "saving(", "stack",
+            "width(",
         ],
     ),
     ("gsort", &["generate(", "mfirst"]),
+    ("postfile", &["every(", "replace"]),
     (
         "histogram",
         &[
@@ -648,7 +657,9 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("file", &["close", "open", "write"]),
     (
         "graph",
-        &["bar", "box", "drop", "export", "hbar", "hbox", "twoway"],
+        &[
+            "bar", "box", "combine", "drop", "export", "hbar", "hbox", "save", "twoway",
+        ],
     ),
     ("import", &["delimited", "excel"]),
     (
@@ -1294,6 +1305,7 @@ mod tests {
             "anova" => format!("anova y g, {o}"),
             "append" => format!("append using t, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
+            "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),
             "coefplot" => format!("regress y x\ncoefplot, {o}"),
             "collapse" => format!("collapse (mean) y, {o}"),
             "connected" | "line" | "scatter" => format!("{cmd} y x, {o}"),
@@ -1317,6 +1329,7 @@ gettoken a b : s, {o}"
             }
             "import" => format!("import delimited f.csv, {o}"),
             "insheet" => format!("insheet using f.csv, {o}"),
+            "postfile" => format!("postfile h z using f, {o}"),
             "file" => format!("file open h using f.txt, write {o}"),
             "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),

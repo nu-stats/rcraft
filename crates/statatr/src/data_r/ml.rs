@@ -271,6 +271,7 @@ impl Session {
             Fit::Clogit => return self.clogit(c, opts, out),
             Fit::Robreg => return self.robreg(c, opts, out),
             Fit::Reghdfe => return self.reghdfe(c, opts, out),
+            Fit::Cluster2 => return self.cluster2(c, opts, out),
         }
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -438,7 +439,8 @@ impl Session {
             | Fit::Stcox
             | Fit::Clogit
             | Fit::Robreg
-            | Fit::Reghdfe => {}
+            | Fit::Reghdfe
+            | Fit::Cluster2 => {}
         }
         match fit {
             Fit::Logit | Fit::Probit | Fit::Poisson => {
@@ -512,7 +514,8 @@ impl Session {
             | Fit::Stcox
             | Fit::Clogit
             | Fit::Robreg
-            | Fit::Reghdfe => {}
+            | Fit::Reghdfe
+            | Fit::Cluster2 => {}
         }
         if matches!(fit, Fit::Nbreg | Fit::Ologit | Fit::Oprobit | Fit::Mlogit)
             && (robust || cluster.is_some())

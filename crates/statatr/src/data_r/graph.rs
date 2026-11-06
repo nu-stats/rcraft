@@ -871,6 +871,7 @@ impl Session {
             ("xline", 5),
             ("yline", 5),
             ("yaxis", 5),
+            ("saving", 4),
         ]);
         known.extend(TITLES.iter().map(|(o, m, _)| (*o, *m)));
         known.extend(kind_options(l.kind));
@@ -1044,6 +1045,12 @@ impl Session {
         }
         if abbrev(sub, "export", 3) {
             return self.graph_export(c, rest, opts, out);
+        }
+        if abbrev(sub, "save", 2) {
+            return self.graph_save(rest, opts, out);
+        }
+        if abbrev(sub, "combine", 3) {
+            return self.graph_combine(c, rest, opts, out);
         }
         if sub == "drop" {
             // the graphs Stata keeps by name; R keeps only the last, which
@@ -1295,7 +1302,7 @@ impl Session {
     ) -> Result<(), Untranslated> {
         let mut known: Vec<(&str, usize)> = LOOK.to_vec();
         known.extend(own.iter().copied());
-        known.extend([("xline", 5), ("yline", 5)]);
+        known.extend([("xline", 5), ("yline", 5), ("saving", 4)]);
         known.extend(TITLES.iter().map(|(o, m, _)| (*o, *m)));
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -1355,6 +1362,7 @@ impl Session {
         }
         out.package("ggplot2");
         out.line(format!("stata_graph <- {}", plot.join(" +\n  ")));
+        self.keep_graph(opts, out)?;
         if !self.quiet(c) && !opts.has("nodraw", 6) {
             out.line("print(stata_graph)");
         }
@@ -1489,3 +1497,173 @@ fn layer_texts(main: &str) -> Result<Vec<String>, Untranslated> {
             .collect())
     }
 }
+
+impl Session {
+    /// After a graph is drawn: `name(n[, replace])` keeps it by name for
+    /// `graph combine`, `saving(f[, replace])` in a file (R's form under the
+    /// .gph name, which Stata cannot open).
+    pub(super) fn keep_graph(&mut self, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(n) = opts.arg("name", 4) {
+            let (name, _) = super::coefplot::split_top_comma(&n);
+            let name = name.trim();
+            if !is_name(name) {
+                return Err(no(format!("name({n}): a graph name is a plain name")));
+            }
+            out.line(format!(
+                "if (!exists(\"stata_graphs\")) stata_graphs <- list(); stata_graphs[[{}]] <- stata_graph",
+                r_text(name)
+            ));
+        }
+        if let Some(s) = opts.arg("saving", 4) {
+            let (name, o) = super::coefplot::split_top_comma(&s);
+            let file = file_name(name.trim(), "gph");
+            let replace = crate::lang::syntax::options(o)
+                .iter()
+                .any(|x| x.is("replace", 7));
+            self.save_graph_line(&file, replace, out);
+        }
+        Ok(())
+    }
+
+    fn save_graph_line(&mut self, file: &str, replace: bool, out: &mut Out) {
+        if !replace {
+            out.line(format!(
+                "if (file.exists({p})) stop(\"file {p2} already exists (Stata: r(602))\", call. = FALSE)",
+                p = r_text(file),
+                p2 = file.replace('"', "")
+            ));
+        }
+        out.line(format!("saveRDS(stata_graph, {})", r_text(file)));
+        out.caveat("the graph is kept in R's form under the .gph name, which Stata cannot open");
+    }
+
+    /// `graph save [name] file[.gph] [, replace]`.
+    fn graph_save(&mut self, rest: &str, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("replace", 7), ("asis", 4)]) {
+            return Err(no(format!(
+                "graph save with the option {o} is not translated yet"
+            )));
+        }
+        let words: Vec<&str> = rest.split_whitespace().collect();
+        let (graph, file) = match words.as_slice() {
+            [f] => (None, *f),
+            [g, f] if is_name(g) => (Some(*g), *f),
+            _ => {
+                return Err(no(
+                    "graph save takes a file name, after a graph's name if one is given",
+                ))
+            }
+        };
+        match graph {
+            Some(g) => out.line(format!(
+                "stata_graph <- if (exists(\"stata_graphs\") && !is.null(stata_graphs[[{0}]])) stata_graphs[[{0}]] else stop(\"graph {1} not found (Stata: r(111))\", call. = FALSE)",
+                r_text(g),
+                g
+            )),
+            None if !self.graph_drawn => {
+                return Err(no("graph save needs a graph drawn earlier in this do-file"))
+            }
+            None => {}
+        }
+        let file = file_name(file, "gph");
+        self.save_graph_line(&file, opts.has("replace", 7), out);
+        Ok(())
+    }
+
+    /// `graph combine g1 g2 ...` (graphs kept by name, or .gph files RCraft
+    /// saved): in a grid (ggplot2 and gtable), `cols()` and `rows()` as asked.
+    fn graph_combine(
+        &mut self,
+        c: &Command,
+        rest: &str,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let mut known: Vec<(&str, usize)> = LOOK.to_vec();
+        known.extend([
+            ("cols", 3),
+            ("rows", 3),
+            ("saving", 4),
+            ("xsize", 5),
+            ("ysize", 5),
+            ("ycommon", 5),
+            ("xcommon", 5),
+            ("imargin", 4),
+        ]);
+        known.extend(TITLES.iter().map(|(o, m, _)| (*o, *m)));
+        if let Some(o) = opts.other(&known) {
+            return Err(no(format!(
+                "graph combine with the option {o} is not translated yet"
+            )));
+        }
+        let parts: Vec<&str> = rest.split_whitespace().collect();
+        if parts.is_empty() {
+            return Err(no("graph combine needs the graphs to combine"));
+        }
+        let mut pieces = Vec::new();
+        for p in &parts {
+            let unq = p.trim_matches('"');
+            if is_name(unq) {
+                pieces.push(format!(
+                    "(if (exists(\"stata_graphs\") && !is.null(stata_graphs[[{0}]])) stata_graphs[[{0}]] else if (file.exists({1})) readRDS({1}) else stop(\"graph {2} not found (Stata: r(111))\", call. = FALSE))",
+                    r_text(unq),
+                    r_text(&file_name(unq, "gph")),
+                    unq
+                ));
+            } else {
+                let f = file_name(unq, "gph");
+                pieces.push(format!(
+                    "(if (file.exists({0})) readRDS({0}) else stop(\"file {1} not found (Stata: r(601))\", call. = FALSE))",
+                    r_text(&f),
+                    f
+                ));
+            }
+        }
+        let mut layout = Vec::new();
+        for (o, arg) in [("cols", "ncol"), ("rows", "nrow")] {
+            if let Some(v) = opts.arg(o, 3) {
+                let n: u32 = v
+                    .trim()
+                    .parse()
+                    .map_err(|_| no(format!("{o}({v}) needs a whole number")))?;
+                layout.push(format!("{arg} = {n}"));
+            }
+        }
+        out.package("ggplot2");
+        self.helpers.insert("stata_combine");
+        let title = match opts.arg("title", 1) {
+            Some(t) => r_text(t.trim().trim_matches('"')),
+            None => "NULL".into(),
+        };
+        out.line(format!(
+            "stata_graph <- stata_combine(list({}){}, title = {title})",
+            pieces.join(", "),
+            layout.iter().map(|l| format!(", {l}")).collect::<String>()
+        ));
+        self.keep_graph(opts, out)?;
+        if !self.quiet(c) && !opts.has("nodraw", 6) {
+            out.line("grid::grid.newpage(); grid::grid.draw(stata_graph)");
+        }
+        self.graph_drawn = true;
+        out.caveat("the graphs are put side by side by ggplot2 and gtable, so the layout looks like R's, not Stata's");
+        Ok(())
+    }
+}
+
+/// `graph combine`'s R: the graphs (ggplots, or graphs combined already) in a
+/// grid, by rows, as many columns as asked or Stata's near-square default.
+pub(super) const COMBINE_HELPER: &str = r##"stata_combine <- function(plots, ncol = NULL, nrow = NULL, title = NULL) {
+  n <- length(plots)
+  if (is.null(ncol) && is.null(nrow)) ncol <- ceiling(sqrt(n))
+  if (is.null(ncol)) ncol <- ceiling(n / nrow)
+  if (is.null(nrow)) nrow <- ceiling(n / ncol)
+  grobs <- lapply(plots, function(p) if (inherits(p, "gtable")) p else ggplot2::ggplotGrob(p))
+  while (length(grobs) < nrow * ncol) grobs <- c(grobs, list(grid::nullGrob()))
+  g <- gtable::gtable_matrix("stata_combine", matrix(grobs[seq_len(nrow * ncol)], nrow, ncol, byrow = TRUE),
+                             widths = grid::unit(rep(1, ncol), "null"), heights = grid::unit(rep(1, nrow), "null"))
+  if (!is.null(title)) {
+    g <- gtable::gtable_add_rows(g, grid::unit(2, "lines"), pos = 0)
+    g <- gtable::gtable_add_grob(g, grid::textGrob(title), t = 1, l = 1, r = ncol)
+  }
+  g
+}"##;
