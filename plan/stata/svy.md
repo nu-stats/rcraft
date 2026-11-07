@@ -39,8 +39,8 @@ unit missing, Strata 1 <one>, Sampling unit 1, FPC 1 <zero>). Strata, stages and
 
 The weighted analysis does not reach svy yet: `weight_rake` comes from rake.do's `survwgt rake`
 (an SSC add-on, raking to the age-by-gender quotas), which is not translated, so `weighted_data.dta`
-is saved without it and `keep id weight_rake` stops in R. rake.do also needs `isid` and a `save` to a
-tempfile that R reports as existing (line 37). Those three are next for this package.
+is saved without it and `keep id weight_rake` stops in R. rake.do also needs `isid`. Those two are next
+for this package (its `save` to a tempfile, line 37, stopped on an earlier run's file, now removed).
 
 ## Found on the way
 

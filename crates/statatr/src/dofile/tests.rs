@@ -729,3 +729,24 @@ fn an_error_under_capture_ends_only_what_capture_runs() {
     // capture on the line itself: the loop goes on
     assert_eq!(stata_lines(&d, "display \"go on").len(), 2, "{s:?}");
 }
+
+#[test]
+fn a_tempfile_left_by_an_earlier_run_goes_before_it_is_used() {
+    // the numbering starts again each run, so the name may be an earlier
+    // run's file, and Stata's tempfile names one that does not exist yet
+    let opts = Options {
+        folder: "proj".into(),
+        temp_folder: "proj/temp".into(),
+        ..Options::default()
+    };
+    let d = dry_run("tempfile a b", &NoFiles, opts);
+    let code = d.translation.lines[0]
+        .result
+        .as_ref()
+        .map(|r| r.code.clone())
+        .unwrap_or_default();
+    assert_eq!(
+        code,
+        "dir.create(\"proj/temp\", showWarnings = FALSE, recursive = TRUE)\nunlink(c(\"proj/temp/ST_000000.tmp\", \"proj/temp/ST_000001.tmp\"))"
+    );
+}

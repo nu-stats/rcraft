@@ -3464,4 +3464,7 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **Found on the way:** the model after `svy:` lost fvset's bases (now restated as every command is);
   `ereturn list` and `return list` no longer count as changing the data for margins.
 - **YFBPT6 not reached yet:** its `weight_rake` comes from rake.do's `survwgt rake` (SSC), which is not
-  translated; rake.do also needs `isid` and a `save` to a tempfile (line 37). Next for that package.
+  translated; rake.do also needs `isid`. Next for that package.
+- **tempfile** removes a file an earlier run left under the new name (the numbering starts again each
+  run, and the app's temp folder is shared), so `save` to a tempfile without replace no longer stops
+  a second run (YFBPT6 rake.do:37).

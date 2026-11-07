@@ -981,6 +981,7 @@ impl<'f> Run<'f> {
                     return Flow::Line;
                 }
                 let mut made = Vec::new();
+                let mut files = Vec::new();
                 for n in &names {
                     // Stata 19: __000000, __000001, ... for both; tempfile a file of its own
                     let value = if c.name == "tempfile" {
@@ -993,16 +994,23 @@ impl<'f> Run<'f> {
                             t.push(value.clone());
                         }
                     }
+                    if c.name == "tempfile" {
+                        files.push(crate::expr_r::r_text(&value));
+                    }
                     self.temp += 1;
                     made.push(format!("{n} is {value}"));
                     self.set_local_now(n, Macro::Text(value));
                 }
                 let mut line = nothing(c);
                 if c.name == "tempfile" {
+                    // a Stata tempfile names a file that does not exist yet; the
+                    // numbering starts again each run, so a file an earlier run
+                    // left under the name goes (save without replace would stop)
                     line.result = Ok(RCode {
                         code: format!(
-                            "dir.create({}, showWarnings = FALSE, recursive = TRUE)",
-                            crate::expr_r::r_text(&self.opts.temp_folder)
+                            "dir.create({}, showWarnings = FALSE, recursive = TRUE)\nunlink(c({}))",
+                            crate::expr_r::r_text(&self.opts.temp_folder),
+                            files.join(", ")
                         ),
                         ..RCode::default()
                     });
