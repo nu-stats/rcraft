@@ -673,7 +673,7 @@ use crate::lang::expr::Expr;
 use crate::reader::Command;
 
 /// Where `ch` first comes outside parentheses, brackets and quotes.
-fn top_level(text: &str, ch: char) -> Option<usize> {
+pub(super) fn top_level(text: &str, ch: char) -> Option<usize> {
     let mut depth = 0i32;
     let mut quoted = false;
     for (i, c) in text.char_indices() {

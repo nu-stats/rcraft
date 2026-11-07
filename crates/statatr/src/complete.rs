@@ -169,6 +169,8 @@ pub const COMMANDS: &[&str] = &[
     "stcox",
     "stset",
     "summarize",
+    "svy",
+    "svyset",
     "svmat",
     "syntax",
     "tab1",
@@ -572,6 +574,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("summarize", &["detail", "format", "meanonly", "separator("]),
+    ("svyset", &["vce("]),
     ("svmat", &["names("]),
     ("tab1", &["missing", "nolabel", "sort"]),
     (
@@ -1295,6 +1298,7 @@ mod tests {
     fn with_option(cmd: &str, opt: &str) -> String {
         let name = opt.trim_end_matches('(');
         let arg = match name {
+            "vce" if cmd == "svyset" => "linearized",
             "level" => "90",
             "vce" => "robust",
             "by" | "over" | "strata" => "g",
@@ -1338,6 +1342,7 @@ mod tests {
             "drawnorm" if name == "n" => format!("drawnorm z1 z2, {o} clear"),
             "drawnorm" => format!("drawnorm z1 z2, {o}"),
             "_pctile" => format!("_pctile y, {o}"),
+            "svyset" => format!("svyset g [pweight=w], {o}"),
             "append" => format!("append using t, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),

@@ -102,6 +102,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("stset", &["likelihood"]),
     ("summarize", &["aware", "control", "descriptives"]),
     ("svmat", &["matrices"]),
+    ("svy", &["svy"]),
+    ("svyset", &["svy"]),
     ("syntax", &["programs"]),
     ("tabulate", &["checks", "descriptives"]),
     ("tempvar", &["control"]),

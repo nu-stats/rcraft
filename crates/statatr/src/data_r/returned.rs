@@ -708,6 +708,27 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     put(vce = vce)
     if (robust) put(vcetype = "Robust")
     put(properties = "b V")
+  } else if (cmd == "clogit" && isTRUE(extra$svy)) {
+    # svy: clogit (Stata 19): the design in e(), the adjusted Wald F on the
+    # design df, the rank the estimated columns
+    m <- stata_m
+    q <- sum(slopes)
+    W <- wald(slopes)
+    dfr <- m$df_r
+    Fa <- (dfr - q + 1) / (q * dfr) * W
+    put(k = length(b), k_dv = 1, converged = 1, rc = 0, k_eq_model = 1, N_drop = m$N_drop,
+        N_group_drop = m$N_group_drop, stages = 1, N = m$N, N_pop = m$N_pop, N_strata = 1,
+        N_psu = m$df_r + 1, df_r = dfr, k_eq = 1, rank = q,
+        p = stats::pf(Fa, q, dfr - q + 1, lower.tail = FALSE), F = Fa, df_m = q, census = 0,
+        singleton = 0, N_strata_omit = 0)
+    put(cmd = "clogit", cmdline = extra$svy_cmdline, prefix = "svy", cmdname = "clogit",
+        command = extra$command, estat_cmd = "svy_estat", vce = "linearized", vcetype = "Linearized",
+        title = "Survey: Conditional (fixed-effects) logistic regression",
+        wexp = paste("=", extra$wvar), wtype = "pweight", wvar = extra$wvar, singleunit = "missing")
+    if (nzchar(extra$psu)) put(su1 = extra$psu)
+    put(properties = "b V", predict = "clogit_p",
+        marginsnotok = "default Pc1 STDP DBeta DX2 GDBeta GDX2 Hat Residuals RSTAndard SCore",
+        marginsok = "PU0 XB", marginsdefault = "predict(pu0)", group = m$group, depvar = depvar)
   } else if (cmd == "clogit") {
     m <- stata_m
     q <- sum(slopes)

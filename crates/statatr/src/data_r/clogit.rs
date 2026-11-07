@@ -21,10 +21,11 @@ use super::stats::r_logical;
 use super::*;
 
 /// The fit, its variance and what Stata prints before the table.
-pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data, group, robust = FALSE, cluster = NULL, notes = TRUE) {
+pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data, group, robust = FALSE, cluster = NULL, notes = TRUE, weights = NULL, psu = NULL) {
   tt <- stats::terms(formula)
   mf <- stats::model.frame(formula, data, na.action = stats::na.pass)
   ok <- stats::complete.cases(mf) & !is.na(data[[group]])
+  for (v in c(weights, psu)) ok <- ok & !is.na(data[[v]])
   if (!is.null(cluster)) ok <- ok & !is.na(data[[cluster]])
   rn <- rownames(data)[ok]
   d <- data[ok, , drop = FALSE]
@@ -110,11 +111,55 @@ pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data
       }
     }
   }
-  Vinfo <- V
   S <- NULL
   cl <- NULL
   G <- NA
-  if (robust || !is.null(cluster)) {
+  wrow <- NULL
+  N_pop <- NA
+  df_r <- NA
+  # svy: sampling weights (one a group) and the design's PSUs: the weighted
+  # likelihood on Stata's path from a weighted logit's slopes, and its
+  # linearized variance, G / (G - 1) times the PSUs' score sums
+  if (!is.null(weights)) {
+    wrow <- as.numeric(d[[weights]][!out])
+    if (anyNA(wrow) || any(wrow < 0)) stop("svy: sampling weights missing or below 0 are not translated", call. = FALSE)
+    if (any(tapply(wrow, gi, function(v) length(unique(v))) > 1)) stop("weights must be the same within each group (Stata: r(407))", call. = FALSE)
+    if (!all(tapply(y, gi, sum) == 1)) stop("svy: clogit with a group of more than one positive outcome is not translated yet", call. = FALSE)
+    wg <- as.numeric(tapply(wrow, gi, function(v) v[1]))
+    lg <- suppressWarnings(stats::glm.fit(cbind(1, Xk), y, weights = wrow, family = stats::binomial(),
+                                          control = stats::glm.control(epsilon = 1e-14, maxit = 100)))
+    wll <- function(bb) {
+      eta <- drop(Xk %*% bb)
+      m <- as.numeric(tapply(eta, gi, max))
+      lse <- m + log(as.numeric(tapply(exp(eta - m[gi]), gi, sum)))
+      sum(wrow * y * eta) - sum(wg * lse)
+    }
+    wder <- function(bb) {
+      eta <- drop(Xk %*% bb)
+      e1 <- exp(eta - as.numeric(tapply(eta, gi, max))[gi])
+      p <- e1 / as.numeric(tapply(e1, gi, sum))[gi]
+      px <- rowsum(p * Xk, gi)
+      list(ll = wll(bb), g = colSums(wrow * (y - p) * Xk),
+           nh = crossprod(Xk * (wrow * p), Xk) - crossprod(px * sqrt(wg)), p = p)
+    }
+    path <- stata_ml_path(wll, wder, stats::coef(lg)[-1])
+    if (!path$converged) stop("svy: clogit did not converge as Stata's would", call. = FALSE)
+    b <- stats::setNames(path$b, names(b))
+    dd <- wder(b)
+    V <- solve(dd$nh)
+    dimnames(V) <- list(names(b), names(b))
+    ll_at <- wll(b)
+    S <- wrow * (y - dd$p) * Xk
+    cl <- if (is.null(psu)) seq_along(y) else d[[psu]][!out]
+    if (anyNA(cl)) stop("svy: missing values in the PSU variable are not translated", call. = FALSE)
+    Vinfo <- V
+    U <- rowsum(S, cl)
+    G <- nrow(U)
+    V <- V %*% crossprod(U) %*% V * G / (G - 1)
+    N_pop <- sum(wg)
+    df_r <- G - 1
+  } else if (robust || !is.null(cluster)) {
+    Vinfo <- V
     # each row's score: its x times its outcome less its chance of being among
     # the group's positives (exact: from the elementary symmetric sums)
     esym <- function(w, k) {
@@ -136,6 +181,8 @@ pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data
     U <- rowsum(S, cl)
     G <- nrow(U)
     V <- V %*% crossprod(U) %*% V * G / (G - 1)
+  } else {
+    Vinfo <- V
   }
   bf <- stats::setNames(rep(NA_real_, ncol(X)), colnames(X))
   bf[keep] <- b
@@ -158,10 +205,11 @@ pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data
     colnames(fit$stata_influence) <- colnames(X)[keep]
     fit$stata_cluster <- cl
   }
+  fit$stata_weights <- wrow
   fit$stata_written <- vapply(attr(tt, "term.labels"), function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":"), "")
   list(fit = fit, b = bf, V = Vf, N = length(y), G = if (is.null(cluster)) NA else G,
        ll = ll_at, ll_0 = fit$loglik[1], N_drop = sum(out), N_group_drop = length(bad),
-       multiple = multiple, group = group)
+       multiple = multiple, group = group, N_pop = N_pop, df_r = df_r)
 }
 stata_clogit_header <- function(m, robust, clustvar = NULL, group = NULL) {
   k <- sum(!is.na(m$b))
@@ -253,8 +301,25 @@ impl Session {
         self.helpers.insert("stata_probit_newton");
         self.helpers.insert("stata_coefs");
         let quiet = self.quiet(c);
+        // under svy: the design's weights and PSUs, and no vce() of its own
+        let svy = self.svy_call.clone();
+        if svy.is_some() && (robust || cluster.is_some()) {
+            return Err(no("svy: clogit with vce() is not allowed (Stata: r(198))"));
+        }
+        let design = match &svy {
+            Some(((psu, w), _, _)) => {
+                self.helpers.insert("stata_svy");
+                let p = if psu.is_empty() {
+                    String::new()
+                } else {
+                    format!(", psu = {}", r_text(psu))
+                };
+                format!(", weights = {}{p}", r_text(w))
+            }
+            None => String::new(),
+        };
         out.line(format!(
-            "stata_m <- stata_clogit({} ~ {right}, data = {src}, group = {}, robust = {}{}{})",
+            "stata_m <- stata_clogit({} ~ {right}, data = {src}, group = {}, robust = {}{}{}{design})",
             r_name(&spec.dep),
             r_text(&group),
             r_logical(robust || cluster.is_some()),
@@ -262,19 +327,24 @@ impl Session {
                 .as_deref()
                 .map(|v| format!(", cluster = {}", r_text(v)))
                 .unwrap_or_default(),
-            if quiet { ", notes = FALSE" } else { "" }
+            if quiet || svy.is_some() { ", notes = FALSE" } else { "" }
         ));
         out.line("stata_estimates <- stata_m$fit");
         out.line("stata_b <- stata_m$b");
         out.line("stata_vcov <- stata_m$V");
-        out.line("stata_df <- Inf");
+        out.line(if svy.is_some() {
+            "stata_df <- stata_m$df_r"
+        } else {
+            "stata_df <- Inf"
+        });
         out.line(keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
         out.line(esample_line(&d, &src));
         self.esample_new = true;
-        self.fit_robust = robust || cluster.is_some();
+        self.fit_robust = robust || cluster.is_some() || svy.is_some();
         self.fit_cluster = cluster.is_some();
+        self.svy_fit = svy.is_some();
         self.estimates = Some(Estimates {
             fit: Fit::Clogit,
             dep: spec.dep.clone(),
@@ -287,9 +357,27 @@ impl Session {
         } else {
             "oim"
         };
-        let args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &None);
+        let vce = if svy.is_some() { "linearized" } else { vce };
+        let mut args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &None);
+        if let Some(((psu, w), line, command)) = &svy {
+            args.push_str(&format!(
+                ", extra = list(svy = TRUE, psu = {}, wvar = {}, svy_cmdline = {}, command = {})",
+                r_text(psu),
+                r_text(w),
+                r_text(line),
+                r_text(command)
+            ));
+        }
         self.keep_e(c, out, &args, "");
-        if !quiet {
+        if !quiet && svy.is_some() {
+            out.line(
+                "stata_svy_header(\"Survey: Conditional (fixed-effects) logistic regression\", stata_m)",
+            );
+            out.line(format!(
+                "stata_coefs(stata_b, stata_vcov, stata_df, level = {}, label = \"Coefficient\")",
+                r_number(level)
+            ));
+        } else if !quiet {
             out.line(format!(
                 "stata_clogit_header(stata_m, robust = {}{}, group = {})",
                 r_logical(robust || cluster.is_some()),

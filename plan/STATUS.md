@@ -3454,3 +3454,14 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **YFBPT6 run whole:** 4,288 of 4,549 model values the same; the 261 others are robreg on simulated
   data, where 1e-12 upstream flips float draws; on the same data Stata's robreg gives RCraft's numbers.
   `asclogit.do` checks the chain.
+
+## svyset and svy: clogit, 2026-11-06
+
+- **svyset psu [pweight=w]** and **svy: clogit** (`data_r/svy.rs`, `data_r/clogit.rs`, `plan/stata/svy.md`):
+  the weighted estimates on Stata's path, the variance linearized over the PSUs, the design df and the
+  adjusted Wald F, e() as Stata's; predict pc1/pu0 and margins vce(unconditional) after it (weighted means,
+  linearized by PSU). `svy.do`.
+- **Found on the way:** the model after `svy:` lost fvset's bases (now restated as every command is);
+  `ereturn list` and `return list` no longer count as changing the data for margins.
+- **YFBPT6 not reached yet:** its `weight_rake` comes from rake.do's `survwgt rake` (SSC), which is not
+  translated; rake.do also needs `isid` and a `save` to a tempfile (line 37). Next for that package.

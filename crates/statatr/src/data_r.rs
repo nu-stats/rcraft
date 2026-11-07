@@ -53,6 +53,7 @@ mod robreg;
 mod scalars;
 mod st;
 mod stats;
+mod svy;
 mod tables;
 mod ts;
 mod tsreg;
@@ -411,6 +412,7 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "svyset",
     "collapse",
     "summarize",
     "tabulate",
@@ -430,6 +432,7 @@ const WEIGHTED: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "svy",
     "asclogit",
     "cluster2",
     "stcox",
@@ -546,6 +549,8 @@ const DISPLAY_OPTIONS: &[(&str, usize)] = &[
 const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10)];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "ereturn",
+    "return",
     "display",
     "matrix",
     "parmest",
@@ -816,6 +821,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_reghdfe" => reghdfe::REGHDFE_HELPER,
         "stata_cluster2" => cluster2::CLUSTER2_HELPER,
         "stata_asclogit" => clogit::ASCLOGIT_HELPER,
+        "stata_svy" => svy::SVY_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -908,6 +914,12 @@ struct Session {
     post_closed: BTreeSet<String>,
     /// After asclogit: its variables, alternatives variable and cluster, for estat summarize.
     asclogit_vars: Option<(Vec<String>, String, Option<String>)>,
+    /// svyset: the PSU variable ("" for each row its own) and the pweight variable.
+    svy_design: Option<(String, String)>,
+    /// While svy: runs its model: the design, the line as Stata keeps it, the model alone.
+    svy_call: Option<((String, String), String, String)>,
+    /// The model in e() was fitted under svy (margins weight its rows).
+    svy_fit: bool,
     /// The storage types of the numeric variables `generate` made, so a
     /// `replace` stores as Stata does (a float stays a float).
     storage: BTreeMap<String, Storage>,
@@ -1752,6 +1764,9 @@ impl Session {
         self.esample_new = false;
         self.r_new = None;
         self.e_new = false;
+        if MODELS.contains(&c.name.as_str()) {
+            self.svy_fit = false;
+        }
         self.quiet_asked.set(false);
         self.drew.set(false);
         self.scalars_read.borrow_mut().clear();
@@ -2028,6 +2043,8 @@ impl Session {
             "asclogit" => self.asclogit(c, &opts, out),
             "drawnorm" => self.drawnorm(c, &opts, out),
             "_pctile" => self.pctile_r(c, &opts, out),
+            "svyset" => self.svyset(c, &opts, out),
+            "svy" => self.svy(c, out),
             "outreg2" => self.outreg2(c, &opts, out),
             "fre" => self.fre(c, &opts, out),
             "coefplot" => self.coefplot(c, out),
@@ -3356,7 +3373,7 @@ impl Session {
     /// older `vce(cluster v)`, which `robust` does not change, and `i.x` takes
     /// the base `fvset` chose (both read off Stata 19). `None` when nothing
     /// changes.
-    fn restated(&self, c: &Command) -> Option<Command> {
+    pub(super) fn restated(&self, c: &Command) -> Option<Command> {
         let margins = c.name == "margins";
         if !MODELS.contains(&c.name.as_str()) && !margins {
             return None;

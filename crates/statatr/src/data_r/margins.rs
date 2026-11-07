@@ -259,7 +259,13 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
     vals <- lapply(items, function(f) f(b))
     IF <- unconditional$IF[, names(b), drop = FALSE]
     n <- nrow(IF)
-    S <- matrix(vapply(seq_along(items), function(j) (rep_len(vals[[j]], n) - m[j]) / n + drop(IF %*% J[j, ]), numeric(n)), n)
+    # with weights (svy) each row's part is w_i (f_i - m) / sum(w)
+    own <- function(j) {
+      ww <- wts[[j]]
+      d0 <- rep_len(vals[[j]], n) - m[j]
+      if (is.null(ww) || length(ww) != n) d0 / n else ww * d0 / sum(ww)
+    }
+    S <- matrix(vapply(seq_along(items), function(j) own(j) + drop(IF %*% J[j, ]), numeric(n)), n)
     if (!is.null(unconditional$cluster)) S <- rowsum(S, unconditional$cluster)
     Vm <- unconditional$c * crossprod(S)
   }
@@ -704,7 +710,13 @@ impl Session {
             r_number(level),
             r_text(&expression),
             r_text(compare),
-            wts = if self.weighted_fit { ", w = stats::model.weights(stats::model.frame(stata_estimates))" } else { "" },
+            wts = if self.svy_fit {
+                ", w = stata_estimates$stata_weights"
+            } else if self.weighted_fit {
+                ", w = stats::model.weights(stats::model.frame(stata_estimates))"
+            } else {
+                ""
+            },
             mc = if mcomp.is_empty() {
                 String::new()
             } else {

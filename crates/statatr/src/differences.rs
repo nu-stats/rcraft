@@ -1208,6 +1208,27 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "svy",
+        about: "Survey estimation (svyset, svy: clogit)",
+        points: &[
+            p(
+                "As Stata 19",
+                "svyset psu [pweight=w] (one stage, no strata, no finite population \
+                 correction) and svy: clogit: the weighted estimates (one weight a group, on \
+                 Stata's Newton-Raphson path), the variance linearized over the PSUs, G / (G - 1) \
+                 times their score sums; t tests on the design df (PSUs less 1), Stata's adjusted \
+                 Wald F, e() as Stata's (N_pop the groups' weights). predict pc1 and pu0 after it, \
+                 and margins with vce(unconditional): weighted means, linearized over the PSUs, on \
+                 the design df.",
+            ),
+            p(
+                "Not yet",
+                "Strata, several stages, fpc, subpop(), other models under svy, and groups with \
+                 more than one positive outcome.",
+            ),
+        ],
+    },
+    Guide {
         command: "summarize",
         about: "Summary statistics",
         points: &[
@@ -1710,6 +1731,7 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
         "tab1" | "tab2" => "tabulate",
         "scatter" | "line" | "connected" => "twoway",
         "bysort" => "by",
+        "svyset" => "svy",
         "saveold" => "save",
         "return" => "ereturn",
         "run" | "include" => "do",
