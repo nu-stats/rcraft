@@ -155,6 +155,22 @@ pub(super) const MERGE_HELPER: &str = r#"stata_merge <- function(d, u, keys, kin
   out
 }"#;
 
+/// `isid` as Stata 19 says it: the whole list named ("variables a, b, and
+/// c"), missing values checked first (a string's is ""), both r(459).
+pub(super) const ISID_HELPER: &str = r#"stata_isid <- function(d, vars, missok = FALSE) {
+  for (v in vars) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  k <- length(vars)
+  named <- if (k == 1) paste("variable", vars) else if (k == 2) paste("variables", vars[1], "and", vars[2]) else
+    paste0("variables ", paste(vars[-k], collapse = ", "), ", and ", vars[k])
+  if (!missok) {
+    gone <- vapply(vars, function(v) { x <- d[[v]]; if (is.character(x)) any(is.na(x) | x == "") else any(is.na(x)) }, TRUE)
+    if (any(gone)) stop(named, " should never be missing (Stata: r(459))", call. = FALSE)
+  }
+  if (anyDuplicated(as.data.frame(d)[vars]) > 0)
+    stop(named, if (k == 1) " does not" else " do not", " uniquely identify the observations (Stata: r(459))", call. = FALSE)
+  invisible(NULL)
+}"#;
+
 pub(super) const FORCED_HELPER: &str = r#"stata_forced <- function(d, u) {
   for (v in intersect(names(d), names(u))) {
     if (is.character(d[[v]]) != is.character(u[[v]])) {
@@ -1145,6 +1161,46 @@ impl Session {
             }
             other => return Err(no(format!("duplicates {other} is not translated yet"))),
         }
+        Ok(())
+    }
+
+    /// `isid varlist [, missok]`: nothing when the variables identify the
+    /// rows; Stata 19's r(459) messages when one is missing or two rows
+    /// share the values (`sort` is not translated yet).
+    pub(super) fn isid(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("missok", 6)]) {
+            return Err(no(format!(
+                "isid with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.if_exp.is_some() || c.parts.in_range.is_some() {
+            return Err(no("isid with if or in is not translated yet"));
+        }
+        let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
+        if vars.is_empty() || vars.iter().any(|v| !is_name(v)) {
+            return Err(no(
+                "isid with names only is translated (patterns are not yet)",
+            ));
+        }
+        let d = self.data()?;
+        self.helpers.insert("stata_isid");
+        out.line(format!(
+            "stata_isid({d}, c({}), missok = {})",
+            vars.iter()
+                .map(|v| r_text(v))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if opts.has("missok", 6) {
+                "TRUE"
+            } else {
+                "FALSE"
+            }
+        ));
         Ok(())
     }
 

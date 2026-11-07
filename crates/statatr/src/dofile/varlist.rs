@@ -168,9 +168,207 @@ pub fn needs_names(varlist: &str) -> bool {
     })
 }
 
+/// The names in an expression that may be a variable or an abbreviation
+/// of one: not in a string, not a function (a name before `(`), not a
+/// value label (after `:`), not inside `[...]`, not a number or `.a`, and
+/// not a system name (`_n`, `_b`, ... : any name beginning `_`).
+fn expression_names(exp: &str) -> Vec<(usize, usize)> {
+    let b = exp.as_bytes();
+    let mut found = Vec::new();
+    let mut i = 0;
+    let next_non_space = |from: usize| {
+        b.get(from..).and_then(|s| {
+            s.iter()
+                .position(|c| !c.is_ascii_whitespace())
+                .map(|k| from + k)
+        })
+    };
+    while let Some(&c) = b.get(i) {
+        match c {
+            b'"' => {
+                // a string, to its closing quote
+                i += 1;
+                while b.get(i).is_some_and(|&c| c != b'"') {
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'`' if b.get(i + 1) == Some(&b'"') => {
+                // a compound string, to "'
+                i += 2;
+                while i < b.len() && !(b.get(i) == Some(&b'"') && b.get(i + 1) == Some(&b'\'')) {
+                    i += 1;
+                }
+                i += 2;
+            }
+            b'[' => {
+                let mut depth = 0;
+                while let Some(&c) = b.get(i) {
+                    if c == b'[' {
+                        depth += 1;
+                    } else if c == b']' {
+                        depth -= 1;
+                        if depth == 0 {
+                            break;
+                        }
+                    }
+                    i += 1;
+                }
+                i += 1;
+            }
+            b'0'..=b'9' => {
+                // a number: digits, a point, an exponent
+                while b.get(i).is_some_and(|c| c.is_ascii_digit() || *c == b'.') {
+                    i += 1;
+                }
+                if b.get(i).is_some_and(|c| *c == b'e' || *c == b'E')
+                    && b.get(i + 1)
+                        .is_some_and(|c| c.is_ascii_digit() || *c == b'-' || *c == b'+')
+                {
+                    i += 2;
+                    while b.get(i).is_some_and(u8::is_ascii_digit) {
+                        i += 1;
+                    }
+                }
+                // a date literal's month (01jan2020) or the like: not a name
+                while b
+                    .get(i)
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
+                {
+                    i += 1;
+                }
+            }
+            b'.' => {
+                // a decimal (.5) or an extended missing value (.a); after an
+                // operator (l.x) what follows is read as usual
+                i += 1;
+                if b.get(i).is_some_and(u8::is_ascii_digit) {
+                    while b.get(i).is_some_and(u8::is_ascii_digit) {
+                        i += 1;
+                    }
+                } else if b.get(i).is_some_and(u8::is_ascii_lowercase)
+                    && !b
+                        .get(i + 1)
+                        .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'.')
+                {
+                    i += 1;
+                }
+            }
+            c if c.is_ascii_alphabetic() || c == b'_' => {
+                let start = i;
+                while b
+                    .get(i)
+                    .is_some_and(|c| c.is_ascii_alphanumeric() || *c == b'_')
+                {
+                    i += 1;
+                }
+                let after = next_non_space(i).and_then(|k| b.get(k).copied());
+                let before = exp.get(..start).and_then(|s| s.trim_end().chars().last());
+                // a system name, a value label (after :), or an operator: l.x, d.x, i.g
+                if c == b'_' || before == Some(':') || b.get(i) == Some(&b'.') {
+                    continue;
+                }
+                match after {
+                    // a function: what it is given stays as written only for
+                    // the date ones (td(01jan2020)), others hold expressions
+                    Some(b'(') => {
+                        let name = exp.get(start..i).unwrap_or("");
+                        if matches!(
+                            name,
+                            "td" | "tc"
+                                | "tC"
+                                | "tm"
+                                | "tq"
+                                | "tw"
+                                | "th"
+                                | "ty"
+                                | "c"
+                                | "e"
+                                | "r"
+                                | "s"
+                        ) {
+                            let mut depth = 0;
+                            while let Some(&c) = b.get(i) {
+                                if c == b'(' {
+                                    depth += 1;
+                                } else if c == b')' {
+                                    depth -= 1;
+                                    if depth == 0 {
+                                        break;
+                                    }
+                                }
+                                i += 1;
+                            }
+                        }
+                    }
+                    // a matrix's element, m[1,2]: not a variable
+                    Some(b'[')
+                        if exp
+                            .get(i..)
+                            .and_then(|s| s.find(']').and_then(|e| s.get(..e)))
+                            .is_some_and(|s| s.contains(',')) => {}
+                    _ => found.push((start, i)),
+                }
+            }
+            _ => i += 1,
+        }
+    }
+    found
+}
+
+/// The names in an expression that may be a variable or an abbreviation of
+/// one (only the data's names settle which).
+pub fn expression_words(exp: &str) -> Vec<&str> {
+    expression_names(exp)
+        .into_iter()
+        .filter_map(|(a, b)| exp.get(a..b))
+        .collect()
+}
+
+/// An expression with each abbreviation of a variable made the variable's
+/// name, as Stata 19 reads it (a variable comes before a scalar of the same
+/// name); a name no variable begins with stays as written.
+pub fn expand_expression(exp: &str, vars: &[String]) -> Result<String, String> {
+    let mut out = String::new();
+    let mut last = 0;
+    for (a, b) in expression_names(exp) {
+        let word = exp.get(a..b).unwrap_or("");
+        out.push_str(exp.get(last..a).unwrap_or(""));
+        match unique(word, vars)? {
+            Some(v) => out.push_str(&v),
+            None => out.push_str(word),
+        }
+        last = b;
+    }
+    out.push_str(exp.get(last..).unwrap_or(""));
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn abbreviations_in_expressions_are_the_variables() {
+        let vars: Vec<String> = ["country_v13", "group_c0110", "x1", "x2", "s1", "_merge"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let e = |s: &str| expand_expression(s, &vars);
+        assert_eq!(
+            e("country==1 & group==0").unwrap(),
+            "country_v13==1 & group_c0110==0"
+        );
+        // functions, strings, value labels, numbers, system names and matrices stay
+        assert_eq!(
+            e("missing(coun) & s == \"coun\" & coun == \"a\":coun & 1e-5 < .a & _n > 2 & M[1,2] > td(01jan2020)").unwrap(),
+            "missing(country_v13) & s1 == \"coun\" & country_v13 == \"a\":coun & 1e-5 < .a & _n > 2 & M[1,2] > td(01jan2020)"
+        );
+        assert_eq!(e("coun[_n-1] + 2").unwrap(), "country_v13[_n-1] + 2");
+        assert_eq!(e("l.d.coun + L2.x1").unwrap(), "l.d.country_v13 + L2.x1");
+        assert_eq!(e("x > 1").unwrap_err(), "x ambiguous abbreviation");
+        assert_eq!(e("newname + 1").unwrap(), "newname + 1");
+    }
 
     fn data() -> Vec<String> {
         ["id", "x1", "x2", "x3", "price", "s", "g", "f", "d"]

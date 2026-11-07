@@ -109,6 +109,7 @@ pub const COMMANDS: &[&str] = &[
     "include",
     "input",
     "insheet",
+    "isid",
     "ivregress",
     "kdensity",
     "keep",
@@ -169,6 +170,7 @@ pub const COMMANDS: &[&str] = &[
     "stcox",
     "stset",
     "summarize",
+    "survwgt",
     "svy",
     "svyset",
     "svmat",
@@ -575,6 +577,8 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("summarize", &["detail", "format", "meanonly", "separator("]),
     ("svyset", &["vce("]),
+    ("survwgt", &["by(", "generate(", "maxrep(", "totvars("]),
+    ("isid", &["missok"]),
     ("svmat", &["names("]),
     ("tab1", &["missing", "nolabel", "sort"]),
     (
@@ -657,6 +661,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
 /// The subcommands the translator takes after a command's name.
 const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("duplicates", &["drop", "report", "tag"]),
+    ("survwgt", &["rake"]),
     ("ereturn", &["list"]),
     ("estadd", &["local", "scalar"]),
     (
@@ -1134,7 +1139,7 @@ mod tests {
     fn commands_after_the_prefixes() {
         assert_eq!(options("reg", VARS), names(&["reghdfe", "regress"]));
         assert_eq!(options("regr", VARS), names(&["regress"]));
-        assert_eq!(options("su", VARS), names(&["summarize"]));
+        assert_eq!(options("su", VARS), names(&["summarize", "survwgt"]));
         assert_eq!(options("ta", VARS), names(&["tab1", "tab2", "tabulate"]));
         assert_eq!(options("q", VARS), names(&["quietly"]));
         assert_eq!(options("quietly regr", VARS), names(&["regress"]));
@@ -1343,6 +1348,15 @@ mod tests {
             "drawnorm" => format!("drawnorm z1 z2, {o}"),
             "_pctile" => format!("_pctile y, {o}"),
             "svyset" => format!("svyset g [pweight=w], {o}"),
+            "survwgt" => {
+                let need = ["by(g)", "totvars(t)", "generate(z)"];
+                let rest: Vec<&str> = need
+                    .iter()
+                    .copied()
+                    .filter(|r| !r.starts_with(name))
+                    .collect();
+                format!("survwgt rake w, {} {o}", rest.join(" "))
+            }
             "append" => format!("append using t, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),

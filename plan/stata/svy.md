@@ -37,10 +37,9 @@ unit missing, Strata 1 <one>, Sampling unit 1, FPC 1 <zero>). Strata, stages and
 
 ## YFBPT6 itself
 
-The weighted analysis does not reach svy yet: `weight_rake` comes from rake.do's `survwgt rake`
-(an SSC add-on, raking to the age-by-gender quotas), which is not translated, so `weighted_data.dta`
-is saved without it and `keep id weight_rake` stops in R. rake.do also needs `isid`. Those two are next
-for this package (its `save` to a tempfile, line 37, stopped on an earlier run's file, now removed).
+Reached since `survwgt rake` and `isid` are translated (`survwgt.md`): the nine countries' svy clogit
+and margins tables match Stata's to every printed digit (all nine svy tables, 81 rows, and Sweden's margins checked). Stata's header writes
+counts with thousands separators (1,316 PSUs), as RCraft now does.
 
 ## Found on the way
 

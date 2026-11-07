@@ -53,6 +53,7 @@ mod robreg;
 mod scalars;
 mod st;
 mod stats;
+mod survwgt;
 mod svy;
 mod tables;
 mod ts;
@@ -608,10 +609,14 @@ fn no(reason: impl Into<String>) -> Untranslated {
 
 /// `import delimited`'s reading: a line that is empty is skipped, as in Stata, but
 /// one of delimiters alone is a row of missing values (readr would skip both).
-const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ...) {
+/// A column's type comes from every row, as Stata 19 scans the whole file (a
+/// column of numbers with "NA" at row 6,583 is a string); readr would look at
+/// the first 1,000 and make the late text missing.
+const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ..., guess_max = NULL) {
   lines <- readLines(file, warn = FALSE)
   lines <- lines[nzchar(sub("\r$", "", lines))]
-  readr::read_delim(I(paste0(lines, collapse = "\n")), ..., skip_empty_rows = FALSE)
+  if (is.null(guess_max)) guess_max <- max(1000, length(lines))
+  readr::read_delim(I(paste0(lines, collapse = "\n")), ..., guess_max = guess_max, skip_empty_rows = FALSE)
 }"#;
 
 /// R's version of Stata's float storage: a double rounded to the nearest
@@ -822,6 +827,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_cluster2" => cluster2::CLUSTER2_HELPER,
         "stata_asclogit" => clogit::ASCLOGIT_HELPER,
         "stata_svy" => svy::SVY_HELPER,
+        "stata_survwgt" => survwgt::SURVWGT_HELPER,
+        "stata_isid" => more::ISID_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -1991,6 +1998,8 @@ impl Session {
             "collapse" => self.collapse(c, &opts, out),
             "xpose" => self.xpose(c, &opts, out),
             "duplicates" => self.duplicates(c, &opts, out),
+            "isid" => self.isid(c, &opts, out),
+            "survwgt" => self.survwgt(c, &opts, out),
             "encode" => self.encode(c, &opts, out),
             "decode" => self.decode(c, &opts, out),
             "destring" => self.destring(c, &opts, out),

@@ -3463,8 +3463,28 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   linearized by PSU). `svy.do`.
 - **Found on the way:** the model after `svy:` lost fvset's bases (now restated as every command is);
   `ereturn list` and `return list` no longer count as changing the data for margins.
-- **YFBPT6 not reached yet:** its `weight_rake` comes from rake.do's `survwgt rake` (SSC), which is not
+- **YFBPT6 not reached yet** (done 2026-11-07, below): its `weight_rake` comes from rake.do's `survwgt rake` (SSC), which was not
   translated; rake.do also needs `isid`. Next for that package.
 - **tempfile** removes a file an earlier run left under the new name (the numbering starts again each
   run, and the app's temp folder is shared), so `save` to a tempfile without replace no longer stops
   a second run (YFBPT6 rake.do:37).
+
+## survwgt rake, isid, abbreviations in expressions, 2026-11-07
+
+- **survwgt rake** (SSC, installed in Stata with the user's OK; observed, its program not read;
+  `data_r/survwgt.rs`, `plan/stata/survwgt.md`): raking in Stata's order, its stopping rule for totals
+  below a thousand (0.001 on any category's gap; every case observed), maxrep() (10 by default) and its
+  warning, the add-on's errors, missing weights and categories, the double "(raked)" variable, the data
+  left sorted by the last dimension. With several dimensions and large totals Stata can stop sooner by a
+  rule not pinned down: R stops with a message there. `survwgt.do`.
+- **isid** with Stata's r(459) messages and missok (`data_r/more.rs`). `survwgt.do`.
+- **Abbreviations in expressions**: `keep if country==1` for country_v13, in if, generate and egen's
+  expression, replace and assert, as Stata 19 reads them (a variable before a scalar; ambiguous is
+  r(111)). The names are asked of R when an expression has a name R has not given as a variable.
+- **import delimited** decides a column's type from the whole file, as Stata does (readr looked at 1,000
+  rows: a late "NA" made a column of numbers instead of text).
+- **YFBPT6:** 18,106 lines ran, 214 refused, 29 stopped in R (were 17,735, 275 and 337). rake.do and
+  analysis_weighted.do run every line; their 63 compared values match Stata's (to 2e-7), and the svy
+  clogit tables (all nine countries, 81 rows) and Sweden's margins match Stata's to every printed digit (Stata's own reference
+  rerun for those two files, since its first run had no survwgt). What is left in YFBPT6: `contract`
+  (representative.do), macro.do's chain, graphs.

@@ -245,6 +245,9 @@ const NAMES_STAY: &[&str] = &[
     "browse",
     "pause",
     "more",
+    "replace",
+    "assert",
+    "isid",
 ];
 
 /// Deepest nesting of files run from files.
@@ -342,6 +345,9 @@ pub struct Run<'f> {
     done: bool,
     /// The data's variable names, as R last gave them, while they hold.
     vars: Option<Vec<String>>,
+    /// The names R gave last, kept after a line that may have changed them:
+    /// a name in an expression that is one of them needs no asking.
+    seen_vars: Vec<String>,
     /// A local the line just added sets from what it left (`levelsof, local()`).
     then: Option<(String, Need)>,
 }
@@ -393,6 +399,7 @@ impl<'f> Run<'f> {
             waiting: None,
             done: false,
             vars: None,
+            seen_vars: Vec::new(),
             then: None,
         }
     }
@@ -1472,6 +1479,64 @@ impl<'f> Run<'f> {
                         Ok(None) | Err(_) => {}
                     }
                 }
+                // a name in an expression may abbreviate a variable (keep if
+                // country==1 for country_v13), which only the data's names settle
+                let in_main = matches!(c.name.as_str(), "generate" | "replace" | "egen" | "assert");
+                let exp_of = |main: &str| -> (String, String) {
+                    // generate and egen: what follows = (the new name stays)
+                    match (c.name.as_str(), main.split_once('=')) {
+                        ("generate" | "egen", Some((head, exp))) => {
+                            (format!("{head}="), exp.to_string())
+                        }
+                        ("generate" | "egen", None) => (main.to_string(), String::new()),
+                        _ => (String::new(), main.to_string()),
+                    }
+                };
+                let main_exp = if in_main {
+                    exp_of(&c.parts.main).1
+                } else {
+                    String::new()
+                };
+                let mut words = varlist::expression_words(&main_exp);
+                if let Some(e) = c.parts.if_exp.as_deref() {
+                    words.extend(varlist::expression_words(e));
+                }
+                // names R gave before that are names still need no asking
+                let wants = !words.is_empty()
+                    && (self.vars.is_some()
+                        || words.iter().any(|w| !self.seen_vars.iter().any(|v| v == w)));
+                if wants {
+                    match self.vars_now() {
+                        Err(Stop::Ask(need)) => return Flow::Ask(need),
+                        Ok(Some(vars)) => {
+                            let mut done = Ok(());
+                            if let Some(e) = c.parts.if_exp.clone() {
+                                match varlist::expand_expression(&e, &vars) {
+                                    Ok(x) => c.parts.if_exp = Some(x),
+                                    Err(e) => done = Err(e),
+                                }
+                            }
+                            if in_main && done.is_ok() {
+                                let (head, exp) = exp_of(&c.parts.main);
+                                match varlist::expand_expression(&exp, &vars) {
+                                    Ok(x) => c.parts.main = format!("{head}{x}"),
+                                    Err(e) => done = Err(e),
+                                }
+                            }
+                            if let Err(e) = done {
+                                self.done_item(depth);
+                                let line = self.t.refused(
+                                    c.span,
+                                    c.text.clone(),
+                                    format!("Stata stops here with an error: {e}"),
+                                );
+                                self.push(line, What::Command, None, written);
+                                return Flow::Line;
+                            }
+                        }
+                        Ok(None) | Err(_) => {}
+                    }
+                }
                 // use: the xtset or tsset settings Stata saved in the file, which
                 // it puts back as it reads it (only R, when the do-file runs, can look)
                 let mut saved_ts = None;
@@ -1586,6 +1651,7 @@ impl<'f> Run<'f> {
                     .filter(|l| !l.is_empty())
                     .collect();
                 self.vars = Some(v.clone());
+                self.seen_vars = v.clone();
                 Ok(Some(v))
             }
             Err(Stop::Later(_)) => Ok(None),

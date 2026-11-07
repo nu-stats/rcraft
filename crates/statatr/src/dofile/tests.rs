@@ -80,9 +80,15 @@ fn a_value_only_r_knows_is_asked_for_and_used() {
     let text = "use auto\nsummarize price\nlocal m = r(mean)\ngenerate d = price - `m'\nif r(N) > 10 {\n  display \"many\"\n}";
     let mut r = Run::new(text, &NoFiles, Options::default());
     let mut asks = Vec::new();
+    let mut names_asked = 0;
     loop {
         match r.next_event() {
             Event::Line => {}
+            // the data's names, for a name in an expression (price)
+            Event::Ask(code) if code.code.starts_with("cat(names(") => {
+                names_asked += 1;
+                r.give(Ok("make\nprice\nmpg\n".into()));
+            }
             Event::Ask(code) => {
                 asks.push(code.clone());
                 // what R would print: the mean in %18.0g, then r(N) > 10
@@ -98,6 +104,7 @@ fn a_value_only_r_knows_is_asked_for_and_used() {
     }
     let d = r.finish();
     assert_eq!(asks.len(), 2);
+    assert_eq!(names_asked, 1);
     assert!(asks[0].code.contains("%18.0g"), "{}", asks[0].code);
     assert!(!asks[0].text);
     let s = shown(&d);

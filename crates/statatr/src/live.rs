@@ -283,6 +283,16 @@ mod tests {
         live.give(Ok("  6165.256756756757\n".into()));
         let set = live.step("local m = r(mean)");
         assert!(set.ask.is_none() && set.lines.len() == 1, "{set:?}");
+        // the data's names first: price may abbreviate a variable
+        let names = live.step("generate d = price - `m'");
+        assert!(
+            names
+                .ask
+                .as_deref()
+                .is_some_and(|c| c.starts_with("cat(names(")),
+            "{names:?}"
+        );
+        live.give(Ok("make\nprice\nmpg\n".into()));
         let used = live.step("generate d = price - `m'");
         assert_eq!(
             used.lines[0].stata,
