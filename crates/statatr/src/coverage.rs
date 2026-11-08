@@ -54,6 +54,7 @@ const DATA: &[&str] = &[
     "bysort",
     "capture",
     "cd",
+    "center",
     "char",
     "clear",
     "clonevar",

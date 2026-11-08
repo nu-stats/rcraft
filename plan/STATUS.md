@@ -3543,3 +3543,17 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   cheaper.
 - Probes: 446, one differing (518-regress-bits, StatCraft's, residual bits); probe 574's append now
   runs.
+
+## center (SSC), 2026-11-08
+
+- **center** installed in Stata with the user's OK and observed (its program not read;
+  `data_r/center.rs`, `plan/stata/center.md`, `center.do` to 1e-13): new c_ variables or
+  inplace, standardize, casewise, if, aweights and fweights, double, replace, nolabel, prefix(),
+  the add-on's float-rounded mean and sd, its labels, messages and errors. `in` is refused (the
+  add-on leaves the rows in range unchanged there).
+- **ZNMIXH with center:** Stata's reference rerun with center installed (the package copy's
+  `ssc install` and `, perm` lines commented out). RCraft runs 101,360 lines and all 569 values it
+  reaches match Stata's; the e2e run stops at its 30-minute limit, since lassoClean's pairwise loop
+  asks R for the names and e(r2) on every pass. Left: that loop's cost; `eststo ...: reg ... if`
+  at 01_analysis.do:1781 stopping in R ("logical subscript too long"); outreg (108 lines); `winsor`
+  (SSC, not installed in Stata, so Stata's own run stops there too).

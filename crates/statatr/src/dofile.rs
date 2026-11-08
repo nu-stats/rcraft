@@ -187,6 +187,7 @@ const VARLIST: &[&str] = &[
     "levelsof",
     "contract",
     "codebook",
+    "center",
     "isid",
 ];
 

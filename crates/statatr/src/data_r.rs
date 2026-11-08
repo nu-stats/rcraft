@@ -26,6 +26,7 @@
 //! without the data and are taken as written.
 
 mod anova;
+mod center;
 mod clogit;
 mod cluster2;
 mod codebook;
@@ -427,6 +428,7 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "center",
     "contract",
     "svyset",
     "collapse",
@@ -904,6 +906,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_suest" => suest::SUEST_HELPER,
         "stata_est_table" => esttable::EST_TABLE_HELPER,
         "stata_codebook" => codebook::CODEBOOK_HELPER,
+        "stata_center" => center::CENTER_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -1919,6 +1922,7 @@ impl Session {
                 | "format"
                 | "order"
                 | "compress"
+                | "center"
         ) || (matches!(name, "drop" | "keep")
             && c.parts.if_exp.is_none()
             && c.parts.in_range.is_none());
@@ -2082,6 +2086,7 @@ impl Session {
             "isvar" => self.isvar(c, &opts, out),
             "suest" => self.suest(c, &opts, out),
             "codebook" => self.codebook(c, out),
+            "center" => self.center(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
                 out.caveat("nothing to do in R: query only shows Stata's own settings");
