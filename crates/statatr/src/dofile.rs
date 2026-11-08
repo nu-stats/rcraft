@@ -19,7 +19,7 @@
 //! `format`, `macros` and `plan/STATUS.md`.
 
 mod eval;
-mod format;
+pub(crate) mod format;
 mod macros;
 mod progsyntax;
 mod scan;
@@ -188,6 +188,7 @@ const VARLIST: &[&str] = &[
     "contract",
     "codebook",
     "center",
+    "winsor",
     "isid",
 ];
 

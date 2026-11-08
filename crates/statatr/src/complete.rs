@@ -198,6 +198,7 @@ pub const COMMANDS: &[&str] = &[
     "use",
     "version",
     "while",
+    "winsor",
     "xpose",
     "xtile",
     "xtreg",
@@ -601,6 +602,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("recast", &["force"]),
+    ("winsor", &["generate(", "h(", "highonly", "lowonly", "p("]),
     (
         "center",
         &[
@@ -1403,6 +1405,9 @@ mod tests {
             "contract" => format!("contract g, {o}"),
             "recast" => format!("recast float y, {o}"),
             "center" => format!("center y, {o}"),
+            "winsor" if name == "generate" => format!("winsor y, {o} p(.1)"),
+            "winsor" if name == "p" || name == "h" => format!("winsor y, gen(z) {o}"),
+            "winsor" => format!("winsor y, gen(z) p(.1) {o}"),
             "connected" | "line" | "scatter" => format!("{cmd} y x, {o}"),
             "twoway" => format!("twoway scatter y x, {o}"),
             "describe" => format!("describe, {o}"),

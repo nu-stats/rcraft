@@ -397,7 +397,13 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     # on the scale of the errors (a correlation), so coefficients of very
     # different sizes do not make V look singular to solve()
     bk <- b[keep]
-    Vk <- as.matrix(V[keep, keep, drop = FALSE])
+    # by name: a robust V (sandwich) leaves out the rows of an NA coefficient
+    Vm <- as.matrix(V)
+    Vk <- if (!is.null(rownames(Vm)) && all(names(bk) %in% rownames(Vm))) {
+      Vm[names(bk), names(bk), drop = FALSE]
+    } else {
+      Vm[keep, keep, drop = FALSE]
+    }
     s <- sqrt(diag(Vk))
     z <- bk / s
     # a variance of less than full rank (fewer clusters than slopes): Stata's test is missing

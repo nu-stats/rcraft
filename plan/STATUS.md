@@ -3557,3 +3557,15 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   asks R for the names and e(r2) on every pass. Left: that loop's cost; `eststo ...: reg ... if`
   at 01_analysis.do:1781 stopping in R ("logical subscript too long"); outreg (108 lines); `winsor`
   (SSC, not installed in Stata, so Stata's own run stops there too).
+
+## winsor (SSC), and robust regress with an omitted variable, 2026-11-08
+
+- **winsor** installed in Stata with the user's OK and observed (its program not read;
+  `data_r/winsor.rs`, `plan/stata/winsor.md`, `winsor.do` to 1e-13): p() and h(), high and low,
+  ties, missing values, if and in, the type, format and label it gives, its errors.
+- **regress, robust with a variable omitted for collinearity** stopped in R ("logical subscript too
+  long"): sandwich's variance leaves out the omitted row, and the F test indexed it by position.
+  Now by name; e(F), _se and e(b) match Stata's (`regress_exact.do`). ZNMIXH 01_analysis.do:1781.
+- **ZNMIXH:** 111,019 lines ran, 1,271 refused, 53 stopped in R (36 minutes, the isvar loop); all
+  583 values compared match Stata's reference, rerun with center and winsor. Stata still lacks revrs,
+  pdslasso, the blindschemes scheme.

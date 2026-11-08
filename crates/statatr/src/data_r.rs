@@ -64,6 +64,7 @@ mod tables;
 mod ts;
 mod tsreg;
 mod weights;
+mod winsor;
 mod xt;
 mod xtregar;
 
@@ -907,6 +908,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_est_table" => esttable::EST_TABLE_HELPER,
         "stata_codebook" => codebook::CODEBOOK_HELPER,
         "stata_center" => center::CENTER_HELPER,
+        "stata_winsor" => winsor::WINSOR_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -1923,6 +1925,7 @@ impl Session {
                 | "order"
                 | "compress"
                 | "center"
+                | "winsor"
         ) || (matches!(name, "drop" | "keep")
             && c.parts.if_exp.is_none()
             && c.parts.in_range.is_none());
@@ -2087,6 +2090,7 @@ impl Session {
             "suest" => self.suest(c, &opts, out),
             "codebook" => self.codebook(c, out),
             "center" => self.center(c, &opts, out),
+            "winsor" => self.winsor(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
                 out.caveat("nothing to do in R: query only shows Stata's own settings");

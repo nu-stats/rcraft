@@ -159,6 +159,7 @@ const DATA: &[&str] = &[
     "webuse",
     "which",
     "while",
+    "winsor",
     "xpose",
 ];
 
