@@ -148,6 +148,24 @@ pub fn expand(varlist: &str, vars: &[String]) -> Result<String, String> {
     Ok(out.join(" "))
 }
 
+/// The names a varlist writes (without operators, factor prefixes,
+/// parentheses or patterns): each may be an abbreviation, which only the
+/// data's names settle.
+pub fn varlist_words(varlist: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for tok in varlist.split_whitespace() {
+        let tok = tok.trim_matches(['(', ')', '=']);
+        for part in tok.split('#') {
+            let atom = part.rsplit('.').next().unwrap_or(part);
+            if atom.chars().next().is_some_and(is_atom_start)
+                && atom.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+            {
+                out.push(atom.to_string());
+            }
+        }
+    }
+    out
+}
 /// Whether a varlist has anything only the data's names settle: a
 /// pattern, a range or `_all` (an abbreviation cannot be told from a name
 /// without them, and a name not in the data makes R say so).
@@ -344,6 +362,24 @@ pub fn expand_expression(exp: &str, vars: &[String]) -> Result<String, String> {
     Ok(out)
 }
 
+/// `isvar` (SSC), as observed in Stata 19: each word that names variables
+/// as a varlist would (an abbreviation, a pattern, a range) gives them, in
+/// order and repeats kept; any other word (an operator, an ambiguous or
+/// unknown name, `_n`, a number) goes to the second list as written.
+pub fn isvar_split(words: &str, vars: &[String]) -> (Vec<String>, Vec<String>) {
+    let mut good = Vec::new();
+    let mut bad = Vec::new();
+    for w in words.split_whitespace() {
+        let plain = w.chars().next().is_some_and(is_atom_start) && w.chars().all(is_atom_char);
+        match resolve(w, vars) {
+            Ok(names) if plain && !names.is_empty() && names.iter().all(|n| vars.contains(n)) => {
+                good.extend(names)
+            }
+            _ => bad.push(w.to_string()),
+        }
+    }
+    (good, bad)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -400,5 +436,22 @@ mod tests {
         assert!(needs_names("y x*") && needs_names("x1-x3") && needs_names("_all"));
         assert!(needs_names("(x = z1-z3)") && needs_names("i.g*"));
         assert!(!needs_names("y x1 x2") && !needs_names("i.g c.x#c.w"));
+    }
+
+    #[test]
+    fn isvar_splits_names_as_stata_19_does() {
+        let vars: Vec<String> = ["alpha", "beta", "gamma1", "gamma2", "name"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let (good, bad) = isvar_split(
+            "beta zz alp gamma* gamma alpha-gamma1 name _n 1x Alpha i.alpha",
+            &vars,
+        );
+        assert_eq!(
+            good,
+            ["beta", "alpha", "gamma1", "gamma2", "alpha", "beta", "gamma1", "name"]
+        );
+        assert_eq!(bad, ["zz", "gamma", "_n", "1x", "Alpha", "i.alpha"]);
     }
 }

@@ -3488,3 +3488,58 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   clogit tables (all nine countries, 81 rows) and Sweden's margins match Stata's to every printed digit (Stata's own reference
   rerun for those two files, since its first run had no survwgt). What is left in YFBPT6: `contract`
   (representative.do), macro.do's chain, graphs.
+
+## contract, recast, isvar, suest, estimates table, codebook and more, 2026-11-07
+
+- **Fixed a regression from 17242ef**: abbreviations in expressions read `egen vmean = rowmean(v*)`'s
+  varlist as an expression (`v ambiguous abbreviation`, YFBPT6 macroreg.do, 10 lines). Only egen's
+  functions that take an expression are read that way now.
+- **contract** (freq, cfreq, percent, cpercent bit for bit, float, format, zero, nomiss, if, in,
+  fweights, its errors) and **recast** to number types (truncation, float, out of range, force and
+  Stata's messages). `contract.do`, `plan/stata/contract.md`.
+- **isvar** (SSC, observed only; it was already in Stata's PLUS folder) with r(varlist) and
+  r(badlist), which the translator works out from the data's names, so `r(varlist)' needs no ask.
+  **wordcount()** in expressions. `isvar.do`.
+- **A fit Stata takes as exact**: regress below about 1e-14 of the total sum of squares gives rss 0,
+  R-squared 1, F and ll missing and standard errors of 0, as Stata's; the narrow band where the
+  cut-off was not pinned down is refused. `regress_exact.do`. ZNMIXH's own lassoClean program relies
+  on `e(r2)==1`.
+- **suest** of stored clogits (e(b) with bases and name_depvar equations, the clustered sandwich
+  e(V), clogit's groups without vce(cluster)), **margins after it** with dydx() of factor levels and
+  an expression() of the equations' predictions, posted, and **test** after it: all match Stata to
+  1e-15. **estimates table** (R's layout, r(names)). `suest.do`, `plan/stata/suest.md`.
+- **margins, dydx(1.reform 3.opinion)**: the levels asked for, r(b) with their bases as Stata's; and
+  **matrix list e(b) after margins, post** of effects alone (R checks the layout). `clogit_margins.do`.
+- **codebook** (R's layout, no storage types), **grstyle** (style only, like set scheme), list
+  **sepby()**, quoted **matrix rownames/colnames** ("18--24", "65+", spaces), `: var label`,
+  **coefl** as Stata's shortest coeflegend, and **compress** and an untranslated **putexcel** no
+  longer cost the model or the data that follow.
+- **Abbreviations in varlists**: `drop _m` for _merge (ZNMIXH, YFBPT6 agg_merge.do), in every
+  varlist command, the data's names asked when a name is not one R has given; ambiguous is Stata's
+  error. The Command window asks once per new name.
+- **predict after logit and probit with a perfect predictor**: missing on the rows it excluded, in
+  the sample or out of it, as Stata's default (ZNMIXH 02_attrition.do's inverse-probability weights
+  used 13 rows Stata leaves out); e(b) keeps the omitted variable as a column of 0 where it was
+  written. `perfect_predict.do`.
+- **A refused command that changes variables in place** (`center x, inplace`, `..., replace` that
+  is not a file's): its variables are no longer known after it, so lines that read them are refused
+  rather than run on the old values. (ZNMIXH's reference run had no `center`; Stata stopped each
+  loop at it, which is why lines 860-892 and 2999-3005 differed.)
+- **append** puts a file's `%td` dates in the form the data in memory have (probe 574).
+- `robreg m y x` and `ivregress gmm ...`: the estimator's word is not taken as a variable.
+- `estimates table` before `suest` no longer costs the stored models; `matrix rownames` with quoted
+  names; list `sepby()`; `query` and `grstyle` (nothing to do in R).
+- **YFBPT6:** 18,325 lines ran, 20 refused, 4 stopped in R (were 18,106, 214 and 29); all 4,553
+  values compared with Stata's log match (the 63 of rake.do and analysis_weighted.do as before).
+  analysis_polknow.do runs every line, suest included. Left: esttab's LaTeX options (cells(),
+  mlabels() with suboptions, matrix()), cmset/cmclogit with margins over alternatives (2 files),
+  rreg, twoway rspike, and two graphs that read a .gph.
+- **TZEN38:** 1,923 ran, 371 refused (were 1,771 and 523): an untranslated putexcel keeps the model.
+- **ZNMIXH:** isvar makes its own lassoClean program run (110,895 lines with it), but `center` (SSC,
+  not translated, and not installed in the Stata that made the reference log) changes its
+  variables in place, so what reads them after it is now refused: 4,823 ran. Next for ZNMIXH:
+  install center in Stata with the user's OK, observe and translate it, and record Stata's log
+  again with it. The loop then asks R thousands of times (26 minutes in the e2e run): worth making
+  cheaper.
+- Probes: 446, one differing (518-regress-bits, StatCraft's, residual bits); probe 574's append now
+  runs.

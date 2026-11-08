@@ -185,6 +185,9 @@ const VARLIST: &[&str] = &[
     "scatter",
     "line",
     "levelsof",
+    "contract",
+    "codebook",
+    "isid",
 ];
 
 /// Commands that leave the data's variable names as they were.
@@ -248,6 +251,10 @@ const NAMES_STAY: &[&str] = &[
     "replace",
     "assert",
     "isid",
+    "isvar",
+    "codebook",
+    "grstyle",
+    "estimates",
 ];
 
 /// Deepest nesting of files run from files.
@@ -348,6 +355,9 @@ pub struct Run<'f> {
     /// The names R gave last, kept after a line that may have changed them:
     /// a name in an expression that is one of them needs no asking.
     seen_vars: Vec<String>,
+    /// What the last isvar left in r(): known here, so `r(varlist)' needs no
+    /// asking while those are still the r() Stata holds.
+    isvar_r: Vec<(String, String)>,
     /// A local the line just added sets from what it left (`levelsof, local()`).
     then: Option<(String, Need)>,
 }
@@ -400,6 +410,7 @@ impl<'f> Run<'f> {
             done: false,
             vars: None,
             seen_vars: Vec::new(),
+            isvar_r: Vec::new(),
             then: None,
         }
     }
@@ -1454,14 +1465,32 @@ impl<'f> Run<'f> {
                 let mut c = c.clone();
                 let mut info = None;
                 let main = c.parts.main.clone();
-                if VARLIST.contains(&c.name.as_str()) && varlist::needs_names(&main) {
+                // robreg m y x, ivregress gmm y (x = z): the estimator first, not a variable
+                let (lead, list) = match c.name.as_str() {
+                    "robreg" | "ivregress" => {
+                        match main.trim_start().split_once(char::is_whitespace) {
+                            Some((a, b)) => (format!("{a} "), b.to_string()),
+                            None => (main.clone(), String::new()),
+                        }
+                    }
+                    _ => (String::new(), main.clone()),
+                };
+                // and a name R has not given as a variable may abbreviate one
+                // (drop _m for _merge), as anywhere Stata takes a varlist
+                let unseen = || {
+                    let words = varlist::varlist_words(&list);
+                    !words.is_empty()
+                        && (self.vars.is_some()
+                            || words.iter().any(|w| !self.seen_vars.iter().any(|v| v == w)))
+                };
+                if VARLIST.contains(&c.name.as_str()) && (varlist::needs_names(&list) || unseen()) {
                     match self.vars_now() {
                         Err(Stop::Ask(need)) => return Flow::Ask(need),
-                        Ok(Some(vars)) => match varlist::expand(&main, &vars) {
+                        Ok(Some(vars)) => match varlist::expand(&list, &vars) {
                             Ok(m) => {
-                                if m != main {
+                                if m != list {
                                     info = Some(format!("the variables: {m}"));
-                                    c.parts.main = m;
+                                    c.parts.main = format!("{lead}{m}");
                                 }
                             }
                             Err(e) => {
@@ -1479,10 +1508,43 @@ impl<'f> Run<'f> {
                         Ok(None) | Err(_) => {}
                     }
                 }
+                // isvar (SSC): which names are variables, which only the data's
+                // names settle; the translator gets "variables | others"
+                if c.name == "isvar" {
+                    match self.vars_now() {
+                        Err(Stop::Ask(need)) => return Flow::Ask(need),
+                        Ok(Some(vars)) => {
+                            let (good, bad) = varlist::isvar_split(&main, &vars);
+                            c.parts.main = format!("{} | {}", good.join(" "), bad.join(" "));
+                            self.isvar_r = vec![
+                                ("varlist".to_string(), good.join(" ")),
+                                ("badlist".to_string(), bad.join(" ")),
+                            ];
+                        }
+                        Ok(None) | Err(_) => {}
+                    }
+                }
                 // a name in an expression may abbreviate a variable (keep if
                 // country==1 for country_v13), which only the data's names settle
                 let in_main = matches!(c.name.as_str(), "generate" | "replace" | "egen" | "assert");
                 let exp_of = |main: &str| -> (String, String) {
+                    // egen: only the functions that take an expression (rowmean(v*)
+                    // takes a varlist, which the varlist rules expand)
+                    if c.name == "egen" {
+                        let f = main
+                            .split_once('=')
+                            .map(|(_, e)| e.trim_start())
+                            .and_then(|e| e.split_once('('))
+                            .map(|(f, _)| f.trim())
+                            .unwrap_or("");
+                        const EXP_FNS: &[&str] = &[
+                            "count", "iqr", "kurt", "mad", "max", "mdev", "mean", "median", "min",
+                            "mode", "pc", "pctile", "rank", "sd", "skew", "std", "sum", "total",
+                        ];
+                        if !EXP_FNS.contains(&f) {
+                            return (main.to_string(), String::new());
+                        }
+                    }
                     // generate and egen: what follows = (the new name stays)
                     match (c.name.as_str(), main.split_once('=')) {
                         ("generate" | "egen", Some((head, exp))) => {
@@ -2544,6 +2606,24 @@ impl Env for Run<'_> {
     }
 
     fn inline(&mut self, exp: &str) -> Result<String, Stop> {
+        // `r(varlist)' after isvar: known here (isvar cleared the rest of r())
+        if self.t.r_from() == Some("isvar") {
+            if let Some(name) = exp
+                .trim()
+                .strip_prefix("r(")
+                .and_then(|n| n.strip_suffix(')'))
+            {
+                // a name it set; one it did not is "" as a macro and missing
+                // in an expression, which R tells apart
+                if let Some((_, v)) = self
+                    .isvar_r
+                    .iter()
+                    .find(|(n, v)| n == name && !v.is_empty())
+                {
+                    return Ok(v.clone());
+                }
+            }
+        }
         match eval::eval_text(exp) {
             Ok(v) => Ok(v.macro_text()),
             Err(eval::NotHere::Stata(m)) => Err(Stop::Stata(m)),
@@ -2617,7 +2697,7 @@ impl Env for Run<'_> {
                 Ok(out)
             }
             "display" | "di" | "dis" | "disp" | "displ" | "displa" => self.ask(Need::Display(rest.trim().to_string())),
-            "variable" if split_word(rest).0 == "label" => {
+            w if w.len() >= 3 && "variable".starts_with(w) && split_word(rest).0 == "label" => {
                 let var = split_word(rest).1.trim();
                 let d = self
                     .t

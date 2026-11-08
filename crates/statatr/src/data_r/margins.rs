@@ -33,7 +33,7 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
                           within = character(), at = list(), dydx = character(), eyex = character(),
                           dyex = character(), eydx = character(), factors = character(),
                           atmeans = FALSE, level = 0.95, expression = "", outcomes = NULL,
-                          compare = "", unconditional = NULL, w = NULL, mcomp = "") {
+                          compare = "", unconditional = NULL, w = NULL, mcomp = "", dydx_levels = list()) {
   plain <- function(v) if (inherits(v, "haven_labelled")) as.vector(unclass(v)) else v
   data <- as.data.frame(lapply(data, plain), check.names = FALSE)
   tt <- stats::delete.response(stats::terms(fit))
@@ -192,9 +192,10 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
                 if (e != "dydx") stop(e, "(): ", v, " is a factor variable, which Stata does not allow here")
                 lv <- levels_of(v)
                 base <- if (is.na(factors[[v]])) lv[1] else as.numeric(factors[[v]])
+                if (!all(dydx_levels[[v]] %in% setdiff(lv, base))) stop("margins: dydx() of a base or unseen level is not translated yet", call. = FALSE)
                 local({
                   d0 <- design(setv(nd, stats::setNames(list(base), v)))
-                  for (l in setdiff(lv, base)) {
+                  for (l in if (is.null(dydx_levels[[v]])) setdiff(lv, base) else dydx_levels[[v]]) {
                     local({
                       d1 <- design(setv(nd, stats::setNames(list(l), v)))
                       oo <- o
@@ -275,7 +276,8 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
   cat(if (any_effect) "Average marginal effects\n" else "Predictive margins\n")
   cat(sprintf("Number of obs = %d\n", nrow(data)))
   cat("Expression:", expression, "\n")
-  if (any_effect) cat(what, "wrt:", paste(unlist(effects), collapse = " "), "\n")
+  wrt <- unlist(lapply(unlist(effects), function(v) if (is.null(dydx_levels[[v]])) v else paste0(dydx_levels[[v]], ".", v)))
+  if (any_effect) cat(what, "wrt:", paste(wrt, collapse = " "), "\n")
   if (atmeans) cat("at: the covariates at their means\n")
   cat("\n")
   if (compare == "") {
@@ -295,6 +297,7 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
         } else if (!any(grepl(paste0("\\.", v, "$"), nm))) {
           lvv <- levels_of(v)
           base <- if (is.na(factors[[v]])) lvv[1] else as.numeric(factors[[v]])
+          if (!is.null(dydx_levels[[v]])) lvv <- sort(unique(c(as.numeric(dydx_levels[[v]]), base)))
           for (l in lvv) {
             lab <- paste0(l, ".", v)
             nm <- c(nm, if (l == base) paste0(l, "b.", v) else lab)
@@ -307,6 +310,10 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
       full_b[have] <- m[src[have]]
       full_V <- matrix(0, length(nm), length(nm), dimnames = list(nm, nm))
       full_V[have, have] <- Vm[src[have], src[have]]
+      # e(b) after post is laid out as Stata's: matrix list may show it
+      attr(full_b, "stata_layout") <- TRUE
+    } else if (any_effect && all(grepl("^[A-Za-z_][A-Za-z0-9_]*$", labels))) {
+      attr(full_b, "stata_layout") <- TRUE
     }
     if (identical(mcomp, "bonferroni")) {
       # the p-values and intervals Bonferroni-adjusted within each term (as
@@ -414,6 +421,9 @@ impl Session {
         };
         let est = self.estimates_for("margins")?;
         let name = est.fit.name();
+        if est.fit == Fit::Suest {
+            return self.margins_suest(c, opts, out, &est);
+        }
         if est.fit == Fit::Margins {
             return Err(no("margins after margins, post is not translated yet"));
         }
@@ -551,8 +561,45 @@ impl Session {
                 }
             }
         };
+        // dydx(1.reform 3.opinion): those levels' effects only
+        let mut dydx_levels: Vec<(String, Vec<String>)> = Vec::new();
+        let dydx_list = match opts.arg("dydx", 4) {
+            Some(l)
+                if l.split_whitespace()
+                    .any(|w| w.contains('.') && !w.starts_with("c.") && !w.starts_with("i.")) =>
+            {
+                let mut vs = Vec::new();
+                for w in l.split_whitespace() {
+                    let Some((lv, v)) = w.split_once('.') else {
+                        return Err(no(format!(
+                            "dydx({l}): names and levels of factor variables together are not translated yet"
+                        )));
+                    };
+                    if lv.is_empty() || !lv.bytes().all(|b| b.is_ascii_digit()) || !is_name(v) {
+                        return Err(no(format!(
+                            "dydx({l}): only variable names and #.name are translated"
+                        )));
+                    }
+                    match dydx_levels.iter_mut().find(|(n, _)| n == v) {
+                        Some((_, ls)) => ls.push(lv.to_string()),
+                        None => {
+                            dydx_levels.push((v.to_string(), vec![lv.to_string()]));
+                            vs.push(r_text(v));
+                        }
+                    }
+                }
+                if opts.has("post", 4) {
+                    return Err(no("margins, dydx(#.name) post is not translated yet"));
+                }
+                Some(format!("c({})", vs.join(", ")))
+            }
+            _ => None,
+        };
         let (dydx, eyex, dyex, eydx) = (
-            list("dydx", 4)?,
+            match dydx_list {
+                Some(l) => l,
+                None => list("dydx", 4)?,
+            },
             list("eyex", 4)?,
             list("dyex", 4)?,
             list("eydx", 4)?,
@@ -684,6 +731,9 @@ impl Session {
         } else {
             format!("c({})", factors.join(", "))
         };
+        // effects alone, posted: e(b) is laid out as Stata's (R checks it)
+        let plain_effects =
+            effects > 0 && terms.is_empty() && ats.is_empty() && !opts.has("over", 4);
         let terms = format!("list({})", terms.join(", "));
         let at = if ats.is_empty() {
             "list()".to_string()
@@ -704,8 +754,20 @@ impl Session {
             Some(m) if m.len() >= 3 && "bonferroni".starts_with(m) => "bonferroni",
             Some(m) => return Err(no(format!("margins, mcompare({m}) is not translated yet"))),
         };
+        let lv = if dydx_levels.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", dydx_levels = list({})",
+                dydx_levels
+                    .iter()
+                    .map(|(v, ls)| format!("{} = c({})", r_name(v), ls.join(", ")))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
         let call = format!(
-            "stata_margins({model}, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond}{wts}{mc})",
+            "stata_margins({model}, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond}{wts}{mc}{lv})",
             r_logical(atmeans),
             r_number(level),
             r_text(&expression),
@@ -756,7 +818,7 @@ impl Session {
                         super::returned::e_args(&est.dep, "delta", None, &None),
                         r_text(ec)
                     );
-                    self.keep_e(c, out, &args, "");
+                    self.keep_e(c, out, &args, if plain_effects { "dydx" } else { "" });
                 }
                 _ => {
                     self.e_ret = super::returned::Returned::Lost(
@@ -770,7 +832,7 @@ impl Session {
             // contrasts) with their variance, as a row vector and a matrix
             if let (Some(ec), false) = (&est_cmd, self.weighted_fit) {
                 out.line(format!(
-                    "stata_r <- list(N = sum(stata_esample), level = {}, cmd = \"margins\", est_cmd = {}, est_cmdline = stata_e$cmdline, b = matrix(stata_m$b, 1, dimnames = list(\"r1\", names(stata_m$b))), V = stata_m$V)",
+                    "stata_r <- list(N = sum(stata_esample), level = {}, cmd = \"margins\", est_cmd = {}, est_cmdline = stata_e$cmdline, b = if (is.null(stata_m$full_b)) matrix(stata_m$b, 1, dimnames = list(\"r1\", names(stata_m$b))) else matrix(stata_m$full_b, 1, dimnames = list(\"r1\", names(stata_m$full_b))), V = if (is.null(stata_m$full_V)) stata_m$V else stata_m$full_V)",
                     r_number(super::returned::percent(level)),
                     r_text(ec)
                 ));
@@ -786,7 +848,7 @@ impl Session {
 
 /// The base level of `stata_ib(g, "2")`; none for `factor(g)`, whose base
 /// is the lowest value.
-fn factor_base(expr: &str) -> Option<String> {
+pub(super) fn factor_base(expr: &str) -> Option<String> {
     let rest = expr.strip_prefix("stata_ib(")?.split_once(", \"")?.1;
     rest.split_once('"').map(|(b, _)| b.to_string())
 }

@@ -36,6 +36,14 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     attr(out$V, "stata_names") <- why
     out
   }
+  # suest names its columns as Stata does (co_chosen:1.actor, with the bases),
+  # and so does margins, post of effects alone (1.g with 4b.g, or x)
+  if (cmd == "suest" || (cmd == "margins" && isTRUE(attr(b, "stata_layout")))) {
+    b <- c(b)
+    V <- as.matrix(V)
+    dimnames(V) <- list(names(b), names(b))
+    return(list(b = matrix(b, 1, dimnames = list("y1", names(b))), V = V))
+  }
   if (cmd %in% c("anova", "margins")) return(approx(paste0("Stata's e(b) after ", cmd, " has columns RCraft does not rebuild yet")))
   # a variable xtreg left out is still a column of Stata's, a zero
   om <- fit[["omitted"]]
@@ -484,8 +492,28 @@ impl Session {
             .ok_or_else(|| no("matrix rownames needs `name = names`"))?;
         let name = name.trim();
         let m = self.user_matrix(name)?;
-        let words: Vec<&str> = names.split_whitespace().collect();
-        if words.is_empty() || words.iter().any(|w| w.contains([':', '.', '#', '"'])) {
+        // a quoted name is taken as written, spaces and all ("18--24", "65+",
+        // "Quota diff"), as Stata 19 keeps it
+        let mut words: Vec<String> = Vec::new();
+        let mut rest = names.trim();
+        while !rest.is_empty() {
+            if let Some(r) = rest.strip_prefix('"') {
+                let end = r
+                    .find('"')
+                    .ok_or_else(|| no("matrix rownames: a quoted name is not closed"))?;
+                words.push(r.get(..end).unwrap_or("").to_string());
+                rest = r.get(end + 1..).unwrap_or("").trim_start();
+            } else {
+                let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+                words.push(rest.get(..end).unwrap_or("").to_string());
+                rest = rest.get(end..).unwrap_or("").trim_start();
+            }
+        }
+        if words.is_empty()
+            || words
+                .iter()
+                .any(|w| w.is_empty() || w.contains([':', '.', '#', '"', '`', '\'']))
+        {
             return Err(no(
                 "these row or column names (equations, factor variables) are not translated yet",
             ));

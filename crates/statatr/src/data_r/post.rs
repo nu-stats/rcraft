@@ -297,6 +297,7 @@ impl Session {
                     "predict after margins, post is not allowed, as in Stata",
                 ))
             }
+            Fit::Suest => return Err(no("predict after suest is not translated yet")),
         };
         // one statistic worked out by stata_predict_stat, if one was asked for
         let stat = [
@@ -491,6 +492,14 @@ impl Session {
                 Fit::Ivregress => format!("unname(stata_iv_xb(stata_estimates, {d}))"),
                 _ if opts.has("xb", 2) => newdata(", type = \"link\""),
                 _ => newdata(", type = \"response\""),
+            };
+            // after a perfect predictor was omitted, Stata's default is missing
+            // on the rows it excluded
+            let v = if matches!(fit, Fit::Logit | Fit::Probit) {
+                self.helpers.insert("stata_perfect");
+                format!("stata_excluded_na(stata_estimates, {d}, {v})")
+            } else {
+                v
             };
             values.push(v);
         } else {

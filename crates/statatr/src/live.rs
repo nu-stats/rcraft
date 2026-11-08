@@ -237,23 +237,37 @@ fn helper_name(code: &str) -> Option<&str> {
 mod tests {
     use super::*;
 
+    /// A step with the data's names given when it asks for them, as the
+    /// window does (a name in a varlist may abbreviate a variable).
+    fn answered(live: &mut Live, text: &str) -> Step {
+        loop {
+            let s = live.step(text);
+            match &s.ask {
+                Some(code) if code.contains("cat(names(") => {
+                    live.give(Ok("make\nprice\nmpg\nweight\n".into()))
+                }
+                _ => return s,
+            }
+        }
+    }
+
     #[test]
     fn each_line_means_what_it_does_after_the_ones_before() {
         let mut live = Live::new();
         let a = live.step("use auto");
         assert_eq!(a.lines.len(), 1);
         assert_eq!(live.data(), Some("auto"));
-        let b = live.step("summarize price");
+        let b = answered(&mut live, "summarize price");
         // the helper comes once, before the line that first needs it
         assert!(b.code.starts_with(HELPERS_BEGIN), "{}", b.code);
         assert!(b.code.contains("stata_summarize <- function"));
         assert!(b.code.contains(HELPERS_END));
         assert!(b.code.contains("# Stata: summarize price\n"));
-        let c = live.step("summarize mpg");
+        let c = answered(&mut live, "summarize mpg");
         assert!(!c.code.contains(HELPERS_BEGIN), "{}", c.code);
         assert!(c.code.starts_with("# Stata: summarize mpg\n"), "{}", c.code);
         // a line that reads e() after a model typed earlier
-        live.step("regress price mpg");
+        answered(&mut live, "regress price mpg");
         let d = live.step("display e(N)");
         assert!(d.lines.iter().all(|l| l.result.is_ok()), "{:?}", d.lines);
         assert!(d.code.contains("stata_eget(\"N\")"), "{}", d.code);
@@ -266,7 +280,7 @@ mod tests {
         let open = live.step("foreach v of varlist price mpg {");
         assert!(open.lines.iter().any(|l| l.result.is_err()));
         // the open block did not swallow what follows
-        let next = live.step("summarize price");
+        let next = answered(&mut live, "summarize price");
         assert_eq!(next.lines.len(), 1, "{:?}", next.lines);
         assert!(next.lines.iter().all(|l| l.result.is_ok()));
     }
@@ -275,16 +289,8 @@ mod tests {
     fn a_value_only_r_knows_is_asked_for_on_a_line_of_its_own() {
         let mut live = Live::new();
         live.step("use auto");
-        live.step("summarize price");
-        let ask = live.step("local m = r(mean)");
-        let code = ask.ask.clone().unwrap_or_default();
-        assert!(code.contains("%18.0g") && ask.lines.is_empty(), "{ask:?}");
-        // R's answer, then the same line again
-        live.give(Ok("  6165.256756756757\n".into()));
-        let set = live.step("local m = r(mean)");
-        assert!(set.ask.is_none() && set.lines.len() == 1, "{set:?}");
         // the data's names first: price may abbreviate a variable
-        let names = live.step("generate d = price - `m'");
+        let names = live.step("summarize price");
         assert!(
             names
                 .ask
@@ -293,7 +299,17 @@ mod tests {
             "{names:?}"
         );
         live.give(Ok("make\nprice\nmpg\n".into()));
+        assert!(live.step("summarize price").ask.is_none());
+        let ask = live.step("local m = r(mean)");
+        let code = ask.ask.clone().unwrap_or_default();
+        assert!(code.contains("%18.0g") && ask.lines.is_empty(), "{ask:?}");
+        // R's answer, then the same line again
+        live.give(Ok("  6165.256756756757\n".into()));
+        let set = live.step("local m = r(mean)");
+        assert!(set.ask.is_none() && set.lines.len() == 1, "{set:?}");
+        // price is a name R gave already: no asking again
         let used = live.step("generate d = price - `m'");
+        assert!(used.ask.is_none(), "{used:?}");
         assert_eq!(
             used.lines[0].stata,
             "generate d = price - 6165.256756756757"
@@ -331,6 +347,6 @@ mod tests {
             live.step("ssc install estout, replace").ssc,
             ["estout".to_string()]
         );
-        assert!(live.step("summarize price").ssc.is_empty());
+        assert!(answered(&mut live, "summarize price").ssc.is_empty());
     }
 }

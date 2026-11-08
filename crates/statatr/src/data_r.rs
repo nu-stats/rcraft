@@ -28,9 +28,12 @@
 mod anova;
 mod clogit;
 mod cluster2;
+mod codebook;
 mod coefplot;
+mod contract;
 mod dates;
 mod esttab;
+mod esttable;
 mod files;
 mod fre;
 mod graph;
@@ -53,6 +56,7 @@ mod robreg;
 mod scalars;
 mod st;
 mod stats;
+mod suest;
 mod survwgt;
 mod svy;
 mod tables;
@@ -325,6 +329,16 @@ impl Translator {
     }
 
     /// The R name of the data in memory, if there is any.
+    /// The command whose results r() holds now, when the translator knows them.
+    pub fn r_from(&self) -> Option<&str> {
+        match &self.s.r_ret {
+            returned::Returned::Kept { cmd, .. } | returned::Returned::Program { cmd, .. } => {
+                Some(cmd.as_str())
+            }
+            _ => None,
+        }
+    }
+
     pub fn data(&self) -> Option<&str> {
         self.s.data.as_deref()
     }
@@ -413,6 +427,7 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "contract",
     "svyset",
     "collapse",
     "summarize",
@@ -458,6 +473,54 @@ const MODELS: &[&str] = &[
 /// `margins`). Anything else may have changed the data.
 /// How a line refused for a lost variable says so.
 const LOST_VAR: &str = "is not known here: the line that makes it was not translated";
+
+/// The variables a command changes in place, by its `inplace` or `replace`
+/// option (`center x, inplace`, `winsor2 x, replace`): when it is not
+/// translated their values are not known after it. A `replace` that
+/// overwrites a file says nothing about the variables.
+fn in_place_vars(c: &Command) -> Vec<String> {
+    let opts = Opts(&c.options);
+    let writes_file = c.using.is_some()
+        || c.options.iter().any(|o| o.is("saving", 3))
+        || matches!(
+            c.name.as_str(),
+            "save"
+                | "saveold"
+                | "export"
+                | "outsheet"
+                | "graph"
+                | "esttab"
+                | "estout"
+                | "outreg"
+                | "outreg2"
+                | "putexcel"
+                | "log"
+                | "cmdlog"
+                | "copy"
+                | "estimates"
+                | "eststo"
+                | "estadd"
+                | "label"
+                | "notes"
+                | "note"
+                | "translate"
+                | "file"
+                | "postfile"
+                | "parmest"
+                | "coefplot"
+                | "marginsplot"
+        );
+    let in_place = opts.has("inplace", 5) || (opts.has("replace", 7) && !writes_file);
+    if !in_place {
+        return Vec::new();
+    }
+    c.parts
+        .main
+        .split_whitespace()
+        .filter(|w| is_name(w))
+        .map(str::to_string)
+        .collect()
+}
 
 /// The variables (or scalar) a generate, egen, predict, replace or scalar line
 /// makes or changes.
@@ -543,13 +606,19 @@ const DISPLAY_OPTIONS: &[(&str, usize)] = &[
     ("nopvalues", 9),
     ("noheader", 8),
     ("notable", 7),
-    ("coeflegend", 10),
+    ("coeflegend", 5),
 ];
 
 /// And those of `margins`: `asobserved` is its default.
 const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10)];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "query",
+    "putexcel",
+    "codebook",
+    "grstyle",
+    "compress",
+    "suest",
     "ereturn",
     "return",
     "display",
@@ -772,6 +841,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_stats" => more::STAT_HELPERS,
         "stata_destring" => more::DESTRING_HELPER,
         "stata_forced" => more::FORCED_HELPER,
+        "stata_same_dates" => more::SAME_DATES_HELPER,
         "stata_merge" => more::MERGE_HELPER,
         "stata_label_set" => more::DTA_LABEL_SET_HELPER,
         "stata_xpose" => more::XPOSE_HELPER,
@@ -829,6 +899,11 @@ fn helper_code(name: &str) -> &'static str {
         "stata_svy" => svy::SVY_HELPER,
         "stata_survwgt" => survwgt::SURVWGT_HELPER,
         "stata_isid" => more::ISID_HELPER,
+        "stata_contract" => contract::CONTRACT_HELPER,
+        "stata_recast" => contract::RECAST_HELPER,
+        "stata_suest" => suest::SUEST_HELPER,
+        "stata_est_table" => esttable::EST_TABLE_HELPER,
+        "stata_codebook" => codebook::CODEBOOK_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -1461,7 +1536,7 @@ impl Session {
         self.stores_lost = true;
         if let Some(c) = crate::reader::read(stata.trim()).commands().first() {
             let later = reason.contains(crate::dofile::KNOWN_WHEN_RUN);
-            for v in new_vars(c) {
+            for v in new_vars(c).into_iter().chain(in_place_vars(c)) {
                 let line = if later {
                     format!("{}: {reason}", stata.trim())
                 } else {
@@ -1812,7 +1887,9 @@ impl Session {
                 returned::Returned::Lost(format!("e() after {} is not kept in R yet", c.name));
         }
         // a line that is not translated still runs in Stata, so it counts too
-        if done.is_err() || !LEAVE_DATA_ALONE.contains(&c.name.as_str()) {
+        // (putexcel only writes a spreadsheet, translated or not)
+        let harmless = c.name == "putexcel";
+        if (done.is_err() && !harmless) || !LEAVE_DATA_ALONE.contains(&c.name.as_str()) {
             self.changed_since_fit = done.is_err() || !MODELS.contains(&c.name.as_str());
             if self.changed_since_fit {
                 for f in self.stored_fits.values_mut() {
@@ -1845,7 +1922,7 @@ impl Session {
         ) || (matches!(name, "drop" | "keep")
             && c.parts.if_exp.is_none()
             && c.parts.in_range.is_none());
-        let rows_stay = done.is_ok()
+        let rows_stay = (done.is_ok() || harmless)
             && !bysort
             && !matches!(name, "sort" | "gsort" | "tsset" | "xtset")
             && (MODELS.contains(&name) || LEAVE_DATA_ALONE.contains(&name) || values_only);
@@ -2000,6 +2077,21 @@ impl Session {
             "duplicates" => self.duplicates(c, &opts, out),
             "isid" => self.isid(c, &opts, out),
             "survwgt" => self.survwgt(c, &opts, out),
+            "contract" => self.contract(c, &opts, out),
+            "recast" => self.recast(c, &opts, out),
+            "isvar" => self.isvar(c, &opts, out),
+            "suest" => self.suest(c, &opts, out),
+            "codebook" => self.codebook(c, out),
+            // query shows Stata's settings, which R does not have
+            "query" => {
+                out.caveat("nothing to do in R: query only shows Stata's own settings");
+                Ok(())
+            }
+            // grstyle (SSC) only builds a graph scheme, as set scheme chooses one
+            "grstyle" => {
+                out.caveat("nothing to do in R: grstyle only changes how Stata's graphs look; RCraft's graphs keep their own");
+                Ok(())
+            }
             "encode" => self.encode(c, &opts, out),
             "decode" => self.decode(c, &opts, out),
             "destring" => self.destring(c, &opts, out),
@@ -3017,6 +3109,7 @@ impl Session {
             ("clean", 1),
             ("noobs", 3),
             ("separator", 3),
+            ("sepby", 5),
             ("abbreviate", 2),
             ("nolabel", 3),
             ("table", 3),
@@ -3969,7 +4062,7 @@ reshape long v, i(id)
 append using t, force");
         assert!(out[1].contains("\"_j\""), "{out:?}");
         assert!(
-            out[2].contains("stata_forced(s, haven::read_dta(\"t.dta\"))"),
+            out[2].contains("stata_forced(s, stata_same_dates(s, haven::read_dta(\"t.dta\")))"),
             "{out:?}"
         );
     }

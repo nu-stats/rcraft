@@ -1,0 +1,21 @@
+* Stata 19.0's results for contract.do, recorded by cargo xtask stata-record
+@ plain 14 1 1 31 . . 3
+@ plain_sum 250 2 39
+@ all 14 26 84 +1.4cccccccccccdX+003 +1.0cccccccccccdX+005 +1.9000000000000X+006
+@ all2 2 . 4 +1.999999999999aX+000 +1.599999999999aX+005
+@ nomiss 8 31 4 2 26
+@ zero 15 3 . .
+@ zero_sum 250 0
+@ zeronomiss 8
+@ float 20 [] 1 6 +1.3333340000000X+001 [k3]
+@ snomiss 3 [k1] 64
+@ fw 5 106 +1.62122bd31b41cX+004 33
+@ if 3 26 20
+@ in 5 10
+@ freqa 110 250
+@ pctid 110 250
+@ none 2000 250
+@ nf +1.ade59760f3ba4X+008
+@ f +1.ade5980000000X+008 -1.8c23fc0000000X+005
+@ int 429 -49 -118
+@ byte 70 -122 100

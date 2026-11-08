@@ -206,7 +206,10 @@ pub(super) const CLOGIT_HELPER: &str = r#"stata_clogit <- function(formula, data
     fit$stata_cluster <- cl
   }
   fit$stata_weights <- wrow
-  fit$stata_written <- vapply(attr(tt, "term.labels"), function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":"), "")
+  # for suest: the rows (the data's row names), the design, the outcome, the
+  # groups, the coefficients and the model's own variance
+  fit$stata_suest <- list(rows = rn, X = Xk, y = y, gi = gi, b = b, Vinfo = Vinfo, cols = colnames(X)[keep])
+  fit$stata_written <-vapply(attr(tt, "term.labels"), function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":"), "")
   list(fit = fit, b = bf, V = Vf, N = length(y), G = if (is.null(cluster)) NA else G,
        ll = ll_at, ll_0 = fit$loglik[1], N_drop = sum(out), N_group_drop = length(bad),
        multiple = multiple, group = group, N_pop = N_pop, df_r = df_r)

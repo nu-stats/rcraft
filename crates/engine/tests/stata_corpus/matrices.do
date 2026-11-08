@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.9 continued): made-up data; Stata 19's results are in matrices.recorded
 * commands: insheet matrix mkmat svmat
-* (Stata's matrices the do-file makes: J(), I(), joins with , and \, products, sums, a scalar times a matrix, transposes, invsym() and inv(), vecdiag() and diag(), e(b) and e(V), elements by number and by name, el(), rowsof() and colsof(), an element or a matrix put in place, nullmat() growing a matrix in a loop, rownames and colnames, drop, mkmat with if, in and nomissing, and insheet, its floats and double, into a matrix, and svmat: its names, floats and double, and the rows it adds)
+* (Stata's matrices the do-file makes: J(), I(), joins with , and \, products, sums, a scalar times a matrix, transposes, invsym() and inv(), vecdiag() and diag(), e(b) and e(V), elements by number and by name, el(), rowsof() and colsof(), an element or a matrix put in place, nullmat() growing a matrix in a loop, rownames and colnames (quoted ones too), drop, mkmat with if, in and nomissing, and insheet, its floats and double, into a matrix, and svmat: its names, floats and double, and the rows it adds)
 * tolerance: 1e-8
 version 19
 set linesize 255
@@ -38,6 +38,10 @@ display "@ placed " w[1, 1] " " w[1, 2] " " u[2, 1] " " q[1, 1] " " q[2, 1] " " 
 matrix rownames A = a b
 matrix colnames A = x y
 display "@ names " A["a", "y"] " " A["b", "x"]
+matrix Q = (1, 2 \ 3, 4 \ 5, 6)
+matrix rownames Q = "Female" "18--24" "65+"
+matrix colnames Q = "Proportion" "Quota diff"
+display "@ quoted " Q["18--24", "Proportion"] " " Q["65+", "Quota diff"] " " rowsof(Q)
 matrix k = J(1, 3, 0)
 forvalues i = 1/3 {
   matrix k[1, `i'] = `i' * 10

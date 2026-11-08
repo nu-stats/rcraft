@@ -757,3 +757,145 @@ fn a_tempfile_left_by_an_earlier_run_goes_before_it_is_used() {
         "dir.create(\"proj/temp\", showWarnings = FALSE, recursive = TRUE)\nunlink(c(\"proj/temp/ST_000000.tmp\", \"proj/temp/ST_000001.tmp\"))"
     );
 }
+
+#[test]
+fn egen_varlist_functions_are_not_read_as_expressions() {
+    // rowmean(v*) takes a varlist; mean(v) takes an expression, where v
+    // abbreviates both v1 and v2
+    let text = "use auto\negen vmean = rowmean(v*)\negen m = mean(v)";
+    let mut r = Run::new(text, &NoFiles, Options::default());
+    loop {
+        match r.next_event() {
+            Event::Line => {}
+            Event::Ask(code) if code.code.starts_with("cat(names(") => {
+                r.give(Ok("v1\nv2\n".into()));
+            }
+            Event::Ask(_) => r.give(Err("not asked".into())),
+            Event::Done => break,
+        }
+    }
+    let d = r.finish();
+    let lines = &d.translation.lines;
+    let row = lines.iter().find(|l| l.stata.contains("rowmean")).unwrap();
+    assert!(row.result.is_ok(), "{:?}", row.result);
+    let mean = lines.iter().find(|l| l.stata.contains("mean(v)")).unwrap();
+    let why = mean
+        .result
+        .as_ref()
+        .err()
+        .map(|e| e.reason.clone())
+        .unwrap_or_default();
+    assert!(why.contains("v ambiguous abbreviation"), "{why}");
+}
+
+#[test]
+fn putexcel_leaves_the_model_and_the_data_alone() {
+    // not translated itself, but a model's results after it are still known
+    let text = "use auto\nregress price mpg\nputexcel A1 = \"x\"\ndisplay e(r2)\ndisplay _se[mpg]";
+    let d = dry_run(text, &NoFiles, Options::default());
+    let lines = &d.translation.lines;
+    let reg = lines
+        .iter()
+        .find(|l| l.stata.starts_with("regress"))
+        .unwrap();
+    assert!(reg.result.is_ok(), "{:?}", reg.result);
+    let put = lines
+        .iter()
+        .find(|l| l.stata.starts_with("putexcel"))
+        .unwrap();
+    assert!(put.result.is_err());
+    for l in lines.iter().filter(|l| l.stata.starts_with("display")) {
+        assert!(l.result.is_ok(), "{}: {:?}", l.stata, l.result);
+    }
+}
+
+#[test]
+fn a_varlist_takes_abbreviations_as_stata_does() {
+    // drop _m for _merge; an ambiguous one is Stata's error
+    let text = "use auto\ndrop _m\nkeep pri m";
+    let mut r = Run::new(text, &NoFiles, Options::default());
+    loop {
+        match r.next_event() {
+            Event::Line => {}
+            Event::Ask(code) if code.code.starts_with("cat(names(") => {
+                r.give(Ok("make\nprice\nmpg\n_merge\n".into()));
+            }
+            Event::Ask(_) => r.give(Err("not asked".into())),
+            Event::Done => break,
+        }
+    }
+    let d = r.finish();
+    let lines = &d.translation.lines;
+    let drop = lines.iter().find(|l| l.stata.starts_with("drop")).unwrap();
+    assert!(drop.result.is_ok(), "{:?}", drop.result);
+    let code = format!("{:?}", drop.result);
+    assert!(code.contains("_merge"), "{code}");
+    let keep = lines.iter().find(|l| l.stata.starts_with("keep")).unwrap();
+    let why = keep
+        .result
+        .as_ref()
+        .err()
+        .map(|e| e.reason.clone())
+        .unwrap_or_default();
+    assert!(why.contains("m ambiguous abbreviation"), "{why}");
+}
+
+#[test]
+fn a_refused_command_that_changes_variables_in_place_loses_them() {
+    // center (SSC) is not translated; it changes price, so what reads price
+    // after it is refused rather than run on the old values
+    let text = "use auto\ncenter price, inplace standardize\nsummarize price\nsave t, replace\nsummarize mpg";
+    let mut r = Run::new(text, &NoFiles, Options::default());
+    loop {
+        match r.next_event() {
+            Event::Line => {}
+            Event::Ask(code) if code.code.starts_with("cat(names(") => {
+                r.give(Ok("make\nprice\nmpg\n".into()));
+            }
+            Event::Ask(_) => r.give(Err("not asked".into())),
+            Event::Done => break,
+        }
+    }
+    let d = r.finish();
+    let sums: Vec<_> = d
+        .translation
+        .lines
+        .iter()
+        .filter(|l| l.stata.starts_with("summarize"))
+        .collect();
+    let why = sums[0]
+        .result
+        .as_ref()
+        .err()
+        .map(|e| e.reason.clone())
+        .unwrap_or_default();
+    assert!(why.contains("price is not known here"), "{why}");
+    // save's replace overwrites a file and loses nothing
+    assert!(sums[1].result.is_ok(), "{:?}", sums[1].result);
+}
+
+#[test]
+fn robregs_estimator_is_not_a_variable() {
+    // robreg m y x: m names the M estimator, though it abbreviates mpg and make
+    let text = "use auto\nrobreg m price mp";
+    let mut r = Run::new(text, &NoFiles, Options::default());
+    loop {
+        match r.next_event() {
+            Event::Line => {}
+            Event::Ask(code) if code.code.starts_with("cat(names(") => {
+                r.give(Ok("make\nprice\nmpg\n".into()));
+            }
+            Event::Ask(_) => r.give(Err("not asked".into())),
+            Event::Done => break,
+        }
+    }
+    let d = r.finish();
+    let rob = d
+        .translation
+        .lines
+        .iter()
+        .find(|l| l.stata.starts_with("robreg"))
+        .unwrap();
+    let code = format!("{:?}", rob.result);
+    assert!(rob.result.is_ok() && code.contains("mpg"), "{code}");
+}

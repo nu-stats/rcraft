@@ -180,6 +180,22 @@ pub(super) const FORCED_HELPER: &str = r#"stata_forced <- function(d, u) {
   u
 }"#;
 
+/// A file read in has its `%td` dates as R dates, while dates the do-file
+/// made are Stata's day numbers: the appended file's are put in the form the
+/// data in memory have (days since 1 January 1960), as Stata keeps one form.
+pub(super) const SAME_DATES_HELPER: &str = r#"stata_same_dates <- function(d, u) {
+  for (v in intersect(names(d), names(u))) {
+    x <- d[[v]]
+    y <- u[[v]]
+    if (inherits(y, "Date") && is.numeric(x) && !inherits(x, "Date")) {
+      u[[v]] <- structure(as.numeric(y - as.Date("1960-01-01")), label = attr(y, "label", exact = TRUE), format.stata = attr(y, "format.stata", exact = TRUE))
+    } else if (inherits(x, "Date") && is.numeric(y) && !inherits(y, "Date")) {
+      u[[v]] <- structure(as.Date("1960-01-01") + y, label = attr(y, "label", exact = TRUE))
+    }
+  }
+  u
+}"#;
+
 /// `destring`: Stata's rules for which text is a number (`""` and `.` are
 /// missing; "1,000", "5%" and "NA" are not numbers); without `force` a
 /// variable with any other text is left alone, with Stata's message.
@@ -764,13 +780,17 @@ impl Session {
             .clone()
             .ok_or_else(|| no("append needs `using file`"))?;
         let force = opts.has("force", 5);
+        self.need_helper("stata_same_dates");
         if force {
             self.need_helper("stata_forced");
         }
         let reads: Vec<String> = files
             .split_whitespace()
             .map(|f| {
-                let read = format!("haven::read_dta({})", r_text(&file_name(f, "dta")));
+                let read = format!(
+                    "stata_same_dates({d}, haven::read_dta({}))",
+                    r_text(&file_name(f, "dta"))
+                );
                 if force {
                     format!("stata_forced({d}, {read})")
                 } else {

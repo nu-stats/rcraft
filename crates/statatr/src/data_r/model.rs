@@ -48,6 +48,8 @@ pub(super) enum Fit {
     Reghdfe,
     Cluster2,
     Asclogit,
+    /// `suest`: stored results combined
+    Suest,
 }
 
 impl Fit {
@@ -70,6 +72,7 @@ impl Fit {
             Fit::Reghdfe => "reghdfe",
             Fit::Cluster2 => "cluster2",
             Fit::Asclogit => "asclogit",
+            Fit::Suest => "suest",
         }
     }
 

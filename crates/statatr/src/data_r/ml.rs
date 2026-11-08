@@ -358,6 +358,7 @@ impl Session {
             Fit::Xtreg => return self.xtreg(c, opts, out),
             Fit::Ivregress => return self.ivregress(c, opts, out),
             Fit::Margins => return Err(no("margins is not a model to fit")),
+            Fit::Suest => return Err(no("suest is not a model to fit")),
             Fit::Stcox => return self.stcox(c, opts, out),
             Fit::Clogit => return self.clogit(c, opts, out),
             Fit::Robreg => return self.robreg(c, opts, out),
@@ -474,11 +475,17 @@ impl Session {
                     if self.quiet(c) { ", notes = FALSE" } else { "" }
                 ));
                 self.helpers.insert("stata_collinear");
+                // the rows a perfect predictor excluded, kept through the refits
+                out.line("stata_excluded <- stata_estimates$stata_excluded");
                 out.line("stata_estimates <- stata_collinear(stata_estimates)");
                 if fit == Fit::Probit {
                     self.helpers.insert("stata_probit_newton");
                     out.line("stata_estimates <- stata_probit_newton(stata_estimates)");
                 }
+                out.line("stata_estimates$stata_excluded <- stata_excluded");
+                out.line("stata_estimates$omitted <- unique(c(stata_estimates$omitted, attr(stata_excluded, \"omitted\")))");
+                out.line("if (length(attr(stata_excluded, \"omitted\"))) stata_estimates$stata_written <- attr(stata_excluded, \"written\")");
+                out.line("rm(stata_excluded)");
                 out.caveat(
                     "the outcome is 1 where it is not 0 (and not missing), as Stata takes it",
                 );
@@ -564,7 +571,8 @@ impl Session {
             | Fit::Robreg
             | Fit::Reghdfe
             | Fit::Cluster2
-            | Fit::Asclogit => {}
+            | Fit::Asclogit
+            | Fit::Suest => {}
         }
         match fit {
             Fit::Logit | Fit::Probit | Fit::Poisson => {
@@ -640,7 +648,8 @@ impl Session {
             | Fit::Robreg
             | Fit::Reghdfe
             | Fit::Cluster2
-            | Fit::Asclogit => {}
+            | Fit::Asclogit
+            | Fit::Suest => {}
         }
         if matches!(fit, Fit::Nbreg | Fit::Ologit | Fit::Oprobit | Fit::Mlogit)
             && (robust || cluster.is_some())
@@ -799,6 +808,8 @@ pub(super) const PERFECT_HELPER: &str = r#"stata_perfect <- function(fit, notes 
   keep <- rep(TRUE, nrow(mf))
   labs <- attr(stats::terms(fit), "term.labels")
   gone <- character(0)
+  # the rows each omitted variable excluded (x != cut), for predict
+  rules <- list()
   for (t in labs) {
     v <- mf[[t]]
     if (is.null(v)) next
@@ -806,7 +817,7 @@ pub(super) const PERFECT_HELPER: &str = r#"stata_perfect <- function(fit, notes 
       name <- all.vars(stats::as.formula(paste("~", t)))[1]
       lv <- levels(v)
       o <- suppressWarnings(order(as.numeric(lv), lv))
-      cols <- lapply(lv[o], function(l) list(name = paste0(l, ".", name), x = as.numeric(v == l)))
+      cols <- lapply(lv[o], function(l) list(name = paste0(l, ".", name), x = as.numeric(v == l), level = l))
     } else if (is.numeric(v) && is.null(dim(v))) {
       cols <- list(list(name = t, x = as.numeric(v)))
     } else {
@@ -838,6 +849,7 @@ pub(super) const PERFECT_HELPER: &str = r#"stata_perfect <- function(fit, notes 
             " perfectly;\n      ", n, " omitted and ", nb + na, " obs not used.")
       }
       keep[which(keep)[x != cut]] <- FALSE
+      rules[[length(rules) + 1]] <- list(term = t, level = cl$level, cut = cut)
       if (!is.factor(v)) gone <- c(gone, t)
     }
   }
@@ -869,7 +881,23 @@ pub(super) const PERFECT_HELPER: &str = r#"stata_perfect <- function(fit, notes 
   d <- d[match(rownames(mf)[keep], rownames(d)), , drop = FALSE]
   call <- stats::update(fit, formula. = f, evaluate = FALSE)
   call$data <- d
-  refit(call)
+  out <- refit(call)
+  out$stata_excluded <- rules
+  # e(b) keeps an omitted variable as a column of 0 (o.x), as Stata does
+  attr(out$stata_excluded, "omitted") <- setdiff(gone, character(0))
+  attr(out$stata_excluded, "written") <- unname(vapply(labs, function(t) paste(sort(trimws(strsplit(t, ":", fixed = TRUE)[[1]])), collapse = ":"), ""))
+  out
+}
+# predict's default after a perfect predictor was omitted: missing on the rows
+# it excluded (x != cut), as Stata's "missing for excluded observations"
+stata_excluded_na <- function(fit, data, v) {
+  for (r in fit$stata_excluded) {
+    x <- tryCatch(eval(str2lang(r$term), data, globalenv()), error = function(e) NULL)
+    if (is.null(x)) stop("predict: the rows the omitted ", r$term, " excluded could not be found", call. = FALSE)
+    if (!is.null(r$level)) x <- as.numeric(as.character(x) == r$level) else x <- as.numeric(x)
+    v[!is.na(x) & x != r$cut] <- NA
+  }
+  v
 }"#;
 
 /// Each row's score (the gradient of its log likelihood) after `nbreg`,

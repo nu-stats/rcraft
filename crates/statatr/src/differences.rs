@@ -757,8 +757,10 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Perfect prediction",
                 "A variable that predicts the outcome perfectly is dealt with as Stata does: \
-                 omitted with the rows it decides, or the fit stops with Stata's message. R's \
-                 glm() would go on with huge estimates.",
+                 omitted with the rows it decides (a column of 0 in e(b), where it was written), \
+                 or the fit stops with Stata's message; predict after it is missing on those \
+                 rows, in the sample or not, as Stata's default. R's glm() would go on with huge \
+                 estimates.",
             ),
             p(
                 "Collinear regressors",
@@ -1250,6 +1252,116 @@ pub const GUIDES: &[Guide] = &[
                  guess (one dimension is exact either way). The add-on's other subcommands, if, in, \
                  and the values it leaves in r().",
             ),
+        ],
+    },
+    Guide {
+        command: "query",
+        about: "Shows Stata's settings",
+        points: &[
+            p(
+                "As Stata 19",
+                "Nothing to do in R: query only shows Stata's own settings (graphics, memory, \
+                 output and the rest), which R does not have.",
+            ),
+            p("Not yet", "Nothing known."),
+        ],
+    },
+    Guide {
+        command: "codebook",
+        about: "Describes variables",
+        points: &[
+            p(
+                "As Stata 19",
+                "For each variable: its label, range and units, unique and missing values, then \
+                 a tabulation when it has 9 values or fewer, or else the mean, standard \
+                 deviation and Stata's percentiles; if and in. Printed in R's layout.",
+            ),
+            p(
+                "Not yet",
+                "Options; the storage type (R does not keep Stata's) and the value label's name; \
+                 r(), which Stata fills for some checks.",
+            ),
+        ],
+    },
+    Guide {
+        command: "grstyle",
+        about: "Graph style settings (grstyle, SSC)",
+        points: &[
+            p(
+                "As Stata 19",
+                "Nothing to do in R: grstyle init, set and clear only build the scheme Stata's \
+                 graphs are drawn with, as set scheme chooses one. RCraft's graphs keep their \
+                 own look.",
+            ),
+            p("Not yet", "Graphs drawn in the scheme grstyle builds."),
+        ],
+    },
+    Guide {
+        command: "suest",
+        about: "Combines stored models into one set of results",
+        points: &[
+            p(
+                "As Stata 19",
+                "suest of conditional logits (clogit) stored with estimates store: e(b) with each \
+                 model's coefficients and base levels, its equations named name_depvar, and the \
+                 sandwich e(V) from the models' own variances and the rows' scores, clustered by \
+                 vce(cluster v) or by clogit's groups, times G / (G - 1). After it, margins, \
+                 dydx() of factor levels with an expression() that sums invlogit(predict(\
+                 equation(eq))) or predict(equation(eq)) terms, posted or not, and test after the \
+                 posted margins.",
+            ),
+            p(
+                "Not yet",
+                "Other models; models fitted with robust errors or weights; predict and other \
+                 margins after suest. The table is printed in R's layout.",
+            ),
+        ],
+    },
+    Guide {
+        command: "contract",
+        about: "A dataset of frequencies of combinations of variables",
+        points: &[
+            p(
+                "As Stata 19",
+                "One row per combination of the variables' values, sorted by them (missing last, \
+                 an empty string first), with its frequency; freq(), cfreq(), percent(), \
+                 cpercent() (percents to the bit, labelled as Stata labels them, doubles or with \
+                 float floats, format() or %8.2f), zero (every combination of the values seen), \
+                 nomiss, if, in and fweights. The variables keep their labels and formats. A new \
+                 name already in the data is r(110), no rows r(2000); the data stay as they were.",
+            ),
+            p(
+                "Not yet",
+                "Weights of zero; the storage type Stata gives the frequency (byte, int or long), \
+                 which R does not have.",
+            ),
+        ],
+    },
+    Guide {
+        command: "recast",
+        about: "Changes a variable's storage type",
+        points: &[
+            p(
+                "As Stata 19",
+                "byte, int, long, float and double: with force a value the type cannot hold is \
+                 truncated toward zero or rounded to float, and one out of range becomes \
+                 missing; without it nothing changes when a value would, and Stata's count of \
+                 the values is shown.",
+            ),
+            p("Not yet", "String types."),
+        ],
+    },
+    Guide {
+        command: "isvar",
+        about: "Which names are variables (isvar, SSC)",
+        points: &[
+            p(
+                "As Stata 19",
+                "Each name, abbreviation, pattern or range that names variables gives them in \
+                 r(varlist); every other word goes to r(badlist); the lines Stata shows. Observed \
+                 in Stata on made-up data; the add-on's program was not read.",
+            ),
+            p("Not yet", "Nothing known."),
         ],
     },
     Guide {

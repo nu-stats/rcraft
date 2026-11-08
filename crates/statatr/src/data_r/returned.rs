@@ -454,6 +454,22 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     rss <- sum(wn * u^2)
     tss <- if (cons) sum(wn * (y - ybar)^2) else sum(wn * y^2)
     mss <- tss - rss
+    # Stata 19 takes a fit whose residual sum of squares is below about 1e-14
+    # of the total (centred) one as exact: rss 0, R-squared 1, no F or log
+    # likelihood, and standard errors of 0 unless they are robust (observed
+    # unweighted: zero below 9.87e-15, kept from 9.98e-15, whatever N and k)
+    exact <- FALSE
+    if (cmd == "regress" && tss > 0 && rss < 9.98e-15 * tss) {
+      if (!is.null(w) || rss >= 9.87e-15 * tss)
+        stop("regress: the residuals are so small that Stata 19 may take the fit as exact, by a rule not pinned down here; not translated yet", call. = FALSE)
+      exact <- TRUE
+      rss <- 0
+      mss <- tss
+      if (!robust) {
+        V[] <- 0
+        stata_vcov[] <<- 0
+      }
+    }
     k <- fit$rank
     df_m <- k - cons
     r2 <- mss / tss
@@ -470,7 +486,7 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
       put(N = N, sum_w = if (is.null(w)) N else sum(w))
     }
     put(df_m = df_m, df_r = stata_df, F = wald(slopes) / df_m, r2 = r2, rmse = sqrt(rss / (Wk - k)),
-        mss = mss, rss = rss, r2_a = 1 - rss / (Wk - k) / (tss / (N - cons)), ll = ll(rss))
+        mss = mss, rss = rss, r2_a = 1 - rss / (Wk - k) / (tss / (N - cons)), ll = if (exact) NA_real_ else ll(rss))
     # without the constant Stata keeps no e(ll_0)
     if (cons) put(ll_0 = ll(tss))
     put(rank = k)
@@ -915,6 +931,8 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 const TEXT_NAMES: &[&str] = &[
     "levels",
     "varlist",
+    "badlist",
+    "names",
     "cmd",
     "cmd2",
     "cmdline",
@@ -1021,12 +1039,34 @@ pub(super) struct StoredFit {
 /// The R objects a fit leaves, which `estimates store` keeps together.
 const FIT_OBJECTS: &str = "c(\"stata_estimates\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_e\", \"stata_esample\", \"stata_data\", \"stata_cluster\", \"stata_levels\", \"stata_base\", \"stata_rows\")";
 
+impl StoredFit {
+    pub(super) fn estimates(&self) -> Option<&super::model::Estimates> {
+        self.estimates.as_ref()
+    }
+
+    pub(super) fn robust_or_weighted(&self) -> bool {
+        self.fit_robust || self.fit_cluster || self.weighted_fit
+    }
+
+    pub(super) fn changed_since(&self) -> bool {
+        self.changed_since_fit
+    }
+}
+
 impl Session {
+    /// The results `estimates store` kept under `name`.
+    pub(super) fn stored_fit(&self, name: &str) -> Option<&StoredFit> {
+        self.stored_fits.get(name)
+    }
+
     /// `estimates store`, `restore`, `drop` and `clear` (Stata 19: `sto` and
     /// `res` are the shortest; a name not stored is r(111), storing with no
     /// model r(301)).
     pub(super) fn estimates_cmd(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let (sub, rest) = super::first_word(&c.parts.main);
+        if sub.len() >= 3 && "table".starts_with(sub) {
+            return self.estimates_table(c, rest, out);
+        }
         if !c.options.is_empty() {
             return Err(no(format!(
                 "estimates {sub} with options is not translated yet"
@@ -1252,6 +1292,8 @@ const LEAVE_R_ALONE: &[&str] = &[
 /// Commands that never change e() (an untranslated command not here might
 /// be an estimation command, after which e() is not known).
 const LEAVE_E_ALONE: &[&str] = &[
+    // writes cells of a spreadsheet only, translated or not
+    "putexcel",
     "_rcraft_program_begin",
     "_rcraft_program_end",
     "return",
@@ -1406,6 +1448,8 @@ pub(super) const R_COUNT: &[&str] = &["N"];
 pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
 /// What `split` leaves in r().
 pub(super) const R_SPLIT: &[&str] = &["k_new", "varlist"];
+pub(super) const R_ISVAR: &[&str] = &["varlist", "badlist"];
+pub(super) const R_EST_TABLE: &[&str] = &["names"];
 /// What `test` leaves in r(), with r(dropped_1) and the like for each
 /// constraint it drops (one of base levels only)
 pub(super) const R_TEST: &[&str] = &[
@@ -1496,6 +1540,15 @@ impl Session {
     ) {
         let name = c.name.as_str();
         match r_left {
+            // isvar clears r() and leaves only these: any other name is
+            // missing, as after an r-class program
+            Some((names, cmd)) if ok && cmd == "isvar" => {
+                self.helpers.insert("stata_returned");
+                self.r_ret = Returned::Program {
+                    cmd,
+                    texts: names.iter().map(|n| n.to_string()).collect(),
+                }
+            }
             Some((names, cmd)) if ok => {
                 // what reads r() back (stata_rget) comes with it
                 self.helpers.insert("stata_returned");
@@ -1662,7 +1715,9 @@ impl Session {
             ))),
             Returned::Kept { cmd, model, .. } => {
                 if which == "e" {
-                    if matches!(cmd.as_str(), "anova" | "margins") {
+                    if matches!(cmd.as_str(), "anova" | "margins")
+                        && !matches!(model.as_str(), "suest" | "dydx")
+                    {
                         return Err(no(format!(
                             "matrix list {shown} after {cmd} is not translated yet: Stata's columns there are not rebuilt in R"
                         )));

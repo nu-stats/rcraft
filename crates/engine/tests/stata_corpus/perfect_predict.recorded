@@ -1,0 +1,9 @@
+* Stata 19.0's results for perfect_predict.do, recorded by cargo xtask stata-record
+@ probit 364  .487124267599139016 -.745284167466630843   .07761657756081386
+@ eb 4 0 -.745284167466630843 0
+@ p_missing 17
+@ p_missing_out 1
+@ p_sum  149.626463138908974 383
+@ xb_missing 17
+@ ipw 383 -.683905895805972941
+@ logit_missing 17 383

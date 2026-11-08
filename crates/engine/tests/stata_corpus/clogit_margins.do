@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.9 continued): made-up data; Stata 19's results are in clogit_margins.recorded
 * commands: parmest
-* (margins after clogit as a conjoint replication package runs it: fvset bases, clogit with clusters, margins ar. of three terms with predict(pu0), parmest of the model, margins dydx(*) post predict(pu0) vce(unconditional) mcomp(bonferroni), and parmest of the margins; both parmest files read back)
+* (margins after clogit as a conjoint replication package runs it: fvset bases, clogit with clusters, margins ar. of three terms with predict(pu0), parmest of the model, margins dydx() of two levels, margins dydx(*) post predict(pu0) vce(unconditional) mcomp(bonferroni), and parmest of the margins; both parmest files read back)
 * tolerance: 1e-6
 version 19
 set linesize 255
@@ -24,8 +24,12 @@ display "@ clogit " e(N) " " e(N_clust) " " _b[1.actor] " " _se[1.actor] " " _b[
 margins ar.actor ar.reform ar.opinion, predict(pu0) asobserved cformat(%5.3f)
 display "@ ar " el(r(b), 1, 1) " " el(r(b), 1, 4) " " el(r(b), 1, 5) " " el(r(b), 1, 9) " " sqrt(el(r(V), 1, 1)) " " sqrt(el(r(V), 5, 5)) " " sqrt(el(r(V), 9, 9)) " " el(r(V), 1, 2)
 parmest, idnum(7) saving(cm_contrast, replace)
+margins, dydx(1.reform 3.opinion) predict(pu0)
+display "@ levels " colsof(r(b)) " " el(r(b), 1, 1) " " el(r(b), 1, colsof(r(b))) " " sqrt(el(r(V), 1, 1)) " " sqrt(el(r(V), colsof(r(b)), colsof(r(b)))) " " el(r(V), 1, colsof(r(b)))
 margins, dydx(*) post predict(pu0) asobserved cformat(%5.3f) vce(unconditional) mcomp(bonferroni)
 display "@ dydx " _b[1.actor] " " _b[4.actor] " " _b[1.reform] " " _b[3.opinion] " " _se[1.actor] " " _se[2.reform] " " _se[3.opinion] " " e(N)
+display "@ eb " colsof(e(b)) " " el(e(b), 1, 1) " " el(e(b), 1, 5) " " el(e(b), 1, 9) " " el(e(b), 1, 12) " " el(e(V), 1, 1) " " el(e(V), 5, 5)
+matrix list e(b)
 parmest, idnum(7) saving(cm_dydx, replace)
 use cm_contrast, clear
 quietly count if eq == "chosen"

@@ -1,0 +1,8 @@
+* Stata 19.0's results for isvar.do, recorded by cargo xtask stata-record
+@ a 2 1 1
+@ b 2 1 1
+@ c 3 1 1
+@ d 3 1 1
+@ e 3 1 1
+@ f 0 1 1
+@ drop 1 1

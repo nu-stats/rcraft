@@ -834,6 +834,16 @@ impl Translator<'_> {
                 Ok((format!("nchar({s}, type = \"bytes\")"), Kind::Number))
             }
             "ustrlen" => self.text_fn("nchar", args, Kind::Number),
+            // words are what spaces and tabs separate; quotes are not special
+            // (Stata 19: wordcount(`"a "b c" d"') is 4)
+            "wordcount" => {
+                want(1)?;
+                let (s, _) = self.expr(arg(0)?)?;
+                Ok((
+                    format!("as.numeric(lengths(regmatches({s}, gregexpr(\"[^ \\t]+\", {s}))))"),
+                    Kind::Number,
+                ))
+            }
             "upper" | "strupper" | "ustrupper" => self.text_fn("toupper", args, Kind::Text),
             "lower" | "strlower" | "ustrlower" => self.text_fn("tolower", args, Kind::Text),
             // Stata's trim, strtrim, ltrim, ... take spaces only; the ustr ones

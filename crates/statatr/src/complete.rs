@@ -67,10 +67,12 @@ pub const COMMANDS: &[&str] = &[
     "clear",
     "clogit",
     "cluster2",
+    "codebook",
     "coefplot",
     "collapse",
     "compress",
     "confirm",
+    "contract",
     "connected",
     "continue",
     "correlate",
@@ -103,6 +105,7 @@ pub const COMMANDS: &[&str] = &[
     "gettoken",
     "global",
     "graph",
+    "grstyle",
     "gsort",
     "histogram",
     "import",
@@ -110,6 +113,7 @@ pub const COMMANDS: &[&str] = &[
     "input",
     "insheet",
     "isid",
+    "isvar",
     "ivregress",
     "kdensity",
     "keep",
@@ -149,6 +153,7 @@ pub const COMMANDS: &[&str] = &[
     "pwcorr",
     "pwd",
     "quietly",
+    "recast",
     "recode",
     "reghdfe",
     "regress",
@@ -169,6 +174,7 @@ pub const COMMANDS: &[&str] = &[
     "ssc",
     "stcox",
     "stset",
+    "suest",
     "summarize",
     "survwgt",
     "svy",
@@ -576,9 +582,24 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("summarize", &["detail", "format", "meanonly", "separator("]),
+    ("suest", &["vce("]),
     ("svyset", &["vce("]),
     ("survwgt", &["by(", "generate(", "maxrep(", "totvars("]),
     ("isid", &["missok"]),
+    (
+        "contract",
+        &[
+            "cfreq(",
+            "cpercent(",
+            "float",
+            "format(",
+            "freq(",
+            "nomiss",
+            "percent(",
+            "zero",
+        ],
+    ),
+    ("recast", &["force"]),
     ("svmat", &["names("]),
     ("tab1", &["missing", "nolabel", "sort"]),
     (
@@ -1139,7 +1160,10 @@ mod tests {
     fn commands_after_the_prefixes() {
         assert_eq!(options("reg", VARS), names(&["reghdfe", "regress"]));
         assert_eq!(options("regr", VARS), names(&["regress"]));
-        assert_eq!(options("su", VARS), names(&["summarize", "survwgt"]));
+        assert_eq!(
+            options("su", VARS),
+            names(&["suest", "summarize", "survwgt"])
+        );
         assert_eq!(options("ta", VARS), names(&["tab1", "tab2", "tabulate"]));
         assert_eq!(options("q", VARS), names(&["quietly"]));
         assert_eq!(options("quietly regr", VARS), names(&["regress"]));
@@ -1362,6 +1386,9 @@ mod tests {
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),
             "coefplot" => format!("regress y x\ncoefplot, {o}"),
             "collapse" => format!("collapse (mean) y, {o}"),
+            "contract" if name == "format" => format!("contract g, percent(p) {o}"),
+            "contract" => format!("contract g, {o}"),
+            "recast" => format!("recast float y, {o}"),
             "connected" | "line" | "scatter" => format!("{cmd} y x, {o}"),
             "twoway" => format!("twoway scatter y x, {o}"),
             "describe" => format!("describe, {o}"),

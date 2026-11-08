@@ -24,13 +24,14 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("coefplot", &["coefplot"]),
     ("collapse", &["data"]),
     ("confirm", &["strings"]),
+    ("contract", &["contract"]),
     ("correlate", &["descriptives"]),
     ("count", &["control", "descriptives"]),
     ("drawnorm", &["asclogit"]),
     ("egen", &["descriptives"]),
     ("erase", &["replication"]),
     ("estadd", &["estout"]),
-    ("estimates", &["estimates"]),
+    ("estimates", &["estimates", "suest"]),
     ("eststo", &["estout"]),
     ("esttab", &["esttab"]),
     ("expand", &["made", "random"]),
@@ -59,6 +60,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("input", &["arpanel"]),
     ("insheet", &["matrices"]),
     ("isid", &["survwgt"]),
+    ("isvar", &["isvar"]),
     ("ivregress", &["panel"]),
     ("label", &["aware"]),
     ("levelsof", &["aware"]),
@@ -83,14 +85,22 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("prais", &["arpanel"]),
     ("predict", &["regress"]),
     ("preserve", &["made"]),
-    ("probit", &["collinear", "likelihood"]),
+    ("probit", &["collinear", "likelihood", "perfect_predict"]),
     ("program", &["programs"]),
     ("pwcorr", &["descriptives"]),
+    ("recast", &["contract"]),
     ("recode", &["data"]),
     ("reghdfe", &["reghdfe"]),
     (
         "regress",
-        &["aware", "collinear", "control", "interactions", "regress"],
+        &[
+            "aware",
+            "collinear",
+            "control",
+            "interactions",
+            "regress",
+            "regress_exact",
+        ],
     ),
     ("replace", &["data", "random"]),
     ("reshape", &["replication"]),
@@ -101,6 +111,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("split", &["strings"]),
     ("stcox", &["likelihood"]),
     ("stset", &["likelihood"]),
+    ("suest", &["suest"]),
     ("summarize", &["aware", "control", "descriptives"]),
     ("survwgt", &["survwgt"]),
     ("svmat", &["matrices"]),
@@ -225,7 +236,16 @@ mod tests {
         }
         assert_eq!(
             files("regress"),
-            Some(&["aware", "collinear", "control", "interactions", "regress"][..])
+            Some(
+                &[
+                    "aware",
+                    "collinear",
+                    "control",
+                    "interactions",
+                    "regress",
+                    "regress_exact"
+                ][..]
+            )
         );
         assert_eq!(files("xtlogit"), None);
         let functions: Vec<&str> = VERIFIED_FUNCTIONS.iter().map(|(f, _)| *f).collect();
