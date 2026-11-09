@@ -737,9 +737,15 @@ pub(super) const SLICE_HELPER: &str = r#"stata_slice <- function(d, r) {
 
 impl Session {
     /// `stata_data`: the rows `rows` of the data expression `src`.
+    ///
+    /// The data and the rows are taken now, the copy made when something
+    /// reads it (margins, anova, `estimates store`): most fits are never
+    /// asked, and in a loop of regressions the copy was most of R's work.
     pub(super) fn keep_rows(&mut self, src: &str, rows: &str) -> String {
         self.helpers.insert("stata_slice");
-        format!("stata_data <- stata_slice({src}, {rows})")
+        format!(
+            "local({{ d <- {src}; r <- {rows}; delayedAssign(\"stata_data\", stata_slice(d, r), eval.env = environment(), assign.env = globalenv()) }})"
+        )
     }
 
     /// The rows the model used, as they were when it was fitted: Stata's

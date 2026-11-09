@@ -3685,3 +3685,8 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - The e2e harness sends lines and questions as the window does and reports the time in R.
   ZNMIXH: same 111,553 lines, same log, all 667 compared values match, Table2/TableI1/TableI2.tex
   byte for byte Stata's.
+- **Then 246 s:** the copy is made only when something reads it (`delayedAssign`, with the data
+  and the rows taken at the fit, so it is the same copy): margins, anova, `estimates store` and
+  the workspace listing, which now comes at most every 250 ms. A bare trip to R is 0.3 ms; what
+  is left is R's own work for each fit (lm, the collinearity check, e()). Same lines, log, 667
+  values and tables as before.
