@@ -1279,6 +1279,40 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "outreg",
+        about: "Tables of estimates and statistics (outreg, SSC)",
+        points: &[
+            p(
+                "As Stata 19",
+                "The balance-table use: after a model, keep() rtitle() stats(b) noautosumm \
+                 starlevels() starloc(1) store(), the coefficient with three decimals, thousands \
+                 commas and stars; replay() with append() or merge(), ctitles() (rows split by \
+                 \\), note(\"\"), store(); and using a file with tex fragment plain nocenter, \
+                 multicol() and replace, the .tex byte for byte as outreg writes it (CR LF). \
+                 Observed on made-up data; the package's programs were not read.",
+            ),
+            p(
+                "Not yet",
+                "Every other layout: standard errors or t statistics under the coefficients, \
+                 summary statistics, outreg's own notes, Word and RTF files, a table without \
+                 fragment. On screen the table is printed in R's layout.",
+            ),
+        ],
+    },
+    Guide {
+        command: "frmttable",
+        about: "A table from a matrix (frmttable, part of outreg)",
+        points: &[
+            p(
+                "As Stata 19",
+                "statmat() store() with sfmt() of g and f and sdec(): f with sdec() decimals \
+                 (2), g a whole number, a missing cell empty, no row titles; for outreg's \
+                 replay() and merge().",
+            ),
+            p("Not yet", "g of a number with decimals, row and column titles, and writing a file."),
+        ],
+    },
+    Guide {
         command: "alpha",
         about: "Cronbach's alpha and the scale of the items",
         points: &[

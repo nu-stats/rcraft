@@ -321,9 +321,30 @@ const GRAPHS: &[&str] = &[
 ];
 
 const PROGRAMS: &[&str] = &[
-    "ado", "args", "distinct", "end", "estout", "esttab", "eststo", "fre", "gettoken", "ivreg2",
-    "mata", "net", "outreg2", "plugin", "program", "python", "reghdfe", "ssc", "syntax",
-    "tokenize", "unique", "winsor2",
+    "ado",
+    "args",
+    "distinct",
+    "end",
+    "estout",
+    "esttab",
+    "eststo",
+    "fre",
+    "frmttable",
+    "gettoken",
+    "ivreg2",
+    "mata",
+    "net",
+    "outreg",
+    "outreg2",
+    "plugin",
+    "program",
+    "python",
+    "reghdfe",
+    "ssc",
+    "syntax",
+    "tokenize",
+    "unique",
+    "winsor2",
 ];
 
 /// Which tier a command is in, by its full name or a short form of one

@@ -172,6 +172,12 @@ fn tokens(text: &str) -> Result<Vec<Tok>, Untranslated> {
                 }
             }
             out.push(Tok::Num(span(s, i)));
+        } else if c == '.'
+            && !at(i + 1).is_some_and(|d| d.is_ascii_alphanumeric() || d == '_' || d == '.')
+        {
+            // a missing value (J(3, 2, .)); .a and the like are refused below
+            out.push(Tok::Num("NA_real_".into()));
+            i += 1;
         } else if c.is_ascii_alphabetic() || c == '_' {
             let s = i;
             while at(i).is_some_and(|d| d.is_ascii_alphanumeric() || d == '_') {
@@ -513,7 +519,8 @@ fn text_of(ts: &[Tok]) -> String {
                 {
                     s.push(' ');
                 }
-                s.push_str(n);
+                // the missing value is `.` again in Stata's text
+                s.push_str(if n == "NA_real_" { "." } else { n });
             }
             Tok::Text(x) => {
                 s.push('"');

@@ -102,6 +102,7 @@ pub const COMMANDS: &[&str] = &[
     "format",
     "forvalues",
     "fre",
+    "frmttable",
     "fvset",
     "generate",
     "gettoken",
@@ -140,6 +141,7 @@ pub const COMMANDS: &[&str] = &[
     "ologit",
     "oprobit",
     "order",
+    "outreg",
     "outreg2",
     "parmest",
     "poisson",
@@ -605,6 +607,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("recast", &["force"]),
     ("winsor", &["generate(", "h(", "highonly", "lowonly", "p("]),
     ("alpha", &["asis", "casewise", "generate(", "min(", "std"]),
+    ("frmttable", &["sdec(", "sfmt(", "statmat(", "store("]),
     (
         "center",
         &[

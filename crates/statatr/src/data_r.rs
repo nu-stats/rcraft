@@ -47,6 +47,7 @@ mod ml;
 mod model;
 mod more;
 mod natscale;
+mod outreg;
 mod outreg2;
 mod parmest;
 mod post;
@@ -621,6 +622,7 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 const HARMLESS: &[&str] = &["putexcel", "outreg", "frmttable", "which"];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "mata",
     "outreg",
     "frmttable",
     "which",
@@ -918,6 +920,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_center" => center::CENTER_HELPER,
         "stata_winsor" => winsor::WINSOR_HELPER,
         "stata_alpha" => alpha::ALPHA_HELPER,
+        "stata_outreg" => outreg::OUTREG_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -998,6 +1001,8 @@ struct Session {
     user_mats: BTreeSet<String>,
     /// Matrices a line that was not translated may have changed: name -> that line.
     lost_mats: BTreeMap<String, String>,
+    /// outreg tables a line that was not translated may have stored: name -> that line.
+    outreg_lost: BTreeMap<String, String>,
     /// The files `file open` opened and not closed: handle -> binary.
     file_handles: BTreeMap<String, bool>,
     /// Handles a `file open` that was not translated may have opened.
@@ -1501,6 +1506,19 @@ impl Session {
                 stata.trim().to_string()
             };
             self.lost_mats.insert(m, why);
+        }
+        // an outreg table a refused outreg or frmttable may have stored
+        {
+            let word = crate::dofile::command_name(stata.trim());
+            if matches!(word.as_str(), "outreg" | "frmttable") {
+                if let Some(rest) = stata.split("store(").nth(1) {
+                    let name = rest.split(')').next().unwrap_or("").trim();
+                    if is_name(name) {
+                        self.outreg_lost
+                            .insert(name.to_string(), stata.trim().to_string());
+                    }
+                }
+            }
         }
         // a line that may write a file: which files are there is not known
         {
@@ -2102,6 +2120,9 @@ impl Session {
             "center" => self.center(c, &opts, out),
             "winsor" => self.winsor(c, &opts, out),
             "alpha" => self.alpha(c, &opts, out),
+            "outreg" => self.outreg(c, &opts, out),
+            "frmttable" => self.frmttable(c, &opts, out),
+            "mata" => self.mata_line(c, out),
             // query shows Stata's settings, which R does not have
             "query" => {
                 out.caveat("nothing to do in R: query only shows Stata's own settings");

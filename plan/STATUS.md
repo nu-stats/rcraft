@@ -3585,3 +3585,17 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **ZNMIXH:** 111,175 lines ran, 1,153 refused, 15 stopped in R; all 667 values compared match
   Stata's (were 583). Still not translated there: outreg's tables themselves (the .tex files it
   writes), esttab's LaTeX options, frame, pdslasso and revrs (not installed in Stata either).
+
+## outreg's balance tables, 2026-11-08
+
+- **outreg and frmttable** (SSC, observed; `data_r/outreg.rs`, `plan/stata/outreg.md`,
+  `outreg.do`): the balance-table use (a model's coefficient with stars, store, replay, append,
+  merge, ctitles, note(""), frmttable of a matrix) and the LaTeX fragment written byte for byte
+  as outreg writes it. Other layouts are refused. A stored table is dropped before it is stored
+  again, and a table whose last store was refused is not read, so no older table is written in
+  its place.
+- **mata: mata clear** empties outreg's tables, as in Stata (outreg keeps them in Mata);
+  other Mata is still refused. **J(r, c, .)** (a matrix of missing values) in matrix expressions.
+- **ZNMIXH:** 111,551 lines ran, 777 refused, 15 stopped in R; all 667 values compared match
+  Stata's, and the balance tables RCraft writes (TableI1.tex, TableI2.tex) are byte for byte
+  Stata's. Table 2 goes through filefilter (not translated yet) after outreg writes it.
