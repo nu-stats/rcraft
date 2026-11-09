@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-11-01.
+Last updated: 2026-11-09.
 
 **Where things are:** Phases 0, 1 (except P1.2 and P1.6), 1A, 3 and 4 are built; Phase 5 and the
 first three Stata translator tasks (P2B.1 to P2B.3) too. `plan/AUDIT.md` (2026-10-29) lists every
@@ -3599,3 +3599,61 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **ZNMIXH:** 111,551 lines ran, 777 refused, 15 stopped in R; all 667 values compared match
   Stata's, and the balance tables RCraft writes (TableI1.tex, TableI2.tex) are byte for byte
   Stata's. Table 2 goes through filefilter (not translated yet) after outreg writes it.
+
+## Merged into main, 2026-11-09
+
+- The two entries below were made on branch `claude/step3-eclass-fileread-matrices-bootstrap` on
+  2026-11-05, alongside main's entries above, and merged on 2026-11-09. Their numbers (probes, packages)
+  were measured on that branch, before main's later work.
+
+## Step 3 continued: e-class programs, file read, more matrix functions; rt(), rbeta() and the bootstrap options, 2026-11-05
+
+- **ereturn** (`data_r/eclass.rs`, `plan/stata/eclass.md`): `post b V` with `depname()`, `obs()`, `dof()`,
+  `properties()` and `esample()` (its variable marks e(sample) and leaves the data), moving the matrices as
+  Stata does; `scalar`, `local` (an empty one removes it) and `matrix` (`copy`) in the order `ereturn list`
+  shows (StatCraft's probe 147); `clear`; `display` (t with `dof()`, z without, equations, `level()`). `post`
+  and `clear` work anywhere, the others only in an e-class program (r(152)); r(503) and r(507) as Stata's.
+  e(), `_b[]`, `_se[]` and `matrix list e()` read the posted results; an e-class program with a line not
+  translated leaves e() unknown. Declined: `repost`, a V that is not symmetric, predict and the rest after
+  posted results. `eclass.do` (22 results); `ereturn` is Verified.
+- **file read** (`data_r/files.rs`): `file open ..., read` and `file read h name`, the line in the local
+  without its end, r(status) win, unix, mac or none, r(eof) and an empty local past the end, so `while
+  r(eof) == 0` loops run; file open and close leave r(). `fileread.do` (15 results).
+- **Matrices** (`data_r/mexpr.rs`, `plan/stata/matrices.md`): `#` (eq:name names, numbered across the
+  result when the right one is typed in place), submatrices (`A[1..2, 3...]`, by name), `cholesky()`,
+  `corr()`, `hadamard()`, `vec()`, `vech()`, `sweep()`, `get(_b)`, `get(VCE)`, `invsym()` of a singular
+  matrix (StatCraft's sweep rule), `.` in a typed matrix; `trace()`, `det()`, `diag0cnt()`,
+  `issymmetric()`, `matmissing()`, `mreldif()`, `colnumb()`, `rownumb()`. `matrix list` of each form was
+  compared with Stata's screen. Found: the inverse of a matrix typed in place has default names, not
+  swapped ones. `matfuncs.do` (30 results); eight functions are Verified.
+- **rt()** (decoded here from Stata 19's draws): a ratio of uniforms; the next uniform is Stata's after
+  every one of 116 draws over 15 df, the draws bit for bit at 11 df and within an ulp of the bound at the
+  others. **rbeta()** with a shape of 1 (order statistics at (1,1), (1,2), (2,1), else one uniform
+  inverted), exact; other shapes are refused (Jöhnk's method fits a + b <= 1 only in part).
+  `variates2.do` (8 results); `rt` and `rbeta` are Verified. `rpoisson()` is still refused.
+- **bootstrap** (`data_r/random.rs`): `strata()`, decoded on 13 samples of `bsample, strata()` (sorted by
+  stratum, bins within it, a third uniform a row for the order; every sample in Stata's order), in
+  `bsample` too, with a size; `saving(f [, replace double])`, the replicates' dataset as Stata writes it,
+  r(602) before anything runs; `estat bootstrap` (bc, normal, percentile, all), screen for screen. Fixed:
+  `capture bootstrap ...` read `bootstrap` as a statistic. `bsopts.do` (12 results).
+- **Also:** a program's begin and end no longer lose e(sample); `bootstrap m = r(mean)` with spaces round
+  the `=`; the corpus test takes `RCRAFT_CORPUS_ONLY`.
+- **Machine:** this one has R 4.4.3 without ggplot2 and quantreg, so `coefplot.do` and `robreg.do` were
+  not run here; every other corpus file passes. StatCraft's probes here (288 run) have no
+  compared line differing: 4,110 of 4,114 match Stata to 8 digits and 4 more to 6.
+- **Domains, from Stata's manual and checked:** `rbeta()` draws only for a in 0.05 to 1e5 and b in 0.15 to
+  1e5, `rt()` for df in 1 to 2^53 - 1 (missing, with no draw, outside); RCraft had drawn outside them.
+  `rt()` above 1e10 degrees of freedom is refused: at 2^53 - 1 Stata's acceptance test is not the one
+  found.
+
+## P2C.11 continued: rbeta(), from the methods Stata's manual names, 2026-11-05
+
+- **rbeta()** (`data_r/random.rs`, `plan/stata/random-numbers.md`): Johnk's method (a + b <= 1, both below
+  1), Atkinson and Whittaker's switching method split at 1/2 (both below 1, a + b > 1), their AS 134 (one
+  shape on each side of 1, mirrored when a is the larger), a four-piece method laid out as Stata's G4PE
+  for both shapes above 1 (Schmeiser and Babu's B4PE), and the shape-of-1 forms found before. On 556 of
+  Stata 19's draws over 40 shapes: 507 bit for bit, every one within 1e-12, and the stream Stata's after
+  every one; `variates2.do` checks 1,400 more on fresh seeds. Equal shapes above 1 (rbeta(2, 2)) are
+  refused: their method was not matched.
+- **Found:** Stata's `%21x` prints the exponent in hexadecimal; three apparent misses were the reading of it.
+

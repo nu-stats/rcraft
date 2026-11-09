@@ -409,7 +409,45 @@ stata_bs_clusters <- function(units) {
   keep <- o[count[o] > 0]
   list(unit = keep, count = count[keep])
 }
-stata_bsample <- function(d, n = NA, sel = NULL, cluster = NULL, idcluster = NULL) {
+# with strata() (Stata 19, made-up samples, every one matched in order): the
+# data sorted by stratum (rows keeping their order within one), each row
+# draws k, then each draws v, as above, the bins taken within its stratum;
+# the units drawn in (stratum, k) order, their extra copies after them; then
+# each row draws w and the rows go in (stratum, w) order (3N draws in all).
+# With a size n, the first n of each stratum in that order.
+stata_bs_strata <- function(d, strata, n = NA) {
+  o <- order(d[[strata]], seq_len(nrow(d)), method = "radix")
+  d <- d[o, , drop = FALSE]
+  g <- d[[strata]]
+  gi <- match(g, unique(g))
+  N <- nrow(d)
+  k <- stata_rng_u(stata_rng_words(N))
+  v <- stata_rng_u(stata_rng_words(N))
+  cnt <- integer(N)
+  for (h in unique(gi)) {
+    r <- which(gi == h)
+    bin <- pmin(floor(length(r) * k[r]), length(r) - 1)
+    for (b in unique(bin)) {
+      m <- r[bin == b]
+      w <- m[which.max(v[m])]
+      cnt[w] <- cnt[w] + length(m)
+    }
+  }
+  chosen <- which(cnt > 0)
+  first <- chosen[order(gi[chosen], k[chosen])]
+  rows <- c(first, rep(first, cnt[first] - 1))
+  w <- stata_rng_u(stata_rng_words(N))
+  rows <- rows[order(gi[rows], w)]
+  if (!is.na(n)) {
+    if (n > min(tabulate(gi))) stop("RCraft: bsample with a size larger than a stratum is not translated yet", call. = FALSE)
+    rows <- rows[stats::ave(seq_along(rows), gi[rows], FUN = seq_along) <= n]
+  }
+  out <- d[rows, , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}
+stata_bsample <- function(d, n = NA, sel = NULL, cluster = NULL, idcluster = NULL, strata = NULL) {
+  if (!is.null(strata)) return(stata_bs_strata(d, strata, n))
   rows <- if (is.null(sel)) seq_len(nrow(d)) else which(!is.na(sel) & sel)
   units <- if (is.null(cluster)) {
     as.list(rows)
@@ -533,6 +571,160 @@ stata_rchi2 <- function(rows, df) {
   need <- a$sel & stata_rng_in(a[[3]], 2e-4, 2e8)
   out <- rep(NA_real_, a$n)
   out[need] <- 2 * stata_rgamma_std(a[[3]][need] / 2)
+  stata_rng_out(out)
+}
+# rt(df) (read off Stata 19's draws, 2026-11-05): the ratio of uniforms, u
+# then v each try, t = b (2v - 1) / u, kept when u^2 <= (1 + t^2/df)^(-(df+1)/2);
+# b, the region's half width, is 1 at df = 1. Missing, with no draw, outside
+# Stata's 1 to 2^53 - 1
+stata_rt <- function(rows, df) {
+  a <- stata_rng_args(rows, df)
+  need <- which(a$sel & stata_rng_in(a[[3]], 1, 9007199254740991))
+  out <- rep(NA_real_, a$n)
+  for (i in need) {
+    n <- a[[3]][i]
+    if (n > 1e10) stop("RCraft: rt() with more than 1e10 degrees of freedom is not translated yet (Stata's draws there were not matched)", call. = FALSE)
+    b <- if (n == 1) 1 else exp(0.5 * (log(2 * n / (n - 1)) + (n + 1) / 2 * log((n - 1) / (n + 1))))
+    repeat {
+      w <- stata_rng_u(stata_rng_words(2))
+      t <- (b * (2 * w[2] - 1)) / w[1]
+      if (w[1] * w[1] <= (1 + t * t / n)^(-(n + 1) / 2)) break
+    }
+    out[i] <- t
+  }
+  stata_rng_out(out)
+}
+# rbeta(a, b) (read off Stata 19's draws, 2026-11-05, against the methods its
+# manual names; plan/stata/random-numbers.md). A shape of 1: (1, 1) is one
+# uniform, (1, 2) the smaller of two and (2, 1) the larger, else one uniform
+# inverted. Both below 1: Johnk's method when a + b <= 1, else Atkinson and
+# Whittaker's switching method split at 1/2. One on each side of 1: Atkinson
+# and Whittaker (AS 134), with the shapes swapped and 1 - x when a is the
+# larger. Both above 1 and unequal: a four-piece method with exponential tails
+# laid out as Stata's G4PE for gammas (B4PE, Schmeiser and Babu). Powers are
+# stata_rng_pow's, as in rgamma(). Equal shapes above 1 use a method not
+# found yet and stop. Missing, with no draw, outside a 0.05 to 1e5 and b 0.15
+# to 1e5
+stata_rbeta_johnk <- function(a, b) {
+  repeat {
+    w <- stata_rng_u(stata_rng_words(2))
+    x <- stata_rng_pow(w[1], 1 / a)
+    y <- stata_rng_pow(w[2], 1 / b)
+    if (x + y <= 1) return(x / (x + y))
+  }
+}
+# [0, t] drawn from x^(a-1), [t, 1] from (1-x)^(b-1); one = a < 1 < b
+stata_rbeta_switch <- function(a, b, t, one) {
+  p <- if (one) b * t / (b * t + a * stata_rng_pow(1 - t, b)) else b * t / (b * t + a * (1 - t))
+  repeat {
+    w <- stata_rng_u(stata_rng_words(2))
+    if (w[1] <= p) {
+      x <- t * stata_rng_pow(w[1] / p, 1 / a)
+      ok <- if (one) w[2] <= stata_rng_pow(1 - x, b - 1) else w[2] <= ((1 - x) / (1 - t))^(b - 1)
+    } else {
+      x <- 1 - (1 - t) * stata_rng_pow((1 - w[1]) / (1 - p), 1 / b)
+      ok <- if (one) w[2] <= stata_rng_pow(x / t, a - 1) else w[2] <= (x / t)^(a - 1)
+    }
+    if (ok) return(x)
+  }
+}
+stata_rbeta_b4pe <- function(a, b) {
+  u <- function() stata_rng_u(stata_rng_words(1))
+  x3 <- (a - 1) / ((a - 1) + (b - 1))
+  # the inflection points, x3 -/+ d (none when a + b <= 3)
+  d <- if (a + b <= 3) Inf else sqrt((a - 1) * (b - 1) / (a + b - 3)) / (a + b - 2)
+  f <- function(x) stata_rng_pow(x / x3, a - 1) * stata_rng_pow((1 - x) / (1 - x3), b - 1)
+  dl <- function(x) (a - 1 - (a + b - 2) * x) / (x * (1 - x))
+  x1 <- 0; x2 <- 0; f1 <- 0; f2 <- 0; l1 <- 0
+  if (d < x3) {
+    x2 <- x3 - d
+    x1 <- x2 - 1 / dl(x2)
+    f1 <- f(x1)
+    f2 <- f(x2)
+    l1 <- -dl(x1)
+  }
+  x4 <- 1; x5 <- 1; f4 <- 0; f5 <- 0; l5 <- 0
+  if (x3 + d < 1) {
+    x4 <- x3 + d
+    x5 <- x4 - 1 / dl(x4)
+    f4 <- f(x4)
+    f5 <- f(x5)
+    l5 <- -dl(x5)
+  }
+  # the rectangles summed from the mode out (left of it, right of it, then
+  # the outer ones), then wedges, triangles and tails as G4PE
+  rect <- c(f2 * (x3 - x2), f4 * (x4 - x3), f1 * (x2 - x1), f5 * (x5 - x4))
+  rest <- c((1 - f2) * (x3 - x2), (1 - f4) * (x4 - x3), (f2 - f1) * (x2 - x1) / 2,
+            (f4 - f5) * (x5 - x4) / 2, if (l1 == 0) 0 else -f1 / l1, if (l5 == 0) 0 else f5 / l5)
+  pr <- cumsum(rect)
+  p <- c(rep(NA_real_, 4), pr[4] + cumsum(rest))
+  repeat {
+    v0 <- u() * p[10]
+    if (v0 <= pr[4]) {
+      if (v0 <= pr[1]) return(x2 + v0 / f2)
+      if (v0 <= pr[2]) return(x3 + (v0 - pr[1]) / f4)
+      if (v0 <= pr[3]) return(x1 + (v0 - pr[2]) / f1)
+      return(x4 + (v0 - pr[3]) / f5)
+    }
+    if (v0 > p[8] && v0 <= p[9]) {
+      x <- x1 - log((p[9] - v0) / (p[9] - p[8])) / l1
+      if (x <= 0) next
+    }
+    if (v0 > p[9]) x <- x5 - log((p[10] - v0) / (p[10] - p[9])) / l5
+    w <- u()
+    if (v0 <= p[5]) {
+      x <- x2 + (x3 - x2) * w
+      v <- f2 + (v0 - pr[4]) / (x3 - x2)
+    } else if (v0 <= p[6]) {
+      x <- x3 + (x4 - x3) * w
+      v <- f4 + (v0 - p[5]) / (x4 - x3)
+    } else if (v0 <= p[8]) {
+      hi <- max(w, u())
+      if (v0 <= p[7]) {
+        x <- x1 + (x2 - x1) * hi
+        v <- f1 + (f2 - f1) * ((v0 - p[6]) / (p[7] - p[6])) * hi
+      } else {
+        x <- x5 - (x5 - x4) * hi
+        v <- f5 + (f4 - f5) * ((v0 - p[7]) / (p[8] - p[7])) * hi
+      }
+    } else if (v0 <= p[9]) {
+      v <- w * f1 * exp(-l1 * (x - x1))
+    } else {
+      v <- w * f5 * exp(-l5 * (x - x5))
+    }
+    if (x > 0 && x < 1 && v <= f(x)) return(x)
+  }
+}
+stata_rbeta <- function(rows, a, b) {
+  x <- stata_rng_args(rows, a, b)
+  need <- which(x$sel & stata_rng_in(x[[3]], 0.05, 1e5) & stata_rng_in(x[[4]], 0.15, 1e5))
+  out <- rep(NA_real_, x$n)
+  for (i in need) {
+    p <- x[[3]][i]
+    q <- x[[4]][i]
+    if (p == q && p > 1) {
+      stop("RCraft: rbeta() with equal shapes above 1 is not translated yet (Stata's method there was not matched)", call. = FALSE)
+    }
+    out[i] <- if (p == 1 && q == 1) {
+      stata_rng_u(stata_rng_words(1))
+    } else if (p == 1 && q == 2) {
+      min(stata_rng_u(stata_rng_words(2)))
+    } else if (p == 2 && q == 1) {
+      max(stata_rng_u(stata_rng_words(2)))
+    } else if (q == 1) {
+      exp(log(stata_rng_u(stata_rng_words(1))) * (1 / p))
+    } else if (p == 1) {
+      1 - exp(log(stata_rng_u(stata_rng_words(1))) * (1 / q))
+    } else if (p < 1 && q < 1) {
+      if (p + q <= 1) stata_rbeta_johnk(p, q) else stata_rbeta_switch(p, q, 0.5, FALSE)
+    } else if (p < 1) {
+      stata_rbeta_switch(p, q, (1 - p) / (q + 1 - p), TRUE)
+    } else if (q < 1) {
+      1 - stata_rbeta_switch(q, p, (1 - q) / (p + 1 - q), TRUE)
+    } else {
+      stata_rbeta_b4pe(p, q)
+    }
+  }
   stata_rng_out(out)
 }
 # Michael, Schucany and Haas on rnormal(), then one more uniform, row by row
@@ -710,7 +902,23 @@ fn split_items(text: &str) -> Vec<String> {
     if !cur.is_empty() {
         out.push(cur);
     }
-    out
+    // name = exp with spaces around the =, as Stata takes it
+    let mut joined: Vec<String> = Vec::new();
+    let mut words = out.into_iter().peekable();
+    while let Some(w) = words.next() {
+        let last_open = joined.last().is_some_and(|l| l.ends_with('='));
+        if (w.starts_with('=') || last_open) && !joined.is_empty() {
+            if let Some(l) = joined.last_mut() {
+                l.push_str(&w);
+            }
+        } else {
+            joined.push(w);
+        }
+        if joined.last().is_some_and(|l| l.ends_with('=')) && words.peek().is_none() {
+            break;
+        }
+    }
+    joined
 }
 
 /// Whether an expression has one value for the whole data (`_N > 5`,
@@ -767,7 +975,10 @@ pub(super) const BOOTSTRAP_HELPER: &str = r##"stata_bs_sum <- function(v) {
   for (x in v) s <- s + x
   s
 }
-stata_bs_begin <- function(cmdname, eclass, reps, nodots) {
+stata_bs_begin <- function(cmdname, eclass, reps, nodots, saving = NULL, replace = FALSE) {
+  if (!is.null(saving) && !replace && file.exists(saving)) {
+    stop("file ", saving, " already exists (Stata: r(602))", call. = FALSE)
+  }
   if (!nodots) cat("(running ", cmdname, " on estimation sample)\n", sep = "")
   if (!eclass) {
     cat("\nwarning: ", cmdname, " does not set e(sample), so no observations will be\n",
@@ -775,6 +986,7 @@ stata_bs_begin <- function(cmdname, eclass, reps, nodots) {
         "         reasons. To exclude observations, press Break, save the data, drop\n",
         "         any observations that are to be excluded, and rerun bootstrap.\n", sep = "")
   }
+  if (!is.null(saving) && !file.exists(saving)) cat("(file ", saving, " not found)\n", sep = "")
   if (!nodots) cat("\nBootstrap replications (", reps, "): ", sep = "")
   invisible(NULL)
 }
@@ -785,6 +997,17 @@ stata_bs_dot <- function(i, total, nodots) {
   if (i == total) cat(" done\n")
   invisible(NULL)
 }
+# saving(): the replicates as a dataset, a variable each, labelled with its
+# expression (_b[x] is _b_x), the data labelled "bootstrap: command"
+stata_bs_save <- function(reps, names, exps, by_b, cmdname, path) {
+  d <- as.data.frame(reps)
+  vn <- if (by_b) paste0("_b_", sub("^_", "", names)) else names
+  lab <- if (by_b) paste0("_b[", names, "]") else exps
+  colnames(d) <- vn
+  for (j in seq_along(vn)) attr(d[[j]], "label") <- lab[j]
+  haven::write_dta(d, path, label = paste0("bootstrap: ", cmdname))
+  invisible(NULL)
+}
 # _b: the model's e(b), its base and omitted columns left out, one equation's name dropped
 stata_bs_b <- function() {
   b <- stata_e$b
@@ -793,7 +1016,7 @@ stata_bs_b <- function() {
   stats::setNames(as.vector(b)[keep], sub("^[^:]*:", "", nm[keep]))
 }
 stata_bs_report <- function(obs, reps, exps, command, n_used, level = 0.95, model = NULL,
-                            cluster = NULL, n_units = NULL, depvar = "") {
+                            cluster = NULL, n_units = NULL, depvar = "", strata = NULL, n_strata = NULL) {
   names <- names(obs)
   k <- length(obs)
   ok <- stats::complete.cases(reps)
@@ -834,10 +1057,20 @@ stata_bs_report <- function(obs, reps, exps, command, n_used, level = 0.95, mode
       lines <- c(lines, list(c(paste0("Log likelihood = ", trimws(stata_fmt(model$ll, "%10.0g"))),
                                right("Pseudo R2", sprintf("%.4f", model$r2_p)))))
     }
+    # with strata(), the title on a line of its own and the strata below it
+    if (!is.null(strata)) {
+      cat(title, "\n\n", sep = "")
+      lines[[1]][1] <- sprintf("Number of strata = %d", n_strata)
+    }
     for (l in lines) cat(formatC(l[1], width = -56), l[2], "\n", sep = "")
   } else {
     w <- max(nchar(n_used), nchar(R))
-    cat(formatC(title, width = -60), "Number of obs = ", pad(n_used, w), "\n", sep = "")
+    first <- title
+    if (!is.null(strata)) {
+      cat(title, "\n\n", sep = "")
+      first <- sprintf("Number of strata = %d", n_strata)
+    }
+    cat(formatC(first, width = -60), "Number of obs = ", pad(n_used, w), "\n", sep = "")
     cat(strrep(" ", 60), "Replications  = ", pad(R, w), "\n\n", sep = "")
     cat(pad("Command", 13), ": ", command, "\n", sep = "")
     for (j in seq_len(k)) cat(pad(short(names[j]), 13), ": ", exps[j], "\n", sep = "")
@@ -893,10 +1126,13 @@ stata_bs_report <- function(obs, reps, exps, command, n_used, level = 0.95, mode
   e$k_extra <- 0
   e$bs_version <- 3
   if (!is.null(cluster)) e$N_clust <- n_units
+  if (!is.null(strata)) e$N_strata <- n_strata
   e$cmd <- if (is.null(cmd)) "bootstrap" else cmd
   e$prefix <- "bootstrap"
   e$title <- title
   e$command <- command
+  if (is.null(model)) for (j in seq_len(k)) e[[paste0("exp", j)]] <- exps[j]
+  if (!is.null(strata)) e$strata <- strata
   e$vcetype <- "Bootstrap"
   e$vce <- "bootstrap"
   e$properties <- "b V"
@@ -912,6 +1148,65 @@ stata_bs_report <- function(obs, reps, exps, command, n_used, level = 0.95, mode
                 vapply(seq_len(k), function(j) pct(X[, j], 100 * stats::pnorm(2 * z0[j] + z)), 0))
   e
 }"##;
+
+/// `estat bootstrap`: the observed values, bias, bootstrap standard errors
+/// and the intervals bootstrap kept, as Stata 19 lays them out.
+pub(super) const ESTAT_BOOTSTRAP_HELPER: &str = r##"stata_estat_bootstrap <- function(which = "bc") {
+  e <- stata_e
+  pad <- function(s, w) formatC(as.character(s), width = w)
+  short <- function(s) ifelse(nchar(s) > 12, paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s))), s)
+  g <- function(x, f) stata_fmt(x, f)
+  names <- colnames(e$b)
+  r_class <- identical(e$cmd, "bootstrap")
+  right <- function(l, v) paste0(formatC(l, width = -18), "= ", pad(v, 10))
+  cat("\n")
+  if (is.null(e$N_strata)) {
+    cat(formatC(e$title, width = -48), right("Number of obs", format(e$N, big.mark = ",")), "\n", sep = "")
+  } else {
+    cat(e$title, "\n", sep = "")
+    cat(formatC(paste0(formatC("Number of strata", width = -19), "= ", pad(e$N_strata, 10)), width = -48),
+        right("Number of obs", format(e$N, big.mark = ",")), "\n", sep = "")
+  }
+  cat(strrep(" ", 48), right("Replications", e$N_reps), "\n", sep = "")
+  if (r_class) {
+    cat("\n", pad("Command", 13), ": ", e$command, "\n", sep = "")
+    for (j in seq_along(names)) cat(pad(short(names[j]), 13), ": ", e[[paste0("exp", j)]], "\n", sep = "")
+  }
+  cat("\n")
+  cat(strrep("-", 78), "\n", sep = "")
+  cat("             |    Observed               Bootstrap\n")
+  dep <- if (r_class || is.null(e$depvar)) "" else e$depvar
+  cat(pad(short(dep), 12), " | coefficient       Bias    std. err.  [",
+      stata_fmt(e$level, "%9.0g", trim = TRUE), "% conf. interval]\n", sep = "")
+  cat("-------------+----------------------------------------------------------------\n")
+  kinds <- list(normal = c("ci_normal", "(N)"), percentile = c("ci_percentile", "(P)"), bc = c("ci_bc", "(BC)"))
+  kinds <- kinds[names(kinds) %in% which]
+  for (j in seq_along(names)) {
+    for (t in seq_along(kinds)) {
+      ci <- e[[kinds[[t]][1]]]
+      tail <- paste0(pad(g(ci[1, j], "%9.0g"), 12), pad(g(ci[2, j], "%9.0g"), 11), pad(kinds[[t]][2], 6))
+      if (t == 1) {
+        cat(pad(short(names[j]), 12), " |", pad(g(e$b[1, j], "%10.0g"), 12), pad(g(e$bias[1, j], "%9.0g"), 11),
+            pad(g(e$se[1, j], "%10.0g"), 12), tail, "\n", sep = "")
+      } else {
+        cat(strrep(" ", 13), "|", strrep(" ", 35), tail, "\n", sep = "")
+      }
+    }
+  }
+  cat(strrep("-", 78), "\n", sep = "")
+  words <- c("(N)" = "Normal", "(P)" = "Percentile", "(BC)" = "Bias-corrected")
+  labs <- vapply(kinds, function(x) gsub("[()]", "", x[2]), "")
+  w <- max(nchar(labs))
+  for (t in seq_along(labs)) {
+    cat(if (t == 1) "Key: " else "     ", pad(labs[t], w), ": ", words[[kinds[[t]][2]]], "\n", sep = "")
+  }
+  invisible(NULL)
+}"##;
+
+/// What follows the first word.
+fn first_word_rest(s: &str) -> &str {
+    super::first_word(s).1
+}
 
 /// Commands that draw from the generator, or run code that may.
 const DRAWING_COMMANDS: &[&str] = &[
@@ -1092,7 +1387,7 @@ impl Session {
             return Err(no(why.clone()));
         }
         self.no_by(c, "bsample")?;
-        if let Some(o) = opts.other(&[("cluster", 2), ("idcluster", 3)]) {
+        if let Some(o) = opts.other(&[("cluster", 2), ("idcluster", 3), ("strata", 6)]) {
             return Err(no(format!(
                 "bsample with the option {o} is not translated yet"
             )));
@@ -1120,6 +1415,19 @@ impl Session {
         if idcluster.is_some() && cluster.is_none() {
             return Err(no("idcluster() needs cluster() (Stata: r(198))"));
         }
+        let strata = opts.arg("strata", 6).map(|v| v.trim().to_string());
+        if let Some(v) = &strata {
+            if !super::is_name(v) {
+                return Err(no(
+                    "bsample, strata() of more than one variable is not translated yet",
+                ));
+            }
+            if cluster.is_some() || c.parts.if_exp.is_some() || c.parts.in_range.is_some() {
+                return Err(no(
+                    "bsample, strata() with cluster(), if or in is not translated yet",
+                ));
+            }
+        }
         let cond = self.condition(c, out)?;
         // what Stata does with if or in beside a size or clusters was not observed
         if cond.is_some() && (n.is_some() || cluster.is_some()) {
@@ -1144,6 +1452,10 @@ impl Session {
             self.helpers.insert("stata_float");
             self.kinds.insert(v.clone(), Kind::Number);
         }
+        if let Some(v) = &strata {
+            args.push_str(&format!(", strata = {}", super::r_text(v)));
+            out.caveat("with strata(), the rows come sorted by stratum, as in Stata");
+        }
         out.package("dplyr");
         out.line(format!("{d} <- stata_bsample({d}{args})"));
         self.drew.set(true);
@@ -1153,29 +1465,81 @@ impl Session {
         Ok(())
     }
 
-    /// `bootstrap [exp_list] [, reps(#) seed(#) nodots cluster(v) level(#)]: command`
-    /// (P2C.16 part two): the command is translated once, quietly, and run on
-    /// the data for the observed values, then on `reps()` samples of its
-    /// estimation sample drawn as `bsample` draws them; `stata_bs_report`
-    /// prints Stata's table and leaves its `e()`.
+    /// `estat bootstrap [, normal percentile bc all]` after `bootstrap`.
+    pub(super) fn estat_bootstrap(
+        &mut self,
+        c: &Command,
+        opts: &super::Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("normal", 1), ("percentile", 1), ("bc", 2), ("all", 3)]) {
+            return Err(no(format!(
+                "estat bootstrap with the option {o} is not translated yet"
+            )));
+        }
+        if !first_word_rest(&c.parts.main).is_empty() {
+            return Err(no(
+                "estat bootstrap takes no variables (Stata: invalid syntax)",
+            ));
+        }
+        match &self.e_ret {
+            super::returned::Returned::Kept { cmd, .. } if cmd == "bootstrap" => {}
+            super::returned::Returned::Lost(why) => {
+                return Err(no(format!("estat bootstrap: {why}")))
+            }
+            _ => {
+                return Err(no(
+                    "estat bootstrap: the results held are not bootstrap's (Stata: r(301))",
+                ))
+            }
+        }
+        let mut which: Vec<&str> = Vec::new();
+        if opts.has("all", 3) {
+            which = vec!["normal", "percentile", "bc"];
+        } else {
+            for (o, m) in [("normal", 1), ("percentile", 1), ("bc", 2)] {
+                if opts.has(o, m) {
+                    which.push(o);
+                }
+            }
+        }
+        if which.is_empty() {
+            which.push("bc");
+        }
+        self.helpers.insert("stata_estat_bootstrap");
+        self.helpers.insert("stata_fmt");
+        out.line(format!(
+            "stata_estat_bootstrap(c({}))",
+            which
+                .iter()
+                .map(|w| super::r_text(w))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        self.r_ret = super::returned::Returned::Lost(
+            "estat bootstrap replaces r() in Stata with results RCraft does not keep yet".into(),
+        );
+        Ok(())
+    }
+
+    /// `bootstrap [exp_list] [, reps(#) seed(#) nodots cluster(v) strata(v)
+    /// level(#) saving()]: command` (P2C.16 part two): the command is
+    /// translated once, quietly, and run on the data for the observed values,
+    /// then on `reps()` samples of its estimation sample drawn as `bsample`
+    /// draws them; `stata_bs_report` prints Stata's table and leaves its `e()`.
     pub(super) fn bootstrap(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         if let Some(why) = self.rng_old.as_ref().or(self.rng_lost.as_ref()) {
             return Err(no(why.clone()));
         }
         self.no_by(c, "bootstrap")?;
-        let text = c.text.trim();
-        let colon = top_level(text, ':')
+        // what follows the command word, past any prefix (capture, quietly)
+        let text = super::returned::after_name(c);
+        let colon = top_level(&text, ':')
             .ok_or_else(|| no("bootstrap needs a command after a colon (Stata: r(198))"))?;
         let (head, inner_text) = (
-            text.get(..colon).unwrap_or(""),
+            text.get(..colon).unwrap_or("").trim(),
             text.get(colon + 1..).unwrap_or(""),
         );
-        // the command word ends at a space or the comma of its options
-        let head = head
-            .find(|ch: char| ch.is_whitespace() || ch == ',')
-            .and_then(|i| head.get(i..))
-            .unwrap_or("")
-            .trim();
         let (explist, opt_text) = match top_level(head, ',') {
             Some(i) => (head.get(..i).unwrap_or(""), head.get(i + 1..).unwrap_or("")),
             None => (head, ""),
@@ -1193,11 +1557,45 @@ impl Session {
             ("nodots", 4),
             ("cluster", 2),
             ("level", 1),
+            ("strata", 6),
+            ("saving", 4),
         ]) {
             return Err(no(format!(
                 "bootstrap with the option {o} is not translated yet"
             )));
         }
+        let strata = opts.arg("strata", 6).map(|v| v.trim().to_string());
+        if let Some(v) = &strata {
+            if !super::is_name(v) {
+                return Err(no(
+                    "bootstrap, strata() of more than one variable is not translated yet",
+                ));
+            }
+        }
+        // saving(file [, replace double]): the replicates as a dataset
+        let saving = match opts.arg("saving", 4) {
+            None => None,
+            Some(s) => {
+                let (file, sub) = match top_level(&s, ',') {
+                    Some(i) => (s.get(..i).unwrap_or(""), s.get(i + 1..).unwrap_or("")),
+                    None => (s.as_str(), ""),
+                };
+                let mut replace = false;
+                let mut double = false;
+                for w in sub.split_whitespace() {
+                    match w {
+                        "replace" => replace = true,
+                        "double" => double = true,
+                        other => {
+                            return Err(no(format!(
+                                "bootstrap, saving(..., {other}) is not translated yet"
+                            )))
+                        }
+                    }
+                }
+                Some((super::file_name(file.trim(), "dta"), replace, double))
+            }
+        };
         let reps: u32 = match opts.arg("reps", 1) {
             Some(r) => r.trim().parse().ok().filter(|r| *r >= 2).ok_or_else(|| {
                 no(format!(
@@ -1214,6 +1612,11 @@ impl Session {
             if !super::is_name(v) {
                 return Err(no(format!("{v} is not a variable name")));
             }
+        }
+        if cluster.is_some() && strata.is_some() {
+            return Err(no(
+                "bootstrap with cluster() and strata() together is not translated yet",
+            ));
         }
         let d = self.data()?;
         // the command, run quietly as Stata does inside bootstrap
@@ -1295,11 +1698,16 @@ impl Session {
         }
         // the observed values as computed; the replicates of a named
         // expression kept as floats, those of _b as doubles (q10, Stata 19)
+        let double = saving.as_ref().is_some_and(|s| s.2);
+        let keep = |s: &str| {
+            if double {
+                s.to_string()
+            } else {
+                format!("stata_float({s})")
+            }
+        };
         let (stats, rep_stats) = if by_b {
-            (
-                "stata_bs_b()".to_string(),
-                "stata_float(stata_bs_b())".to_string(),
-            )
+            ("stata_bs_b()".to_string(), keep("stata_bs_b()"))
         } else {
             let named = format!(
                 "stats::setNames(c({}), c({}))",
@@ -1310,7 +1718,7 @@ impl Session {
                     .collect::<Vec<_>>()
                     .join(", ")
             );
-            (named.clone(), format!("stata_float({named})"))
+            (named.clone(), keep(&named))
         };
         let k = if by_b {
             "length(stata_bs_obs)".to_string()
@@ -1360,21 +1768,50 @@ impl Session {
         } else {
             "stata_bs_model <- NULL"
         });
+        let save_args = saving.as_ref().map_or(String::new(), |(p, replace, _)| {
+            format!(
+                ", saving = {}, replace = {}",
+                super::r_text(p),
+                super::stats::r_logical(*replace)
+            )
+        });
         out.line(format!(
-            "stata_bs_begin({}, {}, {reps}, {})",
+            "stata_bs_begin({}, {}, {reps}, {}{save_args})",
             super::r_text(&cmdname),
             super::stats::r_logical(eclass),
             super::stats::r_logical(nodots)
         ));
         out.line(format!("stata_bs_m <- matrix(NA_real_, {reps}, {k})"));
-        let cl = cluster.as_ref().map_or(String::new(), |v| {
-            format!(", cluster = {}", super::r_text(v))
-        });
+        let cl = match (&cluster, &strata) {
+            (Some(v), _) => format!(", cluster = {}", super::r_text(v)),
+            (None, Some(v)) => format!(", strata = {}", super::r_text(v)),
+            (None, None) => String::new(),
+        };
         out.line(format!(
             "for (stata_bs_i in seq_len({reps})) {{\n{d} <- stata_bsample(stata_bs_full[stata_bs_rows, , drop = FALSE]{cl})\nstata_bs_m[stata_bs_i, ] <- tryCatch({{\n{code}\n{rep_stats}\n}}, error = function(e) NA_real_)\nstata_bs_dot(stata_bs_i, {reps}, {})\n}}",
             super::stats::r_logical(nodots)
         ));
         out.line(format!("{d} <- stata_bs_full"));
+        if let Some((path, _, _)) = &saving {
+            out.package("haven");
+            out.line(format!(
+                "stata_bs_save(stata_bs_m, names(stata_bs_obs), c({}), {}, {}, {})",
+                exps.iter()
+                    .map(|e| super::r_text(e))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                super::stats::r_logical(by_b),
+                super::r_text(&cmdname),
+                super::r_text(path)
+            ));
+        }
+        let strata_args = strata.as_ref().map_or(String::new(), |v| {
+            format!(
+                ", strata = {}, n_strata = length(unique(stata_bs_full[[{}]][stata_bs_rows]))",
+                super::r_text(v),
+                super::r_text(v)
+            )
+        });
         let units = cluster.as_ref().map_or("NULL".to_string(), |v| {
             format!(
                 "length(unique(stata_bs_full[[{}]][stata_bs_rows]))",
@@ -1382,7 +1819,7 @@ impl Session {
             )
         });
         out.line(format!(
-            "stata_e <- stata_bs_report(stata_bs_obs, stata_bs_m, exps = c({}), command = {}, n_used = sum(stata_bs_rows), level = {}, model = stata_bs_model{}, n_units = {units}, depvar = {})",
+            "stata_e <- stata_bs_report(stata_bs_obs, stata_bs_m, exps = c({}), command = {}, n_used = sum(stata_bs_rows), level = {}, model = stata_bs_model{}, n_units = {units}, depvar = {}{strata_args})",
             exps.iter().map(|e| super::r_text(e)).collect::<Vec<_>>().join(", "),
             super::r_text(command),
             super::r_number(level),

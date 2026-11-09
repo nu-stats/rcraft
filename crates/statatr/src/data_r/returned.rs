@@ -105,7 +105,8 @@ stata_list_returned <- function(x, p) {
     cat("\nmatrices:\n")
     for (n in mat) cat(key(n), " :  ", nrow(x[[n]]), " x ", ncol(x[[n]]), "\n", sep = "")
   }
-  if (p == "e" && !identical(x$cmd, "cluster2")) cat("\nfunctions:\n", key("sample"), "   \n", sep = "")
+  # results ereturn posted without esample() have no e(sample), nor does cluster2's
+  if (p == "e" && !identical(x$cmd, "cluster2") && !identical(attr(x, "stata_sample"), FALSE)) cat("\nfunctions:\n", key("sample"), "   \n", sep = "")
   invisible(NULL)
 }"##;
 
@@ -950,6 +951,19 @@ const TEXT_NAMES: &[&str] = &[
     "wtype",
     "wexp",
     "properties",
+    // file read's r(status)
+    "status",
+    // bootstrap's
+    "strata",
+    "exp1",
+    "exp2",
+    "exp3",
+    "exp4",
+    "exp5",
+    "exp6",
+    "exp7",
+    "exp8",
+    "exp9",
     "predict",
     "model",
     "estat_cmd",
@@ -1252,14 +1266,17 @@ pub(super) enum Returned {
     },
     /// A command since may have replaced them in Stata, so they are not known.
     Lost(String),
-    /// An r-class program the do-file defines returned them: its name, and
-    /// the names it returned that are text (any name it did not is missing).
+    /// An r-class program the do-file defines returned them, or (for e())
+    /// `ereturn` posted them: the program's name (`ereturn` at the top), and
+    /// the names that are text (any name not set is missing).
     Program { cmd: String, texts: Vec<String> },
 }
 
 /// Commands after which Stata 19 still holds the r() it held before
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
+    // file open, write and close (file read sets r() itself)
+    "file",
     // a program called and returning, and return inside it, set r() themselves
     "_rcraft_program_begin",
     "_rcraft_program_end",
@@ -1303,6 +1320,7 @@ const LEAVE_E_ALONE: &[&str] = &[
     "outreg",
     "frmttable",
     "which",
+    "file",
     "_rcraft_program_begin",
     "_rcraft_program_end",
     "return",
@@ -1427,6 +1445,11 @@ const READ_THE_MODEL: &[&str] = &[
 /// `estimates use` do not.
 fn leaves_e_alone(c: &Command) -> bool {
     let name = c.name.as_str();
+    // ereturn sets e() but for list and display
+    if name == "ereturn" {
+        let sub = c.parts.main.split_whitespace().next().unwrap_or("");
+        return sub.len() >= 2 && ("list".starts_with(sub) || "display".starts_with(sub));
+    }
     if LEAVE_E_ALONE.contains(&name) {
         return true;
     }
@@ -1454,6 +1477,8 @@ pub(super) const R_SUMMARIZE_DETAIL: &[&str] = &[
 ];
 pub(super) const R_MEANONLY: &[&str] = &["N", "sum_w", "mean", "min", "max", "sum"];
 pub(super) const R_COUNT: &[&str] = &["N"];
+/// What `file read` leaves in r().
+pub(super) const R_FILE_READ: &[&str] = &["eof", "status"];
 pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
 /// What `split` leaves in r().
 pub(super) const R_SPLIT: &[&str] = &["k_new", "varlist"];
@@ -1630,8 +1655,16 @@ impl Session {
                         )))
                     }
                     Returned::Lost(why) => return Err(no(format!("{which}[{name}] is not known here: {why}"))),
-                    Returned::Program { cmd, .. } => {
-                        return Err(no(format!("{which}[{name}]: e() after the program {cmd} is not translated yet")))
+                    // posted by ereturn: read off e(b) and e(V)
+                    Returned::Program { .. } => {
+                        return Ok((
+                            format!(
+                                "stata_bpost({}{})",
+                                r_text(name.trim_start_matches(':')),
+                                if which == "_se" { ", se = TRUE" } else { "" }
+                            ),
+                            Kind::Number,
+                        ))
                     }
                 }
                 Ok((
@@ -1656,13 +1689,12 @@ impl Session {
                     ))),
                     Returned::Lost(why) => Err(no(format!("{shown} is not known here: {why}"))),
                     // what an r-class program returned; a name it did not is missing, as in Stata
-                    Returned::Program { cmd, texts, .. } => {
-                        if which == "e" {
-                            return Err(no(format!("{shown} after the program {cmd} is not translated yet")));
-                        }
+                    // or what ereturn posted
+                    Returned::Program { texts, .. } => {
                         let text = texts.iter().any(|t| t == name);
+                        let get = if which == "e" { "stata_eget" } else { "stata_rget" };
                         Ok((
-                            format!("stata_rget({}{})", r_text(name), if text { ", text = TRUE" } else { "" }),
+                            format!("{get}({}{})", r_text(name), if text { ", text = TRUE" } else { "" }),
                             if text { Kind::Text } else { Kind::Number },
                         ))
                     }
@@ -1721,9 +1753,14 @@ impl Session {
                 "matrix list {shown}: nothing before it in this do-file leaves {which}()"
             ))),
             Returned::Lost(why) => Err(no(format!("matrix list {shown}: {why}"))),
-            Returned::Program { cmd, .. } => Err(no(format!(
-                "matrix list {shown} after the program {cmd} is not translated yet"
-            ))),
+            Returned::Program { cmd, .. } => {
+                if which == "r" {
+                    return Err(no(format!(
+                        "matrix list {shown} after the program {cmd} is not translated yet"
+                    )));
+                }
+                Ok(format!("stata_e[[{}]]", r_text(name)))
+            }
             Returned::Kept { cmd, model, .. } => {
                 if which == "e" {
                     if matches!(cmd.as_str(), "anova" | "margins")
@@ -2098,9 +2135,21 @@ fn mentions_data(e: &str, scalar: &dyn Fn(&str) -> bool) -> bool {
             }
             // a matrix by name, then its indices
             Expr::Call(name, args)
-                if matches!(name.as_str(), "rowsof" | "colsof" | "el" | "__matel") =>
+                if matches!(
+                    name.as_str(),
+                    "rowsof" | "colsof" | "el" | "__matel" | "colnumb" | "rownumb"
+                ) =>
             {
                 args.iter().skip(1).any(|a| walk(a, scalar))
+            }
+            // functions of matrices, named
+            Expr::Call(name, _)
+                if matches!(
+                    name.as_str(),
+                    "trace" | "det" | "diag0cnt" | "issymmetric" | "matmissing" | "mreldif"
+                ) =>
+            {
+                false
             }
             Expr::Call(name, args) => {
                 !matches!(name.as_str(), "e" | "r" | "scalar")
@@ -2404,6 +2453,12 @@ impl Session {
             if run.class == "rclass" {
                 self.r_ret = Returned::Lost(format!(
                     "a line of the program {} was not translated, so what it returns is not known",
+                    run.name
+                ));
+            }
+            if run.class == "eclass" {
+                self.e_ret = Returned::Lost(format!(
+                    "a line of the program {} was not translated, so the e() it sets is not known",
                     run.name
                 ));
             }

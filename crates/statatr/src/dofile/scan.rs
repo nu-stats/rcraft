@@ -102,7 +102,7 @@ pub struct Scan {
 
 /// The random functions whose draws are not Stata's yet (the others are,
 /// P2C.11 and its continuation).
-const RANDOM: &[&str] = &["rpoisson(", "rbeta(", "rt("];
+const RANDOM: &[&str] = &["rpoisson(", "rbeta("];
 
 pub fn scan(d: &DoFile) -> Scan {
     let mut s = Scan {
@@ -158,13 +158,13 @@ pub fn scan(d: &DoFile) -> Scan {
         if RANDOM.iter().any(|r| calls(r))
             || matches!(word.as_str(), "simulate" | "permute" | "sample")
         {
-            limit(&mut s, "Random numbers: most random functions (runiform(), rnormal(), rbinomial(), ...), bsample and bootstrap give Stata's own draws, but rpoisson(), rbeta(), rt() and the commands that draw (simulate, permute, ...) do not, and the draws after them wait for a set seed.");
+            limit(&mut s, "Random numbers: most random functions (runiform(), rnormal(), rbinomial(), ...), bsample and bootstrap give Stata's own draws, but rpoisson(), rbeta() with equal shapes above 1 and the commands that draw (simulate, permute, ...) do not, and the draws after them wait for a set seed.");
         }
         if lower.starts_with("mata") {
             limit(&mut s, "Mata: its blocks are not run.");
         }
         if lower.starts_with("program define") {
-            limit(&mut s, "Programs the do-file defines (program define ... end) run where they are called, with args, syntax and return; e-class programs (ereturn post) are not translated yet, and a program with a line that is not translated leaves r() unknown.");
+            limit(&mut s, "Programs the do-file defines (program define ... end) run where they are called, with args, syntax, return and ereturn; a program with a line that is not translated leaves r() (or e()) unknown.");
         }
         if lower.contains("plugin") {
             limit(&mut s, "Compiled plugins are not run.");

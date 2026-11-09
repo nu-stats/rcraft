@@ -160,10 +160,35 @@ In `bootstrap.do` (9 results) the standard errors match to 1e-9. `logit`'s agree
 as its own coefficients do.
 
 Not translated yet:
-- `strata()`, `saving()`, `bca` and the other options;
+- `bca` and the options not below;
 - `_b` after other models;
-- `predict` and `estat bootstrap` after it;
+- `predict` after it;
 - `vce(bootstrap)` as a model option.
+
+## bsample and bootstrap with strata(), saving() and estat bootstrap (2026-11-05)
+
+Read off Stata 19 with made-up data, each sample listed by an id and followed by the next uniform:
+- `bsample, strata(g)` takes 3N uniforms (the 37th is the next after 12 rows), however the data are
+  sorted. The rule that gives all ten samples recorded, in order: sort the data by g (rows keep their
+  order within a stratum); each row draws k, then each draws v, as in plain `bsample`, but a row's bin
+  is floor(N_h k) among the N_h rows of its stratum, and a bin's count goes to its largest v; the units
+  drawn go in (stratum, k) order with their extra copies after them; then each of the N rows draws w,
+  and the rows go in (stratum, w) order.
+- `bsample n, strata(g)`: the first n rows of each stratum in that order (three samples; the stream
+  moves as without n).
+- `bootstrap ..., strata(g)`: replications as above on the estimation sample; the header has the title
+  alone, then `Number of strata = 3` beside `Number of obs`; e(N_strata) and e(strata). `estat
+  bootstrap` heads it the same way (`Number of strata   =          3`).
+- `saving(f [, replace double])`: the replicates as `f.dta`, a variable each (`_bs_1`, the names given,
+  or `_b_x`, `_b_cons` for `_b`), labelled with the expression (`r(mean)`, `_b[x]`), the data labelled
+  `bootstrap: summarize`; floats (`%9.0g`) unless `double` (`%10.0g`), and with `double` the standard
+  errors come from the doubles. `(file f.dta not found)` when replacing a file not there; a file there
+  without `replace` is r(602) before anything runs, and e() is gone after it.
+- `estat bootstrap`: `bc` by default, `normal`, `percentile`, `all` (N, P, BC). Observed values and
+  standard errors in `%10.0g`, the bias and the interval ends in `%9.0g`; the `Key:` lines pad the
+  letters to the widest shown.
+- With `capture` before it, `bootstrap` took the word itself as a statistic (`bootstrap` as an
+  expression); fixed.
 
 ## The other random variates (P2C.11 continued)
 
@@ -183,3 +208,49 @@ gives missing and draws nothing.
 The check (`q12`) took 34 cases of 1,500 draws each, every case followed by the next uniform. All match
 Stata 19 bit for bit, and so do the 19 results of `variates.do`. Still not Stata's: `rpoisson()`, `rbeta()`
 and `rt()`, refused.
+
+## rt() and rbeta() (decoded here, 2026-11-05)
+
+Read off Stata 19 with `set seed s`, one draw on one row, then `runiform()` to see how many uniforms the
+draw took, against the mt64 stream RCraft already reproduces.
+- `rt(df)` is a ratio of uniforms. Each try takes two uniforms, u then w: v = b (2w - 1), t = v / u, kept
+  when u^2 <= (1 + t^2/df)^(-(df+1)/2). b is the half width of the region, sup |t| f(t)^(1/2): 1 at
+  df = 1, else exp(0.5 (log(2df/(df-1)) + (df+1)/2 log((df-1)/(df+1)))). On 116 draws at df 1, 1.5, 2,
+  3, 4, 5, 7, 10, 12.5, 30, 50, 100, 1000, 1e6 and 1e10 the next uniform is Stata's every time; the
+  draw is bit for bit at 11 of the 15 df, and one ulp of b away at df 3, 4 and 1e10 (no one formula for b
+  found gives all of them; Stata's maths library may differ from R's in the last bit). df below 1 gives
+  missing and takes no draw (0.3, 0.5, 0.9), as do 0, -1 and `.`.
+- Stata's manual (`[FN] Random-number functions`) names Kinderman and Monahan (1977, 1980) for `rt()` and
+  gives its domain as 1 to 2^53 - 1: 2^53 - 1 draws and 2^53 is missing with no draw (checked). At
+  2^53 - 1 Stata turns down a try the exact test keeps (u = .7497, t = -.611), so its test there is not
+  (1 + t^2/df)^(-(df+1)/2) in any form tried (pow, log1p); at 1e10 it keeps it. RCraft refuses df above
+  1e10.
+- `rbeta(a, b)`, decoded against the methods the manual names (Johnk via Gentle 2003, Atkinson and
+  Whittaker 1970 and 1976, Devroye 1986, Schmeiser and Babu 1980). Its domain is a 0.05 to 1e5 and b 0.15
+  to 1e5; outside it (0.049, 0.14999, 100001, 0, -1, `.`) missing with no draw. Powers are taken as in
+  `rgamma()`: a whole exponent by repeated products, else exp(e ln x).
+  - A shape of 1: (1, 1) is one uniform as it is; (1, 2) the smaller of two and (2, 1) the larger; else
+    one uniform, exp(log(u) * (1/a)) when b = 1 and 1 - exp(log(u) * (1/b)) when a = 1.
+  - Both below 1, a + b <= 1: Johnk's method, x = u1^(1/a), y = u2^(1/b), kept when x + y <= 1, x/(x+y).
+  - Both below 1, a + b > 1: the switching method split at t = 1/2: p = bt/(bt + a(1-t)); u <= p gives
+    x = t (u/p)^(1/a), kept when v <= ((1-x)/(1-t))^(b-1); else x = 1 - (1-t)((1-u)/(1-p))^(1/b), kept
+    when v <= (x/t)^(a-1).
+  - One below 1 and one above (AS 134): a < 1 < b with t = (1-a)/(b+1-a), p = bt/(bt + a(1-t)^b), and the
+    tests v <= (1-x)^(b-1) and v <= (x/t)^(a-1); with a > 1 > b, 1 - that draw for (b, a).
+  - Both above 1 and unequal: a four-piece method with exponential tails laid out as Stata's G4PE for
+    gammas: the mode x3 = (a-1)/((a-1)+(b-1)), the inflection points x3 -/+ d with d =
+    sqrt((a-1)(b-1)/(a+b-3))/(a+b-2) (none when a + b <= 3, and a side drops out when its point is past
+    0 or 1), where their tangents meet 0 x1 and x5, f(x) = (x/x3)^(a-1) ((1-x)/(1-x3))^(b-1). One
+    difference from G4PE: the four rectangles are summed from the mode out (left of it, right of it, then
+    the outer two). 215 of 264 draws over 19 shapes are bit for bit and all are within 1e-12, with
+    Stata's stream after every one; the rest differ in the last bits (the order of operations, not found).
+  - Equal shapes above 1 (2, 1.5, 3, 5, 50, 1.01) use another method: a pair (2u-1, 2v-1) drawn until it
+    falls in the unit circle accounts for the uniforms taken at a = 3 and 5, then one more, but no
+    formula tried gives the draws and at 1.01 and 1.5 a test that depends on a takes more. Refused.
+  - In all, 556 recorded draws: 507 bit for bit, all within 1e-12 (worst 7.8e-14 relative), the next
+    uniform Stata's after every one; `variates2.do` adds 1,400 more draws over the five methods.
+  - The 64-fold misses first seen at (0.1, 0.3) were the probe's own: `%21x` writes its exponent in
+    hexadecimal (`X-014` is 2^-20), and the scripts had read it as decimal.
+- `rpoisson()`: not looked at again; StatCraft's notes above stand. The manual names Kemp and Kemp
+  (1990, a composition-search algorithm for low means; 1991) and Kachitvichyanukul (1982), which fits
+  StatCraft's two-stage search below a mean of about 10 and its change of method further up.

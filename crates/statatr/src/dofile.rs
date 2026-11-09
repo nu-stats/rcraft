@@ -193,6 +193,20 @@ const VARLIST: &[&str] = &[
     "isid",
 ];
 
+/// The local `file read handle name` reads into.
+fn file_read_local(c: &reader::Command) -> Option<String> {
+    if c.name != "file" {
+        return None;
+    }
+    let mut w = c.parts.main.split_whitespace();
+    let sub = w.next()?;
+    if !(1..=4).contains(&sub.len()) || !"read".starts_with(sub) {
+        return None;
+    }
+    let (_, name) = (w.next()?, w.next()?);
+    (w.next().is_none() && macros::is_name(name)).then(|| name.to_string())
+}
+
 /// Commands that leave the data's variable names as they were.
 const NAMES_STAY: &[&str] = &[
     "display",
@@ -1669,6 +1683,21 @@ impl<'f> Run<'f> {
                         for n in names {
                             self.set_local_now(&n, Macro::Lost(why.clone()));
                         }
+                    }
+                }
+                // file read h name: the local is the line R read, or not known
+                if let Some(name) = file_read_local(c) {
+                    if line.result.is_ok() {
+                        self.then = Some((
+                            name,
+                            Need::R(
+                                "cat(stata_file_line)".into(),
+                                "the line file read read".into(),
+                            ),
+                        ));
+                    } else {
+                        let why = format!("{} was not translated", c.text.trim());
+                        self.set_local_now(&name, Macro::Lost(why));
                     }
                 }
                 // levelsof, local(name): the local is set from r(levels) once the line has run

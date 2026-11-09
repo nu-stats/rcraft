@@ -1,0 +1,31 @@
+* Stata 19.0's results for matfuncs.do, recorded by cargo xtask stata-record
+@ kron 4 6 24 15 2 5
+@ kron_default 8 2 .
+@ kron_typed 4 4 12
+@ kron_J 4 4 2
+@ kron_scalar 109
+@ sub 2 2 5 1 2
+@ sub_end 3 6 1
+@ sub_names 2 6 2
+@ sub_one 2 1 1
+@ sub_outside 503
+@ sub_backwards 503
+@ sub_kron 8 2
+@ sub_t 2 4 2 1
+@ cholesky 2 0 1 1.4142136 2 2
+@ cholesky_not_pd 506
+@ corr .57735027 1 2
+@ hadamard 216 3 .
+@ vec 6 4 3 4 1
+@ vech 3 3 2 3
+@ sweep .25 .5 -.5 2 1 1
+@ invsym_singular .375 -.25 0 .5 1
+@ invsym_zero 0 .5
+@ numbers 7 8 1 1 0 0 1
+@ not_square . .
+@ mreldif .00793651
+@ numb 2 2 . .
+@ symmetric_names 1
+@ not_there 111
+@ get .48959417 .27220355 1
+@ of_e .2794238 2 1

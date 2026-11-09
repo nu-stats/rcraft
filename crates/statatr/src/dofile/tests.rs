@@ -899,3 +899,79 @@ fn robregs_estimator_is_not_a_variable() {
     let code = format!("{:?}", rob.result);
     assert!(rob.result.is_ok() && code.contains("mpg"), "{code}");
 }
+
+#[test]
+fn an_e_class_program_posts_and_sets_e() {
+    let d = run("clear\nset obs 4\ngenerate y = _n\nprogram myest, eclass\n  matrix b = (1, 2)\n  matrix V = I(2)\n  matrix colnames V = c1 c2\n  matrix rownames V = c1 c2\n  ereturn post b V, depname(y) obs(4)\n  ereturn scalar k = 2\n  ereturn local note \"hi\"\nend\nmyest\ndisplay e(k) _b[c1] _se[c2] e(note)\nmatrix list b\nereturn display\nereturn repost b = c");
+    let code = |start: &str| -> Vec<String> {
+        d.translation
+            .lines
+            .iter()
+            .filter(|l| l.stata.trim_start().starts_with(start))
+            .map(|l| match &l.result {
+                Ok(r) => r.code.clone(),
+                Err(e) => format!("not: {}", e.reason),
+            })
+            .collect()
+    };
+    let post = code("ereturn post");
+    assert!(
+        post[0].contains(
+            "stata_epost(b = stata_mat[[\"b\"]], V = stata_mat[[\"V\"]], depname = \"y\", obs = 4)"
+        ),
+        "{post:?}"
+    );
+    assert!(code("ereturn scalar")[0].contains("stata_eput"));
+    // the matrices are moved: b is gone afterwards, as in Stata (r(111))
+    assert!(post[0].contains("stata_mat[[\"b\"]] <- NULL"), "{post:?}");
+    assert!(code("matrix list b")[0].contains("matrix b not found (Stata: r(111))"));
+    let shown = code("display e(k)");
+    assert!(
+        shown[0].contains("stata_eget(\"k\")") && shown[0].contains("stata_bpost(\"c1\")"),
+        "{shown:?}"
+    );
+    assert!(
+        shown[0].contains("stata_eget(\"note\", text = TRUE)"),
+        "{shown:?}"
+    );
+    assert!(
+        shown[0].contains("stata_bpost(\"c2\", se = TRUE)"),
+        "{shown:?}"
+    );
+    assert!(code("ereturn display")[0].contains("stata_epost_display(0.95)"));
+    assert!(code("ereturn repost")[0].starts_with("not: ereturn repost is not translated yet"));
+}
+
+#[test]
+fn ereturn_scalar_outside_an_e_class_program_stops_as_stata_does() {
+    let d = run("program plain\n  ereturn scalar s = 1\nend\nplain\nereturn local a \"x\"");
+    let stops: Vec<String> = d
+        .translation
+        .lines
+        .iter()
+        .filter(|l| l.stata.contains("ereturn"))
+        .filter_map(|l| l.result.as_ref().ok().map(|r| r.code.clone()))
+        .collect();
+    assert_eq!(stops.len(), 2, "{stops:?}");
+    assert!(stops
+        .iter()
+        .all(|c| c.contains("non e-class program may not set e() (Stata: r(152))")));
+}
+
+#[test]
+fn file_read_puts_a_line_in_a_local_known_when_it_runs() {
+    let d = run("file open h using a.txt, read\nfile read h line\ndisplay \"`line'\"\nfile read h %4b x\ndisplay \"`x'\"");
+    let s = shown(&d);
+    assert!(s[0].contains("| Command | "), "{s:?}");
+    assert!(s[1].contains("| Command | "), "{s:?}");
+    // a dry run cannot read the file: the line is known when it runs
+    assert!(s[2].contains(crate::dofile::KNOWN_WHEN_RUN), "{s:?}");
+    assert!(s[3].contains("not: file read with formats"), "{s:?}");
+    let code = d
+        .translation
+        .lines
+        .get(1)
+        .and_then(|l| l.result.as_ref().ok())
+        .map(|r| r.code.clone());
+    assert_eq!(code.as_deref(), Some("stata_file_read(\"h\")"));
+}

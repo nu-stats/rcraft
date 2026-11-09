@@ -34,6 +34,7 @@ mod codebook;
 mod coefplot;
 mod contract;
 mod dates;
+mod eclass;
 mod esttab;
 mod esttable;
 mod files;
@@ -944,6 +945,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_returned" => returned::RETURNED_HELPER,
         "stata_fmt" => returned::FORMAT_HELPER,
         "stata_ereturn" => returned::ERETURN_HELPER,
+        "stata_eclass" => eclass::ECLASS_HELPER,
         "stata_ttest_r" => returned::TTEST_R_HELPER,
         "stata_eb" => matrices::EB_HELPER,
         "stata_scalar" => scalars::SCALAR_HELPER,
@@ -958,6 +960,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_rng" => random::RNG_HELPER,
         "stata_drawnorm" => random::DRAWNORM_HELPER,
         "stata_bootstrap" => random::BOOTSTRAP_HELPER,
+        "stata_estat_bootstrap" => random::ESTAT_BOOTSTRAP_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -999,6 +1002,9 @@ struct Session {
     eststo_names: Vec<String>,
     /// The matrices the do-file made (`matrix A = ...`), kept in R as stata_mat.
     user_mats: BTreeSet<String>,
+    /// Matrices `capture ereturn post` may have moved into e(): R says
+    /// whether they are still there.
+    maybe_moved: BTreeSet<String>,
     /// Matrices a line that was not translated may have changed: name -> that line.
     lost_mats: BTreeMap<String, String>,
     /// outreg tables a line that was not translated may have stored: name -> that line.
@@ -1954,6 +1960,11 @@ impl Session {
                 | "center"
                 | "winsor"
                 | "alpha"
+                // ereturn post, esample() drops the variable it names
+                | "ereturn"
+                // a program's own lines are judged one by one
+                | "_rcraft_program_begin"
+                | "_rcraft_program_end"
         ) || (matches!(name, "drop" | "keep")
             && c.parts.if_exp.is_none()
             && c.parts.in_range.is_none());
@@ -2203,7 +2214,8 @@ impl Session {
             }
             "_rcraft_program_begin" => self.program_begin(c, out),
             "_rcraft_program_end" => self.program_end(c, out),
-            "ereturn" | "return" => self.list_returned(c, out),
+            "ereturn" => self.ereturn(c, out),
+            "return" => self.list_returned(c, out),
             "matrix" => self.matrix(c, out),
             "scalar" => self.scalar(c, out),
             "ssc" => self.ssc(c, out),
@@ -4038,8 +4050,8 @@ mod tests {
             assert!(out.iter().any(|l| l.contains(why)), "{src}: {out:?}");
         }
         // after a line that drew and was not translated, draws wait for a set seed
-        let out = r("set obs 2\ngenerate a = rbeta(1, 2)\ngenerate b = runiform()\nset seed 3\ngenerate c = runiform()");
-        assert!(out[2].contains("not Stata's: a line before it that draws was not translated (generate a = rbeta(1, 2))"), "{out:?}");
+        let out = r("set obs 2\ngenerate a = rpoisson(2)\ngenerate b = runiform()\nset seed 3\ngenerate c = runiform()");
+        assert!(out[2].contains("not Stata's: a line before it that draws was not translated (generate a = rpoisson(2))"), "{out:?}");
         assert!(!out[4].starts_with("NOT"), "{out:?}");
     }
 
@@ -4392,7 +4404,7 @@ restore, not");
             "{out:?}"
         );
         assert!(!out[4].starts_with("NOT"), "{out:?}");
-        let out = r("use a\nkeep if rbeta(1, 1) < .5\nsummarize x\nlabel variable x \"X\"");
+        let out = r("use a\nkeep if rpoisson(1) < .5\nsummarize x\nlabel variable x \"X\"");
         assert!(
             out[2].starts_with("NOT: the data in memory is not known here"),
             "{out:?}"
@@ -4407,7 +4419,7 @@ display . == .");
         assert!(!out[1].starts_with("NOT"), "{out:?}");
         // a variable whose line was not translated: the lines that use it say so
         let out = r(concat!(
-            "use a\ngenerate double y = rbeta(1, 2)\ngenerate z = y * 2\nregress z x\n",
+            "use a\ngenerate double y = rpoisson(2)\ngenerate z = y * 2\nregress z x\n",
             "display \"y is fine in text\"\ngenerate y = 1\nsummarize y\ngenerate w = L.x\n",
         ));
         assert!(

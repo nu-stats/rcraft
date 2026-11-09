@@ -1060,10 +1060,43 @@ impl Translator<'_> {
                     Kind::Number,
                 ))
             }
+            // numbers from a matrix the do-file made or one e() or r() keeps,
+            // named (Stata takes no expression there): trace() and det() of a
+            // matrix that is not square are missing, as in Stata 19
+            "trace" | "det" | "diag0cnt" | "issymmetric" | "matmissing" => {
+                want(1)?;
+                let m = self.matrix_arg(name, arg(0)?)?;
+                Ok((format!("stata_m{name}({m})"), Kind::Number))
+            }
+            "mreldif" => {
+                want(2)?;
+                let a = self.matrix_arg(name, arg(0)?)?;
+                let b = self.matrix_arg(name, arg(1)?)?;
+                Ok((format!("stata_mmreldif({a}, {b})"), Kind::Number))
+            }
+            "colnumb" | "rownumb" => {
+                want(2)?;
+                let m = self.matrix_arg(name, arg(0)?)?;
+                let (s, k) = self.expr(arg(1)?)?;
+                if k != Kind::Text {
+                    return Err(no(format!(
+                        "{name}() takes a name as text (Stata: type mismatch)"
+                    )));
+                }
+                let side = if name == "colnumb" {
+                    "colnames"
+                } else {
+                    "rownames"
+                };
+                Ok((
+                    format!("as.numeric(match({s}, {side}(stata_mnamed({m}))))"),
+                    Kind::Number,
+                ))
+            }
             "runiform" | "uniform" | "rnormal" | "rgamma" | "rexponential" | "rlogistic"
             | "rweibull" | "rweibullph" | "rcauchy" | "rlaplace" | "rpareto" | "rgeometric"
             | "rigaussian" | "rchi2" | "runiformint" | "rbinomial" | "rnbinomial"
-            | "rhypergeometric" => self.draw(name, args),
+            | "rhypergeometric" | "rt" | "rbeta" => self.draw(name, args),
             n if DATE_FUNCTIONS.iter().any(|(f, _)| *f == n) => self.date_fn(n, args),
             n if DATE_READERS.iter().any(|(f, _)| *f == n) => self.date_reader(n, args),
             n if LEAP_SECOND_FUNCTIONS.contains(&n) => Err(no(format!(
@@ -1076,6 +1109,25 @@ impl Translator<'_> {
 
     /// A date or time function of numbers (P2C.14): the R helper of the
     /// same name, `stata_mdy()` and so on, with Stata's missing values.
+    /// A matrix named as a function's argument: one the do-file made, or one
+    /// e() or r() keeps.
+    fn matrix_arg(&mut self, f: &str, e: &Expr) -> Result<String, Untranslated> {
+        self.helpers.push("stata_matrix");
+        match e {
+            Expr::Call(w, a) if (w == "e" || w == "r") && a.len() == 1 => match a.first() {
+                Some(Expr::Name(n)) if n != "sample" => {
+                    (self.returned)(&format!("{w}#matrix"), n)?;
+                    Ok(format!("stata_{w}[[{}]]", r_text(n)))
+                }
+                _ => Err(no(format!("{f}() of this matrix is not translated yet"))),
+            },
+            Expr::Name(n) => Ok((self.returned)("m#matrix", n)?.0),
+            _ => Err(no(format!(
+                "{f}() takes a matrix's name (Stata: an expression there is not found, r(111))"
+            ))),
+        }
+    }
+
     fn date_fn(&mut self, name: &str, args: &[Expr]) -> Result<(String, Kind), Untranslated> {
         let n = DATE_FUNCTIONS
             .iter()
@@ -1161,7 +1213,7 @@ impl Translator<'_> {
             "runiform" => n == 0 || n == 2,
             "uniform" => n == 0,
             "rnormal" | "rlogistic" => n <= 2,
-            "rexponential" | "rgeometric" | "rchi2" => n == 1,
+            "rexponential" | "rgeometric" | "rchi2" | "rt" => n == 1,
             "rweibull" | "rweibullph" => n == 2 || n == 3,
             "rhypergeometric" => n == 3,
             _ => n == 2,
@@ -1173,6 +1225,14 @@ impl Translator<'_> {
         };
         if !fits {
             return Err(no(format!("{name}() with {n} arguments is not translated")));
+        }
+        // rbeta() with equal shapes above 1 is not Stata's yet; shapes written out say so now
+        if let [Expr::Number(a), Expr::Number(b)] = args {
+            if name == "rbeta" && a == b && *a > 1.0 && *a <= 1e5 {
+                return Err(no(
+                    "rbeta() with equal shapes above 1 is not translated yet: Stata's method there was not matched",
+                ));
+            }
         }
         let mut parts = vec![rows.to_string()];
         // rlogistic(s) is the scale, about a mean of 0
