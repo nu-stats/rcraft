@@ -142,7 +142,7 @@ impl Session {
         out.line("stata_b <- stata_m$b");
         out.line("stata_vcov <- stata_m$V");
         out.line("stata_df <- stata_m$df");
-        out.line(format!("stata_data <- {src}[stata_m$rows, , drop = FALSE]"));
+        out.line(self.keep_rows(&src, "stata_m$rows"));
         // cluster2 leaves no e(sample): lines that read it are not translated
         self.fit_robust = true;
         self.fit_cluster = true;

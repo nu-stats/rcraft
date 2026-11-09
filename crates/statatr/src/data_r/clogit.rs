@@ -16,7 +16,7 @@
 //! - `predict` gives pc1 (the probability of being the positive one, within
 //!   the group, on every row), `pu0` (invlogit of xb: the fixed effect taken as zero) or `xb`.
 
-use super::model::{esample_line, keep_sample, level, vce, Estimates, Fit, Spec};
+use super::model::{esample_line, level, vce, Estimates, Fit, Spec};
 use super::stats::r_logical;
 use super::*;
 
@@ -340,7 +340,7 @@ impl Session {
         } else {
             "stata_df <- Inf"
         });
-        out.line(keep_sample(&src));
+        out.line(self.keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
         out.line(esample_line(&d, &src));
@@ -582,7 +582,7 @@ impl Session {
         out.line("stata_b <- stata_m$b");
         out.line("stata_vcov <- stata_m$V");
         out.line("stata_df <- Inf");
-        out.line(keep_sample(&src));
+        out.line(self.keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
         out.line(esample_line(&d, &src));

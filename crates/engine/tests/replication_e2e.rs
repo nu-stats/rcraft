@@ -32,7 +32,8 @@ fn engine() -> Option<Engine> {
 }
 
 fn run(e: &mut Engine, code: &str, limit: Duration) -> (Outcome, String) {
-    let Ok(id) = e.submit(Source::Typed, code) else {
+    // as the do-file window sends them
+    let Ok(id) = e.submit(Source::Script, code) else {
         return (Outcome::Error, String::new());
     };
     let until = Instant::now() + limit;
@@ -73,6 +74,21 @@ fn run(e: &mut Engine, code: &str, limit: Duration) -> (Outcome, String) {
         })
         .unwrap_or_default();
     (outcome, text)
+}
+
+/// A value the run asks R for, as the do-file window asks it: a hidden query.
+fn ask(e: &mut Engine, code: &str, limit: Duration) -> (bool, String) {
+    let q = e.query(code);
+    let until = Instant::now() + limit;
+    loop {
+        e.poll(Duration::from_millis(20));
+        if let Some(a) = e.query_result(q) {
+            return (a.ok, a.text.clone());
+        }
+        if Instant::now() > until {
+            return (false, "timed out".into());
+        }
+    }
 }
 
 struct Disk;
@@ -132,6 +148,8 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
     let mut sent = BTreeSet::new();
     let mut handled = 0;
     let mut timed_out = false;
+    // the time R itself took, apart from translating
+    let mut in_r = Duration::ZERO;
     loop {
         if started.elapsed() > budget {
             timed_out = true;
@@ -149,13 +167,23 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
                             refused += 1;
                             ("refused", e.reason.clone())
                         }
+                        // nothing for R (a macro, a loop's line): as the app does it,
+                        // no round trip
+                        Ok(rc) if rc.code.is_empty() && fresh(&r, &sent).1.is_empty() => {
+                            script.push_str(&line.script());
+                            script.push('\n');
+                            ok += 1;
+                            ("ok", String::new())
+                        }
                         Ok(_) => {
                             let (mut code, names) = fresh(&r, &sent);
                             code.push_str(&line.script());
                             script.push_str(&code);
                             script.push('\n');
                             let left = budget.saturating_sub(started.elapsed());
+                            let at = Instant::now();
                             let (o, t) = run(e, &code, left.max(Duration::from_secs(1)));
+                            in_r += at.elapsed();
                             log.push_str(&t);
                             if !t.ends_with('\n') && !t.is_empty() {
                                 log.push('\n');
@@ -190,11 +218,13 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
                 code.push_str(&v.code);
                 script.push_str(&code);
                 script.push('\n');
-                let (o, t) = run(e, &code, Duration::from_secs(120));
-                if o == Outcome::Ok {
+                let at = Instant::now();
+                let (ok, t) = ask(e, &code, Duration::from_secs(120));
+                in_r += at.elapsed();
+                if ok {
                     sent.extend(names);
                 }
-                r.give(if o == Outcome::Ok { Ok(t) } else { Err(t) });
+                r.give(if ok { Ok(t) } else { Err(t) });
             }
             Event::Done => break,
         }
@@ -211,10 +241,11 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
     let _ = std::fs::write(pkg.join("rcraft.R"), &script);
     let _ = std::fs::write(pkg.join("rcraft_lines.tsv"), &table);
     format!(
-        "{}: {ok} ran, {refused} refused, {errors} stopped in R{} ({:.0} s)",
+        "{}: {ok} ran, {refused} refused, {errors} stopped in R{} ({:.0} s, {:.0} in R)",
         pkg.file_name().unwrap_or_default().to_string_lossy(),
         if timed_out { ", timed out" } else { "" },
-        started.elapsed().as_secs_f64()
+        started.elapsed().as_secs_f64(),
+        in_r.as_secs_f64()
     )
 }
 

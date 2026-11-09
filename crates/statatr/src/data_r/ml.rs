@@ -23,7 +23,7 @@
 //! - the iterations are run to a tighter tolerance than R's default, so the
 //!   estimates agree with Stata's to the digits shown.
 
-use super::model::{cluster_rows, keep_sample, level, vce, Estimates, Fit, Spec};
+use super::model::{cluster_rows, level, vce, Estimates, Fit, Spec};
 use super::stats::r_logical;
 use super::weights::W;
 use super::*;
@@ -678,7 +678,7 @@ impl Session {
             ));
         }
         if fit.one_outcome() {
-            out.line(keep_sample(&src));
+            out.line(self.keep_sample(&src));
         }
         let d = self.data()?;
         out.package("dplyr");

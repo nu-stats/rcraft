@@ -276,7 +276,7 @@ impl Session {
         out.line("stata_vcov <- stata_m$V");
         out.line("stata_df <- stata_m$df");
         let d = self.data()?;
-        out.line(format!("stata_data <- {src}[stata_m$rows, , drop = FALSE]"));
+        out.line(self.keep_rows(&src, "stata_m$rows"));
         out.package("dplyr");
         out.line(super::model::esample_rows_line(&d, &src, "stata_m$rows"));
         self.esample_new = true;

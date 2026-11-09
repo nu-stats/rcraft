@@ -330,7 +330,7 @@ impl Session {
         out.line("stata_b <- stata_m$b");
         out.line("stata_vcov <- stata_m$V");
         out.line("stata_df <- Inf");
-        out.line(super::model::keep_sample(&src));
+        out.line(self.keep_sample(&src));
         let d = self.data()?;
         out.line(super::model::esample_line(&d, &src));
         self.esample_new = true;

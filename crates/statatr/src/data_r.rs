@@ -888,6 +888,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ib" => model::IB_HELPER,
         "stata_dates" => dates::DATES_HELPER,
         "stata_collinear" => model::COLLINEAR_HELPER,
+        "stata_slice" => model::SLICE_HELPER,
         "stata_glm_vcov" => ml::GLM_VCOV_HELPER,
         "stata_nbreg_vcov" => ml::NBREG_VCOV_HELPER,
         "stata_ml_header" => ml::ML_HEADER_HELPER,

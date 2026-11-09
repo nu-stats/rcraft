@@ -332,7 +332,7 @@ impl Session {
         ));
         self.helpers.insert("stata_collinear");
         out.line("stata_estimates <- stata_collinear(stata_estimates, sweep = TRUE)");
-        out.line(keep_sample(&src));
+        out.line(self.keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
         out.line(esample_line(&d, &src));
@@ -721,12 +721,35 @@ pub(super) fn vce(opts: &Opts) -> Result<(bool, Option<String>), Untranslated> {
     }
 }
 
-/// The rows the model used, as they were when it was fitted: Stata's
-/// `e(sample)`, which `margins` averages over.
-pub(super) fn keep_sample(src: &str) -> String {
-    format!(
-        "stata_data <- {src}[match(rownames(stats::model.frame(stata_estimates)), rownames({src})), , drop = FALSE]"
-    )
+/// `stata_slice(d, r)`: `d[r, , drop = FALSE]`, the same object, made
+/// faster for a tibble of plain columns by slicing each column itself and
+/// putting its attributes back (labels, formats, classes) rather than
+/// through vctrs' dispatch for each column: on wide data from `use` that
+/// dispatch was most of the time a regression took. Anything else goes to `[`.
+pub(super) const SLICE_HELPER: &str = r#"stata_slice <- function(d, r) {
+  plain <- function(v) is.atomic(v) && is.null(dim(v)) && is.null(names(v))
+  if (!inherits(d, "tbl_df") || !all(vapply(d, plain, TRUE))) return(d[r, , drop = FALSE])
+  out <- lapply(d, function(v) { w <- unclass(v)[r]; attributes(w) <- attributes(v); w })
+  attributes(out) <- attributes(d)
+  attr(out, "row.names") <- c(NA_integer_, -length(seq_len(nrow(d))[r]))
+  out
+}"#;
+
+impl Session {
+    /// `stata_data`: the rows `rows` of the data expression `src`.
+    pub(super) fn keep_rows(&mut self, src: &str, rows: &str) -> String {
+        self.helpers.insert("stata_slice");
+        format!("stata_data <- stata_slice({src}, {rows})")
+    }
+
+    /// The rows the model used, as they were when it was fitted: Stata's
+    /// `e(sample)`, which `margins` averages over.
+    pub(super) fn keep_sample(&mut self, src: &str) -> String {
+        self.keep_rows(
+            src,
+            &format!("match(rownames(stats::model.frame(stata_estimates)), rownames({src}))"),
+        )
+    }
 }
 
 /// The cluster variable for the rows the model kept.
@@ -859,6 +882,10 @@ fn one(t: &str) -> Result<String, Untranslated> {
 /// `e(sample)` for a fit that keeps the rows it used, as positions in the
 /// rows its data expression gives (`xtreg`, `ivregress`).
 pub(super) fn esample_rows_line(d: &str, src: &str, rows: &str) -> String {
+    if d == src {
+        // positions or a logical vector alike
+        return format!("stata_esample <- seq_len(nrow({d})) %in% seq_len(nrow({d}))[{rows}]");
+    }
     format!(
         "stata_esample <- local({{ {d} <- dplyr::mutate({d}, stata_row = seq_len(nrow({d}))); s <- {src}; seq_len(nrow({d})) %in% s$stata_row[{rows}] }})"
     )
@@ -869,6 +896,12 @@ pub(super) fn esample_rows_line(d: &str, src: &str, rows: &str) -> String {
 /// data expression again on `d` with each row's number added (the name `d`
 /// is shadowed inside `local()`, so `src` reads the numbered copy).
 pub(super) fn esample_line(d: &str, src: &str) -> String {
+    // the whole data frame: its own row names say which rows
+    if d == src {
+        return format!(
+            "stata_esample <- seq_len(nrow({d})) %in% match(rownames(stats::model.frame(stata_estimates)), rownames({d}))"
+        );
+    }
     format!(
         "stata_esample <- local({{ {d} <- dplyr::mutate({d}, stata_row = seq_len(nrow({d}))); s <- {src}; seq_len(nrow({d})) %in% s$stata_row[match(rownames(stats::model.frame(stata_estimates)), rownames(s))] }})"
     )

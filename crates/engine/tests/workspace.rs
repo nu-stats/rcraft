@@ -168,3 +168,30 @@ fn the_working_folder_is_known_and_follows_setwd() {
     assert_eq!(e.working_dir().map(str::to_string), start);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn a_script_run_is_listed_at_a_pace_and_ends_listed() {
+    let Some(mut e) = engine() else { return };
+    run(&mut e, "df <- data.frame(a = 1:3)");
+    e.watch("df");
+    settle(&mut e);
+    // a do-file's lines, one after another as fast as R takes them
+    for i in 0..40 {
+        let r = e.submit(Source::Script, &format!("x{i} <- {i}; df$a <- df$a + 1"));
+        assert!(r.is_ok(), "{r:?}");
+        settle(&mut e);
+    }
+    // the listing that waited comes once the pause is over
+    let limit = Instant::now() + Duration::from_secs(10);
+    while e.is_working() || e.refresh_waiting() {
+        e.poll(Duration::from_millis(20));
+        assert!(Instant::now() < limit, "the last listing never came");
+    }
+    let names: Vec<&str> = e.workspace().iter().map(|w| w.name.as_str()).collect();
+    assert!(names.contains(&"x39"), "{names:?}");
+    let a = e
+        .table("df")
+        .and_then(|t| t.columns.first())
+        .map(|c| c.data.clone());
+    assert_eq!(a, Some(Data::Double(vec![41.0, 42.0, 43.0])));
+}

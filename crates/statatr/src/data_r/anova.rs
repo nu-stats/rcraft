@@ -22,7 +22,7 @@
 //!
 //! Nested terms (`a|b`) and error terms (`/`) are not translated yet.
 
-use super::model::{keep_sample, Estimates, Fit, Spec};
+use super::model::{Estimates, Fit, Spec};
 use super::stats::r_logical;
 use super::*;
 
@@ -335,7 +335,7 @@ impl Session {
                 spec.right(false)?
             ));
         }
-        out.line(keep_sample(&src));
+        out.line(self.keep_sample(&src));
         out.line("stata_b <- stats::coef(stata_estimates)");
         out.line("stata_vcov <- stats::vcov(stata_estimates)");
         out.line("stata_df <- stata_estimates$df.residual");

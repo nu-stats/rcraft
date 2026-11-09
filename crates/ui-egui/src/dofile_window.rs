@@ -12,6 +12,7 @@
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use eframe::egui::{self, RichText};
 use rcraft_engine::{CommandId, Engine, Item, Outcome, QueryId, Source};
@@ -38,6 +39,8 @@ static DISK: Disk = Disk;
 
 /// Most lines with nothing for R (macros, loops) gone through in one frame.
 const LINES_PER_FRAME: usize = 400;
+/// How long a frame may spend moving a run on.
+const FRAME_BUDGET: Duration = Duration::from_millis(12);
 
 /// What the window asks of the app.
 pub enum DoFileOut {
@@ -184,8 +187,26 @@ impl DoFileWindow {
         self.selected = None;
     }
 
-    /// Moves the run on as far as R lets it; called every frame.
+    /// Moves the run on as far as R lets it for a few milliseconds; called
+    /// every frame. Each line R runs is a short trip, so waiting a frame for
+    /// each made a long do-file take minutes where R needed seconds.
     pub fn poll(&mut self, engine: &mut Engine, session: &str) -> Option<DoFileOut> {
+        let until = Instant::now() + FRAME_BUDGET;
+        loop {
+            let out = self.step(engine, session);
+            let going = self.running.as_ref().is_some_and(|r| {
+                r.session == session && r.done.is_none() && !r.stopped && r.problem.is_none()
+            });
+            let now = Instant::now();
+            if out.is_some() || !going || now >= until {
+                return out;
+            }
+            engine.poll((until - now).min(Duration::from_millis(4)));
+        }
+    }
+
+    /// One move of the run: what R finished, then the next lines.
+    fn step(&mut self, engine: &mut Engine, session: &str) -> Option<DoFileOut> {
         let folder = self.folder.clone();
         let r = self.running.as_mut()?;
         if r.session != session || r.done.is_some() || r.stopped || r.problem.is_some() {

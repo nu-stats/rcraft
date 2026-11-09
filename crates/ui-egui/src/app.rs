@@ -563,7 +563,7 @@ impl App {
             if polled.changed {
                 ctx.request_repaint();
             }
-            if engine.is_working() {
+            if engine.is_working() || engine.refresh_waiting() {
                 ctx.request_repaint_after(Duration::from_millis(33));
             }
         }

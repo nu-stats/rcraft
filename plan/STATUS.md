@@ -3665,3 +3665,23 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   all probe outputs byte for byte Stata's. ZNMIXH: 111,553 lines ran; Table2.tex (outreg, then
   two filefilters), TableI1.tex and TableI2.tex, written by R from scratch, are byte for byte
   Stata's, and all 667 compared values match.
+
+## Do-file runs faster: ZNMIXH 1,155 s to 355 s, 2026-11-09
+
+ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, `if e(r2)==1`):
+15,170 regressions. Each took about 70 ms in R where the fit itself takes 1 ms.
+
+- **The estimation sample's copy** (`stata_data`, for margins and anova): `d[rows, , drop = FALSE]`
+  on a 4,903 x 222 tibble from `use` went through vctrs once per column, ~17 ms. `stata_slice()`
+  (`data_r/model.rs`) slices each plain column and puts its attributes back: the same object
+  (`identical()` on every data frame of ZNMIXH's and on made-up columns of each kind), 4 times
+  faster. All writers of `stata_data` use it; `e(sample)` over a whole data frame no longer copies
+  it to number its rows.
+- **The workspace listing** after each line of a script (`Source::Script`) is made at most every
+  250 ms, and so is the fetch of a watched table (`Engine::refresh_waiting`); a typed command is
+  listed at once as before. A run ends listed.
+- **Questions** (`Engine::query`) start at once when R is free, not at the next poll.
+- **The do-file window** moves the run on for up to 12 ms a frame rather than one line a frame.
+- The e2e harness sends lines and questions as the window does and reports the time in R.
+  ZNMIXH: same 111,553 lines, same log, all 667 compared values match, Table2/TableI1/TableI2.tex
+  byte for byte Stata's.

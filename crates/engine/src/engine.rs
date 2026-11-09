@@ -30,6 +30,11 @@ const INTERNAL_WAIT: Duration = Duration::from_secs(30);
 /// Most text kept from a hidden query's output.
 const MAX_INTERNAL_BYTES: usize = 4 * 1024 * 1024;
 
+/// While a script runs (a do-file, line after line), the workspace is listed
+/// and watched tables brought over at most this often, not after each line:
+/// each listing is a trip to R, and a watched table a copy of it.
+const SCRIPT_REFRESH: Duration = Duration::from_millis(250);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EngineError {
     /// Nothing but whitespace was submitted.
@@ -88,6 +93,10 @@ pub struct Engine {
     query_queue: VecDeque<(QueryId, String)>,
     query_results: BTreeMap<QueryId, QueryResult>,
     next_query: QueryId,
+    /// When the workspace was last marked for listing after a command.
+    refreshed: Option<Instant>,
+    /// A script's command ended and its listing waits for [`SCRIPT_REFRESH`].
+    deferred: bool,
 }
 
 /// Names a question asked with [`Engine::query`].
@@ -138,6 +147,8 @@ impl Engine {
             query_queue: VecDeque::new(),
             query_results: BTreeMap::new(),
             next_query: 1,
+            refreshed: None,
+            deferred: false,
         })
     }
 
@@ -334,6 +345,9 @@ impl Engine {
         let id = self.next_query;
         self.next_query += 1;
         self.query_queue.push_back((id, code.to_string()));
+        // at once if R is free, not at the next poll: a do-file's questions
+        // come one after another
+        self.start_internal();
         id
     }
 
@@ -361,6 +375,12 @@ impl Engine {
             || !self.query_queue.is_empty()
     }
 
+    /// A script's listing is waiting its turn (see [`Engine::is_working`],
+    /// which does not count it): keep polling, so it comes.
+    pub fn refresh_waiting(&self) -> bool {
+        self.deferred
+    }
+
     fn queue_fetch(&mut self, name: &str) {
         if !self.fetch_queue.iter().any(|n| n == name) {
             self.fetch_queue.push_back(name.to_string());
@@ -369,6 +389,9 @@ impl Engine {
 
     /// Starts the next hidden query if R is free.
     fn start_internal(&mut self) {
+        if self.deferred && self.refreshed.is_none_or(|t| t.elapsed() >= SCRIPT_REFRESH) {
+            self.after_command();
+        }
         if self.current.is_some() || self.internal.is_some() || !self.session.is_running() {
             return;
         }
@@ -498,6 +521,7 @@ impl Engine {
         self.tables.clear();
         self.table_errors.clear();
         self.stale = true;
+        self.deferred = false;
         let names: Vec<String> = self.watched.iter().cloned().collect();
         self.fetch_queue.clear();
         self.query_queue.clear();
@@ -639,7 +663,23 @@ impl Engine {
             self.transcript.finished(&source, &code, outcome);
         }
         self.current = None;
-        // the command may have changed the workspace and the tables
+        // the command may have changed the workspace and the tables; a
+        // script's next line comes at once, so its listing may wait a little
+        let script = self
+            .history
+            .get(command)
+            .is_some_and(|e| e.source == Source::Script);
+        if script && self.refreshed.is_some_and(|t| t.elapsed() < SCRIPT_REFRESH) {
+            self.deferred = true;
+        } else {
+            self.after_command();
+        }
+    }
+
+    /// Marks the workspace for listing and the watched tables for fetching.
+    fn after_command(&mut self) {
+        self.deferred = false;
+        self.refreshed = Some(Instant::now());
         self.stale = true;
         let names: Vec<String> = self
             .watched

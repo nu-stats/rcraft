@@ -462,9 +462,7 @@ impl Session {
         out.line("stata_vcov <- stata_estimates$vcov");
         out.line("stata_df <- stata_estimates$df");
         // the estimation sample, for margins and e(sample)
-        out.line(format!(
-            "stata_data <- {src}[stata_estimates$rows, , drop = FALSE]"
-        ));
+        out.line(self.keep_rows(&src, "stata_estimates$rows"));
         let d = self.data()?;
         out.package("dplyr");
         out.line(super::model::esample_rows_line(
