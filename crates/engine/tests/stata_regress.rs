@@ -413,3 +413,25 @@ fn fresh() -> usize {
     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
+
+#[test]
+fn a_data_frame_named_e_still_gets_its_estimation_sample() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    // a copy named e.dta, with one y missing: R names the data frame `e`
+    ok(
+        &mut e,
+        &format!(
+            "local({{ p <- haven::read_dta('{dir}/panel.dta'); p$y[3] <- NA; haven::write_dta(p, '{dir}/e.dta') }})"
+        ),
+    );
+    let code = script(&format!("use \"{dir}/e.dta\"\nregress y x w\n"));
+    assert!(code.contains("e <- haven::read_dta("), "{code}");
+    ok(&mut e, &code);
+    let got = numbers(
+        &mut e,
+        "0",
+        "sum(stata_esample), which(!stata_esample), nrow(stata_data)",
+    );
+    assert_eq!(got, [19.0, 3.0, 19.0]);
+}

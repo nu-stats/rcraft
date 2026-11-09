@@ -3698,3 +3698,14 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   time a single statement, so steps are timed 300 at a time. A `reg` is now 4 ms (lm 0.6, e() 0.8,
   vcov 0.4, the collinearity check 0.3, the trip 0.7). The e2e table has each line's time in R
   (`ms`), and the summary the time in questions.
+- **Review pass:** `stata_ib()` builds its factor from the distinct values for plain and
+  Stata-labelled numbers (factor() wrote every row as text, again for each level margins
+  computes): identical on 302 columns of YFBPT6's data and on edge cases; YFBPT6's 162 margins
+  86 s to 47 s. An independent review found, and these fix: e(sample) all FALSE for a data frame
+  named `e` (the shortcut's local name; now `stata_es`, test
+  `a_data_frame_named_e_still_gets_its_estimation_sample`); the Data view not following a short
+  do-file's data while its listing waited (`Engine::is_quiet`, used where the app waits for the
+  listing); a repaint after the run moves on; parked sessions polled while a listing waits;
+  `stata_slice` only for plain tibbles and integer rows (a grouped tibble keeps `[`); the copy
+  made where the line runs (`parent.env(environment())`). YFBPT6 4,553 values, TZEN38 as before
+  (its 15 differences are older), ZNMIXH 667 and its tables, every line's fate unchanged.

@@ -470,7 +470,7 @@ impl App {
                 }
             }
             if let EngineState::Ready(engine) = &mut session.engine {
-                if engine.poll(Duration::ZERO).changed || engine.is_working() {
+                if engine.poll(Duration::ZERO).changed || !engine.is_quiet() {
                     ctx.request_repaint_after(Duration::from_millis(100));
                 }
             }
@@ -578,7 +578,7 @@ impl App {
             return;
         };
         if let Some(name) = &self.dataset {
-            let gone = !engine.is_working()
+            let gone = engine.is_quiet()
                 && !engine
                     .workspace()
                     .iter()
@@ -601,7 +601,7 @@ impl App {
                 self.dataset = Some(wanted);
                 self.view = View::Data;
                 self.show_when_listed = None;
-            } else if !engine.is_working() {
+            } else if engine.is_quiet() {
                 // the import failed: the error is in Results
                 self.show_when_listed = None;
                 self.view = View::Results;
@@ -622,7 +622,7 @@ impl App {
                     self.dataset = Some(wanted);
                 }
                 self.stata.follow = None;
-            } else if !engine.is_working() {
+            } else if engine.is_quiet() {
                 self.stata.follow = None;
             }
         }
@@ -1255,8 +1255,13 @@ impl App {
         // the do-file run moves on as R lets it, in the session it started in
         let session = self.session_name.clone();
         let mut dofile_out = Vec::new();
+        let was_moving = self.dofile.is_moving();
         if let EngineState::Ready(engine) = &mut self.engine {
             dofile_out.extend(self.dofile.poll(engine, &session));
+        }
+        // the run moved on after this frame drew Results: draw them again
+        if was_moving {
+            ctx.request_repaint();
         }
         dofile_out.extend(self.dofile.show(ctx, &pal, &session));
         if self.dofile.is_running() {
@@ -2497,7 +2502,7 @@ impl App {
     pub fn is_settled(&self) -> bool {
         match &self.engine {
             EngineState::Ready(e) => {
-                !e.is_working()
+                e.is_quiet()
                     && !self.help_window.is_busy()
                     && !self.dofile.is_running()
                     && self.stata.asking.is_none()

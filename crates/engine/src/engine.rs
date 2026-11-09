@@ -381,6 +381,12 @@ impl Engine {
         self.deferred
     }
 
+    /// Nothing running or waiting, and the workspace listed since the last
+    /// command: what is listed is what R has.
+    pub fn is_quiet(&self) -> bool {
+        !self.is_working() && !self.deferred
+    }
+
     fn queue_fetch(&mut self, name: &str) {
         if !self.fetch_queue.iter().any(|n| n == name) {
             self.fetch_queue.push_back(name.to_string());

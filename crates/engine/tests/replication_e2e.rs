@@ -153,12 +153,17 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
     // and in the questions the run asked
     let mut in_asks = Duration::ZERO;
     let mut asks = 0;
+    // and translating: the run working out its next lines
+    let mut translating = Duration::ZERO;
     loop {
         if started.elapsed() > budget {
             timed_out = true;
             break;
         }
-        match r.next_event() {
+        let at = Instant::now();
+        let event = r.next_event();
+        translating += at.elapsed();
+        match event {
             Event::Line => {
                 let lines = r.lines().get(handled..).unwrap_or_default().to_vec();
                 let origins = r.origins().get(handled..).unwrap_or_default().to_vec();
@@ -249,12 +254,13 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
     let _ = std::fs::write(pkg.join("rcraft.R"), &script);
     let _ = std::fs::write(pkg.join("rcraft_lines.tsv"), &table);
     format!(
-        "{}: {ok} ran, {refused} refused, {errors} stopped in R{} ({:.0} s, {:.0} in R, {:.0} of it in {asks} questions)",
+        "{}: {ok} ran, {refused} refused, {errors} stopped in R{} ({:.0} s, {:.0} in R, {:.0} of it in {asks} questions; {:.0} translating)",
         pkg.file_name().unwrap_or_default().to_string_lossy(),
         if timed_out { ", timed out" } else { "" },
         started.elapsed().as_secs_f64(),
         in_r.as_secs_f64(),
-        in_asks.as_secs_f64()
+        in_asks.as_secs_f64(),
+        translating.as_secs_f64()
     )
 }
 

@@ -126,6 +126,13 @@ impl DoFileWindow {
             .is_some_and(|r| r.done.is_none() && !r.stopped)
     }
 
+    /// Running and not waiting for the user at a problem.
+    pub fn is_moving(&self) -> bool {
+        self.running
+            .as_ref()
+            .is_some_and(|r| r.done.is_none() && !r.stopped && r.problem.is_none())
+    }
+
     /// Reads a do-file and scans it.
     pub fn open_file(&mut self, path: &Path) {
         match std::fs::read(path) {

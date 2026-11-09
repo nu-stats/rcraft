@@ -249,6 +249,21 @@ stata_omitted_notes <- function() {
 /// column collinear (glm's check is tight enough to miss it on some
 /// machines).
 pub(super) const IB_HELPER: &str = r##"stata_ib <- function(x, base) {
+  # numbers, plain or with Stata's value labels: the same factor, made from
+  # the distinct values (factor() would write every row as text; margins
+  # makes it again for every level it computes)
+  cl <- attr(x, "class")
+  if (is.numeric(unclass(x)) && is.null(names(x)) && (is.null(cl) ||
+      identical(cl, c("haven_labelled", "vctrs_vctr", "double")) ||
+      identical(cl, c("haven_labelled", "vctrs_vctr", "integer")))) {
+    v <- as.vector(unclass(x))
+    u <- sort(unique(v[!is.na(v)]))
+    lv <- as.character(u)
+    L <- c(base, setdiff(lv, base))
+    f <- match(lv, L)[match(v, u)]
+    if (anyNA(v)) f[is.nan(v)] <- match("NaN", L)
+    return(structure(f, levels = L, class = "factor"))
+  }
   lv <- as.character(sort(unique(x[!is.na(x)])))
   factor(x, levels = c(base, setdiff(lv, base)))
 }
@@ -727,8 +742,10 @@ pub(super) fn vce(opts: &Opts) -> Result<(bool, Option<String>), Untranslated> {
 /// through vctrs' dispatch for each column: on wide data from `use` that
 /// dispatch was most of the time a regression took. Anything else goes to `[`.
 pub(super) const SLICE_HELPER: &str = r#"stata_slice <- function(d, r) {
-  plain <- function(v) is.atomic(v) && is.null(dim(v)) && is.null(names(v))
-  if (!inherits(d, "tbl_df") || !all(vapply(d, plain, TRUE))) return(d[r, , drop = FALSE])
+  plain <- function(v) is.atomic(v) && is.null(dim(v)) && is.null(names(v)) && !inherits(v, "integer64")
+  # a plain tibble (as from `use`) and integer rows; a grouped tibble,
+  # readr's spec_tbl_df and other rows (logical, text, fractions) keep `[`
+  if (!identical(class(d), c("tbl_df", "tbl", "data.frame")) || !is.integer(r) || !all(vapply(d, plain, TRUE))) return(d[r, , drop = FALSE])
   out <- lapply(d, function(v) { w <- unclass(v)[r]; attributes(w) <- attributes(v); w })
   attributes(out) <- attributes(d)
   attr(out, "row.names") <- c(NA_integer_, -length(seq_len(nrow(d))[r]))
@@ -753,8 +770,10 @@ impl Session {
     /// asked, and in a loop of regressions the copy was most of R's work.
     pub(super) fn keep_rows(&mut self, src: &str, rows: &str) -> String {
         self.helpers.insert("stata_slice");
+        // names the data can never have; the copy lives where the fit's
+        // other results do (the environment the line runs in)
         format!(
-            "local({{ d <- {src}; r <- {rows}; delayedAssign(\"stata_data\", stata_slice(d, r), eval.env = environment(), assign.env = globalenv()) }})"
+            "local({{ stata_kd <- {src}; stata_kr <- {rows}; delayedAssign(\"stata_data\", stata_slice(stata_kd, stata_kr), eval.env = environment(), assign.env = parent.env(environment())) }})"
         )
     }
 
@@ -762,7 +781,7 @@ impl Session {
     /// `e(sample)`, which `margins` averages over.
     pub(super) fn keep_sample(&mut self, src: &str) -> String {
         self.helpers.insert("stata_fit_rows");
-        self.keep_rows(src, "stata_fit_rows(stata_estimates, d)")
+        self.keep_rows(src, "stata_fit_rows(stata_estimates, stata_kd)")
     }
 }
 
@@ -915,7 +934,8 @@ impl Session {
         if d == src {
             self.helpers.insert("stata_fit_rows");
             return format!(
-                "stata_esample <- local({{ e <- logical(nrow({d})); e[stata_fit_rows(stata_estimates, {d})] <- TRUE; e }})"
+                // a name the data can never have (data named stata_ become data_stata_)
+                "stata_esample <- local({{ stata_es <- logical(nrow({d})); stata_es[stata_fit_rows(stata_estimates, {d})] <- TRUE; stata_es }})"
             );
         }
         esample_line(d, src)
