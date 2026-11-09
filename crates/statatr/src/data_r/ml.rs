@@ -682,7 +682,7 @@ impl Session {
         }
         let d = self.data()?;
         out.package("dplyr");
-        out.line(super::model::esample_line(&d, &src));
+        out.line(self.esample_line(&d, &src));
         self.esample_new = true;
         out.line("stata_df <- Inf");
         self.estimates = Some(Estimates {

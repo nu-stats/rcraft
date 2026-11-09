@@ -889,6 +889,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_dates" => dates::DATES_HELPER,
         "stata_collinear" => model::COLLINEAR_HELPER,
         "stata_slice" => model::SLICE_HELPER,
+        "stata_fit_rows" => model::FIT_ROWS_HELPER,
         "stata_glm_vcov" => ml::GLM_VCOV_HELPER,
         "stata_nbreg_vcov" => ml::NBREG_VCOV_HELPER,
         "stata_ml_header" => ml::ML_HEADER_HELPER,
@@ -2016,7 +2017,7 @@ impl Session {
         if MODELS.contains(&c.name.as_str()) && self.e_new && !out.code.is_empty() {
             out.code.insert(
                 0,
-                "rm(list = intersect(c(\"stata_e\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_estimates\"), ls()))\nstata_fit_failed <- TRUE"
+                "rm(list = intersect(c(\"stata_e\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_estimates\"), ls(sorted = FALSE)))\nstata_fit_failed <- TRUE"
                     .to_string(),
             );
             out.code.push("stata_fit_failed <- FALSE".to_string());

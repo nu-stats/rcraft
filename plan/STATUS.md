@@ -3690,3 +3690,11 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   the workspace listing, which now comes at most every 250 ms. A bare trip to R is 0.3 ms; what
   is left is R's own work for each fit (lm, the collinearity check, e()). Same lines, log, 667
   values and tables as before.
+- **Then 117 s:** the fit's rows (`stata_fit_rows`) are read from its model frame's own row
+  numbers when the data's rows are numbered 1 to n, not made into names and matched as text
+  (1.2 ms to 0.03 ms, identical on 300 pairs and on named rows, `subset=`, filtered tibbles, glm
+  and weights); `e(sample)` from the same rows; the old results cleared with `ls(sorted = FALSE)`.
+  Timed in a live session, R was busy ~6 ms of each 7 ms `reg`: Windows' clock is too coarse to
+  time a single statement, so steps are timed 300 at a time. A `reg` is now 4 ms (lm 0.6, e() 0.8,
+  vcov 0.4, the collinearity check 0.3, the trip 0.7). The e2e table has each line's time in R
+  (`ms`), and the summary the time in questions.

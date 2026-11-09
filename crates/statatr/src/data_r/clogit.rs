@@ -16,7 +16,7 @@
 //! - `predict` gives pc1 (the probability of being the positive one, within
 //!   the group, on every row), `pu0` (invlogit of xb: the fixed effect taken as zero) or `xb`.
 
-use super::model::{esample_line, level, vce, Estimates, Fit, Spec};
+use super::model::{level, vce, Estimates, Fit, Spec};
 use super::stats::r_logical;
 use super::*;
 
@@ -343,7 +343,7 @@ impl Session {
         out.line(self.keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
-        out.line(esample_line(&d, &src));
+        out.line(self.esample_line(&d, &src));
         self.esample_new = true;
         self.fit_robust = robust || cluster.is_some() || svy.is_some();
         self.fit_cluster = cluster.is_some();
@@ -585,7 +585,7 @@ impl Session {
         out.line(self.keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
-        out.line(esample_line(&d, &src));
+        out.line(self.esample_line(&d, &src));
         self.esample_new = true;
         self.fit_robust = robust || cluster.is_some();
         self.fit_cluster = cluster.is_some();

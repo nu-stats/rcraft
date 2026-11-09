@@ -150,6 +150,9 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
     let mut timed_out = false;
     // the time R itself took, apart from translating
     let mut in_r = Duration::ZERO;
+    // and in the questions the run asked
+    let mut in_asks = Duration::ZERO;
+    let mut asks = 0;
     loop {
         if started.elapsed() > budget {
             timed_out = true;
@@ -162,6 +165,7 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
                 handled += lines.len();
                 for (line, origin) in lines.iter().zip(&origins) {
                     let command = command_name(line.stata.trim());
+                    let mut ms = 0.0;
                     let (status, why) = match &line.result {
                         Err(e) => {
                             refused += 1;
@@ -184,6 +188,7 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
                             let at = Instant::now();
                             let (o, t) = run(e, &code, left.max(Duration::from_secs(1)));
                             in_r += at.elapsed();
+                            ms = at.elapsed().as_secs_f64() * 1000.0;
                             log.push_str(&t);
                             if !t.ends_with('\n') && !t.is_empty() {
                                 log.push('\n');
@@ -206,7 +211,7 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
                     rows.push((
                         origin.file,
                         format!(
-                            "{}\t{command}\t{status}\t{}",
+                            "{}\t{command}\t{status}\t{}\t{ms:.1}",
                             origin.span.line,
                             why.replace(['\t', '\n'], " ")
                         ),
@@ -221,6 +226,8 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
                 let at = Instant::now();
                 let (ok, t) = ask(e, &code, Duration::from_secs(120));
                 in_r += at.elapsed();
+                in_asks += at.elapsed();
+                asks += 1;
                 if ok {
                     sent.extend(names);
                 }
@@ -230,7 +237,8 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
         }
     }
     let files = r.finish().files;
-    let mut table = String::from("file\tline\tcommand\tstatus\twhy\n");
+    // ms: the time the line took in R, there and back
+    let mut table = String::from("file\tline\tcommand\tstatus\twhy\tms\n");
     for (i, rest) in &rows {
         let name = files
             .get(*i)
@@ -241,11 +249,12 @@ fn run_package(e: &mut Engine, pkg: &Path, budget: Duration) -> String {
     let _ = std::fs::write(pkg.join("rcraft.R"), &script);
     let _ = std::fs::write(pkg.join("rcraft_lines.tsv"), &table);
     format!(
-        "{}: {ok} ran, {refused} refused, {errors} stopped in R{} ({:.0} s, {:.0} in R)",
+        "{}: {ok} ran, {refused} refused, {errors} stopped in R{} ({:.0} s, {:.0} in R, {:.0} of it in {asks} questions)",
         pkg.file_name().unwrap_or_default().to_string_lossy(),
         if timed_out { ", timed out" } else { "" },
         started.elapsed().as_secs_f64(),
-        in_r.as_secs_f64()
+        in_r.as_secs_f64(),
+        in_asks.as_secs_f64()
     )
 }
 

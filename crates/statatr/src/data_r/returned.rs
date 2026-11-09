@@ -1164,7 +1164,7 @@ impl Session {
         );
         out.line("if (!exists(\"stata_stored\")) stata_stored <- list()");
         out.line(format!(
-            "stata_stored[[{}]] <- mget(intersect({FIT_OBJECTS}, ls()))",
+            "stata_stored[[{}]] <- mget(intersect({FIT_OBJECTS}, ls(sorted = FALSE)))",
             r_text(&name)
         ));
         self.active_store = Some(name);
@@ -1192,7 +1192,9 @@ impl Session {
             "if (!exists(\"stata_stored\") || is.null(stata_stored[[{n}]])) stop({})",
             r_text(&format!("estimation result {name} not found"))
         ));
-        out.line(format!("rm(list = intersect({FIT_OBJECTS}, ls()))"));
+        out.line(format!(
+            "rm(list = intersect({FIT_OBJECTS}, ls(sorted = FALSE)))"
+        ));
         out.line(format!(
             "invisible(list2env(stata_stored[[{n}]], environment()))"
         ));

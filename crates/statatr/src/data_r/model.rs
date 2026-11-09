@@ -335,7 +335,7 @@ impl Session {
         out.line(self.keep_sample(&src));
         let d = self.data()?;
         out.package("dplyr");
-        out.line(esample_line(&d, &src));
+        out.line(self.esample_line(&d, &src));
         self.esample_new = true;
         out.line("stata_b <- stats::coef(stata_estimates)");
         if let Some((k, _)) = &w {
@@ -735,6 +735,16 @@ pub(super) const SLICE_HELPER: &str = r#"stata_slice <- function(d, r) {
   out
 }"#;
 
+/// `stata_fit_rows(fit, d)`: the rows of `d` the fit used, as
+/// `match(rownames(model.frame(fit)), rownames(d))` gives them. Rows numbered
+/// 1 to n (all data from `use`) keep their numbers in the model's frame, and
+/// those are the positions: no names made and matched as text.
+pub(super) const FIT_ROWS_HELPER: &str = r#"stata_fit_rows <- function(fit, d) {
+  rn <- attr(stats::model.frame(fit), "row.names")
+  if (is.integer(rn) && .row_names_info(d) < 0L && all(rn >= 1L & rn <= nrow(d))) return(rn)
+  match(as.character(rn), rownames(d))
+}"#;
+
 impl Session {
     /// `stata_data`: the rows `rows` of the data expression `src`.
     ///
@@ -751,10 +761,8 @@ impl Session {
     /// The rows the model used, as they were when it was fitted: Stata's
     /// `e(sample)`, which `margins` averages over.
     pub(super) fn keep_sample(&mut self, src: &str) -> String {
-        self.keep_rows(
-            src,
-            &format!("match(rownames(stats::model.frame(stata_estimates)), rownames({src}))"),
-        )
+        self.helpers.insert("stata_fit_rows");
+        self.keep_rows(src, "stata_fit_rows(stata_estimates, d)")
     }
 }
 
@@ -901,13 +909,20 @@ pub(super) fn esample_rows_line(d: &str, src: &str, rows: &str) -> String {
 /// `d`, whether the model used it. The model's rows are found by running its
 /// data expression again on `d` with each row's number added (the name `d`
 /// is shadowed inside `local()`, so `src` reads the numbered copy).
-pub(super) fn esample_line(d: &str, src: &str) -> String {
-    // the whole data frame: its own row names say which rows
-    if d == src {
-        return format!(
-            "stata_esample <- seq_len(nrow({d})) %in% match(rownames(stats::model.frame(stata_estimates)), rownames({d}))"
-        );
+impl Session {
+    pub(super) fn esample_line(&mut self, d: &str, src: &str) -> String {
+        // the whole data frame: its own row names say which rows
+        if d == src {
+            self.helpers.insert("stata_fit_rows");
+            return format!(
+                "stata_esample <- local({{ e <- logical(nrow({d})); e[stata_fit_rows(stata_estimates, {d})] <- TRUE; e }})"
+            );
+        }
+        esample_line(d, src)
     }
+}
+
+pub(super) fn esample_line(d: &str, src: &str) -> String {
     format!(
         "stata_esample <- local({{ {d} <- dplyr::mutate({d}, stata_row = seq_len(nrow({d}))); s <- {src}; seq_len(nrow({d})) %in% s$stata_row[match(rownames(stats::model.frame(stata_estimates)), rownames(s))] }})"
     )

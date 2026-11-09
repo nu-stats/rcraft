@@ -332,7 +332,7 @@ impl Session {
         out.line("stata_df <- Inf");
         out.line(self.keep_sample(&src));
         let d = self.data()?;
-        out.line(super::model::esample_line(&d, &src));
+        out.line(self.esample_line(&d, &src));
         self.esample_new = true;
         self.estimates = Some(Estimates {
             fit: Fit::Stcox,

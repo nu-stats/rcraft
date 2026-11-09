@@ -19,7 +19,7 @@
 //!   unique, the exact vertex. Checked in the corpus and on 200 fits of a
 //!   replication package.
 
-use super::model::{esample_line, level, Estimates, Fit, Spec};
+use super::model::{level, Estimates, Fit, Spec};
 use super::*;
 
 /// The fit, its variance and Stata's header.
@@ -178,7 +178,7 @@ impl Session {
         let d = self.data()?;
         out.package("dplyr");
         out.package("quantreg");
-        out.line(esample_line(&d, &src));
+        out.line(self.esample_line(&d, &src));
         self.esample_new = true;
         self.fit_robust = true;
         self.fit_cluster = false;
