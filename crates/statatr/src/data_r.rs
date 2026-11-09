@@ -25,6 +25,7 @@
 //! otherwise taken as numbers. Abbreviated variable names cannot be resolved
 //! without the data and are taken as written.
 
+mod alpha;
 mod anova;
 mod center;
 mod clogit;
@@ -615,7 +616,14 @@ const DISPLAY_OPTIONS: &[(&str, usize)] = &[
 /// And those of `margins`: `asobserved` is its default.
 const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10)];
 
+/// Commands that, translated or not, change neither the data nor its rows nor
+/// e(): they write a table or a file, or look something up.
+const HARMLESS: &[&str] = &["putexcel", "outreg", "frmttable", "which"];
+
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "outreg",
+    "frmttable",
+    "which",
     "query",
     "putexcel",
     "codebook",
@@ -909,6 +917,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_codebook" => codebook::CODEBOOK_HELPER,
         "stata_center" => center::CENTER_HELPER,
         "stata_winsor" => winsor::WINSOR_HELPER,
+        "stata_alpha" => alpha::ALPHA_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -1893,7 +1902,7 @@ impl Session {
         }
         // a line that is not translated still runs in Stata, so it counts too
         // (putexcel only writes a spreadsheet, translated or not)
-        let harmless = c.name == "putexcel";
+        let harmless = HARMLESS.contains(&c.name.as_str());
         if (done.is_err() && !harmless) || !LEAVE_DATA_ALONE.contains(&c.name.as_str()) {
             self.changed_since_fit = done.is_err() || !MODELS.contains(&c.name.as_str());
             if self.changed_since_fit {
@@ -1926,6 +1935,7 @@ impl Session {
                 | "compress"
                 | "center"
                 | "winsor"
+                | "alpha"
         ) || (matches!(name, "drop" | "keep")
             && c.parts.if_exp.is_none()
             && c.parts.in_range.is_none());
@@ -2091,6 +2101,7 @@ impl Session {
             "codebook" => self.codebook(c, out),
             "center" => self.center(c, &opts, out),
             "winsor" => self.winsor(c, &opts, out),
+            "alpha" => self.alpha(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
                 out.caveat("nothing to do in R: query only shows Stata's own settings");

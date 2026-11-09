@@ -3569,3 +3569,19 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
 - **ZNMIXH:** 111,019 lines ran, 1,271 refused, 53 stopped in R (36 minutes, the isvar loop); all
   583 values compared match Stata's reference, rerun with center and winsor. Stata still lacks revrs,
   pdslasso, the blindschemes scheme.
+
+## alpha, and outreg left alone, 2026-11-08
+
+- **alpha** with generate(), min(), casewise, std, asis and if: the scale to the bit (a running
+  sum rounded to float, as Stata makes it), reversed items, r(k), and with casewise r(alpha),
+  r(cov) and r(rho) (`data_r/alpha.rs`, `plan/stata/alpha.md`, `alpha.do`). Without casewise
+  Stata's r(alpha) and r(cov) are not matched yet and not kept.
+- **outreg, frmttable and which** (still not translated) no longer cost the model, its e(sample)
+  or the data after them, as putexcel: they only write a table or look something up. In ZNMIXH 51
+  `summarize ... if e(sample)` lines had been refused after each outreg.
+- Which items alpha reverses: the first principal factor of the complete rows' correlations
+  (squared multiple correlations on the diagonal), loadings oriented to sum above 0; it matched
+  Stata in 200 of 200 random data sets, and every scale ZNMIXH builds.
+- **ZNMIXH:** 111,175 lines ran, 1,153 refused, 15 stopped in R; all 667 values compared match
+  Stata's (were 583). Still not translated there: outreg's tables themselves (the .tex files it
+  writes), esttab's LaTeX options, frame, pdslasso and revrs (not installed in Stata either).

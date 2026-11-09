@@ -1298,8 +1298,11 @@ const LEAVE_R_ALONE: &[&str] = &[
 /// Commands that never change e() (an untranslated command not here might
 /// be an estimation command, after which e() is not known).
 const LEAVE_E_ALONE: &[&str] = &[
-    // writes cells of a spreadsheet only, translated or not
+    // write a table or look something up only, translated or not
     "putexcel",
+    "outreg",
+    "frmttable",
+    "which",
     "_rcraft_program_begin",
     "_rcraft_program_end",
     "return",
@@ -1456,6 +1459,8 @@ pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
 pub(super) const R_SPLIT: &[&str] = &["k_new", "varlist"];
 pub(super) const R_ISVAR: &[&str] = &["varlist", "badlist"];
 pub(super) const R_EST_TABLE: &[&str] = &["names"];
+pub(super) const R_ALPHA: &[&str] = &["k"];
+pub(super) const R_ALPHA_CASEWISE: &[&str] = &["k", "alpha", "cov", "rho"];
 /// What `test` leaves in r(), with r(dropped_1) and the like for each
 /// constraint it drops (one of base levels only)
 pub(super) const R_TEST: &[&str] = &[

@@ -54,6 +54,7 @@ pub struct Context<'a> {
 /// in command position.
 pub const COMMANDS: &[&str] = &[
     "_pctile",
+    "alpha",
     "anova",
     "append",
     "asclogit",
@@ -603,6 +604,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("recast", &["force"]),
     ("winsor", &["generate(", "h(", "highonly", "lowonly", "p("]),
+    ("alpha", &["asis", "casewise", "generate(", "min(", "std"]),
     (
         "center",
         &[
@@ -1405,6 +1407,7 @@ mod tests {
             "contract" => format!("contract g, {o}"),
             "recast" => format!("recast float y, {o}"),
             "center" => format!("center y, {o}"),
+            "alpha" => format!("alpha y x, {o}"),
             "winsor" if name == "generate" => format!("winsor y, {o} p(.1)"),
             "winsor" if name == "p" || name == "h" => format!("winsor y, gen(z) {o}"),
             "winsor" => format!("winsor y, gen(z) p(.1) {o}"),

@@ -13,6 +13,7 @@
 /// Each Verified command, with the corpus files that check it.
 pub const VERIFIED: &[(&str, &[&str])] = &[
     ("_pctile", &["asclogit"]),
+    ("alpha", &["alpha"]),
     ("anova", &["panel"]),
     ("append", &["replication"]),
     ("asclogit", &["asclogit"]),

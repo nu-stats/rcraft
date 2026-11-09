@@ -189,6 +189,7 @@ const VARLIST: &[&str] = &[
     "codebook",
     "center",
     "winsor",
+    "alpha",
     "isid",
 ];
 
