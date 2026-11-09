@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.11 continued): made-up draws; Stata 19's results are in variates2.recorded
 * functions: rt rbeta
-* (rt() by the ratio of uniforms at df 1, 2.5, 4 and 30, missing outside 1 to 2^53 - 1 with no draw; rbeta() with a shape of 1: a uniform, the smaller or larger of two, and one uniform inverted; the next uniform after each, which shows the stream is Stata's; rt() agrees to its last bit or so, hence the tolerance)
+* (rt() by the ratio of uniforms at df 1, 2.5, 4 and 30, missing outside 1 to 2^53 - 1 with no draw; rbeta() by each of its methods: a shape of 1 (a uniform, the smaller or larger of two, one uniform inverted), Johnk's, Atkinson and Whittaker's switching and AS 134, and the four-piece one for both shapes above 1; the next uniform after each, which shows the stream is Stata's; rt() agrees to its last bit or so, hence the tolerance)
 * tolerance: 1e-13
 version 19
 set linesize 255
@@ -30,6 +30,20 @@ display "@ rbeta_moments " r(mean) " " r(min) " " r(max)
 display "@ rbeta_next " runiform()
 generate double b0 = rbeta(0, 1)
 display "@ rbeta_invalid " (b0[1] >= .) " " runiform()
+set seed 404
+generate double j1 = rbeta(0.3, 0.6)
+generate double j2 = rbeta(0.7, 0.8)
+generate double j3 = rbeta(0.4, 3.5)
+generate double j4 = rbeta(6, 0.25)
+generate double j5 = rbeta(2.5, 7)
+generate double j6 = rbeta(1.3, 1.4)
+generate double j7 = rbeta(40, 9)
+display "@ rbeta_methods " j1[17] " " j2[33] " " j3[50] " " j4[71] " " j5[99] " " j6[150] " " j7[200]
+quietly summarize j5
+display "@ rbeta_b4pe " r(mean) " " r(min) " " r(max)
+quietly summarize j3
+display "@ rbeta_as134 " r(mean) " " r(min) " " r(max)
+display "@ rbeta_methods_next " runiform()
 set seed 303
 generate double e1 = rbeta(1, 0.15) in 1
 generate double e2 = rbeta(0.05, 1) in 1

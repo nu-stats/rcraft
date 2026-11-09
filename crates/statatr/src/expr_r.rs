@@ -1162,16 +1162,11 @@ impl Translator<'_> {
         if !fits {
             return Err(no(format!("{name}() with {n} arguments is not translated")));
         }
-        // rbeta() is Stata's only with a shape of 1; shapes written out say so now
+        // rbeta() with equal shapes above 1 is not Stata's yet; shapes written out say so now
         if let [Expr::Number(a), Expr::Number(b)] = args {
-            if name == "rbeta"
-                && *a != 1.0
-                && *b != 1.0
-                && (0.05..=1e5).contains(a)
-                && (0.15..=1e5).contains(b)
-            {
+            if name == "rbeta" && a == b && *a > 1.0 && *a <= 1e5 {
                 return Err(no(
-                    "rbeta() with neither shape 1 is not translated yet: Stata's method there is not known",
+                    "rbeta() with equal shapes above 1 is not translated yet: Stata's method there was not matched",
                 ));
             }
         }

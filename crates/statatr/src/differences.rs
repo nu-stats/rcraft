@@ -117,8 +117,9 @@ pub const GUIDES: &[Guide] = &[
                  runiformint(), rexponential(), ...), bsample and bootstrap give Stata's own \
                  draws: RCraft runs Stata's generator (the 64-bit Mersenne Twister) in R, row by \
                  row as Stata draws. rt() is Stata's draw to within its last bit or so, the \
-                 draws after it exactly Stata's; rbeta() is Stata's when a shape is 1. \
-                 rpoisson(), rbeta() with neither shape 1, rbinomial(), rnbinomial() and \
+                 draws after it exactly Stata's; rbeta() is Stata's draw to its last bits or so, \
+                 its stream exactly Stata's. rpoisson(), rbeta() with equal shapes above 1, \
+                 rbinomial(), rnbinomial() and \
                  rhypergeometric() past the ranges whose method is known (they stop with the \
                  reason), simulate and permute, two draws in one expression and version 13 or \
                  earlier are refused.",

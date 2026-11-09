@@ -3348,3 +3348,15 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   1e5, `rt()` for df in 1 to 2^53 - 1 (missing, with no draw, outside); RCraft had drawn outside them.
   `rt()` above 1e10 degrees of freedom is refused: at 2^53 - 1 Stata's acceptance test is not the one
   found.
+
+## P2C.11 continued: rbeta(), from the methods Stata's manual names, 2026-11-05
+
+- **rbeta()** (`data_r/random.rs`, `plan/stata/random-numbers.md`): Johnk's method (a + b <= 1, both below
+  1), Atkinson and Whittaker's switching method split at 1/2 (both below 1, a + b > 1), their AS 134 (one
+  shape on each side of 1, mirrored when a is the larger), a four-piece method laid out as Stata's G4PE
+  for both shapes above 1 (Schmeiser and Babu's B4PE), and the shape-of-1 forms found before. On 556 of
+  Stata 19's draws over 40 shapes: 507 bit for bit, every one within 1e-12, and the stream Stata's after
+  every one; `variates2.do` checks 1,400 more on fresh seeds. Equal shapes above 1 (rbeta(2, 2)) are
+  refused: their method was not matched.
+- **Found:** Stata's `%21x` prints the exponent in hexadecimal; three apparent misses were the reading of it.
+

@@ -158,7 +158,7 @@ pub fn scan(d: &DoFile) -> Scan {
         if RANDOM.iter().any(|r| calls(r))
             || matches!(word.as_str(), "simulate" | "permute" | "sample")
         {
-            limit(&mut s, "Random numbers: most random functions (runiform(), rnormal(), rbinomial(), ...), bsample and bootstrap give Stata's own draws, but rpoisson(), rbeta() with neither shape 1 and the commands that draw (simulate, permute, ...) do not, and the draws after them wait for a set seed.");
+            limit(&mut s, "Random numbers: most random functions (runiform(), rnormal(), rbinomial(), ...), bsample and bootstrap give Stata's own draws, but rpoisson(), rbeta() with equal shapes above 1 and the commands that draw (simulate, permute, ...) do not, and the draws after them wait for a set seed.");
         }
         if lower.starts_with("mata") {
             limit(&mut s, "Mata: its blocks are not run.");

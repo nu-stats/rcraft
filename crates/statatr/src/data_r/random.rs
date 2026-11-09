@@ -594,11 +594,107 @@ stata_rt <- function(rows, df) {
   }
   stata_rng_out(out)
 }
-# rbeta(a, b) with a shape of 1 (read off Stata 19's draws, 2026-11-05):
-# (1, 1) is a uniform, (1, 2) the smaller of two and (2, 1) the larger; else
-# one uniform u, exp(log(u) (1/a)) when b is 1 and 1 - exp(log(u) (1/b)) when
-# a is. Stata's method for other shapes is not known. Missing, with no draw,
-# outside Stata's a 0.05 to 1e5 and b 0.15 to 1e5
+# rbeta(a, b) (read off Stata 19's draws, 2026-11-05, against the methods its
+# manual names; plan/stata/random-numbers.md). A shape of 1: (1, 1) is one
+# uniform, (1, 2) the smaller of two and (2, 1) the larger, else one uniform
+# inverted. Both below 1: Johnk's method when a + b <= 1, else Atkinson and
+# Whittaker's switching method split at 1/2. One on each side of 1: Atkinson
+# and Whittaker (AS 134), with the shapes swapped and 1 - x when a is the
+# larger. Both above 1 and unequal: a four-piece method with exponential tails
+# laid out as Stata's G4PE for gammas (B4PE, Schmeiser and Babu). Powers are
+# stata_rng_pow's, as in rgamma(). Equal shapes above 1 use a method not
+# found yet and stop. Missing, with no draw, outside a 0.05 to 1e5 and b 0.15
+# to 1e5
+stata_rbeta_johnk <- function(a, b) {
+  repeat {
+    w <- stata_rng_u(stata_rng_words(2))
+    x <- stata_rng_pow(w[1], 1 / a)
+    y <- stata_rng_pow(w[2], 1 / b)
+    if (x + y <= 1) return(x / (x + y))
+  }
+}
+# [0, t] drawn from x^(a-1), [t, 1] from (1-x)^(b-1); one = a < 1 < b
+stata_rbeta_switch <- function(a, b, t, one) {
+  p <- if (one) b * t / (b * t + a * stata_rng_pow(1 - t, b)) else b * t / (b * t + a * (1 - t))
+  repeat {
+    w <- stata_rng_u(stata_rng_words(2))
+    if (w[1] <= p) {
+      x <- t * stata_rng_pow(w[1] / p, 1 / a)
+      ok <- if (one) w[2] <= stata_rng_pow(1 - x, b - 1) else w[2] <= ((1 - x) / (1 - t))^(b - 1)
+    } else {
+      x <- 1 - (1 - t) * stata_rng_pow((1 - w[1]) / (1 - p), 1 / b)
+      ok <- if (one) w[2] <= stata_rng_pow(x / t, a - 1) else w[2] <= (x / t)^(a - 1)
+    }
+    if (ok) return(x)
+  }
+}
+stata_rbeta_b4pe <- function(a, b) {
+  u <- function() stata_rng_u(stata_rng_words(1))
+  x3 <- (a - 1) / ((a - 1) + (b - 1))
+  # the inflection points, x3 -/+ d (none when a + b <= 3)
+  d <- if (a + b <= 3) Inf else sqrt((a - 1) * (b - 1) / (a + b - 3)) / (a + b - 2)
+  f <- function(x) stata_rng_pow(x / x3, a - 1) * stata_rng_pow((1 - x) / (1 - x3), b - 1)
+  dl <- function(x) (a - 1 - (a + b - 2) * x) / (x * (1 - x))
+  x1 <- 0; x2 <- 0; f1 <- 0; f2 <- 0; l1 <- 0
+  if (d < x3) {
+    x2 <- x3 - d
+    x1 <- x2 - 1 / dl(x2)
+    f1 <- f(x1)
+    f2 <- f(x2)
+    l1 <- -dl(x1)
+  }
+  x4 <- 1; x5 <- 1; f4 <- 0; f5 <- 0; l5 <- 0
+  if (x3 + d < 1) {
+    x4 <- x3 + d
+    x5 <- x4 - 1 / dl(x4)
+    f4 <- f(x4)
+    f5 <- f(x5)
+    l5 <- -dl(x5)
+  }
+  # the rectangles summed from the mode out (left of it, right of it, then
+  # the outer ones), then wedges, triangles and tails as G4PE
+  rect <- c(f2 * (x3 - x2), f4 * (x4 - x3), f1 * (x2 - x1), f5 * (x5 - x4))
+  rest <- c((1 - f2) * (x3 - x2), (1 - f4) * (x4 - x3), (f2 - f1) * (x2 - x1) / 2,
+            (f4 - f5) * (x5 - x4) / 2, if (l1 == 0) 0 else -f1 / l1, if (l5 == 0) 0 else f5 / l5)
+  pr <- cumsum(rect)
+  p <- c(rep(NA_real_, 4), pr[4] + cumsum(rest))
+  repeat {
+    v0 <- u() * p[10]
+    if (v0 <= pr[4]) {
+      if (v0 <= pr[1]) return(x2 + v0 / f2)
+      if (v0 <= pr[2]) return(x3 + (v0 - pr[1]) / f4)
+      if (v0 <= pr[3]) return(x1 + (v0 - pr[2]) / f1)
+      return(x4 + (v0 - pr[3]) / f5)
+    }
+    if (v0 > p[8] && v0 <= p[9]) {
+      x <- x1 - log((p[9] - v0) / (p[9] - p[8])) / l1
+      if (x <= 0) next
+    }
+    if (v0 > p[9]) x <- x5 - log((p[10] - v0) / (p[10] - p[9])) / l5
+    w <- u()
+    if (v0 <= p[5]) {
+      x <- x2 + (x3 - x2) * w
+      v <- f2 + (v0 - pr[4]) / (x3 - x2)
+    } else if (v0 <= p[6]) {
+      x <- x3 + (x4 - x3) * w
+      v <- f4 + (v0 - p[5]) / (x4 - x3)
+    } else if (v0 <= p[8]) {
+      hi <- max(w, u())
+      if (v0 <= p[7]) {
+        x <- x1 + (x2 - x1) * hi
+        v <- f1 + (f2 - f1) * ((v0 - p[6]) / (p[7] - p[6])) * hi
+      } else {
+        x <- x5 - (x5 - x4) * hi
+        v <- f5 + (f4 - f5) * ((v0 - p[7]) / (p[8] - p[7])) * hi
+      }
+    } else if (v0 <= p[9]) {
+      v <- w * f1 * exp(-l1 * (x - x1))
+    } else {
+      v <- w * f5 * exp(-l5 * (x - x5))
+    }
+    if (x > 0 && x < 1 && v <= f(x)) return(x)
+  }
+}
 stata_rbeta <- function(rows, a, b) {
   x <- stata_rng_args(rows, a, b)
   need <- which(x$sel & stata_rng_in(x[[3]], 0.05, 1e5) & stata_rng_in(x[[4]], 0.15, 1e5))
@@ -606,8 +702,8 @@ stata_rbeta <- function(rows, a, b) {
   for (i in need) {
     p <- x[[3]][i]
     q <- x[[4]][i]
-    if (p != 1 && q != 1) {
-      stop("RCraft: rbeta() with neither shape 1 is not translated yet (Stata's method there is not known)", call. = FALSE)
+    if (p == q && p > 1) {
+      stop("RCraft: rbeta() with equal shapes above 1 is not translated yet (Stata's method there was not matched)", call. = FALSE)
     }
     out[i] <- if (p == 1 && q == 1) {
       stata_rng_u(stata_rng_words(1))
@@ -617,8 +713,16 @@ stata_rbeta <- function(rows, a, b) {
       max(stata_rng_u(stata_rng_words(2)))
     } else if (q == 1) {
       exp(log(stata_rng_u(stata_rng_words(1))) * (1 / p))
-    } else {
+    } else if (p == 1) {
       1 - exp(log(stata_rng_u(stata_rng_words(1))) * (1 / q))
+    } else if (p < 1 && q < 1) {
+      if (p + q <= 1) stata_rbeta_johnk(p, q) else stata_rbeta_switch(p, q, 0.5, FALSE)
+    } else if (p < 1) {
+      stata_rbeta_switch(p, q, (1 - p) / (q + 1 - p), TRUE)
+    } else if (q < 1) {
+      1 - stata_rbeta_switch(q, p, (1 - q) / (p + 1 - q), TRUE)
+    } else {
+      stata_rbeta_b4pe(p, q)
     }
   }
   stata_rng_out(out)

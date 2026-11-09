@@ -225,15 +225,32 @@ draw took, against the mt64 stream RCraft already reproduces.
   2^53 - 1 Stata turns down a try the exact test keeps (u = .7497, t = -.611), so its test there is not
   (1 + t^2/df)^(-(df+1)/2) in any form tried (pow, log1p); at 1e10 it keeps it. RCraft refuses df above
   1e10.
-- `rbeta(a, b)`: (1, 1) is one uniform as it is; (1, 2) is the smaller of two and (2, 1) the larger (12
-  draws each, every one exact); with b = 1, exp(log(u) * (1/a)) (a = 2.5, 3, 5) and with a = 1,
-  1 - exp(log(u) * (1/b)) (b = 0.4, 3), one uniform, exact on 50 draws. Both shapes below 1 with
-  a + b <= 1 look like Johnk's method (x = u1^(1/a), y = u2^(1/b), kept when x + y <= 1, x/(x + y)):
-  the uniforms it takes are Stata's, and most draws are exact, but some are not (small x), so it is
-  not used. Other shapes take other numbers of uniforms (Cheng's BB and BC, and a ratio of Stata's
-  gammas, do not fit). The manual names Johnk (via Gentle 2003), Atkinson and Whittaker (1970, 1976), Devroye
-  (1986) and Schmeiser and Babu (1980), and gives the domains a 0.05 to 1e5 and b 0.15 to 1e5: outside
-  them (0.049, 0.14999, 100001, 0, -1, `.`) the result is missing with no draw (checked).
+- `rbeta(a, b)`, decoded against the methods the manual names (Johnk via Gentle 2003, Atkinson and
+  Whittaker 1970 and 1976, Devroye 1986, Schmeiser and Babu 1980). Its domain is a 0.05 to 1e5 and b 0.15
+  to 1e5; outside it (0.049, 0.14999, 100001, 0, -1, `.`) missing with no draw. Powers are taken as in
+  `rgamma()`: a whole exponent by repeated products, else exp(e ln x).
+  - A shape of 1: (1, 1) is one uniform as it is; (1, 2) the smaller of two and (2, 1) the larger; else
+    one uniform, exp(log(u) * (1/a)) when b = 1 and 1 - exp(log(u) * (1/b)) when a = 1.
+  - Both below 1, a + b <= 1: Johnk's method, x = u1^(1/a), y = u2^(1/b), kept when x + y <= 1, x/(x+y).
+  - Both below 1, a + b > 1: the switching method split at t = 1/2: p = bt/(bt + a(1-t)); u <= p gives
+    x = t (u/p)^(1/a), kept when v <= ((1-x)/(1-t))^(b-1); else x = 1 - (1-t)((1-u)/(1-p))^(1/b), kept
+    when v <= (x/t)^(a-1).
+  - One below 1 and one above (AS 134): a < 1 < b with t = (1-a)/(b+1-a), p = bt/(bt + a(1-t)^b), and the
+    tests v <= (1-x)^(b-1) and v <= (x/t)^(a-1); with a > 1 > b, 1 - that draw for (b, a).
+  - Both above 1 and unequal: a four-piece method with exponential tails laid out as Stata's G4PE for
+    gammas: the mode x3 = (a-1)/((a-1)+(b-1)), the inflection points x3 -/+ d with d =
+    sqrt((a-1)(b-1)/(a+b-3))/(a+b-2) (none when a + b <= 3, and a side drops out when its point is past
+    0 or 1), where their tangents meet 0 x1 and x5, f(x) = (x/x3)^(a-1) ((1-x)/(1-x3))^(b-1). One
+    difference from G4PE: the four rectangles are summed from the mode out (left of it, right of it, then
+    the outer two). 215 of 264 draws over 19 shapes are bit for bit and all are within 1e-12, with
+    Stata's stream after every one; the rest differ in the last bits (the order of operations, not found).
+  - Equal shapes above 1 (2, 1.5, 3, 5, 50, 1.01) use another method: a pair (2u-1, 2v-1) drawn until it
+    falls in the unit circle accounts for the uniforms taken at a = 3 and 5, then one more, but no
+    formula tried gives the draws and at 1.01 and 1.5 a test that depends on a takes more. Refused.
+  - In all, 556 recorded draws: 507 bit for bit, all within 1e-12 (worst 7.8e-14 relative), the next
+    uniform Stata's after every one; `variates2.do` adds 1,400 more draws over the five methods.
+  - The 64-fold misses first seen at (0.1, 0.3) were the probe's own: `%21x` writes its exponent in
+    hexadecimal (`X-014` is 2^-20), and the scripts had read it as decimal.
 - `rpoisson()`: not looked at again; StatCraft's notes above stand. The manual names Kemp and Kemp
   (1990, a composition-search algorithm for low means; 1991) and Kachitvichyanukul (1982), which fits
   StatCraft's two-stage search below a mean of about 10 and its change of method further up.
