@@ -86,6 +86,7 @@ const DATA: &[&str] = &[
     "exit",
     "expand",
     "export",
+    "filefilter",
     "fillin",
     "foreach",
     "format",

@@ -37,6 +37,7 @@ mod dates;
 mod eclass;
 mod esttab;
 mod esttable;
+mod filefilter;
 mod files;
 mod fre;
 mod graph;
@@ -623,6 +624,7 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 const HARMLESS: &[&str] = &["putexcel", "outreg", "frmttable", "which"];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "filefilter",
     "mata",
     "outreg",
     "frmttable",
@@ -922,6 +924,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_winsor" => winsor::WINSOR_HELPER,
         "stata_alpha" => alpha::ALPHA_HELPER,
         "stata_outreg" => outreg::OUTREG_HELPER,
+        "stata_filefilter" => filefilter::FILEFILTER_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -2134,6 +2137,7 @@ impl Session {
             "outreg" => self.outreg(c, &opts, out),
             "frmttable" => self.frmttable(c, &opts, out),
             "mata" => self.mata_line(c, out),
+            "filefilter" => self.filefilter(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
                 out.caveat("nothing to do in R: query only shows Stata's own settings");

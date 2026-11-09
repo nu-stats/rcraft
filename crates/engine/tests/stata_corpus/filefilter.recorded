@@ -1,0 +1,15 @@
+* Stata 19.0's results for filefilter.do, recorded by cargo xtask stata-record
+@ first 1 42 44
+@ second 1 37 24
+@ overlap 3 1
+@ none 0
+@ exists 602
+@ missing 601
+@ same 602
+@ badcode 198
+@ lines 5
+@ l1 1
+@ l2 1
+@ l3 1
+@ l4 1
+@ l5 1

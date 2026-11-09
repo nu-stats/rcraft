@@ -98,6 +98,7 @@ pub const COMMANDS: &[&str] = &[
     "exit",
     "expand",
     "file",
+    "filefilter",
     "foreach",
     "format",
     "forvalues",
@@ -608,6 +609,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("winsor", &["generate(", "h(", "highonly", "lowonly", "p("]),
     ("alpha", &["asis", "casewise", "generate(", "min(", "std"]),
     ("frmttable", &["sdec(", "sfmt(", "statmat(", "store("]),
+    ("filefilter", &["from(", "replace", "to("]),
     (
         "center",
         &[
@@ -1411,6 +1413,11 @@ mod tests {
             "recast" => format!("recast float y, {o}"),
             "center" => format!("center y, {o}"),
             "alpha" => format!("alpha y x, {o}"),
+            "filefilter" if name == "replace" => {
+                format!("filefilter a.txt b.txt, from(x) to(y) {o}")
+            }
+            "filefilter" if name == "from" => format!("filefilter a.txt b.txt, {o} to(y)"),
+            "filefilter" => format!("filefilter a.txt b.txt, from(x) {o}"),
             "winsor" if name == "generate" => format!("winsor y, {o} p(.1)"),
             "winsor" if name == "p" || name == "h" => format!("winsor y, gen(z) {o}"),
             "winsor" => format!("winsor y, gen(z) p(.1) {o}"),

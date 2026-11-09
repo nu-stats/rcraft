@@ -1485,6 +1485,7 @@ pub(super) const R_SPLIT: &[&str] = &["k_new", "varlist"];
 pub(super) const R_ISVAR: &[&str] = &["varlist", "badlist"];
 pub(super) const R_EST_TABLE: &[&str] = &["names"];
 pub(super) const R_ALPHA: &[&str] = &["k"];
+pub(super) const R_FILEFILTER: &[&str] = &["occurrences", "bytes_from", "bytes_to"];
 pub(super) const R_ALPHA_CASEWISE: &[&str] = &["k", "alpha", "cov", "rho"];
 /// What `test` leaves in r(), with r(dropped_1) and the like for each
 /// constraint it drops (one of base levels only)

@@ -3657,3 +3657,11 @@ itself (P2B.7's two-pane view brings it): the Tab key in Stata mode calls `compl
   refused: their method was not matched.
 - **Found:** Stata's `%21x` prints the exponent in hexadecimal; three apparent misses were the reading of it.
 
+
+## filefilter, 2026-11-09
+
+- **filefilter** (`data_r/filefilter.rs`, `plan/stata/filefilter.md`, `filefilter.do`): bytes
+  replaced as Stata does, its codes, r(occurrences), r(bytes_from), r(bytes_to) and its errors;
+  all probe outputs byte for byte Stata's. ZNMIXH: 111,553 lines ran; Table2.tex (outreg, then
+  two filefilters), TableI1.tex and TableI2.tex, written by R from scratch, are byte for byte
+  Stata's, and all 667 compared values match.

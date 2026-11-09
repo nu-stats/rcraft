@@ -20,7 +20,7 @@
 
 mod eval;
 pub(crate) mod format;
-mod macros;
+pub(crate) mod macros;
 mod progsyntax;
 mod scan;
 mod varlist;
