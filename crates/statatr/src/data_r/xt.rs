@@ -6,7 +6,10 @@
 //!
 //! - `fe`: least squares on y - ybar_i + ybar (the grand mean added back, so
 //!   there is a constant), df = N - n - k; a regressor with no variation
-//!   within a panel is dropped with Stata's note. sigma_u is the standard
+//!   within a panel is dropped with Stata's note, and of columns collinear
+//!   within the panels the later one, or, with `vce(cluster v)` on another
+//!   variable than the panel, the one Stata's largest-pivot sweep leaves
+//!   with nothing (its note says "with the absorbed variable"). sigma_u is the standard
 //!   deviation over the panels of ybar_i - xbar_i b - _cons; the F test that
 //!   all u_i = 0 compares with the pooled fit.
 //! - `be`: least squares on the panel means.
@@ -83,16 +86,48 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   # and from the fe fit re takes sigma_e from
   wkeep <- varies
   within_set <- character()
+  absorbed <- character()
   if (sum(varies) > 1) {
-    qw <- qr(Xd[, varies, drop = FALSE], tol = 1e-9)
-    gone <- setdiff(seq_len(sum(varies)), qw$pivot[seq_len(qw$rank)])
+    Xv <- Xd[, varies, drop = FALSE]
+    unsure <- FALSE
+    if (type == "fe" && !is.null(cluster) && !identical(cluster, panel)) {
+      # clustered on another variable than the panel, Stata 19 fits fe as areg
+      # does, and leaves out what its sweep finds: the column with the most
+      # left is swept next, and the one left with nothing is omitted
+      # ('collinearity with the absorbed variable'). Where two are left with
+      # the same (time dummies of one year, say), Stata's rounding decides:
+      # the earlier one goes here, and a note names the columns that may then
+      # differ (plan/stata/xtreg-absorbed.md)
+      A <- crossprod(Xv)
+      sweep_out <- function(last) {
+        B <- A
+        swept <- out <- rep(FALSE, ncol(B))
+        repeat {
+          left <- which(!swept & !out)
+          out[left[diag(B)[left] <= 1e-10 * diag(A)[left]]] <- TRUE
+          left <- which(!swept & !out)
+          if (!length(left)) break
+          s <- diag(B)[left]
+          tied <- left[s >= max(s) * (1 - 1e-12)]
+          p <- if (last) tied[length(tied)] else tied[1]
+          swept[p] <- TRUE
+          rest <- which(!swept & !out)
+          if (length(rest)) B[rest, rest] <- B[rest, rest] - outer(B[rest, p], B[p, rest]) / B[p, p]
+        }
+        which(out)
+      }
+      gone <- sweep_out(TRUE)
+      unsure <- !identical(gone, sweep_out(FALSE))
+      absorbed <- colnames(Xv)[gone]
+    } else {
+      # otherwise the later one of the set, as Stata leaves it out
+      qw <- qr(Xv, tol = 1e-9)
+      gone <- setdiff(seq_len(sum(varies)), qw$pivot[seq_len(qw$rank)])
+    }
     wkeep[which(varies)[gone]] <- FALSE
-    # which column of such a set Stata leaves out of fe rests on its rounding
-    # (the later one where it is exact; another, 'collinearity with the
-    # absorbed variable', where rounding leaves a residual): the later one is
-    # left out here, and the columns of the set are named, whose coefficients
-    # then may differ from Stata's; nothing else does (plan/stata/xtset-on-use.md)
-    if (type == "fe" && length(gone)) {
+    # the columns of such a set, whose coefficients then may differ from
+    # Stata's; nothing else does
+    if (unsure) {
       Xk <- Xd[, wkeep, drop = FALSE]
       for (j in which(varies)[gone]) {
         cf <- qr.coef(qr(Xk), Xd[, j])
@@ -179,15 +214,17 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   if (type == "fe") {
     # Stata's name for the column: 1.g for factor(g)1
     stata_nm <- function(v) sub("^(factor|stata_ib)\\(([^,()]+)(, \"[^\"]*\")?\\)(.+)$", "\\4.\\2", v)
-    for (v in c(collinear, colnames(X)[!varies])) cat("note: ", stata_nm(v), " omitted because of collinearity.\n", sep = "")
+    for (v in c(collinear, colnames(X)[!varies])) {
+      cat("note: ", stata_nm(v), " omitted because of collinearity", if (v %in% absorbed) " with the absorbed variable", ".\n", sep = "")
+    }
     if (length(within_set)) {
       nm <- stata_nm(within_set)
       lev <- grepl("^[0-9]+[a-z]*\\.", nm)
       # the constant moves with them (it is the grand mean less their part)
       what <- c(nm[!lev], if (any(lev)) paste0("the ", unique(sub("^[0-9]+[a-z]*\\.", "", nm[lev])), " levels"), "_cons")
-      cat("note: these columns are collinear within the panels; Stata may omit another of them (its choice rests\n",
-          "      on rounding), and then only the coefficients of ", paste(what[-length(what)], collapse = ", "),
-          " and _cons differ.\n", sep = "")
+      cat("note: these columns are collinear within the panels, and two of them are left with the same; Stata\n",
+          "      may omit the other (its rounding decides), and then only the coefficients of ",
+          paste(what[-length(what)], collapse = ", "), " and _cons differ.\n", sep = "")
     }
     b <- ff$b
     if (robust) {

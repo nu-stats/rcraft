@@ -138,7 +138,16 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("winsor", &["winsor"]),
     ("xpose", &["made"]),
     ("xtile", &["xtile"]),
-    ("xtreg", &["likelihood", "panel", "xtcollinear", "xtreg_r2"]),
+    (
+        "xtreg",
+        &[
+            "likelihood",
+            "panel",
+            "xtabsorbed",
+            "xtcollinear",
+            "xtreg_r2",
+        ],
+    ),
     ("xtregar", &["arpanel"]),
     ("xtset", &["likelihood", "panel", "xtreg_r2"]),
 ];

@@ -3744,3 +3744,14 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   Stata in full (read without joining, 164 and 165 looked different). AXYMDI and SI3BGA never ran
   in Stata (the reference was started with the comma inside the quotes), and their do-files open
   no data; DZ8BUS and XURXZN stop in Stata too (no import; data not in the package).
+
+## xtreg, fe: the within-collinear column Stata omits, clustered on another variable, 2026-11-09
+
+- Observed in Stata 19 (`plan/stata/xtreg-absorbed.md`): the "collinearity with the absorbed
+  variable" note, and a column other than the later one, come only with `vce(cluster v)` on a
+  variable that is not the panel; Stata then omits the column its largest-pivot sweep of the within
+  cross products leaves with nothing. Plain, robust or clustered on the panel it omits the later
+  one (as before). RCraft now does both, with Stata's note; corpus `xtabsorbed.do`.
+- Where the last two columns are left with the same (meetings of one year), Stata's rounding
+  decides and was not reproduced; RCraft omits the earlier and notes the coefficients that may
+  differ. TZEN38: 856 of 861 model values as Stata's (846), the 5 others in tied models.

@@ -1741,13 +1741,15 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Differences",
                 "fe with variables collinear only within the panels (age with time dummies): one \
-                 must be left out, and the data cannot tell which. RCraft leaves out the later \
-                 one, as Stata does when the collinearity is exact; where rounding leaves a \
-                 residual, Stata's choice rests on it ('collinearity with the absorbed \
-                 variable') and may be another of the set. A note names the coefficients that \
-                 then differ (those of the set and _cons); every other result is the same \
-                 whichever is left out: the other coefficients and their standard errors, N, \
-                 the R-squareds, sigma_u, sigma_e, rho, F and the predictions.",
+                 must be left out, and the data cannot tell which. RCraft leaves out the one \
+                 Stata leaves out: the later one, or, clustered on another variable than the \
+                 panel, the one its largest-pivot sweep leaves with nothing ('collinearity with \
+                 the absorbed variable'). Where two columns are left with the same (time \
+                 dummies of one year, say), Stata's rounding decides between them; RCraft then \
+                 leaves out the earlier, and a note names the coefficients that may differ \
+                 (those of the set and _cons). Every other result is the same whichever is \
+                 left out: the other coefficients and their standard errors, N, the \
+                 R-squareds, sigma_u, sigma_e, rho, F and the predictions.",
             ),
             MISSING_IN_MODELS,
             LAYOUT_R,

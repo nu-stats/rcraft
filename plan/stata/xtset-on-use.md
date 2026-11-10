@@ -67,3 +67,7 @@ Stata's, the 15 others in those sets (14 age, 1 meeting level); Tables 1 and 5 t
 (line endings aside), Tables 2a to 4 too but for _cons in the fe columns where Stata left out
 another level. Also `age age` (o.age after age, as Stata) and g#c.x without g (every level in
 e(b); a zero base column had been put in).
+
+Superseded in part (2026-11-09, `xtreg-absorbed.md`): the absorbed note comes with `vce(cluster v)` on
+another variable than the panel, and Stata then omits what a largest-pivot sweep leaves; only ties
+rest on rounding.
