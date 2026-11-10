@@ -13,20 +13,27 @@
 //! - True and false are numbers: anything not zero is true, missing included,
 //!   and a comparison gives 1 or 0.
 //! - `x / 0` is missing; `+` joins strings; `max()` and `min()` skip missing.
+//! - The extended missing values `.a` to `.z` come after `.` (numbers < `.` <
+//!   `.a` < ... < `.z`). R holds them as haven's tagged NAs, which `use` reads
+//!   from a `.dta` file; a comparison with a missing value written out goes by
+//!   its place in that order (`stata_mv`), two values that may both be missing
+//!   by `stata_compare`. As in Stata 19, a copy (`x`, `x[_n-1]`, `L.x`,
+//!   `cond()`), `float()`, `int()`, `round()`, `floor()` and `ceil()` keep the
+//!   tag, and arithmetic and other functions give `.` (`stata_untag`).
 //! - `round()` goes halfway up with a tiny allowance (as StatCraft found Stata
 //!   does: 2.345 rounds to 2.35), `mod(x, y)` is missing for `y <= 0`, and
 //!   `inrange()` is false for a missing first argument.
 //!
 //! Where R cannot say the same thing, the expression is not translated and the
 //! reason is given ([`Untranslated`]); where the R is right but loses a detail
-//! (Stata's extended missing values `.a` to `.z`, regular-expression dialects,
-//! how `string()` formats numbers), a caveat goes with it. The rules for
+//! (regular-expression dialects, how `string()` formats numbers), a caveat
+//! goes with it. The rules for
 //! `round`, `mod`, `max`/`min`, `missing`, `inrange`, `inlist`, `cond` and `sum`
 //! follow StatCraft's implementations, which are checked against Stata's output.
 
 use crate::lang::expr::{parse, BinaryOp, Expr, UnaryOp};
 use crate::values::datetime::parse_date;
-use crate::values::missing::{is_missing, missing_code};
+use crate::values::missing::{is_missing, missing_code, missing_label};
 
 /// What an R expression holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +66,9 @@ pub struct RExpr {
     pub draws: usize,
     /// The R helpers its code calls (`stata_dates`, ...).
     pub helpers: Vec<&'static str>,
+    /// It writes an extended missing value (`.a` to `.z`) as a value, which
+    /// R keeps as a tagged NA (`haven::tagged_na`).
+    pub tagged: bool,
 }
 
 /// Why an expression was not translated.
@@ -113,7 +123,7 @@ pub fn translate_with(
     returned: &Returned,
     use_: Use,
 ) -> Result<RExpr, Untranslated> {
-    translate_drawing(text, kind_of, returned, use_, None)
+    translate_drawing(text, kind_of, returned, use_, None, false)
 }
 
 /// [`translate_with`] where Stata's random draws may be taken: `rows` is the
@@ -121,14 +131,22 @@ pub fn translate_with(
 /// draw a row in order (Stata draws only for the rows an `if` or `in`
 /// selects). The draws come from `stata_rng` (`data_r::random`); with `None`,
 /// a random function is refused.
+///
+/// `tags` says the data may hold extended missing values (`.a` to `.z`, as
+/// haven's tagged NAs): a file was read or one was stored. Then a comparison
+/// with a missing value tells them apart and a computed value is made `.`, as
+/// Stata's arithmetic makes it; without, the R stays as short as before (an
+/// extended value written out in the expression turns it on).
 pub fn translate_drawing(
     text: &str,
     kind_of: &dyn Fn(&str) -> Option<Kind>,
     returned: &Returned,
     use_: Use,
     rows: Option<&str>,
+    tags: bool,
 ) -> Result<RExpr, Untranslated> {
     let tree = parse(text).map_err(|e| no(format!("Stata would not read it: {}", e.message)))?;
+    let tagged = has_extended(&tree);
     let mut t = Translator {
         kind_of,
         returned,
@@ -138,11 +156,17 @@ pub fn translate_drawing(
         draw_call: None,
         helpers: Vec::new(),
         bytes_ok: false,
+        tags: tags || tagged,
     };
     let (code, kind) = t.expr(&tree)?;
     let (code, kind) = match use_ {
         Use::Condition => (truth(&code, kind)?, Kind::Logical),
         Use::Value if kind == Kind::Logical => (format!("as.numeric({code})"), Kind::Number),
+        // arithmetic and functions give `.` where Stata's do; R would keep the tag
+        Use::Value if t.tags && kind == Kind::Number && !t.carries(&tree) && reads_data(&tree) => {
+            t.helpers.push("stata_untag");
+            (format!("stata_untag({code})"), kind)
+        }
         Use::Value => (code, kind),
     };
     // the draw is taken once: where the R writes it more than once (the
@@ -160,6 +184,7 @@ pub fn translate_drawing(
         caveats,
         draws: t.draws,
         helpers: t.helpers,
+        tagged: tagged && use_ == Use::Value,
     })
 }
 
@@ -175,6 +200,8 @@ struct Translator<'a> {
     /// Inside subinstr()'s search and replacement, which Stata works on as
     /// bytes: there char(128) to char(255) are single bytes R can match too.
     bytes_ok: bool,
+    /// The data may hold extended missing values ([`translate_drawing`]).
+    tags: bool,
 }
 
 /// Stata's date and time functions of numbers, the R helper each is
@@ -347,6 +374,56 @@ fn plain_number(e: &Expr) -> Option<f64> {
     }
 }
 
+/// A missing value written out, by its place in Stata's order: 1 for `.`,
+/// 2 to 27 for `.a` to `.z` (0 would be a number; `stata_mv` in R).
+fn missing_place(e: &Expr) -> Option<u32> {
+    match e {
+        Expr::Number(v) => missing_code(*v).map(|c| u32::from(c) + 1),
+        _ => None,
+    }
+}
+
+/// The last place, `.z`'s.
+const LAST_PLACE: u32 = 27;
+
+/// `a op b` for two places in Stata's order.
+fn holds(a: u32, op: BinaryOp, b: u32) -> bool {
+    match op {
+        BinaryOp::Eq => a == b,
+        BinaryOp::Ne => a != b,
+        BinaryOp::Lt => a < b,
+        BinaryOp::Le => a <= b,
+        BinaryOp::Gt => a > b,
+        _ => a >= b,
+    }
+}
+
+/// An extended missing value (`.a` to `.z`) written out anywhere in `e`.
+fn has_extended(e: &Expr) -> bool {
+    match e {
+        Expr::Number(_) => missing_place(e).is_some_and(|p| p > 1),
+        Expr::Subscript(_, i) => has_extended(i),
+        Expr::Unary(_, a) => has_extended(a),
+        Expr::Binary(_, a, b) => has_extended(a) || has_extended(b),
+        Expr::Call(_, args) => args.iter().any(has_extended),
+        _ => false,
+    }
+}
+
+/// Whether `e` reads the data (a variable), so its R may carry a tag along.
+fn reads_data(e: &Expr) -> bool {
+    match e {
+        Expr::Name(n) => !matches!(n.as_str(), "_n" | "_N" | "_pi" | "_rc"),
+        Expr::Subscript(n, i) => !matches!(n.as_str(), "_b" | "_se" | "_coef") || reads_data(i),
+        Expr::Unary(_, a) => reads_data(a),
+        Expr::Binary(_, a, b) => reads_data(a) || reads_data(b),
+        // e(), r(), scalars and matrices hold no tags
+        Expr::Call(f, _) if matches!(f.as_str(), "e" | "r" | "scalar" | "c") => false,
+        Expr::Call(_, args) => args.iter().any(reads_data),
+        _ => false,
+    }
+}
+
 impl Translator<'_> {
     fn caveat(&mut self, text: impl Into<String>) {
         let t = text.into();
@@ -355,17 +432,58 @@ impl Translator<'_> {
         }
     }
 
+    /// Whether the value of `e` may be an extended missing value in Stata 19:
+    /// a variable, a row of one (`x[_n-1]`, `L.x`), one written out, and what
+    /// keeps it (`cond()`'s values, `float()`, `int()`, `round()`, `floor()`,
+    /// `ceil()`). Arithmetic and the other functions give `.` (`-x`, `x + 0`,
+    /// `abs()`, `sqrt()`, `exp()`, `mod()`, `max()`, ...).
+    fn carries(&self, e: &Expr) -> bool {
+        match e {
+            Expr::Number(_) => missing_place(e).is_some_and(|p| p > 1),
+            Expr::Name(n) => {
+                !matches!(n.as_str(), "_n" | "_N" | "_pi" | "_rc")
+                    && match (self.kind_of)(n) {
+                        Some(k) => k != Kind::Text,
+                        // a scalar holds no tag
+                        None => (self.returned)("scalar?", n).is_err(),
+                    }
+            }
+            Expr::Subscript(n, _) => !matches!(n.as_str(), "_b" | "_se" | "_coef"),
+            Expr::Unary(UnaryOp::Plus, inner) => self.carries(inner),
+            Expr::Call(f, args) => match f.as_str() {
+                "cond" => args.iter().skip(1).any(|a| self.carries(a)),
+                "float" | "int" | "round" | "floor" | "ceil" => {
+                    args.first().is_some_and(|a| self.carries(a))
+                }
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// The R of `e`, made `.` where Stata's value has no tag but R's may.
+    fn untagged(&mut self, e: &Expr, code: String) -> String {
+        if self.tags && !self.carries(e) && reads_data(e) {
+            self.helpers.push("stata_untag");
+            format!("stata_untag({code})")
+        } else {
+            code
+        }
+    }
+
     fn expr(&mut self, e: &Expr) -> Result<(String, Kind), Untranslated> {
         match e {
-            Expr::Number(v) if is_missing(*v) => {
-                if missing_code(*v).is_some_and(|c| c > 0) {
-                    self.caveat(
-                        "Stata's extended missing values (.a to .z) are all NA in R, so they are \
-                         no longer told apart",
-                    );
-                }
-                Ok(("NA_real_".into(), Kind::Number))
-            }
+            Expr::Number(v) if is_missing(*v) => match missing_code(*v) {
+                // kept as haven's tagged NA, which tells it apart from `.`
+                Some(c) if c > 0 => Ok((
+                    format!(
+                        "haven::tagged_na({})",
+                        r_text(missing_label(c).trim_start_matches('.'))
+                    ),
+                    Kind::Number,
+                )),
+                _ => Ok(("NA_real_".into(), Kind::Number)),
+            },
             Expr::Number(v) => Ok((r_number(*v), Kind::Number)),
             Expr::Text(s) => Ok((r_text(s), Kind::Text)),
             Expr::Name(n)
@@ -459,17 +577,6 @@ impl Translator<'_> {
     }
 
     fn binary(&mut self, op: BinaryOp, a: &Expr, b: &Expr) -> Result<(String, Kind), Untranslated> {
-        // .a to .z are all NA in R, so how they compare (. < .a < .b) is lost
-        let extended = |e: &Expr| matches!(e, Expr::Number(v) if is_missing(*v) && missing_code(*v).is_some_and(|c| c > 0));
-        let compares = matches!(
-            op,
-            BinaryOp::Eq | BinaryOp::Ne | BinaryOp::Lt | BinaryOp::Le | BinaryOp::Gt | BinaryOp::Ge
-        );
-        if compares && (extended(a) || extended(b)) {
-            return Err(no(
-                "a comparison with an extended missing value (.a to .z) is not translated: they are all NA in R, so their order is lost",
-            ));
-        }
         let (ac, ak) = self.expr(a)?;
         let (bc, bk) = self.expr(b)?;
         let text = ak == Kind::Text || bk == Kind::Text;
@@ -538,7 +645,7 @@ impl Translator<'_> {
     }
 
     /// A numeric comparison with Stata's missing rule: missing is larger than
-    /// every number.
+    /// every number, and `.` < `.a` < ... < `.z`.
     #[allow(clippy::too_many_arguments)]
     fn compare(
         &mut self,
@@ -550,18 +657,36 @@ impl Translator<'_> {
         ak: Kind,
         bk: Kind,
     ) -> Result<(String, Kind), Untranslated> {
-        // x op . (or . op x): only "is it missing" is asked
-        if is_missing_literal(b) || is_missing_literal(a) {
-            let (x, op) = if is_missing_literal(b) {
-                (ac, op)
+        // two missing values written out: their order decides
+        if let (Some(pa), Some(pb)) = (missing_place(a), missing_place(b)) {
+            let code = if holds(pa, op, pb) { "TRUE" } else { "FALSE" };
+            return Ok((code.into(), Kind::Logical));
+        }
+        // x op . (or x op .d): by x's place in the order, 0 for a number
+        let lit = match (missing_place(a), missing_place(b)) {
+            (_, Some(k)) => Some((ac.clone(), a, op, k)),
+            (Some(k), _) => Some((bc.clone(), b, flip(op), k)),
+            _ => None,
+        };
+        if let Some((x, xe, op, k)) = lit {
+            // a computed value is a number or `.`; a variable may be any
+            let top = if self.tags && self.carries(xe) {
+                LAST_PLACE
             } else {
-                (bc, flip(op))
+                1
             };
-            let code = match op {
-                BinaryOp::Eq | BinaryOp::Ge => format!("is.na({x})"),
-                BinaryOp::Ne | BinaryOp::Lt => format!("!is.na({x})"),
-                BinaryOp::Le => "TRUE".into(),
-                _ => "FALSE".into(),
+            let all: Vec<bool> = (0..=top).map(|p| holds(p, op, k)).collect();
+            let code = if all.iter().all(|t| *t) {
+                "TRUE".to_string()
+            } else if all.iter().all(|t| !*t) {
+                "FALSE".to_string()
+            } else if all.iter().enumerate().all(|(p, t)| *t == (p > 0)) {
+                format!("is.na({x})")
+            } else if all.iter().enumerate().all(|(p, t)| *t == (p == 0)) {
+                format!("!is.na({x})")
+            } else {
+                self.helpers.push("stata_mv");
+                format!("(stata_mv({x}) {} {k})", r_op(op))
             };
             return Ok((code, Kind::Logical));
         }
@@ -573,6 +698,14 @@ impl Translator<'_> {
             (true, true) => format!("({ac} {sym} {bc})"),
             (false, true) => missing_one_side(&ac, op, &bc),
             (true, false) => missing_one_side(&bc, flip(op), &ac),
+            // both may be missing and one may be .a to .z: by the order
+            (false, false) if self.tags && (self.carries(a) || self.carries(b)) => {
+                let ac = self.untagged(a, ac);
+                let bc = self.untagged(b, bc);
+                self.helpers.push("stata_mv");
+                self.helpers.push("stata_compare");
+                format!("stata_compare({ac}, {}, {bc})", r_text(sym))
+            }
             (false, false) => {
                 format!("(dplyr::coalesce({ac}, Inf) {sym} dplyr::coalesce({bc}, Inf))")
             }
@@ -779,6 +912,23 @@ impl Translator<'_> {
                 if args.len() < 2 {
                     return Err(no("inlist() needs a value and a list"));
                 }
+                // R's %in% finds any NA for any other, so where .a to .z may be
+                // held, a list with more than numbers is z == a | z == b | ...
+                let z0 = arg(0)?;
+                if self.tags
+                    && self.carries(z0)
+                    && args.iter().skip(1).any(|a| plain_number(a).is_none())
+                {
+                    let (z, zk) = self.expr(z0)?;
+                    let z = number(&z, zk)?;
+                    let mut any = Vec::new();
+                    for a in args.iter().skip(1) {
+                        let (c, k) = self.expr(a)?;
+                        let c = number(&c, k)?;
+                        any.push(self.compare(BinaryOp::Eq, z0, a, z.clone(), c, zk, k)?.0);
+                    }
+                    return Ok((format!("({})", any.join(" | ")), Kind::Logical));
+                }
                 let (z, _) = self.expr(arg(0)?)?;
                 let mut rest = Vec::new();
                 for a in args.iter().skip(1) {
@@ -789,10 +939,22 @@ impl Translator<'_> {
             "cond" => {
                 let (c, ck) =
                     self.expr(args.first().ok_or_else(|| no("cond() needs a condition"))?)?;
-                let (a, ak) =
-                    self.expr(args.get(1).ok_or_else(|| no("cond() needs two values"))?)?;
-                let (b, _) =
-                    self.expr(args.get(2).ok_or_else(|| no("cond() needs two values"))?)?;
+                // cond() gives its value itself, a tag kept: where one value
+                // may carry one, a computed value beside it is made `.`
+                let ae = args.get(1).ok_or_else(|| no("cond() needs two values"))?;
+                let be = args.get(2).ok_or_else(|| no("cond() needs two values"))?;
+                let keeps = self.tags && args.iter().skip(1).any(|a| self.carries(a));
+                let (a, ak) = self.expr(ae)?;
+                let (b, bk) = self.expr(be)?;
+                let one = |me: &mut Self, x: &Expr, code: String, k: Kind| {
+                    if keeps && k == Kind::Number {
+                        me.untagged(x, code)
+                    } else {
+                        code
+                    }
+                };
+                let a = one(self, ae, a, ak);
+                let b = one(self, be, b, bk);
                 let kind = if ak == Kind::Logical {
                     Kind::Number
                 } else {
@@ -807,8 +969,9 @@ impl Translator<'_> {
                     None if args.len() == 3 => {
                         Ok((format!("ifelse({}, {a}, {b})", truth(&c, ck)?), kind))
                     }
-                    Some(m) if args.len() == 4 => {
-                        let (m, _) = self.expr(m)?;
+                    Some(me) if args.len() == 4 => {
+                        let (m, mk) = self.expr(me)?;
+                        let m = one(self, me, m, mk);
                         let c = number(&c, ck)?;
                         Ok((
                             format!("ifelse(is.na({c}), {m}, ifelse({c} != 0, {a}, {b}))"),
@@ -1336,6 +1499,7 @@ mod tests {
             &|_, _| Err(no("")),
             Use::Value,
             Some("n"),
+            false,
         );
         let r = r.map(|r| (r.code, r.draws)).map_err(|e| e.reason);
         assert_eq!(
@@ -1478,12 +1642,85 @@ mod tests {
                 "{text}: {r:?}"
             );
         }
-        // an extended missing value as a value has a caveat; compared, it is refused
-        let r = translate(".a", &none, Use::Value);
-        assert!(r.is_ok_and(|r| r.caveats.iter().any(|c| c.contains("extended missing"))));
-        let r = translate("x == .a", &none, Use::Condition);
-        assert!(r.is_err_and(|e| e.reason.contains("their order is lost")));
         let r = translate("regexm(s, \"^a\")", &none, Use::Condition);
         assert!(r.is_ok_and(|r| r.caveats.iter().any(|c| c.contains("dialects"))));
+    }
+
+    /// With the data's tags on (a .dta file was read).
+    fn tagged(text: &str, use_: Use) -> String {
+        match translate_drawing(text, &none, &|_, _| Err(no("")), use_, None, true) {
+            Ok(r) => r.code,
+            Err(e) => panic!("{text}: {}", e.reason),
+        }
+    }
+
+    #[test]
+    fn extended_missing_values_compare_by_their_place() {
+        // Stata 19's counts over 1 . .a .d .w .z (plan/stata/extended-missing.md)
+        assert_eq!(tagged("x == .d", Use::Condition), "(stata_mv(x) == 5)");
+        assert_eq!(tagged("x == .", Use::Condition), "(stata_mv(x) == 1)");
+        assert_eq!(tagged("x != .", Use::Condition), "(stata_mv(x) != 1)");
+        assert_eq!(tagged("x > .", Use::Condition), "(stata_mv(x) > 1)");
+        assert_eq!(tagged("x <= .", Use::Condition), "(stata_mv(x) <= 1)");
+        // where only "is it missing" is asked, the short form stays
+        assert_eq!(tagged("x < .", Use::Condition), "!is.na(x)");
+        assert_eq!(tagged("x >= .", Use::Condition), "is.na(x)");
+        assert_eq!(tagged("x <= .z", Use::Condition), "TRUE");
+        assert_eq!(tagged(".d < x", Use::Condition), "(stata_mv(x) > 5)");
+        assert_eq!(tagged(".d == .d", Use::Condition), "TRUE");
+        assert_eq!(tagged(". < .a", Use::Condition), "TRUE");
+        // a computed value is a number or `.`
+        assert_eq!(tagged("(x + 0) == .", Use::Condition), "is.na((x + 0))");
+        assert_eq!(tagged("-x == .d", Use::Condition), "FALSE");
+        assert_eq!(
+            tagged("round(x) == .d", Use::Condition),
+            "(stata_mv(floor(x + 0.5 + abs(x) * 4 * .Machine$double.eps)) == 5)"
+        );
+        // two values that may both be missing
+        assert_eq!(
+            tagged("x < y", Use::Condition),
+            "stata_compare(x, \"<\", y)"
+        );
+        assert_eq!(
+            tagged("x + 1 == y", Use::Condition),
+            "stata_compare(stata_untag((x + 1)), \"==\", y)"
+        );
+        assert_eq!(tagged("x > 5", Use::Condition), "(is.na(x) | x > 5)");
+        // without tags, as short as before; an extended value written out turns them on
+        assert_eq!(code("x == .", Use::Condition), "is.na(x)");
+        assert_eq!(code("x == .d", Use::Condition), "(stata_mv(x) == 5)");
+        assert_eq!(
+            tagged("inlist(x, .d, 1)", Use::Condition),
+            "((stata_mv(x) == 5) | (!is.na(x) & x == 1))"
+        );
+        assert_eq!(
+            tagged("inlist(x, 1, 2)", Use::Condition),
+            "(x %in% c(1, 2))"
+        );
+    }
+
+    #[test]
+    fn tags_are_kept_by_copies_and_dropped_by_arithmetic() {
+        let r = translate(".d", &none, Use::Value);
+        assert!(r.is_ok_and(|r| r.tagged
+            && r.code == "haven::tagged_na(\"d\")"
+            && r.caveats.is_empty()));
+        assert_eq!(tagged("x", Use::Value), "x");
+        assert_eq!(tagged("x[_n-1]", Use::Value), "dplyr::lag(x, 1)");
+        assert_eq!(tagged("float(x)", Use::Value), "stata_float(x)");
+        assert_eq!(tagged("int(x)", Use::Value), "trunc(x)");
+        assert_eq!(tagged("x + 0", Use::Value), "stata_untag((x + 0))");
+        assert_eq!(tagged("abs(x)", Use::Value), "stata_untag(abs(x))");
+        assert_eq!(tagged("-x", Use::Value), "stata_untag(-x)");
+        assert_eq!(tagged("_n + 1", Use::Value), "(dplyr::row_number() + 1)");
+        assert_eq!(
+            tagged("cond(x > 5, x, 0)", Use::Value),
+            "ifelse((is.na(x) | x > 5), x, 0)"
+        );
+        assert_eq!(
+            tagged("cond(g, x + 1, y)", Use::Value),
+            "ifelse((is.na(g) | g != 0), stata_untag((x + 1)), y)"
+        );
+        assert_eq!(code("x + 0", Use::Value), "(x + 0)");
     }
 }

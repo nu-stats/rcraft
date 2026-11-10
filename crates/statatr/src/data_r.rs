@@ -706,8 +706,36 @@ const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ..., guess
 }"#;
 
 /// R's version of Stata's float storage: a double rounded to the nearest
-/// single-precision value, missing kept missing.
-const FLOAT_HELPER: &str = "stata_float <- function(x) {\n  y <- readBin(writeBin(as.numeric(x), raw(), size = 4), \"double\", size = 4, n = length(x))\n  y[is.na(x) | !is.finite(y)] <- NA\n  y\n}";
+/// single-precision value, missing kept as it is (`.a` to `.z` too, as a
+/// copy into a float keeps them in Stata 19); too large for a float is `.`.
+const FLOAT_HELPER: &str = "stata_float <- function(x) {\n  x <- as.numeric(x)\n  y <- readBin(writeBin(x, raw(), size = 4), \"double\", size = 4, n = length(x))\n  y[!is.finite(y)] <- NA\n  y[is.na(x)] <- x[is.na(x)]\n  y\n}";
+
+/// Stata's order of missing values as a number, for comparisons with one:
+/// 0 a number, 1 for `.`, 2 to 27 for `.a` to `.z` (haven's tagged NAs).
+const MV_HELPER: &str = r#"stata_mv <- function(x) {
+  k <- numeric(length(x))
+  m <- is.na(x)
+  if (!any(m)) return(k)
+  tag <- if (is.double(x)) haven::na_tag(as.vector(unclass(x))[m]) else rep(NA_character_, sum(m))
+  k[m] <- ifelse(is.na(tag), 1, match(tag, letters) + 1)
+  k
+}"#;
+
+/// What Stata's arithmetic and functions give for a missing value: `.`,
+/// where R would keep the tag of `.a` to `.z`.
+const UNTAG_HELPER: &str = r#"stata_untag <- function(x) {
+  if (is.double(x) && anyNA(x)) x[is.na(x)] <- NA_real_
+  x
+}"#;
+
+/// `x op y` in Stata's order (numbers < `.` < `.a` < ... < `.z`), for two
+/// values that may both be missing.
+const COMPARE_HELPER: &str = r#"stata_compare <- function(x, op, y) {
+  kx <- stata_mv(x)
+  ky <- stata_mv(y)
+  d <- ifelse(kx == ky, ifelse(kx == 0, sign(as.numeric(x) - as.numeric(y)), 0), kx - ky)
+  match.fun(op)(d, 0)
+}"#;
 
 /// `strmatch(s, pattern)` as Stata 19: the whole string, `*` any characters
 /// (new lines too), `?` one, every other character itself (`\` and `[` too).
@@ -867,6 +895,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_strmatch" => STRMATCH_HELPER,
         "stata_char" => CHAR_HELPER,
+        "stata_mv" => MV_HELPER,
+        "stata_untag" => UNTAG_HELPER,
+        "stata_compare" => COMPARE_HELPER,
         "stata_insheet" => more::INSHEET_HELPER,
         "stata_split" => more::SPLIT_HELPER,
         "stata_confirm" => more::CONFIRM_HELPER,
@@ -1075,8 +1106,13 @@ struct Session {
     stset: Option<st::StSet>,
     /// A graph was drawn, so `graph export` has one to write.
     graph_drawn: bool,
-    /// an extended missing value (.a to .z) was stored, which R keeps as NA
+    /// an extended missing value (.a to .z) was stored (R keeps it as a
+    /// tagged NA, which fre and tabulate do not tell apart yet)
     extended_missing: std::cell::Cell<bool>,
+    /// The data may hold extended missing values: a `.dta` file was read or
+    /// one was stored. Comparisons with a missing value then tell them apart
+    /// and computed values are made `.` (`expr_r::translate_drawing`).
+    tags: std::cell::Cell<bool>,
     /// the R function that maps the second y axis onto the first, per graph
     y2_fn: String,
     y2_count: usize,
@@ -1403,18 +1439,25 @@ impl Session {
         self.rc_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
-        let r = expr_r::translate_with(text, &kinds, &ret, use_)?;
-        if r.caveats
-            .iter()
-            .any(|c| c.contains("extended missing values"))
-        {
+        let r = expr_r::translate_drawing(text, &kinds, &ret, use_, None, self.tags.get())?;
+        Ok(self.took(r, out).0)
+    }
+
+    /// An expression's caveats and helpers into `out`; one that stores an
+    /// extended missing value turns on the tags (haven's tagged NAs).
+    fn took(&self, r: expr_r::RExpr, out: &mut Out) -> (String, Kind) {
+        if r.tagged {
             self.extended_missing.set(true);
+            self.tags.set(true);
+        }
+        if r.tagged || r.helpers.contains(&"stata_mv") {
+            out.package("haven");
         }
         for c in r.caveats {
             out.caveat(c);
         }
         out.helpers.extend(r.helpers);
-        Ok(r.code)
+        (r.code, r.kind)
     }
 
     /// `_rc` only while the last line under capture was translated.
@@ -1454,18 +1497,8 @@ impl Session {
         self.rc_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
-        let r = expr_r::translate_with(text, &kinds, &ret, Use::Value)?;
-        if r.caveats
-            .iter()
-            .any(|c| c.contains("extended missing values"))
-        {
-            self.extended_missing.set(true);
-        }
-        for c in r.caveats {
-            out.caveat(c);
-        }
-        out.helpers.extend(r.helpers);
-        Ok((r.code, r.kind))
+        let r = expr_r::translate_drawing(text, &kinds, &ret, Use::Value, None, self.tags.get())?;
+        Ok(self.took(r, out))
     }
 
     fn data(&self) -> Result<String, Untranslated> {
@@ -2320,6 +2353,10 @@ impl Session {
         self.fv_base = kept.fv_base;
         self.label_sets = kept.label_sets;
         self.ts_unknown = !self.saved.contains_key(&self.file_key(&path));
+        // a file this do-file did not save may hold .a to .z (tagged NAs)
+        if self.ts_unknown {
+            self.tags.set(true);
+        }
         self.panel = kept.panel;
         self.panel_time = kept.panel_time;
         self.ts_delta = kept.ts_delta;
@@ -3883,13 +3920,14 @@ mod tests {
             Some("if (\"y\" %in% names(s)) stop(\"variable y already defined\")")
         );
         let out: Vec<&str> = all.iter().map(|s| s.lines().last().unwrap_or("")).collect();
-        assert_eq!(out[1], "s <- s |> dplyr::mutate(y = dplyr::if_else((!is.na(g) & g == 1), stata_float((x * 2)), NA_real_))");
+        // the data was read from a file, so .a to .z may be in x: x * 2 is `.` there
+        assert_eq!(out[1], "s <- s |> dplyr::mutate(y = dplyr::if_else((!is.na(g) & g == 1), stata_float(stata_untag((x * 2))), NA_real_))");
         assert_eq!(out[2], "s <- s |> dplyr::mutate(z = 0.1)");
         // missing x counts as larger than 1; str5 keeps 5 characters
         assert_eq!(out[3], "s <- s |> dplyr::mutate(t = dplyr::if_else((is.na(x) | x > 1), substr(paste0(\"a\", s), 1, 5), \"\"))");
         assert_eq!(
             out[4],
-            "s <- s |> dplyr::mutate(y = dplyr::if_else(is.na(y), stata_float(0), y))"
+            "s <- s |> dplyr::mutate(y = dplyr::if_else((stata_mv(y) == 1), stata_float(0), y))"
         );
         assert_eq!(out[5], "s <- s |> dplyr::arrange(dplyr::pick(g)) |> dplyr::group_by(dplyr::pick(g)) |> dplyr::mutate(n = stata_float(dplyr::row_number())) |> dplyr::ungroup()");
         // carried down row by row: each missing row takes the row above, already filled
@@ -4450,14 +4488,20 @@ restore, not");
             out[2].starts_with("NOT: the data in memory is not known here"),
             "{out:?}"
         );
-        // .a to .z are all NA in R: how they compare is not translated
+        // .a to .z compare by their place in Stata's order
         let out = r("display . < .a
 display . == .");
+        assert!(out[0].contains("as.numeric(TRUE)"), "{out:?}");
+        assert!(!out[1].starts_with("NOT"), "{out:?}");
+        // a recode by a missing value takes that one only (Stata 19)
+        let out = r("use s\nrecode x (.d = 9) (.w = .) (1 = .a) (.a/.w = 5)");
         assert!(
-            out[0].starts_with("NOT: a comparison with an extended missing value"),
+            out[1].contains("stata_mv(x) %in% c(5) ~ 9")
+                && out[1].contains("stata_mv(x) %in% c(24) ~ NA_real_")
+                && out[1].contains("x %in% c(1) ~ haven::tagged_na(\"a\")")
+                && out[1].contains("(stata_mv(x) >= 2 & stata_mv(x) <= 24) ~ 5"),
             "{out:?}"
         );
-        assert!(!out[1].starts_with("NOT"), "{out:?}");
         // a variable whose line was not translated: the lines that use it say so
         let out = r(concat!(
             "use a\ngenerate double y = rpoisson(2)\ngenerate z = y * 2\nregress z x\n",

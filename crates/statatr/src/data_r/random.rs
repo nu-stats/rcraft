@@ -1269,24 +1269,16 @@ impl Session {
         self.rc_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
-        let r = expr_r::translate_drawing(text, &kinds, &ret, use_, Some(rows))?;
+        let r = expr_r::translate_drawing(text, &kinds, &ret, use_, Some(rows), self.tags.get())?;
         if r.draws > 0 {
             if let Some(why) = self.rng_old.as_ref().or(self.rng_lost.as_ref()) {
                 return Err(no(why.clone()));
             }
             self.drew.set(true);
         }
-        if r.caveats
-            .iter()
-            .any(|c| c.contains("extended missing values"))
-        {
-            self.extended_missing.set(true);
-        }
-        for c in r.caveats {
-            out.caveat(c);
-        }
-        out.helpers.extend(r.helpers);
-        Ok((r.code, r.kind, r.draws))
+        let draws = r.draws;
+        let (code, kind) = self.took(r, out);
+        Ok((code, kind, draws))
     }
 
     /// The `if` and `in` of a command as one condition, where the `if` may

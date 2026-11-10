@@ -3744,3 +3744,25 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   Stata in full (read without joining, 164 and 165 looked different). AXYMDI and SI3BGA never ran
   in Stata (the reference was started with the comma inside the quotes), and their do-files open
   no data; DZ8BUS and XURXZN stop in Stata too (no import; data not in the package).
+
+## Extended missing values .a to .z, 2026-11-09
+
+- Comparisons with `.` and `.a` to `.z` go by Stata's order (numbers < `.` < `.a` < ... < `.z`),
+  once the data may hold them (a `.dta` read by `use`, `merge` or `append`, or one stored by
+  `input`, an expression or `recode`): `stata_mv()` gives a value's place, `stata_compare()`
+  compares two values that may both be missing, `inlist()` with a missing value goes value by
+  value. `x < .` and `x >= .` stay `!is.na(x)` and `is.na(x)`; without tags the R is as before.
+- R keeps haven's tagged NAs; as in Stata 19, copies, rows of a variable, `cond()`, `float()`,
+  `int()`, `round()`, `floor()` and `ceil()` keep them, and arithmetic and other functions give
+  `.` (`stata_untag()`). `stata_float()` keeps a tag; `.d` as a value is `haven::tagged_na("d")`.
+  `recode` by a missing value takes that one only, `(.a/.w = 5)` a range of them, `(1 = .a)` stores
+  one. Observed on made-up data (`plan/stata/extended-missing.md`); corpus `extended_missing.do`,
+  76 results, all Stata 19's exactly; `cond`, `inlist`, `int`, `round`, `floor`, `ceil` Verified.
+- ZNMIXH: `replace church_survey_b=. if church_survey_b==.d | church_survey_b==.w` and the chain
+  after it run: 112,167 lines ran (111,553), 163 refused (775), 13 stopped in R (15, the two gone
+  were after it); 926 of Stata's 947 `@E` values printed (667), every one as Stata's; Table2,
+  TableI1 and TableI2 byte for byte. What is left is mostly `esttab, stats()` (21), `which`,
+  `frame` and `graph export`.
+- Not yet (noted in the plan file): `egen` row functions, `collapse (max)/(min)/(first)`, `sort`,
+  `tabulate, missing` and `fre` still treat `.a` to `.z` as one NA; `+x` is accepted, which Stata
+  refuses.

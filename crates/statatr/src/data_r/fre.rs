@@ -80,8 +80,8 @@ impl Session {
         }
         if self.extended_missing.get() {
             return Err(no(
-                "fre after an extended missing value (.a to .z) was stored: R keeps them all as \
-                 one missing value, so fre's rows and counts of missing values would not be Stata's",
+                "fre after an extended missing value (.a to .z) was stored: fre's R shows them as \
+                 one missing value, so its rows and counts of missing values would not be Stata's",
             ));
         }
         let src = self.rows_for(c, out)?;

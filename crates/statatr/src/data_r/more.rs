@@ -205,10 +205,29 @@ pub(super) const DESTRING_HELPER: &str = "stata_destring <- function(x, name, ig
 /// missing becomes ".". Other numbers stop with a message (not translated).
 pub(super) const TOSTRING_HELPER: &str = "stata_tostring <- function(x, name, generate = FALSE) {\n  if (is.character(x)) {\n    message(name, \" already string; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  v <- as.numeric(x)\n  s <- ifelse(is.na(v), \".\", formatC(v, format = \"f\", digits = 0))\n  if (any(!is.na(v) & (v != trunc(v) | nchar(s) > 12))) stop(name, \": tostring of numbers that are not whole (or have more than 12 digits) is not translated yet\")\n  structure(s, label = attr(x, \"label\", exact = TRUE))\n}";
 
-/// A `recode` rule's left side as an R condition on `v`.
-fn rule_condition(values: &str, v: &str) -> Result<String, Untranslated> {
+/// A missing value written out (`.`, `.a` to `.z`) by its place in Stata's
+/// order: 1 for `.`, 2 to 27 for `.a` to `.z` (as `stata_mv` gives it).
+fn missing_place(t: &str) -> Option<u32> {
+    match t.as_bytes() {
+        [b'.'] => Some(1),
+        [b'.', c] if c.is_ascii_lowercase() => Some(u32::from(*c - b'a') + 2),
+        _ => None,
+    }
+}
+
+/// A `recode` rule's left side as an R condition on `v`. A missing value
+/// written out matches itself only (Stata 19: `(. = 8)` leaves `.a` alone,
+/// `(.a/.w = 5)` takes `.a` to `.w`); `mv` is set when that needs `stata_mv`
+/// (where the data may hold `.a` to `.z`, `tags`).
+fn rule_condition(
+    values: &str,
+    v: &str,
+    tags: bool,
+    mv: &mut bool,
+) -> Result<String, Untranslated> {
     let mut conds = Vec::new();
     let mut numbers = Vec::new();
+    let mut places = Vec::new();
     for tok in values.split_whitespace() {
         match tok {
             "else" | "*" => conds.push("TRUE".to_string()),
@@ -216,6 +235,12 @@ fn rule_condition(values: &str, v: &str) -> Result<String, Untranslated> {
             "nonmissing" | "nonmiss" => conds.push(format!("!is.na({v})")),
             t if t.contains('/') => {
                 let (a, b) = t.split_once('/').unwrap_or((t, t));
+                // between two missing values: by their places
+                if let (Some(pa), Some(pb)) = (missing_place(a), missing_place(b)) {
+                    *mv = true;
+                    conds.push(format!("(stata_mv({v}) >= {pa} & stata_mv({v}) <= {pb})"));
+                    continue;
+                }
                 let end = |e: &str| -> Result<String, Untranslated> {
                     match e {
                         // min and max are over the variable's nonmissing values, all rows
@@ -235,12 +260,25 @@ fn rule_condition(values: &str, v: &str) -> Result<String, Untranslated> {
             }
             "min" => conds.push(format!("({v} %in% min({v}, na.rm = TRUE))")),
             "max" => conds.push(format!("({v} %in% max({v}, na.rm = TRUE))")),
-            t => numbers
-                .push(number_literal(t).ok_or_else(|| no(format!("recode: {t} is not a number")))?),
+            t => match missing_place(t) {
+                Some(p) => places.push(p),
+                None => numbers.push(
+                    number_literal(t).ok_or_else(|| no(format!("recode: {t} is not a number")))?,
+                ),
+            },
         }
     }
     if !numbers.is_empty() {
         conds.push(format!("{v} %in% c({})", numbers.join(", ")));
+    }
+    if !places.is_empty() {
+        if tags || places.iter().any(|p| *p > 1) {
+            *mv = true;
+            let list: Vec<String> = places.iter().map(u32::to_string).collect();
+            conds.push(format!("stata_mv({v}) %in% c({})", list.join(", ")));
+        } else {
+            conds.push(format!("is.na({v})"));
+        }
     }
     match conds.len() {
         0 => Err(no("recode: a rule has no values")),
@@ -306,8 +344,20 @@ impl Session {
                 ),
                 None => (right, None),
             };
-            let target = number_literal(number)
-                .ok_or_else(|| no(format!("recode: {number} is not a number")))?;
+            let target = match missing_place(number) {
+                // .a to .z stored as haven's tagged NAs, as Stata keeps them
+                Some(p) if p > 1 => {
+                    self.extended_missing.set(true);
+                    self.tags.set(true);
+                    out.package("haven");
+                    format!(
+                        "haven::tagged_na({})",
+                        r_text(number.get(1..).unwrap_or(""))
+                    )
+                }
+                _ => number_literal(number)
+                    .ok_or_else(|| no(format!("recode: {number} is not a number")))?,
+            };
             if let Some(t) = text {
                 let v = number.parse::<f64>().map_err(|_| {
                     no(format!(
@@ -376,7 +426,13 @@ impl Session {
             let mut cases = Vec::new();
             for (left, target) in &rules {
                 // the first rule that matches wins
-                cases.push(format!("{} ~ {target}", rule_condition(left, &rv)?));
+                let mut mv = false;
+                let when = rule_condition(left, &rv, self.tags.get(), &mut mv)?;
+                if mv {
+                    self.helpers.insert("stata_mv");
+                    out.package("haven");
+                }
+                cases.push(format!("{when} ~ {target}"));
             }
             let recoded = format!("dplyr::case_when({}, .default = {rv})", cases.join(", "));
             match new_names.get(i) {
@@ -704,6 +760,8 @@ impl Session {
         out.package("haven");
         out.package("dplyr");
         self.helpers.insert("stata_merge");
+        // the file may hold .a to .z (tagged NAs)
+        self.tags.set(true);
         out.line(format!("merge_using <- haven::read_dta({})", r_text(&path)));
         if let Some(k) = opts.arg("keepusing", 5) {
             out.line(format!(
@@ -784,6 +842,8 @@ impl Session {
         if force {
             self.need_helper("stata_forced");
         }
+        // the files may hold .a to .z (tagged NAs)
+        self.tags.set(true);
         let reads: Vec<String> = files
             .split_whitespace()
             .map(|f| {
@@ -2063,8 +2123,11 @@ impl Session {
                     && v.starts_with('.')
                     && v.chars().nth(1).is_some_and(|ch| ch.is_ascii_lowercase())
                 {
+                    // kept as haven's tagged NA, as Stata keeps .a to .z
                     self.extended_missing.set(true);
-                    "NA".to_string()
+                    self.tags.set(true);
+                    out.package("haven");
+                    format!("haven::tagged_na({})", r_text(v.get(1..).unwrap_or("")))
                 } else {
                     let x: f64 = v.trim_matches('"').parse().map_err(|_| {
                         no(format!("'{v}' cannot be read as a number for {name} (Stata skips the line); not translated yet"))
