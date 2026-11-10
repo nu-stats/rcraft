@@ -3709,3 +3709,11 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   `stata_slice` only for plain tibbles and integer rows (a grouped tibble keeps `[`); the copy
   made where the line runs (`parent.env(environment())`). YFBPT6 4,553 values, TZEN38 as before
   (its 15 differences are older), ZNMIXH 667 and its tables, every line's fate unchanged.
+
+## xtreg, fe: e(r2), e(r2_a), e(rss), e(mss), e(tss), e(rmse), 2026-11-09
+
+- Observed in Stata 19 (`plan/stata/xtreg-r2.md`, corpus `xtreg_r2.do`, all within 1e-10): the
+  within R-squared, the sums of squares, and r2_a and rmse on N - k - panels, or N - k - 1 with
+  robust or clustered errors. TZEN38: 2,067 lines ran (1,923 before), 227 refused (371): what is
+  left is `putexcel` (220 lines), `estpost`/`esttab cells()` (6) and `set mem`. Its values as before
+  (846 of 861; the 15 are the within-collinear set Stata chooses by rounding, decided earlier).

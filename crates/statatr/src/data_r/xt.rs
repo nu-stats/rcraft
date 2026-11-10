@@ -268,6 +268,10 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   if (type == "fe") {
     out$F_u <- F_u
     out$df_f <- c(n - 1, N - n - (kf - 1))
+    # e(rss), e(mss) (the within total less rss), e(tss) (about the grand mean)
+    out$rss <- sum(ff$e^2)
+    out$tss_w <- sum((y - ybar[gi])^2)
+    out$tss <- sum((y - mean(y))^2)
     out$corr <- corr_u
     # left out because they do not vary within a panel, as Stata keeps them in e(b)
     out$omitted <- c(collinear, colnames(X)[!varies])

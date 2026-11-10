@@ -619,6 +619,15 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
         r2_w = fit$r2[["within"]], r2_b = fit$r2[["between"]], r2_o = fit$r2[["overall"]])
     if (fit$type != "be") put(sigma_u = fit$sigma_u, sigma_e = fit$sigma_e, rho = fit$rho)
     if (fit$type == "fe") put(corr = fit$corr, ll = fit$ll, ll_0 = fit$ll_0)
+    # fe: e(r2) is the within R-squared; e(r2_a) and e(rmse) on N - k - the
+    # panels, or N - k - 1 with robust or clustered errors (Stata 19, made-up
+    # panels: plan/stata/xtreg-r2.md)
+    if (fit$type == "fe" && !is.null(fit$rss)) {
+      dfr <- fit$N - k - if (robust) 1 else fit$n
+      r2 <- 1 - fit$rss / fit$tss_w
+      put(r2 = r2, r2_a = 1 - (1 - r2) * (fit$N - 1) / dfr, rss = fit$rss, mss = fit$tss_w - fit$rss,
+          tss = fit$tss, rmse = sqrt(fit$rss / dfr))
+    }
     if (is.finite(stata_df)) {
       F <- wald(slopes) / k
       put(df_r = stata_df, F = F, p = stats::pf(F, k, stata_df, lower.tail = FALSE))
@@ -806,12 +815,6 @@ fn e_not_kept(cmd: &str, model: &str) -> &'static [&'static str] {
             "df_m",
             "df_b",
             "df_a",
-            "tss",
-            "rss",
-            "mss",
-            "rmse",
-            "r2",
-            "r2_a",
             "sum_w",
             "absvar",
             "kabsorb",
