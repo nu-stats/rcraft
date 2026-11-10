@@ -3911,3 +3911,13 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   by both show the same rows, intervals, labels and legend.
 - ZNMIXH: 23 lines refused (39); all eight of its coefplot figures translated. Left: pdslasso (2, with
   about 18 lines after it), twoway's text() and graph bar (percent).
+
+## graph bar (percent), over(..., sort() descending), blabel(bar), hbar's order, twoway text(), 2026-11-10
+
+- Observed in Stata 19 (`plan/stata/graph-bar-text.md`): `(percent)` without variables (each group's
+  share, rows with the over() variable missing left out), `over(v, sort(var|#) descending)`,
+  `blabel(bar[, format()])`, the value axis titled with a single series and no legend for it, and
+  `text(y x "text")` on any graph. Two differences fixed along the way: `graph hbar` drew its first group
+  at the bottom (Stata's is at the top), and over()'s sort() had been ignored. The probes' graphs drawn by
+  both show the same bars, order, labels and texts.
+- ZNMIXH: 20 lines refused (23), all of them pdslasso (2) and the lines in 02_attrition.do after it.

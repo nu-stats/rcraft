@@ -149,7 +149,9 @@ stata_bar_data <- function(d, stats, vars, over = character()) {
   out <- do.call(rbind, lapply(seq_along(vars), function(j) {
     # (count) with no variable: the rows
     x <- if (nzchar(vars[j])) stata_num(d[[vars[j]]]) else rep(1, nrow(d))
-    val <- tapply(x, key, function(v) f(stats[j], v))
+    # (percent) with no variable: each group's share of the rows, those with a
+    # missing over() variable left out (Stata 19)
+    val <- if (stats[j] == "percent") 100 * tapply(x, key, length) / sum(!is.na(key)) else tapply(x, key, function(v) f(stats[j], v))
     data.frame(group = factor(names(val), levels = levels(key)), series = if (nzchar(vars[j])) paste0(stats[j], " of ", vars[j]) else stats[j],
                value = as.numeric(val), stringsAsFactors = FALSE)
   }))
@@ -1085,7 +1087,7 @@ impl Session {
             if let Some(s) = w.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
                 let ok = matches!(
                     s,
-                    "mean" | "median" | "sum" | "count" | "min" | "max" | "sd"
+                    "mean" | "median" | "sum" | "count" | "min" | "max" | "sd" | "percent"
                 ) || s
                     .strip_prefix('p')
                     .is_some_and(|k| k.parse::<u32>().is_ok_and(|k| (1..=99).contains(&k)));
@@ -1102,24 +1104,74 @@ impl Session {
                 )));
             }
         }
+        if stat == "percent" && !vars.is_empty() {
+            return Err(no("graph bar (percent) of variables is not translated yet"));
+        }
         if vars.is_empty() {
-            // (count) alone counts the rows; another statistic needs a
-            // variable (Stata: r(100))
-            if stat != "count" {
+            // (count) and (percent) alone count the rows; another statistic
+            // needs a variable (Stata: r(100))
+            if stat != "count" && stat != "percent" {
                 return Err(no("graph bar needs a variable (Stata: r(100))"));
             }
             stats.push(r_text(&stat));
             vars.push(r_text(""));
         }
         let mut over = Vec::new();
+        // over(v, sort(var | #) descending): the groups in the order of a bar's values
+        let mut sort: Option<String> = None;
+        let mut descending = false;
         for o in c.options.iter().filter(|o| o.is("over", 4)) {
-            let v = o.arg();
-            let v = v.split(',').next().unwrap_or("").trim().to_string();
+            let arg = o.arg();
+            let (v, sub) = arg.split_once(',').unwrap_or((arg.as_str(), ""));
+            let v = v.trim().to_string();
             if !is_name(&v) {
                 return Err(no(format!("over({v}): one variable is translated")));
             }
+            for so in crate::lang::syntax::options(sub) {
+                if so.is("sort", 4) {
+                    let s = so.arg().trim().to_string();
+                    let series = if let Ok(k) = s.parse::<usize>() {
+                        k
+                    } else {
+                        vars.iter().position(|x| *x == r_text(&s)).map(|i| i + 1).ok_or_else(|| {
+                            no(format!("over(..., sort({s})): sorting by a variable not drawn is not translated yet"))
+                        })?
+                    };
+                    if series == 0 || series > vars.len() {
+                        return Err(no(format!("over(..., sort({s})): no such bar")));
+                    }
+                    sort = Some(series.to_string());
+                } else if so.is("descending", 4) {
+                    descending = true;
+                }
+            }
             over.push(r_text(&v));
         }
+        if sort.is_some() && over.len() != 1 {
+            return Err(no(
+                "graph bar, over(..., sort()) with other than one over() is not translated yet",
+            ));
+        }
+        // blabel(bar [, format(fmt)]): each bar's value at its end
+        let blabel = match opts.arg("blabel", 4) {
+            None => None,
+            Some(b) => {
+                let (what, sub) = b.split_once(',').unwrap_or((b.as_str(), ""));
+                if what.trim() != "bar" {
+                    return Err(no(format!(
+                        "blabel({}) is not translated yet (blabel(bar) is)",
+                        what.trim()
+                    )));
+                }
+                let mut fmt = "%9.0g".to_string();
+                for so in crate::lang::syntax::options(sub) {
+                    if so.is("format", 3) {
+                        fmt = so.arg().trim().to_string();
+                    }
+                }
+                Some(r_text(&fmt))
+            }
+        };
         let rows = self.rows_for(c, out)?;
         self.helpers.insert("stata_graph");
         self.helpers.insert("stata_tab_values");
@@ -1134,15 +1186,59 @@ impl Session {
         } else {
             "dodge"
         };
+        if let Some(k) = &sort {
+            out.line(format!(
+                "stata_bar$group <- factor(stata_bar$group, levels = local({{ s <- stata_bar[stata_bar$series == levels(stata_bar$series)[{k}], ]; as.character(s$group[order(s$value, decreasing = {})]) }}))",
+                super::stats::r_logical(descending)
+            ));
+        }
         let mut layers = vec![format!(
             "ggplot2::geom_col(data = stata_bar, ggplot2::aes(x = group, y = value, fill = series), position = \"{position}\")"
         )];
+        if let Some(fmt) = &blabel {
+            self.helpers.insert("stata_fmt");
+            let dodge = if position == "stack" {
+                "ggplot2::position_stack(vjust = 1)"
+            } else {
+                "ggplot2::position_dodge(width = 0.9)"
+            };
+            let just = if horizontal {
+                "hjust = -0.2"
+            } else {
+                "vjust = -0.4"
+            };
+            layers.push(format!(
+                "ggplot2::geom_text(data = stata_bar, ggplot2::aes(x = group, y = value, group = series, label = vapply(value, function(v) trimws(stata_fmt(v, {fmt})), \"\")), position = {dodge}, {just})"
+            ));
+            // room for the labels past the longest bar
+            layers.push(
+                "ggplot2::expand_limits(y = max(stata_bar$value, na.rm = TRUE) * 1.08)".to_string(),
+            );
+        }
         layers.push("ggplot2::labs(fill = NULL)".to_string());
+        // one series: no legend, as Stata draws it
+        if vars.len() == 1 {
+            layers.push("ggplot2::theme(legend.position = \"none\")".to_string());
+        }
         if horizontal {
+            // hbar: the first group at the top, as Stata draws it
+            layers.push("ggplot2::scale_x_discrete(limits = rev)".to_string());
             layers.push("ggplot2::coord_flip()".to_string());
         }
         let known = [("over", 4), ("stack", 5)];
-        self.draw(c, opts, out, &known, &layers, "NULL", "NULL")
+        // the value axis is titled with the statistic when there is one series
+        let ytitle = if vars.len() == 1 {
+            if stat == "percent" {
+                r_text("percent")
+            } else if vars.first() == Some(&r_text("")) {
+                "NULL".to_string()
+            } else {
+                "levels(stata_bar$series)[1]".to_string()
+            }
+        } else {
+            "NULL".to_string()
+        };
+        self.draw(c, opts, out, &known, &layers, "NULL", &ytitle)
     }
 
     /// `graph box`: each variable's quartiles within each `over()` group,
@@ -1302,7 +1398,7 @@ impl Session {
     ) -> Result<(), Untranslated> {
         let mut known: Vec<(&str, usize)> = LOOK.to_vec();
         known.extend(own.iter().copied());
-        known.extend([("xline", 5), ("yline", 5), ("saving", 4)]);
+        known.extend([("xline", 5), ("yline", 5), ("saving", 4), ("text", 4)]);
         known.extend(TITLES.iter().map(|(o, m, _)| (*o, *m)));
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -1342,6 +1438,19 @@ impl Session {
                     return Err(no(format!("{o}() needs a number")));
                 }
                 plot.push(format!("ggplot2::{geom}({at} = c({}))", nums.join(", ")));
+            }
+        }
+        // text(y x "text" [y x "text" ...] [, look]): the text at those coordinates
+        for opt in opts.0.iter().filter(|x| x.is("text", 4)) {
+            let raw = opt.raw.clone().unwrap_or_default();
+            let (spec, _) = super::coefplot::split_top_comma(&raw);
+            for (y, x, t) in text_triples(spec)? {
+                plot.push(format!(
+                    "ggplot2::annotate(\"text\", x = {}, y = {}, label = {})",
+                    r_number(x),
+                    r_number(y),
+                    r_text(&t)
+                ));
             }
         }
         plot.push(format!("ggplot2::labs({})", labs.join(", ")));
@@ -1386,6 +1495,67 @@ impl Session {
         self.graph_drawn = true;
         Ok(())
     }
+}
+
+/// text()'s places: `y x "text"` again and again, the text in quotes or compound
+/// quotes; one text to a place.
+fn text_triples(spec: &str) -> Result<Vec<(f64, f64, String)>, Untranslated> {
+    let mut toks: Vec<(bool, String)> = Vec::new();
+    let chars: Vec<char> = spec.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars.get(i).copied().unwrap_or(' ');
+        if c.is_whitespace() {
+            i += 1;
+        } else if c == '`' && chars.get(i + 1) == Some(&'"') {
+            // `"text"': up to the "' that closes it
+            let mut j = i + 2;
+            let mut s = String::new();
+            while j < chars.len()
+                && !(chars.get(j) == Some(&'"') && chars.get(j + 1) == Some(&'\''))
+            {
+                s.push(chars.get(j).copied().unwrap_or(' '));
+                j += 1;
+            }
+            toks.push((true, s));
+            i = j + 2;
+        } else if c == '"' {
+            let mut j = i + 1;
+            let mut s = String::new();
+            while j < chars.len() && chars.get(j) != Some(&'"') {
+                s.push(chars.get(j).copied().unwrap_or(' '));
+                j += 1;
+            }
+            toks.push((true, s));
+            i = j + 1;
+        } else {
+            let mut j = i;
+            let mut s = String::new();
+            while j < chars.len() && !chars.get(j).is_some_and(|c| c.is_whitespace()) {
+                s.push(chars.get(j).copied().unwrap_or(' '));
+                j += 1;
+            }
+            toks.push((false, s));
+            i = j;
+        }
+    }
+    let mut out = Vec::new();
+    for t in toks.chunks(3) {
+        let [(false, y), (false, x), (true, s)] = t else {
+            return Err(no(format!(
+                "text({spec}): places as y x \"text\", one text to each, are translated"
+            )));
+        };
+        let num = |v: &str| {
+            v.parse::<f64>()
+                .map_err(|_| no(format!("text({spec}): {v} is not a number")))
+        };
+        out.push((num(y)?, num(x)?, s.clone()));
+    }
+    if out.is_empty() {
+        return Err(no("text() needs a place and a text"));
+    }
+    Ok(out)
 }
 
 /// The kind of heights a histogram has, and its y title.
