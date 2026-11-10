@@ -1884,6 +1884,44 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "tabm",
+        about: "One table of several variables' values (tabm, tab_chi from SSC)",
+        points: &[
+            p(
+                "In R",
+                "stata_tabm stacks the variables and prints tabulate's table of variable (a row \
+                 each, in the varlist's order) by values (a column each, labelled with the first \
+                 variable's value label, cut at 9 characters), split into blocks as Stata 19 does; \
+                 if and missing; r(N), r(r) and r(c).",
+            ),
+            p(
+                "Not yet",
+                "in, weights, string variables, missing with .a to .z in the data, and tabm's \
+                 other options are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "revrs",
+        about: "Reverses a variable's coding (revrs, SSC)",
+        points: &[
+            p(
+                "In R",
+                "stata_revrs does what Stata 19 does with revrs, matched to its output: with a \
+                 value label, the labelled values in the data take the codes k to 1 in order and \
+                 the label set rev<name> keeps their texts (a value without a label is missing); \
+                 without one, (max + 1) - x with missing values kept. rev<name> is new, or with \
+                 replace the variable itself. Stata's errors come through capture as r(111), \
+                 r(109) and r(110).",
+            ),
+            p(
+                "Not yet",
+                "Values that are not whole numbers or halves (Stata's float arithmetic there was \
+                 not matched), value labels that name missing values, if and in are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "frame",
         about: "Several datasets at once (frame create, change, drop, pwf)",
         points: &[

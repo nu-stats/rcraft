@@ -1,0 +1,5 @@
+* Stata 19.0's results for tabm.do, recorded by cargo xtask stata-record
+@ a 21 4 6
+@ b 7 4 3
+@ c 12 2 7
+@ d 11 2 2

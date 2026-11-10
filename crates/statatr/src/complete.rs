@@ -170,6 +170,7 @@ pub const COMMANDS: &[&str] = &[
     "replace",
     "reshape",
     "restore",
+    "revrs",
     "robreg",
     "return",
     "run",
@@ -192,6 +193,7 @@ pub const COMMANDS: &[&str] = &[
     "syntax",
     "tab1",
     "tab2",
+    "tabm",
     "tabulate",
     "tempfile",
     "tempname",
@@ -592,6 +594,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("rename", &["lower", "upper"]),
     ("reshape", &["i(", "j(", "string"]),
+    ("revrs", &["replace"]),
     ("robreg", &["efficiency(", "huber", "level("]),
     ("save", &["nolabel", "replace", "version("]),
     ("saveold", &["nolabel", "replace", "version("]),
@@ -660,6 +663,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "row",
         ],
     ),
+    ("tabm", &["missing"]),
     (
         "tabulate",
         &[
@@ -1212,7 +1216,10 @@ mod tests {
             options("su", VARS),
             names(&["suest", "summarize", "survwgt"])
         );
-        assert_eq!(options("ta", VARS), names(&["tab1", "tab2", "tabulate"]));
+        assert_eq!(
+            options("ta", VARS),
+            names(&["tab1", "tab2", "tabm", "tabulate"])
+        );
         assert_eq!(options("q", VARS), names(&["quietly"]));
         assert_eq!(options("quietly regr", VARS), names(&["regress"]));
         assert_eq!(options("qui: reg", VARS), names(&["reghdfe", "regress"]));

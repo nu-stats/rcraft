@@ -57,13 +57,20 @@ stata_tab1_print <- function(name, labs, freq) {
       stata_tab_pad("100.00", 12), "\n", sep = "")
   invisible(NULL)
 }
+# a column's label is cut at 9 characters (Stata 19: "Secondary - complete" is "Secondary"); a
+# number, not a label, is as it is
+stata_tab2_clabs <- function(clabs) {
+  num <- grepl("^-?[0-9.]+(e[-+]?[0-9]+)?$", clabs)
+  ifelse(num, clabs, substr(clabs, 1, 9))
+}
 # whether a two-way table has the shape Stata's was seen in
 stata_tab2_fits <- function(rname, cname, clabs) {
-  nchar(rname) <= 10 && all(nchar(clabs) <= 10) && nchar(cname) <= 33
+  nchar(rname) <= 10 && all(nchar(stata_tab2_clabs(clabs)) <= 10) && nchar(cname) <= 33
 }
 # a two-way table: rows' labels cut at 21, columns of 10 a space apart in blocks that fit
 # a line of 80, the column variable's name centred over its columns
 stata_tab2_print <- function(rname, cname, rlabs, clabs, counts, chi2 = NULL) {
+  clabs <- stata_tab2_clabs(clabs)
   rlabs <- substr(rlabs, 1, 21)
   L <- max(10, nchar(rlabs))
   per <- max(1, (65 - L) %/% 11)

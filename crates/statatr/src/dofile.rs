@@ -152,6 +152,8 @@ pub const MAX_ROUNDS: usize = 100_000;
 /// The commands whose main part is a varlist (with factor variables for the
 /// models): there a pattern, a range or `_all` is made the data's names.
 const VARLIST: &[&str] = &[
+    "revrs",
+    "tabm",
     "summarize",
     "tabulate",
     "tab1",

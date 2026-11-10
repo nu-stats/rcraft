@@ -152,6 +152,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("replace", &["data", "extended_missing", "random"]),
     ("reshape", &["replication"]),
     ("restore", &["made"]),
+    ("revrs", &["revrs"]),
     ("robreg", &["robreg"]),
     ("set", &["made", "random"]),
     ("sort", &["data", "extended_missing_commands"]),
@@ -170,6 +171,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("syntax", &["programs"]),
     ("tab1", &["extended_missing_commands"]),
     ("tab2", &["extended_missing_commands"]),
+    ("tabm", &["tabm"]),
     (
         "tabulate",
         &["checks", "descriptives", "extended_missing_commands"],

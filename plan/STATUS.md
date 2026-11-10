@@ -3870,3 +3870,18 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - `which` and `frame create/change/drop` keep r() (as Stata 19 does); `frame pwf` does not.
 - ZNMIXH: 69 lines refused (97), none stopped in R (15): the `cap drop` before `g x = y > r(p50)` and
   the `cap drop Z*var` loops now run as in Stata.
+
+## revrs and tabm (SSC), tabulate's long column labels, 2026-11-10
+
+- revrs and tab_chi installed from SSC in Stata 19 with the user's yes; observed with made-up data
+  (`plan/stata/revrs.md`, `plan/stata/tabm.md`; corpus `revrs.do`, `tabm.do`), their code not read.
+  - `revrs`: a labelled variable's labelled values take the codes k ... 1 with label set rev<name>;
+    without a label (max + 1) - x; `replace`; Stata's r(111), r(109), r(110), and its silence when
+    rev<name> is there already for a labelled variable without replace. Values that are not whole
+    numbers or halves are refused (Stata's float arithmetic there was not matched).
+  - `tabm`: tabulate's table of variable by values, the first variable's value label on the columns;
+    `if`, `missing`; r(N), r(r), r(c).
+- tabulate: a two-way table's column labels longer than 9 characters are cut to 9 as Stata does (such
+  tables had been printed in R's layout).
+- ZNMIXH: 39 lines refused (69); 29 of 30 tables as Stata's. ASKO93: its tabm table as Stata's; the
+  13 anovaplot lines wait on anovaplot, which is not on SSC.

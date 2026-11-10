@@ -59,6 +59,7 @@ mod putexcel;
 mod random;
 mod reghdfe;
 mod returned;
+mod revrs;
 mod robreg;
 mod scalars;
 mod st;
@@ -67,6 +68,7 @@ mod suest;
 mod survwgt;
 mod svy;
 mod tables;
+mod tabm;
 mod ts;
 mod tsreg;
 mod weights;
@@ -925,6 +927,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xpose" => more::XPOSE_HELPER,
         "stata_coefplot" => coefplot::COEFPLOT_HELPER,
         "stata_estpost" => estpost::ESTPOST_HELPER,
+        "stata_revrs" => revrs::REVRS_HELPER,
+        "stata_tabm" => tabm::TABM_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_strmatch" => STRMATCH_HELPER,
@@ -2223,6 +2227,8 @@ impl Session {
             "estpost" => self.estpost(c, &opts, out),
             "which" => self.which(c, &opts, out),
             "frame" => self.frame_cmd(c, &opts, out),
+            "revrs" => self.revrs(c, &opts, out),
+            "tabm" => self.tabm(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),
