@@ -1123,12 +1123,28 @@ impl Translator<'_> {
                 let (s, _) = self.expr(arg(0)?)?;
                 Ok((format!("suppressWarnings(as.numeric({s}))"), Kind::Number))
             }
-            "string" | "strofreal" if args.len() == 1 => {
+            // string(x [, "fmt"]): x in the format (%9.0g without one), its leading
+            // blanks taken off and the trailing kept, as Stata 19 writes it
+            "string" | "strofreal" if args.len() == 1 || args.len() == 2 => {
                 let (x, k) = self.expr(arg(0)?)?;
-                self.caveat(
-                    "string(): R writes numbers with up to 15 digits, Stata with its %9.0g format",
-                );
-                Ok((format!("as.character({})", number(&x, k)?), Kind::Text))
+                let fmt = match args.get(1) {
+                    None => "%9.0g".to_string(),
+                    Some(Expr::Text(f)) if stata_number_format(f) => f.clone(),
+                    Some(_) => {
+                        return Err(no(
+                            "string(x, fmt) is translated with a numeric format written out, as \"%4.1f\"",
+                        ))
+                    }
+                };
+                self.helpers.push("stata_fmt");
+                Ok((
+                    format!(
+                        "vapply({}, function(v) sub(\"^ +\", \"\", stata_fmt(v, {})), \"\", USE.NAMES = FALSE)",
+                        number(&x, k)?,
+                        r_text(&fmt)
+                    ),
+                    Kind::Text,
+                ))
             }
             // e(sample): the rows of the last model, kept in R as stata_esample
             // (the translator lets it through only while those rows are unmoved)
@@ -1466,6 +1482,34 @@ fn missing_one_side(x: &str, op: BinaryOp, c: &str) -> String {
         BinaryOp::Gt | BinaryOp::Ge | BinaryOp::Ne => format!("(is.na({x}) | {x} {sym} {c})"),
         _ => format!("(!is.na({x}) & {x} {sym} {c})"),
     }
+}
+
+/// A Stata numeric format written out: `%[-][0]w.d` then `f`, `g` or `e`, a
+/// `c` after `f` or `g` for commas.
+fn stata_number_format(f: &str) -> bool {
+    let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
+    let Some(rest) = f.strip_prefix('%') else {
+        return false;
+    };
+    let rest = rest.strip_prefix('-').unwrap_or(rest);
+    let (rest, comma) = match rest.strip_suffix('c') {
+        Some(r) => (r, true),
+        None => (rest, false),
+    };
+    let Some((body, last)) = rest
+        .char_indices()
+        .last()
+        .and_then(|(i, c)| Some((rest.get(..i)?, c)))
+    else {
+        return false;
+    };
+    if !matches!(last, 'f' | 'g' | 'e') || (comma && last == 'e') {
+        return false;
+    }
+    let Some((w, d)) = body.split_once('.') else {
+        return false;
+    };
+    digits(w) && digits(d)
 }
 
 #[cfg(test)]

@@ -623,9 +623,10 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 
 /// Commands that, translated or not, change neither the data nor its rows nor
 /// e(): they write a table or a file, or look something up.
-const HARMLESS: &[&str] = &["putexcel", "outreg", "frmttable", "which"];
+const HARMLESS: &[&str] = &["putexcel", "outreg", "frmttable", "which", "_rcraft_fail"];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "_rcraft_fail",
     "filefilter",
     "mata",
     "outreg",
@@ -2360,6 +2361,15 @@ impl Session {
             }
             "_rcraft_program_begin" => self.program_begin(c, out),
             "_rcraft_program_end" => self.program_end(c, out),
+            // a line the runner knows fails in Stata, under capture: `code message`
+            "_rcraft_fail" => {
+                let (code, msg) = first_word(&c.parts.main);
+                out.line(format!(
+                    "stop({}, call. = FALSE)",
+                    r_text(&format!("{msg} (Stata: r({code}))"))
+                ));
+                Ok(())
+            }
             "ereturn" => self.ereturn(c, out),
             "return" => self.list_returned(c, out),
             "matrix" => self.matrix(c, out),

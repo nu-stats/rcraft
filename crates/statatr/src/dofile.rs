@@ -1504,11 +1504,43 @@ impl<'f> Run<'f> {
                     match self.vars_now() {
                         Err(Stop::Ask(need)) => return Flow::Ask(need),
                         Ok(Some(vars)) => match varlist::expand(&list, &vars) {
+                            // drop and keep of a name the data does not have, under
+                            // capture: Stata's r(111), r() and the data stay
+                            Ok(m)
+                                if c.prefixes.contains(&Prefix::Capture)
+                                    && matches!(c.name.as_str(), "drop" | "keep")
+                                    && m.split_whitespace()
+                                        .any(|w| !vars.iter().any(|v| v == w)) =>
+                            {
+                                let w = m
+                                    .split_whitespace()
+                                    .find(|w| !vars.iter().any(|v| v == w))
+                                    .unwrap_or("");
+                                let mut fail = self.internal(
+                                    c.span,
+                                    &format!("_rcraft_fail 111 variable {w} not found"),
+                                );
+                                fail.prefixes = c.prefixes.clone();
+                                fail.text = c.text.clone();
+                                c = fail;
+                            }
                             Ok(m) => {
                                 if m != list {
                                     info = Some(format!("the variables: {m}"));
                                     c.parts.main = format!("{lead}{m}");
                                 }
+                            }
+                            // under capture, a name that matches no variable is Stata's
+                            // r(111): _rc is set, r() and the data stay, the do-file goes on
+                            Err(e)
+                                if c.prefixes.contains(&Prefix::Capture)
+                                    && e.ends_with(" not found") =>
+                            {
+                                let mut fail =
+                                    self.internal(c.span, &format!("_rcraft_fail 111 {e}"));
+                                fail.prefixes = c.prefixes.clone();
+                                fail.text = c.text.clone();
+                                c = fail;
                             }
                             Err(e) => {
                                 self.done_item(depth);

@@ -38,6 +38,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("count", &["control", "descriptives", "extended_missing"]),
     ("decode", &["labels2"]),
     ("drawnorm", &["asclogit"]),
+    ("drop", &["captured"]),
     ("duplicates", &["extended_missing_groups"]),
     (
         "egen",
@@ -274,8 +275,10 @@ pub const VERIFIED_FUNCTIONS: &[(&str, &[&str])] = &[
     ("rweibullph", &["variates"]),
     ("ss", &["dates"]),
     ("ssC", &["dates"]),
+    ("string", &["captured"]),
     ("strltrim", &["strings"]),
     ("strmatch", &["strings"]),
+    ("strofreal", &["captured"]),
     ("strrtrim", &["strings"]),
     ("strtrim", &["strings"]),
     ("subinstr", &["strings"]),

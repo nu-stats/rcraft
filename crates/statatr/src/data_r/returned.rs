@@ -1285,6 +1285,8 @@ const LEAVE_R_ALONE: &[&str] = &[
     // a program called and returning, and return inside it, set r() themselves
     "_rcraft_program_begin",
     "_rcraft_program_end",
+    "_rcraft_fail",
+    "which",
     "return",
     "parmest",
     "outreg2",
@@ -1328,6 +1330,8 @@ const LEAVE_E_ALONE: &[&str] = &[
     "file",
     "_rcraft_program_begin",
     "_rcraft_program_end",
+    "_rcraft_fail",
+    "frame",
     "return",
     "parmest",
     "fre",
@@ -1601,6 +1605,8 @@ impl Session {
                 }
             }
             _ if LEAVE_R_ALONE.contains(&name) => {}
+            // frame create, change and drop keep r() (Stata 19); frame pwf clears it
+            _ if name == "frame" && c.parts.main.split_whitespace().next() != Some("pwf") => {}
             // matrix list (the one matrix command translated) leaves it too
             _ if ok && name == "matrix" => {}
             _ => {

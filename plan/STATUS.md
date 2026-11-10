@@ -3860,3 +3860,13 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - preserve and restore now keep the variables' storage types too (they had kept the rest).
 - ZNMIXH: 97 lines refused (136 before this round, 139 before the esttab work); its package check
   and its frame blocks run; 26 of 30 tables written, all byte for byte as Stata's.
+
+## capture drop of what is not there, string() with a format, 2026-11-10
+
+- Observed in Stata 19 (`plan/stata/which-frames.md`; corpus `captured.do`): a `capture drop` or
+  `capture keep` of a name or pattern the data does not have is r(111) and keeps r() and the data;
+  RCraft now does the same where it knows the variables (it had refused a pattern and lost r() for a
+  name). `string()` and `strofreal()` write Stata's format (`%9.0g` without one), as Stata does.
+- `which` and `frame create/change/drop` keep r() (as Stata 19 does); `frame pwf` does not.
+- ZNMIXH: 69 lines refused (97), none stopped in R (15): the `cap drop` before `g x = y > r(p50)` and
+  the `cap drop Z*var` loops now run as in Stata.

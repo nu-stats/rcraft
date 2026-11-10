@@ -38,3 +38,22 @@ Observed on a licensed Stata 19 SE (probes in the session scratchpad: `which/w.d
   a preserve in b and one in default each come back with their own frame's `restore` (probe `pr.do`:
   `_N` 3, 5 after restore in default, 1, 2 after restore in b). RCraft keeps each frame's pending
   preserve with it (`stata_frames_preserved`).
+
+## drop and r(), capture drop of what is not there
+
+- A drop that fails keeps r(): `summarize x, detail` then `capture drop nosuch` or `capture drop Z*b`
+  (no match): _rc 111, r(p50) and r(N) as before. A drop that runs clears r() (`drop y`, `drop Z*a`:
+  r(p50) is `.`); `drop if` leaves r(N_drop); `keep if` clears r() as well. `which`, `frame create`,
+  `change`, `drop` and `set obs` keep r(); `frame pwf` clears it (probes `drop/d.do`, `r.do`, `r2.do`).
+- RCraft: where it knows the data's variables, `capture drop` or `capture keep` of a name or pattern the
+  data does not have stops in R with r(111), so _rc is Stata's and r() and the data stay (it had refused
+  a pattern, and lost r() for a name). After a drop that runs, r() is still taken as not known (Stata
+  has cleared it), so what reads it is refused, not guessed.
+
+## string(x [, fmt])
+
+- `string(n)` is `%9.0g` (`1234567`, `.3333333`, `.0000123`, `1.23e+11`, `1.00e+20`); `string(n, "%4.1f")`
+  in the format given, `%12.2fc` with commas; leading blanks taken off, trailing kept (`"%-8.2f"`:
+  `3.00    `); `.` for missing, `.a` for .a. `strofreal()` the same. RCraft: Stata's format through
+  stata_fmt, value by value (it had written R's digits for `string(n)` and refused a format); `.a` still
+  prints as `.` (as `display .a` does in RCraft).
