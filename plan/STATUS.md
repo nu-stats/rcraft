@@ -3885,3 +3885,9 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   tables had been printed in R's layout).
 - ZNMIXH: 39 lines refused (69); 29 of 30 tables as Stata's. ASKO93: its tabm table as Stata's; the
   13 anovaplot lines wait on anovaplot, which is not on SSC.
+- ZNMIXH's TableF2 (new with revrs) differs from the copy shipped in the package in its first two
+  columns (Treatment 0.037 there, -0.120 here; R-squared 0.04, 0.09). Stata 19 itself, run on its own
+  build of analysis_clean_intermediate.dta (01_analysis.do lines 1-89) and lines 2723-2785 with today's
+  revrs, gives -0.12041813 (se .07312435, N 191, R-squared .09375217): what RCraft writes. The shipped
+  table was made otherwise (perhaps another revrs version); RCraft matches Stata 19 here. The other 29
+  tables are byte for byte as shipped.
