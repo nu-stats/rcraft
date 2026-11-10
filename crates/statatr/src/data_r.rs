@@ -2998,8 +2998,13 @@ impl Session {
                 let set = self.label_sets.entry(name.to_string()).or_default();
                 let add = opts.has("add", 3);
                 let modify = opts.has("modify", 6);
+                // Stata's error, as it stops there (nothing is changed)
                 if !set.is_empty() && !add && !modify && !opts.has("replace", 7) {
-                    return Err(no(format!("label define {name}: the label already exists (Stata wants add, modify or replace)")));
+                    out.line(format!(
+                        "stop({}, call. = FALSE)",
+                        r_text(&format!("label {name} already defined (Stata: r(110))"))
+                    ));
+                    return Ok(());
                 }
                 if opts.has("replace", 7) {
                     set.clear();
@@ -3032,7 +3037,7 @@ impl Session {
                 let sel = select(&vars)?;
                 if lbl == "." {
                     out.line(format!(
-                        "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) structure(haven::zap_labels(v), label = attr(v, \"label\"))))"
+                        "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) structure(haven::zap_labels(v), label = attr(v, \"label\", exact = TRUE))))"
                     ));
                 } else {
                     let labels = if self.label_sets.contains_key(lbl) {
@@ -3051,7 +3056,7 @@ impl Session {
                         )
                     };
                     out.line(format!(
-                        "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) haven::labelled(as.numeric(v), labels = {labels}, label = attr(v, \"label\"))))"
+                        "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) haven::labelled(as.numeric(v), labels = {labels}, label = attr(v, \"label\", exact = TRUE))))"
                     ));
                 }
                 Ok(())
@@ -3217,7 +3222,7 @@ impl Session {
         }
         if !opts.has("short", 1) {
             out.line(format!(
-                "print(data.frame(variable = names({d}), type = vapply({d}, \\(v) class(v)[1], \"\"), label = vapply({d}, \\(v) {{ l <- attr(v, \"label\"); if (is.null(l)) \"\" else l }}, \"\")), row.names = FALSE)"
+                "print(data.frame(variable = names({d}), type = vapply({d}, \\(v) class(v)[1], \"\"), label = vapply({d}, \\(v) {{ l <- attr(v, \"label\", exact = TRUE); if (is.null(l)) \"\" else l }}, \"\")), row.names = FALSE)"
             ));
         }
         out.line(format!(
@@ -3925,7 +3930,9 @@ mod tests {
             out[4],
             "label_yn <- c(\"No\" = 0, \"Yes\" = 1, \"Maybe\" = 2)"
         );
-        assert!(r("label define a 1 \"x\"\nlabel define a 2 \"y\"")[1].starts_with("NOT:"));
+        // a set that exists: Stata's error, as it stops there
+        assert!(r("label define a 1 \"x\"\nlabel define a 2 \"y\"")[1]
+            .contains("label a already defined (Stata: r(110))"));
     }
 
     #[test]
@@ -4139,7 +4146,10 @@ import delimited c.csv, clear
 label define yes 1 \"yes\"
 label define yes 1 \"no\"");
         assert!(!out[3].starts_with("NOT"), "{out:?}");
-        assert!(out[4].starts_with("NOT"), "{out:?}");
+        assert!(
+            out[4].contains("label yes already defined (Stata: r(110))"),
+            "{out:?}"
+        );
         // reshape long without j() makes _j; append with force
         let out = r("use s
 reshape long v, i(id)

@@ -44,7 +44,7 @@ pub(super) const GRAPH_HELPER: &str = r#"stata_num <- function(v) {
   as.numeric(u)
 }
 stata_varlab <- function(d, v) {
-  l <- attr(d[[v]], "label")
+  l <- attr(d[[v]], "label", exact = TRUE)
   if (is.null(l) || !nzchar(l)) v else l
 }
 stata_hist_data <- function(x, name = "x", bin = NULL, width = NULL, start = NULL, discrete = FALSE,

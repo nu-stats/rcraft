@@ -1,0 +1,6 @@
+* Stata 19.0's results for labels2.do, recorded by cargo xtask stata-record
+@ second dos|dos|nil||
+@ varlab |the p
+@ exists 110
+@ kept dos
+@ modified again

@@ -199,11 +199,11 @@ pub(super) const SAME_DATES_HELPER: &str = r#"stata_same_dates <- function(d, u)
 /// `destring`: Stata's rules for which text is a number (`""` and `.` are
 /// missing; "1,000", "5%" and "NA" are not numbers); without `force` a
 /// variable with any other text is left alone, with Stata's message.
-pub(super) const DESTRING_HELPER: &str = "stata_destring <- function(x, name, ignore = \"\", force = FALSE, generate = FALSE) {\n  if (!is.character(x)) {\n    message(name, \" already numeric; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  y <- x\n  for (ch in strsplit(ignore, \"\")[[1]]) y <- gsub(ch, \"\", y, fixed = TRUE)\n  y <- trimws(y)\n  number <- grepl(\"^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eEdD][+-]?[0-9]+)?$\", y)\n  missing <- is.na(y) | y == \"\" | grepl(\"^[.][a-z]?$\", y)\n  if (!force && !all(number | missing)) {\n    message(name, \": contains nonnumeric characters; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  out <- suppressWarnings(as.numeric(sub(\"[dD]\", \"e\", y)))\n  out[!number] <- NA\n  structure(out, label = attr(x, \"label\"))\n}";
+pub(super) const DESTRING_HELPER: &str = "stata_destring <- function(x, name, ignore = \"\", force = FALSE, generate = FALSE) {\n  if (!is.character(x)) {\n    message(name, \" already numeric; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  y <- x\n  for (ch in strsplit(ignore, \"\")[[1]]) y <- gsub(ch, \"\", y, fixed = TRUE)\n  y <- trimws(y)\n  number <- grepl(\"^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eEdD][+-]?[0-9]+)?$\", y)\n  missing <- is.na(y) | y == \"\" | grepl(\"^[.][a-z]?$\", y)\n  if (!force && !all(number | missing)) {\n    message(name, \": contains nonnumeric characters; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  out <- suppressWarnings(as.numeric(sub(\"[dD]\", \"e\", y)))\n  out[!number] <- NA\n  structure(out, label = attr(x, \"label\", exact = TRUE))\n}";
 
 /// `tostring` of whole numbers, written as Stata's `%12.0g` writes them;
 /// missing becomes ".". Other numbers stop with a message (not translated).
-pub(super) const TOSTRING_HELPER: &str = "stata_tostring <- function(x, name, generate = FALSE) {\n  if (is.character(x)) {\n    message(name, \" already string; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  v <- as.numeric(x)\n  s <- ifelse(is.na(v), \".\", formatC(v, format = \"f\", digits = 0))\n  if (any(!is.na(v) & (v != trunc(v) | nchar(s) > 12))) stop(name, \": tostring of numbers that are not whole (or have more than 12 digits) is not translated yet\")\n  structure(s, label = attr(x, \"label\"))\n}";
+pub(super) const TOSTRING_HELPER: &str = "stata_tostring <- function(x, name, generate = FALSE) {\n  if (is.character(x)) {\n    message(name, \" already string; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  v <- as.numeric(x)\n  s <- ifelse(is.na(v), \".\", formatC(v, format = \"f\", digits = 0))\n  if (any(!is.na(v) & (v != trunc(v) | nchar(s) > 12))) stop(name, \": tostring of numbers that are not whole (or have more than 12 digits) is not translated yet\")\n  structure(s, label = attr(x, \"label\", exact = TRUE))\n}";
 
 /// A `recode` rule's left side as an R condition on `v`.
 fn rule_condition(values: &str, v: &str) -> Result<String, Untranslated> {
@@ -1256,7 +1256,7 @@ impl Session {
         ));
         // codes 1, 2, ... in byte order of the distinct nonempty strings; "" is missing
         out.line(format!(
-            "{d} <- {d} |> dplyr::mutate({gn} = (\\(v, src) {{ lv <- sort(unique(v[!is.na(v) & v != \"\"]), method = \"radix\"); haven::labelled(as.numeric(match(v, lv)), labels = stats::setNames(as.numeric(seq_along(lv)), lv), label = attr(src, \"label\")) }})({v}, {src}))",
+            "{d} <- {d} |> dplyr::mutate({gn} = (\\(v, src) {{ lv <- sort(unique(v[!is.na(v) & v != \"\"]), method = \"radix\"); haven::labelled(as.numeric(match(v, lv)), labels = stats::setNames(as.numeric(seq_along(lv)), lv), label = attr(src, \"label\", exact = TRUE)) }})({v}, {src}))",
             gn = r_name(&g),
             src = r_name(var)
         ));

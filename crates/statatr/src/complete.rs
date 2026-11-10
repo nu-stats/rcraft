@@ -79,6 +79,7 @@ pub const COMMANDS: &[&str] = &[
     "continue",
     "correlate",
     "count",
+    "decode",
     "describe",
     "destring",
     "display",

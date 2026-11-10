@@ -3729,3 +3729,18 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   needs to be set in modern Statas; …", r(198) without a number or for one that is not whole.
   TZEN38's `capture set mem 2000m` now runs; its 6 left are `estpost summarize` with
   `esttab, tex cells()`.
+
+## Value labels: attr(, "label") read exactly; label define on a set that exists, 2026-11-09
+
+- R's `attr(v, "label")` matches partially: on a column with value labels (`labels`) and no
+  variable label it returned the value labels, and a second `label values` on such a column
+  stopped in R (TQN6ZN, twice; its next `tab` showed the old labels). Every read is now
+  `exact = TRUE`. Corpus `labels2.do` (a copy of a labelled variable, replaces, a second value
+  label, decode): Stata 19's results.
+- `label define` on a set that exists without add/modify/replace is Stata's r(110) "label …
+  already defined" (it was refused). TQN6ZN: 364 lines ran, 2 refused (pwcorr, o; coefplot, ci),
+  the one stop Stata's own r(110); 231 values as Stata's.
+- The e2e comparison joins Stata's wrapped `> ` lines first: ASKO93 (241) and TQN6ZN (231) match
+  Stata in full (read without joining, 164 and 165 looked different). AXYMDI and SI3BGA never ran
+  in Stata (the reference was started with the comma inside the quotes), and their do-files open
+  no data; DZ8BUS and XURXZN stop in Stata too (no import; data not in the package).
