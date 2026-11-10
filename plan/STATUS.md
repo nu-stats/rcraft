@@ -3763,6 +3763,33 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   were after it); 926 of Stata's 947 `@E` values printed (667), every one as Stata's; Table2,
   TableI1 and TableI2 byte for byte. What is left is mostly `esttab, stats()` (21), `which`,
   `frame` and `graph export`.
-- Not yet (noted in the plan file): `egen` row functions, `collapse (max)/(min)/(first)`, `sort`,
-  `tabulate, missing` and `fre` still treat `.a` to `.z` as one NA; `+x` is accepted, which Stata
-  refuses.
+- Not yet then: `egen` row functions, `collapse (max)/(min)/(first)`, `sort`, `tabulate, missing`
+  and `fre` treated `.a` to `.z` as one NA, and `+x` was accepted; done 2026-11-10 (below).
+
+## Extended missing values in commands, 2026-11-10
+
+- Where the data may hold `.a` to `.z`, these commands now treat them as Stata 19 does
+  (observed on made-up data, `plan/stata/extended-missing.md`):
+  - `sort` and `gsort` order `. .a ... .z` after the numbers; `gsort -x` puts them last in
+    descending order, `mfirst` first.
+  - `tabulate`, `tab1` and `tab2` with `missing`: a row and column for each, a labelled one
+    shown by its label. `tabulate, generate()` makes an indicator for each.
+  - `fre`: a Missing row for each and their Total. It no longer refuses after one was stored.
+  - `egen group(), missing` and `tag(), missing`: each missing value is a group of its own.
+  - `egen rowmax()` and the new `rowfirst()`: a row with no number gives the last variable's
+    value. `rowlast()` (new) gives the first's; `rowmin()` gives `.`.
+  - `collapse (max)`, `(min)`, `(firstnm)` and `(lastnm)` of a group with no number give its
+    largest, smallest, first and last missing value.
+  - `recode` ranges from a number to a missing value go by Stata's order (`(1/.b = 9)`). From a
+    missing value to a number they change nothing.
+- `+x`, `2^+x`, `+(x)` are refused as Stata refuses them, r(198) and r(133). A `+` goes only
+  before a number written out.
+- Three bugs fixed along the way, missing values or not:
+  - `egen tag(), missing` gave NA past the first row.
+  - `fre` printed a grand Total when no value was valid.
+  - `fre` did not pad values to one width under a label set (`1  one`, `10 ten`).
+- Corpus `extended_missing_commands.do`: 75 results, all Stata 19's exactly. Verified for
+  `collapse`, `egen`, `fre`, `gsort`, `input`, `recode`, `sort`, `tab1`, `tab2` and `tabulate`.
+  The `tabulate` and `fre` tables were also compared with Stata's log line by line.
+- Not yet: `by` groups, `collapse, by()`, `merge` keys, `duplicates`, `levelsof` and `contract`
+  still take `.a` to `.z` as one value.

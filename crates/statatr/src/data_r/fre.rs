@@ -13,8 +13,11 @@
 
 use super::*;
 
-/// Prints the tables and gives the r() of the last one.
-pub(super) const FRE_HELPER: &str = r#"stata_fre <- function(d, vars) {
+/// Prints the tables and gives the r() of the last one. Each missing value
+/// has a row (`.`, then `.a` to `.z` with `tags`, their places from
+/// `stata_mv`), a Total of them when there is more than one, and the Total of
+/// all only when some value is valid (Stata 19).
+pub(super) const FRE_HELPER: &str = r#"stata_fre <- function(d, vars, tags = FALSE) {
   r <- NULL
   for (v in vars) {
     x <- d[[v]]
@@ -29,13 +32,23 @@ pub(super) const FRE_HELPER: &str = r#"stata_fre <- function(d, vars) {
     vals <- if (is_s) sort(unique(xv[!miss]), method = "radix") else sort(unique(xv[!miss]))
     freq <- vapply(vals, function(u) sum(xv[!miss] == u), 0)
     text <- if (is_s) vals else vapply(vals, function(u) stata_fmt(u, "%9.0g", trim = TRUE), "")
+    mp <- if (tags && !is_s) stata_mv(x)[miss] else rep(1, nm)
+    mvals <- sort(unique(mp))
+    mfreq <- vapply(mvals, function(p) sum(mp == p), 0)
+    mtext <- if (is_s) rep("", length(mvals)) else c(".", paste0(".", letters))[mvals]
     if (!is_s && !is.null(labs)) {
+      # with a label set, the values are padded to one width and the label
+      # follows (`1  one`, `10 ten`, `.b dunno`)
+      vw <- max(nchar(c(text, mtext)))
       m <- match(vals, as.numeric(labs))
-      text <- ifelse(is.na(m), text, paste(text, names(labs)[m]))
+      text <- sub(" +$", "", paste(formatC(text, width = -vw, flag = "-"), ifelse(is.na(m), "", names(labs)[m])))
+      lt <- if (tags) haven::na_tag(as.numeric(labs)) else rep(NA_character_, length(labs))
+      ml <- vapply(mvals, function(p) if (p > 1 && any(lt %in% letters[p - 1])) names(labs)[match(letters[p - 1], lt)] else "", "")
+      mtext <- sub(" +$", "", paste(formatC(mtext, width = -vw, flag = "-"), ml))
     }
-    mtext <- if (is_s) "" else "."
     vtot <- length(vals) > 1
-    w <- max(c(nchar(text), if (vtot) 5, if (nm > 0) nchar(mtext), 0))
+    mtot <- length(mvals) > 1
+    w <- max(c(nchar(text), if (vtot || mtot) 5, nchar(mtext), 0))
     W <- 8 + w + 1
     lab <- function(prefix, t) paste0(formatC(prefix, width = -8, flag = "-"), formatC(t, width = -w, flag = "-"), " ")
     cat("\n", v, if (!is.null(vl) && nzchar(vl)) paste(" --", vl), "\n", sep = "")
@@ -48,13 +61,16 @@ pub(super) const FRE_HELPER: &str = r#"stata_fre <- function(d, vars) {
       cat(lab(if (i == 1) "Valid" else "", text[i]), sprintf("|%11.0f%11.2f%11.2f%11.2f\n", freq[i], 100 * freq[i] / N, 100 * freq[i] / nv, cum), sep = "")
     }
     if (vtot) cat(lab("", "Total"), sprintf("|%11.0f%11.2f%11.2f%11s\n", nv, 100 * nv / N, 100, ""), sep = "")
-    if (nm > 0) {
-      cat(lab("Missing", mtext), sprintf("|%11.0f%11.2f%22s\n", nm, 100 * nm / N, ""), sep = "")
+    for (i in seq_along(mvals)) {
+      cat(lab(if (i == 1) "Missing" else "", mtext[i]), sprintf("|%11.0f%11.2f%22s\n", mfreq[i], 100 * mfreq[i] / N, ""), sep = "")
+    }
+    if (mtot) cat(lab("", "Total"), sprintf("|%11.0f%11.2f%22s\n", nm, 100 * nm / N, ""), sep = "")
+    if (nm > 0 && nv > 0) {
       cat(formatC("Total", width = -W, flag = "-"), sprintf("|%11.0f%11.2f%22s\n", N, 100, ""), sep = "")
     }
     cat(strrep("-", W + 45), "\n", sep = "")
-    r <- list(N = N, N_valid = nv, N_missing = nm, r = length(vals) + (nm > 0), r_valid = length(vals),
-              r_missing = as.numeric(nm > 0), depvar = v)
+    r <- list(N = N, N_valid = nv, N_missing = nm, r = length(vals) + length(mvals), r_valid = length(vals),
+              r_missing = length(mvals), depvar = v)
   }
   r
 }"#;
@@ -78,25 +94,18 @@ impl Session {
         if vars.is_empty() {
             return Err(no("fre needs variables"));
         }
-        if self.extended_missing.get() {
-            return Err(no(
-                "fre after an extended missing value (.a to .z) was stored: fre's R shows them as \
-                 one missing value, so its rows and counts of missing values would not be Stata's",
-            ));
-        }
         let src = self.rows_for(c, out)?;
         self.helpers.insert("stata_fre");
         self.helpers.insert("stata_fmt");
         let list: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+        // each of . and .a to .z on a row of its own
+        let tags = if self.mv_on(out) { ", tags = TRUE" } else { "" };
         out.line(format!(
-            "stata_r <- stata_fre({src}, c({}))",
+            "stata_r <- stata_fre({src}, c({}){tags})",
             list.join(", ")
         ));
         self.r_new = Some((super::returned::R_FRE, "fre".into()));
-        out.caveat(
-            "fre as the SSC package prints it, matched to its output (not its code); Stata's \
-             extended missing values (.a to .z) are one missing value in R",
-        );
+        out.caveat("fre as the SSC package prints it, matched to its output (not its code)");
         Ok(())
     }
 }

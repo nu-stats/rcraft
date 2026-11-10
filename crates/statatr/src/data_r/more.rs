@@ -15,6 +15,15 @@ stata_min <- function(x) if (all(is.na(x))) NA_real_ else min(x, na.rm = TRUE)\n
 stata_max <- function(x) if (all(is.na(x))) NA_real_ else max(x, na.rm = TRUE)\n\
 stata_pctile <- function(x, p) if (all(is.na(x))) NA_real_ else unname(stats::quantile(x, p / 100, type = 2, na.rm = TRUE))";
 
+/// `collapse` where the data may hold `.a` to `.z`, as Stata 19 gives them:
+/// (max) and (min) of a group with no number are its largest and smallest
+/// missing value in Stata's order, (firstnm) and (lastnm) its first and last
+/// value (`stata_mv` gives the order).
+pub(super) const MV_STAT_HELPERS: &str = "stata_mv_max <- function(x) if (all(is.na(x))) x[which.max(stata_mv(x))] else max(x, na.rm = TRUE)\n\
+stata_mv_min <- function(x) if (all(is.na(x))) x[which.min(stata_mv(x))] else min(x, na.rm = TRUE)\n\
+stata_mv_firstnm <- function(x) { k <- which(!is.na(x)); x[if (length(k)) k[1] else 1] }\n\
+stata_mv_lastnm <- function(x) { k <- which(!is.na(x)); x[if (length(k)) k[length(k)] else length(x)] }";
+
 /// `append, force`: a variable of the using data whose kind (string or
 /// number) is not the master's is missing there, `""` or `.` (Stata 19).
 /// `merge` as Stata 19 does it (`plan/stata/merge.md`). Within a key, the
@@ -241,6 +250,15 @@ fn rule_condition(
                     conds.push(format!("(stata_mv({v}) >= {pa} & stata_mv({v}) <= {pb})"));
                     continue;
                 }
+                // from a missing value to a number (or max): none, as Stata
+                // 19 makes no change (the missing values come after them all)
+                if missing_place(a).is_some() {
+                    if b != "max" && number_literal(b).filter(|n| n != "NA_real_").is_none() {
+                        return Err(no(format!("recode: {b} is not a number")));
+                    }
+                    conds.push(format!("rep_len(FALSE, length({v}))"));
+                    continue;
+                }
                 let end = |e: &str| -> Result<String, Untranslated> {
                     match e {
                         // min and max are over the variable's nonmissing values, all rows
@@ -251,7 +269,21 @@ fn rule_condition(
                             .ok_or_else(|| no(format!("recode: {e} is not a number"))),
                     }
                 };
-                // a range never matches a missing value
+                // from a number (or min, max) to a missing value: the numbers
+                // from it up and the missing values up to that one, by
+                // Stata's order (`(1/.b = 9)` takes 1, 2, . and .b)
+                if let Some(pb) = missing_place(b) {
+                    let numbers = format!("(!is.na({v}) & {v} >= {})", end(a)?);
+                    let missing = if tags {
+                        *mv = true;
+                        format!("(stata_mv({v}) >= 1 & stata_mv({v}) <= {pb})")
+                    } else {
+                        format!("is.na({v})")
+                    };
+                    conds.push(format!("({numbers} | {missing})"));
+                    continue;
+                }
+                // a range of numbers never matches a missing value
                 conds.push(format!(
                     "(!is.na({v}) & {v} >= {} & {v} <= {})",
                     end(a)?,
@@ -573,7 +605,13 @@ impl Session {
                 let missing = opts.has("missing", 7);
                 // "" is a missing value for text, as `.` is for numbers
                 let k = if missing {
-                    format!("dplyr::pick({keys})")
+                    // each of . and .a to .z a value of its own, in that order
+                    if self.mv_on(out) {
+                        self.need_helper("stata_sort_keys");
+                        format!("stata_sort_keys(dplyr::pick({keys}))")
+                    } else {
+                        format!("dplyr::pick({keys})")
+                    }
                 } else {
                     format!("dplyr::mutate(dplyr::pick({keys}), dplyr::across(dplyr::where(is.character), \\(v) dplyr::na_if(v, \"\")))")
                 };
@@ -584,7 +622,8 @@ impl Session {
                     byte = true;
                     // 1 on the first row of each combination among the selected rows
                     let complete = if missing {
-                        "TRUE"
+                        // every row counts (a lone TRUE would be NA past the first)
+                        "rep(TRUE, nrow(k))"
                     } else {
                         "stats::complete.cases(k)"
                     };
@@ -592,9 +631,21 @@ impl Session {
                 }
             }
             "rowtotal" | "rowmean" | "rowmax" | "rowmin" | "rownonmiss" | "rowmiss"
-            | "rowmedian" | "rowpctile" => {
+            | "rowmedian" | "rowpctile" | "rowfirst" | "rowlast" => {
                 let cols = format!("dplyr::pick({})", select(args)?);
+                let tags = self.tags.get();
+                if tags && fname == "rowmin" {
+                    self.need_helper("stata_untag");
+                }
                 let v = match fname {
+                    // a row with no number: the last variable's value, .a to
+                    // .z kept (Stata 19); rowmin's is `.`
+                    "rowmax" if tags => format!("(\\(m) {{ r <- do.call(pmax, c(as.list(m), na.rm = TRUE)); a <- is.na(r); r[a] <- m[[ncol(m)]][a]; r }})({cols})"),
+                    "rowmin" if tags => format!("stata_untag(do.call(pmin, c(as.list({cols}), na.rm = TRUE)))"),
+                    // the first (last) number in the row; a row with none has
+                    // the last (first) variable's value, as Stata 19 gives it
+                    "rowfirst" => format!("Reduce(\\(r, v) ifelse(is.na(v), r, v), rev(as.list({cols})))"),
+                    "rowlast" => format!("Reduce(\\(r, v) ifelse(is.na(v), r, v), as.list({cols}))"),
                     "rowtotal" if opts.has("missing", 7) => {
                         format!("(\\(m) ifelse(rowSums(!is.na(m)) == 0, NA_real_, rowSums(m, na.rm = TRUE)))({cols})")
                     }
@@ -647,6 +698,8 @@ impl Session {
                 | "rowmiss"
                 | "rowmedian"
                 | "rowpctile"
+                | "rowfirst"
+                | "rowlast"
         ) {
             if let Some(k) = &cond {
                 value = format!("dplyr::if_else({k}, {value}, NA_real_)");
@@ -1060,7 +1113,18 @@ impl Session {
             }
             let x = r_name(&src);
             let plain = |e: String| (stat.clone(), e);
+            // a value itself, where .a to .z may be kept (Stata 19)
+            let keeps = matches!(stat.as_str(), "max" | "min" | "firstnm" | "lastnm")
+                && self.kinds.get(&src) != Some(&Kind::Text)
+                && self.mv_on(out);
+            if keeps {
+                self.need_helper("stata_mv_stats");
+            }
             let (label, expr) = match stat.as_str() {
+                "max" if keeps => plain(format!("stata_mv_max({x})")),
+                "min" if keeps => plain(format!("stata_mv_min({x})")),
+                "firstnm" if keeps => plain(format!("stata_mv_firstnm({x})")),
+                "lastnm" if keeps => plain(format!("stata_mv_lastnm({x})")),
                 "mean" => plain(format!("stata_mean({x})")),
                 // the label is written "(p 50) x"
                 "median" => ("p 50".to_string(), format!("stata_pctile({x}, 50)")),

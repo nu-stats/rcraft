@@ -433,6 +433,23 @@ impl Parser<'_> {
         }
     }
 
+    /// Stata 19 takes a `+` sign only before a number written out (`+5`,
+    /// `2^+2`, `x*+2`): `+x` is r(198) "+x invalid name", `+abs(x)` r(133)
+    /// "unknown function +abs()", `+.` and `+.d` r(198) invalid syntax.
+    fn plus_operand(&self) -> Result<(), ExprError> {
+        let bad = |message: String, code: u16| Err(ExprError { message, code });
+        match (self.peek(), self.tokens.get(self.pos + 1)) {
+            (Some(Token::Number(v)), _) if !crate::values::missing::is_missing(*v) => Ok(()),
+            (Some(Token::Name(n)), Some(Token::Open)) => {
+                bad(format!("unknown function +{n}()"), 133)
+            }
+            (Some(Token::Name(n)), _) => bad(format!("+{n} invalid name"), 198),
+            (Some(Token::Open), _) => bad("unknown function +()".into(), 133),
+            (Some(Token::Op(_)), _) => bad("+ invalid name".into(), 198),
+            _ => bad("invalid syntax".into(), 198),
+        }
+    }
+
     fn fail(&self) -> ExprError {
         ExprError::invalid(self.text)
     }
@@ -493,6 +510,9 @@ impl Parser<'_> {
 
     fn unary(&mut self) -> Result<Expr, ExprError> {
         if let Some(op) = self.eat_op(&["-", "+", "!"]) {
+            if op == "+" {
+                self.plus_operand()?;
+            }
             self.deeper()?;
             let inner = self.unary()?;
             self.depth -= 1;
@@ -512,6 +532,9 @@ impl Parser<'_> {
         let mut left = self.atom()?;
         while self.eat_op(&["^"]).is_some() {
             let right = if let Some(op) = self.eat_op(&["-", "+"]) {
+                if op == "+" {
+                    self.plus_operand()?;
+                }
                 self.deeper()?;
                 let inner = self.power_operand()?;
                 self.depth -= 1;
@@ -531,6 +554,9 @@ impl Parser<'_> {
 
     fn power_operand(&mut self) -> Result<Expr, ExprError> {
         if let Some(op) = self.eat_op(&["-", "+"]) {
+            if op == "+" {
+                self.plus_operand()?;
+            }
             self.deeper()?;
             let inner = self.power_operand()?;
             self.depth -= 1;
@@ -730,6 +756,22 @@ mod tests {
             let e = parse(bad).unwrap_err();
             assert_eq!(e.code, 198);
             assert_eq!(e.message, format!("{bad} invalid name"));
+        }
+        // a + sign before anything but a number written out (Stata 19)
+        for (bad, message, code) in [
+            ("+x", "+x invalid name", 198),
+            ("1 - +x", "+x invalid name", 198),
+            ("2^+x", "+x invalid name", 198),
+            ("+(x)", "unknown function +()", 133),
+            ("+abs(x)", "unknown function +abs()", 133),
+            ("+-x", "+ invalid name", 198),
+            ("+.d", "invalid syntax", 198),
+        ] {
+            let e = parse(bad).unwrap_err();
+            assert_eq!((e.message.as_str(), e.code), (message, code), "{bad}");
+        }
+        for good in ["+5", "2^+2", "x*+2"] {
+            assert!(parse(good).is_ok(), "{good}");
         }
         let deep = "(".repeat(500) + "1" + &")".repeat(500);
         assert!(parse(&deep).is_err());

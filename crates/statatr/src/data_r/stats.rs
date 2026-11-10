@@ -150,25 +150,40 @@ pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, deta
 
 /// A column as `tabulate` shows it: its value labels when it has them, in the
 /// order of the values underneath (which is Stata's order), the plain values
-/// when it has none or `nolabel` was given.
-pub(super) const TAB_VALUES_HELPER: &str = r#"stata_tab_values <- function(v, nolabel = FALSE) {
+/// when it has none or `nolabel` was given. With `tags` the places of `.a` to
+/// `.z` (`stata_mv`) go with it, so that `missing` shows each on a row of its
+/// own, after the values and `.` (Stata 19).
+pub(super) const TAB_VALUES_HELPER: &str = r#"stata_tab_values <- function(v, nolabel = FALSE, tags = FALSE) {
   if (is.factor(v)) return(v)
+  m <- if (tags && is.double(v) && anyNA(v)) stata_mv(v)
+  l <- attr(v, "labels")
+  mark <- function(r) {
+    if (any(m > 1)) {
+      attr(r, "stata_mv") <- m
+      # each row's name: a label of .a to .z when there is one
+      ml <- rep(NA_character_, 26)
+      if (!nolabel && length(l)) ml <- names(l)[match(letters, haven::na_tag(as.numeric(l)))]
+      attr(r, "stata_mv_names") <- c(".", ifelse(is.na(ml), paste0(".", letters), ml))
+    }
+    r
+  }
   u <- unclass(v)
   attributes(u) <- NULL
-  l <- attr(v, "labels")
-  if (nolabel || is.null(l) || length(l) == 0) return(u)
+  if (nolabel || is.null(l) || length(l) == 0) return(mark(u))
   vals <- sort(unique(u[!is.na(u)]))
   labs <- names(l)[match(vals, l)]
   labs[is.na(labs)] <- format(vals[is.na(labs)])
-  factor(labs[match(u, vals)], levels = unique(labs))
+  mark(factor(labs[match(u, vals)], levels = unique(labs)))
 }"#;
 
 /// `tabulate x, generate(stub)`: one indicator per value, in sorted order,
 /// labelled `x==` and the value's label, the text, or the number as Stata 19
 /// writes it there (`%11.4f`, or `%11.4e` when that is wider). Rows the table
 /// leaves out (missing x, if, in) are missing; with `missing` a missing x
-/// has its own indicator, labelled `x==` and six spaces before `.`.
-pub(super) const TAB_GENERATE_HELPER: &str = r#"stata_tab_generate <- function(d, var, stub, sel = TRUE, missing = FALSE, nolabel = FALSE) {
+/// has its own indicator, labelled `x==` and six spaces before `.`; with
+/// `tags` each of `.a` to `.z` has one after it, labelled with it 11 wide
+/// (`x==         .b`, Stata 19).
+pub(super) const TAB_GENERATE_HELPER: &str = r#"stata_tab_generate <- function(d, var, stub, sel = TRUE, missing = FALSE, nolabel = FALSE, tags = FALSE) {
   x <- d[[var]]
   text <- is.character(x)
   labs <- if (nolabel || text) NULL else attr(x, "labels")
@@ -189,7 +204,11 @@ pub(super) const TAB_GENERATE_HELPER: &str = r#"stata_tab_generate <- function(d
   cols <- lapply(vals, function(v) list(is = !miss & x == v, label = label_of(v)))
   if (missing && any(use & miss)) {
     if (text) stop("tabulate, generate() with missing for a string variable is not translated yet")
-    cols <- c(cols, list(list(is = miss, label = "      .")))
+    p <- if (tags) stata_mv(x) else as.numeric(miss)
+    lv <- c(".", paste0(".", letters))
+    for (k in sort(unique(p[use & miss]))) {
+      cols <- c(cols, list(list(is = p == k, label = if (k == 1) "      ." else formatC(lv[k], width = 11))))
+    }
   }
   made <- paste0(stub, seq_along(cols))
   if (any(made %in% names(d))) stop("variable ", made[made %in% names(d)][1], " already defined")
@@ -212,6 +231,19 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
   env <- parent.frame()
   counts <- is.null(w) || wtype == "f"
   use_na <- if (missing) "ifany" else "no"
+  # with missing, each of . and .a to .z (their places from stata_tab_values)
+  # is a value of its own, after the others, in Stata's order
+  split <- function(v) {
+    m <- attr(v, "stata_mv", exact = TRUE)
+    if (!missing || is.null(m)) return(v)
+    lv <- attr(v, "stata_mv_names", exact = TRUE)
+    f <- if (is.factor(v)) v else factor(v)
+    s <- factor(as.character(f), levels = unique(c(levels(f), lv[sort(unique(m[m > 0]))])))
+    s[m > 0] <- lv[m[m > 0]]
+    s
+  }
+  x <- split(x)
+  if (!is.null(y)) y <- split(y)
   # weighted counts: sums of the weights, analytic ones scaled to the rows
   wtab <- function(keep, ...) {
     if (missing) keep[] <- TRUE
@@ -485,11 +517,14 @@ impl Session {
             ));
         }
         let nolabel = opts.has("nolabel", 3);
+        // with missing, .a to .z each get a row of their own
+        let tags = opts.has("missing", 1) && self.mv_on(out);
         let value = |v: &str| {
             format!(
-                "stata_tab_values({src}${}{})",
+                "stata_tab_values({src}${}{}{})",
                 r_name(v),
-                if nolabel { ", nolabel = TRUE" } else { "" }
+                if nolabel { ", nolabel = TRUE" } else { "" },
+                if tags { ", tags = TRUE" } else { "" }
             )
         };
         let mut args = vec![value(x)];
@@ -532,7 +567,7 @@ impl Session {
                 self.helpers.insert("stata_tab_generate");
                 out.package("dplyr");
                 Some(format!(
-                    "{d} <- stata_tab_generate({d}, {}, {}, sel = {sel}{}{})",
+                    "{d} <- stata_tab_generate({d}, {}, {}, sel = {sel}{}{}{})",
                     r_text(x),
                     r_text(stub),
                     if opts.has("missing", 1) {
@@ -540,7 +575,8 @@ impl Session {
                     } else {
                         ""
                     },
-                    if nolabel { ", nolabel = TRUE" } else { "" }
+                    if nolabel { ", nolabel = TRUE" } else { "" },
+                    if tags { ", tags = TRUE" } else { "" }
                 ))
             }
             None => None,
@@ -782,11 +818,11 @@ pub(super) fn r_logical(b: bool) -> &'static str {
 }
 
 /// `tab1`: a one-way table of each variable, each on its own rows.
-pub(super) const TAB1_HELPER: &str = r#"stata_tab1 <- function(d, nolabel = FALSE, ret = FALSE, ...) {
+pub(super) const TAB1_HELPER: &str = r#"stata_tab1 <- function(d, nolabel = FALSE, tags = FALSE, ret = FALSE, ...) {
   out <- list()
   for (n in names(d)) {
     cat("\n-> tabulation of ", n, "  \n", sep = "")
-    out[[n]] <- stata_tabulate(stata_tab_values(d[[n]], nolabel), ret = ret, xname = n, ...)
+    out[[n]] <- stata_tabulate(stata_tab_values(d[[n]], nolabel, tags), ret = ret, xname = n, ...)
   }
   # Stata leaves the last table's r()
   if (ret) assign("stata_r", stata_r, envir = parent.frame())
@@ -795,15 +831,15 @@ pub(super) const TAB1_HELPER: &str = r#"stata_tab1 <- function(d, nolabel = FALS
 
 /// `tab2`: a two-way table of every pair (of the first with each other with
 /// `firstonly`), each pair on the rows where both are present.
-pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FALSE, nolabel = FALSE, ret = FALSE, ...) {
+pub(super) const TAB2_HELPER: &str = r#"stata_tab2 <- function(d, firstonly = FALSE, nolabel = FALSE, tags = FALSE, ret = FALSE, ...) {
   n <- names(d)
   if (length(n) < 2) stop("too few variables specified")
   out <- list()
   for (i in seq_len(if (firstonly) 1 else length(n) - 1)) {
     for (j in (i + 1):length(n)) {
       cat("\n-> tabulation of ", n[i], " by ", n[j], "  \n", sep = "")
-      out[[paste(n[i], n[j])]] <- stata_tabulate(stata_tab_values(d[[n[i]]], nolabel),
-                                                  stata_tab_values(d[[n[j]]], nolabel), ret = ret,
+      out[[paste(n[i], n[j])]] <- stata_tabulate(stata_tab_values(d[[n[i]]], nolabel, tags),
+                                                  stata_tab_values(d[[n[j]]], nolabel, tags), ret = ret,
                                                   xname = n[i], yname = n[j], ...)
     }
   }
@@ -917,6 +953,9 @@ impl Session {
             self.helpers.insert(h);
         }
         let mut args = tab_args(src + &wargs, opts, &[("missing", 1), ("sort", 4)]);
+        if opts.has("missing", 1) && self.mv_on(out) {
+            args.push("tags = TRUE".into());
+        }
         // importance weights' r() was not checked against Stata
         if !matches!(w, Some((W::I, _))) {
             args.push("ret = TRUE".into());
@@ -983,6 +1022,9 @@ impl Session {
                 ("chi2", 4),
             ],
         );
+        if opts.has("missing", 1) && self.mv_on(out) {
+            args.push("tags = TRUE".into());
+        }
         if opts.has("firstonly", 9) {
             args.push("firstonly = TRUE".into());
         }

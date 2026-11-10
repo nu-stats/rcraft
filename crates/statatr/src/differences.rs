@@ -82,7 +82,7 @@ pub const GUIDES: &[Guide] = &[
                  missing x; R's NA compared with anything is NA. The translation writes \
                  Stata's rule out (is.na(x) | x > 5), so conditions keep the rows Stata keeps. \
                  The extended missing values .a to .z are kept as haven's tagged NAs and \
-                 compare in Stata's order (. < .a < ... < .z).",
+                 compare, sort, group and tabulate in Stata's order (. < .a < ... < .z).",
             ),
             p(
                 "Float and double",

@@ -1,0 +1,76 @@
+* Stata 19.0's results for extended_missing_commands.do, recorded by cargo xtask stata-record
+@ a 8 6027 28139
+@ b 8 8027 36122
+@ c 8 6019 28066
+@ rmax 8 6020 28073
+@ rmin 8 6008 28036
+@ rmean 8 6009.5 28040.5
+@ rtot 8 7 25
+@ rtotm 8 6013 28053
+@ rmed 8 6009.5 28040.5
+@ rfirst 8 6018 28071
+@ rlast 8 6028 28134
+@ rnm 8 4 16
+@ rmiss 8 20 92
+@ r2max 8 6019 28066
+@ r2min 8 6010 28038
+@ r2first 8 6019 28066
+@ r2last 8 6019 28066
+@ gmax 8 5009 26043
+@ gmin 8 5009 26043
+@ gmean 8 5009 26043
+@ gtot 8 4 17
+@ gtotm 8 5009 26043
+@ gmed 8 5009 26043
+@ grp 8 30 147
+@ grp2 8 6009 28043
+@ grpb 8 36 202
+@ tg 8 6 23
+@ tg2 8 2 8
+@ recode1 3064 15288
+@ recode2 4047 21230
+@ recode3 6027 28139
+@ recode4 2044 12204
+@ recode5 6027 28139
+@ recode6 24 108
+@ recode7 4406 22557
+@ recode8 645 3221
+@ recode9 6222 28916
+@ sort_a 181
+@ gsort_desc 158
+@ gsort_mfirst 150
+@ gsort_b 157
+@ tab_a 8 6
+@ tab_a_nm 2 2
+@ tab_ab 8 6 6
+@ tab_bc 8 6 6
+@ tab_sort 8 6
+@ tab1 8 6
+@ tab2 8 6 6
+@ tgen1 8 1
+@ tgen2 8 14
+@ tgen3 8 21
+@ tgen4 8 24
+@ tgen5 8 15
+@ tgen6 8 72
+@ fre_a 8 2 6 6 2 4
+@ fre_b 8 0 8 6 0 6
+@ mxa 3020 10067
+@ mxb 5023 15067
+@ mxc 3010 10025
+@ mna 3016 10057
+@ mnb 5013 15048
+@ mnc 3007 10017
+@ fa 3016 10057
+@ fb 5021 15061
+@ la 4020 11067
+@ lb 5015 15054
+@ fna 3016 10057
+@ fnb 5021 15061
+@ fnc 3007 10017
+@ lna 3020 10067
+@ lnb 5015 15054
+@ lnc 3010 10025
+@ mea 3006 10019
+@ sa 3 9
+@ na 2 5
