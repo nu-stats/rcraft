@@ -1868,9 +1868,18 @@ pub const GUIDES: &[Guide] = &[
                  statistics with fmt() (a statistic without one takes the first one's).",
             ),
             p(
+                "Head and foot",
+                "prehead() posthead() prefoot() postfoot() put their lines in place of a part of the \
+                 table (@title in prehead() is the title), fragment leaves out the .tex head and \
+                 foot, mgroups(..., erepeat()) follows the group row, mlabels() with span prefix() \
+                 suffix() or without them, alignment() sets .tex's columns, and addnotes() goes \
+                 between the first note and the stars', as Stata 19 printed and wrote them.",
+            ),
+            p(
                 "Not yet",
-                "wide, cells() of other models, matrix(), mlabels() with its suboptions, .rtf (it \
-                 carries the time it was written) and not with a file are refused.",
+                "wide, cells() of other models, matrix(), mlabels() with mtitles(), other @ \
+                 substitutions, fragment with prehead() or postfoot(), .rtf (it carries the time \
+                 it was written) and not with a file are refused.",
             ),
         ],
     },

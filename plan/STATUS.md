@@ -3830,3 +3830,20 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   with these values.
 - Not yet: `contract, zero` with `.a` to `.z` stops with a message. `isid, missok`,
   `egen rank()` and `xtile` were not observed with them.
+
+## esttab: prehead() posthead() prefoot() postfoot(), fragment, erepeat(), mlabels(), alignment(), 2026-11-10
+
+- Observed in Stata 19 (`plan/stata/esttab-options.md`, second part; three probes, RCraft's output the
+  same in all 43 files and on the screen; corpus `esttab3.do`): the table as seven parts, each of
+  prehead, posthead, prefoot and postfoot replaced by its option's lines (@title in prehead());
+  `fragment` in .tex; `mgroups(..., erepeat())`; `mlabels()` with and without span, prefix() suffix(),
+  none, depvars; `alignment()` in .tex's tabular; `nonumber` and `addnote` as written.
+- Two differences from Stata fixed along the way: `addnotes()` with the default notes goes between the
+  first note and the stars' (it came last), and `noobs` in .tex ends the coefficients with the bottom
+  rule (it gave `\hline`). A single quoted `addnote("a b")` or `mtitles("a b")` is no longer split at
+  its spaces.
+- ZNMIXH: 136 lines refused (139); 26 of its 30 tables written, all byte for byte as Stata's (TableF4,
+  F5 and F9 new); the other 4 wait on models not stored before them. YFBPT6: 17 refused (20);
+  table_robreg.tex, table_robreg1.tex and table_valreg.tex written, byte for byte as Stata 19 wrote them
+  from the same data. Its four `alignment()` tables now stop at `sfmt()` and `cells()` of clogit models;
+  `esttab matrix()` (2) is not translated yet.

@@ -53,7 +53,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("estimates", &["estimates", "suest"]),
     ("estpost", &["esttab2"]),
     ("eststo", &["estout"]),
-    ("esttab", &["esttab", "esttab2"]),
+    ("esttab", &["esttab", "esttab2", "esttab3"]),
     ("expand", &["made", "random"]),
     ("file", &["fileread", "strings"]),
     ("filefilter", &["filefilter"]),

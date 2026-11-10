@@ -52,7 +52,8 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
                          numbers = TRUE, mtitles = NULL, nomtitles = FALSE, title = NULL, notes = TRUE,
                          addnotes = character(), varlabels = NULL, nogaps = FALSE, mgroups = NULL,
                          cells = NULL, compress = FALSE, varwidth = NULL, modelwidth = NULL,
-                         format = "screen", booktabs = FALSE, file = NULL, replace = FALSE,
+                         mlabels = NULL, prehead = NULL, posthead = NULL, prefoot = NULL, postfoot = NULL,
+                         fragment = FALSE, alignment = NULL, format = "screen", booktabs = FALSE, file = NULL, replace = FALSE,
                          from_eststo = FALSE) {
   # compress narrows the columns: 9 for the models, 10 (16 with label) for the names
   if (is.null(modelwidth)) modelwidth <- if (compress) 9 else 12
@@ -63,7 +64,8 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
     stata_esttab_table(models, d, aux, bfmt, auxfmt, star, stars, star_text, raw_stars, label, nobase,
                        keep, drop, order, stats, statfmt, sstats, noobs, obslast, numbers, mtitles,
                        nomtitles, title, notes, addnotes, varlabels, nogaps, mgroups, varwidth,
-                       modelwidth, format, booktabs)
+                       modelwidth, format, booktabs, mlabels, prehead, posthead, prefoot, postfoot,
+                       fragment, alignment)
   }
   if (is.null(file)) {
     if (from_eststo) cat("(tabulating estimates stored by eststo; specify \".\" to tabulate the active results)\n")
@@ -85,7 +87,8 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
 stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_text, raw_stars, label,
                                nobase, keep, drop, order, stats, statfmt, sstats, noobs, obslast,
                                numbers, mtitles, nomtitles, title, notes, addnotes, varlabels, nogaps,
-                               mgroups, varwidth, modelwidth, format, booktabs) {
+                               mgroups, varwidth, modelwidth, format, booktabs, mlabels, prehead,
+                               posthead, prefoot, postfoot, fragment, alignment) {
   # varlabels() takes the blank lines between the coefficients away, as nogaps does
   gaps <- !nogaps && is.null(varlabels)
   stats <- c(stats, sstats$names)
@@ -185,14 +188,37 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
     if (is.null(v) || !length(v) || is.na(v)) return("")
     stata_esttab_fmt(v, sfmt(s))
   }
-  # the header rows: a label for each model, and mgroups' for each group of models
+  # the header rows: a label for each model, and mgroups' for each group of models.
+  # mlabels() without span sets its labels, and the numbers above them, as the
+  # coefficients are set (right-aligned, the stars' blank after); with span, from the left
   nmod <- length(ms)
   heads <- list()
-  if (numbers) heads[[length(heads) + 1]] <- list(h = paste0("(", seq_len(nmod), ")"), span = !nomtitles)
-  if (!nomtitles) {
-    heads[[length(heads) + 1]] <- list(h = if (!is.null(mtitles)) rep_len(mtitles, nmod) else
-      vapply(ms, function(m) if (label && m$depvar %in% names(d)) stata_varlab(d, m$depvar) else m$depvar, ""),
-      span = TRUE)
+  ml <- mlabels
+  if (!is.null(ml)) {
+    titles <- if (isTRUE(ml$none)) NULL else if (length(ml$labels)) {
+      rest <- models[-seq_along(ml$labels)]
+      if (any(rest == ".")) stop("RCraft: esttab, mlabels() with fewer labels than models of the active results is not translated yet")
+      c(ml$labels, rest)[seq_len(nmod)]
+    } else {
+      if (label) stop("RCraft: esttab, mlabels(, depvars) with label is not translated yet")
+      vapply(ms, function(m) m$depvar, "")
+    }
+    if (!is.null(titles)) {
+      pre <- if (is.null(ml$prefix)) "" else gsub("@span", "1", ml$prefix, fixed = TRUE)
+      suf <- if (is.null(ml$suffix)) "" else gsub("@span", "1", ml$suffix, fixed = TRUE)
+      titles <- paste0(pre, titles, suf)
+    }
+    hspan <- isTRUE(ml$span)
+    if (numbers) heads[[length(heads) + 1]] <- list(h = paste0("(", seq_len(nmod), ")"), span = hspan && !is.null(titles), mc = TRUE)
+    if (!is.null(titles)) heads[[length(heads) + 1]] <- list(h = titles, span = hspan, mc = FALSE)
+  } else {
+    hspan <- FALSE
+    if (numbers) heads[[length(heads) + 1]] <- list(h = paste0("(", seq_len(nmod), ")"), span = !nomtitles, mc = TRUE)
+    if (!nomtitles) {
+      heads[[length(heads) + 1]] <- list(h = if (!is.null(mtitles)) rep_len(mtitles, nmod) else
+        vapply(ms, function(m) if (label && m$depvar %in% names(d)) stata_varlab(d, m$depvar) else m$depvar, ""),
+        span = TRUE, mc = TRUE)
+    }
   }
   groups <- NULL
   if (!is.null(mgroups)) {
@@ -206,13 +232,18 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
                    prefix = mgroups$prefix, suffix = mgroups$suffix, span = isTRUE(mgroups$span))
     groups$per_model <- rep("", nmod)
     groups$per_model[starts] <- groups$labels
+    # erepeat() after the spanned row, @span its columns (the first model is column 2)
+    groups$after <- if (groups$span && !is.null(mgroups$erepeat)) {
+      paste0(vapply(seq_along(starts), function(i) gsub("@span", paste0(starts[i] + 1, "-", starts[i] + groups$sizes[i]), mgroups$erepeat, fixed = TRUE), ""), collapse = "")
+    } else ""
   }
   note1 <- switch(aux, t = "t statistics in parentheses", se = "Standard errors in parentheses",
                   p = "p-values in parentheses", NULL)
   note2 <- if (star) {
     if (!is.null(star_text)) star_text else paste(paste0(names(stars), " p<", format(unname(stars), scientific = FALSE, drop0trailing = TRUE)), collapse = ", ")
   }
-  nts <- c(if (notes) c(note1, note2), addnotes)
+  # addnotes() between the first note and the stars'
+  nts <- if (notes) c(note1, addnotes, note2) else addnotes
   vw <- varwidth
   # starlevels() stars are as typed, in a column as wide as the longest; star()'s
   # are 3 wide on the screen and \sym{} in 9 in .tex
@@ -222,54 +253,55 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
     if (nchar(s) <= w) return(stata_pad(s, -w))
     paste0(substr(s, 1, w - 2), "~", substr(s, nchar(s), nchar(s)))
   }
-  out <- character()
+  # the table's sections, each replaced by prehead() posthead() prefoot() postfoot() when given:
+  # prehead, the header rows, posthead, the coefficients, prefoot, the statistics, postfoot
+  sect <- function(given, default) {
+    if (is.null(given)) default else gsub("@title", if (is.null(title)) "" else title, given, fixed = TRUE)
+  }
   if (format %in% c("screen", "txt")) {
     width <- vw + nmod * (1 + modelwidth + sw)
     rule <- strrep("-", width)
     cell <- function(x, s = "") paste0(" ", stata_pad(x, modelwidth), stata_pad(s, -sw))
     row <- function(n, xs, ss = rep("", length(xs))) paste0(nm_cell(n, vw), paste0(mapply(cell, xs, ss), collapse = ""))
-    if (format == "screen") out <- ""
-    if (!is.null(title)) out <- c(out, title)
-    out <- c(out, rule)
-    if (!is.null(groups)) {
-      out <- c(out, if (groups$span) {
-        # a group's label from the left of the models it spans
-        w <- groups$sizes * (1 + modelwidth + sw) - 1
-        paste0(stata_pad("", -vw), paste0(" ", groups$labels, strrep(" ", pmax(0, w - nchar(groups$labels))), collapse = ""))
-      } else row("", groups$per_model))
+    # spanned: a label from the left of the models it spans
+    srow <- function(labs, k) {
+      w <- k * (1 + modelwidth + sw) - 1
+      paste0(stata_pad("", -vw), paste0(" ", labs, strrep(" ", pmax(0, w - nchar(labs))), collapse = ""))
     }
-    for (h in heads) out <- c(out, row("", h$h))
-    out <- c(out, rule)
+    # on the screen a blank line comes first
+    out <- c(if (format == "screen") "", sect(prehead, c(title, rule)))
+    if (!is.null(groups)) {
+      out <- c(out, paste0(if (groups$span) srow(groups$labels, groups$sizes) else row("", groups$per_model), groups$after))
+    }
+    for (h in heads) out <- c(out, if (!is.null(ml) && h$span) srow(h$h, 1) else row("", h$h))
+    out <- c(out, sect(posthead, rule))
     for (j in seq_along(all)) {
       # one line a coefficient with not: no blank lines between them
       if (j > 1 && aux != "none" && gaps) out <- c(out, "")
       out <- c(out, row(lab(all[j]), vapply(cells, function(m) m[[j]]$main, ""), vapply(cells, function(m) m[[j]]$st, "")))
       if (aux != "none") out <- c(out, row("", vapply(cells, function(m) m[[j]]$aux, "")))
     }
-    out <- c(out, rule)
-    if (length(srows)) {
-      for (s in srows) out <- c(out, row(slabel(s), vapply(ms, scell, "", s = s)))
-      out <- c(out, rule)
-    }
-    out <- c(out, nts)
+    out <- c(out, sect(prefoot, if (length(srows)) rule))
+    for (s in srows) out <- c(out, row(slabel(s), vapply(ms, scell, "", s = s)))
+    out <- c(out, sect(postfoot, c(rule, nts)))
   } else if (format == "csv") {
     q <- function(x) paste0("=\"", x, "\"")
     line <- function(xs) paste(q(xs), collapse = ",")
     # the blank lines: none with nogaps; varlabels() keeps the first and those before the
     # coefficients, the statistics and the notes
-    out <- if (!nogaps) "" else character()
+    blank <- if (!nogaps) "" else character()
+    out <- sect(prehead, blank)
     if (!is.null(groups)) out <- c(out, line(c("", groups$per_model)))
     for (h in heads) out <- c(out, line(c("", h$h)))
+    out <- c(out, sect(posthead, blank))
     for (j in seq_along(all)) {
-      if (if (j == 1) !nogaps else gaps) out <- c(out, "")
+      if (j > 1 && gaps) out <- c(out, "")
       out <- c(out, line(c(lab(all[j]), vapply(cells, function(m) paste0(m[[j]]$main, m[[j]]$st), ""))))
       if (aux != "none") out <- c(out, line(c("", vapply(cells, function(m) m[[j]]$aux, ""))))
     }
-    if (length(srows)) {
-      if (!nogaps) out <- c(out, "")
-      for (s in srows) out <- c(out, line(c(slabel(s), vapply(ms, scell, "", s = s))))
-    }
-    if (length(nts)) out <- c(out, if (!nogaps) "", vapply(nts, q, ""))
+    out <- c(out, sect(prefoot, if (length(srows)) blank))
+    for (s in srows) out <- c(out, line(c(slabel(s), vapply(ms, scell, "", s = s))))
+    out <- c(out, sect(postfoot, if (length(nts)) c(blank, vapply(nts, q, ""))))
   } else {
     esc <- function(s) gsub("_", "\\\\_", s)
     # a cell padded by its length as written, then its _ escaped
@@ -293,10 +325,11 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
     mid <- if (booktabs) "\\midrule" else "\\hline"
     bot <- if (booktabs) "\\bottomrule" else "\\hline\\hline"
     gap <- if (booktabs) "\\addlinespace" else "[1em]"
-    # a title makes it a table with a caption
+    # a title makes it a table with a caption; fragment leaves out the head and the foot
     open <- if (is.null(title)) "{" else "\\begin{table}[htbp]\\centering"
-    out <- c(open, if (star) "\\def\\sym#1{\\ifmmode^{#1}\\else\\(^{#1}\\)\\fi}",
-             if (!is.null(title)) paste0("\\caption{", title, "}"), sprintf("\\begin{tabular}{l*{%d}{c}}", n), top)
+    colspec <- if (is.null(alignment)) "c" else alignment
+    out <- sect(prehead, if (!fragment) c(open, if (star) "\\def\\sym#1{\\ifmmode^{#1}\\else\\(^{#1}\\)\\fi}",
+             if (!is.null(title)) paste0("\\caption{", title, "}"), sprintf("\\begin{tabular}{l*{%d}{%s}}", n, colspec), top))
     if (!is.null(groups)) {
       g <- if (groups$span) {
         # a label spanning its models, from the left, padded to their width
@@ -308,26 +341,23 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
       } else {
         paste0("&", padr(groups$per_model, modelwidth), strrep(" ", tsw))
       }
-      out <- c(out, paste0(nmc(""), paste0(g, collapse = ""), "\\\\"))
+      out <- c(out, paste0(nmc(""), paste0(g, collapse = ""), "\\\\", groups$after))
     }
     for (h in heads) {
-      mc <- paste0("\\multicolumn{1}{c}{", h$h, "}")
+      mc <- if (h$mc) paste0("\\multicolumn{1}{c}{", h$h, "}") else h$h
       # spanned, a model's label is padded to its width from the left; without the
       # titles the numbers sit in the coefficients' column, the stars' blank after
       g <- if (h$span) padl(mc, mw1) else paste0(padr(mc, modelwidth), strrep(" ", tsw))
       out <- c(out, paste0(nmc(""), paste0("&", g, collapse = ""), "\\\\"))
     }
-    out <- c(out, mid)
+    out <- c(out, sect(posthead, mid))
     for (j in seq_along(all)) {
       if (j > 1 && gaps) out <- c(out, gap)
       out <- c(out, paste0(tname(all[j]), paste0(mapply(tcell, vapply(cells, function(m) m[[j]]$main, ""), vapply(cells, function(m) m[[j]]$st, "")), collapse = ""), "\\\\"))
       if (aux != "none") out <- c(out, paste0(nmc(""), paste0(vapply(vapply(cells, function(m) m[[j]]$aux, ""), tcell, ""), collapse = ""), "\\\\"))
     }
-    out <- c(out, mid)
-    if (length(srows)) {
-      for (s in srows) out <- c(out, paste0(sl(s), paste0(vapply(vapply(ms, scell, "", s = s), tcell, ""), collapse = ""), "\\\\"))
-      out <- c(out, bot)
-    }
+    out <- c(out, sect(prefoot, if (length(srows)) mid))
+    for (s in srows) out <- c(out, paste0(sl(s), paste0(vapply(vapply(ms, scell, "", s = s), tcell, ""), collapse = ""), "\\\\"))
     texnote <- function(s) {
       s <- sub("^t statistics", "\\\\textit{t} statistics", s)
       if (star && identical(s, note2) && is.null(star_text)) {
@@ -335,7 +365,7 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
       }
       sprintf("\\multicolumn{%d}{l}{\\footnotesize %s}\\\\", n + 1, s)
     }
-    out <- c(out, vapply(nts, texnote, ""), "\\end{tabular}", if (is.null(title)) "}" else "\\end{table}")
+    out <- c(out, sect(postfoot, if (!fragment) c(bot, vapply(nts, texnote, ""), "\\end{tabular}", if (is.null(title)) "}" else "\\end{table}")))
   }
   out
 }
@@ -416,9 +446,9 @@ impl Session {
             ("title", 5),
             ("mtitles", 7),
             ("nomtitles", 9),
-            ("nonumbers", 9),
+            ("nonumbers", 8),
             ("nonotes", 7),
-            ("addnotes", 8),
+            ("addnotes", 7),
             ("scalars", 7),
             ("r2", 2),
             ("ar2", 3),
@@ -445,6 +475,13 @@ impl Session {
             ("starlevels", 10),
             ("mgroups", 7),
             ("cells", 5),
+            ("mlabels", 7),
+            ("prehead", 7),
+            ("posthead", 8),
+            ("prefoot", 7),
+            ("postfoot", 8),
+            ("fragment", 8),
+            ("alignment", 9),
         ];
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -456,6 +493,9 @@ impl Session {
                 "only one allowed of smcl, fixed, tab, csv, scsv, rtf, html, html5, tex, booktabs, \
                  md, or mmd (Stata: r(198))",
             ));
+        }
+        if c.parts.main.trim_start().starts_with("matrix(") {
+            return Err(no("esttab matrix() is not translated yet"));
         }
         // the models: names, else those eststo stored, else the active ones
         let mut names: Vec<String> = c
@@ -543,7 +583,7 @@ impl Session {
         }
         let extra = Extra::read(opts, kind)?;
         let words = |name: &str, m: usize| -> Vec<String> {
-            opts.arg(name, m)
+            opts.raw(name, m)
                 .map(|a| quoted_words(&a))
                 .unwrap_or_default()
         };
@@ -645,6 +685,11 @@ impl Session {
             stats.clear();
             statfmt.clear();
         }
+        if extra.mlabels != "NULL" && (opts.has("mtitles", 7) || opts.has("nomtitles", 9)) {
+            return Err(no(
+                "esttab with mlabels() and mtitles() or nomtitles together is not translated yet",
+            ));
+        }
         if kind == "csv" && opts.has("nogaps", 6) && !opts.has("nonotes", 7) {
             return Err(no(
                 "esttab using a .csv file with nogaps and its notes is not translated yet",
@@ -657,7 +702,7 @@ impl Session {
                     ("tex", 3),
                     ("label", 3),
                     ("varlabels", 8),
-                    ("nonumbers", 9),
+                    ("nonumbers", 8),
                     ("nomtitles", 9),
                     ("noobs", 5),
                     ("nonotes", 7),
@@ -697,7 +742,8 @@ impl Session {
              raw_stars = {}, label = {}, nobase = {}, keep = {}, drop = {}, order = {}, stats = c({}), statfmt = list({}), \
              sstats = {}, noobs = {}, obslast = {}, numbers = {}, mtitles = {}, nomtitles = {}, title = {}, notes = {}, \
              addnotes = {}, varlabels = {}, nogaps = {}, mgroups = {}, cells = {}, compress = {}, \
-             varwidth = {}, modelwidth = {}, format = {}, booktabs = {}, file = {}, replace = {}, from_eststo = {})",
+             varwidth = {}, modelwidth = {}, mlabels = {}, prehead = {}, posthead = {}, prefoot = {}, postfoot = {}, \
+             fragment = {}, alignment = {}, format = {}, booktabs = {}, file = {}, replace = {}, from_eststo = {})",
             names.iter().map(|n| r_text(n)).collect::<Vec<_>>().join(", "),
             r_text(aux),
             r_text(&fmt_arg("b", 1).filter(|f| !f.is_empty()).unwrap_or_else(|| "a3".into())),
@@ -714,12 +760,12 @@ impl Session {
             extra.sstats,
             super::stats::r_logical(opts.has("noobs", 5)),
             super::stats::r_logical(opts.has("obslast", 7)),
-            super::stats::r_logical(!opts.has("nonumbers", 9)),
+            super::stats::r_logical(!opts.has("nonumbers", 8)),
             if mtitles.is_empty() { "NULL".to_string() } else { list(mtitles) },
             super::stats::r_logical(opts.has("nomtitles", 9)),
             title.map(|t| r_text(&t)).unwrap_or_else(|| "NULL".into()),
             super::stats::r_logical(!opts.has("nonotes", 7)),
-            list(words("addnotes", 8)),
+            list(words("addnotes", 7)),
             extra.varlabels,
             super::stats::r_logical(opts.has("nogaps", 6)),
             extra.mgroups,
@@ -727,6 +773,13 @@ impl Session {
             super::stats::r_logical(opts.has("compress", 8)),
             num("varwidth", 8)?,
             num("modelwidth", 10)?,
+            extra.mlabels,
+            extra.heads[0],
+            extra.heads[1],
+            extra.heads[2],
+            extra.heads[3],
+            super::stats::r_logical(extra.fragment),
+            extra.alignment,
             r_text(kind),
             super::stats::r_logical(opts.has("booktabs", 8)),
             file.as_ref().map(|(f, _)| r_text(f)).unwrap_or_else(|| "NULL".into()),
@@ -746,13 +799,38 @@ impl Session {
     }
 }
 
-/// The options read into R lists: `stats()`, `varlabels()`, `mgroups()` and
-/// `cells()`, each `NULL` when not given.
+/// The options read into R values: `stats()`, `varlabels()`, `mgroups()`,
+/// `cells()`, `mlabels()`, `prehead()` `posthead()` `prefoot()` `postfoot()` and
+/// `alignment()`, each `NULL` when not given; `fragment`.
 struct Extra {
     sstats: String,
     varlabels: String,
     mgroups: String,
     cells: String,
+    mlabels: String,
+    heads: [String; 4],
+    fragment: bool,
+    alignment: String,
+}
+
+/// The quoted strings of prehead() and the like, one a line (empty ones kept);
+/// `None` when there is text outside the quotes.
+fn quoted_lines(text: &str) -> Option<Vec<String>> {
+    let mut out = Vec::new();
+    let mut cur: Option<String> = None;
+    for ch in text.chars() {
+        match (&mut cur, ch) {
+            (None, '"') => cur = Some(String::new()),
+            (Some(_), '"') => out.extend(cur.take()),
+            (Some(s), c) => s.push(c),
+            (None, c) if c.is_whitespace() => {}
+            (None, _) => return None,
+        }
+    }
+    if cur.is_some() || out.is_empty() {
+        return None;
+    }
+    Some(out)
 }
 
 /// A format esttab takes: a#, a number of decimals, or a Stata %w.d[feg][c].
@@ -872,6 +950,7 @@ impl Extra {
                 let labels = quoted_words(&p.main);
                 let mut pattern = Vec::new();
                 let (mut prefix, mut suffix, mut span) = (None, None, false);
+                let mut erepeat = None;
                 for o in crate::lang::syntax::options(&p.options) {
                     let inner = o.raw.clone().unwrap_or_default();
                     if o.is("pattern", 3) {
@@ -891,6 +970,8 @@ impl Extra {
                         suffix = Some(inner);
                     } else if o.is("span", 4) && o.raw.is_none() {
                         span = true;
+                    } else if o.is("erepeat", 7) && o.raw.is_some() {
+                        erepeat = Some(inner);
                     } else {
                         return Err(no(format!(
                             "esttab, mgroups(..., {}) is not translated yet",
@@ -913,15 +994,22 @@ impl Extra {
                         "esttab, mgroups(..., span) in a .csv file is not translated yet",
                     ));
                 }
+                // erepeat() was checked on the screen, in .txt and in .tex
+                if erepeat.is_some() && kind == "csv" {
+                    return Err(no(
+                        "esttab, mgroups(..., erepeat()) in a .csv file is not translated yet",
+                    ));
+                }
                 let text =
                     |s: Option<String>| s.map(|s| r_text(&s)).unwrap_or_else(|| "NULL".into());
                 format!(
-                    "list(labels = {}, pattern = as.numeric({}), prefix = {}, suffix = {}, span = {})",
+                    "list(labels = {}, pattern = as.numeric({}), prefix = {}, suffix = {}, span = {}, erepeat = {})",
                     list(&labels),
                     list(&pattern),
                     text(prefix),
                     text(suffix),
-                    super::stats::r_logical(span)
+                    super::stats::r_logical(span),
+                    text(erepeat)
                 )
             }
         };
@@ -967,11 +1055,136 @@ impl Extra {
                 format!("list({})", els.join(", "))
             }
         };
+        // mlabels(labels | none [, span prefix() suffix() depvars]): notitles and nonumbers
+        // there change nothing Stata prints
+        let mlabels = match opts.raw("mlabels", 7) {
+            None => "NULL".to_string(),
+            Some(a) => {
+                plain("mlabels()", &a)?;
+                let p = crate::lang::syntax::parts(&a);
+                let none = p.main.trim() == "none";
+                let labels = if none {
+                    Vec::new()
+                } else {
+                    quoted_words(&p.main)
+                };
+                let (mut prefix, mut suffix, mut span, mut depvars) = (None, None, false, false);
+                for o in crate::lang::syntax::options(&p.options) {
+                    let inner = o.raw.clone().unwrap_or_default();
+                    if o.is("prefix", 6) && o.raw.is_some() {
+                        prefix = Some(inner);
+                    } else if o.is("suffix", 6) && o.raw.is_some() {
+                        suffix = Some(inner);
+                    } else if o.is("span", 4) && o.raw.is_none() {
+                        span = true;
+                    } else if o.is("depvars", 7) && o.raw.is_none() {
+                        depvars = true;
+                    } else if (o.is("notitles", 4) || o.is("nonumbers", 5)) && o.raw.is_none() {
+                    } else {
+                        return Err(no(format!(
+                            "esttab, mlabels(..., {}) is not translated yet",
+                            o.name
+                        )));
+                    }
+                }
+                if none && !p.options.trim().is_empty() {
+                    return Err(no(
+                        "esttab, mlabels(none, ...) with suboptions is not translated yet",
+                    ));
+                }
+                if labels.is_empty() && !none && !depvars {
+                    return Err(no("esttab, mlabels() without labels is not translated yet"));
+                }
+                // as checked against Stata: prefix() and suffix() in .tex, @span with span
+                if prefix.is_some() || suffix.is_some() {
+                    let at = [&prefix, &suffix]
+                        .iter()
+                        .any(|s| s.as_deref().is_some_and(|s| s.contains('@')));
+                    if kind != "tex" || (at && !span) {
+                        return Err(no(
+                            "esttab, mlabels(..., prefix() suffix()) is translated in .tex (@span with span)",
+                        ));
+                    }
+                }
+                if span && kind == "csv" {
+                    return Err(no(
+                        "esttab, mlabels(..., span) in a .csv file is not translated yet",
+                    ));
+                }
+                let text =
+                    |s: Option<String>| s.map(|s| r_text(&s)).unwrap_or_else(|| "NULL".into());
+                format!(
+                    "list(labels = {}, none = {}, prefix = {}, suffix = {}, span = {})",
+                    list(&labels),
+                    super::stats::r_logical(none),
+                    text(prefix),
+                    text(suffix),
+                    super::stats::r_logical(span)
+                )
+            }
+        };
+        // prehead() posthead() prefoot() postfoot(): quoted lines in place of a section;
+        // @title in prehead() is the title
+        let mut heads: [String; 4] = Default::default();
+        for (slot, (name, m)) in heads.iter_mut().zip([
+            ("prehead", 7),
+            ("posthead", 8),
+            ("prefoot", 7),
+            ("postfoot", 8),
+        ]) {
+            *slot = match opts.raw(name, m) {
+                None => "NULL".to_string(),
+                Some(a) => {
+                    plain(&format!("{name}()"), &a)?;
+                    let Some(lines) = quoted_lines(&a) else {
+                        return Err(no(format!(
+                            "esttab, {name}() of text outside quotes is not translated yet"
+                        )));
+                    };
+                    let mut all = lines.join("\n");
+                    if name == "prehead" {
+                        all = all.replace("@title", "");
+                    }
+                    if all.contains('@') {
+                        return Err(no(format!(
+                            "esttab, {name}() with @ substitutions (other than @title in prehead()) is not translated yet"
+                        )));
+                    }
+                    list(&lines)
+                }
+            };
+        }
+        let fragment = opts.has("fragment", 8);
+        if fragment {
+            if kind != "tex" {
+                return Err(no("esttab, fragment outside .tex is not translated yet"));
+            }
+            if opts.has("prehead", 7) || opts.has("postfoot", 8) {
+                return Err(no(
+                    "esttab, fragment with prehead() or postfoot() is not translated yet",
+                ));
+            }
+        }
+        // alignment() sets the columns of .tex's tabular; elsewhere Stata leaves it aside
+        let alignment = match opts.arg("alignment", 9) {
+            Some(a) if kind == "tex" => {
+                let a = a.trim();
+                if a.is_empty() || a.contains(['"', '`', '\'']) {
+                    return Err(no(format!("esttab, alignment({a}) is not translated yet")));
+                }
+                r_text(a)
+            }
+            _ => "NULL".to_string(),
+        };
         Ok(Extra {
             sstats,
             varlabels,
             mgroups,
             cells,
+            mlabels,
+            heads,
+            fragment,
+            alignment,
         })
     }
 }

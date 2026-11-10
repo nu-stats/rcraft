@@ -1272,6 +1272,13 @@ impl Opts<'_> {
     fn arg(&self, full: &str, min: usize) -> Option<String> {
         self.0.iter().find(|o| o.is(full, min)).map(Opt::arg)
     }
+    /// The text in an option's parentheses as typed, its quotes kept.
+    fn raw(&self, full: &str, min: usize) -> Option<String> {
+        self.0
+            .iter()
+            .find(|o| o.is(full, min))
+            .and_then(|o| o.raw.clone())
+    }
     /// Options other than those listed (to refuse what is not translated).
     fn other(&self, known: &[(&str, usize)]) -> Option<String> {
         self.0

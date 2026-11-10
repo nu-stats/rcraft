@@ -74,3 +74,62 @@ the same probes was the same as Stata's in all 50 files (.tex, .csv, .txt) and o
   (the numbers then in the first column, the others blank), `label`.
 - Screen and .txt: columns of 1 + 12 (9 with compress), the number over the first, a blank title row; names cut.
 - `esttab` of estpost's results without `cells()`, and cells() of other models, are not translated yet.
+
+# prehead() posthead() prefoot() postfoot(), fragment, erepeat(), mlabels(), alignment() (2026-11-10)
+
+Observed on Stata 19 SE with made-up data (probes p5, p6 and p7 in the session scratchpad, `esttab3`);
+estout's code and help were not read. RCraft's output of the probes was the same as Stata's in all 43
+files and on the screen.
+
+## The table's parts
+
+- A table is: prehead, the header rows, posthead, the coefficients, prefoot, the statistics, postfoot.
+  Each of `prehead()` `posthead()` `prefoot()` `postfoot()` puts its quoted lines in place of that part,
+  as typed (no `_` escaping in .tex), on the screen, in .txt, .csv and .tex alike.
+- The parts by default:
+  - Screen and .txt: prehead the title and the rule; posthead the rule; prefoot the rule when there are
+    statistics, else nothing; postfoot the rule and the notes. On the screen a blank line comes first
+    even with `prehead()`.
+  - .csv: prehead, posthead and prefoot (with statistics) a blank line (none with nogaps); postfoot a
+    blank line and the notes.
+  - .tex: prehead `{` (or `\begin{table}[htbp]\centering`), `\def\sym...`, `\caption{}`, `\begin{tabular}`
+    and the top rule; posthead and prefoot (with statistics) `\hline` (`\midrule`); postfoot the bottom
+    rule, the notes, `\end{tabular}` and `}` (or `\end{table}`). So `noobs` gives the bottom rule right
+    after the coefficients, not `\hline` (a difference fixed here).
+- `@title` in `prehead()` is the title; a title with `prehead()` shows only through it.
+- `fragment` in .tex: no prehead and no postfoot (nor the title or the notes).
+
+## mgroups(..., span erepeat(text))
+
+- With span, after the group row (after its `\` in .tex): `text` for each group, `@span` its columns
+  (`2-3`, the first model is column 2): `\cmidrule(lr){2-3}\cmidrule(lr){4-5}`. Without span it is left
+  out.
+
+## mlabels(labels | none [, span prefix() suffix() depvars notitles nonumbers])
+
+- The labels in place of the dependent variables; fewer labels than models: the rest show the models'
+  names (`m2`), prefix() and suffix() around them too (`<m2>`). `none`: no row. `depvars` alone: the
+  dependent variables. `noti`, `nonum` change nothing printed.
+- Without span the row is set as the coefficients are: right-aligned in the model's width, the stars'
+  blank after (`&           A         `), and in .tex the numbers above too
+  (`\multicolumn{1}{c}{(1)}` and the stars' blank, 9 spaces). prefix() and suffix() go around the
+  label (`<A>`), `@span` 1.
+- With span: from the left, padded to the model's width (.tex: modelwidth + stars, `A` + 20 spaces;
+  screen and .txt: a space, then 15, for the numbers row too).
+
+## alignment(spec)
+
+- .tex only: `\begin{tabular}{l*{2}{D{.}{.}{-1}}}`; the cells do not change. On the screen, in .txt and
+  .csv it is left aside.
+
+## addnotes()
+
+- With the notes, between the first note and the stars': `t statistics in parentheses`, the added notes,
+  `* p<0.05, ...`, on the screen, in .txt, .csv and .tex (only `nonotes addnotes()` had been seen before).
+- `nonumber` and `addnote` are accepted as written by YFBPT6.
+
+## Not translated yet
+
+- `fragment` with `prehead()` or `postfoot()`; `@` substitutions other than `@title` in `prehead()`;
+  `mlabels()` with `mtitles()` or `nomtitles`, with `depvars` and `label`, `span` in .csv, `prefix()`
+  outside .tex; `mgroups(..., erepeat())` in .csv; more groups than mgroups' labels.
