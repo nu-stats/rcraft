@@ -1884,6 +1884,44 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "frame",
+        about: "Several datasets at once (frame create, change, drop, pwf)",
+        points: &[
+            p(
+                "In R",
+                "Each frame's data is kept in the list stata_frames while another is current; \
+                 frame change puts the current one there and takes the other out, so each keeps \
+                 its own data, labels, settings and pending preserve, and e() stays, as in Stata \
+                 19. A frame that is \
+                 there already is r(110), one that is not r(111), dropping the current one r(119), \
+                 each stopping in R so capture gives Stata's _rc.",
+            ),
+            p(
+                "Not yet",
+                "frame name: command, frame copy, put, rename, dir, frlink and frget are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "which",
+        about: "Whether a command is installed (capture which, as do-files check their add-ons)",
+        points: &[
+            p(
+                "In R",
+                "capture which name (or quietly) sets _rc as Stata 19 does, 0 when found and 111 \
+                 when not, printing nothing. Found means RCraft translates the command (the estout \
+                 package for its esttab, eststo, estadd and estpost); an add-on it does not \
+                 translate counts as not installed, so a do-file's own install step runs as on a \
+                 machine without it.",
+            ),
+            p(
+                "Not yet",
+                "which without capture or quietly (it lists the command's file and its version \
+                 lines), several names and options are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "estpost",
         about: "Posts summary statistics for esttab (estpost summarize, the SSC estout package)",
         points: &[

@@ -104,6 +104,7 @@ pub const COMMANDS: &[&str] = &[
     "foreach",
     "format",
     "forvalues",
+    "frame",
     "fre",
     "frmttable",
     "fvset",
@@ -204,6 +205,7 @@ pub const COMMANDS: &[&str] = &[
     "unab",
     "use",
     "version",
+    "which",
     "while",
     "winsor",
     "xpose",
@@ -730,6 +732,7 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("ereturn", &["list"]),
     ("estadd", &["local", "scalar"]),
     ("estpost", &["summarize"]),
+    ("frame", &["change", "create", "drop", "pwf"]),
     (
         "estat",
         &[

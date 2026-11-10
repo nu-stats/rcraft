@@ -3847,3 +3847,16 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   table_robreg.tex, table_robreg1.tex and table_valreg.tex written, byte for byte as Stata 19 wrote them
   from the same data. Its four `alignment()` tables now stop at `sfmt()` and `cells()` of clogit models;
   `esttab matrix()` (2) is not translated yet.
+
+## capture which, frame create/change/drop/pwf, set obs's message, 2026-11-10
+
+- Observed in Stata 19 (`plan/stata/which-frames.md`; corpus `which.do`, `frames.do`):
+  - `capture which name` sets _rc (0 found, 111 not) and prints nothing; RCraft answers for itself
+    (found when it translates the command, estout for its esttab, eststo, estadd and estpost).
+  - `frame create`, `change`, `drop` and `pwf`: each frame its own data, labels and settings, e()
+    shared, _rc 110, 111 and 119 as Stata gives them; preserve is each frame's own.
+  - `set obs` prints "Number of observations (_N) was 0, now 5." (commas from 1,000), which RCraft had
+    left out; fewer than there are is r(198).
+- preserve and restore now keep the variables' storage types too (they had kept the rest).
+- ZNMIXH: 97 lines refused (136 before this round, 139 before the esttab work); its package check
+  and its frame blocks run; 26 of 30 tables written, all byte for byte as Stata's.

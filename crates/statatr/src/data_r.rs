@@ -810,10 +810,12 @@ const EXPAND_HELPER: &str = r#"stata_expand <- function(d, n, gen = NULL) {
 
 /// `set obs n`: the data made longer to n rows, the new ones missing (`""`
 /// in a string variable); with no data, n rows and no variables.
-const SET_OBS_HELPER: &str = r#"stata_set_obs <- function(d, n) {
+const SET_OBS_HELPER: &str = r#"stata_set_obs <- function(d, n, show = FALSE) {
+  old <- if (is.null(d)) 0 else nrow(d)
+  if (n < old) stop("observation number out of range (Stata: r(198))", call. = FALSE)
+  # set obs says so, as Stata 19 does
+  if (show) cat("Number of observations (_N) was ", formatC(old, format = "d", big.mark = ","), ", now ", formatC(n, format = "d", big.mark = ","), ".\n", sep = "")
   if (is.null(d)) return(structure(list(), names = character(0), row.names = c(NA, -as.integer(n)), class = "data.frame"))
-  old <- nrow(d)
-  if (n < old) stop("set obs ", n, ": the data has ", old, " rows, and set obs does not drop any")
   if (n == old) return(d)
   d <- d[c(seq_len(old), rep(NA_integer_, n - old)), , drop = FALSE]
   rownames(d) <- NULL
@@ -1176,6 +1178,14 @@ struct Session {
     ssc: Vec<String>,
     /// What `preserve` kept, for `restore`.
     preserved: Option<Box<Preserved>>,
+    /// The frames other than the current one (`frame create`), each with what
+    /// the translator follows of its data, kept in R in `stata_frames`.
+    frames: BTreeMap<String, Preserved>,
+    /// What `preserve` kept in a frame other than the current one (preserve
+    /// is a frame's own), in R in `stata_frames_preserved`.
+    frame_preserved: BTreeMap<String, Box<Preserved>>,
+    /// The current frame's name, `None` for `default`.
+    frame: Option<String>,
     /// The command being translated asked whether it is quiet, so it hides
     /// its own output.
     quiet_asked: std::cell::Cell<bool>,
@@ -1219,6 +1229,7 @@ struct Preserved {
     data: Option<String>,
     file: Option<String>,
     kinds: BTreeMap<String, Kind>,
+    storage: BTreeMap<String, Storage>,
     fv_base: BTreeMap<String, String>,
     label_sets: BTreeMap<String, Vec<(f64, String)>>,
     panel: Option<String>,
@@ -2209,6 +2220,8 @@ impl Session {
             "eststo" => self.eststo(c, &opts, out),
             "esttab" => self.esttab(c, &opts, out),
             "estpost" => self.estpost(c, &opts, out),
+            "which" => self.which(c, &opts, out),
+            "frame" => self.frame_cmd(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),
@@ -2403,6 +2416,44 @@ impl Session {
     fn quiet(&self, c: &Command) -> bool {
         self.quiet_asked.set(true);
         silent(c)
+    }
+
+    /// `capture which name` (or quietly): Stata prints nothing and sets _rc, 0 when
+    /// the command is found and 111 when not (a program defined in the do-file is
+    /// not, as which looks for files). RCraft answers for itself: found when it
+    /// translates the command, the estout package for its esttab, eststo, estadd
+    /// and estpost; an add-on it does not translate counts as not installed.
+    fn which(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[]) {
+            return Err(no(format!(
+                "which with the option {o} is not translated yet"
+            )));
+        }
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let [name] = words.as_slice() else {
+            return Err(no("which of other than one command is not translated yet"));
+        };
+        if !silent(c) {
+            return Err(no(
+                "which without capture or quietly is not translated (it lists the command's file)",
+            ));
+        }
+        let found = name
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+            && (crate::complete::COMMANDS.contains(name) || *name == "estout");
+        out.line(if found {
+            "invisible(NULL)".to_string()
+        } else {
+            format!(
+                "stop({}, call. = FALSE)",
+                r_text(&format!(
+                    "command {name} not found as either built-in or ado-file (Stata: r(111))"
+                ))
+            )
+        });
+        out.caveat("which: a command is found when RCraft translates it (an add-on it does not translate counts as not installed)");
+        Ok(())
     }
 
     // ---------------- files ----------------
@@ -3459,10 +3510,17 @@ impl Session {
             None => "stata_preserved <- NULL".into(),
         });
         out.caveat("if the do-file ends before restore, Stata puts the preserved data back; R keeps the data as it is then");
-        self.preserved = Some(Box::new(Preserved {
+        self.preserved = Some(Box::new(self.data_state()));
+        Ok(())
+    }
+
+    /// What the translator follows of the data in memory.
+    fn data_state(&self) -> Preserved {
+        Preserved {
             data: self.data.clone(),
             file: self.file.clone(),
             kinds: self.kinds.clone(),
+            storage: self.storage.clone(),
             fv_base: self.fv_base.clone(),
             label_sets: self.label_sets.clone(),
             panel: self.panel.clone(),
@@ -3470,7 +3528,151 @@ impl Session {
             ts_delta: self.ts_delta.clone(),
             ts_unknown: self.ts_unknown,
             stset: self.stset.clone(),
-        }));
+        }
+    }
+
+    fn set_data_state(&mut self, p: Preserved) {
+        self.data = p.data;
+        self.file = p.file;
+        self.kinds = p.kinds;
+        self.storage = p.storage;
+        self.fv_base = p.fv_base;
+        self.label_sets = p.label_sets;
+        self.panel = p.panel;
+        self.panel_time = p.panel_time;
+        self.ts_delta = p.ts_delta;
+        self.ts_unknown = p.ts_unknown;
+        self.stset = p.stset;
+        // the rows may not be the ones the last model was fitted on
+        self.esample = false;
+        self.changed_since_fit = true;
+    }
+
+    /// `frame create|change|drop name` and `frame pwf`, as Stata 19 does them:
+    /// each frame keeps its own data, e() stays; a frame that is there already
+    /// is r(110), one that is not r(111), dropping the current one r(119). Each
+    /// error stops in R, so `capture` gives Stata's _rc.
+    fn frame_cmd(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[]) {
+            return Err(no(format!(
+                "frame with the option {o} is not translated yet"
+            )));
+        }
+        let (sub, rest) = first_word(&c.parts.main);
+        let words: Vec<&str> = rest.split_whitespace().collect();
+        let current = self.frame.clone().unwrap_or_else(|| "default".into());
+        let stop = |msg: String| format!("stop({}, call. = FALSE)", r_text(&msg));
+        if sub == "pwf" {
+            if !words.is_empty() {
+                return Err(no(
+                    "frame pwf takes no words after it (Stata: invalid syntax)",
+                ));
+            }
+            if !self.quiet(c) {
+                out.line(format!(
+                    "cat({})",
+                    r_text(&format!("  (current frame is {current})\n"))
+                ));
+            }
+            return Ok(());
+        }
+        let [name] = words.as_slice() else {
+            return Err(no(format!(
+                "frame {sub} with other than one frame name is not translated yet"
+            )));
+        };
+        let name = name.to_string();
+        if !is_name(&name) {
+            return Err(no(format!(
+                "frame {sub} {name}: {name} is not a frame name"
+            )));
+        }
+        let exists = name == current || self.frames.contains_key(&name);
+        match sub {
+            "create" => {
+                if exists {
+                    out.line(stop(format!(
+                        "frame {name} already defined (Stata: r(110))"
+                    )));
+                } else {
+                    out.line("invisible(NULL)");
+                    self.frames.insert(name, Preserved::default());
+                }
+            }
+            "change" => {
+                if !exists {
+                    out.line(stop(format!("frame {name} not found (Stata: r(111))")));
+                } else if name == current {
+                    out.line("invisible(NULL)");
+                } else {
+                    let mut code =
+                        vec!["if (!exists(\"stata_frames\")) stata_frames <- list()".to_string()];
+                    let now = self.data_state();
+                    if let Some(d) = &now.data {
+                        code.push(format!("stata_frames[[{}]] <- {d}", r_text(&current)));
+                        code.push(format!("rm({d})"));
+                    }
+                    // preserve is a frame's own (Stata 19): it goes with it
+                    if let Some(p) = self.preserved.take() {
+                        code.push("if (!exists(\"stata_frames_preserved\")) stata_frames_preserved <- list()".into());
+                        code.push(format!(
+                            "stata_frames_preserved[[{}]] <- stata_preserved",
+                            r_text(&current)
+                        ));
+                        code.push("rm(stata_preserved)".into());
+                        self.frame_preserved.insert(current.clone(), p);
+                    }
+                    let next = self.frames.remove(&name).unwrap_or_default();
+                    if let Some(d) = &next.data {
+                        code.push(format!("{d} <- stata_frames[[{}]]", r_text(&name)));
+                        code.push(format!("stata_frames[[{}]] <- NULL", r_text(&name)));
+                    }
+                    if let Some(p) = self.frame_preserved.remove(&name) {
+                        code.push(format!(
+                            "stata_preserved <- stata_frames_preserved[[{}]]",
+                            r_text(&name)
+                        ));
+                        code.push(format!(
+                            "stata_frames_preserved[[{}]] <- NULL",
+                            r_text(&name)
+                        ));
+                        self.preserved = Some(p);
+                    }
+                    out.line(code.join("\n"));
+                    self.frames.insert(current, now);
+                    self.frame = (name != "default").then_some(name);
+                    self.set_data_state(next);
+                }
+            }
+            "drop" => {
+                if name == current {
+                    out.line(stop(format!(
+                        "frame {name} is the current frame and cannot be dropped (Stata: r(119))"
+                    )));
+                } else if let Some(p) = self.frames.remove(&name) {
+                    let mut code = Vec::new();
+                    if p.data.is_some() {
+                        code.push(format!("stata_frames[[{}]] <- NULL", r_text(&name)));
+                    }
+                    if self.frame_preserved.remove(&name).is_some() {
+                        code.push(format!(
+                            "stata_frames_preserved[[{}]] <- NULL",
+                            r_text(&name)
+                        ));
+                    }
+                    out.line(if code.is_empty() {
+                        "invisible(NULL)".to_string()
+                    } else {
+                        code.join("\n")
+                    });
+                } else {
+                    out.line(stop(format!("frame {name} not found (Stata: r(111))")));
+                }
+            }
+            _ => {
+                return Err(no(format!("frame {sub} is not translated yet")));
+            }
+        }
         Ok(())
     }
 
@@ -3508,6 +3710,7 @@ impl Session {
         self.data = p.data;
         self.file = p.file;
         self.kinds = p.kinds;
+        self.storage = p.storage;
         self.fv_base = p.fv_base;
         self.label_sets = p.label_sets;
         self.panel = p.panel;
@@ -3533,10 +3736,11 @@ impl Session {
                     ))
                 })?;
                 self.helpers.insert("stata_set_obs");
+                let show = if self.quiet(c) { "" } else { ", show = TRUE" };
                 match self.data.clone() {
-                    Some(d) => out.line(format!("{d} <- stata_set_obs({d}, {n})")),
+                    Some(d) => out.line(format!("{d} <- stata_set_obs({d}, {n}{show})")),
                     None => {
-                        out.line(format!("data <- stata_set_obs(NULL, {n})"));
+                        out.line(format!("data <- stata_set_obs(NULL, {n}{show})"));
                         self.data = Some("data".into());
                         self.file = None;
                         self.kinds.clear();
@@ -4527,8 +4731,8 @@ predict p");
 set obs 3
 generate x = _n
 set obs 5");
-        assert_eq!(out[1], "data <- stata_set_obs(NULL, 3)");
-        assert_eq!(out[3], "data <- stata_set_obs(data, 5)");
+        assert_eq!(out[1], "data <- stata_set_obs(NULL, 3, show = TRUE)");
+        assert_eq!(out[3], "data <- stata_set_obs(data, 5, show = TRUE)");
         assert!(r("set obs many")[0].starts_with("NOT: set obs many"));
         let out = r("use s
 capture drop nosuch
@@ -4640,7 +4844,7 @@ restore, not");
             .collect();
         assert_eq!(hidden, [true, true, false, true, false, false], "{out:?}");
         // a line that changes the data and is not translated: the data after it is not known
-        let out = r("use a\nframe change other\ndisplay _N\nuse b\ndisplay _N");
+        let out = r("use a\nframe copy default other\ndisplay _N\nuse b\ndisplay _N");
         assert!(
             out[2].starts_with("NOT: the data in memory is not known here"),
             "{out:?}"
