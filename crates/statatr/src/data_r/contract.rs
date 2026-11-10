@@ -20,7 +20,7 @@ use crate::lang::syntax::WeightKind;
 ///   would drop; no rows is r(2000); the data are then left as they were;
 /// - the varlist's labels, value labels and formats stay; the data are
 ///   sorted by the varlist.
-pub(super) const CONTRACT_HELPER: &str = r#"stata_contract <- function(d, vars, keep = NULL, w = NULL, freq = "_freq", cfreq = NULL, percent = NULL, cpercent = NULL, float = FALSE, format = "%8.2f", zero = FALSE, nomiss = FALSE) {
+pub(super) const CONTRACT_HELPER: &str = r#"stata_contract <- function(d, vars, keep = NULL, w = NULL, freq = "_freq", cfreq = NULL, percent = NULL, cpercent = NULL, float = FALSE, format = "%8.2f", zero = FALSE, nomiss = FALSE, tags = FALSE) {
   for (v in vars) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
   for (v in c(freq, cfreq, percent, cpercent)) if (v %in% names(d)) stop("variable ", v, " already defined (Stata: r(110))", call. = FALSE)
   use <- if (is.null(keep)) rep(TRUE, nrow(d)) else (!is.na(keep) & keep)
@@ -34,7 +34,13 @@ pub(super) const CONTRACT_HELPER: &str = r#"stata_contract <- function(d, vars, 
   if (nomiss) for (x in bare) use <- use & !is.na(x) & !(is.character(x) & x %in% "")
   if (!any(use)) stop("no observations (Stata: r(2000))", call. = FALSE)
   rows <- which(use)
-  b <- as.data.frame(lapply(bare, `[`, rows), stringsAsFactors = FALSE)
+  # with tags each of . and .a to .z is a category of its own: their places
+  # (stata_mv) are keys beside the values
+  mv <- lapply(bare, function(x) if (tags && is.double(x) && anyNA(x)) stata_mv(x))
+  if (tags && zero && any(!vapply(mv, is.null, TRUE))) stop("contract, zero with .a to .z is not translated yet", call. = FALSE)
+  kb <- c(bare, Filter(Negate(is.null), mv))
+  names(kb) <- paste0("k", seq_along(kb))
+  b <- as.data.frame(lapply(kb, `[`, rows), stringsAsFactors = FALSE)
   wt <- if (is.null(w)) rep(1, length(rows)) else w[rows]
   g <- vctrs::vec_group_id(b)
   first <- rows[!duplicated(g)]
@@ -52,7 +58,11 @@ pub(super) const CONTRACT_HELPER: &str = r#"stata_contract <- function(d, vars, 
     pick <- as.data.frame(lapply(vars, function(v) first))
   }
   names(pick) <- vars
-  ord <- do.call(order, c(lapply(seq_along(vars), function(j) bare[[j]][pick[[j]]]), list(na.last = TRUE, method = "radix")))
+  by <- unlist(lapply(seq_along(vars), function(j) {
+    x <- bare[[j]][pick[[j]]]
+    if (is.null(mv[[j]])) list(x) else list(x, mv[[j]][pick[[j]]])
+  }), recursive = FALSE)
+  ord <- do.call(order, c(by, list(na.last = TRUE, method = "radix")))
   pick <- pick[ord, , drop = FALSE]
   f <- f[ord]
   out <- list()
@@ -187,8 +197,10 @@ impl Session {
             Some(n) => r_text(n),
             None => "NULL".into(),
         };
+        // . and .a to .z each a category of its own (Stata 19)
+        let tags = if self.mv_on(out) { ", tags = TRUE" } else { "" };
         out.line(format!(
-            "{d} <- stata_contract({d}, c({}), keep = {}, w = {}, freq = {}, cfreq = {}, percent = {}, cpercent = {}, float = {}, format = {}, zero = {}, nomiss = {})",
+            "{d} <- stata_contract({d}, c({}), keep = {}, w = {}, freq = {}, cfreq = {}, percent = {}, cpercent = {}, float = {}, format = {}, zero = {}, nomiss = {}{tags})",
             vars.iter().map(|v| r_text(v)).collect::<Vec<_>>().join(", "),
             with(keep),
             with(w),

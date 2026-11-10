@@ -1,0 +1,28 @@
+* Stata 19.0's results for extended_missing_groups.do, recorded by cargo xtask stata-record
+@ n 62
+@ nn 72
+@ s 3360
+@ first 10
+@ s2 3360
+@ m2 1680
+@ mx2 240
+@ dt 36
+@ by_last 2 120
+@ dup_drop 4
+@ dup_ids 10
+@ lv 1
+@ lvm 4
+@ lv1 2
+@ lv2 2
+@ lv3 2
+@ lv4 2
+@ col_n 4
+@ col_g 9021
+@ col_x 960
+@ con_n 4
+@ con_f 20
+@ m11 5
+@ m11_y 4000
+@ m1 9
+@ m1_matched 8
+@ m1_y 9600

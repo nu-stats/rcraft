@@ -3769,3 +3769,64 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   `esttab, tex cells()` tables as Stata's log. ZNMIXH: 12 more of its .tex tables written, each the same
   byte for byte as the package's own (TableF11 too, its pattern() one longer than the models); the rest
   wait on lines before them, mostly comparisons with extended missing values (`== .d`).
+## Extended missing values .a to .z, 2026-11-09
+
+- Comparisons with `.` and `.a` to `.z` go by Stata's order (numbers < `.` < `.a` < ... < `.z`),
+  once the data may hold them (a `.dta` read by `use`, `merge` or `append`, or one stored by
+  `input`, an expression or `recode`): `stata_mv()` gives a value's place, `stata_compare()`
+  compares two values that may both be missing, `inlist()` with a missing value goes value by
+  value. `x < .` and `x >= .` stay `!is.na(x)` and `is.na(x)`; without tags the R is as before.
+- R keeps haven's tagged NAs; as in Stata 19, copies, rows of a variable, `cond()`, `float()`,
+  `int()`, `round()`, `floor()` and `ceil()` keep them, and arithmetic and other functions give
+  `.` (`stata_untag()`). `stata_float()` keeps a tag; `.d` as a value is `haven::tagged_na("d")`.
+  `recode` by a missing value takes that one only, `(.a/.w = 5)` a range of them, `(1 = .a)` stores
+  one. Observed on made-up data (`plan/stata/extended-missing.md`); corpus `extended_missing.do`,
+  76 results, all Stata 19's exactly; `cond`, `inlist`, `int`, `round`, `floor`, `ceil` Verified.
+- ZNMIXH: `replace church_survey_b=. if church_survey_b==.d | church_survey_b==.w` and the chain
+  after it run: 112,167 lines ran (111,553), 163 refused (775), 13 stopped in R (15, the two gone
+  were after it); 926 of Stata's 947 `@E` values printed (667), every one as Stata's; Table2,
+  TableI1 and TableI2 byte for byte. What is left is mostly `esttab, stats()` (21), `which`,
+  `frame` and `graph export`.
+- Not yet then: `egen` row functions, `collapse (max)/(min)/(first)`, `sort`, `tabulate, missing`
+  and `fre` treated `.a` to `.z` as one NA, and `+x` was accepted; done 2026-11-10 (below).
+
+## Extended missing values in commands, 2026-11-10
+
+- Where the data may hold `.a` to `.z`, these commands now treat them as Stata 19 does
+  (observed on made-up data, `plan/stata/extended-missing.md`):
+  - `sort` and `gsort` order `. .a ... .z` after the numbers; `gsort -x` puts them last in
+    descending order, `mfirst` first.
+  - `tabulate`, `tab1` and `tab2` with `missing`: a row and column for each, a labelled one
+    shown by its label. `tabulate, generate()` makes an indicator for each.
+  - `fre`: a Missing row for each and their Total. It no longer refuses after one was stored.
+  - `egen group(), missing` and `tag(), missing`: each missing value is a group of its own.
+  - `egen rowmax()` and the new `rowfirst()`: a row with no number gives the last variable's
+    value. `rowlast()` (new) gives the first's; `rowmin()` gives `.`.
+  - `collapse (max)`, `(min)`, `(firstnm)` and `(lastnm)` of a group with no number give its
+    largest, smallest, first and last missing value.
+  - `recode` ranges from a number to a missing value go by Stata's order (`(1/.b = 9)`). From a
+    missing value to a number they change nothing.
+- `+x`, `2^+x`, `+(x)` are refused as Stata refuses them, r(198) and r(133). A `+` goes only
+  before a number written out.
+- Three bugs fixed along the way, missing values or not:
+  - `egen tag(), missing` gave NA past the first row.
+  - `fre` printed a grand Total when no value was valid.
+  - `fre` did not pad values to one width under a label set (`1  one`, `10 ten`).
+- Corpus `extended_missing_commands.do`: 75 results, all Stata 19's exactly. Verified for
+  `collapse`, `egen`, `fre`, `gsort`, `input`, `recode`, `sort`, `tab1`, `tab2` and `tabulate`.
+  The `tabulate` and `fre` tables were also compared with Stata's log line by line.
+- Not yet then: `by` groups, `collapse, by()`, `merge` keys, `duplicates`, `levelsof` and
+  `contract`; done the same day (below).
+
+## Extended missing values as groups, 2026-11-10
+
+- Where the data may hold `.a` to `.z`, each of `.`, `.a`, ... `.z` is a group of its own, in
+  Stata's order, as Stata 19 does (`plan/stata/extended-missing.md`): `by` and `bysort` (grouped
+  steps and the by-each loop of statistics and models, its `-> g = .a` headings),
+  `egen ..., by()`, `collapse, by()`, `duplicates drop/tag/report`, `levelsof, missing`,
+  `contract` and `merge` keys (`.a` matches `.a`; a `.z` only in the using data is not matched).
+- Corpus `extended_missing_groups.do`: 27 results, all Stata 19's exactly. Verified for
+  `duplicates` (new), and for `collapse`, `contract`, `egen`, `input`, `levelsof` and `merge`
+  with these values.
+- Not yet: `contract, zero` with `.a` to `.z` stops with a message. `isid, missok`,
+  `egen rank()` and `xtile` were not observed with them.

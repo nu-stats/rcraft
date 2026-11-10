@@ -708,8 +708,59 @@ const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ..., guess
 }"#;
 
 /// R's version of Stata's float storage: a double rounded to the nearest
-/// single-precision value, missing kept missing.
-const FLOAT_HELPER: &str = "stata_float <- function(x) {\n  y <- readBin(writeBin(as.numeric(x), raw(), size = 4), \"double\", size = 4, n = length(x))\n  y[is.na(x) | !is.finite(y)] <- NA\n  y\n}";
+/// single-precision value, missing kept as it is (`.a` to `.z` too, as a
+/// copy into a float keeps them in Stata 19); too large for a float is `.`.
+const FLOAT_HELPER: &str = "stata_float <- function(x) {\n  x <- as.numeric(x)\n  y <- readBin(writeBin(x, raw(), size = 4), \"double\", size = 4, n = length(x))\n  y[!is.finite(y)] <- NA\n  y[is.na(x)] <- x[is.na(x)]\n  y\n}";
+
+/// Stata's order of missing values as a number, for comparisons with one:
+/// 0 a number, 1 for `.`, 2 to 27 for `.a` to `.z` (haven's tagged NAs).
+const MV_HELPER: &str = r#"stata_mv <- function(x) {
+  k <- numeric(length(x))
+  m <- is.na(x)
+  if (!any(m)) return(k)
+  tag <- if (is.double(x)) haven::na_tag(as.vector(unclass(x))[m]) else rep(NA_character_, sum(m))
+  k[m] <- ifelse(is.na(tag), 1, match(tag, letters) + 1)
+  k
+}"#;
+
+/// What Stata's arithmetic and functions give for a missing value: `.`,
+/// where R would keep the tag of `.a` to `.z`.
+const UNTAG_HELPER: &str = r#"stata_untag <- function(x) {
+  if (is.double(x) && anyNA(x)) x[is.na(x)] <- NA_real_
+  x
+}"#;
+
+/// `x op y` in Stata's order (numbers < `.` < `.a` < ... < `.z`), for two
+/// values that may both be missing.
+const COMPARE_HELPER: &str = r#"stata_compare <- function(x, op, y) {
+  kx <- stata_mv(x)
+  ky <- stata_mv(y)
+  d <- ifelse(kx == ky, ifelse(kx == 0, sign(as.numeric(x) - as.numeric(y)), 0), kx - ky)
+  match.fun(op)(d, 0)
+}"#;
+
+/// One value per row that tells apart rows whose missing values differ
+/// (`.`, `.a` to `.z`): grouped on beside the columns themselves, as dplyr
+/// takes every tagged NA for the same NA, so each is a group of its own as in
+/// Stata 19 (`by`, `egen, by()`, `collapse, by()`, `duplicates`).
+const TAG_KEY_HELPER: &str = r#"stata_tag_key <- function(d) {
+  k <- lapply(Filter(function(v) is.double(v) && anyNA(v), as.list(d)), stata_mv)
+  if (length(k) == 0) return(rep("", nrow(d)))
+  do.call(paste, unname(k))
+}"#;
+
+/// The columns of `d` as keys in Stata's order: each number column is
+/// followed by the place of its missing values (`stata_mv`), so `.` comes
+/// before `.a` and `.a` before `.z` (Stata 19's sort, gsort, egen group()).
+const SORT_KEYS_HELPER: &str = r#"stata_sort_keys <- function(d) {
+  k <- list()
+  for (v in d) {
+    k[[length(k) + 1]] <- v
+    if (is.double(v) && anyNA(v)) k[[length(k) + 1]] <- stata_mv(v)
+  }
+  names(k) <- paste0("k", seq_along(k))
+  vctrs::new_data_frame(k, n = nrow(d))
+}"#;
 
 /// `strmatch(s, pattern)` as Stata 19: the whole string, `*` any characters
 /// (new lines too), `?` one, every other character itself (`\` and `[` too).
@@ -770,7 +821,9 @@ const SET_OBS_HELPER: &str = r#"stata_set_obs <- function(d, n) {
   d
 }"#;
 
-const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, sep = " ", missing = FALSE) {
+/// `levelsof`; with `missing` and `tags`, each of `.` and `.a` to `.z` found
+/// is a level of its own, after the numbers (Stata 19: `1 . .a .d`).
+const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, sep = " ", missing = FALSE, tags = FALSE) {
   if (is.character(x)) {
     x[is.na(x)] <- ""
     keep <- if (missing) rep(TRUE, length(x)) else x != ""
@@ -781,7 +834,9 @@ const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, se
     keep <- if (missing) rep(TRUE, length(x)) else !is.na(x)
     v <- sort(unique(x[!is.na(x)]))
     s <- vapply(v, function(z) stata_fmt(z, "%18.0g", trim = TRUE), "")
-    if (missing && anyNA(x)) s <- c(s, ".")
+    if (missing && anyNA(x)) {
+      s <- c(s, if (tags) c(".", paste0(".", letters))[sort(unique(stata_mv(x[is.na(x)])))] else ".")
+    }
   }
   list(levels = paste(s, collapse = sep), r = length(s), N = sum(keep))
 }"#;
@@ -858,6 +913,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_assert" => ASSERT_HELPER,
         "stata_excel_names" => EXCEL_NAMES_HELPER,
         "stata_stats" => more::STAT_HELPERS,
+        "stata_mv_stats" => more::MV_STAT_HELPERS,
         "stata_destring" => more::DESTRING_HELPER,
         "stata_forced" => more::FORCED_HELPER,
         "stata_same_dates" => more::SAME_DATES_HELPER,
@@ -870,6 +926,11 @@ fn helper_code(name: &str) -> &'static str {
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_strmatch" => STRMATCH_HELPER,
         "stata_char" => CHAR_HELPER,
+        "stata_mv" => MV_HELPER,
+        "stata_untag" => UNTAG_HELPER,
+        "stata_compare" => COMPARE_HELPER,
+        "stata_sort_keys" => SORT_KEYS_HELPER,
+        "stata_tag_key" => TAG_KEY_HELPER,
         "stata_insheet" => more::INSHEET_HELPER,
         "stata_split" => more::SPLIT_HELPER,
         "stata_confirm" => more::CONFIRM_HELPER,
@@ -1078,8 +1139,13 @@ struct Session {
     stset: Option<st::StSet>,
     /// A graph was drawn, so `graph export` has one to write.
     graph_drawn: bool,
-    /// an extended missing value (.a to .z) was stored, which R keeps as NA
+    /// an extended missing value (.a to .z) was stored (R keeps it as a
+    /// tagged NA, which fre and tabulate do not tell apart yet)
     extended_missing: std::cell::Cell<bool>,
+    /// The data may hold extended missing values: a `.dta` file was read or
+    /// one was stored. Comparisons with a missing value then tell them apart
+    /// and computed values are made `.` (`expr_r::translate_drawing`).
+    tags: std::cell::Cell<bool>,
     /// the R function that maps the second y axis onto the first, per graph
     y2_fn: String,
     y2_count: usize,
@@ -1406,18 +1472,35 @@ impl Session {
         self.rc_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
-        let r = expr_r::translate_with(text, &kinds, &ret, use_)?;
-        if r.caveats
-            .iter()
-            .any(|c| c.contains("extended missing values"))
-        {
+        let r = expr_r::translate_drawing(text, &kinds, &ret, use_, None, self.tags.get())?;
+        Ok(self.took(r, out).0)
+    }
+
+    /// An expression's caveats and helpers into `out`; one that stores an
+    /// extended missing value turns on the tags (haven's tagged NAs).
+    fn took(&self, r: expr_r::RExpr, out: &mut Out) -> (String, Kind) {
+        if r.tagged {
             self.extended_missing.set(true);
+            self.tags.set(true);
+        }
+        if r.tagged || r.helpers.contains(&"stata_mv") {
+            out.package("haven");
         }
         for c in r.caveats {
             out.caveat(c);
         }
         out.helpers.extend(r.helpers);
-        Ok(r.code)
+        (r.code, r.kind)
+    }
+
+    /// Whether the data may hold `.a` to `.z`; when it may, the R reads their
+    /// places with `stata_mv` (haven's tagged NAs).
+    fn mv_on(&mut self, out: &mut Out) -> bool {
+        if self.tags.get() {
+            self.helpers.insert("stata_mv");
+            out.package("haven");
+        }
+        self.tags.get()
     }
 
     /// `_rc` only while the last line under capture was translated.
@@ -1457,18 +1540,8 @@ impl Session {
         self.rc_ok(text)?;
         let kinds = |n: &str| self.kind_of(n);
         let ret = |w: &str, n: &str| self.returned_value(w, n);
-        let r = expr_r::translate_with(text, &kinds, &ret, Use::Value)?;
-        if r.caveats
-            .iter()
-            .any(|c| c.contains("extended missing values"))
-        {
-            self.extended_missing.set(true);
-        }
-        for c in r.caveats {
-            out.caveat(c);
-        }
-        out.helpers.extend(r.helpers);
-        Ok((r.code, r.kind))
+        let r = expr_r::translate_drawing(text, &kinds, &ret, Use::Value, None, self.tags.get())?;
+        Ok(self.took(r, out))
     }
 
     fn data(&self) -> Result<String, Untranslated> {
@@ -1679,7 +1752,11 @@ impl Session {
 
     /// The steps a `by` prefix puts around a step: sorting for `bysort`, then
     /// grouping; `None` when there is no `by`.
-    fn by(&self, c: &Command) -> Result<Option<(Option<String>, String)>, Untranslated> {
+    fn by(
+        &mut self,
+        c: &Command,
+        out: &mut Out,
+    ) -> Result<Option<(Option<String>, String)>, Untranslated> {
         let Some((varlist, sort)) = c.prefixes.iter().find_map(|p| match p {
             Prefix::By { varlist, sort, .. } => Some((varlist.clone(), *sort)),
             _ => None,
@@ -1695,36 +1772,58 @@ impl Session {
             None => (varlist.trim().to_string(), String::new()),
         };
         let group_sel = select(&group)?;
-        let arrange = if sort {
-            let all = format!("{group} {within}");
-            Some(format!(
-                "dplyr::arrange(dplyr::pick({}))",
-                select(all.trim())?
-            ))
-        } else if within.is_empty() {
-            None
-        } else {
-            Some(format!(
-                "dplyr::arrange(dplyr::pick({}))",
-                select(&format!("{group} {within}"))?
-            ))
+        let order = |sel: String, me: &mut Self, out: &mut Out| {
+            if me.mv_on(out) {
+                me.helpers.insert("stata_sort_keys");
+                out.package("vctrs");
+                format!("dplyr::arrange(stata_sort_keys(dplyr::pick({sel})))")
+            } else {
+                format!("dplyr::arrange(dplyr::pick({sel}))")
+            }
         };
-        Ok(Some((
-            arrange,
-            format!("dplyr::group_by(dplyr::pick({group_sel}))"),
-        )))
+        let arrange = if sort || !within.is_empty() {
+            let all = format!("{group} {within}");
+            Some(order(select(all.trim())?, self, out))
+        } else {
+            None
+        };
+        Ok(Some((arrange, self.group_by(&group_sel, out))))
+    }
+
+    /// `dplyr::group_by()` on the columns `sel`: where the data may hold `.a`
+    /// to `.z`, also on `stata_tag_k` (`stata_tag_key`), so each missing value
+    /// is a group of its own; [`Self::ungroup`] drops it again.
+    fn group_by(&mut self, sel: &str, out: &mut Out) -> String {
+        if self.mv_on(out) {
+            self.helpers.insert("stata_tag_key");
+            format!(
+                "dplyr::group_by(dplyr::pick({sel}), stata_tag_k = stata_tag_key(dplyr::pick({sel})))"
+            )
+        } else {
+            format!("dplyr::group_by(dplyr::pick({sel}))")
+        }
+    }
+
+    /// What ends a [`Self::group_by`]: `dplyr::ungroup()`, and the key it
+    /// may have added dropped.
+    fn ungroup(&self) -> String {
+        if self.tags.get() {
+            "dplyr::ungroup() |> dplyr::select(-stata_tag_k)".into()
+        } else {
+            "dplyr::ungroup()".into()
+        }
     }
 
     /// `data <- data |> step` with the `by` prefix's grouping around it.
-    fn step(&self, c: &Command, step: String, out: &mut Out) -> Result<(), Untranslated> {
+    fn step(&mut self, c: &Command, step: String, out: &mut Out) -> Result<(), Untranslated> {
         let d = self.data()?;
         let mut steps = Vec::new();
-        match self.by(c)? {
+        match self.by(c, out)? {
             Some((arrange, group)) => {
                 steps.extend(arrange);
                 steps.push(group);
                 steps.push(step);
-                steps.push("dplyr::ungroup()".into());
+                steps.push(self.ungroup());
             }
             None => steps.push(step),
         }
@@ -1791,10 +1890,21 @@ impl Session {
             let v: Vec<String> = v.iter().map(|x| r_text(x)).collect();
             format!("c({})", v.join(", "))
         };
+        // each of . and .a to .z a group of its own, in Stata's order
+        let tags = self.mv_on(out);
         if sort {
             out.package("dplyr");
             let all: Vec<String> = group.iter().chain(&within).map(|v| r_name(v)).collect();
-            out.line(format!("{d} <- dplyr::arrange({d}, {})", all.join(", ")));
+            if tags {
+                self.helpers.insert("stata_sort_keys");
+                out.package("vctrs");
+                out.line(format!(
+                    "{d} <- dplyr::arrange({d}, stata_sort_keys(dplyr::pick({})))",
+                    all.join(", ")
+                ));
+            } else {
+                out.line(format!("{d} <- dplyr::arrange({d}, {})", all.join(", ")));
+            }
         }
         self.helpers.insert("stata_by_groups");
         let mut args = vec![d.clone(), vector(&group)];
@@ -1803,6 +1913,9 @@ impl Session {
         }
         if sort {
             args.push("sorted = TRUE".into());
+        }
+        if tags {
+            args.push("tags = TRUE".into());
         }
         out.line(format!(
             "for (stata_g in stata_by_groups({})) {{",
@@ -2324,6 +2437,10 @@ impl Session {
         self.fv_base = kept.fv_base;
         self.label_sets = kept.label_sets;
         self.ts_unknown = !self.saved.contains_key(&self.file_key(&path));
+        // a file this do-file did not save may hold .a to .z (tagged NAs)
+        if self.ts_unknown {
+            self.tags.set(true);
+        }
         self.panel = kept.panel;
         self.panel_time = kept.panel_time;
         self.ts_delta = kept.ts_delta;
@@ -2868,10 +2985,14 @@ impl Session {
         }
         let d = self.data()?;
         out.package("dplyr");
-        out.line(format!(
-            "{d} <- {d} |> dplyr::arrange(dplyr::pick({}))",
-            select(&c.parts.main)?
-        ));
+        let mut keys = format!("dplyr::pick({})", select(&c.parts.main)?);
+        // . before .a before .z, as Stata sorts them
+        if self.mv_on(out) {
+            self.helpers.insert("stata_sort_keys");
+            out.package("vctrs");
+            keys = format!("stata_sort_keys({keys})");
+        }
+        out.line(format!("{d} <- {d} |> dplyr::arrange({keys})"));
         if !opts.has("stable", 6) {
             out.caveat(
                 "Stata's sort puts rows that tie in no set order (unless stable); \
@@ -2910,16 +3031,22 @@ impl Session {
             }
             let n = r_name(name);
             let minus = minus || (desc && !tok.starts_with('+'));
+            // the missing values among themselves: . < .a < ... < .z
+            let places = self.kinds.get(name) != Some(&Kind::Text) && self.mv_on(out);
             if minus {
                 // descending: missing values last unless mfirst
                 if mfirst {
                     keys.push(format!("!is.na({n}) & {n} != \"\""));
-                    keys.push(format!("dplyr::desc({n})"));
-                } else {
-                    keys.push(format!("dplyr::desc({n})"));
+                }
+                keys.push(format!("dplyr::desc({n})"));
+                if places {
+                    keys.push(format!("dplyr::desc(stata_mv({n}))"));
                 }
             } else {
-                keys.push(n);
+                keys.push(n.clone());
+                if places {
+                    keys.push(format!("stata_mv({n})"));
+                }
             }
         }
         if keys.is_empty() {
@@ -3149,8 +3276,13 @@ impl Session {
         out.package("dplyr");
         self.helpers.insert("stata_fmt");
         self.helpers.insert("stata_levelsof");
+        let tags = if opts.has("missing", 4) && self.mv_on(out) {
+            ", tags = TRUE"
+        } else {
+            ""
+        };
         out.line(format!(
-            "stata_r <- stata_levelsof({rows}[[{}]], clean = {}, sep = {}, missing = {})",
+            "stata_r <- stata_levelsof({rows}[[{}]], clean = {}, sep = {}, missing = {}{tags})",
             r_text(var),
             if opts.has("clean", 1) {
                 "TRUE"
@@ -3783,6 +3915,55 @@ mod tests {
     use crate::reader::read;
 
     #[test]
+    fn extended_missing_values_in_commands_go_by_their_places() {
+        // a .dta may hold .a to .z (Stata 19, plan/stata/extended-missing.md)
+        let out = r("use s
+egen m = rowmax(a b)
+egen n = rowmin(a b)
+egen f = rowfirst(a b)
+egen tg = tag(a), missing
+recode a (1/.b = 9) (.d/1 = 4)
+collapse (max) x = a (firstnm) y = a, by(g)");
+        assert!(out[1].contains("r[a] <- m[[ncol(m)]][a]"), "{out:?}");
+        assert!(out[2].contains("stata_untag(do.call(pmin"), "{out:?}");
+        assert!(
+            out[3].contains(
+                r"Reduce(\(r, v) ifelse(is.na(v), r, v), rev(as.list(dplyr::pick(c(a, b)))))"
+            ),
+            "{out:?}"
+        );
+        assert!(
+            out[4].contains("(stata_sort_keys(dplyr::pick(a)), TRUE)")
+                && out[4].contains("& (rep(TRUE, nrow(k)))[s]"),
+            "{out:?}"
+        );
+        assert!(
+            out[5].contains(
+                "((!is.na(a) & a >= 1) | (stata_mv(a) >= 1 & stata_mv(a) <= 3)) ~ 9, rep_len(FALSE, length(a)) ~ 4"
+            ),
+            "{out:?}"
+        );
+        assert!(
+            out[6].contains("stata_mv_max(a)") && out[6].contains("stata_mv_firstnm(a)"),
+            "{out:?}"
+        );
+        // without a .dta or a stored .a to .z the R is as before
+        let out = r("clear
+set obs 3
+generate a = _n
+generate b = .
+egen m = rowmax(a b)
+recode a (1/. = 9)
+sort a");
+        assert!(out.iter().all(|l| !l.contains("stata_mv")), "{out:?}");
+        assert!(
+            out.iter()
+                .any(|l| l.contains("((!is.na(a) & a >= 1) | is.na(a)) ~ 9")),
+            "{out:?}"
+        );
+    }
+
+    #[test]
     fn a_file_name_becomes_a_name_r_can_assign_to() {
         assert_eq!(frame_name("study.dta"), "study");
         assert_eq!(frame_name("C:/data/My Study.dta"), "my_study");
@@ -3887,15 +4068,17 @@ mod tests {
             Some("if (\"y\" %in% names(s)) stop(\"variable y already defined\")")
         );
         let out: Vec<&str> = all.iter().map(|s| s.lines().last().unwrap_or("")).collect();
-        assert_eq!(out[1], "s <- s |> dplyr::mutate(y = dplyr::if_else((!is.na(g) & g == 1), stata_float((x * 2)), NA_real_))");
+        // the data was read from a file, so .a to .z may be in x: x * 2 is `.` there
+        assert_eq!(out[1], "s <- s |> dplyr::mutate(y = dplyr::if_else((!is.na(g) & g == 1), stata_float(stata_untag((x * 2))), NA_real_))");
         assert_eq!(out[2], "s <- s |> dplyr::mutate(z = 0.1)");
         // missing x counts as larger than 1; str5 keeps 5 characters
         assert_eq!(out[3], "s <- s |> dplyr::mutate(t = dplyr::if_else((is.na(x) | x > 1), substr(paste0(\"a\", s), 1, 5), \"\"))");
         assert_eq!(
             out[4],
-            "s <- s |> dplyr::mutate(y = dplyr::if_else(is.na(y), stata_float(0), y))"
+            "s <- s |> dplyr::mutate(y = dplyr::if_else((stata_mv(y) == 1), stata_float(0), y))"
         );
-        assert_eq!(out[5], "s <- s |> dplyr::arrange(dplyr::pick(g)) |> dplyr::group_by(dplyr::pick(g)) |> dplyr::mutate(n = stata_float(dplyr::row_number())) |> dplyr::ungroup()");
+        // a .dta may hold .a to .z: each is a group of its own
+        assert_eq!(out[5], "s <- s |> dplyr::arrange(stata_sort_keys(dplyr::pick(g))) |> dplyr::group_by(dplyr::pick(g), stata_tag_k = stata_tag_key(dplyr::pick(g))) |> dplyr::mutate(n = stata_float(dplyr::row_number())) |> dplyr::ungroup() |> dplyr::select(-stata_tag_k)");
         // carried down row by row: each missing row takes the row above, already filled
         assert!(
             out[6].contains("stata_rows_replace(function(stata_cur)")
@@ -3919,8 +4102,15 @@ mod tests {
         );
         assert_eq!(out[4], "s <- s |> dplyr::select(-(!c(c:e, id)))");
         assert_eq!(out[5], "s <- s |> dplyr::rename(c = a, d = b)");
-        assert_eq!(out[6], "s <- s |> dplyr::arrange(dplyr::pick(c(g, x)))");
-        assert_eq!(out[7], "s <- s |> dplyr::arrange(dplyr::desc(x), g)");
+        // a .dta may hold .a to .z: they sort by their places
+        assert_eq!(
+            out[6],
+            "s <- s |> dplyr::arrange(stata_sort_keys(dplyr::pick(c(g, x))))"
+        );
+        assert_eq!(
+            out[7],
+            "s <- s |> dplyr::arrange(dplyr::desc(x), dplyr::desc(stata_mv(x)), g, stata_mv(g))"
+        );
         assert_eq!(out[8], "s <- s |> dplyr::relocate(id)");
     }
 
@@ -4181,7 +4371,7 @@ tabulate g h, generate(d)");
             "{out:?}"
         );
         assert!(
-            out[3].ends_with("s <- stata_tab_generate(s, \"g\", \"d\", sel = dplyr::pull(dplyr::mutate(s, stata_sel = (is.na(x) | x > 0)), stata_sel), missing = TRUE)"),
+            out[3].ends_with("s <- stata_tab_generate(s, \"g\", \"d\", sel = dplyr::pull(dplyr::mutate(s, stata_sel = (is.na(x) | x > 0)), stata_sel), missing = TRUE, tags = TRUE)"),
             "{out:?}"
         );
         assert!(out[4].starts_with("NOT"), "{out:?}");
@@ -4454,14 +4644,20 @@ restore, not");
             out[2].starts_with("NOT: the data in memory is not known here"),
             "{out:?}"
         );
-        // .a to .z are all NA in R: how they compare is not translated
+        // .a to .z compare by their place in Stata's order
         let out = r("display . < .a
 display . == .");
+        assert!(out[0].contains("as.numeric(TRUE)"), "{out:?}");
+        assert!(!out[1].starts_with("NOT"), "{out:?}");
+        // a recode by a missing value takes that one only (Stata 19)
+        let out = r("use s\nrecode x (.d = 9) (.w = .) (1 = .a) (.a/.w = 5)");
         assert!(
-            out[0].starts_with("NOT: a comparison with an extended missing value"),
+            out[1].contains("stata_mv(x) %in% c(5) ~ 9")
+                && out[1].contains("stata_mv(x) %in% c(24) ~ NA_real_")
+                && out[1].contains("x %in% c(1) ~ haven::tagged_na(\"a\")")
+                && out[1].contains("(stata_mv(x) >= 2 & stata_mv(x) <= 24) ~ 5"),
             "{out:?}"
         );
-        assert!(!out[1].starts_with("NOT"), "{out:?}");
         // a variable whose line was not translated: the lines that use it say so
         let out = r(concat!(
             "use a\ngenerate double y = rpoisson(2)\ngenerate z = y * 2\nregress z x\n",
