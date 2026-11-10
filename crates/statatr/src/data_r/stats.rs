@@ -1144,8 +1144,9 @@ fn tab_args(src: String, opts: &Opts, flags: &[(&str, usize)]) -> Vec<String> {
 /// The groups of a `by` prefix, in the order of the rows: which rows, and the
 /// `g = 0, h = 1` heading Stata prints (value labels where there are some, `.`
 /// for missing). Without `bysort` the rows must already be in order, missing
-/// last and strings by their bytes, or it stops with Stata's `not sorted`.
-pub(super) const BY_GROUPS_HELPER: &str = r#"stata_by_groups <- function(d, vars, within = character(0), sorted = FALSE) {
+/// last and strings by their bytes, or it stops with Stata's `not sorted`. With
+/// `tags` each of `.` and `.a` to `.z` is a group of its own, in that order.
+pub(super) const BY_GROUPS_HELPER: &str = r#"stata_by_groups <- function(d, vars, within = character(0), sorted = FALSE, tags = FALSE) {
   value <- function(v) {
     if (is.factor(v)) v <- as.character(v)
     u <- unclass(v)
@@ -1153,7 +1154,12 @@ pub(super) const BY_GROUPS_HELPER: &str = r#"stata_by_groups <- function(d, vars
     u
   }
   n <- nrow(d)
-  key <- lapply(c(vars, within), function(v) value(d[[v]]))
+  keys <- function(vs) unlist(lapply(vs, function(v) {
+    u <- value(d[[v]])
+    if (tags && is.double(u) && anyNA(u)) list(u, stata_mv(u)) else list(u)
+  }), recursive = FALSE)
+  group <- keys(vars)
+  key <- c(group, keys(within))
   if (!sorted && n > 1) {
     o <- do.call(order, c(unname(key), list(na.last = TRUE, method = "radix")))
     if (any(o != seq_len(n))) stop("not sorted")
@@ -1164,11 +1170,11 @@ pub(super) const BY_GROUPS_HELPER: &str = r#"stata_by_groups <- function(d, vars
     y <- a[-n]
     (is.na(x) & is.na(y)) | (!is.na(x) & !is.na(y) & x == y)
   }
-  new <- if (n > 1) c(TRUE, !Reduce(`&`, lapply(key[seq_along(vars)], same))) else TRUE
+  new <- if (n > 1) c(TRUE, !Reduce(`&`, lapply(group, same))) else TRUE
   label <- function(v, i) {
     x <- d[[v]]
     u <- value(x)[i]
-    if (is.na(u)) return(if (is.character(u)) "" else ".")
+    if (is.na(u)) return(if (is.character(u)) "" else if (tags) c(".", paste0(".", letters))[stata_mv(u)] else ".")
     l <- attr(x, "labels")
     if (!is.null(l) && is.numeric(u) && any(l == u)) return(names(l)[match(u, l)])
     as.character(u)

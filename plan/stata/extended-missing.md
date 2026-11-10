@@ -62,10 +62,26 @@ Its `.dta` holds 273 `.d` and 458 `.w` in that variable. Observed in Stata 19 on
   Total of all only when some value is valid; with a label set the values are padded to one width
   (`1  one`, `10 ten`, `.b dunno`). r(r_missing) counts the missing values, r(r) both.
 
+## Groups (observed 2026-11-10, `extended_missing_groups.do`)
+
+- `bysort g:` makes `.`, `.a`, `.d` groups of their own, in that order after the numbers (`_n`,
+  `_N`, `egen total()` by them); `egen ..., by(g)` too; `by g: summarize` runs them in turn, the
+  last being `.d`'s. `by g:` on rows sorted otherwise is `not sorted`.
+- `collapse ..., by(g)` gives a row for each (1 . .a .d); `contract g` too (`nomiss` keeps only
+  the numbers); `duplicates tag/drop/list g` take each as its own value.
+- `levelsof g` lists the numbers only; with `missing`, `1 . .a .d` (r(r) 4).
+- `merge 1:1 g` and `m:1 g`: `.` matches `.`, `.a` matches `.a`; a `.z` only in the using data is
+  `Using only (2)`. `isid g` is r(459) "should never be missing" for any of them.
+- In R: grouping is on the columns and `stata_tag_k` (`stata_tag_key()`, the places of each
+  number column's missing values), dropped afterwards; `collapse, by()` is put back in Stata's
+  order with `stata_sort_keys()`; `stata_by_groups()`, `stata_merge()`, `stata_levelsof()` and
+  `stata_contract()` take `tags = TRUE`.
+
 ## Not translated by these rules yet
 
-- `by` groups (`by x:`, `bysort x:`, `egen ..., by()`, `collapse, by()`) and `merge` keys still
-  take `.a` to `.z` as one value; `duplicates`, `levelsof`, `contract` and `egen rank()` too.
+- `contract, zero` stops with a message when `.a` to `.z` are among the values; `isid, missok`,
+  `egen rank()`, `xtile` and the model commands' samples (where any missing value is left out
+  anyway) were not observed with them.
 
 ## In R
 

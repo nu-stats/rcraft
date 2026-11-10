@@ -37,7 +37,8 @@ stata_mv_lastnm <- function(x) { k <- which(!is.na(x)); x[if (length(k)) k[lengt
 /// `replace` settles for the using value. The report, `assert()` (before
 /// `keep()`, the merged data left in memory) and `keep()` as Stata has them.
 pub(super) const MERGE_HELPER: &str = r#"stata_merge <- function(d, u, keys, kind, gen = "_merge", update = FALSE, replace = FALSE,
-                        keep = NULL, assert = NULL, report = TRUE, generate = TRUE, target = NULL) {
+                        keep = NULL, assert = NULL, report = TRUE, generate = TRUE, target = NULL,
+                        tags = FALSE) {
   for (k in keys) {
     if (!k %in% names(d)) stop("variable ", k, " not found")
     if (!k %in% names(u)) stop("variable ", k, " not found")
@@ -49,12 +50,17 @@ pub(super) const MERGE_HELPER: &str = r#"stata_merge <- function(d, u, keys, kin
     do.call(paste, c("\002", lapply(keys, function(k) {
       v <- x[[k]]
       # a string is never missing in Stata: NA is ""
-      if (is.character(v)) ifelse(is.na(v), "", v) else ifelse(is.na(v), "\001", as.character(plain(v)))
+      # with tags, . and .a to .z are keys of their own (Stata 19)
+      if (is.character(v)) ifelse(is.na(v), "", v) else ifelse(is.na(v), if (tags) paste0("\001", stata_mv(v)) else "\001", as.character(plain(v)))
     }), sep = "\r"))
   }
   sorted <- function(x) {
     if (length(keys) == 0) return(seq_len(nrow(x)))
-    do.call(order, c(lapply(keys, function(k) plain(x[[k]])), list(method = "radix", na.last = TRUE)))
+    by <- unlist(lapply(keys, function(k) {
+      p <- plain(x[[k]])
+      if (tags && is.double(p)) list(p, stata_mv(p)) else list(p)
+    }), recursive = FALSE)
+    do.call(order, c(by, list(method = "radix", na.last = TRUE)))
   }
   where <- if (kind == "1:1") "master and using data" else if (kind == "1:m") "master data" else "using data"
   kd0 <- key(d)
@@ -718,10 +724,9 @@ impl Session {
         match opts.arg("by", 2) {
             Some(b) if !c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) => {
                 // by() groups without sorting and keeps the data's order
-                out.line(format!(
-                    "{d} <- {d} |> dplyr::group_by(dplyr::pick({})) |> {step} |> dplyr::ungroup()",
-                    select(&b)?
-                ));
+                let group = self.group_by(&select(&b)?, out);
+                let ungroup = self.ungroup();
+                out.line(format!("{d} <- {d} |> {group} |> {step} |> {ungroup}"));
             }
             Some(_) => return Err(no("egen with both a by prefix and by() is not translated")),
             None => self.step(c, step, out)?,
@@ -854,6 +859,10 @@ impl Session {
         }
         if opts.has("noreport", 5) || self.quiet(c) {
             args.push_str(", report = FALSE");
+        }
+        // . and .a to .z each a key of its own
+        if self.mv_on(out) {
+            args.push_str(", tags = TRUE");
         }
         if !generate {
             args.push_str(", generate = FALSE");
@@ -1182,8 +1191,9 @@ impl Session {
                 "dplyr::filter(dplyr::if_all(c({cols}), \\(v) !is.na(v)))"
             ));
         }
-        if let Some(b) = opts.arg("by", 2) {
-            steps.push(format!("dplyr::group_by(dplyr::pick({}))", select(&b)?));
+        let by = opts.arg("by", 2).map(|b| select(&b)).transpose()?;
+        if let Some(b) = &by {
+            steps.push(self.group_by(b, out));
         }
         // each under a name of its own first: summarise reads a column it has
         // just made, so (mean) y (sd) sy = y would take the sd of the mean
@@ -1202,6 +1212,14 @@ impl Session {
             assigns.join(", ")
         ));
         steps.push(format!("dplyr::rename({})", renames.join(", ")));
+        // each missing value of the by() variables was a group: in Stata's order
+        if let Some(b) = by.as_ref().filter(|_| self.tags.get()) {
+            out.package("vctrs");
+            self.need_helper("stata_sort_keys");
+            steps.push(format!(
+                "dplyr::arrange(stata_sort_keys(dplyr::pick({b}))) |> dplyr::select(-stata_tag_k)"
+            ));
+        }
         steps.push("as.data.frame()".into());
         out.line(format!("{d} <- {d} |> {}", steps.join(" |> ")));
         for p in &percents {
@@ -1268,6 +1286,16 @@ impl Session {
             select(vars)?
         };
         out.package("dplyr");
+        // each of . and .a to .z a value of its own (Stata 19)
+        let (key, unkey) = if self.mv_on(out) {
+            self.need_helper("stata_tag_key");
+            (
+                format!(", stata_tag_k = stata_tag_key(dplyr::pick({sel}))"),
+                " |> dplyr::select(-stata_tag_k)",
+            )
+        } else {
+            (String::new(), "")
+        };
         match sub {
             "drop" => {
                 if c.parts.if_exp.is_some() || c.parts.in_range.is_some() {
@@ -1279,7 +1307,7 @@ impl Session {
                 }
                 // the first row of each group stays, in the data's order
                 out.line(format!(
-                    "{d} <- {d} |> dplyr::distinct(dplyr::pick({sel}), .keep_all = TRUE)"
+                    "{d} <- {d} |> dplyr::distinct(dplyr::pick({sel}){key}, .keep_all = TRUE){unkey}"
                 ));
             }
             "tag" => {
@@ -1289,7 +1317,7 @@ impl Session {
                 let g = g.trim().to_string();
                 let cond = self.condition(c, out)?.unwrap_or_else(|| "TRUE".into());
                 out.line(format!(
-                    "{d} <- {d} |> dplyr::mutate(dup_rows = {cond}) |> dplyr::group_by(dplyr::pick({sel}), dup_rows) |> dplyr::mutate({gn} = dplyr::if_else(dup_rows, as.numeric(dplyr::n() - 1), NA_real_)) |> dplyr::ungroup() |> dplyr::select(-dup_rows)",
+                    "{d} <- {d} |> dplyr::mutate(dup_rows = {cond}) |> dplyr::group_by(dplyr::pick({sel}), dup_rows{key}) |> dplyr::mutate({gn} = dplyr::if_else(dup_rows, as.numeric(dplyr::n() - 1), NA_real_)) |> dplyr::ungroup() |> dplyr::select(-dup_rows){unkey}",
                     gn = r_name(&g)
                 ));
                 self.kinds.insert(g, Kind::Number);
@@ -1299,7 +1327,7 @@ impl Session {
                     return Ok(());
                 }
                 out.line(format!(
-                    "local({{ k <- dplyr::count({d}, dplyr::pick({sel}), name = \"copies\"); r <- dplyr::count(k, copies, name = \"groups\"); r$observations <- r$copies * r$groups; r$surplus <- r$observations - r$groups; print(as.data.frame(r[c(\"copies\", \"observations\", \"surplus\")]), row.names = FALSE) }})"
+                    "local({{ k <- dplyr::count({d}, dplyr::pick({sel}){key}, name = \"copies\"); r <- dplyr::count(k, copies, name = \"groups\"); r$observations <- r$copies * r$groups; r$surplus <- r$observations - r$groups; print(as.data.frame(r[c(\"copies\", \"observations\", \"surplus\")]), row.names = FALSE) }})"
                 ));
                 out.caveat("printed in R's layout, not Stata's table");
             }

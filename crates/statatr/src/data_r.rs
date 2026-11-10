@@ -737,6 +737,16 @@ const COMPARE_HELPER: &str = r#"stata_compare <- function(x, op, y) {
   match.fun(op)(d, 0)
 }"#;
 
+/// One value per row that tells apart rows whose missing values differ
+/// (`.`, `.a` to `.z`): grouped on beside the columns themselves, as dplyr
+/// takes every tagged NA for the same NA, so each is a group of its own as in
+/// Stata 19 (`by`, `egen, by()`, `collapse, by()`, `duplicates`).
+const TAG_KEY_HELPER: &str = r#"stata_tag_key <- function(d) {
+  k <- lapply(Filter(function(v) is.double(v) && anyNA(v), as.list(d)), stata_mv)
+  if (length(k) == 0) return(rep("", nrow(d)))
+  do.call(paste, unname(k))
+}"#;
+
 /// The columns of `d` as keys in Stata's order: each number column is
 /// followed by the place of its missing values (`stata_mv`), so `.` comes
 /// before `.a` and `.a` before `.z` (Stata 19's sort, gsort, egen group()).
@@ -809,7 +819,9 @@ const SET_OBS_HELPER: &str = r#"stata_set_obs <- function(d, n) {
   d
 }"#;
 
-const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, sep = " ", missing = FALSE) {
+/// `levelsof`; with `missing` and `tags`, each of `.` and `.a` to `.z` found
+/// is a level of its own, after the numbers (Stata 19: `1 . .a .d`).
+const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, sep = " ", missing = FALSE, tags = FALSE) {
   if (is.character(x)) {
     x[is.na(x)] <- ""
     keep <- if (missing) rep(TRUE, length(x)) else x != ""
@@ -820,7 +832,9 @@ const LEVELSOF_HELPER: &str = r#"stata_levelsof <- function(x, clean = FALSE, se
     keep <- if (missing) rep(TRUE, length(x)) else !is.na(x)
     v <- sort(unique(x[!is.na(x)]))
     s <- vapply(v, function(z) stata_fmt(z, "%18.0g", trim = TRUE), "")
-    if (missing && anyNA(x)) s <- c(s, ".")
+    if (missing && anyNA(x)) {
+      s <- c(s, if (tags) c(".", paste0(".", letters))[sort(unique(stata_mv(x[is.na(x)])))] else ".")
+    }
   }
   list(levels = paste(s, collapse = sep), r = length(s), N = sum(keep))
 }"#;
@@ -913,6 +927,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_untag" => UNTAG_HELPER,
         "stata_compare" => COMPARE_HELPER,
         "stata_sort_keys" => SORT_KEYS_HELPER,
+        "stata_tag_key" => TAG_KEY_HELPER,
         "stata_insheet" => more::INSHEET_HELPER,
         "stata_split" => more::SPLIT_HELPER,
         "stata_confirm" => more::CONFIRM_HELPER,
@@ -1734,7 +1749,11 @@ impl Session {
 
     /// The steps a `by` prefix puts around a step: sorting for `bysort`, then
     /// grouping; `None` when there is no `by`.
-    fn by(&self, c: &Command) -> Result<Option<(Option<String>, String)>, Untranslated> {
+    fn by(
+        &mut self,
+        c: &Command,
+        out: &mut Out,
+    ) -> Result<Option<(Option<String>, String)>, Untranslated> {
         let Some((varlist, sort)) = c.prefixes.iter().find_map(|p| match p {
             Prefix::By { varlist, sort, .. } => Some((varlist.clone(), *sort)),
             _ => None,
@@ -1750,36 +1769,58 @@ impl Session {
             None => (varlist.trim().to_string(), String::new()),
         };
         let group_sel = select(&group)?;
-        let arrange = if sort {
-            let all = format!("{group} {within}");
-            Some(format!(
-                "dplyr::arrange(dplyr::pick({}))",
-                select(all.trim())?
-            ))
-        } else if within.is_empty() {
-            None
-        } else {
-            Some(format!(
-                "dplyr::arrange(dplyr::pick({}))",
-                select(&format!("{group} {within}"))?
-            ))
+        let order = |sel: String, me: &mut Self, out: &mut Out| {
+            if me.mv_on(out) {
+                me.helpers.insert("stata_sort_keys");
+                out.package("vctrs");
+                format!("dplyr::arrange(stata_sort_keys(dplyr::pick({sel})))")
+            } else {
+                format!("dplyr::arrange(dplyr::pick({sel}))")
+            }
         };
-        Ok(Some((
-            arrange,
-            format!("dplyr::group_by(dplyr::pick({group_sel}))"),
-        )))
+        let arrange = if sort || !within.is_empty() {
+            let all = format!("{group} {within}");
+            Some(order(select(all.trim())?, self, out))
+        } else {
+            None
+        };
+        Ok(Some((arrange, self.group_by(&group_sel, out))))
+    }
+
+    /// `dplyr::group_by()` on the columns `sel`: where the data may hold `.a`
+    /// to `.z`, also on `stata_tag_k` (`stata_tag_key`), so each missing value
+    /// is a group of its own; [`Self::ungroup`] drops it again.
+    fn group_by(&mut self, sel: &str, out: &mut Out) -> String {
+        if self.mv_on(out) {
+            self.helpers.insert("stata_tag_key");
+            format!(
+                "dplyr::group_by(dplyr::pick({sel}), stata_tag_k = stata_tag_key(dplyr::pick({sel})))"
+            )
+        } else {
+            format!("dplyr::group_by(dplyr::pick({sel}))")
+        }
+    }
+
+    /// What ends a [`Self::group_by`]: `dplyr::ungroup()`, and the key it
+    /// may have added dropped.
+    fn ungroup(&self) -> String {
+        if self.tags.get() {
+            "dplyr::ungroup() |> dplyr::select(-stata_tag_k)".into()
+        } else {
+            "dplyr::ungroup()".into()
+        }
     }
 
     /// `data <- data |> step` with the `by` prefix's grouping around it.
-    fn step(&self, c: &Command, step: String, out: &mut Out) -> Result<(), Untranslated> {
+    fn step(&mut self, c: &Command, step: String, out: &mut Out) -> Result<(), Untranslated> {
         let d = self.data()?;
         let mut steps = Vec::new();
-        match self.by(c)? {
+        match self.by(c, out)? {
             Some((arrange, group)) => {
                 steps.extend(arrange);
                 steps.push(group);
                 steps.push(step);
-                steps.push("dplyr::ungroup()".into());
+                steps.push(self.ungroup());
             }
             None => steps.push(step),
         }
@@ -1846,10 +1887,21 @@ impl Session {
             let v: Vec<String> = v.iter().map(|x| r_text(x)).collect();
             format!("c({})", v.join(", "))
         };
+        // each of . and .a to .z a group of its own, in Stata's order
+        let tags = self.mv_on(out);
         if sort {
             out.package("dplyr");
             let all: Vec<String> = group.iter().chain(&within).map(|v| r_name(v)).collect();
-            out.line(format!("{d} <- dplyr::arrange({d}, {})", all.join(", ")));
+            if tags {
+                self.helpers.insert("stata_sort_keys");
+                out.package("vctrs");
+                out.line(format!(
+                    "{d} <- dplyr::arrange({d}, stata_sort_keys(dplyr::pick({})))",
+                    all.join(", ")
+                ));
+            } else {
+                out.line(format!("{d} <- dplyr::arrange({d}, {})", all.join(", ")));
+            }
         }
         self.helpers.insert("stata_by_groups");
         let mut args = vec![d.clone(), vector(&group)];
@@ -1858,6 +1910,9 @@ impl Session {
         }
         if sort {
             args.push("sorted = TRUE".into());
+        }
+        if tags {
+            args.push("tags = TRUE".into());
         }
         out.line(format!(
             "for (stata_g in stata_by_groups({})) {{",
@@ -3217,8 +3272,13 @@ impl Session {
         out.package("dplyr");
         self.helpers.insert("stata_fmt");
         self.helpers.insert("stata_levelsof");
+        let tags = if opts.has("missing", 4) && self.mv_on(out) {
+            ", tags = TRUE"
+        } else {
+            ""
+        };
         out.line(format!(
-            "stata_r <- stata_levelsof({rows}[[{}]], clean = {}, sep = {}, missing = {})",
+            "stata_r <- stata_levelsof({rows}[[{}]], clean = {}, sep = {}, missing = {}{tags})",
             r_text(var),
             if opts.has("clean", 1) {
                 "TRUE"
@@ -4013,7 +4073,8 @@ sort a");
             out[4],
             "s <- s |> dplyr::mutate(y = dplyr::if_else((stata_mv(y) == 1), stata_float(0), y))"
         );
-        assert_eq!(out[5], "s <- s |> dplyr::arrange(dplyr::pick(g)) |> dplyr::group_by(dplyr::pick(g)) |> dplyr::mutate(n = stata_float(dplyr::row_number())) |> dplyr::ungroup()");
+        // a .dta may hold .a to .z: each is a group of its own
+        assert_eq!(out[5], "s <- s |> dplyr::arrange(stata_sort_keys(dplyr::pick(g))) |> dplyr::group_by(dplyr::pick(g), stata_tag_k = stata_tag_key(dplyr::pick(g))) |> dplyr::mutate(n = stata_float(dplyr::row_number())) |> dplyr::ungroup() |> dplyr::select(-stata_tag_k)");
         // carried down row by row: each missing row takes the row above, already filled
         assert!(
             out[6].contains("stata_rows_replace(function(stata_cur)")

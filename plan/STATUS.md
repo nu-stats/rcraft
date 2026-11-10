@@ -3791,5 +3791,18 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - Corpus `extended_missing_commands.do`: 75 results, all Stata 19's exactly. Verified for
   `collapse`, `egen`, `fre`, `gsort`, `input`, `recode`, `sort`, `tab1`, `tab2` and `tabulate`.
   The `tabulate` and `fre` tables were also compared with Stata's log line by line.
-- Not yet: `by` groups, `collapse, by()`, `merge` keys, `duplicates`, `levelsof` and `contract`
-  still take `.a` to `.z` as one value.
+- Not yet then: `by` groups, `collapse, by()`, `merge` keys, `duplicates`, `levelsof` and
+  `contract`; done the same day (below).
+
+## Extended missing values as groups, 2026-11-10
+
+- Where the data may hold `.a` to `.z`, each of `.`, `.a`, ... `.z` is a group of its own, in
+  Stata's order, as Stata 19 does (`plan/stata/extended-missing.md`): `by` and `bysort` (grouped
+  steps and the by-each loop of statistics and models, its `-> g = .a` headings),
+  `egen ..., by()`, `collapse, by()`, `duplicates drop/tag/report`, `levelsof, missing`,
+  `contract` and `merge` keys (`.a` matches `.a`; a `.z` only in the using data is not matched).
+- Corpus `extended_missing_groups.do`: 27 results, all Stata 19's exactly. Verified for
+  `duplicates` (new), and for `collapse`, `contract`, `egen`, `input`, `levelsof` and `merge`
+  with these values.
+- Not yet: `contract, zero` with `.a` to `.z` stops with a message. `isid, missok`,
+  `egen rank()` and `xtile` were not observed with them.
