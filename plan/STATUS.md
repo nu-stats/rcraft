@@ -3725,3 +3725,7 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   Stata's errors; R's openxlsx2 (now in CI's packages). TZEN38: 2,287 lines ran, 7 refused (227
   before; `estpost`/`esttab cells()` and `set mem` are left), its values as before, and its
   workbook, written by R from scratch, has Stata's four sheets and all 207 cells the same.
+- **set memory** (`set mem`, `set memory`): Stata 19's note "set memory ignored. Memory no longer
+  needs to be set in modern Statas; …", r(198) without a number or for one that is not whole.
+  TZEN38's `capture set mem 2000m` now runs; its 6 left are `estpost summarize` with
+  `esttab, tex cells()`.

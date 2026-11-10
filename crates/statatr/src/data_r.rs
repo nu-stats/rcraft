@@ -3427,6 +3427,28 @@ impl Session {
                 out.caveat("nothing to do in R: set scheme only changes how Stata's graphs look; RCraft's graphs keep their own");
                 Ok(())
             }
+            // set memory, from before Stata 12: Stata 19 notes it is ignored (a
+            // whole number, b k m or g after it), and r(198) for anything else
+            m if m.len() >= 3 && "memory".starts_with(m) => {
+                let n = rest.trim();
+                let digits = n.trim_end_matches(['b', 'k', 'm', 'g', 'B', 'K', 'M', 'G']);
+                let line = if n.is_empty() {
+                    "stop(\"invalid syntax (Stata: r(198))\", call. = FALSE)".to_string()
+                } else if !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit()) {
+                    "cat(\"set memory ignored.\\n    Memory no longer needs to be set in modern \
+                     Statas; memory adjustments are performed on the fly automatically.\\n\")"
+                        .to_string()
+                } else {
+                    format!(
+                        "stop({}, call. = FALSE)",
+                        r_text(&format!(
+                            "'{n}' found where integer expected (Stata: r(198))"
+                        ))
+                    )
+                };
+                out.line(line);
+                Ok(())
+            }
             other => Err(no(format!("set {other} is not translated yet"))),
         }
     }

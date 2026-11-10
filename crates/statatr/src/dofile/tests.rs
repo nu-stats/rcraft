@@ -988,3 +988,27 @@ fn file_read_puts_a_line_in_a_local_known_when_it_runs() {
         .map(|r| r.code.clone());
     assert_eq!(code.as_deref(), Some("stata_file_read(\"h\")"));
 }
+
+#[test]
+fn set_memory_is_noted_as_ignored_as_stata_19_does() {
+    let d = run("set mem 2000m\nset memory 1g\ncapture set mem 500m\nset mem abc");
+    let lines = &d.translation.lines;
+    assert_eq!(lines.len(), 4);
+    for l in lines.iter().take(3) {
+        let code = l
+            .result
+            .as_ref()
+            .map(|r| r.code.clone())
+            .unwrap_or_default();
+        assert!(code.contains("set memory ignored."), "{}: {code}", l.stata);
+    }
+    let bad = lines[3]
+        .result
+        .as_ref()
+        .map(|r| r.code.clone())
+        .unwrap_or_default();
+    assert!(
+        bad.contains("'abc' found where integer expected (Stata: r(198))"),
+        "{bad}"
+    );
+}
