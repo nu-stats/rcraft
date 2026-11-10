@@ -312,6 +312,7 @@ const MODELS: &[&str] = &[
 
 const GRAPHS: &[&str] = &[
     "_natscale",
+    "anovaplot",
     "connected",
     "graph",
     "grstyle",

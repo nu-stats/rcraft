@@ -56,6 +56,7 @@ pub const COMMANDS: &[&str] = &[
     "_pctile",
     "alpha",
     "anova",
+    "anovaplot",
     "append",
     "asclogit",
     "assert",
@@ -221,6 +222,7 @@ pub const COMMANDS: &[&str] = &[
 /// `(` marks one that takes an argument.
 pub const OPTIONS: &[(&str, &[&str])] = &[
     ("anova", &["partial", "repeated(", "sequential"]),
+    ("anovaplot", &["scatter(", "title(", "xtitle(", "ytitle("]),
     ("_pctile", &["nquantiles(", "percentiles("]),
     ("append", &["force", "generate(", "nolabel", "nonotes"]),
     (

@@ -27,6 +27,7 @@
 
 mod alpha;
 mod anova;
+mod anovaplot;
 mod center;
 mod clogit;
 mod cluster2;
@@ -657,6 +658,7 @@ const LEAVE_DATA_ALONE: &[&str] = &[
     "erase",
     "rm",
     "fvset",
+    "anovaplot",
     "histogram",
     "kdensity",
     "scatter",
@@ -2229,6 +2231,7 @@ impl Session {
             "frame" => self.frame_cmd(c, &opts, out),
             "revrs" => self.revrs(c, &opts, out),
             "tabm" => self.tabm(c, &opts, out),
+            "anovaplot" => self.anovaplot(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),

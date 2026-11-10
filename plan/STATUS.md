@@ -3891,3 +3891,14 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   revrs, gives -0.12041813 (se .07312435, N 191, R-squared .09375217): what RCraft writes. The shipped
   table was made otherwise (perhaps another revrs version); RCraft matches Stata 19 here. The other 29
   tables are byte for byte as shipped.
+
+## anovaplot (Stata Journal gr0009_2), 2026-11-10
+
+- Installed from the Stata Journal (SJ23-1) with the user's yes; observed with made-up data, its
+  graphs exported as SVG and PNG (`plan/stata/anovaplot.md`), its code not read. After anova: the
+  model's fitted values over its own rows, joined along x for each value of g and marked at each cell,
+  the data as points (hidden by scatter(ms(i)), which still set the y axis), x's value labels as its
+  ticks, Stata's titles and "Profiles by" g's label above; drawn by ggplot2. ASKO93's first Figure 2
+  panel, drawn by both from its data, shows the same lines, labels and titles.
+- ASKO93: every line translated (494 ran, none refused; 27 before). Of the eight packages run, ASKO93,
+  SI3BGA and TZEN38 refuse nothing.

@@ -1290,7 +1290,7 @@ impl Session {
     /// Puts the layers on one ggplot2 graph with the titles, prints it and
     /// keeps it as `stata_graph`.
     #[allow(clippy::too_many_arguments)]
-    fn draw(
+    pub(super) fn draw(
         &mut self,
         c: &Command,
         opts: &Opts,
