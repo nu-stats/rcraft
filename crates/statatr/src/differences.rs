@@ -1858,9 +1858,35 @@ pub const GUIDES: &[Guide] = &[
                  sym stars, booktabs or plain rules, lines ending CR LF.",
             ),
             p(
+                "More options",
+                "stats() with fmt() and labels() (only the rows it names, in b()'s format without \
+                 fmt()), varlabels() (pairs in turn; it also takes away the blank lines between the \
+                 coefficients), mgroups() with pattern(), and prefix() suffix() span in .tex, \
+                 starlevels() (the stars as typed), compress, nogaps, and tex on the screen, each \
+                 as Stata 19 printed and wrote them. After estpost summarize, cells() of its \
+                 statistics with fmt() (a statistic without one takes the first one's).",
+            ),
+            p(
                 "Not yet",
-                "wide, cells(), matrix(), mlabels() with its suboptions, varlabels(), .rtf (it \
+                "wide, cells() of other models, matrix(), mlabels() with its suboptions, .rtf (it \
                  carries the time it was written) and not with a file are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "estpost",
+        about: "Posts summary statistics for esttab (estpost summarize, the SSC estout package)",
+        points: &[
+            p(
+                "In R",
+                "stata_estpost_summarize posts e(count), e(sum_w), e(mean), e(Var), e(sd), e(min), \
+                 e(max) and e(sum) for each variable, e(N) (the rows where any is nonmissing) and \
+                 e(k), and prints its table as Stata 19 does, split to the linesize.",
+            ),
+            p(
+                "Not yet",
+                "Its other subcommands (tabulate, correlate, ttest, ...), weights, options and \
+                 string variables are refused.",
             ),
         ],
     },

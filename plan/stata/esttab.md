@@ -67,4 +67,6 @@ byte for byte; `esttab.do` reads four of them back.
 
 ## Not translated yet
 
-`wide`, `cells()`, `matrix()`, `mlabels()` with its suboptions, `varlabels()`, `.rtf`, `not` with a file.
+`wide`, `cells()` of models other than estpost summarize's, `matrix()`, `mlabels()` with its suboptions, `.rtf`,
+`not` with a file. `stats()`, `varlabels()`, `mgroups()`, `starlevels()`, `compress`, `nogaps`, `estpost summarize`
+and its `cells()`: `esttab-options.md`.

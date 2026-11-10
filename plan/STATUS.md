@@ -3755,3 +3755,17 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - Where the last two columns are left with the same (meetings of one year), Stata's rounding
   decides and was not reproduced; RCraft omits the earlier and notes the coefficients that may
   differ. TZEN38: 856 of 861 model values as Stata's (846), the 5 others in tied models.
+
+## esttab: stats(), varlabels(), mgroups(), starlevels(), compress, nogaps; estpost summarize and cells(), 2026-11-10
+
+- Observed in Stata 19 (`plan/stata/esttab-options.md`; four probes, RCraft's output the same in all 50
+  files and on the screen; corpus `esttab2.do`): `stats()` with `fmt()` and `labels()`, `varlabels()`
+  (pairs in turn; no blank lines between the coefficients), `mgroups()` with `pattern()` and, in .tex,
+  `prefix() suffix() span`, `starlevels()` (stars as typed), `compress`, `nogaps`, `tex` on the screen,
+  esttab's note when it takes eststo's models, and Stata's string() for `%w.df` (12344.19 in %8.3f is
+  1.2e+04). `estpost summarize` posts its e() (e(N) the rows where any variable is nonmissing) and prints
+  its table; `esttab, cells()` of it.
+- TZEN38: every line translated (2,294 ran, none refused; 6 before), its three estpost tables and three
+  `esttab, tex cells()` tables as Stata's log. ZNMIXH: 12 more of its .tex tables written, each the same
+  byte for byte as the package's own (TableF11 too, its pattern() one longer than the models); the rest
+  wait on lines before them, mostly comparisons with extended missing values (`== .d`).

@@ -328,6 +328,7 @@ const PROGRAMS: &[&str] = &[
     "distinct",
     "end",
     "estout",
+    "estpost",
     "esttab",
     "eststo",
     "fre",

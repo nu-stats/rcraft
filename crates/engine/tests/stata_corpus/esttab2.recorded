@@ -1,0 +1,9 @@
+* Stata 19.0's results for esttab2.do, recorded by cargo xtask stata-record
+@ ep 40 4 3.1289583 1.0848608 0 3 36 64.666666 .88617788 36
+@ et2_a_tex 16 3803
+@ et2_b_tex 22 12233
+@ et2_c_txt 16 4005
+@ et2_d_tex 17 6597
+@ et2_e_txt 12 3588
+@ a_lines 1 1
+@ d_lines 1 1

@@ -35,6 +35,7 @@ mod coefplot;
 mod contract;
 mod dates;
 mod eclass;
+mod estpost;
 mod esttab;
 mod esttable;
 mod filefilter;
@@ -632,6 +633,7 @@ const LEAVE_DATA_ALONE: &[&str] = &[
     "which",
     "query",
     "putexcel",
+    "estpost",
     "codebook",
     "grstyle",
     "compress",
@@ -863,6 +865,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_label_set" => more::DTA_LABEL_SET_HELPER,
         "stata_xpose" => more::XPOSE_HELPER,
         "stata_coefplot" => coefplot::COEFPLOT_HELPER,
+        "stata_estpost" => estpost::ESTPOST_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_strmatch" => STRMATCH_HELPER,
@@ -2085,6 +2088,7 @@ impl Session {
             "estimates" => self.estimates_cmd(c, out),
             "eststo" => self.eststo(c, &opts, out),
             "esttab" => self.esttab(c, &opts, out),
+            "estpost" => self.estpost(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),
