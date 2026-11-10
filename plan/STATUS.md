@@ -3902,3 +3902,12 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   panel, drawn by both from its data, shows the same lines, labels and titles.
 - ASKO93: every line translated (494 ran, none refused; 27 before). Of the eight packages run, ASKO93,
   SI3BGA and TZEN38 refuse nothing.
+
+## coefplot: levels(95 90), asequation swapnames eqrename(), mlabel(string(@b)), legend(order()), 2026-11-10
+
+- Observed in Stata 19 (`plan/stata/coefplot.md`, last part; corpus `coefplot2.do`): two levels' intervals
+  (gen()'s ll2 ul2), swapnames' rows (a group per coefficient, a row per plot), eqrename()'s row names,
+  marker labels of b in a format, and legend(order()) keys (L + 1 to a plot). The probes' graphs drawn
+  by both show the same rows, intervals, labels and legend.
+- ZNMIXH: 23 lines refused (39); all eight of its coefplot figures translated. Left: pdslasso (2, with
+  about 18 lines after it), twoway's text() and graph bar (percent).

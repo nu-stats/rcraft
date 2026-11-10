@@ -28,3 +28,19 @@ text of its graphs exported as SVG. Its code and help were not read.
   legend shows each plot's `label()`, else its model's name.
 - `coefplot` with no name plots the results in memory (`p_plot` shows `.`).
 - `saving(sv, replace)` writes `sv.gph`.
+
+## levels(95 90), asequation swapnames eqrename(), mlabel(string(@b)), legend(order()) (2026-11-10)
+
+Observed the same way (probes `cp2/c1.do`, `c7.do` in the session scratchpad; corpus `coefplot2.do`):
+
+- `levels(95 90)`: `gen()` leaves ll1 ul1 (95) and ll2 ul2 (90), each b ± t·se at its level; drawn as two
+  intervals, the inner one thicker.
+- `asequation swapnames`: each coefficient a group, a row in it for each plot, then an empty row: Z's at 1
+  and 2, w's at 4 and 5 (no offsets); the rows are named after the plots (their models), the groups after
+  the coefficients' names (`Z`, `w`, not their labels), shown only when there are several; `eqrename(INTENT
+  = "Initiation" ...)` renames the rows; the legend keeps the models' names. `asequation` alone changes
+  nothing for one-equation models (Z at .8333 and 1.1667).
+- `mlabel(string(@b, "%9.3f"))`: each marker labelled with its b in the format (`0.445`, `-0.271`).
+- `legend(order(3 "First" 6 "Second"))`: with L levels each plot has L + 1 keys, its marker the last (3, 6
+  with two levels; ZNMIXH's 3, 9 and 15 are plots 1, 3 and 5); only the plots named show, with the texts.
+- RCraft puts swapnames' group names on the other side of the graph (ggplot2's second axis).

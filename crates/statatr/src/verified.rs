@@ -23,7 +23,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("center", &["center"]),
     ("clogit", &["clogit"]),
     ("cluster2", &["cluster2"]),
-    ("coefplot", &["coefplot"]),
+    ("coefplot", &["coefplot", "coefplot2"]),
     (
         "collapse",
         &[

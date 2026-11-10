@@ -20,7 +20,7 @@ use super::*;
 /// The rows `coefplot` shows and their places: see the module.
 pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(subs, d, keep = NULL, drop = NULL, order = NULL, baselevels = FALSE,
                                 omitted = FALSE, level = 0.95, headings = character(), coeflabels = character(),
-                                gap = TRUE) {
+                                gap = TRUE, swap = FALSE, eqrename = character()) {
   wild <- function(p) paste0("^", gsub("\\?", ".", gsub("\\*", ".*", gsub("([.+^$(){}|\\[\\]])", "\\\\\\1", p))), "$")
   hits <- function(n, pats) {
     pats <- sub(":$", ":*", pats)
@@ -97,8 +97,27 @@ pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(sub
     v <- sub("^c\\.", "", n)
     if (v %in% names(d)) stata_varlab(d, v) else n
   }
-  q <- function(df) ifelse(is.finite(df), stats::qt((1 + level) / 2, df), stats::qnorm((1 + level) / 2))
+  # levels(95 90): an interval each, ll1 ul1 then ll2 ul2
+  q <- function(df, lv) ifelse(is.finite(df), stats::qt((1 + lv) / 2, df), stats::qnorm((1 + lv) / 2))
+  nlev <- length(level)
   out <- list()
+  # asequation swapnames: each coefficient a group, a row in it for each plot (1, 2, a
+  # row's gap, 4, 5), the rows named after the plots (eqrename()), the groups after the
+  # coefficients when there are several
+  if (swap) {
+    if (length(subs) > 1 || anyNA(rows) || nrow(heads)) {
+      stop("RCraft: coefplot, swapnames with subgraphs, headings() or order()'s empty rows is not translated yet", call. = FALSE)
+    }
+    k <- length(subs[[1]]$plots)
+    for (i in seq_len(k)) {
+      if (!all(rows %in% tabs[[1]][[i]]$name)) {
+        stop("RCraft: coefplot, swapnames of plots without the same coefficients is not translated yet", call. = FALSE)
+      }
+    }
+    pnames <- vapply(subs[[1]]$plots, function(p) p$name, "")
+    plabels <- ifelse(is.na(eqrename[pnames]), pnames, eqrename[pnames])
+    swap_at <- function(r, i) (match(r, rows) - 1) * (k + 1) + i
+  }
   for (j in seq_along(subs)) {
     k <- length(subs[[j]]$plots)
     given <- vapply(subs[[j]]$plots, function(p) !is.null(p$offset), TRUE)
@@ -108,9 +127,11 @@ pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(sub
       t <- tabs[[j]][[i]]
       t <- t[t$name %in% rows, , drop = FALSE]
       if (!nrow(t)) next
-      t$at <- pos[match(t$name, rows)] - off
-      t$ll1 <- t$b - q(t$df) * t$se
-      t$ul1 <- t$b + q(t$df) * t$se
+      t$at <- if (swap) swap_at(t$name, i) else pos[match(t$name, rows)] - off
+      for (l in seq_len(nlev)) {
+        t[[paste0("ll", l)]] <- t$b - q(t$df, level[l]) * t$se
+        t[[paste0("ul", l)]] <- t$b + q(t$df, level[l]) * t$se
+      }
       t$plot <- i
       t$plotlabel <- p$label
       t$by <- j
@@ -123,7 +144,7 @@ pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(sub
   gaps <- pos[is.na(rows)]
   if (length(gaps)) {
     g <- tab[rep(1, length(gaps)), , drop = FALSE]
-    g[, c("b", "se", "ll1", "ul1")] <- NA
+    g[, c("b", "se", paste0("ll", seq_len(nlev)), paste0("ul", seq_len(nlev)))] <- NA
     g$at <- gaps
     g$name <- NA
     g$plot <- 1
@@ -132,26 +153,49 @@ pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(sub
   }
   tab <- tab[order(tab$at), , drop = FALSE]
   shown <- !is.na(rows)
+  nplots <- max(vapply(subs, function(s) length(s$plots), 1))
+  if (swap) {
+    at <- as.vector(outer(seq_len(nplots), (seq_along(rows) - 1) * (nplots + 1), `+`))
+    return(list(tab = tab, breaks = at, labels = rep(unname(plabels), length(rows)), plots = nplots,
+                subs = 1, levels = nlev,
+                groups = if (length(rows) > 1) list(at = (seq_along(rows) - 1) * (nplots + 1) + (nplots + 1) / 2, labels = rows)))
+  }
   list(tab = tab, breaks = c(pos[shown], heads$at),
-       labels = c(vapply(rows[shown], label, ""), heads$text), plots = max(vapply(subs, function(s) length(s$plots), 1)),
-       subs = length(subs))
+       labels = c(vapply(rows[shown], label, ""), heads$text), plots = nplots,
+       subs = length(subs), levels = nlev, groups = NULL)
 }
-stata_coefplot <- function(cp, vertical = FALSE, xline = NULL, title = NULL, legend = TRUE) {
+stata_coefplot <- function(cp, vertical = FALSE, xline = NULL, title = NULL, legend = TRUE,
+                           mlabel = NULL, keys = NULL) {
   tab <- cp$tab[!is.na(cp$tab$b), , drop = FALSE]
   # the legend and the panels in the order written
   tab$plotlabel <- factor(tab$plotlabel, levels = unique(tab$plotlabel[order(tab$by, tab$plot)]))
   tab$bylabel <- factor(tab$bylabel, levels = unique(tab$bylabel[order(tab$by)]))
   many <- cp$plots > 1
-  colour <- if (many) ggplot2::aes(colour = plotlabel) else NULL
-  g <- ggplot2::ggplot(tab, ggplot2::aes(y = at, x = b)) +
-    ggplot2::geom_errorbarh(ggplot2::aes(xmin = ll1, xmax = ul1), height = 0) +
-    ggplot2::geom_point()
+  nlev <- if (is.null(cp$levels)) 1 else cp$levels
+  g <- ggplot2::ggplot(tab, ggplot2::aes(y = at, x = b))
+  # each level's interval, the inner ones drawn thicker
+  for (l in seq_len(nlev)) {
+    g <- g + ggplot2::geom_errorbarh(ggplot2::aes(xmin = .data[[paste0("ll", l)]], xmax = .data[[paste0("ul", l)]]),
+                                     height = 0, linewidth = 0.5 * l)
+  }
+  g <- g + ggplot2::geom_point()
+  # mlabel(string(@b, "fmt")): each marker labelled with its b in the format
+  if (!is.null(mlabel)) {
+    tab$stata_mlbl <- vapply(tab$b, function(v) trimws(stata_fmt(v, mlabel)), "")
+    g <- g + ggplot2::geom_text(data = tab, ggplot2::aes(label = stata_mlbl), vjust = -0.8, show.legend = FALSE)
+  }
   if (many) g <- g + ggplot2::aes(colour = plotlabel)
   for (v in xline) g <- g + ggplot2::geom_vline(xintercept = v)
-  # every row shows, headings and empty rows too
+  # every row shows, headings and empty rows too; swapnames' groups on the other side
+  sec <- if (!is.null(cp$groups)) ggplot2::dup_axis(breaks = cp$groups$at, labels = cp$groups$labels, name = NULL) else ggplot2::waiver()
   g <- g + ggplot2::expand_limits(y = range(c(cp$breaks, cp$tab$at))) +
-    ggplot2::scale_y_reverse(breaks = cp$breaks, labels = cp$labels) +
+    ggplot2::scale_y_reverse(breaks = cp$breaks, labels = cp$labels, sec.axis = sec) +
     ggplot2::labs(x = NULL, y = NULL, colour = NULL, title = title)
+  # legend(order(3 "text" ...)): the plots named, in that order, with those texts
+  if (many && !is.null(keys)) {
+    lv <- levels(tab$plotlabel)
+    g <- g + ggplot2::scale_colour_discrete(breaks = lv[keys$plot], labels = keys$text)
+  }
   if (cp$subs > 1) g <- g + ggplot2::facet_wrap(~bylabel, nrow = 1)
   if (!legend) g <- g + ggplot2::theme(legend.position = "none")
   if (vertical) g <- g + ggplot2::coord_flip()
@@ -176,8 +220,10 @@ stata_coefplot_gen <- function(d, cp, prefix) {
   put("t", t$b / t$se)
   put("df", ifelse(is.finite(t$df), t$df, NA))
   put("pval", ifelse(is.finite(t$df), 2 * stats::pt(-abs(t$b / t$se), t$df), 2 * stats::pnorm(-abs(t$b / t$se))))
-  put("ll1", t$ll1)
-  put("ul1", t$ul1)
+  for (l in seq_len(if (is.null(cp$levels)) 1 else cp$levels)) {
+    put(paste0("ll", l), t[[paste0("ll", l)]])
+    put(paste0("ul", l), t[[paste0("ul", l)]])
+  }
   d
 }"##;
 
@@ -282,6 +328,9 @@ impl Session {
             ("nodraw", 6),
             ("label", 5),
             ("offset", 6),
+            ("asequation", 10),
+            ("swapnames", 9),
+            ("eqrename", 8),
         ]);
         for (_, o) in &subs {
             if let Some(bad) = Opts(o).other(&known) {
@@ -340,14 +389,82 @@ impl Session {
                 .iter()
                 .any(|x| x.is("nogap", 5))
         });
-        let level = match g.arg("levels", 3) {
-            None => 95.0,
+        // levels(95 90): an interval for each, as Stata's ll1 ul1, ll2 ul2
+        let levels: Vec<f64> = match g.arg("levels", 3) {
+            None => vec![95.0],
+            Some(l) => l
+                .split_whitespace()
+                .map(|w| {
+                    w.parse::<f64>()
+                        .ok()
+                        .filter(|v| *v > 0.0 && *v < 100.0)
+                        .ok_or_else(|| {
+                            no(format!(
+                                "levels({l}): levels between 0 and 100 are translated"
+                            ))
+                        })
+                })
+                .collect::<Result<_, _>>()?,
+        };
+        if levels.is_empty() {
+            return Err(no("levels() needs a level"));
+        }
+        // asequation (a no-op for one-equation models, as Stata 19 shows) and swapnames,
+        // which makes each coefficient a group of a row per plot; eqrename() names them
+        let swap = g.has("swapnames", 9);
+        if swap && !g.has("asequation", 10) {
+            return Err(no(
+                "coefplot, swapnames without asequation is not translated yet",
+            ));
+        }
+        if g.has("eqrename", 8) && !swap {
+            return Err(no(
+                "coefplot, eqrename() without asequation swapnames is not translated yet",
+            ));
+        }
+        let eqrename = pairs("eqrename", 8)?;
+        // mlabel(string(@b, "%9.3f")): each marker's b in that format; other marker labels
+        // only change the look
+        let mlabel = g.arg("mlabel", 4).and_then(|m| {
+            let m: String = m.chars().filter(|c| !c.is_whitespace()).collect();
+            let inner = m.strip_prefix("string(@b,\"")?.strip_suffix("\")")?;
+            Some(r_text(inner))
+        });
+        // legend(order(3 "text" ...)): with L levels a plot has L + 1 keys, its marker the last
+        let keys = match g.arg("legend", 3) {
+            None => None,
             Some(l) => {
-                let v: f64 = l
-                    .trim()
-                    .parse()
-                    .map_err(|_| no(format!("levels({l}): one level is translated")))?;
-                v
+                let lo = crate::lang::syntax::options(&l);
+                match lo.iter().find(|o| o.is("order", 5)) {
+                    None => None,
+                    Some(o) => {
+                        let per = levels.len() + 1;
+                        let mut plots = Vec::new();
+                        let mut texts = Vec::new();
+                        let w = quoted_words_kept(&o.raw.clone().unwrap_or_default());
+                        let mut it = w.into_iter().peekable();
+                        while let Some(n) = it.next() {
+                            let k: usize = n.parse().map_err(|_| {
+                                no(format!("coefplot, legend(order({n} ...)): numbers and their texts are translated"))
+                            })?;
+                            if k == 0 || k % per != 0 {
+                                return Err(no(format!(
+                                    "coefplot, legend(order({k})): a key other than a plot's marker is not translated yet"
+                                )));
+                            }
+                            let Some(t) = it.next_if(|t| t.starts_with('"')) else {
+                                return Err(no("coefplot, legend(order()) without a text for each key is not translated yet"));
+                            };
+                            plots.push((k / per).to_string());
+                            texts.push(r_text(t.trim_matches('"')));
+                        }
+                        Some(format!(
+                            "list(plot = c({}), text = c({}))",
+                            plots.join(", "),
+                            texts.join(", ")
+                        ))
+                    }
+                }
             }
         };
         let mut xline = Vec::new();
@@ -393,17 +510,21 @@ impl Session {
         }
         self.helpers.insert("stata_graph");
         self.helpers.insert("stata_coefplot");
+        if mlabel.is_some() {
+            self.helpers.insert("stata_fmt");
+        }
         out.package("ggplot2");
         out.line(format!(
-            "stata_cp <- stata_coefplot_rows(list({}), {d}, keep = c({}), drop = c({}), order = c({}), baselevels = {}, omitted = {}, level = {}, headings = {headings}, coeflabels = {coeflabels}, gap = {})",
+            "stata_cp <- stata_coefplot_rows(list({}), {d}, keep = c({}), drop = c({}), order = c({}), baselevels = {}, omitted = {}, level = c({}), headings = {headings}, coeflabels = {coeflabels}, gap = {}, swap = {}, eqrename = {eqrename})",
             sub_code.join(", "),
             keep.join(", "),
             drop.join(", "),
             order.join(", "),
             super::stats::r_logical(g.has("baselevels", 4)),
             super::stats::r_logical(g.has("omitted", 4)),
-            r_number(level / 100.0),
-            super::stats::r_logical(gap)
+            levels.iter().map(|l| r_number(l / 100.0)).collect::<Vec<_>>().join(", "),
+            super::stats::r_logical(gap),
+            super::stats::r_logical(swap)
         ));
         let title = g
             .arg("title", 2)
@@ -411,10 +532,12 @@ impl Session {
             .unwrap_or_else(|| "NULL".into());
         let legend_off = g.arg("legend", 3).is_some_and(|l| l.trim() == "off");
         out.line(format!(
-            "stata_graph <- stata_coefplot(stata_cp, vertical = {}, xline = c({}), title = {title}, legend = {})",
+            "stata_graph <- stata_coefplot(stata_cp, vertical = {}, xline = c({}), title = {title}, legend = {}, mlabel = {}, keys = {})",
             super::stats::r_logical(g.has("vertical", 4)),
             xline.join(", "),
-            super::stats::r_logical(!legend_off)
+            super::stats::r_logical(!legend_off),
+            mlabel.unwrap_or_else(|| "NULL".into()),
+            keys.unwrap_or_else(|| "NULL".into())
         ));
         if let Some(p) = g.arg("generate", 3) {
             let p = p.trim().to_string();
@@ -614,6 +737,31 @@ fn words(text: &str) -> Vec<String> {
     for ch in text.chars() {
         match ch {
             '"' => quote = !quote,
+            c if c.is_whitespace() && !quote => {
+                if !cur.is_empty() {
+                    out.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if !cur.is_empty() {
+        out.push(cur);
+    }
+    out
+}
+
+/// Words split at blanks outside quotes, a quoted one keeping its quotes.
+fn quoted_words_kept(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut cur = String::new();
+    let mut quote = false;
+    for ch in text.chars() {
+        match ch {
+            '"' => {
+                quote = !quote;
+                cur.push(ch);
+            }
             c if c.is_whitespace() && !quote => {
                 if !cur.is_empty() {
                     out.push(std::mem::take(&mut cur));
