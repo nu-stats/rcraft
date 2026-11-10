@@ -790,8 +790,10 @@ fn egen_varlist_functions_are_not_read_as_expressions() {
 
 #[test]
 fn putexcel_leaves_the_model_and_the_data_alone() {
-    // not translated itself, but a model's results after it are still known
-    let text = "use auto\nregress price mpg\nputexcel A1 = \"x\"\ndisplay e(r2)\ndisplay _se[mpg]";
+    // translated or not, a model's results after it are still known
+    let text = "use auto\nregress price mpg\nputexcel set \"t.xlsx\", modify\n\
+                putexcel A1 = \"x\" B1 = (e(r2))\nputexcel C1 = matrix(e(b))\n\
+                display e(r2)\ndisplay _se[mpg]";
     let d = dry_run(text, &NoFiles, Options::default());
     let lines = &d.translation.lines;
     let reg = lines
@@ -799,11 +801,22 @@ fn putexcel_leaves_the_model_and_the_data_alone() {
         .find(|l| l.stata.starts_with("regress"))
         .unwrap();
     assert!(reg.result.is_ok(), "{:?}", reg.result);
-    let put = lines
+    let put: Vec<_> = lines
         .iter()
-        .find(|l| l.stata.starts_with("putexcel"))
-        .unwrap();
-    assert!(put.result.is_err());
+        .filter(|l| l.stata.starts_with("putexcel"))
+        .collect();
+    assert_eq!(put.len(), 3);
+    assert!(put[0].result.is_ok() && put[1].result.is_ok(), "{put:?}");
+    assert!(put[2].result.is_err());
+    let code = put[1]
+        .result
+        .as_ref()
+        .map(|r| r.code.clone())
+        .unwrap_or_default();
+    assert!(
+        code.contains("stata_px_put(get0(\"stata_putexcel\"), list(A1 = \"x\", B1 = "),
+        "{code}"
+    );
     for l in lines.iter().filter(|l| l.stata.starts_with("display")) {
         assert!(l.result.is_ok(), "{}: {:?}", l.stata, l.result);
     }

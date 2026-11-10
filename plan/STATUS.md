@@ -3717,3 +3717,11 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   robust or clustered errors. TZEN38: 2,067 lines ran (1,923 before), 227 refused (371): what is
   left is `putexcel` (220 lines), `estpost`/`esttab cells()` (6) and `set mem`. Its values as before
   (846 of 861; the 15 are the within-collinear set Stata chooses by rounding, decided earlier).
+
+## putexcel, 2026-11-09
+
+- **putexcel** (`data_r/putexcel.rs`, `plan/stata/putexcel.md`, `putexcel.do`): set with sheet()
+  and modify or replace, text, numbers to 17 digits and ( expressions ) into cells, clear, and
+  Stata's errors; R's openxlsx2 (now in CI's packages). TZEN38: 2,287 lines ran, 7 refused (227
+  before; `estpost`/`esttab cells()` and `set mem` are left), its values as before, and its
+  workbook, written by R from scratch, has Stata's four sheets and all 207 cells the same.

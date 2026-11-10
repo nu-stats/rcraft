@@ -10,7 +10,7 @@
 //! file here that passes.
 //!
 //! Without a supported R, or without haven, dplyr, readr, MASS, nnet,
-//! sandwich and survival, the test is skipped with a note.
+//! sandwich, survival and openxlsx2, the test is skipped with a note.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -34,11 +34,12 @@ fn engine() -> Option<Engine> {
         "stopifnot(requireNamespace(\"dplyr\", quietly = TRUE), requireNamespace(\"haven\", quietly = TRUE), \
          requireNamespace(\"readr\", quietly = TRUE), requireNamespace(\"MASS\", quietly = TRUE), \
          requireNamespace(\"nnet\", quietly = TRUE), requireNamespace(\"sandwich\", quietly = TRUE), \
-         requireNamespace(\"survival\", quietly = TRUE))",
+         requireNamespace(\"survival\", quietly = TRUE), \
+         requireNamespace(\"openxlsx2\", quietly = TRUE))",
     );
     if have != Outcome::Ok {
         eprintln!(
-            "skipped: the corpus needs dplyr, haven, readr, MASS, nnet, sandwich and survival"
+            "skipped: the corpus needs dplyr, haven, readr, MASS, nnet, sandwich, survival and openxlsx2"
         );
         return None;
     }

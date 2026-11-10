@@ -1,0 +1,6 @@
+* Stata 19.0's results for putexcel.do, recorded by cargo xtask stata-record
+@ text again|.123|.123|(.123) 4
+@ num  .3333333333333333148                   3.5  1.00000000000000e-20          123456789012                     5 1                     9 7
+@ exists 602
+@ column 198
+@ noset 198

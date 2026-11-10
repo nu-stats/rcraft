@@ -1353,6 +1353,26 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "putexcel",
+        about: "Writes values into the cells of an Excel workbook",
+        points: &[
+            p(
+                "As Stata 19",
+                "putexcel set file.xlsx with sheet() and modify or replace (or neither, for a \
+                 new file); cell = \"text\", a number or ( expression ), several to a line; \
+                 putexcel clear. Text cells, numbers to 17 digits and . an empty cell, the other \
+                 sheets and cells kept, file … saved after each write, and Stata's errors (a file \
+                 that exists, no set, a column past XFD). Written with the R package openxlsx2.",
+            ),
+            p(
+                "Not yet",
+                "Ranges, matrix(), etable, formula(), pictures, the formatting options (bold, \
+                 nformat() and others), sheet(, replace), .xls files, and putexcel save, close \
+                 and describe.",
+            ),
+        ],
+    },
+    Guide {
         command: "outreg",
         about: "Tables of estimates and statistics (outreg, SSC)",
         points: &[

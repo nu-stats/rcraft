@@ -129,6 +129,7 @@ const DATA: &[&str] = &[
     "postfile",
     "postutil",
     "preserve",
+    "putexcel",
     "pwd",
     "query",
     "quietly",

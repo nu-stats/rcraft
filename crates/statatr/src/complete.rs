@@ -155,6 +155,7 @@ pub const COMMANDS: &[&str] = &[
     "preserve",
     "probit",
     "program",
+    "putexcel",
     "pwcorr",
     "pwd",
     "quietly",
@@ -307,6 +308,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("gsort", &["generate(", "mfirst"]),
     ("postfile", &["every(", "replace"]),
+    ("putexcel", &["modify", "replace", "sheet("]),
     (
         "histogram",
         &[
@@ -1418,6 +1420,7 @@ mod tests {
             }
             "filefilter" if name == "from" => format!("filefilter a.txt b.txt, {o} to(y)"),
             "filefilter" => format!("filefilter a.txt b.txt, from(x) {o}"),
+            "putexcel" => format!("putexcel set \"a.xlsx\", {o}"),
             "winsor" if name == "generate" => format!("winsor y, {o} p(.1)"),
             "winsor" if name == "p" || name == "h" => format!("winsor y, gen(z) {o}"),
             "winsor" => format!("winsor y, gen(z) p(.1) {o}"),

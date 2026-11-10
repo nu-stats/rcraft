@@ -54,6 +54,7 @@ mod outreg2;
 mod parmest;
 mod post;
 mod postfile;
+mod putexcel;
 mod random;
 mod reghdfe;
 mod returned;
@@ -927,6 +928,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_alpha" => alpha::ALPHA_HELPER,
         "stata_outreg" => outreg::OUTREG_HELPER,
         "stata_filefilter" => filefilter::FILEFILTER_HELPER,
+        "stata_putexcel" => putexcel::PUTEXCEL_HELPER,
         "stata_outreg2" => outreg2::OUTREG2_HELPER,
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
@@ -2140,6 +2142,7 @@ impl Session {
             "frmttable" => self.frmttable(c, &opts, out),
             "mata" => self.mata_line(c, out),
             "filefilter" => self.filefilter(c, &opts, out),
+            "putexcel" => self.putexcel(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
                 out.caveat("nothing to do in R: query only shows Stata's own settings");
