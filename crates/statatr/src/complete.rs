@@ -159,6 +159,7 @@ pub const COMMANDS: &[&str] = &[
     "preserve",
     "probit",
     "program",
+    "prtest",
     "putexcel",
     "pwcorr",
     "pwd",
@@ -334,6 +335,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("gsort", &["generate(", "mfirst"]),
     ("postfile", &["every(", "replace"]),
+    ("prtest", &["by(", "level("]),
     ("putexcel", &["modify", "replace", "sheet("]),
     (
         "histogram",

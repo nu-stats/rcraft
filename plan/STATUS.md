@@ -3921,3 +3921,16 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   at the bottom (Stata's is at the top), and over()'s sort() had been ignored. The probes' graphs drawn by
   both show the same bars, order, labels and texts.
 - ZNMIXH: 20 lines refused (23), all of them pdslasso (2) and the lines in 02_attrition.do after it.
+
+## prtest, graph bar (asis), stacked bars' order, b1title(), 2026-11-10
+
+- Observed in Stata 19 (`plan/stata/prtest.md`; corpus `prtest.do`): `prtest var, by(g)` (Stata's
+  table and its 20 r() values; r(450) and r(198) as Stata gives them; AXYMDI's two tables as in its
+  Stata log), `graph bar (asis)` (r(459) for a group of several rows), `legend(order())` for bars, and
+  `b1title()`. Fixed along the way: stacked bars put the first variable on top (Stata's is at the
+  bottom).
+- AXYMDI: every line translated (46 ran, none refused; 3 before). ASKO93, AXYMDI, SI3BGA and TZEN38
+  refuse nothing.
+- Builds after a clock change: the machine's clock went back an hour and twenty minutes when the session
+  restarted, so cargo took older edits for built and skipped them; `cargo clean -p` of RCraft's crates
+  rebuilt them (CI, building from scratch, was not affected).

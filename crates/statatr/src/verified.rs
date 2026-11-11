@@ -130,6 +130,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("preserve", &["made"]),
     ("probit", &["collinear", "likelihood", "perfect_predict"]),
     ("program", &["programs"]),
+    ("prtest", &["prtest"]),
     ("putexcel", &["putexcel"]),
     ("pwcorr", &["descriptives"]),
     ("recast", &["contract"]),

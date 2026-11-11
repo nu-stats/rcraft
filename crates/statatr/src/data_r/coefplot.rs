@@ -752,7 +752,7 @@ fn words(text: &str) -> Vec<String> {
 }
 
 /// Words split at blanks outside quotes, a quoted one keeping its quotes.
-fn quoted_words_kept(text: &str) -> Vec<String> {
+pub(super) fn quoted_words_kept(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
     let mut quote = false;

@@ -151,8 +151,12 @@ stata_bar_data <- function(d, stats, vars, over = character()) {
     x <- if (nzchar(vars[j])) stata_num(d[[vars[j]]]) else rep(1, nrow(d))
     # (percent) with no variable: each group's share of the rows, those with a
     # missing over() variable left out (Stata 19)
-    val <- if (stats[j] == "percent") 100 * tapply(x, key, length) / sum(!is.na(key)) else tapply(x, key, function(v) f(stats[j], v))
-    data.frame(group = factor(names(val), levels = levels(key)), series = if (nzchar(vars[j])) paste0(stats[j], " of ", vars[j]) else stats[j],
+    # (asis): each group's one value as it is, the series named by the variable's label
+    if (stats[j] == "asis" && any(duplicated(key[!is.na(key)]))) {
+      stop("variables ", paste(over, collapse = " "), " and _variables do not uniquely identify the observations (Stata: r(459))", call. = FALSE)
+    }
+    val <- if (stats[j] == "percent") 100 * tapply(x, key, length) / sum(!is.na(key)) else if (stats[j] == "asis") tapply(x, key, function(v) v[1]) else tapply(x, key, function(v) f(stats[j], v))
+    data.frame(group = factor(names(val), levels = levels(key)), series = if (stats[j] == "asis") stata_varlab(d, vars[j]) else if (nzchar(vars[j])) paste0(stats[j], " of ", vars[j]) else stats[j],
                value = as.numeric(val), stringsAsFactors = FALSE)
   }))
   out$series <- factor(out$series, levels = unique(out$series))
@@ -271,6 +275,8 @@ const TITLES: &[(&str, usize, &str)] = &[
     ("ytitle", 2, "y"),
     ("note", 4, "caption"),
     ("caption", 3, "caption"),
+    // b1title(): the title below the x axis (graph bar's groups)
+    ("b1title", 7, "x"),
 ];
 
 /// One layer of a twoway graph.
@@ -1087,7 +1093,7 @@ impl Session {
             if let Some(s) = w.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
                 let ok = matches!(
                     s,
-                    "mean" | "median" | "sum" | "count" | "min" | "max" | "sd" | "percent"
+                    "mean" | "median" | "sum" | "count" | "min" | "max" | "sd" | "percent" | "asis"
                 ) || s
                     .strip_prefix('p')
                     .is_some_and(|k| k.parse::<u32>().is_ok_and(|k| (1..=99).contains(&k)));
@@ -1193,12 +1199,12 @@ impl Session {
             ));
         }
         let mut layers = vec![format!(
-            "ggplot2::geom_col(data = stata_bar, ggplot2::aes(x = group, y = value, fill = series), position = \"{position}\")"
+            "ggplot2::geom_col(data = stata_bar, ggplot2::aes(x = group, y = value, fill = series), position = {})", if position == "stack" { "ggplot2::position_stack(reverse = TRUE)" } else { "\"dodge\"" }
         )];
         if let Some(fmt) = &blabel {
             self.helpers.insert("stata_fmt");
             let dodge = if position == "stack" {
-                "ggplot2::position_stack(vjust = 1)"
+                "ggplot2::position_stack(vjust = 1, reverse = TRUE)"
             } else {
                 "ggplot2::position_dodge(width = 0.9)"
             };
@@ -1216,6 +1222,39 @@ impl Session {
             );
         }
         layers.push("ggplot2::labs(fill = NULL)".to_string());
+        // legend(order(3 "text" 2 "text" ...)): those series, in that order, with those texts
+        if let Some(l) = opts.arg("legend", 3) {
+            let lo = crate::lang::syntax::options(&l);
+            if let Some(o) = lo.iter().find(|o| o.is("order", 5)) {
+                let mut keys = Vec::new();
+                let mut texts = Vec::new();
+                let w = super::coefplot::quoted_words_kept(&o.raw.clone().unwrap_or_default());
+                let mut it = w.into_iter().peekable();
+                while let Some(n) = it.next() {
+                    let k: usize = n
+                        .parse()
+                        .ok()
+                        .filter(|k| *k >= 1 && *k <= vars.len())
+                        .ok_or_else(|| {
+                            no(format!(
+                                "graph bar, legend(order({n})): a series' number is translated"
+                            ))
+                        })?;
+                    keys.push(k.to_string());
+                    texts.push(match it.next_if(|t| t.starts_with('"')) {
+                        Some(t) => r_text(t.trim_matches('"')),
+                        None => format!("levels(stata_bar$series)[{k}]"),
+                    });
+                }
+                if !keys.is_empty() {
+                    layers.push(format!(
+                        "ggplot2::scale_fill_discrete(breaks = levels(stata_bar$series)[c({})], labels = c({}))",
+                        keys.join(", "),
+                        texts.join(", ")
+                    ));
+                }
+            }
+        }
         // one series: no legend, as Stata draws it
         if vars.len() == 1 {
             layers.push("ggplot2::theme(legend.position = \"none\")".to_string());
