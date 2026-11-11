@@ -201,7 +201,8 @@ stata_box_data <- function(d, vars, over = character()) {
 
 /// Options that change only how a graph looks; ggplot2's defaults stand in.
 pub(super) const LOOK: &[(&str, usize)] = &[
-    ("msymbol", 2),
+    // m() is msymbol() as ZNMIXH writes it (Stata takes it)
+    ("msymbol", 1),
     ("mcolor", 2),
     ("msize", 3),
     ("mfcolor", 3),
@@ -793,12 +794,16 @@ impl Session {
             "kdensity"
         } else if w == "bar" {
             "bar"
+        } else if w == "rcap" {
+            "rcap"
+        } else if w == "rspike" {
+            "rspike"
         } else if w == "rarea" {
             "rarea"
         } else {
             return Err(no(format!(
                 "twoway {w} is not translated yet (scatter, line, connected, lfit, qfit, lowess, \
-                 histogram, kdensity, bar and rarea are)"
+                 histogram, kdensity, bar, rarea, rcap and rspike are)"
             )));
         };
         let vars: Vec<String> = cmd
@@ -824,8 +829,8 @@ impl Session {
                     if matches!(kind, "lfit" | "qfit" | "lowess" | "bar") && ys.len() != 1 {
                         return Err(no(format!("twoway {kind} takes one y and one x")));
                     }
-                    if kind == "rarea" && ys.len() != 2 {
-                        return Err(no("twoway rarea takes two y variables and one x"));
+                    if matches!(kind, "rarea" | "rcap" | "rspike") && ys.len() != 2 {
+                        return Err(no(format!("twoway {kind} takes two y variables and one x")));
                     }
                     (ys.to_vec(), x.clone())
                 }
@@ -1017,6 +1022,38 @@ impl Session {
                 };
                 g.push(format!(
                     "ggplot2::geom_ribbon(data = {rows}, ggplot2::aes(x = stata_num(.data[[{x}]]), ymin = {y2w}(stata_num(.data[[{y1}]])), ymax = {y2w}(stata_num(.data[[{y2}]])){fill}), orientation = \"x\")"
+                ));
+            }
+            "rcap" | "rspike" => {
+                // a vertical line from one y to the other at each x, capped for rcap
+                let (y1, y2) = match l.ys.as_slice() {
+                    [a, b] => (r_text(a), r_text(b)),
+                    _ => {
+                        return Err(no(format!(
+                            "twoway {} takes two y variables and one x",
+                            l.kind
+                        )))
+                    }
+                };
+                let colour = if legend {
+                    format!(
+                        ", colour = paste(stata_varlab({rows}, {y1}), \"/\", stata_varlab({rows}, {y2}))"
+                    )
+                } else {
+                    String::new()
+                };
+                let geom = if l.kind == "rcap" {
+                    "geom_errorbar"
+                } else {
+                    "geom_linerange"
+                };
+                let width = if l.kind == "rcap" {
+                    ", width = 0.2"
+                } else {
+                    ""
+                };
+                g.push(format!(
+                    "ggplot2::{geom}(data = {rows}, ggplot2::aes(x = stata_num(.data[[{x}]]), ymin = {y2w}(stata_num(.data[[{y1}]])), ymax = {y2w}(stata_num(.data[[{y2}]])){colour}){width})"
                 ));
             }
             "kdensity" => {

@@ -121,6 +121,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("outreg", &["outreg"]),
     ("outreg2", &["outreg2", "outreg2tex"]),
     ("parmest", &["clogit_margins"]),
+    ("pdslasso", &["pdslasso"]),
     ("poisson", &["collinear", "likelihood"]),
     ("post", &["postfile"]),
     ("postclose", &["postfile"]),

@@ -1,0 +1,7 @@
+* Stata 19.0's results for pdslasso.do, recorded by cargo xtask stata-record
+@ a .48450415 .12640435 296
+@ a_sel c1 c2 c3 c5
+@ a_y c1 c3 c5 _cons
+@ a_d c1 c2 _cons
+@ b .00178816 .11298545 .24183002
+@ b_d _cons

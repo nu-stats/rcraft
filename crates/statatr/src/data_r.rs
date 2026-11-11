@@ -54,6 +54,7 @@ mod natscale;
 mod outreg;
 mod outreg2;
 mod parmest;
+mod pdslasso;
 mod post;
 mod postfile;
 mod prtest;
@@ -933,6 +934,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_revrs" => revrs::REVRS_HELPER,
         "stata_tabm" => tabm::TABM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
+        "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_strmatch" => STRMATCH_HELPER,
@@ -2235,6 +2237,7 @@ impl Session {
             "tabm" => self.tabm(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
+            "pdslasso" => self.pdslasso(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),

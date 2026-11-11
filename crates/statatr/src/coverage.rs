@@ -191,6 +191,7 @@ const STATISTICS: &[&str] = &[
     "oprobit",
     "pca",
     "pctile",
+    "pdslasso",
     "poisson",
     "predict",
     "probit",

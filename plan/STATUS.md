@@ -3934,3 +3934,17 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - Builds after a clock change: the machine's clock went back an hour and twenty minutes when the session
   restarted, so cargo took older edits for built and skipped them; `cargo clean -p` of RCraft's crates
   rebuilt them (CI, building from scratch, was not affected).
+
+## pdslasso (rigorous lasso, post-double selection), twoway rcap and rspike, m(), 2026-11-11
+
+- pdslasso installed from SSC with ivreg2 and ranktest, which it needs (lassopack was there), each with
+  the user's yes; observed with made-up data and ZNMIXH's (`plan/stata/pdslasso.md`; corpus
+  `pdslasso.do`), its code not read. RCraft's rigorous lasso reproduces rlasso's loadings, lambda and
+  estimates to 1e-9 and its selections exactly; pdslasso's e(b) and e(V) (OLS on the union, HC0), its
+  CHS estimates and its printed output follow. On ZNMIXH's 174 controls it selects what Stata does and
+  its estimates agree to 5e-11.
+- twoway `rcap` and `rspike`; `m()` as msymbol().
+- ZNMIXH: every line translated (112,336 ran, none refused; 139 refused on 2026-11-10 morning). Five
+  of the eight packages refuse nothing: ASKO93, AXYMDI, SI3BGA, TZEN38, ZNMIXH.
+- The clock went back again at a session restart (13:25, the build files at 15:23): RCraft's crates
+  cleaned and rebuilt before testing.
