@@ -17,6 +17,7 @@ pub mod plot_export;
 pub mod postest;
 pub mod save;
 pub mod stats;
+pub mod survival;
 
 /// Where an entry sits in the menus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -181,6 +182,10 @@ pub const ENTRIES: &[Entry] = &[
     partial("Fixed-effects count or binary model", Area::Statistics),
     partial("Panel model", Area::Statistics),
     partial("Hausman test (fixed or random effects)", Area::Statistics),
+    partial("Kaplan-Meier survival curves", Area::Statistics),
+    partial("Log-rank test", Area::Statistics),
+    partial("Cox proportional hazards model", Area::Statistics),
+    partial("Parametric survival model", Area::Statistics),
     partial("Model fit", Area::Statistics),
     partial("Compare models", Area::Statistics),
     partial("Predicted values and residuals", Area::Statistics),

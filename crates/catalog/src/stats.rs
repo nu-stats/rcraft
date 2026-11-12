@@ -14,6 +14,7 @@ use crate::generalised;
 use crate::inference;
 use crate::models;
 use crate::panel;
+use crate::survival;
 
 /// `c("a", "b")` for column names.
 fn names_vector(names: &[&str]) -> String {
@@ -434,6 +435,10 @@ pub const SPECS: &[&Spec] = &[
     &panel::FIXED_EFFECTS_GLM,
     &panel::PANEL_MODEL,
     &panel::HAUSMAN,
+    &survival::KAPLAN_MEIER,
+    &survival::LOG_RANK,
+    &survival::COX,
+    &survival::PARAMETRIC,
 ];
 
 #[cfg(test)]

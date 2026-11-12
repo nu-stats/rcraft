@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 103 | 0 | 93 | 10 |
+| 107 | 0 | 97 | 10 |
 
 ## File
 
@@ -88,6 +88,10 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Fixed-effects count or binary model | partial |
 | Panel model | partial |
 | Hausman test (fixed or random effects) | partial |
+| Kaplan-Meier survival curves | partial |
+| Log-rank test | partial |
+| Cox proportional hazards model | partial |
+| Parametric survival model | partial |
 | Model fit | partial |
 | Compare models | partial |
 | Predicted values and residuals | partial |

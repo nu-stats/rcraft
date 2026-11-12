@@ -3990,3 +3990,26 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - **Not yet:** dynamic panels (GMM), instrumental variables in panels, unit-root and serial-correlation
   tests, and the Objects pane's Model menu (fit, comparison, predictions) on fixest and plm models.
 
+## P6.3 Survival (first part), 2026-11-12
+
+- **Statistics > Survival** (`catalog::survival`), four dialogs over the survival package that comes with
+  R, each taking a time and an event (1 or TRUE for the event, 0 or FALSE for censored):
+  - **Kaplan-Meier survival curves:** `survfit`, overall or by group, at a chosen confidence level; the
+    curves drawn in the Graph tab (one curve with its band; several with a legend), censored rows marked.
+    This is also P5.3's "survival curves".
+  - **Log-rank test:** `survdiff`, log-rank or Peto-Peto.
+  - **Cox proportional hazards model:** `coxph` with Efron (R's default), Breslow (Stata's) or exact ties,
+    an optional entry time (counting-process data), strata, a cluster for robust errors; the summary's
+    hazard ratios at the chosen level, and `cox.zph`'s test of proportional hazards.
+  - **Parametric survival model:** `survreg` with a Weibull, exponential, log-normal or log-logistic
+    distribution, and time ratios with intervals.
+  Each variable may have one role only (time, event, entry, group, strata, cluster, or predictor).
+- **Checked in real R** (`engine/tests/survival.rs`, 40 made-up rows in two arms with ties and censoring):
+  each report the same as the call written by hand; the Kaplan-Meier estimate the product limit worked
+  out by hand (1e-12), one picture per plot; the log-rank chi-squared (O - E)^2 / V by hand (1e-10); the
+  Breslow Cox coefficient the maximum of the partial likelihood written out (1e-6); the exponential
+  model's coefficients minus those of the Poisson GLM of the events with log time as offset (1e-6); the
+  Weibull log-likelihood the one written out and maximised (1e-8). Snapshot tests of each form.
+- **Not yet:** competing risks, time-varying covariates set up from the data, survival curves from a
+  fitted Cox model, and the Objects pane's Model menu on these models.
+
