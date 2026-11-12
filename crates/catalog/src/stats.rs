@@ -14,6 +14,7 @@ use crate::generalised;
 use crate::inference;
 use crate::iv;
 use crate::models;
+use crate::multilevel;
 use crate::panel;
 use crate::survey;
 use crate::survival;
@@ -446,6 +447,8 @@ pub const SPECS: &[&Spec] = &[
     &survey::SURVEY_REGRESSION,
     &iv::IV_REGRESSION,
     &iv::HECKMAN,
+    &multilevel::LINEAR_MIXED,
+    &multilevel::GENERALIZED_MIXED,
 ];
 
 #[cfg(test)]

@@ -517,7 +517,13 @@ Each family is its own set of dialogs over a named CRAN package.
   Poisson and logit errors Stata's conventions. Not yet: dynamic panels (GMM),
   instrumental variables in panels, unit-root and serial-correlation tests, and post-estimation
   from the Model menu on these models)
-- P6.2 Multilevel models (`lme4`, `glmmTMB`)
+- P6.2 Multilevel models (`lme4`, `glmmTMB`) (first part done 2026-11-12: Statistics > Multilevel
+  models, a linear mixed model (`lme4::lmer`: random intercepts, random slopes independent or
+  correlated, a nested level, ML or REML) and a logistic or Poisson mixed model (`lme4::glmer`,
+  a random intercept, 7-point adaptive quadrature, an exposure), with Stata's defaults and fitted
+  to the maximum. Checked against the likelihoods written out by hand and Stata 19's `mixed`,
+  `melogit` and `mepoisson`; Verified. Not yet: glmmTMB, random slopes in the logistic and Poisson
+  models, crossed effects, the intraclass correlation and predictions of the random effects)
 - P6.3 Survival (`survival`)
   (first part done 2026-11-12: Statistics > Survival, four dialogs: Kaplan-Meier survival curves
   (`survfit`, overall or by group, with the plot), the log-rank test (`survdiff`, log-rank or

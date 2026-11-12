@@ -4143,3 +4143,41 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   doBy, cowplot, Deriv, modelr and microbenchmark), and added to CI's package step.
 - **Not yet:** LIML and GMM, IV probit and tobit, treatment-effects models, and the Objects pane's
   Model menu on these models.
+
+## P6.2 Multilevel models (first part), 2026-11-12
+
+- **Statistics > Multilevel models** (`catalog::multilevel`), two dialogs over lme4 (1.1.36, already
+  installed as a dependency of sampleSelection; added to CI's package step by name), with Stata's
+  defaults, as the user chose for P6.1 and P6.3:
+  - **Linear mixed model:** `lme4::lmer` with a random intercept for the groups, optional random
+    slopes (independent, `||`, as Stata's default covariance, or correlated with the intercept, `|`,
+    lme4's), an optional nested level (`+ (1 | school:class)`, as Stata's `|| school: || class:`),
+    maximum likelihood (Stata's default) or REML (lme4's); the summary and Wald intervals.
+  - **Logistic or Poisson mixed model:** `lme4::glmer` with a random intercept, `nAGQ = 7` (Stata's
+    7-point adaptive quadrature), an optional exposure (`offset = log(e)`), odds or rate ratios.
+  - Both pass tight optimizer controls: lmer's default stopping rule left the correlated-slopes fit
+    about 5e-6 from the maximum, and glmer's the school variance about 2e-5; with them lme4 sits on
+    the maximum (4e-9 for the slope models, 5e-8 for the quadrature fits).
+- **Checked in real R** (`engine/tests/multilevel.rs`, 100 made-up pupils in 20 classes in 10
+  schools of 6 to 14, intercepts and slopes varying by school, two values missing), R and lme4
+  versions recorded:
+  - the likelihoods written out in plain R with lme4's estimates put in: V = s^2 (I + Z D Z') with Z
+    built from the data (school indicators, their products with hours, class indicators; D diagonal
+    or a Cholesky factor), GLS for the coefficients and errors, the ML or REML log-likelihood (lme4's
+    to 1e-12, its central-difference slope below 1e-5, so the maximum); the 7-point adaptive
+    Gauss-Hermite likelihood (Golub-Welsch nodes, each school centred on its mode) for the logistic
+    and Poisson fits, likewise;
+  - Stata 19's `mixed` (ML, `reml`, random slopes independent and unstructured, `|| school: ||
+    class:`), `melogit` and `mepoisson, exposure()`: log-likelihoods to 1e-12 (linear) and 1e-9;
+    coefficients and errors to 1e-7 or 1e-6; variance components to 1e-6, except where Stata stops
+    short in a flat direction (independent slopes' intercept sd 1e-4, unstructured 1e-5, the
+    Poisson school variance 1e-4, each with its reason in the test). Stata is the one that stops
+    sooner: written out, the maximum is lme4's to 1e-9 and Stata's to about 2e-7. For the logistic
+    and Poisson fits Stata's quadrature centres on each school's posterior mean and variance where
+    lme4's centres on the mode and curvature, which moves the maximum about 1e-7.
+  - lme4's logLik for an AGQ fit leaves out the saturated model's log-likelihood (zero for 0/1
+    outcomes); with it added the Poisson log-likelihood is Stata's.
+  Both entries are marked **Verified**.
+- **Not yet:** glmmTMB, random slopes or nesting in the logistic and Poisson models (Stata's
+  quadrature with several effects is not lme4's Laplace), crossed effects, the intraclass
+  correlation, predicted random effects, and the Objects pane's Model menu on these models.

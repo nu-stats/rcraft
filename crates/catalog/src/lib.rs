@@ -13,6 +13,7 @@ pub mod graphs;
 pub mod inference;
 pub mod iv;
 pub mod models;
+pub mod multilevel;
 pub mod panel;
 pub mod plot_export;
 pub mod postest;
@@ -201,6 +202,8 @@ pub const ENTRIES: &[Entry] = &[
     verified("Survey regression", Area::Statistics),
     verified("Two-stage least squares", Area::Statistics),
     verified("Heckman selection model", Area::Statistics),
+    verified("Linear mixed model", Area::Statistics),
+    verified("Logistic or Poisson mixed model", Area::Statistics),
     partial("Model fit", Area::Statistics),
     partial("Compare models", Area::Statistics),
     partial("Predicted values and residuals", Area::Statistics),
