@@ -133,3 +133,23 @@ files and on the screen.
 - `fragment` with `prehead()` or `postfoot()`; `@` substitutions other than `@title` in `prehead()`;
   `mlabels()` with `mtitles()` or `nomtitles`, with `depvars` and `label`, `span` in .csv, `prefix()`
   outside .tex; `mgroups(..., erepeat())` in .csv; more groups than mgroups' labels.
+
+# cells() of models side by side, refcat(), eqlabels(none), @M (2026-11-11)
+
+Observed on Stata 19 SE with made-up asclogit models (probe `etc/e1.do` in the session scratchpad); RCraft's
+four .tex files and screen table the same as Stata's, and YFBPT6's rawestimates1.tex and rawgovestimates.tex
+(nine asclogit models each) byte for byte as Stata wrote them.
+
+- `cells("b(star fmt(2) label(Coef.)) se(label(Std.Err.))")`: each model's two statistics side by side, the
+  first with its stars; on the screen " " + 12 (+ the stars' 3) and " " + 12, in .tex "&" + 12 + 9 and "&" + 12;
+  the numbers and titles span both (`\multicolumn{2}{c}{(1)}` padded to 2 × 12 + 9 + 1; `@span` is 2);
+  a row of the cells' labels (`Coef.`, `Std.Err.`; `b`, `se` without label()). A statistic without fmt()
+  takes the first one's, and so do the stats() rows without fmt() (`ll` -135.792 under fmt(3)); no N without
+  stats() is in a3 (400). `sfmt()` changed nothing seen. No notes in this layout; tabular `l*{2}{cc}`.
+- A one-equation model (asclogit's `alt:`): its equation's name as a row before the first coefficient, none
+  with `eqlabels(none)`.
+- `refcat(x1 "Head" ..., nolabel)`: a heading row before x1 with empty cells; without nolabel `ref.` in the
+  first column of each model.
+- `prehead()`: `@M` is the number of models; with `fragment` and both prehead() and postfoot() the output is
+  theirs. A word outside quotes is a line of its own (`posthead(\hline)`; the `}` after a closing quote in
+  YFBPT6's postfoot()). Labels in compound quotes (`` `"Observations"' ``) are read as plain ones.

@@ -3948,3 +3948,14 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   of the eight packages refuse nothing: ASKO93, AXYMDI, SI3BGA, TZEN38, ZNMIXH.
 - The clock went back again at a session restart (13:25, the build files at 15:23): RCraft's crates
   cleaned and rebuilt before testing.
+
+## esttab cells() side by side, refcat(), eqlabels(none), @M; rspike horizontal; bgcolor(), 2026-11-11
+
+- Observed in Stata 19 (`plan/stata/esttab-options.md`, last part): models' b and se side by side in
+  cells(), refcat() heading rows, eqlabels(none), @M in prehead(), words outside quotes as lines, compound
+  quotes in labels; esttab of one-equation models (asclogit). YFBPT6's rawestimates1.tex and
+  rawgovestimates.tex are now written byte for byte as Stata's.
+- twoway rcap and rspike, horizontal; bgcolor() as a look option.
+- YFBPT6: 14 lines refused (17): the cmclogit chain (cmset, cmclogit, margins after it, and what reads
+  them), rreg, and esttab matrix() (2). rreg: its iteration log shows a scale about 0.3% larger than
+  MAD/0.6745, not yet pinned down, so it stays refused.

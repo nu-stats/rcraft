@@ -224,6 +224,7 @@ pub(super) const LOOK: &[(&str, usize)] = &[
     ("clcolor", 3),
     ("clwidth", 3),
     ("pstyle", 6),
+    ("bgcolor", 3),
     ("lstyle", 3),
     ("color", 3),
     ("fcolor", 2),
@@ -1052,9 +1053,22 @@ impl Session {
                 } else {
                     ""
                 };
-                g.push(format!(
-                    "ggplot2::{geom}(data = {rows}, ggplot2::aes(x = stata_num(.data[[{x}]]), ymin = {y2w}(stata_num(.data[[{y1}]])), ymax = {y2w}(stata_num(.data[[{y2}]])){colour}){width})"
-                ));
+                if lo.has("horizontal", 3) {
+                    // horizontal: from one value to the other along x, at each y
+                    if l.y2 {
+                        return Err(no(format!(
+                            "twoway {}, horizontal with yaxis(2) is not translated yet",
+                            l.kind
+                        )));
+                    }
+                    g.push(format!(
+                        "ggplot2::{geom}(data = {rows}, ggplot2::aes(y = stata_num(.data[[{x}]]), xmin = stata_num(.data[[{y1}]]), xmax = stata_num(.data[[{y2}]]){colour}), orientation = \"y\"{width})"
+                    ));
+                } else {
+                    g.push(format!(
+                        "ggplot2::{geom}(data = {rows}, ggplot2::aes(x = stata_num(.data[[{x}]]), ymin = {y2w}(stata_num(.data[[{y1}]])), ymax = {y2w}(stata_num(.data[[{y2}]])){colour}){width})"
+                    ));
+                }
             }
             "kdensity" => {
                 let call = self.kd_call(&l.x, rows, &lo)?;
@@ -1664,6 +1678,7 @@ fn kind_options(kind: &str) -> Vec<(&'static str, usize)> {
         "kdensity" => vec![("kernel", 1), ("bwidth", 1), ("n", 1)],
         "lowess" => vec![("bwidth", 2)],
         "bar" => vec![("base", 4), ("vertical", 4)],
+        "rcap" | "rspike" => vec![("horizontal", 3), ("vertical", 4)],
         _ => Vec::new(),
     }
 }
