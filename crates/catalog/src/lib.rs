@@ -12,6 +12,7 @@ pub mod generalised;
 pub mod graphs;
 pub mod inference;
 pub mod models;
+pub mod panel;
 pub mod plot_export;
 pub mod postest;
 pub mod save;
@@ -176,6 +177,10 @@ pub const ENTRIES: &[Entry] = &[
     partial("Negative binomial model", Area::Statistics),
     partial("Ordinal model", Area::Statistics),
     partial("Multinomial model", Area::Statistics),
+    partial("Fixed-effects regression", Area::Statistics),
+    partial("Fixed-effects count or binary model", Area::Statistics),
+    partial("Panel model", Area::Statistics),
+    partial("Hausman test (fixed or random effects)", Area::Statistics),
     partial("Model fit", Area::Statistics),
     partial("Compare models", Area::Statistics),
     partial("Predicted values and residuals", Area::Statistics),

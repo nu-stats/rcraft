@@ -506,6 +506,14 @@ skipped. It never gives a silent wrong answer.
 Each family is its own set of dialogs over a named CRAN package.
 
 - P6.1 Panel and fixed effects (`fixest`, `plm`)
+  (first part done 2026-11-12: Statistics > Panel models, four dialogs: fixed-effects regression
+  (`fixest::feols`, any number of absorbed fixed effects, conventional, robust, clustered or two-way
+  clustered errors), a fixed-effects Poisson or logit model (`fepois`, `feglm`, with an exposure),
+  the classic panel estimators (`plm::plm`: within, random, between, pooled, first differences,
+  effects for units, periods or both, errors clustered by unit or period) and the Hausman test
+  (`plm::phtest`); each run in real R against an independent fit. Not yet: dynamic panels (GMM),
+  instrumental variables in panels, unit-root and serial-correlation tests, and post-estimation
+  from the Model menu on these models)
 - P6.2 Multilevel models (`lme4`, `glmmTMB`)
 - P6.3 Survival (`survival`)
 - P6.4 Survey data (`survey`)

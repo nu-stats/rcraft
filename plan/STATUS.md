@@ -3961,3 +3961,32 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - YFBPT6: 14 lines refused (17): the cmclogit chain (cmset, cmclogit, margins after it, and what reads
   them), rreg, and esttab matrix() (2). rreg: its iteration log shows a scale about 0.3% larger than
   MAD/0.6745, not yet pinned down, so it stays refused.
+
+## P6.1 Panel and fixed effects (first part), 2026-11-12
+
+- **Statistics > Panel models** (`catalog::panel`), four dialogs, each a spec as in Phase 4, that keep the
+  model under a chosen name (but the Hausman test) and print the package's own summary:
+  - **Fixed-effects regression:** `fixest::feols(y ~ x | fe1 + fe2)`, any number of absorbed fixed
+    effects; errors clustered by the first fixed effect (fixest's default), conventional, robust,
+    two-way clustered, or clustered by a chosen variable; confidence intervals.
+  - **Fixed-effects count or binary model:** `fixest::fepois` or `fixest::feglm(family = "logit")`,
+    an exposure as an offset for Poisson, rate or odds ratios with intervals.
+  - **Panel model:** `plm::plm` with the unit and time as `index`: within, random, between, pooled or
+    first differences, effects for units, periods or both, errors conventional or clustered by unit or
+    period (`plm::vcovHC` in the summary).
+  - **Hausman test:** the model fitted within and random, then `plm::phtest`, nothing kept.
+  Their checks: the outcome, predictors, fixed effects, unit and time each in one role, two fixed
+  effects for two-way clustering, an exposure for Poisson only, and no two-way effects for between or
+  first differences.
+- **Checked in real R** (`engine/tests/panel.rs`, made-up balanced panel of 6 units over 5 years): each
+  report the same as the call written by hand; feols the unit and year dummy fit to 1e-10 (and its
+  conventional standard error lm's), fepois and the logit the dummy-variable glm (1e-7, 1e-6), plm's
+  within the unit-dummy fit, between lm on the units' means, first differences lm on the differences,
+  clustered errors vcovHC's, and the Hausman statistic worked out from the two fits. Snapshot tests of
+  the R for each form (`catalog::panel::tests`); every help page's function links found in R.
+- **Packages:** fixest 0.12.1 and plm 2.6.5 from the pinned snapshot (2025-03-15), installed on this
+  machine with the user's go-ahead (with ggplot2 and quantreg, which `coefplot.do` and `robreg.do`
+  need) and added to CI's package step.
+- **Not yet:** dynamic panels (GMM), instrumental variables in panels, unit-root and serial-correlation
+  tests, and the Objects pane's Model menu (fit, comparison, predictions) on fixest and plm models.
+

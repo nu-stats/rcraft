@@ -13,6 +13,7 @@ use crate::data::BASE;
 use crate::generalised;
 use crate::inference;
 use crate::models;
+use crate::panel;
 
 /// `c("a", "b")` for column names.
 fn names_vector(names: &[&str]) -> String {
@@ -429,6 +430,10 @@ pub const SPECS: &[&Spec] = &[
     &generalised::NEGATIVE_BINOMIAL,
     &generalised::ORDINAL,
     &generalised::MULTINOMIAL,
+    &panel::FIXED_EFFECTS_REGRESSION,
+    &panel::FIXED_EFFECTS_GLM,
+    &panel::PANEL_MODEL,
+    &panel::HAUSMAN,
 ];
 
 #[cfg(test)]
