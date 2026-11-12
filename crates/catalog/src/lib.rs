@@ -21,6 +21,7 @@ pub mod save;
 pub mod stats;
 pub mod survey;
 pub mod survival;
+pub mod timeseries;
 
 /// Where an entry sits in the menus.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -204,6 +205,8 @@ pub const ENTRIES: &[Entry] = &[
     verified("Heckman selection model", Area::Statistics),
     verified("Linear mixed model", Area::Statistics),
     verified("Logistic or Poisson mixed model", Area::Statistics),
+    verified("ARIMA model", Area::Statistics),
+    verified("Autocorrelations", Area::Statistics),
     partial("Model fit", Area::Statistics),
     partial("Compare models", Area::Statistics),
     partial("Predicted values and residuals", Area::Statistics),

@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 114 | 15 | 89 | 10 |
+| 116 | 17 | 89 | 10 |
 
 ## File
 
@@ -99,6 +99,8 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Heckman selection model | verified |
 | Linear mixed model | verified |
 | Logistic or Poisson mixed model | verified |
+| ARIMA model | verified |
+| Autocorrelations | verified |
 | Model fit | partial |
 | Compare models | partial |
 | Predicted values and residuals | partial |

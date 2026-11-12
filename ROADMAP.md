@@ -543,7 +543,13 @@ Each family is its own set of dialogs over a named CRAN package.
   to 1e-9, with the R and survey versions recorded: the catalog's first Verified entries. Not yet:
   replicate weights, multi-stage designs, subpopulations, ratios, quantiles, and the Model menu on
   survey models)
-- P6.5 Time series (`forecast`, `fable`)
+- P6.5 Time series (`forecast`, `fable`) (first part done 2026-11-12, with base R's stats: Statistics >
+  Time series > ARIMA model (`stats::arima` by exact maximum likelihood, AR and MA orders, 0 to 2
+  differences with Stata's constant on the differenced series, level forecasts with errors from
+  the psi weights) and Autocorrelations (AC, Yule-Walker and regression PAC, Ljung-Box Q, the
+  correlograms). Checked against the exact likelihood and the formulas written out by hand and
+  Stata 19's `arima`, `predict` and `corrgram`; Verified. Not yet: forecast and fable, seasonal
+  models, unit-root tests, exponential smoothing, ARIMAX, VAR and the time-series plot)
 - P6.6 Instrumental variables and selection models (first part done 2026-11-12: Statistics >
   Instrumental variables > Two-stage least squares (`fixest::feols` with instruments, optional
   fixed effects, conventional, robust or clustered errors, with or without Stata's small-sample

@@ -18,6 +18,7 @@ use crate::multilevel;
 use crate::panel;
 use crate::survey;
 use crate::survival;
+use crate::timeseries;
 
 /// `c("a", "b")` for column names.
 fn names_vector(names: &[&str]) -> String {
@@ -449,6 +450,8 @@ pub const SPECS: &[&Spec] = &[
     &iv::HECKMAN,
     &multilevel::LINEAR_MIXED,
     &multilevel::GENERALIZED_MIXED,
+    &timeseries::ARIMA,
+    &timeseries::AUTOCORRELATIONS,
 ];
 
 #[cfg(test)]

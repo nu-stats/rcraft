@@ -4181,3 +4181,38 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - **Not yet:** glmmTMB, random slopes or nesting in the logistic and Poisson models (Stata's
   quadrature with several effects is not lme4's Laplace), crossed effects, the intraclass
   correlation, predicted random effects, and the Objects pane's Model menu on these models.
+
+## P6.5 Time series (first part), 2026-11-12
+
+- **Statistics > Time series** (`catalog::timeseries`), two dialogs on base R's stats (no package to
+  install), set up as Stata's `arima` and `corrgram`; an optional time variable puts the rows in
+  order first, as `tsset` does:
+  - **ARIMA model:** AR order 0 to 3, 0 to 2 differences, MA order 0 to 3, a constant; forecasts of 6,
+    12 or 24 periods. `stats::arima` by exact maximum likelihood (`method = "ML"`). With d > 0 it
+    fits the differenced series with its own constant, which is Stata's model (`stats::arima` with
+    d > 0 drops the constant, and its regression drift through `xreg` uses an approximate diffuse
+    prior, `kappa = 1e6`, that moves the log-likelihood by 7e-6). `transform.pars = FALSE` and
+    `ndeps = 1e-5`: with the defaults the errors came out up to 6e-4 off (and 3e-3 for an AR(2)). The
+    forecasts are of the series' levels, the differences undone with `diffinv`, their errors from
+    the psi weights of phi(B)(1 - B)^d and theta(B); Stata's `predict, mse` after a differenced
+    model is the error of the differences, not the levels.
+  - **Autocorrelations:** a table of each lag's AC, PAC (Yule-Walker, R's pacf, `corrgram, yw`),
+    PAC by regression (`corrgram`'s default), Ljung-Box Q and its p-value; the correlograms drawn
+    in the Graph tab.
+- **Checked in real R** (`engine/tests/timeseries.rs`, 150 made-up months shuffled out of order, an
+  ARMA(1, 1) around a mean and a random walk with drift), R's version recorded:
+  - the exact Gaussian likelihood written out from the Toeplitz matrix of the ARMA
+    autocovariances: arima's log-likelihood to 1e-12 at its estimate, its central-difference slope
+    below 1e-4 there, and its inverse Hessian arima's errors to 1e-5 (arima's come from optim's
+    finite-difference Hessian, good to about that); the level forecasts and their errors against
+    the psi weights by hand (1e-12); AC, Ljung-Box Q, Durbin-Levinson PAC and regression PAC by hand,
+    the dialog's table the same as the hand one printed;
+  - Stata 19 `arima ..., vce(oim)` with tight tolerances (its defaults stop about 1e-5 short):
+    ARMA(1,1), AR(2), ARI(1,1) with and without the constant; coefficients and sigma to 1e-7, errors
+    to 1e-5, log-likelihoods to 1e-12; `predict double, y` and `mse` five months ahead to 1e-7 (levels
+    to 1e-9); `corrgram` and `corrgram, yw` to 1e-12. An AR(2) without a constant on this series sits
+    next to a unit root (phi1 + phi2 = 0.994), where R's and Stata's numerical Hessians disagree by
+    3e-3 and no finite difference written out settles it; the test uses the AR(2) with a constant.
+  Both entries are marked **Verified**.
+- **Not yet:** forecast and fable, seasonal ARIMA, unit-root tests (Dickey-Fuller, Phillips-Perron),
+  exponential smoothing, regressors in ARIMA, VAR, and a time-series plot.
