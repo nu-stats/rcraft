@@ -4098,3 +4098,48 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
     approximation;
   - Hausman when V_fe - V_re is negative: Stata reports the negative statistic, plm its absolute
     value.
+
+## P6.6 Instrumental variables and selection models (first part), 2026-11-12
+
+- **Statistics > Instrumental variables > Two-stage least squares** (`catalog::iv`): `fixest::feols`
+  with the formula's IV part (`y ~ x | fe | endog ~ instruments`): endogenous predictors, excluded
+  instruments (at least as many), exogenous predictors and fixed effects optional; conventional or
+  robust errors, or clustered by a variable; the summary with the first-stage F, Wu-Hausman and
+  Sargan, the first stage if asked, and `fitstat(~ ivwald)` (the robust first-stage Wald that
+  Stata's `estat firststage` reports) under robust or clustered errors.
+  - "Small-sample statistics" (on by default) is fixest's default, which is exactly Stata's
+    `ivregress ..., small` (conventional, robust and clustered) and `xtivreg, fe` with fixed
+    effects. Off writes `ssc = fixest::ssc(adj = FALSE, cluster.adj = FALSE)`: Stata's large-sample
+    robust and clustered errors exactly; fixest's conventional errors still divide by N - 1 where
+    Stata's divide by N (sqrt(N/(N-1)) larger; noted in the dialog), and fixest reports t where
+    Stata reports z.
+  - fixest's Wu-Hausman and Sargan are the conventional forms; under robust errors Stata's
+    `estat endogenous` and `estat overid` report robust score tests instead (not matched).
+- **Statistics > Selection models > Heckman selection model**: `sampleSelection::selection`, the
+  selection from a 0/1 variable or, left empty, from the outcome being seen (`!is.na(y)`, as
+  Stata's `heckman` does); maximum likelihood (Stata's default) or Heckman's two steps.
+  - Maximum likelihood passes `gradtol = 1e-12, reltol = 1e-16, tol = 1e-14`: maxLik's default
+    stops on a gradient below 1e-6, about 6e-9 (relative) short of the maximum; with these it is
+    Stata's maximum (with Stata's tightest tolerances) to 1e-15.
+- **Checked in real R** (`engine/tests/iv.rs`, 120 made-up rows in six regions, an endogenous
+  schooling, two values of a predictor missing, earnings seen for 63 rows), the R and package
+  versions recorded (fixest 0.12.1, sampleSelection 1.2.12):
+  - two-stage least squares by the projection on the instruments, each error with its factor
+    (s^2 on N - K; HC1; G/(G-1)(N-1)/(N-K); none for the large-sample forms; with fixed effects
+    demeaned within regions, N - K - G, and K + 1 for clusters the effects are nested in); the
+    first-stage F, its HC1 Wald, Wu-Hausman as the control-function F, Sargan as N R^2; against
+    Stata 19's `ivregress 2sls` (with and without `small`, each kind of error), `estat
+    firststage`/`endogenous`/`overid` and `xtivreg, fe` (and clustered), all to 1e-9;
+  - Heckman's log-likelihood written out (the package's at its estimate to 1e-12, its numerical
+    gradient below 1e-6 there) and Stata 19's `heckman` coefficients, errors (rho's and sigma's from
+    /athrho and /lnsigma by the delta method) and log-likelihood to 1e-9; the two steps written out
+    (probit, inverse Mills ratio, least squares, sigma, rho, the corrected variance with the
+    probit's observed information) to 1e-9, and Stata 19's `twostep` coefficients, rho and sigma to
+    1e-9. Stata's twostep outcome errors are held to 1e-6: its selection-equation errors sit about
+    3e-6 from its own `probit` command's, which are the package's to 1e-10 (checked).
+  Both entries are marked **Verified**.
+- **Packages:** sampleSelection 1.2.12 from the pinned snapshot, installed with the user's go-ahead
+  (with systemfit, VGAM, mvtnorm, car, carData, abind, pbkrtest, lme4, nloptr, reformulas, broom,
+  doBy, cowplot, Deriv, modelr and microbenchmark), and added to CI's package step.
+- **Not yet:** LIML and GMM, IV probit and tobit, treatment-effects models, and the Objects pane's
+  Model menu on these models.

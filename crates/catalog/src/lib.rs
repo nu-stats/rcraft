@@ -11,6 +11,7 @@ pub mod data_tools;
 pub mod generalised;
 pub mod graphs;
 pub mod inference;
+pub mod iv;
 pub mod models;
 pub mod panel;
 pub mod plot_export;
@@ -198,6 +199,8 @@ pub const ENTRIES: &[Entry] = &[
     verified("Survey means and totals", Area::Statistics),
     verified("Survey proportions and tables", Area::Statistics),
     verified("Survey regression", Area::Statistics),
+    verified("Two-stage least squares", Area::Statistics),
+    verified("Heckman selection model", Area::Statistics),
     partial("Model fit", Area::Statistics),
     partial("Compare models", Area::Statistics),
     partial("Predicted values and residuals", Area::Statistics),

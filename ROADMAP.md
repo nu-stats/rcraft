@@ -538,7 +538,15 @@ Each family is its own set of dialogs over a named CRAN package.
   replicate weights, multi-stage designs, subpopulations, ratios, quantiles, and the Model menu on
   survey models)
 - P6.5 Time series (`forecast`, `fable`)
-- P6.6 Instrumental variables and selection models
+- P6.6 Instrumental variables and selection models (first part done 2026-11-12: Statistics >
+  Instrumental variables > Two-stage least squares (`fixest::feols` with instruments, optional
+  fixed effects, conventional, robust or clustered errors, with or without Stata's small-sample
+  statistics, the first stage, its F and robust Wald, Wu-Hausman and Sargan) and Statistics >
+  Selection models > Heckman selection model (`sampleSelection::selection`, maximum likelihood
+  fitted to Stata's precision or Heckman's two steps, the selection taken from a 0/1 variable or
+  from the outcome being seen). Checked against the formulas by hand and Stata 19's `ivregress`,
+  `estat`, `xtivreg, fe` and `heckman`; Verified. Not yet: LIML and GMM, IV probit and tobit,
+  treatment-effects models, and the Model menu on these models)
 - P6.7 Multivariate: PCA, factor analysis, clustering, discriminant
 - P6.8 Resampling and permutation tests
 - P6.9 Bayesian (`brms`, `rstanarm`)

@@ -12,6 +12,7 @@ use rcraft_rcodegen::r_string;
 use crate::data::BASE;
 use crate::generalised;
 use crate::inference;
+use crate::iv;
 use crate::models;
 use crate::panel;
 use crate::survey;
@@ -443,6 +444,8 @@ pub const SPECS: &[&Spec] = &[
     &survey::SURVEY_MEANS,
     &survey::SURVEY_TABLES,
     &survey::SURVEY_REGRESSION,
+    &iv::IV_REGRESSION,
+    &iv::HECKMAN,
 ];
 
 #[cfg(test)]
