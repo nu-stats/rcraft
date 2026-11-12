@@ -1,10 +1,12 @@
 # Status
 
-Last updated: 2026-11-09.
+Last updated: 2026-11-12.
 
-**Where things are:** Phases 0, 1 (except P1.2 and P1.6), 1A, 3 and 4 are built; Phase 5 and the
-first three Stata translator tasks (P2B.1 to P2B.3) too. `plan/AUDIT.md` (2026-10-29) lists every
-roadmap task against the code and what is left. The sections below are a dated log, oldest first.
+**Where things are:** Phases 0 to 4 are built (Help, Stata mode and Run my do-file included), but
+P1.2 (a portable R download), P2A.6 and P2A.10 (RCraft's own manuals) and the leftovers
+`plan/AUDIT.md` lists; Phase 5 is built but P5.2 (the ggplot2 builder); Phases 6 to 9 are not
+started. `plan/AUDIT.md` (2026-11-12, with the 2026-10-29 audit kept below it) lists every phase
+against the code and what is left. The sections below are a dated log, oldest first.
 
 ## Done
 

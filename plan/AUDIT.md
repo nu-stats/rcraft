@@ -1,4 +1,81 @@
-# Roadmap audit, 2026-10-29
+# Roadmap audit, 2026-11-12
+
+Each phase of `ROADMAP.md` checked against `main` at `365b49d` (CI green on Windows, macOS and
+Ubuntu), the roadmap's own done notes and `plan/STATUS.md`. The audit of 2026-10-29 is kept below
+as it was; much of what it lists as not started has been built since (Phases 2A, 2B and 2C above all).
+
+## Summary
+
+| Phase | State |
+|---|---|
+| 0 Setup | Done. |
+| 1 R host and session | Done but **P1.2** (download a portable R when none is found), deferred on purpose. P1.6 was done 2026-10-30. |
+| 1A Packages | Done, with the gaps below. |
+| 2 Command window, Results | Done but part of **P2.2** (completion at the cursor, argument names, columns inside `[[`). |
+| 2A Help | Done but **P2A.6** (RCraft's own manual as pages in the app) and **P2A.10** (RCraft's own PDF manuals, "down the road"). |
+| 2B Stata mode | Done (P2B.1 to P2B.12). |
+| 2C Run my do-file | Done (P2C.1 to P2C.16), with the leftovers below; verification goes on in StatCraft's probes and the replication packages. |
+| 3 Data | Done but `.sas7bdat` catalogue files (P3.2). |
+| 4 Statistics | Done; a Q-Q plot and rich tables in Results (P4.1) are left. |
+| 5 Graphs | P5.1, P5.3, P5.4 done with leftovers. **P5.2 (ggplot2 builder) not started.** |
+| 6 Depth modules | Not started. |
+| 7 Reporting | Not started; `crates/report` is still a one-line stub. |
+| 8 Interface, packaging | P8.1 in place; P8.2 to P8.5 not started. |
+| 9 Extensibility | Not started. |
+
+## Where the Stata translator stands
+
+- The corpus (`crates/engine/tests/stata_corpus`): 73 do-files recorded in Stata 19, each checked by
+  every CI run; 200 commands and functions Verified (`statatr::verified`).
+- StatCraft's probes on R (merged main, 2026-11-09): 425 probes, 4,344 of 4,355 compared lines
+  the same as Stata's to 8 digits and 10 more to 6; one different, probe 448 (`c_local` inside a
+  program the do-file defines, which reads as empty; the same before the merge).
+- The replication packages: five of the eight that run in Stata (ASKO93, AXYMDI, SI3BGA, TZEN38,
+  ZNMIXH) translate every line; YFBPT6 refuses 14 (the `cmset`/`cmclogit` chain, `rreg`,
+  `esttab matrix()`). Many of their tables are written byte for byte as Stata's.
+
+## Gaps and leftovers (the real list)
+
+Not started:
+
+- P1.2 portable R download; P2A.6 and P2A.10 RCraft's own manuals; P5.2 ggplot2 builder.
+- Phases 6 and 7 (`crates/report` and `crates/rgraph` are one-line stubs), P8.2 to P8.5, Phase 9.
+
+Partly done, with what is missing:
+
+- P1A.2: the task-view and "has a binary for my platform" filters, other providers in search.
+- P1A.3: download counts and a "new packages" list (CRAN's files do not say which are new).
+- P1A.5/P1A.7: installing an older version has code but no screen.
+- P1A.10: the missing-package prompt exists in dialogs (`Spec::needs`), not for typed commands.
+- P2.2: completion at the cursor, argument names, columns inside `[[`.
+- P2B.5: `pie`, `graph matrix`, twoway `area`/`lfitci`/`function`, `by()` with fitted layers or
+  histograms, `xlabel()` as axis breaks.
+- P2C: `rpoisson()`, `rbeta()` with equal shapes above 1, KISS32 and `c(rngstate)` (P2C.11);
+  `poisson` to 8 digits (P2C.12); collinear terms in the panel, survival and IV models (P2C.13);
+  bootstrap's `bca` and `vce(bootstrap)` (P2C.16); probe 448's `c_local`.
+- P3.2 `.sas7bdat` catalogue files.
+- P4.1 a Q-Q plot and rich tables in Results.
+- P5.1 zoom and copy to clipboard; P5.3 heatmap and survival curves.
+
+Stale records to fix:
+
+- `crates/catalog` (and so `docs/coverage.md`) still marks built entries as `planned`: the seven
+  Stata mode entries (switch, translate code, translate do-file, open and run, dry-run report, side
+  by side, differences guide) and Vignettes. "RCraft manual" and "Model table" are planned rightly.
+- No menu entry is `Verified` (99 entries: 89 partial, 10 planned). AGENTS.md section 5 asks for a
+  check in the pinned R, with versions recorded, before an entry moves to Verified; none has been
+  written for the menus yet (the Stata corpus Verifies the translator's commands, not the menus).
+
+## Not checked by anyone yet
+
+Still as on 2026-10-29: the data-frame chooser, the combine dialogs, the Data submenus, Browse, the
+Graph tab, clicking Install in the live window, and the Stata translator and do-file window in the
+running app have not been used by a person. The review of the plot capture in
+`rproto/bootstrap.R` and of the session protocol is still wanted.
+
+---
+
+# Roadmap audit, 2026-10-29 (kept as it was)
 
 Each task of `ROADMAP.md` checked against the code on `main` at `1a88d9d` (CI green on
 Windows, macOS and Ubuntu), the tests, and the notes in `STATUS.md`. "Done" means built
