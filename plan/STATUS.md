@@ -4046,3 +4046,55 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - **Not yet:** replicate weights (BRR, jackknife, bootstrap), designs of more than one stage,
   subpopulations, ratios and quantiles, and the Objects pane's Model menu on survey models. P6.1's and
   P6.3's tests have not yet been brought up to this standard.
+
+## P6.1 and P6.3 brought to the survey standard, 2026-11-12
+
+- **Tests rewritten** (`engine/tests/panel.rs`, `engine/tests/survival.rs`) to P6.4's standard:
+  - messier made-up data: an unbalanced panel (eight units over three to six years, 37 rows) with
+    two values missing inside units, a balanced one for random effects and Hausman (with a second
+    outcome carrying a year shock for two-way random effects); survival data with two ages missing,
+    eight sites and entry times;
+  - every estimate and standard error recomputed in plain R without the package: the within
+    transform and its Frisch-Waugh two-way form, each sandwich with its small-sample factor
+    (conventional, robust, clustered, two-way clustered), the Poisson and logit scores and
+    information, the between regression, first differences by time, the [XT] manual's GLS transform
+    for random effects (one-way and two-way), the Hausman statistic; the product limit with
+    Greenwood's variance and log-log intervals, the log-rank and Peto-Peto statistics, Newton-Raphson
+    on Breslow's and Efron's partial likelihoods, the exponential model as a Poisson GLM;
+  - Stata 19's results on the same data: `xtreg, fe` (with year dummies, clustered), `areg` (robust,
+    clustered by firm), `poisson` and `logit` with dummies (conventional, robust, clustered),
+    `xtreg, be`, `regress D.wage D.hours` (and clustered), `xtreg, re` (and clustered), `hausman`;
+    `sts generate`, `sts test`, `stcox` (Breslow, Efron, exact partial, clusters, strata, entry
+    times), `streg` (Weibull, exponential, log-normal, log-logistic);
+  - the R and package versions printed (R 4.4.3, fixest 0.12.1, plm 2.6.5, survival 3.8.3) and R's
+    checked against `ENVIRONMENT`.
+  Held to 1e-9, except where a package stops at its own tolerance, which the test names: fixest's
+  Poisson and logit standard errors (about 1.2e-7 from the exact information, whatever its
+  tolerances; 1e-6), its two-way clustered error (two-way effects removed by iteration; 1e-8), and
+  survreg against streg (both stop near 1e-9; 1e-8). The eight entries are marked **Verified**.
+- **Dialogs changed to give Stata's numbers where R has the option** (the user's choice, 2026-11-12):
+  - Panel model, first differences: plm's `model = "fd"` differences row by row (its NEWS says so),
+    so a missing value or year inside a unit was differenced across the gap (27 differences here,
+    against Stata's 25). The dialog now fits `plm(diff(y) ~ diff(x), model = "pooling")`, whose
+    `diff()` goes by the time index as Stata's `D.` does; categorical predictors are refused for
+    first differences (make 0/1 variables).
+  - Panel model, clustered errors: `plm::vcovHC(..., type = "sss")`, Stata's small-sample factor.
+    This gives Stata's clustered errors for random effects and first differences; for the within
+    model Stata's `xtreg, fe` also counts the constant, so its error is sqrt((N-1)/(N-2)) larger
+    (the fixed-effects dialog gives Stata's).
+  - Fixed-effects Poisson and logit: `ssc = fixest::ssc(adj = FALSE)`, Stata's (and glm's)
+    conventions for these models: no degrees-of-freedom adjustment, G/(G-1) for clusters, N/(N-1)
+    for robust errors.
+  - Kaplan-Meier: `conf.type = "log-log"`, Stata's intervals (they stay within 0 and 1).
+- **Where R and Stata still differ** (documented in the tests, no R option to close it):
+  - random effects on an unbalanced panel: plm's Swamy-Arora unit variance is Baltagi and Chang's
+    with the between regression weighted by each unit's rows; Stata's default uses the harmonic mean
+    of the T_i and its `sa` option the unweighted between regression (all three reproduced by hand
+    to 1e-13; on a balanced panel they agree, and plm is Stata's to 1e-14);
+  - Cox robust errors: survival's carry no small-sample factor, Stata's G/(G-1) (or N/(N-1));
+  - `survdiff(rho = 1)` weights by the Kaplan-Meier S(t-), Stata's `sts test, peto` by Prentice's
+    product of (1 - d/(n+1)) (both reproduced by hand);
+  - `cox.zph` (survival 3) is the full score test, Stata's `estat phtest` Grambsch and Therneau's
+    approximation;
+  - Hausman when V_fe - V_re is negative: Stata reports the negative statistic, plm its absolute
+    value.

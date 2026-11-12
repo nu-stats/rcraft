@@ -143,7 +143,8 @@ pub const KAPLAN_MEIER: Spec = Spec {
     about: "The share still without the event over time, estimated by the Kaplan-Meier method \
             with survival::survfit, for all rows or for each group: the number at risk, the \
             events and the median time with its confidence interval, and a plot of the curves \
-            (censored rows marked) in the Graph tab.",
+            (censored rows marked) in the Graph tab. Its intervals are on the log-log scale, \
+            as Stata's are, so they stay between 0 and 1.",
     widgets: &[
         TIME,
         EVENT,
@@ -171,7 +172,8 @@ pub const KAPLAN_MEIER: Spec = Spec {
         let group = a.var("group");
         let rhs = group.clone().unwrap_or_else(|| "1".into());
         let mut code = format!(
-            "{km} <- survival::survfit({} ~ {rhs}, data = {}, conf.int = {})\nprint({km})",
+            "{km} <- survival::survfit({} ~ {rhs}, data = {}, conf.int = {}, \
+             conf.type = \"log-log\")\nprint({km})",
             surv(a),
             a.data(),
             a.choice("conf")
@@ -466,7 +468,8 @@ mod tests {
         let v = values(&KAPLAN_MEIER, &[("time", "time"), ("event", "died")], &[]);
         assert_eq!(
             code(&KAPLAN_MEIER, &v),
-            "km <- survival::survfit(survival::Surv(time, died) ~ 1, data = d, conf.int = 0.95)\n\
+            "km <- survival::survfit(survival::Surv(time, died) ~ 1, data = d, conf.int = 0.95, \
+             conf.type = \"log-log\")\n\
              print(km)\n\
              graphics::plot(km, conf.int = TRUE, lwd = 2, mark.time = TRUE, xlab = \"time\", \
              ylab = \"Survival probability\", main = \"Kaplan-Meier survival curve\")"
@@ -482,7 +485,8 @@ mod tests {
         v.set_flag("draw", false);
         assert_eq!(
             code(&KAPLAN_MEIER, &v),
-            "km <- survival::survfit(survival::Surv(time, died) ~ arm, data = d, conf.int = 0.95)\n\
+            "km <- survival::survfit(survival::Surv(time, died) ~ arm, data = d, conf.int = 0.95, \
+             conf.type = \"log-log\")\n\
              print(km)"
         );
     }

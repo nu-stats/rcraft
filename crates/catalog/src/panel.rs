@@ -254,7 +254,9 @@ pub const FIXED_EFFECTS_GLM: Spec = Spec {
     about: "A Poisson model of counts, or a logit model of a 0/1 outcome, with one or more \
             fixed effects absorbed. It fits with fixest::fepois or fixest::feglm. Groups whose \
             outcome never varies (all zero counts, all 0 or all 1) tell nothing about the \
-            coefficients and are dropped, with a note.",
+            coefficients and are dropped, with a note. The standard errors follow Stata's \
+            conventions for these models (and glm's): no degrees-of-freedom adjustment, and \
+            G/(G - 1) for G clusters.",
     widgets: &[
         Widget::Variable {
             id: "y",
@@ -308,7 +310,8 @@ pub const FIXED_EFFECTS_GLM: Spec = Spec {
         };
         let family = if poisson { "" } else { ", family = \"logit\"" };
         let mut code = format!(
-            "{model} <- {call}{} ~ {} | {}, data = {}{family}{offset}, {})\nprint(summary({model}))",
+            "{model} <- {call}{} ~ {} | {}, data = {}{family}{offset}, {}, \
+             ssc = fixest::ssc(adj = FALSE))\nprint(summary({model}))",
             a.var("y").unwrap_or_default(),
             rhs(a),
             fe_part(a),
@@ -440,11 +443,27 @@ fn plm_check(a: &Args) -> Vec<Problem> {
 fn panel_check(a: &Args) -> Vec<Problem> {
     let mut out = plm_check(a);
     let model = a.choice("model");
-    if a.choice("effect") == "twoways" && matches!(model, "between" | "fd") {
+    if a.choice("effect") == "twoways" && model == "between" {
         out.push(Problem::new(
             "effect",
-            "Between and first-difference models take panel-unit or time effects, not both.",
+            "Between models take panel-unit or time effects, not both.",
         ));
+    }
+    if model == "fd" {
+        let categorical = a.vars("x").into_iter().find(|v| {
+            a.ctx
+                .column(v)
+                .is_some_and(|c| matches!(c.kind, VarKind::Factor | VarKind::Text))
+        });
+        if let Some(v) = categorical {
+            out.push(Problem::new(
+                "x",
+                format!(
+                    "{v} is categorical; first differences need numbers. Make a 0/1 variable for \
+                     each level you need first."
+                ),
+            ));
+        }
     }
     if a.name_text("save") == a.ctx.dataset {
         out.push(Problem::new(
@@ -499,14 +518,16 @@ pub const PANEL_MODEL: Spec = Spec {
             label: "Effects for",
             options: EFFECTS,
             default: "individual",
-            hint: "Pooled models have no effects, so this is ignored for them.",
+            hint: "Pooled and first-difference models have no effects, so this is ignored for \
+                   them.",
         },
         Widget::Choice {
             id: "errors",
             label: "Standard errors",
             options: PANEL_ERRORS,
             default: "conventional",
-            hint: "Clustered errors are plm::vcovHC's (Arellano's), shown in the summary.",
+            hint: "Clustered errors are plm::vcovHC's (Arellano's) with Stata's small-sample \
+                   correction, shown in the summary.",
         },
         SAVE,
     ],
@@ -516,6 +537,22 @@ pub const PANEL_MODEL: Spec = Spec {
     code: |a, _| {
         let model = a.name("save");
         let estimator = a.choice("model");
+        let y = a.var("y").unwrap_or_default();
+        // plm's own model = "fd" differences row by row (its NEWS says so), so a
+        // missing value or year inside a unit is differenced across; diff() of a
+        // pseries goes by the time index, as Stata's D. does, and the pooled fit
+        // of the differences is then Stata's regress D.y D.x.
+        let (formula, estimator) = if estimator == "fd" {
+            let x = a
+                .vars("x")
+                .iter()
+                .map(|n| format!("diff({})", r_name(n)))
+                .collect::<Vec<_>>()
+                .join(" + ");
+            (format!("diff({y}) ~ {x}"), "pooling")
+        } else {
+            (format!("{y} ~ {}", rhs(a)), estimator)
+        };
         let effect = if estimator == "pooling" {
             String::new()
         } else {
@@ -524,14 +561,12 @@ pub const PANEL_MODEL: Spec = Spec {
         let summary = match a.choice("errors") {
             "conventional" => format!("summary({model})"),
             cluster => format!(
-                "summary({model}, vcov = plm::vcovHC({model}, cluster = {}))",
+                "summary({model}, vcov = plm::vcovHC({model}, cluster = {}, type = \"sss\"))",
                 r_string(cluster)
             ),
         };
         format!(
-            "{model} <- plm::plm({} ~ {}, data = {}, {}, model = {}{effect})\nprint({summary})",
-            a.var("y").unwrap_or_default(),
-            rhs(a),
+            "{model} <- plm::plm({formula}, data = {}, {}, model = {}{effect})\nprint({summary})",
             a.data(),
             index_arg(a),
             r_string(estimator),
@@ -693,7 +728,8 @@ mod tests {
         );
         assert_eq!(
             code(&FIXED_EFFECTS_GLM, &v),
-            "model <- fixest::fepois(visits ~ hours | id, data = d, offset = ~log(days), vcov = \"cluster\")\n\
+            "model <- fixest::fepois(visits ~ hours | id, data = d, offset = ~log(days), vcov = \"cluster\", \
+             ssc = fixest::ssc(adj = FALSE))\n\
              print(summary(model))\ncat(\"\\nRate ratios\\n\")\n\
              print(exp(cbind(rate_ratio = stats::coef(model), stats::confint(model, level = 0.95))))"
         );
@@ -715,7 +751,8 @@ mod tests {
         v.set_flag("ratios", false);
         assert_eq!(
             code(&FIXED_EFFECTS_GLM, &v),
-            "model <- fixest::feglm(left ~ hours | firm, data = d, family = \"logit\", vcov = \"iid\")\n\
+            "model <- fixest::feglm(left ~ hours | firm, data = d, family = \"logit\", vcov = \"iid\", \
+             ssc = fixest::ssc(adj = FALSE))\n\
              print(summary(model))\nprint(stats::confint(model, level = 0.95))"
         );
     }
@@ -748,7 +785,24 @@ mod tests {
         assert_eq!(
             code(&PANEL_MODEL, &v),
             "re <- plm::plm(wage ~ hours + `age group`, data = d, index = c(\"id\", \"year\"), model = \"random\", effect = \"twoways\")\n\
-             print(summary(re, vcov = plm::vcovHC(re, cluster = \"group\")))"
+             print(summary(re, vcov = plm::vcovHC(re, cluster = \"group\", type = \"sss\")))"
+        );
+        // first differences: the pooled fit of diff(), which goes by the time index
+        let v = values(
+            &PANEL_MODEL,
+            &[
+                ("y", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("model", "fd"),
+                ("errors", "group"),
+            ],
+            &[("x", &["hours", "days"])],
+        );
+        assert_eq!(
+            code(&PANEL_MODEL, &v),
+            "model <- plm::plm(diff(wage) ~ diff(hours) + diff(days), data = d, index = c(\"id\", \"year\"), model = \"pooling\")\n\
+             print(summary(model, vcov = plm::vcovHC(model, cluster = \"group\", type = \"sss\")))"
         );
         // pooled: no effect argument
         let v = values(
@@ -772,7 +826,7 @@ mod tests {
                 ("y", "wage"),
                 ("id", "year"),
                 ("time", "year"),
-                ("model", "fd"),
+                ("model", "between"),
                 ("effect", "twoways"),
             ],
             &[("x", &["hours"])],
@@ -781,6 +835,21 @@ mod tests {
         let widgets: Vec<&str> = problems.iter().map(|p| p.widget).collect();
         assert!(widgets.contains(&"time"), "{problems:?}");
         assert!(widgets.contains(&"effect"), "{problems:?}");
+        // first differences of a categorical predictor
+        let v = values(
+            &PANEL_MODEL,
+            &[
+                ("y", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("model", "fd"),
+            ],
+            &[("x", &["hours", "firm"])],
+        );
+        assert!(PANEL_MODEL
+            .problems(&ctx(), &v)
+            .iter()
+            .any(|p| p.widget == "x" && p.message.contains("firm")));
         let v = values(
             &PANEL_MODEL,
             &[("y", "wage"), ("id", "hours"), ("time", "year")],

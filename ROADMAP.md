@@ -511,7 +511,10 @@ Each family is its own set of dialogs over a named CRAN package.
   clustered errors), a fixed-effects Poisson or logit model (`fepois`, `feglm`, with an exposure),
   the classic panel estimators (`plm::plm`: within, random, between, pooled, first differences,
   effects for units, periods or both, errors clustered by unit or period) and the Hausman test
-  (`plm::phtest`); each run in real R against an independent fit. Not yet: dynamic panels (GMM),
+  (`plm::phtest`); each checked in real R against the formulas written out by hand and against
+  Stata 19 (`xtreg`, `areg`, `poisson`, `logit`, `regress D.`, `hausman`), Verified 2026-11-12;
+  first differences go by time, clustered plm errors carry Stata's small-sample factor and the
+  Poisson and logit errors Stata's conventions. Not yet: dynamic panels (GMM),
   instrumental variables in panels, unit-root and serial-correlation tests, and post-estimation
   from the Model menu on these models)
 - P6.2 Multilevel models (`lme4`, `glmmTMB`)
@@ -521,7 +524,9 @@ Each family is its own set of dialogs over a named CRAN package.
   Peto-Peto), the Cox model (`coxph`: Efron, Breslow or exact ties, an entry time, strata, a cluster
   for robust errors, hazard ratios, and the test of proportional hazards with `cox.zph`) and
   parametric survival models (`survreg`: Weibull, exponential, log-normal, log-logistic, with time
-  ratios); each run in real R against numbers worked out another way. Not yet: competing risks,
+  ratios); each checked in real R against the formulas written out by hand and against Stata 19
+  (`sts`, `sts test`, `stcox`, `streg`), Verified 2026-11-12, with log-log intervals as Stata's.
+  Not yet: competing risks,
   time-varying covariates set up from the data, survival curves from a fitted Cox model, and the
   Model menu on these models)
 - P6.4 Survey data (`survey`) (first part done 2026-11-12: Statistics > Survey data, with a design
