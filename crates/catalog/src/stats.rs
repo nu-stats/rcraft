@@ -14,6 +14,7 @@ use crate::generalised;
 use crate::inference;
 use crate::models;
 use crate::panel;
+use crate::survey;
 use crate::survival;
 
 /// `c("a", "b")` for column names.
@@ -439,6 +440,9 @@ pub const SPECS: &[&Spec] = &[
     &survival::LOG_RANK,
     &survival::COX,
     &survival::PARAMETRIC,
+    &survey::SURVEY_MEANS,
+    &survey::SURVEY_TABLES,
+    &survey::SURVEY_REGRESSION,
 ];
 
 #[cfg(test)]

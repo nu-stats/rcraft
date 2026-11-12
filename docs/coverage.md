@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 107 | 0 | 97 | 10 |
+| 110 | 3 | 97 | 10 |
 
 ## File
 
@@ -92,6 +92,9 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Log-rank test | partial |
 | Cox proportional hazards model | partial |
 | Parametric survival model | partial |
+| Survey means and totals | verified |
+| Survey proportions and tables | verified |
+| Survey regression | verified |
 | Model fit | partial |
 | Compare models | partial |
 | Predicted values and residuals | partial |

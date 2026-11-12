@@ -4013,3 +4013,36 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - **Not yet:** competing risks, time-varying covariates set up from the data, survival curves from a
   fitted Cox model, and the Objects pane's Model menu on these models.
 
+## P6.4 Survey data (first part), 2026-11-12
+
+- **Statistics > Survey data** (`catalog::survey`), three dialogs over the survey package. Each sets up
+  the design with `survey::svydesign`: sampling weights (required), primary sampling units, strata and
+  a finite-population correction, with `nest = TRUE` when there are both strata and PSUs (units
+  numbered within each stratum, as Stata assumes). The design can be kept under a name.
+  - **Means and totals:** `svymean` or `svytotal` of one or more variables, or `svyby` for each group,
+    with standard errors and intervals on the design's degrees of freedom (`degf`: PSUs less strata),
+    as Stata's are.
+  - **Proportions and tables:** one variable's shares with intervals; with a second, the weighted
+    table, its proportions and `svychisq`'s Rao-Scott F test.
+  - **Regression:** `svyglm`, linear, logistic or Poisson (the quasi families, so weights need not be
+    whole numbers), with odds or rate ratios and intervals. The logistic and Poisson fits use
+    `glm.control(epsilon = 1e-14, maxit = 100)`: with glm's default (1e-8) the logistic standard
+    errors stopped about 2e-8 (relative) short of Stata's.
+  Checks: each design variable once and not analysed; the design, the model and the data need
+  different names.
+- **A stricter standard than P6.1 and P6.3** (`engine/tests/survey.rs`), asked for on 2026-11-12:
+  - made-up data with unequal weights, 3 strata of 4 PSUs, a factor, and missing values;
+  - every standard error recomputed from the [SVY] manual's formulas written out in plain R, without
+    the survey package: the variance of a total over PSUs within strata, with the score variables for
+    means, domains, proportions and regressions, and the sandwich D V D' for the linear, logistic and
+    Poisson models, all to 1e-9;
+  - the same numbers from Stata 19 (`svy: mean`, `total`, `mean, over()`, `proportion`, `regress`,
+    `logit`, `poisson`, `tabulate`, and a design with an fpc) on the same data read with `asdouble`,
+    held to 1e-9;
+  - the R and survey versions printed by the test and R's checked against `ENVIRONMENT`.
+  So the three entries are marked **Verified**, the first menu entries to be.
+- **Packages:** survey 4.4.2 from the pinned snapshot, installed with the user's go-ahead and added to
+  CI's package step.
+- **Not yet:** replicate weights (BRR, jackknife, bootstrap), designs of more than one stage,
+  subpopulations, ratios and quantiles, and the Objects pane's Model menu on survey models. P6.1's and
+  P6.3's tests have not yet been brought up to this standard.

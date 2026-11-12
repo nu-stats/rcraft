@@ -17,6 +17,7 @@ pub mod plot_export;
 pub mod postest;
 pub mod save;
 pub mod stats;
+pub mod survey;
 pub mod survival;
 
 /// Where an entry sits in the menus.
@@ -79,6 +80,14 @@ const fn partial(name: &'static str, area: Area) -> Entry {
         name,
         area,
         status: Status::Partial,
+    }
+}
+
+const fn verified(name: &'static str, area: Area) -> Entry {
+    Entry {
+        name,
+        area,
+        status: Status::Verified,
     }
 }
 
@@ -186,6 +195,9 @@ pub const ENTRIES: &[Entry] = &[
     partial("Log-rank test", Area::Statistics),
     partial("Cox proportional hazards model", Area::Statistics),
     partial("Parametric survival model", Area::Statistics),
+    verified("Survey means and totals", Area::Statistics),
+    verified("Survey proportions and tables", Area::Statistics),
+    verified("Survey regression", Area::Statistics),
     partial("Model fit", Area::Statistics),
     partial("Compare models", Area::Statistics),
     partial("Predicted values and residuals", Area::Statistics),

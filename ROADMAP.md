@@ -524,7 +524,14 @@ Each family is its own set of dialogs over a named CRAN package.
   ratios); each run in real R against numbers worked out another way. Not yet: competing risks,
   time-varying covariates set up from the data, survival curves from a fitted Cox model, and the
   Model menu on these models)
-- P6.4 Survey data (`survey`)
+- P6.4 Survey data (`survey`) (first part done 2026-11-12: Statistics > Survey data, with a design
+  of sampling weights, primary sampling units, strata and a finite-population correction; means
+  and totals, overall or by group; proportions, two-way tables and the Rao-Scott test; linear,
+  logistic and Poisson regression with odds or rate ratios. Each checked in real R against the
+  [SVY] manual's linearization formulas written out by hand and against Stata 19's svy results,
+  to 1e-9, with the R and survey versions recorded: the catalog's first Verified entries. Not yet:
+  replicate weights, multi-stage designs, subpopulations, ratios, quantiles, and the Model menu on
+  survey models)
 - P6.5 Time series (`forecast`, `fable`)
 - P6.6 Instrumental variables and selection models
 - P6.7 Multivariate: PCA, factor analysis, clustering, discriminant
