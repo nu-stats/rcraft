@@ -58,6 +58,13 @@ const ML_DIGITS: Point = p(
     "Stata stops iterating at its tolerance, about 1e-7 from the optimum; R goes on. \
      Estimates agree to 6 or 7 digits, so an 8th printed digit can differ.",
 );
+const ML_TABLE: Point = p(
+    "Printing",
+    "logit, probit and poisson print Stata 19's header and table (LR or Wald chi2, the log \
+     likelihood or pseudolikelihood, Pseudo R2, the clusters' line, factor levels, Odds ratio \
+     and IRR with their notes), as Stata prints them with nolog; Stata's iteration log is not \
+     shown yet, and a model with an offset prints in R's layout.",
+);
 const GRAPH: Point = p(
     "Look",
     "Drawn with ggplot2, so it looks like R's graphs, not Stata's; what is drawn (bins, \
@@ -917,6 +924,7 @@ pub const GUIDES: &[Guide] = &[
                  offset, so its estimates are Stata's to the last digits there.",
             ),
             ML_SE,
+            ML_TABLE,
             ML_ROBUST,
             ML_DIGITS,
             MISSING_IN_MODELS,
@@ -1112,6 +1120,7 @@ pub const GUIDES: &[Guide] = &[
                  above 0, both options, a variable not there, two variables, a string.",
             ),
             ML_SE,
+            ML_TABLE,
             ML_ROBUST,
             ML_DIGITS,
             MISSING_IN_MODELS,

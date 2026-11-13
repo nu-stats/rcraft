@@ -4448,3 +4448,20 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Data > Labelled to factor already handled text codes (its R takes `attr(x, "labels")` whatever
   their type). Stata mode's label commands were not looked at for text codes.
 - Not done: a catalogue packed in the same archive as the data file is not taken out with it.
+
+## ZNMIXH against a fresh Stata run; logit, probit and poisson in Stata's layout, 2026-11-13
+
+- ZNMIXH's 12 differing model values came from a stale reference: its Stata log was from Nov 8, before
+  `revrs` (and pdslasso) were installed, so Stata had skipped `revrs` and gone on with other data. Run
+  again in Stata 19 (nothing installed, `do 00_master.do, nostop`): all 947 model lines match RCraft's and
+  all 30 LaTeX tables are byte for byte (TableF2 too, whose difference on Nov 11 was the same staleness).
+  The other packages' logs: ASKO93's and TQN6ZN's lack only commands that draw or print (anovaplot, tabm,
+  coefplot); YFBPT6 is compared against its Nov 10 log.
+- logit, probit and poisson now print Stata 19's header and table (with nolog, line for line on the
+  probes: factor levels, robust and clustered errors, or and irr with their notes); with an offset R's
+  layout stays. Stata's iteration log is not printed yet: Stata's own Newton path (stata_ml_path, already
+  used for probit's estimates) gives its iteration lines exactly in R, to be wired up next.
+- The core-statistics session's next steps (from their commit messages): estat vif, imtest, bgodfrey,
+  durbinalt, dwatson, classification and gof (b6b5b3a); mean, total, proportion, ratio, its tables cutting
+  names with stata_tab_abbrev (43a29be); sdtest, sdtesti, estimates dir, stats and replay (9941837).
+  The other P3.2 commits (de421e0, 85080db) are the SAS format catalogue.

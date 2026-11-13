@@ -219,8 +219,13 @@ stata_ml_path <- function(ll, deriv, b, max_iter = 300) {
   prev <- NULL
   converged <- FALSE
   iter <- 0
+  # each point's likelihood (Stata's iteration log), and whether a step was halved or
+  # -H was not concave (which Stata marks in its log)
+  lls <- numeric()
+  odd <- ci$nc
   repeat {
     iter <- iter + 1
+    lls <- c(lls, d$ll)
     step <- drop(ci$inv %*% d$g)
     if (!is.null(prev) && !ci$nc) {
       nr <- sum(d$g * step)
@@ -235,6 +240,7 @@ stata_ml_path <- function(ll, deriv, b, max_iter = 300) {
     halved <- FALSE
     while ((is.nan(nxt) || nxt < d$ll) && t > 1e-15) {
       halved <- TRUE
+      odd <- TRUE
       t <- t / 2
       nxt <- ll(b + t * step)
     }
@@ -253,8 +259,9 @@ stata_ml_path <- function(ll, deriv, b, max_iter = 300) {
     b <- b + t * step
     d <- deriv(b)
     ci <- concave_inv(d$nh)
+    if (ci$nc) odd <- TRUE
   }
-  list(b = b, converged = converged)
+  list(b = b, converged = converged, lls = lls, odd = odd)
 }"#;
 
 /// mlogit's coefficients as one named vector, in the order of `vcov()`.
@@ -305,6 +312,134 @@ stata_ml_header <- function(fit, robust = FALSE, nobs = NULL) {
   if (!is.na(ll0)) cat(sprintf("Pseudo R2       = %10.4f\n", 1 - ll / ll0))
   cat(sprintf("Log likelihood  = %.4f\n\n", ll))
   invisible(c(N = n, ll = ll, ll_0 = ll0))
+}
+# logit, probit and poisson in Stata 19's layout (its iteration log aside): the title and
+# Number of obs, LR chi2 (Wald chi2 with robust or clustered errors), Prob > chi2, the log
+# (pseudo)likelihood and Pseudo R2; the clusters' line; the coefficient table as regress's
+# rows with z, Robust over std. err., Odds ratio or IRR with their notes. FALSE when the
+# rows are not ones Stata's table was checked for (then R's layout is printed).
+# Stata's iteration log of logit or probit: its own Newton-Raphson from the constant-only
+# fit (stata_ml_path), each point's likelihood; NULL when the model has no constant or an
+# offset, or a step was halved or -H not concave (marked in Stata's log, not checked)
+stata_ml_iterations <- function(fit, kind) {
+  X <- stats::model.matrix(fit)
+  if (!"(Intercept)" %in% colnames(X)) return(NULL)
+  off <- fit$offset
+  if (!is.null(off) && any(off != 0)) return(NULL)
+  pw <- fit$prior.weights
+  pos <- fit$y != 0
+  pbar <- sum(pw * pos) / sum(pw)
+  b0 <- rep(0, ncol(X))
+  b0[colnames(X) == "(Intercept)"] <- if (kind == "logit") stats::qlogis(pbar) else stats::qnorm(pbar)
+  ll <- function(b) {
+    z <- drop(X %*% b)
+    if (kind == "logit") sum(pw * ifelse(pos, stats::plogis(z, log.p = TRUE), stats::plogis(z, lower.tail = FALSE, log.p = TRUE)))
+    else sum(pw * ifelse(pos, stats::pnorm(z, log.p = TRUE), stats::pnorm(z, lower.tail = FALSE, log.p = TRUE)))
+  }
+  deriv <- function(b) {
+    z <- drop(X %*% b)
+    if (kind == "logit") {
+      p <- stats::plogis(z)
+      list(ll = ll(b), g = colSums(X * (pw * (pos - p))), nh = crossprod(X * (pw * p * (1 - p)), X))
+    } else {
+      lam <- ifelse(pos, exp(stats::dnorm(z, log = TRUE) - stats::pnorm(z, log.p = TRUE)),
+                    -exp(stats::dnorm(z, log = TRUE) - stats::pnorm(z, lower.tail = FALSE, log.p = TRUE)))
+      list(ll = ll(b), g = colSums(X * (pw * lam)), nh = crossprod(X * (pw * lam * (lam + z)), X))
+    }
+  }
+  path <- tryCatch(stata_ml_path(ll, deriv, b0), error = function(e) NULL)
+  if (is.null(path) || path$odd || !path$converged) return(NULL)
+  path$lls
+}
+stata_ml_print <- function(fit, title, robust = FALSE, nobs = NULL, level = 0.95, label = "Coefficient",
+                           eform = FALSE, note = NULL, iterations = NULL) {
+  e <- stata_e
+  # e(b) names the outcome's equation (y:x); the table's rows are the names alone
+  nm <- colnames(e$b)
+  eqs <- unique(sub(":.*$", "", nm[grepl(":", nm, fixed = TRUE)]))
+  if (length(eqs) > 1) return(FALSE)
+  nm <- sub("^[^:]*:", "", nm)
+  rows <- stata_coef_rows(nm)
+  if (is.null(rows)) return(FALSE)
+  l <- stata_ml_ll(fit)
+  ll <- l[["ll"]]
+  ll0 <- l[["ll_0"]]
+  n <- if (is.null(nobs)) NROW(stats::fitted(fit)) else nobs
+  b <- stats::setNames(as.vector(e$b), nm)
+  se <- stats::setNames(sqrt(pmax(diag(as.matrix(e$V)), 0)), nm)
+  keep <- nm != "_cons" & !grepl("^[0-9]+[bo]+\\.|^o\\.", nm) & se > 0
+  q <- sum(keep)
+  pad <- stata_tab_pad
+  row <- function(left, label, value) cat(formatC(left, width = -56, flag = "-"), formatC(label, width = -13, flag = "-"), " =", pad(value, 7), "\n", sep = "")
+  # the iteration log (logit, probit), as Stata prints it before the header
+  if (!is.null(iterations)) {
+    lls <- stata_ml_iterations(fit, iterations)
+    if (!is.null(lls)) {
+      cat("\n")
+      for (i in seq_along(lls)) {
+        cat("Iteration ", i - 1, ":  ", if (robust) "Log pseudolikelihood" else "Log likelihood", " = ",
+            stata_fmt(lls[i], "%10.0g"), "  \n", sep = "")
+      }
+    }
+  }
+  cat("\n")
+  row(title, "Number of obs", stata_tab_count(n))
+  if (robust) {
+    w <- if (q > 0) drop(t(b[keep]) %*% solve(as.matrix(e$V)[keep, keep, drop = FALSE], b[keep])) else NA_real_
+    row("", sprintf("Wald chi2(%d)", q), sprintf("%.2f", w))
+    row("", "Prob > chi2", sprintf("%.4f", stats::pchisq(w, q, lower.tail = FALSE)))
+  } else {
+    lr <- 2 * (ll - ll0)
+    row("", sprintf("LR chi2(%d)", q), sprintf("%.2f", lr))
+    row("", "Prob > chi2", sprintf("%.4f", stats::pchisq(lr, q, lower.tail = FALSE)))
+  }
+  row(paste0(if (robust) "Log pseudolikelihood = " else "Log likelihood = ", trimws(stata_fmt(ll, "%10.0g"))),
+      "Pseudo R2", sprintf("%.4f", 1 - ll / ll0))
+  cat("\n")
+  if (!is.null(e[["N_clust"]])) {
+    cat(pad(sprintf("(Std. err. adjusted for %s clusters in %s)", stata_tab_count(e$N_clust), e$clustvar), 78), "\n", sep = "")
+  }
+  qz <- stats::qnorm((1 + level) / 2)
+  cat(strrep("-", 78), "\n", sep = "")
+  if (robust) cat("             |               Robust\n")
+  cat(pad(stata_tab_abbrev(e$depvar), 12), " | ", formatC(formatC(label, width = 10), width = -13, flag = "-"),
+      if (robust) "std. err." else "Std. err.", "      z    P>|z|     [", format(100 * level), "% conf. interval]\n", sep = "")
+  cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
+  for (r in rows) {
+    if (r$kind == "blank") {
+      cat(strrep(" ", 13), "|\n", sep = "")
+      next
+    }
+    if (r$kind == "head") {
+      cat(pad(stata_tab_abbrev(r$label), 12), " |\n", sep = "")
+      next
+    }
+    if (r$kind == "wrap") {
+      cat(pad(r$label, 11), " #|\n", sep = "")
+      next
+    }
+    lab <- if (r$kind == "level") paste0(pad(r$label, 11), " ") else pad(stata_tab_abbrev(r$label), 12)
+    if (!is.null(r$note)) {
+      cat(lab, " |", pad(if (eform) "1" else "0", 11), "  ", r$note, "\n", sep = "")
+      next
+    }
+    bi <- b[[r$col]]
+    si <- se[[r$col]]
+    z <- bi / si
+    p <- 2 * stats::pnorm(-abs(z))
+    lo <- bi - qz * si
+    hi <- bi + qz * si
+    if (eform) {
+      shown <- c(exp(bi), exp(bi) * si, exp(lo), exp(hi))
+    } else {
+      shown <- c(bi, si, lo, hi)
+    }
+    cat(lab, " |", pad(stata_tab_g(shown[1]), 11), pad(stata_tab_g(shown[2]), 11), pad(sprintf("%.2f", z), 9),
+        pad(sprintf("%.3f", p), 8), pad(stata_tab_g(shown[3]), 13), pad(stata_tab_g(shown[4]), 12), "\n", sep = "")
+  }
+  cat(strrep("-", 78), "\n", sep = "")
+  if (!is.null(note) && "_cons" %in% nm) cat(note, "\n", sep = "")
+  TRUE
 }"#;
 
 impl Session {
@@ -726,14 +861,57 @@ impl Session {
         ) {
             out.line("stata_omitted_notes()");
         }
+        let nobs = if matches!(w, Some((W::F, _))) {
+            ", nobs = sum(stats::model.weights(stats::model.frame(stata_estimates)))"
+        } else {
+            ""
+        };
+        // logit, probit and poisson in Stata 19's layout (not with an offset, whose row
+        // was not checked), else R's
+        let stata_title = match fit {
+            Fit::Logit => Some("Logistic regression"),
+            Fit::Probit => Some("Probit regression"),
+            Fit::Poisson => Some("Poisson regression"),
+            _ => None,
+        }
+        .filter(|_| offset_var.is_none());
+        let stata_open = if let Some(title) = stata_title {
+            let (label, eform, note) = match fit {
+                Fit::Logit if opts.has("or", 2) => {
+                    ("Odds ratio", true, "Note: _cons estimates baseline odds.")
+                }
+                Fit::Poisson if opts.has("irr", 3) => (
+                    "IRR",
+                    true,
+                    "Note: _cons estimates baseline incidence rate.",
+                ),
+                _ => ("Coefficient", false, ""),
+            };
+            self.helpers.insert("stata_tables");
+            self.helpers.insert("stata_fmt");
+            // the iteration log (Stata's own steps, stata_ml_iterations) is not printed yet: it
+            // matched Stata for logit and probit in R alone, not yet from the fit
+            let iterations = "NULL";
+            out.line(format!(
+                "if (!stata_ml_print(stata_estimates, {}, robust = {}{nobs}, level = {}, label = {}, eform = {}, note = {}, iterations = {iterations})) {{",
+                r_text(title),
+                r_logical(robust),
+                r_number(level),
+                r_text(label),
+                r_logical(eform),
+                if note.is_empty() {
+                    "NULL".to_string()
+                } else {
+                    r_text(note)
+                }
+            ));
+            true
+        } else {
+            false
+        };
         out.line(format!(
-            "stata_ml_header(stata_estimates, robust = {}{})",
-            r_logical(robust),
-            if matches!(w, Some((W::F, _))) {
-                ", nobs = sum(stats::model.weights(stats::model.frame(stata_estimates)))"
-            } else {
-                ""
-            }
+            "stata_ml_header(stata_estimates, robust = {}{nobs})",
+            r_logical(robust)
         ));
         let (eform, label) = match fit {
             Fit::Logit if opts.has("or", 2) => ("TRUE", "Odds ratio"),
@@ -766,7 +944,15 @@ impl Session {
             out.line("cat(\"base outcome:\", stata_base, \"\\n\")");
         }
         out.caveat("a row with a missing value anywhere in the model is dropped, as in Stata");
-        out.caveat("printed in R's layout, not Stata's table");
+        if stata_open {
+            out.line("cat(\"(printed in R's layout: Stata's table for this model is not matched yet)\\n\")");
+            out.line("}");
+            out.caveat(
+                "the header and table as Stata 19 prints them; Stata's iteration log is not shown yet",
+            );
+        } else {
+            out.caveat("printed in R's layout, not Stata's table");
+        }
         Ok(())
     }
 }
