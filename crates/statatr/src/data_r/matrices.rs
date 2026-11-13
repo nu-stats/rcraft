@@ -248,13 +248,14 @@ pub(super) const MATRIX_LIST_HELPER: &str = r##"stata_matrix_list <- function(m,
   m <- as.matrix(m)
   sym <- nrow(m) == ncol(m) && isSymmetric(unname(m))
   # names past 12 characters, as Stata shortens them
-  ab <- function(s) ifelse(nchar(s) > 12, paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s))), s)
+  ab <- function(s) stata_tab_abbrev(s, 12)
   cn <- colnames(m)
   if (is.null(cn)) cn <- paste0("c", seq_len(ncol(m)))
   rn <- rownames(m)
   if (is.null(rn)) rn <- paste0("r", seq_len(nrow(m)))
   has_eq <- grepl(":", cn, fixed = TRUE)
-  eq <- ifelse(has_eq, paste0(sub(":.*$", "", cn), ":"), "")
+  # an equation name cut to 11 (its colon makes 12), as Stata lists it: threatcr~ry:
+  eq <- ifelse(has_eq, paste0(stata_tab_abbrev(sub(":.*$", "", cn), 11), ":"), "")
   short <- sub("^[^:]*:", "", cn)
   # a factor's prefix on its own line above the name: 0b. over g, 1.g# over c.x
   top <- ifelse(grepl("#", short, fixed = TRUE), sub("^(.*#).*$", "\\1", short),
@@ -381,7 +382,7 @@ impl Session {
         if let Some(t) = opts.arg("title", 1) {
             args.push(format!("title = {}", r_text(t.trim().trim_matches('"'))));
         }
-        for h in ["stata_matrix_list", "stata_fmt"] {
+        for h in ["stata_matrix_list", "stata_fmt", "stata_tables"] {
             self.helpers.insert(h);
         }
         if self.quiet(c) {

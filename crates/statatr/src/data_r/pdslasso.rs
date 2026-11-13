@@ -57,10 +57,11 @@ stata_abbrev_unique <- function(s, vars, n = 12) {
   if (nchar(s) <= n) return(s)
   for (k in 1:(n - 2)) {
     pre <- substr(s, 1, n - 1 - k); suf <- substr(s, nchar(s) - k + 1, nchar(s))
-    hit <- vars[startsWith(vars, pre) & endsWith(vars, suf) & nchar(vars) > nchar(pre) + nchar(suf) - 1]
+    hit <- vars[startsWith(vars, pre) & endsWith(vars, suf) & nchar(vars) >= nchar(pre) + nchar(suf)]
     if (length(hit) <= 1) return(paste0(pre, "~", suf))
   }
-  paste0(substr(s, 1, n - 2), "~", substr(s, nchar(s), nchar(s)))
+  # no short form matches one variable alone: the first n - 2 and .. (Stata 19)
+  paste0(substr(s, 1, n - 2), "..")
 }
 stata_pdslasso <- function(d, y, dv, ctl, show = TRUE) {
   for (v in c(y, dv, ctl)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)

@@ -478,6 +478,10 @@ const WEIGHTED: &[&str] = &[
     "mlogit",
 ];
 
+/// Commands besides the models whose tables cut long names (to be unique among the
+/// data's variables, as Stata 19 cuts them).
+const NAME_TABLES: &[&str] = &["summarize", "pwcorr", "matrix", "ereturn", "medeff"];
+
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
     "svy",
@@ -2210,6 +2214,25 @@ impl Session {
                     .to_string(),
             );
             out.code.push("stata_fit_failed <- FALSE".to_string());
+        }
+        // tables cut long names to be unique among the data's variables, as Stata's do:
+        // the names the line sees
+        if (MODELS.contains(&c.name.as_str()) || NAME_TABLES.contains(&c.name.as_str()))
+            && !out.code.is_empty()
+            && self.data_lost.is_none()
+        {
+            if let Some(d) = self.data.clone() {
+                // after a fit's clearing of the last results, which comes first
+                let at = usize::from(
+                    out.code
+                        .first()
+                        .is_some_and(|l| l.starts_with("rm(list = intersect(")),
+                );
+                out.code.insert(
+                    at,
+                    format!("stata_vars_now <- if (exists(\"{d}\")) names({d}) else character()"),
+                );
+            }
         }
         // quietly (or capture): what the line prints is not shown
         if silent(c) && !self.quiet_asked.get() && !out.code.is_empty() {

@@ -967,7 +967,7 @@ pub(super) const PWCORR_HELPER: &str = r#"stata_pwcorr <- function(d, obs = FALS
   # correlation a mark (* for star(), else a blank) and %8.4f, the mark after the last
   # ending the line; the p-values and counts below each row, then a blank row; seven
   # columns to a block at 80 characters
-  cut <- function(s, w) ifelse(nchar(s) > w, paste0(substr(s, 1, w - 2), "~", substr(s, nchar(s), nchar(s))), s)
+  cut <- function(s, w) stata_tab_abbrev(s, w)
   f8 <- function(v, digits) if (is.na(v)) formatC(".", width = 8) else formatC(sprintf(paste0("%.", digits, "f"), v), width = 8)
   shown <- function(i, j) i == j || is.null(print) || (!is.na(P[i, j]) && P[i, j] <= print)
   ls <- if (exists("stata_linesize")) stata_linesize else 80
@@ -1166,6 +1166,7 @@ impl Session {
         }
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_pwcorr");
+        self.helpers.insert("stata_tables");
         if w.is_some() {
             self.helpers.insert("stata_wcov");
         }

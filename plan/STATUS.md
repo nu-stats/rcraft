@@ -4403,3 +4403,22 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - The core-statistics session's next steps (from their commit messages): more of the refused forms
   (cii, ci and oneway weights, mlogit, tabstat formats; b2c6fd2) and the distribution functions'
   limits as Stata 19's (04074da).
+
+## Names cut in tables as Stata cuts them, tabulate's long heads, 2026-11-13
+
+- Observed in Stata 19 (`plan/stata/name-cuts.md`): long names are cut to be unique among the data's
+  variables (`threatcre~ty` beside `threatcredibilitybinary`, `..` when no cut is unique); RCraft's
+  tables (regress and the other Stata-layout coefficient tables, summarize, ereturn display, pwcorr,
+  matrix list's names and equation names) now cut them so. `tabulate`'s one-way head now splits a long
+  name in as many pieces as it needs. DZ8BUS's regressions now print `threatcre~ty`, as Stata's.
+- Not done here: logit, probit, poisson and the other likelihood models still print R's layout; the
+  core-statistics session's own tables (centile, ci, nlcom, sktest, tabstat) keep the plain cut until
+  it moves them to the shared helper.
+- Found while checking: ZNMIXH's model lines at 01_analysis.do:2268 and 2275 (12 values, Table E.1's
+  regressions after `center ..., inplace standardize`) differ from Stata's; they did before this day's
+  changes too (checked at 52af68a), so it is an older difference in the data there, still to find.
+- The core-statistics session's next step (c011e5b, from its commit message): test and lincom lines as
+  Stata writes them, lincom's table and constant, nlcom post.
+- The core-statistics session's next step (cf6896e, from its commit message): test's matvlc(), mtest,
+  accumulate and notest; tabulate summarize(); matcell(), matrow(), matcol(); lrchi2 (corpus
+  `tabulate_more.do`, `test_options.do`).

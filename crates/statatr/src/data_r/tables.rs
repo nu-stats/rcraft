@@ -12,8 +12,22 @@
 
 /// The printers, and the small pieces they share.
 pub(super) const TABLES_HELPER: &str = r##"stata_tab_pad <- function(s, w) formatC(as.character(s), width = w)
-stata_tab_abbrev <- function(s, n = 12) {
-  ifelse(nchar(s) > n, paste0(substr(s, 1, n - 2), "~", substr(s, nchar(s), nchar(s))), s)
+# a name cut to n as Stata 19 cuts it: the first characters, ~ and as many of the last as
+# make the short form match one variable of the data alone (threatcre~ty beside
+# threatcredibilitybinary); when none does, the first n - 2 and ..; a name that is no
+# variable keeps one last character. The data's names come from the line (stata_vars_now).
+stata_tab_abbrev <- function(s, n = 12, vars = get0("stata_vars_now", ifnotfound = character())) {
+  one <- function(x) {
+    if (is.na(x) || nchar(x) <= n) return(x)
+    for (k in 1:(n - 2)) {
+      pre <- substr(x, 1, n - 1 - k)
+      suf <- substr(x, nchar(x) - k + 1, nchar(x))
+      hit <- vars[startsWith(vars, pre) & endsWith(vars, suf) & nchar(vars) >= nchar(pre) + nchar(suf)]
+      if (length(hit) <= 1) return(paste0(pre, "~", suf))
+    }
+    paste0(substr(x, 1, n - 2), "..")
+  }
+  vapply(as.character(s), one, "", USE.NAMES = FALSE)
 }
 stata_tab_count <- function(v) stata_fmt(v, "%20.0fc", trim = TRUE)
 stata_tab_g <- function(v, fmt = "%9.0g") stata_fmt(v, fmt)
@@ -35,16 +49,17 @@ stata_sum_print <- function(names, N, mean, sd, min, max, string) {
   invisible(NULL)
 }
 # a one-way table: the labels' column as wide as the widest (11 at least),
-# a name longer than that split over two lines
+# a name longer than that split over as many lines as it needs
 stata_tab1_print <- function(name, labs, freq) {
   total <- sum(freq)
   pct <- 100 * freq / total
   cum <- cumsum(pct)
   W <- max(11, nchar(labs))
   cat("\n")
-  if (nchar(name) > W) {
+  # a long name in pieces of W, the last beside the heads (threatcredi / bilitybinar / y)
+  while (nchar(name) > W) {
     cat(stata_tab_pad(substr(name, 1, W), W), " |\n", sep = "")
-    name <- substr(name, W + 1, 2 * W)
+    name <- substr(name, W + 1, nchar(name))
   }
   cat(stata_tab_pad(name, W), " |      Freq.     Percent        Cum.\n", sep = "")
   rule <- paste0(strrep("-", W + 1), "+", strrep("-", 35), "\n")
