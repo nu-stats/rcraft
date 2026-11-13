@@ -67,6 +67,7 @@ pub const COMMANDS: &[&str] = &[
     "capture",
     "cd",
     "center",
+    "ci",
     "clear",
     "clogit",
     "cluster2",
@@ -678,6 +679,10 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("tabm", &["missing"]),
     ("testparm", &["equal"]),
     ("oneway", &["noanova", "nolabel", "tabulate"]),
+    (
+        "ci",
+        &["agresti", "exact", "jeffreys", "level(", "wald", "wilson"],
+    ),
     (
         "tabstat",
         &[
@@ -1469,6 +1474,7 @@ mod tests {
                 format!("survwgt rake w, {} {o}", rest.join(" "))
             }
             "append" => format!("append using t, {o}"),
+            "ci" => format!("ci proportions d, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
             "cmclogit" => format!("cmset g t\ncmclogit d x, {o}"),
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),

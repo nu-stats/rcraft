@@ -21,6 +21,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("bootstrap", &["bootstrap", "bsopts"]),
     ("bsample", &["bsample", "bsopts"]),
     ("center", &["center"]),
+    ("ci", &["ci"]),
     ("clogit", &["clogit"]),
     ("cluster2", &["cluster2"]),
     ("cmclogit", &["cmclogit"]),

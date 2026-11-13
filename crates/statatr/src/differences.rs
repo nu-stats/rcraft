@@ -1975,6 +1975,26 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "ci",
+        about: "Confidence intervals for means, proportions and variances (ci means x, ci proportions b, ci variances x)",
+        points: &[
+            p(
+                "In R",
+                "stata_ci prints Stata 19's table and leaves the last variable's r(). Means: the \
+                 t interval, with frequency and analytic weights as summarize takes them. \
+                 Proportions: the exact (Clopper-Pearson, from qbeta), Wald, Wilson, \
+                 Agresti-Coull and Jeffreys intervals, with Stata's marks and notes where an \
+                 interval is one-sided or clipped at 0 or 1, and only the 0/1 variables (a note \
+                 says so). Variances: the chi2 interval.",
+            ),
+            p(
+                "Not yet",
+                "ci means, poisson and exposure(), ci variances, bonett, cii, weights other than \
+                 those for means, and patterns in the varlist are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "oneway",
         about: "One-way analysis of variance (oneway y g, tabulate)",
         points: &[

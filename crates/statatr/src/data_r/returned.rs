@@ -940,6 +940,7 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 /// The `e()` and `r()` names that are macros (text) in Stata.
 const TEXT_NAMES: &[&str] = &[
     "levels",
+    "citype",
     "varlist",
     "badlist",
     "names",
