@@ -4232,3 +4232,29 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - YFBPT6: 3 lines refused (14): rreg (1) and esttab matrix() (2).
 - Not checked here: `multilevel.rs` (P6.2's lme4 test) fails on this machine's R 4.6.2 with lme4 2.1.0
   (the Poisson likelihood check); CI's pinned R 4.4.3 passes it.
+
+## P3.2 continued: RCraft's package library is per R minor version, 2026-11-12
+
+- RCraft's library is now one folder per R minor version, like R's own user
+  libraries: `R-library/4.4`, `R-library/4.6` under
+  `%LOCALAPPDATA%\RCraft` on Windows, `~/Library/Application Support/RCraft`
+  on macOS and `~/.local/share/rcraft` on Linux (`rhost::library::user_library_dir`,
+  from the install's version). A session on R x.y puts only the x.y folder first
+  on `R_LIBS`, and creates it, so a package installed in the session loads
+  without a restart. The Packages window, the import dialog and dialogs'
+  install offers take the folder from the session (`Engine::library`).
+- The old flat `R-library` is sorted when a session starts: each package moves
+  into the folder of the R that built it (its DESCRIPTION's `Built:` line).
+  Nothing is deleted or overwritten. A package with no `Built:` line, one whose
+  place is taken, or one Windows will not let go (loaded by a running R) stays
+  where it is and is tried again at the next start.
+- Why: with R 4.4.3 installed next to R 4.6.2 (the CI pin), every 4.4 session
+  found RCraft's 4.6 builds first and failed to load dplyr and others. This
+  closes the upgrade problem noted on 2026-11-02.
+- Checked by hand on a copy of this machine's library (40 packages, all built
+  by R 4.6.1): R 4.4.3 sees only the empty `4.4` folder and takes dplyr from its
+  own `win-library/4.4`; R 4.6.2 finds all 40 moved into `4.6`. The real
+  `%LOCALAPPDATA%\RCraft\R-library` is sorted the first time RCraft starts R.
+- Tests: two versions give two folders on all three systems' path rules;
+  the `Built:` line; sorting (never overwrite, lock folders skipped); a real
+  session has the version folder first and does not see the moved package.
