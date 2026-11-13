@@ -126,6 +126,26 @@ pub const GUIDES: &[Guide] = &[
                  earlier are refused.",
             ),
             p(
+                "Distribution functions",
+                "ttail(), invttail(), Ftail(), invFtail(), chi2tail(), normalden(), ibeta(), \
+                 gammap(), binomial(), poisson(), comb(), lngamma() and the rest of Stata's \
+                 t, F, chi2, normal, beta, gamma, binomial and Poisson functions run on R's \
+                 pt(), pf(), pchisq(), pbeta(), pgamma(), pbinom() and ppois(), which give \
+                 Stata 19's doubles to 1e-9 or closer. Where R gives a number and Stata a \
+                 missing value, the translation gives Stata's: degrees of freedom, shapes or \
+                 a standard deviation of 0 or below, t, F and chi2 degrees of freedom above \
+                 2e17 and beta and gamma shapes above 1e17, k outside 0 to n in binomialp(), \
+                 and comb() or lnfactorial() of a number that is not whole. The counts of \
+                 binomial() and poisson() are cut to whole numbers, as Stata does, and \
+                 normalden(., s) is 0, as in Stata. invF() and invFtail() come from qbeta(), \
+                 since R's qf() gives 0 at small p and an approximation for df2 above 4e5. \
+                 Only at the far ends do the two differ: invt() below p = 1e-200 (Stata \
+                 loses digits, or gives missing with 1 degree of freedom), the densities \
+                 with degrees of freedom above 1e10, poisson() with a mean of 1e16 or more \
+                 and binomialp() or poissonp() with counts above 1e8, where Stata gives \
+                 missing or fewer digits and R its own number.",
+            ),
+            p(
                 "Returned values",
                 "e() and r() are kept in R as stata_e and stata_r, with Stata's names and \
                  values; one Stata keeps that RCraft does not is refused with the reason, not \

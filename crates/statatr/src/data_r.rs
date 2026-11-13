@@ -967,6 +967,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_coefs" => model::COEFS_HELPER,
         "stata_ib" => model::IB_HELPER,
         "stata_dates" => dates::DATES_HELPER,
+        "stata_dist" => crate::expr_r::dist::DIST_HELPER,
         "stata_collinear" => model::COLLINEAR_HELPER,
         "stata_slice" => model::SLICE_HELPER,
         "stata_fit_rows" => model::FIT_ROWS_HELPER,

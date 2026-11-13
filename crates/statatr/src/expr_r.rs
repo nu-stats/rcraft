@@ -35,6 +35,8 @@ use crate::lang::expr::{parse, BinaryOp, Expr, UnaryOp};
 use crate::values::datetime::parse_date;
 use crate::values::missing::{is_missing, missing_code, missing_label};
 
+pub(crate) mod dist;
+
 /// What an R expression holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
@@ -1277,6 +1279,7 @@ impl Translator<'_> {
             | "rigaussian" | "rchi2" | "runiformint" | "rbinomial" | "rnbinomial"
             | "rhypergeometric" | "rt" | "rbeta" => self.draw(name, args),
             n if DATE_FUNCTIONS.iter().any(|(f, _)| *f == n) => self.date_fn(n, args),
+            n if dist::is_distribution(n) => self.distribution(n, args),
             n if DATE_READERS.iter().any(|(f, _)| *f == n) => self.date_reader(n, args),
             n if LEAP_SECOND_FUNCTIONS.contains(&n) => Err(no(format!(
                 "{n}() counts leap seconds (datetime/C), which is not translated yet; \
