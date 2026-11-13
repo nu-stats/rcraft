@@ -66,3 +66,5 @@ va()/varwidth(), case/casewise, not/nototal, m/missing, nosep/noseparator, lo/lo
   %12.4f); a left-justified format's text is right-aligned in the column with its padding (`%-9.2f`).
 - RCraft knows a variable's display format when `format` set it or the data came from a .dta (haven keeps
   it); for a variable only made by `generate` (Stata: %9.0g for float, %10.0g for double) it stops and says so.
+- (2026-11-13) A variable `generate` made has its storage type's default format, as Stata gives it: float
+  %9.0g, double %10.0g, long %12.0g, int and byte %8.0g (probe `ts/t5.do` identical).

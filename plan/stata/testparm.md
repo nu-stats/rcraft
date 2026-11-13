@@ -32,3 +32,10 @@ log set against RCraft's output); corpus `testparm.do`. Translated in
 
 - xtreg re, ivregress and stcox: chi2 and no equation in the lines; ivregress, small: F; clogit: chi2 with
   `[yb]x` lines like the likelihood models.
+
+## After mlogit (2026-11-13; probe `rest/r3.do` identical; corpus `mlogit_tests.do`, to 6 digits)
+
+- Each coefficient matched is tested in every outcome's equation, the coefficient first and the equations
+  inside: `[1]z [2]z [3]o.z [1]w ...`; the base outcome's written `o.z` (`2o.g` for a factor) and dropped
+  ("Constraint 3 dropped"). `equal` compares the coefficients in the first equation only
+  (`- [1]z + [1]w = 0`). Interactions after mlogit are not translated.

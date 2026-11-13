@@ -15,6 +15,14 @@ use super::*;
 pub(super) const TESTPARM_HELPER: &str = r##"stata_testparm <- function(terms, equal = FALSE, eq = "", data_names = character(0), ret = FALSE) {
   st <- stata_bnames()
   rn <- names(stata_b)[seq_along(st)]
+  # mlogit: the coefficients of one equation name the terms; each is tested in every equation
+  multi <- inherits(stata_estimates, "multinom")
+  if (multi) {
+    eqs <- sub(":.*$", "", rn)
+    one <- eqs == eqs[1]
+    rn_all <- rn
+    rn <- sub("^[^:]*:", "", rn[one])
+  }
   # each coefficient's parts as kind:variable (f a factor's level, c a number), and its label
   parts_of <- function(n) {
     out <- list()
@@ -69,7 +77,32 @@ pub(super) const TESTPARM_HELPER: &str = r##"stata_testparm <- function(terms, e
   if (equal && length(hit) < 2) stop("too few variables specified (Stata: r(102))", call. = FALSE)
   pre <- if (nzchar(eq)) paste0("[", eq, "]") else ""
   lab <- paste0(pre, vapply(coefs[hit], label, ""))
-  if (equal) {
+  if (multi) {
+    # Stata 19: each coefficient in every outcome's equation, the base outcome's written o.
+    # and dropped; equal compares them in the first equation only
+    if (any(vapply(coefs[hit], length, 0) > 1)) stop("testparm after mlogit with interactions is not translated yet", call. = FALSE)
+    levs <- as.character(stata_levels)
+    base <- as.character(stata_base)
+    lab1 <- function(ps, b) {
+      p <- ps[[1]]
+      if (p[1] == "f") paste0(p[3], if (b) "o" else "", ".", p[2]) else paste0(if (b) "o." else "", p[2])
+    }
+    if (equal) {
+      e1 <- levs[1]
+      if (e1 == base) stop("testparm, equal after mlogit with the first outcome as the base is not translated yet", call. = FALSE)
+      rows <- lapply(hit[-1], function(i) stats::setNames(c(-1, 1), paste0(e1, ":", rn[c(hit[1], i)])))
+      labels <- paste0("- [", e1, "]", lab1(coefs[[hit[1]]], FALSE), " + [", e1, "]",
+                       vapply(coefs[hit[-1]], lab1, "", b = FALSE), " = 0")
+    } else {
+      rows <- list()
+      labels <- character(0)
+      for (h in hit) for (e in levs) {
+        # the base outcome's coefficient is 0: a constraint of nothing, which test drops
+        rows[[length(rows) + 1]] <- if (e == base) stats::setNames(0, rn_all[1]) else stats::setNames(1, paste0(e, ":", rn[h]))
+        labels <- c(labels, paste0("[", e, "]", lab1(coefs[[h]], e == base), " = 0"))
+      }
+    }
+  } else if (equal) {
     rows <- lapply(hit[-1], function(i) stats::setNames(c(-1, 1), rn[c(hit[1], i)]))
     labels <- paste0("- ", lab[1], " + ", lab[-1], " = 0")
   } else {
@@ -168,7 +201,7 @@ impl Session {
         }
         // Stata labels the coefficients with the equation after the likelihood models
         let eq = match est.fit {
-            Fit::Regress | Fit::Xtreg | Fit::Ivregress | Fit::Stcox => String::new(),
+            Fit::Regress | Fit::Xtreg | Fit::Ivregress | Fit::Stcox | Fit::Mlogit => String::new(),
             Fit::Logit
             | Fit::Probit
             | Fit::Poisson

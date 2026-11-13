@@ -15,7 +15,8 @@ use super::*;
 
 pub(super) const TABSTAT_HELPER: &str = r##"stata_tabstat <- function(d, vars, stats, labs, by = NULL, w = NULL, wtype = "f", cols = "",
                           fmt = "%9.0g", lw = 16, vw = 12, total = TRUE, missing = FALSE, sep = TRUE,
-                          longstub = FALSE, casewise = FALSE, save = FALSE, show = TRUE, full = d) {
+                          longstub = FALSE, casewise = FALSE, save = FALSE, show = TRUE, full = d,
+                          defaults = character(0)) {
   num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
   for (v in c(vars, by)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
   for (v in vars) if (is.character(d[[v]]) || is.factor(d[[v]]))
@@ -107,10 +108,12 @@ pub(super) const TABSTAT_HELPER: &str = r##"stata_tabstat <- function(d, vars, s
   heads <- if (statcols) labs else vapply(vars, ab, "", n = 8)
   # each group's rows: one a variable (statistics across) or one a statistic
   # each variable's display format: format() for all, or (format alone, fmt "") its own
+  # (a format set by format or read with the data, else the storage type's default from generate)
   fmts <- if (nzchar(fmt)) rep(fmt, length(vars)) else vapply(vars, function(v) {
     f <- attr(d[[v]], "format.stata", exact = TRUE)
+    if (is.null(f) && v %in% names(defaults)) f <- defaults[[v]]
     if (is.null(f)) stop("tabstat, format: the display format of ", v, " is not known here (one set by format, ",
-                         "or read with the data, is); give format(%fmt)", call. = FALSE)
+                         "made by generate or read with the data is); give format(%fmt)", call. = FALSE)
     f
   }, "")
   # the columns are one wider than the widest format, at least 10 (Stata 19)
@@ -382,6 +385,25 @@ impl Session {
         }
         if fmt != "%9.0g" {
             args.push_str(&format!(", fmt = {}", r_text(&fmt)));
+        }
+        if fmt.is_empty() {
+            // the display formats Stata gives the storage types generate made
+            let defaults: Vec<String> = vars
+                .iter()
+                .filter_map(|v| {
+                    let f = match self.storage.get(v.as_str())? {
+                        super::Storage::Float => "%9.0g",
+                        super::Storage::Double => "%10.0g",
+                        super::Storage::Long => "%12.0g",
+                        super::Storage::Int | super::Storage::Byte => "%8.0g",
+                        super::Storage::Str => return None,
+                    };
+                    Some(format!("{} = {}", r_text(v), r_text(f)))
+                })
+                .collect();
+            if !defaults.is_empty() {
+                args.push_str(&format!(", defaults = c({})", defaults.join(", ")));
+            }
         }
         if lw != 16 {
             args.push_str(&format!(", lw = {lw}"));

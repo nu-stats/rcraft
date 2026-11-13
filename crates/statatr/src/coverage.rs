@@ -172,6 +172,7 @@ const STATISTICS: &[&str] = &[
     "anova",
     "centile",
     "ci",
+    "cii",
     "correlate",
     "estat",
     "estimates",

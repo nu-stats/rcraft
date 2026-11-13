@@ -141,7 +141,7 @@ impl Session {
         }
         let method = methods.first().copied().unwrap_or("interp");
         if c.parts.weight.is_some() {
-            return Err(no("centile with weights is not translated yet"));
+            return Err(no("weights not allowed (Stata: r(101))"));
         }
         let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
         if vars.is_empty() {

@@ -2086,8 +2086,8 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Not yet",
                 "nlcom after models other than regress, logit, probit, poisson, nbreg, ologit, \
-                 oprobit, xtreg, ivregress, clogit and stcox (mlogit's several equations among \
-                 them), post (which would replace e()) and \
+                 oprobit, xtreg, ivregress, clogit, stcox and mlogit ([2]_b[x] for an equation), \
+                 post (which would replace e()) and \
                  expressions of the data's variables are refused. After the likelihood models the \
                  results are as close to Stata's as the model's own estimates (6 digits or more).",
             ),
@@ -2115,7 +2115,28 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "Weights and centile() lists that are not plain numbers are refused.",
+                "centile() lists that are not plain numbers are refused; weights are Stata's own \
+                 error (weights not allowed, r(101)).",
+            ),
+        ],
+    },
+    Guide {
+        command: "cii",
+        about: "Confidence intervals from numbers typed in (cii means 50 10 3, cii proportions 60 18)",
+        points: &[
+            p(
+                "In R",
+                "stata_cii works ci's intervals out from the numbers typed (cii means #obs #mean \
+                 #sd, cii means #exposure #events, poisson, cii proportions #obs #succ with each \
+                 method, cii variances #obs #variance [#kurtosis] with sd and bonett) and prints \
+                 Stata 19's table with an empty Variable column; where an interval was cut at 0 or \
+                 1 it says so as Stata's cii does (Note: The Wald CI was truncated at 0 at the lower \
+                 endpoint.). r() is ci's.",
+            ),
+            p(
+                "Not yet",
+                "A proportion or rate typed in place of the count (cii proportions 60 .3), and \
+                 values that are not numbers written out, are refused.",
             ),
         ],
     },
@@ -2137,8 +2158,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "cii, weights other than those for means without poisson, and patterns in the \
-                 varlist are refused.",
+                "Patterns in the varlist and exposure() with weights are refused. Frequency \
+                 weights are taken everywhere and analytic ones for normal means; analytic weights \
+                 elsewhere are Stata's own error (aweights not allowed, r(101)). cii has a page of \
+                 its own.",
             ),
         ],
     },
@@ -2160,9 +2183,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "Weights with tabulate, noobs, missing, wrap, the comparisons of more groups than \
-                 the line holds, and Bartlett's test with both single-observation and equal-valued \
-                 groups are refused.",
+                "noobs, missing, wrap and the comparisons of more groups than the line holds are \
+                 refused. With weights and tabulate the summary table gains Stata's Obs column \
+                 (analytic weights: the weight sums as Freq., the rows as Obs, summarize's standard \
+                 deviation).",
             ),
         ],
     },
@@ -2182,8 +2206,9 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "testparm after the other models (mlogit's several equations among them), a level \
-                 of its own (2.g), lists in \
+                "testparm after the other models and with interactions after mlogit (after mlogit \
+                 each coefficient is tested in every equation, the base outcome's dropped, as \
+                 Stata does), a level of its own (2.g), lists in \
                  parentheses (i.(g h)) and the options other than equal are refused. No \
                  coefficient matched is Stata's r(111), equal with one coefficient r(102).",
             ),
@@ -2211,9 +2236,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "format alone takes each variable's own display format, so it needs one RCraft \
-                 knows (set by format, or read with the data from a .dta): a variable that was only \
-                 made by generate stops with that reason. Formats wider than 30, widths above 32 \
+                "format alone takes each variable's own display format: one set by format, read \
+                 with the data from a .dta, or the default of the storage type generate made \
+                 (float %9.0g, double %10.0g, long %12.0g); a variable whose format is none of \
+                 these stops with that reason. Formats wider than 30, widths above 32 \
                  and patterns in the varlist that the data's names do not settle are refused; \
                  an unknown statistic, a string variable and pweights or iweights are Stata's \
                  errors (r(198), r(109), r(101)).",

@@ -31,6 +31,7 @@ mod anovaplot;
 mod center;
 mod centile;
 mod ci;
+mod cii;
 mod clogit;
 mod cluster2;
 mod cm;
@@ -951,6 +952,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tabstat" => tabstat::TABSTAT_HELPER,
         "stata_oneway" => oneway::ONEWAY_HELPER,
         "stata_ci" => ci::CI_HELPER,
+        "stata_cii" => cii::CII_HELPER,
         "stata_centile" => centile::CENTILE_HELPER,
         "stata_nlcom" => nlcom::NLCOM_HELPER,
         "stata_sktest" => sktest::SKTEST_HELPER,
@@ -2273,6 +2275,7 @@ impl Session {
             "tabstat" => self.tabstat(c, &opts, out),
             "oneway" => self.oneway(c, &opts, out),
             "ci" => self.ci(c, &opts, out),
+            "cii" => self.cii(c, &opts, out),
             "centile" => self.centile(c, &opts, out),
             "nlcom" => self.nlcom(c, &opts, out),
             "sktest" => self.sktest(c, &opts, out),

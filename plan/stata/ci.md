@@ -40,3 +40,20 @@ line by line against RCraft's output: identical but for the refused forms); corp
   γ4 = n·Σ(x − m)⁴/(Σ(x − x̄)²)², c = n/(n − z), se = c·√((γ4 − (n − 3)/n)/(n − 1)), the interval
   exp(ln(c·s²) ± z·se). r() adds kurtosis after Var.
 - `sd`: "Std. dev." in place of Variance, the square roots of the estimate and bounds; r() adds sd after Var.
+
+## Weights, cii (2026-11-13; probes `rest/r1.do`, `r2.do` identical but for Stata's errors)
+
+- Frequency weights in `ci proportions`, `ci variances` and `ci means, poisson` (the counts, the exposure and
+  the variance's n are the weight sums); analytic weights there are Stata's error "aweights not allowed",
+  r(101). `centile` takes no weights at all: "weights not allowed", r(101).
+- `cii means #obs #mean #sd`, `cii means #exposure #events, poisson`, `cii proportions #obs #succ [, method]`,
+  `cii variances #obs #variance [, sd]` (with sd the second number is the sd) and `cii variances #obs
+  #variance #kurtosis, bonett`: ci's table with an empty Variable column and ci's r() (bonett: r(kurtosis) is
+  the number typed). With one observation the se is sd/√1 and the bounds missing.
+- cii's notes where a bound went past 0 or 1, in place of ci's marks: "Note: The Wald CI was truncated at 0 at
+  the lower endpoint.", "... truncated at 1 at the upper endpoint." — Wald and Agresti–Coull when the bound
+  crosses (at 0 successes Wald's lower bound is 0 exactly: no note), Wilson's lower at 0 successes;
+  exact and Poisson keep the `*` and "(*) one-sided" line.
+- Stata's errors (refused with them): #obs not a positive integer (r(198)), more successes than
+  observations (r(198)), bonett without the kurtosis (r(198)). A proportion or rate typed in place of the
+  count ("or between 0 and 1") is not translated.

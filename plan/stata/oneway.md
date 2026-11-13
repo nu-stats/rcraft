@@ -47,3 +47,11 @@ logs set line by line against RCraft's output); corpus `oneway.do`. Translated i
   1 − (1 − p)^(k(k−1)/2), Scheffe F = t²/(k − 1) on (k − 1, df_r).
 - `nomeans`, `nostandard`, `nofreq` drop those columns of the summary table; a title as wide as the columns
   goes on two lines, "Summary of" over the variable's name, each centred.
+
+## Weights with tabulate, both kinds of left-out group (2026-11-13; probe `rest/r1.do` identical)
+
+- With weights the summary table gains an `Obs` column (48 wide, the title centred over it): frequency
+  weights show their sums as Freq. and Obs; analytic weights the raw weight sums as Freq., the rows as Obs,
+  and summarize's standard deviation (Σw(x − m)²/Σw · k/(k − 1), the groups' and the total's).
+- With both a single-observation group and a group of equal values, Bartlett's note has both lines, the
+  single-observation one first.

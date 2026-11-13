@@ -1,5 +1,5 @@
 * RCraft's Stata corpus (P2C.12): made-up data; Stata 19's results are in ci.recorded
-* commands: ci
+* commands: ci cii
 * (ci means, ci proportions with every method, at 0 and 1 and in between, and ci variances: the last variable's r(); frequency and analytic weights for means; level(); one and no observations)
 * tolerance: 1e-9
 version 19
@@ -56,3 +56,25 @@ ci variances x, sd
 display "@ sd " %24.17g r(sd) " " %24.17g r(lb) " " %24.17g r(ub)
 ci variances y, sd bonett
 display "@ sdbon " %24.17g r(sd) " " %24.17g r(kurtosis) " " %24.17g r(lb) " " %24.17g r(ub)
+ci proportions b [fweight = e]
+display "@ fwp " r(N) " " %24.17g r(proportion) " " %24.17g r(lb) " " %24.17g r(ub)
+ci variances x [fweight = e]
+display "@ fwv " r(N) " " %24.17g r(Var) " " %24.17g r(lb) " " %24.17g r(ub)
+ci means k [fweight = e], poisson
+display "@ fwpois " r(N) " " %24.17g r(mean) " " %24.17g r(lb) " " %24.17g r(ub)
+cii means 50 10 3
+display "@ cii_m " r(N) " " %24.17g r(se) " " %24.17g r(lb) " " %24.17g r(ub)
+cii means 1 10 3
+display "@ cii_m1 " r(N) " " %24.17g r(se) " " r(lb)
+cii proportions 60 18, wilson
+display "@ cii_p " %24.17g r(se) " " %24.17g r(lb) " " %24.17g r(ub)
+cii proportions 20 0, agresti level(90)
+display "@ cii_p0 " %24.17g r(lb) " " %24.17g r(ub)
+cii proportions 20 20
+display "@ cii_pn " %24.17g r(lb) " " %24.17g r(ub)
+cii means 120 30, poisson
+display "@ cii_pois " %24.17g r(mean) " " %24.17g r(lb) " " %24.17g r(ub)
+cii variances 50 9, sd
+display "@ cii_sd " %24.17g r(sd) " " %24.17g r(lb) " " %24.17g r(ub)
+cii variances 50 9 4, bonett
+display "@ cii_bon " %24.17g r(kurtosis) " " %24.17g r(lb) " " %24.17g r(ub)

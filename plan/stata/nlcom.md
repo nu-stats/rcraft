@@ -17,7 +17,7 @@ Translated in `crates/statatr/src/data_r/nlcom.rs`.
 - `df(#)`: t in place of z (the headings, the critical value, r(table)'s t and df rows) and r(df_r) after
   r(level); `noheader` leaves out the expressions' lines; `iterate()` changes nothing in the results
   (probe `nl/l3.do` identical; corpus `nlcom.do`).
-- Not translated: after mlogit and the models not listed below; `post` (it replaces e()); expressions of the
+- Not translated: after the models not listed below; `post` (it replaces e()); expressions of the
   data's variables.
 
 ## More models (2026-11-13; probe `nl/l2.do`)
@@ -26,3 +26,5 @@ Translated in `crates/statatr/src/data_r/nlcom.rs`.
   points too), clogit, stcox (the stub `_t`) and regress with robust errors. The values follow the model's:
   to 1e-9 after the linear models and stcox, to about 1e-7 after ologit, oprobit and clogit, where Stata
   stops iterating (corpus `nlcom_models.do`, to 6 digits).
+- After mlogit (`[2]_b[z]`, a base outcome's coefficient is missing, r(498)): the same table, the dependent
+  variable in the stub (probe `rest/r3.do`; corpus `mlogit_tests.do`).

@@ -32,9 +32,9 @@ pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level
     mark <- ""
     if (kind == "means" && method == "poisson") {
       # the exact interval for a Poisson count, as rates over the exposure
-      E <- if (is.null(ex)) k else sum(ex[ok])
+      E <- if (is.null(ex)) N else sum(ex[ok])
       # Stata 19 takes the total count rounded (half up): 0.4 ten times is 4, 2.25 ten times 23
-      tot <- floor(sum(x) + 0.5)
+      tot <- floor(sum(vw * x) + 0.5)
       lb <- if (tot > 0) stats::qgamma(a, tot) / E else 0
       ub <- stats::qgamma(1 - a, tot + 1) / E
       rows[[v]] <- list(N = E, est = tot / E, se = sqrt(tot) / E, lb = lb, ub = ub, mark = if (tot == 0) "*" else "")
@@ -56,8 +56,8 @@ pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level
       ub <- if (N > 1) (N - 1) * var / stats::qchisq(a, N - 1) else NA_real_
       rows[[v]] <- list(N = N, est = var, lb = lb, ub = ub)
     } else {
-      n <- k
-      s <- sum(x)
+      n <- N
+      s <- sum(vw * x)
       p <- if (n > 0) s / n else NA_real_
       se <- sqrt(p * (1 - p) / n)
       if (method == "exact") {
@@ -226,9 +226,6 @@ impl Session {
             "variances" if opts.has("bonett", 6) => "bonett",
             _ => "normal",
         };
-        if method == "poisson" && c.parts.weight.is_some() {
-            return Err(no("ci means, poisson with weights is not translated yet"));
-        }
         let level = match opts.arg("level", 1) {
             None => "95".to_string(),
             Some(l) => {
@@ -253,7 +250,17 @@ impl Session {
                 "ci {kind} {v}: patterns and abbreviations are not translated here yet"
             )));
         }
-        let allowed: &[W] = if kind == "means" { &[W::F, W::A] } else { &[] };
+        // Stata 19 takes frequency weights everywhere, analytic ones for normal means only
+        let allowed: &[W] = if kind == "means" && method == "normal" {
+            &[W::F, W::A]
+        } else {
+            &[W::F]
+        };
+        if exposure.is_some() && c.parts.weight.is_some() {
+            return Err(no(
+                "ci means, exposure() with weights is not translated yet",
+            ));
+        }
         let w = self.weight_of(c, allowed)?;
         let mut rows = self.rows_for(c, out)?;
         if w.is_some() {

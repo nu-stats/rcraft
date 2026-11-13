@@ -163,6 +163,7 @@ impl Session {
                 | Fit::Ivregress
                 | Fit::Clogit
                 | Fit::Stcox
+                | Fit::Mlogit
         ) {
             return Err(no(format!(
                 "nlcom after {} is not translated yet",

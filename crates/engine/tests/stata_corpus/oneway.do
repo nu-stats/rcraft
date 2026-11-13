@@ -38,3 +38,11 @@ oneway y educ [aweight = w], bonferroni scheffe sidak
 display "@ aw " r(N) " " %24.17g r(mss) " " %24.17g r(rss) " " r(df_r) " " %24.17g r(F) " " %24.17g r(chi2bart)
 oneway y educ, tabulate nomeans nostandard
 display "@ nomeans " r(N) " " %24.17g r(F)
+generate g2 = educ
+replace g2 = 5 in 2
+replace g2 = 6 in 4/6
+replace y = 3 in 4/6
+oneway y g2
+display "@ both " %24.17g r(chi2bart) " " r(df_bart) " " %24.17g r(F)
+oneway y educ [aweight = w], tabulate
+display "@ awtab " %24.17g r(F) " " %24.17g r(chi2bart)

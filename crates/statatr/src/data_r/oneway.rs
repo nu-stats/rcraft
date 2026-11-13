@@ -19,6 +19,7 @@ pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tab
   wv <- wv[keep]
   if (!length(x)) stop("no observations (Stata: r(2000))", call. = FALSE)
   # analytic weights are scaled to sum to the rows, frequency weights count rows
+  wraw <- wv
   if (!is.null(w) && wtype == "a") wv <- wv * length(x) / sum(wv)
   lv <- sort(unique(gk), method = "radix")
   vl <- if (nolabel || is.character(gv)) NULL else attr(gv, "labels", exact = TRUE)
@@ -46,7 +47,6 @@ pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tab
   single <- sum(n == 1)
   # groups of several equal values (with frequency weights, one row counted several times)
   multi <- sum(n > 1 & s2 == 0)
-  if (single > 0 && multi > 0) stop("oneway: Bartlett's test with both single-observation groups and groups of equal values is not translated yet", call. = FALSE)
   chi2 <- NA_real_
   dfb <- NA_real_
   if (sum(use) >= 2) {
@@ -74,7 +74,16 @@ pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tab
   if (!show) return(r)
   g9 <- function(v) stata_fmt(v, "%10.0g", trim = TRUE)
   if (tabulate && any(cols)) {
-    width <- 12 * sum(cols)
+    weighted <- !is.null(w)
+    width <- 12 * (sum(cols) + weighted)
+    rows_n <- vapply(lv, function(v) sum(gk == v), 0)
+    # with weights: the weight sums as Freq., the rows (frequency weights: their sums) as Obs.
+    freq <- vapply(lv, function(v) sum(wraw[gk == v]), 0)
+    obs <- if (weighted && wtype == "a") rows_n else n
+    # the sd: with analytic weights summarize's (the weighted variance times rows/(rows - 1)), as Stata 19 shows it
+    sd_g <- if (weighted && wtype == "a") sqrt(ifelse(rows_n > 1, ssg / n * rows_n / (rows_n - 1), 0)) else sqrt(s2)
+    tot_ss <- sum(wv * (x - M)^2)
+    sd_t <- if (weighted && wtype == "a") sqrt(tot_ss / N * length(x) / (length(x) - 1)) else if (N > 1) sqrt(tot_ss / (N - 1)) else 0
     title <- paste("Summary of", y)
     head1 <- if (nchar(g) > 11) substr(g, 1, 11) else ""
     head2 <- if (nchar(g) > 11) substring(g, 12) else g
@@ -86,18 +95,20 @@ pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tab
     } else {
       cat("\n", sprintf("%11s", head1), " |", centre(title), "\n", sep = "")
     }
-    line <- function(lab, a, b, f) {
-      v <- c(a, b, f)[cols]
+    line <- function(lab, a, b, f, o = NULL) {
+      v <- c(c(a, b, f)[cols], if (weighted) o)
       paste0(sprintf("%11s |", lab), paste0(sprintf("%12s", v), collapse = ""), "\n")
     }
-    cat(line(head2, "Mean", "Std. dev.", "Freq."))
+    cat(line(head2, "Mean", "Std. dev.", "Freq.", "Obs"))
     rule <- paste0(strrep("-", 12), "+", strrep("-", width), "\n")
     cat(rule)
     for (i in seq_along(lv)) {
-      cat(line(substr(name(lv[i]), 1, 9), g9(m[i]), g9(sqrt(s2[i])), format(n[i], scientific = FALSE)))
+      cat(line(substr(name(lv[i]), 1, 9), g9(m[i]), g9(sd_g[i]), format(if (weighted) freq[i] else n[i], scientific = FALSE),
+               format(obs[i], scientific = FALSE)))
     }
     cat(rule)
-    cat(line("Total", g9(M), g9(if (N > 1) stats::sd(x) else 0), format(N, scientific = FALSE)))
+    cat(line("Total", g9(M), g9(sd_t), format(if (weighted) sum(wraw) else N, scientific = FALSE),
+             format(if (weighted && wtype == "a") length(x) else N, scientific = FALSE)))
   }
   if (anova) {
     g10 <- function(v) stata_fmt(v, "%11.0g", trim = TRUE)
@@ -182,9 +193,6 @@ impl Session {
             )));
         }
         let w = self.weight_of(c, &[super::weights::W::F, super::weights::W::A])?;
-        if w.is_some() && opts.has("tabulate", 8) {
-            return Err(no("oneway with weights and tabulate is not translated yet"));
-        }
         let compare: Vec<String> = [("bonferroni", 10), ("scheffe", 7), ("sidak", 5)]
             .iter()
             .filter(|(o, m)| opts.has(o, *m))

@@ -69,6 +69,7 @@ pub const COMMANDS: &[&str] = &[
     "center",
     "centile",
     "ci",
+    "cii",
     "clear",
     "clogit",
     "cluster2",
@@ -708,6 +709,12 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         &["cci", "centile(", "level(", "meansd", "normal"],
     ),
     ("nlcom", &["df(", "iterate(", "level(", "noheader"]),
+    (
+        "cii",
+        &[
+            "agresti", "bonett", "exact", "jeffreys", "level(", "poisson", "sd", "wald", "wilson",
+        ],
+    ),
     ("sktest", &["noadjust"]),
     (
         "ci",
@@ -1520,6 +1527,10 @@ mod tests {
             "ci" if matches!(name, "poisson" | "exposure") => format!("ci means c, {o}"),
             "ci" if matches!(name, "bonett" | "sd") => format!("ci variances y, {o}"),
             "ci" => format!("ci proportions d, {o}"),
+            "cii" if name == "poisson" => format!("cii means 20 5, {o}"),
+            "cii" if name == "bonett" => format!("cii variances 20 4 3, {o}"),
+            "cii" if name == "sd" => format!("cii variances 20 4, {o}"),
+            "cii" => format!("cii proportions 20 5, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
             "cmclogit" => format!("cmset g t\ncmclogit d x, {o}"),
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),
