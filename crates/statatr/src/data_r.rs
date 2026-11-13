@@ -54,6 +54,7 @@ mod ml;
 mod model;
 mod more;
 mod natscale;
+mod nlcom;
 mod oneway;
 mod outreg;
 mod outreg2;
@@ -946,6 +947,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_oneway" => oneway::ONEWAY_HELPER,
         "stata_ci" => ci::CI_HELPER,
         "stata_centile" => centile::CENTILE_HELPER,
+        "stata_nlcom" => nlcom::NLCOM_HELPER,
         "stata_testparm" => testparm::TESTPARM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
@@ -2258,6 +2260,7 @@ impl Session {
             "oneway" => self.oneway(c, &opts, out),
             "ci" => self.ci(c, &opts, out),
             "centile" => self.centile(c, &opts, out),
+            "nlcom" => self.nlcom(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),
@@ -4838,7 +4841,7 @@ estat ic");
         // so do the commands that only read the model, unless they post
         let out = r("use s
 regress y x
-nlcom _b[x]
+testnl _b[x] = 0
 lincom x
 estimates store m1
 lincom x

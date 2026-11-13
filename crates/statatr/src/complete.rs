@@ -146,6 +146,7 @@ pub const COMMANDS: &[&str] = &[
     "mlogit",
     "nbreg",
     "newey",
+    "nlcom",
     "noisily",
     "ologit",
     "oneway",
@@ -681,6 +682,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("testparm", &["equal"]),
     ("oneway", &["noanova", "nolabel", "tabulate"]),
     ("centile", &["centile(", "level("]),
+    ("nlcom", &["level("]),
     (
         "ci",
         &["agresti", "exact", "jeffreys", "level(", "wald", "wilson"],
@@ -1481,6 +1483,7 @@ mod tests {
             "cmclogit" => format!("cmset g t\ncmclogit d x, {o}"),
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),
             "coefplot" => format!("regress y x\ncoefplot, {o}"),
+            "nlcom" => format!("regress y x\nnlcom _b[x], {o}"),
             "collapse" => format!("collapse (mean) y, {o}"),
             "contract" if name == "format" => format!("contract g, percent(p) {o}"),
             "contract" => format!("contract g, {o}"),

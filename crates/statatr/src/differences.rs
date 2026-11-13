@@ -1975,6 +1975,26 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "nlcom",
+        about: "Nonlinear combinations of the coefficients (nlcom _b[x]/_b[z], nlcom (name: exp) ...)",
+        points: &[
+            p(
+                "In R",
+                "stata_nlcom works each expression out at the coefficients and its standard error \
+                 by the delta method, with the derivatives taken by central differences \
+                 (extrapolated) on Stata mode's own translation of the expression; z and the \
+                 normal interval, as Stata's, after regress too. The table and r() are Stata \
+                 19's: r(b), r(V), r(table), r(N), r(level).",
+            ),
+            p(
+                "Not yet",
+                "nlcom after models other than regress, logit, probit and poisson, its options \
+                 other than level() (post, df(), iterate(), noheader) and expressions of the \
+                 data's variables are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "centile",
         about: "Centiles with confidence intervals (centile x, centile(25 50 75))",
         points: &[
