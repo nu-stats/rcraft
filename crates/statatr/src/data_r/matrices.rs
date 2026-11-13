@@ -265,7 +265,8 @@ pub(super) const MATRIX_LIST_HELPER: &str = r##"stata_matrix_list <- function(m,
   top <- gsub("([0-9])bn\\.", "\\1.", top)
   rl <- ab(rn)
   vals <- matrix(vapply(as.vector(m), function(v) stata_fmt(v, format, trim = TRUE), ""), nrow(m))
-  W <- 2 + max(nchar(vals), nchar(bottom))
+  # as wide as its widest entry, name or equation name (Stata 19: lags: over 1)
+  W <- 2 + max(nchar(vals), nchar(bottom), nchar(eq))
   L <- max(nchar(rl))
   # set linesize, kept in R; Stata's width is 80 when nothing sets one
   ls <- if (exists("stata_linesize")) stata_linesize else 80

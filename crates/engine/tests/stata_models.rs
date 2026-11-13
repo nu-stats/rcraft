@@ -2174,3 +2174,26 @@ fn the_p2b4_leftovers_agree_with_stata_19() {
         assert!(got.contains(why), "{cmd}: {got}");
     }
 }
+
+/// estat vif, classification and gof in Stata 19's layouts
+/// (plan/stata/estat-tests.md).
+#[test]
+fn estat_tests_print_statas_tables() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let code = script(&format!(
+        "use \"{dir}/models.dta\"\nregress y x w\nestat vif\nlogit yb x w\nestat classification\nestat gof, group(4)\n"
+    ));
+    let text = ok(&mut e, &code);
+    for line in [
+        "    Variable |       VIF       1/VIF  ",
+        "    Mean VIF |",
+        "Logistic model for yb",
+        "Classified |         D            ~D  |      Total",
+        "Classified + if predicted Pr(D) >= .5",
+        "Sensitivity                     Pr( +| D)",
+        "       Number of groups =      4",
+    ] {
+        assert!(text.contains(line), "{line:?} in {text}");
+    }
+}

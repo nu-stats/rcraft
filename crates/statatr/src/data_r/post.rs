@@ -955,6 +955,9 @@ impl Session {
         if est.fit == Fit::Ivregress && sub != "vce" {
             return self.estat_iv(sub, out);
         }
+        if self.estat_more(c, sub, est.fit, &est.dep, opts, out)? {
+            return Ok(());
+        }
         if sub == "ic" && est.fit == Fit::Xtreg {
             // fe has the within regression's likelihood; Stata 19 gives none after re or be
             self.helpers.insert("stata_xt_ic");

@@ -57,6 +57,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("erase", &["replication"]),
     ("ereturn", &["eclass"]),
     ("estadd", &["estout"]),
+    ("estat", &["estat_fit", "estat_tests"]),
     ("estimates", &["estimates", "marginsplot", "suest"]),
     ("estpost", &["esttab2"]),
     ("eststo", &["estout", "marginsplot"]),

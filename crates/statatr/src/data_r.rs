@@ -40,6 +40,7 @@ mod coefplot;
 mod contract;
 mod dates;
 mod eclass;
+mod estat;
 mod estpost;
 mod esttab;
 mod esttab_matrix;
@@ -1071,6 +1072,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tables" => tables::TABLES_HELPER,
         "stata_tabpct" => tabpct::TABPCT_HELPER,
         "stata_tabsum2" => tabsum::TABSUM_HELPER,
+        "stata_estat_more" => estat::ESTAT_MORE_HELPER,
         "stata_tab_mats" => tabsum::TAB_MATS_HELPER,
         "stata_import_float" => IMPORT_FLOAT_HELPER,
         "stata_levelsof" => LEVELSOF_HELPER,
