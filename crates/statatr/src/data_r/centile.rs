@@ -76,7 +76,8 @@ pub(super) const CENTILE_HELPER: &str = r##"stata_centile <- function(d, vars, q
   r$centiles <- qtext
   if (!show) return(r)
   g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
-  ab <- function(s) if (nchar(s) <= 12) s else paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s)))
+  # cut as Stata cuts names: unique among the data's variables
+  ab <- function(s) stata_tab_abbrev(s, 12)
   cat("\n", switch(method,
     cci = paste0(strrep(" ", 58), "Binomial exact   "),
     normal = paste0(strrep(" ", 35), "-- Normal, based on observed centiles --"),
@@ -193,7 +194,12 @@ impl Session {
             }
         };
         let rows = self.rows_for(c, out)?;
-        for h in ["stata_centile", "stata_fmt", "stata_returned"] {
+        for h in [
+            "stata_centile",
+            "stata_fmt",
+            "stata_returned",
+            "stata_tables",
+        ] {
             self.helpers.insert(h);
         }
         let names: Vec<String> = vars.iter().map(|v| r_text(v)).collect();

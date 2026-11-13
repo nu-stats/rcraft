@@ -103,7 +103,7 @@ pub(super) const TABSTAT_HELPER: &str = r##"stata_tabstat <- function(d, vars, s
     if (is.null(by) || total) r[["StatTotal"]] <- tot
   }
   if (!show) return(r)
-  ab <- function(s, n) if (nchar(s) <= n) s else paste0(substr(s, 1, n - 2), "~", substr(s, nchar(s), nchar(s)))
+  ab <- function(s, n) stata_tab_abbrev(s, n)
   statcols <- if (cols == "s") TRUE else if (cols == "v") FALSE else length(vars) == 1
   heads <- if (statcols) labs else vapply(vars, ab, "", n = 8)
   # each group's rows: one a variable (statistics across) or one a statistic
@@ -355,7 +355,12 @@ impl Session {
             out.caveat(super::weights::weight_caveat(&w));
         }
         let wargs = w_args(&rows, &w);
-        for h in ["stata_tabstat", "stata_fmt", "stata_returned"] {
+        for h in [
+            "stata_tabstat",
+            "stata_fmt",
+            "stata_returned",
+            "stata_tables",
+        ] {
             self.helpers.insert(h);
         }
         let list = |v: &[&str]| -> String {

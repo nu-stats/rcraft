@@ -43,9 +43,9 @@ pub(super) const OUTCOME_PROBS_HELPER: &str = r#"stata_outcome_probs <- function
 /// Stata's `test`: the Wald test that each row's combination of
 /// coefficients equals its value, as an F or a chi-squared.
 pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, ret = FALSE, vlc = FALSE, mtest = NULL,
-                       accumulate = FALSE, notest = FALSE) {
+                       accumulate = FALSE, notest = FALSE, relabel = FALSE) {
   env <- parent.frame()
-  res <- stata_resolve(rows, r, labels)
+  res <- stata_resolve(rows, r, labels, relabel = relabel)
   rows <- res$rows
   r <- res$r
   labels <- res$labels
@@ -161,9 +161,9 @@ pub(super) const ZERO_TERM_HELPER: &str = r#"stata_zero_term <- function(m, b) {
 /// Stata's `lincom`: one combination of the coefficients, its standard
 /// error, test and interval.
 pub(super) const LINCOM_HELPER: &str = r##"stata_lincom <- function(a, label, level = 0.95, eform = FALSE, what = "Coef.",
-                         ret = FALSE, const = 0, stub = "", layout = TRUE) {
+                         ret = FALSE, const = 0, stub = "", layout = TRUE, relabel = FALSE) {
   env <- parent.frame()
-  res <- stata_resolve(list(a), 0, label, zero = TRUE)
+  res <- stata_resolve(list(a), 0, label, zero = TRUE, relabel = relabel)
   a <- res$rows[[1]]
   label <- res$labels[1]
   b <- stata_b
@@ -179,7 +179,7 @@ pub(super) const LINCOM_HELPER: &str = r##"stata_lincom <- function(a, label, le
   rule <- strrep("-", 78)
   # Stata 19's table: the dependent variable in the stub, the row (1)
   head <- function() {
-    ab <- function(s) if (nchar(s) <= 12) s else paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s)))
+    ab <- function(s) stata_tab_abbrev(s, 12)
     cat(sprintf("\n ( 1)  %s\n\n%s\n", label, rule))
     cat(sprintf("%12s |%s      %s    P>|%s|%25s", ab(stub),
                 if (what %in% c("Coef.", "Coefficient")) " Coefficient  Std. err." else sprintf("%11s   Std. err.", what),
@@ -650,6 +650,8 @@ impl Session {
     ) -> Result<(), Untranslated> {
         self.no_by(c, "test")?;
         let est = self.estimates_for("test")?;
+        // after over() and proportion the lines name e(b)'s levels (1bn.g), as Stata's
+        let relabel = matches!(self.posted_estimates(), Some((_, true)));
         if let Some(o) = opts.other(&[
             ("matvlc", 6),
             ("mtest", 5),
@@ -740,7 +742,7 @@ impl Session {
             self.helpers.insert("stata_fmt");
         }
         let call = format!(
-            "stata_test(list({}), c({}), c({}), ret = TRUE{}{}{}{})",
+            "stata_test(list({}), c({}), c({}), ret = TRUE{}{}{}{}{})",
             list.join(", "),
             values.join(", "),
             labels.join(", "),
@@ -753,6 +755,7 @@ impl Session {
             } else {
                 ""
             },
+            if relabel { ", relabel = TRUE" } else { "" },
             if opts.has("notest", 6) {
                 ", notest = TRUE"
             } else {
@@ -816,7 +819,14 @@ impl Session {
         }
         let label = label.unwrap_or_else(|| format!("{} = 0", tidy(text)));
         // the dependent variable heads the table, but none after margins, post
-        let stub = if est.fit == Fit::Margins && !self.after_nlcom_post() {
+        // after mean, total, proportion and ratio the stub is the estimate's kind (Stata 19: Mean)
+        let posted = self.posted_estimates().map(|(k, l)| (k.to_string(), l));
+        let relabel = matches!(posted, Some((_, true)));
+        let stub = if let Some((kind, _)) = &posted {
+            let mut s = kind.clone();
+            s[..1].make_ascii_uppercase();
+            r_text(&s)
+        } else if est.fit == Fit::Margins && !self.after_nlcom_post() {
             r_text("")
         } else {
             r_text(&est.dep)
@@ -848,6 +858,7 @@ impl Session {
         }
         self.helpers.insert("stata_coefs");
         self.helpers.insert("stata_lincom");
+        self.helpers.insert("stata_tables");
         self.helpers.insert("stata_fmt");
         self.helpers.insert("stata_zero_term");
         self.helpers.insert("stata_names");
@@ -858,7 +869,7 @@ impl Session {
         };
         self.r_new = Some((super::returned::R_LINCOM, "lincom".into()));
         let call = format!(
-            "stata_lincom({}, label = {}, level = {}, eform = {}, what = {}, ret = TRUE{}{})",
+            "stata_lincom({}, label = {}, level = {}, eform = {}, what = {}, ret = TRUE{}{}{})",
             row.r_vector(),
             r_text(&label),
             r_number(level),
@@ -873,7 +884,8 @@ impl Session {
                 format!(", stub = {stub}")
             } else {
                 ", layout = FALSE".to_string()
-            }
+            },
+            if relabel { ", relabel = TRUE" } else { "" }
         );
         out.line(super::returned::quietly(c, call));
         Ok(())
@@ -1532,6 +1544,8 @@ pub(super) const NAMES_HELPER: &str = r##"stata_canon <- function(s) {
   p <- strsplit(gsub(" ", "", s), "#", fixed = TRUE)[[1]]
   # Stata writes a base level as 0bn.g and an omitted one as 0o.g; both are 0.g
   p <- sub("^([0-9]+)(bn|b|o)\\.", "\\1.", sub("^c\\.", "", p))
+  # over()'s names: c.y@0bn.b is y@0.b
+  p <- gsub("@([0-9]+)(bn|b|o)\\.", "@\\1.", p)
   paste0(eq, paste(sort(p), collapse = "#"))
 }
 stata_bnames <- function() {
@@ -1560,7 +1574,7 @@ stata_bnames <- function() {
     stata_canon(paste0(eq, paste(vapply(strsplit(n, ":", fixed = TRUE)[[1]], part, ""), collapse = "#")))
   }, "")
 }
-stata_resolve <- function(rows, r, labels, zero = FALSE) {
+stata_resolve <- function(rows, r, labels, zero = FALSE, relabel = FALSE) {
   st <- stata_bnames()
   nm <- names(stata_b)
   multi <- inherits(stata_estimates, "multinom")
@@ -1622,6 +1636,14 @@ stata_resolve <- function(rows, r, labels, zero = FALSE) {
     names(row) <- keys[keep]
     if (length(row) == 0 && multi && !zero) {
       stop("[", stata_base, "] is the base outcome's equation, which Stata fixes at zero, so nothing is left to test")
+    }
+    # relabel: the line names each coefficient as e(b) does (1bn.g, c.y@0bn.b; Stata 19)
+    if (relabel) {
+      typed <- sub("^stata:", "", names(rows[[i]]))
+      esc <- function(s) gsub("([][{}()+*^$|\\\\?.])", "\\\\\\1", s)
+      for (j in which(!is.na(keys) & typed != keys)) {
+        labels[i] <- gsub(paste0("(?<![A-Za-z0-9_.@#])", esc(typed[j]), "(?![A-Za-z0-9_.@#])"), keys[j], labels[i], perl = TRUE)
+      }
     }
     add(row, r[i], labels[i])
   }

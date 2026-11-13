@@ -2265,6 +2265,62 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "mean",
+        about: "Means with their standard errors (mean y x, over(g))",
+        points: &[
+            p(
+                "In R",
+                "stata_meanest estimates as Stata 19 does and prints its table: the rows with \
+                 every variable (and over()'s) present, each mean's standard error s/sqrt(n) \
+                 with frequency weights counting rows and analytic ones scaled to the rows (in \
+                 each group of over()), and with probability weights the linearized (sandwich) \
+                 variance n/(n-1) sum z z', each group of over() on its own. e(b) and e(V) are \
+                 named as Stata names them (y, c.y@0bn.b), with e(N), e(df_r), e(sd), e(_N) and \
+                 r(table); test and lincom read them, their lines naming the levels as Stata's \
+                 do (c.y@0bn.b - c.y@1.b = 0).",
+            ),
+            p(
+                "Not yet",
+                "Several variables in over(), vce(), the display options and iweights are \
+                 refused; _b[] and _se[] of over()'s names (c.y@0.b) are not read yet.",
+            ),
+        ],
+    },
+    Guide {
+        command: "total",
+        about: "Totals with their standard errors (total y, over(g))",
+        points: &[p(
+            "In R",
+            "As mean's (stata_meanest), each total the sum of the weights times the mean, its \
+             variance that sum squared times the mean's, as Stata 19 gives it; frequency and \
+             probability weights, over(); analytic weights are refused.",
+        )],
+    },
+    Guide {
+        command: "proportion",
+        about: "Proportions of each value with logit intervals (proportion g, over(h))",
+        points: &[p(
+            "In R",
+            "stata_meanest gives each value's share of the rows (every variable present), its \
+             variance (diag(p) - pp')/n, and Stata 19's logit interval; with probability weights \
+             the linearized variance; over() each group on its own. e(b) is named 1bn.g 2.g ... \
+             (0bn.b@1bn.g with over()), with e(freq) and e(_N), and lincom's lines name the \
+             levels so (1bn.g - 2.g = 0). Abbreviations of proportion and analytic weights are \
+             not translated yet.",
+        )],
+    },
+    Guide {
+        command: "ratio",
+        about: "Ratios of means with linearized standard errors (ratio y/x, ratio (r: y/x))",
+        points: &[p(
+            "In R",
+            "stata_meanest gives sum w y / sum w x and its linearized variance, n/(n-1) sum z z' \
+             with z = w (y - R x) / sum w x, each group of over() on its own, as Stata 19's \
+             (frequency weights counting rows); named ratios and _ratio_#, the lines naming \
+             each ratio before the table. Analytic weights are refused.",
+        )],
+    },
+    Guide {
         command: "oneway",
         about: "One-way analysis of variance (oneway y g, tabulate)",
         points: &[

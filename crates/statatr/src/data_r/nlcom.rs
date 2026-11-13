@@ -55,7 +55,8 @@ pub(super) const NLCOM_HELPER: &str = r##"stata_nlcom <- function(exprs, names, 
   r <- c(list(level = level), if (small) list(df_r = df), list(N = if (is.null(N)) NA_real_ else N, table = tab, b = bm, V = V))
   if (!show) return(r)
   g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
-  ab <- function(s) if (nchar(s) <= 12) s else paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s)))
+  # cut as Stata cuts names: unique among the data's variables
+  ab <- function(s) stata_tab_abbrev(s, 12)
   if (header) {
     cat("\n")
     for (i in seq_along(names)) cat(sprintf("%12s: %s", names[i], texts[i]), "\n", sep = "")
@@ -221,7 +222,7 @@ impl Session {
             ));
             texts.push(r_text(e));
         }
-        for h in ["stata_nlcom", "stata_fmt", "stata_returned"] {
+        for h in ["stata_nlcom", "stata_fmt", "stata_returned", "stata_tables"] {
             self.helpers.insert(h);
         }
         out.line(format!(

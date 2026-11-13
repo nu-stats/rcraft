@@ -114,7 +114,8 @@ pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level
   if (kind == "variances" && sd) for (v in names(rows)) for (f in c("est", "lb", "ub")) rows[[v]][[f]] <- sqrt(rows[[v]][[f]])
   if (!show) return(r)
   g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
-  ab <- function(s) if (nchar(s) <= 12) s else paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s)))
+  # cut as Stata cuts names: unique among the data's variables
+  ab <- function(s) stata_tab_abbrev(s, 12)
   lev <- paste0("[", stata_fmt(level, "%9.0g", trim = TRUE), "% conf. interval]")
   wide <- kind != "variances"
   titles <- c(exact = "Binomial exact", wald = "Binomial Wald", wilson = "Wilson",
@@ -270,7 +271,7 @@ impl Session {
             out.caveat(super::weights::weight_caveat(&w));
         }
         let wargs = w_args(&rows, &w);
-        for h in ["stata_ci", "stata_fmt", "stata_returned"] {
+        for h in ["stata_ci", "stata_fmt", "stata_returned", "stata_tables"] {
             self.helpers.insert(h);
         }
         let list: Vec<String> = vars.iter().map(|v| r_text(v)).collect();

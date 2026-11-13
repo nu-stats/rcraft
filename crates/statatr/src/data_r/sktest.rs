@@ -69,7 +69,7 @@ pub(super) const SKTEST_HELPER: &str = r##"stata_sktest <- function(d, vars, adj
   body <- if (adjust) 65 else 61
   ls <- if (exists("stata_linesize")) stata_linesize else 79
   sw <- max(12, min(max(nchar(vars)), ls - 2 - body))
-  ab <- function(s) if (nchar(s) <= sw) s else paste0(substr(s, 1, sw - 2), "~", substr(s, nchar(s), nchar(s)))
+  ab <- function(s) stata_tab_abbrev(s, sw)
   f <- function(v, d) if (is.na(v)) "." else sprintf(paste0("%.", d, "f"), v)
   cat("\nSkewness and kurtosis tests for normality\n")
   cat(strrep(" ", sw + 45), if (adjust) "----- Joint test -----" else "--- Joint test ---", "\n", sep = "")
@@ -124,7 +124,12 @@ impl Session {
             out.caveat(super::weights::weight_caveat(&w));
         }
         let wargs = w_args(&rows, &w);
-        for h in ["stata_sktest", "stata_fmt", "stata_returned"] {
+        for h in [
+            "stata_sktest",
+            "stata_fmt",
+            "stata_returned",
+            "stata_tables",
+        ] {
             self.helpers.insert(h);
         }
         let list: Vec<String> = vars.iter().map(|v| r_text(v)).collect();

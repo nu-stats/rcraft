@@ -52,6 +52,7 @@ mod graph;
 mod iv;
 mod margins;
 mod matrices;
+mod meanest;
 mod medeff;
 mod mexpr;
 mod ml;
@@ -477,11 +478,31 @@ const WEIGHTED: &[&str] = &[
     "ologit",
     "oprobit",
     "mlogit",
+    "mean",
+    "total",
+    "proportion",
+    "ratio",
 ];
 
 /// Commands besides the models whose tables cut long names (to be unique among the
 /// data's variables, as Stata 19 cuts them).
-const NAME_TABLES: &[&str] = &["summarize", "pwcorr", "matrix", "ereturn", "medeff"];
+const NAME_TABLES: &[&str] = &[
+    "summarize",
+    "pwcorr",
+    "matrix",
+    "ereturn",
+    "medeff",
+    "centile",
+    "ci",
+    "nlcom",
+    "sktest",
+    "tabstat",
+    "lincom",
+    "mean",
+    "total",
+    "proportion",
+    "ratio",
+];
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
@@ -1073,6 +1094,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tabpct" => tabpct::TABPCT_HELPER,
         "stata_tabsum2" => tabsum::TABSUM_HELPER,
         "stata_estat_more" => estat::ESTAT_MORE_HELPER,
+        "stata_meanest" => meanest::MEANEST_HELPER,
         "stata_tab_mats" => tabsum::TAB_MATS_HELPER,
         "stata_import_float" => IMPORT_FLOAT_HELPER,
         "stata_levelsof" => LEVELSOF_HELPER,
@@ -2308,6 +2330,10 @@ impl Session {
             "cii" => self.cii(c, &opts, out),
             "centile" => self.centile(c, &opts, out),
             "nlcom" => self.nlcom(c, &opts, out),
+            "mean" | "total" | "proportion" | "ratio" => {
+                let kind = c.name.clone();
+                self.meanest(c, &kind, &opts, out)
+            }
             "sktest" => self.sktest(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
