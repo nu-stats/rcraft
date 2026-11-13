@@ -4280,3 +4280,26 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   has them all (true: CI's packages are in `win-library/4.4`); with two made-up
   ones added, AER was ticked with CRAN's version and a no-repository package was
   blocked. Nothing was installed.
+
+## P3.2 continued: From another R also lists the user's own packages, both ways, 2026-11-13
+
+- From another R now also lists the packages the user installed themselves
+  into R's own library for another version: the version folders beside this
+  R's `R_LIBS_USER` (`win-library/4.6`, `x86_64-pc-linux-gnu-library/4.6`, or
+  on macOS `~/Library/R/arm64/4.6/library`), found by
+  `rhost::library::other_user_versions` after R says where its user library is
+  (`rcodegen::packages::user_libraries_code`). Those folders are only read. An
+  "Installed by" column says RCraft or you; a package both have is listed once.
+  Installs still go into RCraft's own library for this R.
+- It works in both directions: an older R is offered a newer R's packages and
+  a newer R an older one's. Going to an older R, a package whose current CRAN
+  version needs a newer R (`Depends: R (>= ...)`, `rpkg::index::needs_r`) is
+  shown but cannot be ticked, and the list to say yes to names any needed
+  package with the same problem. A CRAN package missing from the list is now
+  said to be no longer on CRAN, not called a GitHub package.
+- The start-up offer counts the user's own packages too, once R has answered.
+- Checked with pictures under R 4.4.3 against this machine's
+  `win-library/4.6` (read only, RCraft's library in a scratch folder): the
+  window opened by itself with the 18 packages 4.6 has and 4.4 lacks (R's own
+  `installed.packages` gives the same 18), each marked "you". Nothing was
+  installed.

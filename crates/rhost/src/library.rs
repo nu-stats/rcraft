@@ -246,6 +246,60 @@ pub fn say_not_now(library: &Path) {
     let _ = std::fs::write(file, text);
 }
 
+/// R's own per-user library for the other R minor versions, found beside
+/// `user_library` (this R's `R_LIBS_USER`): the other version folders next to
+/// it (`win-library/4.6` on Windows, `x86_64-pc-linux-gnu-library/4.6` on
+/// Linux) or, where the version folder holds a `library` folder (macOS:
+/// `~/Library/R/arm64/4.6/library`), the `library` folders of the other
+/// versions. Newest R first, each with its packages; folders without packages
+/// are left out, and so is anything not laid out like this. Only read.
+pub fn other_user_versions(user_library: &Path) -> Vec<(String, Vec<KeptPackage>)> {
+    let Some(name) = user_library.file_name().and_then(OsStr::to_str) else {
+        return Vec::new();
+    };
+    let (own, parent, inner) = if is_version_folder(name) {
+        (name.to_string(), user_library.parent(), None)
+    } else {
+        let version = user_library.parent();
+        match version
+            .and_then(Path::file_name)
+            .and_then(OsStr::to_str)
+            .filter(|v| is_version_folder(v))
+        {
+            Some(v) => (v.to_string(), version.and_then(Path::parent), Some(name)),
+            None => return Vec::new(),
+        }
+    };
+    let Some(parent) = parent else {
+        return Vec::new();
+    };
+    let Ok(entries) = std::fs::read_dir(parent) else {
+        return Vec::new();
+    };
+    let mut found: Vec<((u32, u32), String, Vec<KeptPackage>)> = Vec::new();
+    for entry in entries.flatten().take(MAX_FLAT_ENTRIES) {
+        let Some(v) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if !is_version_folder(&v) || v == own {
+            continue;
+        }
+        let Some(key) = folder_key(&v) else {
+            continue;
+        };
+        let dir = match inner {
+            Some(inner) => entry.path().join(inner),
+            None => entry.path(),
+        };
+        let packages = packages_in(&dir);
+        if !packages.is_empty() {
+            found.push((key, v, packages));
+        }
+    }
+    found.sort_by_key(|a| std::cmp::Reverse(a.0));
+    found.into_iter().map(|(_, n, p)| (n, p)).collect()
+}
+
 /// (major, minor) of a version folder's name, for ordering.
 fn folder_key(name: &str) -> Option<(u32, u32)> {
     let (a, b) = name.split_once('.')?;
@@ -508,6 +562,51 @@ mod tests {
             "4.4\n"
         );
         let _ = std::fs::remove_dir_all(root.parent().unwrap_or(&root));
+    }
+
+    #[test]
+    fn rs_own_user_library_of_other_versions_is_found_on_each_layout() {
+        let base = scratch("user")
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let put = |dir: &Path, name: &str| {
+            let p = dir.join(name);
+            let _ = std::fs::create_dir_all(&p);
+            let _ = std::fs::write(
+                p.join("DESCRIPTION"),
+                format!("Package: {name}\nVersion: 2.0\nRepository: CRAN\n"),
+            );
+        };
+        // Windows and Linux: win-library/4.4, x86_64-pc-linux-gnu-library/4.4
+        let win = base.join("win-library");
+        put(&win.join("4.6"), "data.table");
+        put(&win.join("4.4"), "here");
+        put(&win.join("4.10"), "cli");
+        let _ = std::fs::create_dir_all(win.join("4.2"));
+        let _ = std::fs::create_dir_all(win.join("notes"));
+        let found = other_user_versions(&win.join("4.4"));
+        let versions: Vec<&str> = found.iter().map(|(v, _)| v.as_str()).collect();
+        assert_eq!(versions, vec!["4.10", "4.6"]);
+        assert!(found
+            .get(1)
+            .is_some_and(|(_, p)| p.len() == 1 && p.iter().all(|k| k.name == "data.table")));
+        // macOS: ~/Library/R/arm64/4.4/library
+        let mac = base.join("arm64");
+        put(&mac.join("4.6").join("library"), "fixest");
+        let _ = std::fs::create_dir_all(mac.join("4.4").join("library"));
+        let found = other_user_versions(&mac.join("4.4").join("library"));
+        assert_eq!(
+            found
+                .iter()
+                .map(|(v, p)| (v.as_str(), p.len()))
+                .collect::<Vec<_>>(),
+            vec![("4.6", 1)]
+        );
+        // anything else is left alone
+        assert!(other_user_versions(&base.join("elsewhere")).is_empty());
+        assert!(other_user_versions(Path::new("")).is_empty());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]

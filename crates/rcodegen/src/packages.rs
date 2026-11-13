@@ -178,6 +178,23 @@ pub fn installed_packages_code() -> &'static str {
      na0(ip[, \"Repository\"]), sep = \"\\t\"), sep = \"\\n\") })"
 }
 
+/// R code that prints this R's own per-user library folders (`R_LIBS_USER`),
+/// one per line, with `~` expanded. Nothing is created or changed.
+pub fn user_libraries_code() -> &'static str {
+    "cat(path.expand(strsplit(Sys.getenv(\"R_LIBS_USER\"), .Platform$path.sep, fixed = TRUE)[[1]]), \
+     sep = \"\\n\")"
+}
+
+/// The folders [`user_libraries_code`] printed.
+pub fn parse_user_libraries(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(16)
+        .map(str::to_string)
+        .collect()
+}
+
 /// R code that prints, one per line, where `name` can be found: the attached
 /// packages (and the global workspace) that hold an object of that name, then
 /// the namespaces that have one that is not attached (R's `getAnywhere`).

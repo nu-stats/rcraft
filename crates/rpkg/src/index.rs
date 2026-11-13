@@ -239,6 +239,20 @@ pub fn parse_dependencies(field: &str) -> Vec<Dependency> {
         .collect()
 }
 
+/// The oldest R a `Depends` field allows: `4.5.0` from `R (>= 4.5.0), stats`.
+/// `None` when the field says nothing about R (or something other than `>=`).
+pub fn needs_r(depends: &str) -> Option<String> {
+    depends.split(',').find_map(|item| {
+        let (name, rest) = item.trim().split_once('(')?;
+        if name.trim() != "R" {
+            return None;
+        }
+        let (constraint, _) = rest.split_once(')')?;
+        let version = constraint.trim().strip_prefix(">=")?.trim();
+        (!version.is_empty()).then(|| version.to_string())
+    })
+}
+
 /// R's rule: letters, digits and dots, starting with a letter.
 pub fn is_package_name(s: &str) -> bool {
     let mut chars = s.chars();
@@ -598,6 +612,16 @@ mod tests {
         assert!(ix.is_stale(t + DEFAULT_MAX_AGE + 1, DEFAULT_MAX_AGE));
         // a clock set before the fetch is not stale and does not underflow
         assert_eq!(ix.age(0), 0);
+    }
+
+    #[test]
+    fn the_oldest_r_a_package_allows_is_read() {
+        assert_eq!(needs_r("R (>= 4.5.0), stats").as_deref(), Some("4.5.0"));
+        assert_eq!(needs_r("methods,\n  R(>=3.5)").as_deref(), Some("3.5"));
+        assert_eq!(needs_r("Rcpp (>= 1.0), stats"), None);
+        assert_eq!(needs_r("R (< 5.0)"), None);
+        assert_eq!(needs_r(""), None);
+        assert_eq!(needs_r("R (>= )"), None);
     }
 
     #[test]

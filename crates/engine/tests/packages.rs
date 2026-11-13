@@ -355,3 +355,21 @@ fn a_saved_list_installs_the_current_and_the_archived_versions_it_names() {
         .filter(|s| s.name.starts_with("pf"))
         .all(|s| s.action == Action::AlreadyThere));
 }
+
+#[test]
+fn r_names_its_own_user_library_with_home_expanded() {
+    let Some(mut e) = engine() else { return };
+    let text = ask(&mut e, rcraft_rcodegen::packages::user_libraries_code());
+    let libs = rcraft_rcodegen::packages::parse_user_libraries(&text);
+    assert!(!libs.is_empty(), "{text}");
+    assert!(libs.iter().all(|l| !l.starts_with('~')), "{libs:?}");
+    // the same folders R was given (CI sets its own; R's default otherwise)
+    if let Some(set) = std::env::var_os("R_LIBS_USER").filter(|v| !v.is_empty()) {
+        let set = std::path::PathBuf::from(set);
+        assert!(
+            libs.iter()
+                .any(|l| std::path::Path::new(l).file_name() == set.file_name()),
+            "{libs:?} for {set:?}"
+        );
+    }
+}
