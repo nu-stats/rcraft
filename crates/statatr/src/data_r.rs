@@ -52,6 +52,7 @@ mod ml;
 mod model;
 mod more;
 mod natscale;
+mod oneway;
 mod outreg;
 mod outreg2;
 mod parmest;
@@ -939,6 +940,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_revrs" => revrs::REVRS_HELPER,
         "stata_tabm" => tabm::TABM_HELPER,
         "stata_tabstat" => tabstat::TABSTAT_HELPER,
+        "stata_oneway" => oneway::ONEWAY_HELPER,
         "stata_testparm" => testparm::TESTPARM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
@@ -2248,6 +2250,7 @@ impl Session {
             "revrs" => self.revrs(c, &opts, out),
             "tabm" => self.tabm(c, &opts, out),
             "tabstat" => self.tabstat(c, &opts, out),
+            "oneway" => self.oneway(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),

@@ -146,6 +146,7 @@ pub const COMMANDS: &[&str] = &[
     "newey",
     "noisily",
     "ologit",
+    "oneway",
     "oprobit",
     "order",
     "outreg",
@@ -676,6 +677,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("tabm", &["missing"]),
     ("testparm", &["equal"]),
+    ("oneway", &["noanova", "nolabel", "tabulate"]),
     (
         "tabstat",
         &[
@@ -1529,7 +1531,9 @@ gettoken a b : s, {o}"
             "logit" | "probit" => format!("{cmd} d x, {o}"),
             "poisson" | "nbreg" => format!("{cmd} c x, {o}"),
             "ologit" | "oprobit" | "mlogit" => format!("{cmd} o x, {o}"),
-            "lowess" | "pwcorr" | "correlate" | "regress" | "tab2" => format!("{cmd} y x, {o}"),
+            "lowess" | "pwcorr" | "correlate" | "regress" | "tab2" | "oneway" => {
+                format!("{cmd} y x, {o}")
+            }
             "tabulate" if matches!(name, "generate" | "missing" | "nolabel" | "sort") => {
                 format!("tabulate y, {o}")
             }

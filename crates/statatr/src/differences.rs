@@ -1975,6 +1975,27 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "oneway",
+        about: "One-way analysis of variance (oneway y g, tabulate)",
+        points: &[
+            p(
+                "In R",
+                "stata_oneway prints Stata 19's tables: the groups' means, standard deviations and \
+                 counts with tabulate (labels cut at 9), the analysis of variance (between and \
+                 within groups, F and its p-value), and Bartlett's test of equal variances on the \
+                 groups with a positive variance, with Stata's note when single-observation groups \
+                 are left out. r() is Stata's: N, mss, df_m, rss, df_r, F, chi2bart, df_bart and \
+                 the matrix r(ANOVA).",
+            ),
+            p(
+                "Not yet",
+                "Weights, the multiple-comparison tests (bonferroni, scheffe, sidak), nomeans, \
+                 nostandard, nofreq, noobs, missing and wrap are refused, and so, when it runs, is \
+                 Bartlett's test with a group of several equal values.",
+            ),
+        ],
+    },
+    Guide {
         command: "testparm",
         about: "Joint test of the coefficients a varlist names (testparm varlist, equal)",
         points: &[

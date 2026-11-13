@@ -119,6 +119,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("nbreg", &["collinear"]),
     ("newey", &["arpanel"]),
     ("ologit", &["collinear", "likelihood"]),
+    ("oneway", &["oneway"]),
     ("oprobit", &["collinear", "likelihood"]),
     ("outreg", &["outreg"]),
     ("outreg2", &["outreg2", "outreg2tex"]),
