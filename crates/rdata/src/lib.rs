@@ -248,6 +248,28 @@ impl Column {
             .map(|(v, n)| (*v, n.clone().unwrap_or_default()))
             .collect()
     }
+
+    /// Value labels of a text column as (code, label) pairs, from a `labels`
+    /// attribute that is text (SAS `$` formats, SPSS string variables). A
+    /// missing code is left out.
+    pub fn text_value_labels(&self) -> Vec<(String, String)> {
+        let Some(a) = self.attrs.iter().find(|a| a.key == "labels") else {
+            return Vec::new();
+        };
+        let (AttrValue::Text(values), Some(names)) = (&a.value, &a.names) else {
+            return Vec::new();
+        };
+        values
+            .iter()
+            .zip(names.iter())
+            .filter_map(|(v, n)| Some((v.clone()?, n.clone().unwrap_or_default())))
+            .collect()
+    }
+
+    /// How many value labels the column has, on number or text codes.
+    pub fn value_label_count(&self) -> usize {
+        self.value_labels().len() + self.text_value_labels().len()
+    }
 }
 
 /// Reads a table file, deleting nothing.

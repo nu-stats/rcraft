@@ -4437,5 +4437,14 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `formats.sas7bcat`, from its tests, downloaded to a scratch folder and not kept in the repo), read
   in R 4.4.3 with the code the dialog writes, gives `workshop` (1 = R, 2 = SAS) and `gender`
   (f = Female, m = Male) as labelled variables, and none without the catalogue; `formats.sas7bcat`
-  is the name the dialog fills in there. Not done through the app's window itself.
+  is the name the dialog fills in there.
+- Then checked in the app itself (`rcraft-desktop --picture --import hadley.sas7bdat`, Import pressed):
+  the dialog filled in the catalogue, R's preview came, the import ran. It showed a bug: `workshop`
+  showed R and SAS, but `gender` still showed f and m. Value labels on **text** codes (SAS `$` formats,
+  SPSS string variables) were read only for number codes. Fixed: `Column::text_value_labels`, the
+  grid shows them (Labels, Values, Both), the hover lists them (`"f" = Female`), "With labels" finds
+  them, and the conversion report counts them ("4 value labels on 2 columns (codes stay as they are)";
+  "1 column", not "1 columns"). The data bridge test checks a text `labels` attribute in real R.
+- Data > Labelled to factor already handled text codes (its R takes `attr(x, "labels")` whatever
+  their type). Stata mode's label commands were not looked at for text codes.
 - Not done: a catalogue packed in the same archive as the data file is not taken out with it.

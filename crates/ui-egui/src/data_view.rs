@@ -4,7 +4,7 @@
 
 use eframe::egui::{self, Align2, Color32, FontId, Rect, RichText, Sense, TextStyle};
 use rcraft_engine::WorkspaceItem;
-use rcraft_rdata::display::{labelled_text, LabelView};
+use rcraft_rdata::display::{labelled_text, text_labelled_text, LabelView};
 use rcraft_rdata::summary::Report;
 use rcraft_rdata::{Column, Data, Table};
 
@@ -76,7 +76,7 @@ impl TypeFilter {
                 Data::Date(_) | Data::DateTime { .. } | Data::Duration { .. }
             ),
             TypeFilter::Logical => matches!(col.data, Data::Logical(_)),
-            TypeFilter::Labelled => col.label().is_some() || !col.value_labels().is_empty(),
+            TypeFilter::Labelled => col.label().is_some() || col.value_label_count() > 0,
         }
     }
 }
@@ -85,6 +85,7 @@ impl TypeFilter {
 /// being shown (labels are text, so they sit on the left).
 struct Shown {
     labels: Vec<(f64, String)>,
+    text_labels: Vec<(String, String)>,
     view: LabelView,
 }
 
@@ -92,12 +93,17 @@ impl Shown {
     fn new(col: &Column, view: LabelView) -> Shown {
         Shown {
             labels: col.value_labels(),
+            text_labels: col.text_value_labels(),
             view,
         }
     }
 
     fn text(&self, col: &Column, row: usize) -> String {
-        labelled_text(&col.data, &self.labels, row, self.view)
+        if self.text_labels.is_empty() {
+            labelled_text(&col.data, &self.labels, row, self.view)
+        } else {
+            text_labelled_text(&col.data, &self.text_labels, row, self.view)
+        }
     }
 
     fn right(&self, col: &Column) -> bool {
@@ -479,6 +485,16 @@ fn variable_hint(col: &Column) -> String {
             hint.push_str("\n  …");
         }
     }
+    let text_labels = col.text_value_labels();
+    if !text_labels.is_empty() {
+        hint.push_str("\nValue labels:");
+        for (code, text) in text_labels.iter().take(12) {
+            hint.push_str(&format!("\n  \"{code}\" = {text}"));
+        }
+        if text_labels.len() > 12 {
+            hint.push_str("\n  …");
+        }
+    }
     if let Data::Factor { levels, .. } = &col.data {
         hint.push_str(&format!("\n{} levels", levels.len()));
     }
@@ -539,20 +555,29 @@ mod tests {
             value: rcraft_rdata::AttrValue::Text(vec![Some("Age".into())]),
             names: None,
         });
-        let all = [&number, &text, &factor, &date, &flag, &labelled];
+        let mut coded = column("g", Data::Text(vec![Some("f".into())]));
+        coded.attrs.push(rcraft_rdata::Attr {
+            key: "labels".into(),
+            value: rcraft_rdata::AttrValue::Text(vec![Some("f".into())]),
+            names: Some(vec![Some("Female".into())]),
+        });
+        let all = [&number, &text, &factor, &date, &flag, &labelled, &coded];
         let picked = |f: TypeFilter| -> Vec<&str> {
             all.iter()
                 .filter(|c| f.matches(c))
                 .map(|c| c.name.as_str())
                 .collect()
         };
-        assert_eq!(picked(TypeFilter::All).len(), 6);
+        assert_eq!(picked(TypeFilter::All).len(), 7);
         assert_eq!(picked(TypeFilter::Numbers), ["n", "v"]);
-        assert_eq!(picked(TypeFilter::Text), ["t"]);
+        assert_eq!(picked(TypeFilter::Text), ["t", "g"]);
         assert_eq!(picked(TypeFilter::Factors), ["f"]);
         assert_eq!(picked(TypeFilter::Dates), ["d"]);
         assert_eq!(picked(TypeFilter::Logical), ["l"]);
-        assert_eq!(picked(TypeFilter::Labelled), ["v"]);
+        assert_eq!(picked(TypeFilter::Labelled), ["v", "g"]);
+        let shown = Shown::new(&coded, LabelView::Labels);
+        assert_eq!(shown.text(&coded, 0), "Female");
+        assert!(variable_hint(&coded).contains("\"f\" = Female"));
     }
 
     #[test]

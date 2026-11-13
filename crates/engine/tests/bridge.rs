@@ -51,6 +51,7 @@ df$when <- as.POSIXct(c("2021-03-04 05:06:07", NA, "2000-01-01 00:00:00"), tz = 
 df$gap <- as.difftime(c(1, NA, 3), units = "mins")
 attr(df$d, "label") <- "A labelled variable"
 attr(df$i, "labels") <- c(Low = 1, High = 3)
+attr(df$t, "labels") <- c(Plain = "plain", Gone = NA)
 attr(df$i, "junk") <- list(1, 2)
 df$lst <- list(1:3, "a", NULL)
 df$m <- matrix(1:6, 3)
@@ -133,6 +134,12 @@ fn every_kind_reads_back_exactly() {
             Some("comma, \"quote\"\nline é中".into())
         ])
     );
+    assert_eq!(
+        tx.text_value_labels(),
+        vec![("plain".to_string(), "Plain".to_string())],
+        "text codes keep their labels; a missing code is left out"
+    );
+    assert!(tx.value_labels().is_empty());
 
     let Some(w) = col("when") else { return };
     match &w.data {

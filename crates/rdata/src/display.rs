@@ -94,6 +94,34 @@ pub fn labelled_text(data: &Data, labels: &[(f64, String)], row: usize, view: La
     }
 }
 
+/// Like [`labelled_text`], for a text column whose codes have value labels
+/// ([`crate::Column::text_value_labels`]), such as SAS's `$` formats.
+pub fn text_labelled_text(
+    data: &Data,
+    labels: &[(String, String)],
+    row: usize,
+    view: LabelView,
+) -> String {
+    let plain = cell_text(data, row);
+    if view == LabelView::Values || labels.is_empty() {
+        return plain;
+    }
+    let Data::Text(v) = data else {
+        return plain;
+    };
+    let Some(Some(code)) = v.get(row) else {
+        return plain;
+    };
+    match labels
+        .iter()
+        .find(|(c, text)| c == code && !text.is_empty())
+    {
+        Some((_, text)) if view == LabelView::Both => format!("{text} ({plain})"),
+        Some((_, text)) => text.clone(),
+        None => plain,
+    }
+}
+
 /// Line breaks and tabs would break a table cell; show them as escapes.
 fn one_line(s: &str) -> String {
     s.replace('\r', "\\r")
@@ -239,6 +267,38 @@ mod tests {
         let blank = vec![(1.0, String::new())];
         assert_eq!(labelled_text(&codes, &blank, 0, LabelView::Labels), "1");
         assert_eq!(labelled_text(&codes, &[], 0, LabelView::Labels), "1");
+    }
+
+    #[test]
+    fn text_codes_with_labels_show_the_label() {
+        let labels = vec![
+            ("f".to_string(), "Female".to_string()),
+            ("m".to_string(), "Male".to_string()),
+            ("x".to_string(), String::new()),
+        ];
+        let codes = Data::Text(vec![
+            Some("f".into()),
+            Some("".into()),
+            None,
+            Some("x".into()),
+        ]);
+        let show = |row, view| text_labelled_text(&codes, &labels, row, view);
+        assert_eq!(show(0, LabelView::Labels), "Female");
+        assert_eq!(show(0, LabelView::Both), "Female (f)");
+        assert_eq!(show(0, LabelView::Values), "f");
+        assert_eq!(show(1, LabelView::Labels), "", "an empty code has no label");
+        assert_eq!(show(2, LabelView::Labels), "NA");
+        assert_eq!(
+            show(3, LabelView::Labels),
+            "x",
+            "an empty label is not shown"
+        );
+        assert_eq!(show(9, LabelView::Labels), "", "past the end");
+        let numbers = Data::Double(vec![1.0]);
+        assert_eq!(
+            text_labelled_text(&numbers, &labels, 0, LabelView::Labels),
+            "1"
+        );
     }
 
     #[test]

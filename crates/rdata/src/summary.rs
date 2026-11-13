@@ -13,6 +13,8 @@ pub struct Report {
     /// Columns whose codes have value labels, and the labels in all.
     pub value_labelled: usize,
     pub value_labels: usize,
+    /// Of those columns, the ones whose codes are text.
+    pub text_labelled: usize,
     /// Columns that are not numbers, text, dates or factors, shown as text.
     pub shown_as_text: Vec<String>,
     /// Columns that lost attributes, with the number lost.
@@ -31,10 +33,13 @@ impl Report {
             if col.label().is_some() {
                 r.variable_labels += 1;
             }
-            let labels = col.value_labels().len();
+            let labels = col.value_label_count();
             if labels > 0 {
                 r.value_labelled += 1;
                 r.value_labels += labels;
+                if !col.text_value_labels().is_empty() {
+                    r.text_labelled += 1;
+                }
             }
             if matches!(col.data, Data::Other(_)) {
                 r.shown_as_text.push(col.name.clone());
@@ -68,15 +73,23 @@ impl Report {
             ));
         }
         if self.value_labelled > 0 {
+            let codes = if self.text_labelled == 0 {
+                "codes stay numbers"
+            } else if self.text_labelled == self.value_labelled {
+                "codes stay text"
+            } else {
+                "codes stay as they are"
+            };
             out.push(format!(
-                "Kept: {} value labels on {} columns (codes stay numbers)",
-                self.value_labels, self.value_labelled
+                "Kept: {} on {} ({codes})",
+                count(self.value_labels, "value label"),
+                count(self.value_labelled, "column")
             ));
         }
         if self.user_missing > 0 {
             out.push(format!(
-                "Kept: user-defined missing values on {} columns",
-                self.user_missing
+                "Kept: user-defined missing values on {}",
+                count(self.user_missing, "column")
             ));
         }
         if !self.shown_as_text.is_empty() {
@@ -103,6 +116,15 @@ fn has_user_missing(col: &Column) -> bool {
             .attrs
             .iter()
             .any(|a| a.key == "na_values" || a.key == "na_range")
+}
+
+/// `1 column`, `2 columns`.
+fn count(n: usize, thing: &str) -> String {
+    if n == 1 {
+        format!("1 {thing}")
+    } else {
+        format!("{n} {thing}s")
+    }
 }
 
 /// Up to four names, then a count of the rest.
@@ -171,6 +193,39 @@ mod tests {
         assert!(lines[0].starts_with("Kept: variable labels on 1 of 3"));
         assert!(lines[3].starts_with("Changed:"));
         assert!(lines[4].starts_with("Dropped: 2 attribute(s)"));
+    }
+
+    #[test]
+    fn text_codes_with_labels_are_counted_and_said_so() {
+        let mut gender = col("gender", Data::Text(vec![Some("f".into())]));
+        gender.attrs.push(Attr {
+            key: "labels".into(),
+            value: AttrValue::Text(vec![Some("f".into()), Some("m".into())]),
+            names: Some(vec![Some("Female".into()), Some("Male".into())]),
+        });
+        let r = Report::of(&table(vec![gender.clone()]));
+        assert_eq!(
+            (r.value_labelled, r.value_labels, r.text_labelled),
+            (1, 2, 1)
+        );
+        assert_eq!(
+            r.lines(),
+            vec!["Kept: 2 value labels on 1 column (codes stay text)"]
+        );
+
+        let mut workshop = col("workshop", Data::Double(vec![1.0]));
+        workshop.attrs.push(Attr {
+            key: "labels".into(),
+            value: AttrValue::Number(vec![1.0]),
+            names: Some(vec![Some("R".into())]),
+        });
+        let r = Report::of(&table(vec![workshop, gender]));
+        assert_eq!(
+            r.lines(),
+            vec!["Kept: 3 value labels on 2 columns (codes stay as they are)"]
+        );
+        assert_eq!(count(1, "column"), "1 column");
+        assert_eq!(count(0, "column"), "0 columns");
     }
 
     #[test]
