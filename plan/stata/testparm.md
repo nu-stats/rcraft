@@ -27,3 +27,8 @@ log set against RCraft's output); corpus `testparm.do`. Translated in
   (df in 3, the residual df in 5, F in %7.2f) and `            Prob > F =    0.0000` (%9.4f); or
   `           chi2(  2) =   33.48` and `         Prob > chi2 =    0.0000`. RCraft's `test` printed
   ` (1)` and `F(2, 192) =      24.21`; it now prints Stata's.
+
+## More models (2026-11-13; probe `tp/p4.do` identical; corpus `testparm_models.do`)
+
+- xtreg re, ivregress and stcox: chi2 and no equation in the lines; ivregress, small: F; clogit: chi2 with
+  `[yb]x` lines like the likelihood models.

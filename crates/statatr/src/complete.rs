@@ -682,7 +682,20 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("tabm", &["missing"]),
     ("testparm", &["equal"]),
-    ("oneway", &["noanova", "nolabel", "tabulate"]),
+    (
+        "oneway",
+        &[
+            "bonferroni",
+            "noanova",
+            "nofreq",
+            "nolabel",
+            "nomeans",
+            "nostandard",
+            "scheffe",
+            "sidak",
+            "tabulate",
+        ],
+    ),
     (
         "centile",
         &["cci", "centile(", "level(", "meansd", "normal"],

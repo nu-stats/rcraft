@@ -106,11 +106,21 @@ pub(super) const TABSTAT_HELPER: &str = r##"stata_tabstat <- function(d, vars, s
   statcols <- if (cols == "s") TRUE else if (cols == "v") FALSE else length(vars) == 1
   heads <- if (statcols) labs else vapply(vars, ab, "", n = 8)
   # each group's rows: one a variable (statistics across) or one a statistic
+  # each variable's display format: format() for all, or (format alone, fmt "") its own
+  fmts <- if (nzchar(fmt)) rep(fmt, length(vars)) else vapply(vars, function(v) {
+    f <- attr(d[[v]], "format.stata", exact = TRUE)
+    if (is.null(f)) stop("tabstat, format: the display format of ", v, " is not known here (one set by format, ",
+                         "or read with the data, is); give format(%fmt)", call. = FALSE)
+    f
+  }, "")
+  # the columns are one wider than the widest format, at least 10 (Stata 19)
+  fw <- suppressWarnings(as.integer(sub("^%-?0?([0-9]+).*$", "\\1", fmts)))
+  colw <- max(10, 1 + max(fw, na.rm = TRUE))
   rows_of <- function(m) {
-    if (statcols) lapply(seq_along(vars), function(j) list(name = ab(vars[j], vw), v = m[, j]))
-    else lapply(seq_along(labs), function(i) list(name = labs[i], v = m[i, ]))
+    if (statcols) lapply(seq_along(vars), function(j) list(name = ab(vars[j], vw), v = m[, j], f = rep(fmts[j], nrow(m))))
+    else lapply(seq_along(labs), function(i) list(name = labs[i], v = m[i, ], f = fmts))
   }
-  cell <- function(x) sprintf("%10s", stata_fmt(x, fmt, trim = TRUE))
+  cell <- function(x, f) sprintf("%*s", colw, stata_fmt(x, f))
   iw <- if (statcols) vw else 8
   inner <- if (statcols) "Variable" else "Stats"
   ls <- if (exists("stata_linesize")) stata_linesize else 79
@@ -150,21 +160,21 @@ pub(super) const TABSTAT_HELPER: &str = r##"stata_tabstat <- function(d, vars, s
     many <- length(body[[1]]$rows) > 1
   }
   n <- length(heads)
-  per <- max(1, floor((ls - sw - 2) / 10))
+  per <- max(1, floor((ls - sw - 2) / colw))
   for (from in seq(1, n, by = per)) {
     js <- from:min(n, from + per - 1)
     k <- length(js)
-    rule <- paste0(strrep("-", sw + 1), "+", strrep("-", 10 * k))
-    cat("\n", head_stub, " |", paste0(sprintf("%10s", heads[js]), collapse = ""), "\n", rule, "\n", sep = "")
+    rule <- paste0(strrep("-", sw + 1), "+", strrep("-", colw * k))
+    cat("\n", head_stub, " |", paste0(sprintf("%*s", colw, heads[js]), collapse = ""), "\n", rule, "\n", sep = "")
     for (b in seq_along(body)) {
       g <- body[[b]]
       if (b > 1 && (isTRUE(g$total) || (many && sep))) cat(rule, "\n", sep = "")
       for (i in seq_along(g$rows)) {
         rw <- g$rows[[i]]
-        cat(stub(g$label, rw$name, i == 1), " |", paste0(vapply(rw$v[js], cell, ""), collapse = ""), "\n", sep = "")
+        cat(stub(g$label, rw$name, i == 1), " |", paste0(mapply(cell, rw$v[js], rw$f[js]), collapse = ""), "\n", sep = "")
       }
     }
-    cat(strrep("-", sw + 2 + 10 * k), "\n", sep = "")
+    cat(strrep("-", sw + 2 + colw * k), "\n", sep = "")
   }
   invisible(r)
 }"##;
@@ -312,18 +322,19 @@ impl Session {
             }
         };
         let fmt = if opts.has("format", 1) {
-            let Some(f) = opts.raw("format", 1) else {
-                return Err(no(
-                    "tabstat, format without a format (each variable's own) is not translated yet",
-                ));
-            };
-            let f = f.trim().to_string();
-            if !narrow_number_format(&f) {
-                return Err(no(format!(
-                    "tabstat, format({f}): formats %w.dg, %w.df and %w.de up to 9 wide are translated"
-                )));
+            match opts.raw("format", 1) {
+                // format alone: each variable's own display format
+                None => String::new(),
+                Some(f) => {
+                    let f = f.trim().to_string();
+                    if !number_format(&f) {
+                        return Err(no(format!(
+                            "tabstat, format({f}): formats %w.dg, %w.df and %w.de (with - and c) up to 30 wide are translated"
+                        )));
+                    }
+                    f
+                }
             }
-            f
         } else {
             "%9.0g".to_string()
         };
@@ -407,10 +418,13 @@ impl Session {
     }
 }
 
-/// `%w.dg`, `%w.df` or `%w.de` (with `c`), at most 9 wide: what fits
-/// tabstat's 10-wide columns as Stata lays them out.
-fn narrow_number_format(f: &str) -> bool {
-    let Some(body) = f.strip_prefix('%') else {
+/// `%w.dg`, `%w.df` or `%w.de` (with `-` and `c`), at most 30 wide: tabstat's columns are one
+/// wider than the format, at least 10 (Stata 19).
+fn number_format(f: &str) -> bool {
+    let Some(body) = f
+        .strip_prefix('%')
+        .map(|b| b.strip_prefix('-').unwrap_or(b))
+    else {
         return false;
     };
     let body = body.strip_suffix('c').unwrap_or(body);
@@ -425,7 +439,7 @@ fn narrow_number_format(f: &str) -> bool {
         return false;
     };
     let ok = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
-    ok(w) && ok(d) && w.parse::<u32>().is_ok_and(|w| (1..=9).contains(&w))
+    ok(w) && ok(d) && w.parse::<u32>().is_ok_and(|w| (1..=30).contains(&w))
 }
 
 /// r() after `tabstat, save`: the matrices (`StatTotal`, `Stat1`, ...) and
@@ -467,11 +481,13 @@ mod tests {
 
     #[test]
     fn formats_that_fit_the_columns() {
-        for f in ["%9.2f", "%8.3g", "%9.0gc", "%6.2e"] {
-            assert!(narrow_number_format(f), "{f}");
+        for f in [
+            "%9.2f", "%8.3g", "%9.0gc", "%6.2e", "%12.4f", "%-9.2f", "%14.2fc",
+        ] {
+            assert!(number_format(f), "{f}");
         }
-        for f in ["%10.2f", "%9s", "9.2f", "%9.f", "%td", "%-9.2f"] {
-            assert!(!narrow_number_format(f), "{f}");
+        for f in ["%31.2f", "%9s", "9.2f", "%9.f", "%td", "%--9.2f"] {
+            assert!(!number_format(f), "{f}");
         }
         assert!(tabstat_matrix("StatTotal") && tabstat_matrix("Stat12"));
         assert!(!tabstat_matrix("Stat0") && !tabstat_matrix("Stat"));

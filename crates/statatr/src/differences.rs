@@ -1680,7 +1680,7 @@ pub const GUIDES: &[Guide] = &[
                  cell percentages (with nofreq too: the Key box, each cell's lines, the rules \
                  between rows), checked character for character; analytic weights and string \
                  variables keep R's layout. nofreq alone prints nothing and leaves r() empty, as \
-                 in Stata 19.",
+                 in Stata 19; with chi2 it prints the chi2 line only and leaves r() whole.",
             ),
         ],
     },
@@ -2107,15 +2107,18 @@ pub const GUIDES: &[Guide] = &[
                 "stata_oneway prints Stata 19's tables: the groups' means, standard deviations and \
                  counts with tabulate (labels cut at 9), the analysis of variance (between and \
                  within groups, F and its p-value), and Bartlett's test of equal variances on the \
-                 groups with a positive variance, with Stata's note when single-observation groups \
-                 are left out. r() is Stata's: N, mss, df_m, rss, df_r, F, chi2bart, df_bart and \
-                 the matrix r(ANOVA).",
+                 groups with a positive variance, with Stata's note when single-observation or \
+                 equal-valued groups are left out; the Bonferroni, Scheffe and Sidak comparisons \
+                 of each pair of means; frequency and analytic weights (with analytic weights \
+                 Bartlett's test counts each group's rows, as Stata 19 does). nomeans, nostandard \
+                 and nofreq drop the summary table's columns. r() is Stata's: N, mss, df_m, rss, \
+                 df_r, F, chi2bart, df_bart and the matrix r(ANOVA).",
             ),
             p(
                 "Not yet",
-                "Weights, the multiple-comparison tests (bonferroni, scheffe, sidak), nomeans, \
-                 nostandard, nofreq, noobs, missing and wrap are refused, and so, when it runs, is \
-                 Bartlett's test with a group of several equal values.",
+                "Weights with tabulate, noobs, missing, wrap, the comparisons of more groups than \
+                 the line holds, and Bartlett's test with both single-observation and equal-valued \
+                 groups are refused.",
             ),
         ],
     },
@@ -2128,14 +2131,15 @@ pub const GUIDES: &[Guide] = &[
                 "stata_testparm finds the model's coefficients whose terms the varlist matches \
                  (i.g, c.x, x, i.g#c.x in either order, i.g##i.h as its main effects and \
                  interaction, x* against the data's names), base levels left out, in e(b)'s order, \
-                 and runs test's Wald test on them: F after regress and xtreg, chi2 after logit, \
-                 probit, poisson, nbreg, ologit and oprobit, whose lines name the equation \
-                 ([y]x) as Stata's do. equal tests each against the first (- x1 + x2 = 0). r() is \
-                 test's.",
+                 and runs test's Wald test on them: F after regress, xtreg fe and ivregress, \
+                 small; chi2 after xtreg re, ivregress and stcox, and after logit, probit, poisson, \
+                 nbreg, ologit, oprobit and clogit, whose lines name the equation ([y]x) as \
+                 Stata's do. equal tests each against the first (- x1 + x2 = 0). r() is test's.",
             ),
             p(
                 "Not yet",
-                "testparm after the other models, a level of its own (2.g), lists in \
+                "testparm after the other models (mlogit's several equations among them), a level \
+                 of its own (2.g), lists in \
                  parentheses (i.(g h)) and the options other than equal are refused. No \
                  coefficient matched is Stata's r(111), equal with one coefficient r(102).",
             ),
@@ -2163,8 +2167,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "format without a format (each variable's own), formats wider than 9, widths above \
-                 32 and patterns in the varlist that the data's names do not settle are refused; \
+                "format alone takes each variable's own display format, so it needs one RCraft \
+                 knows (set by format, or read with the data from a .dta): a variable that was only \
+                 made by generate stops with that reason. Formats wider than 30, widths above 32 \
+                 and patterns in the varlist that the data's names do not settle are refused; \
                  an unknown statistic, a string variable and pweights or iweights are Stata's \
                  errors (r(198), r(109), r(101)).",
             ),

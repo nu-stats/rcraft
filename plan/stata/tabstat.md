@@ -43,7 +43,7 @@ set line by line against RCraft's output); corpus `tabstat.do`. Translated in
 - At the line size the columns go in blocks: as many as fit floor((linesize - stub - 2)/10), each block a
   table of its own after a blank line; the "Summary ..." lines once. Batch Stata's line size is 79.
 - `format(%9.2f)` and `format(%8.3g)` keep the 10-wide columns; `format` alone uses each variable's own
-  format and widens every column to the widest (not translated).
+  format and widens every column to the widest (see below).
 
 ## r()
 
@@ -57,3 +57,12 @@ set line by line against RCraft's output); corpus `tabstat.do`. Translated in
 by(), s()/st()/stat()/stats()/statistics(), c()/col()/columns(), f()/format(), la()/labelwidth(),
 va()/varwidth(), case/casewise, not/nototal, m/missing, nosep/noseparator, lo/longstub, save. `nos`, `sa`,
 `ca`, `v()` are not options (r(198)).
+
+## format and wider formats (2026-11-13; probe `ts/t5.do` identical)
+
+- The columns are one wider than the widest format in use, never under 10 (`format(%12.4f)` 13, `%14.2f` 15),
+  and the blocks at the line size count that width. `format` alone uses each variable's own display format:
+  in its column when the variables go across, in its row when the statistics do (N included: `12.0000` under
+  %12.4f); a left-justified format's text is right-aligned in the column with its padding (`%-9.2f`).
+- RCraft knows a variable's display format when `format` set it or the data came from a .dta (haven keeps
+  it); for a variable only made by `generate` (Stata: %9.0g for float, %10.0g for double) it stops and says so.

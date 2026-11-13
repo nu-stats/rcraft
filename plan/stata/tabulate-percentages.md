@@ -26,4 +26,5 @@ line against RCraft's output: identical); corpus `tabulate_pct.do`. Printed by
 - `nofreq` alone prints nothing, and r(N), r(r) and r(c) are then missing: r() is left empty.
 - Widths, the column variable's name over its columns, the blocks of columns and the chi2 line are the
   counts table's. `missing` adds the "." column. r() is as without the percentages.
-- Not observed, so refused: `nofreq chi2` with no percentage.
+- `nofreq chi2` with no percentage (2026-11-13, probe `tb/b2.do`): only the chi2 line, after a blank line, and
+  r() whole (N r c chi2 p) — unlike `nofreq` alone.

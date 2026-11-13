@@ -29,6 +29,21 @@ logs set line by line against RCraft's output); corpus `oneway.do`. Translated i
 - r(): N, mss, df_m, rss, df_r, F, chi2bart, df_bart and r(ANOVA), 3 × 5 (rows "Between groups", "Within
   groups", "Total"; columns SS df MS F p, F and p only on the first row). With `noanova`, r() is left
   empty and, without `tabulate`, nothing is printed.
-- Not translated: weights, `bonferroni`, `scheffe`, `sidak` (a "Comparison of y by g" table),
-  `nomeans`, `nostandard` (the title then wraps), `nofreq`, `noobs`, `missing`, `wrap`; Bartlett's test with
-  a group of several equal values (not observed) stops with that reason.
+- Not translated: weights with `tabulate`, `noobs`, `missing`, `wrap`; the comparisons of more groups than the
+  line holds; Bartlett's test with both single-observation and equal-valued groups (not observed).
+
+## Weights, comparisons, nomeans/nostandard/nofreq (2026-11-13; probes `ow/o1.do`, `o6.do` identical; corpus)
+
+- Frequency weights count rows (N their sum); analytic weights are scaled to sum to the rows. The groups'
+  means and sums of squares are weighted. Bartlett's test: with frequency weights each group counts its weights
+  (so one row of weight 3 is a group of several equal values, "      1 multiple-observation cells not used" in
+  the note); with **analytic weights each group counts its rows**, the weighted sum of squares over the rows
+  less one (checked: 0.6123 where the weight sums would give 0.5434).
+- `bonferroni`, `scheffe`, `sidak`, each its table after Bartlett's test: "Comparison of y by g" centred
+  (ceiling((77 − length)/2) spaces), "(Bonferroni)" under it (floor), the stub `Row Mean-|` / `Col Mean |`,
+  the groups' labels cut at 8 in 11-wide columns (the first k − 1), a rule 9 + 11(k − 1); for each later group
+  the differences of means in %8.0g and under them the p-values %11.3f, a `         |` line between groups.
+  p: the pairwise t on the within-groups mean square, Bonferroni × k(k−1)/2 (at most 1), Sidak
+  1 − (1 − p)^(k(k−1)/2), Scheffe F = t²/(k − 1) on (k − 1, df_r).
+- `nomeans`, `nostandard`, `nofreq` drop those columns of the summary table; a title as wide as the columns
+  goes on two lines, "Summary of" over the variable's name, each centred.

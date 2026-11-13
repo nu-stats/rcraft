@@ -168,10 +168,14 @@ impl Session {
         }
         // Stata labels the coefficients with the equation after the likelihood models
         let eq = match est.fit {
-            Fit::Regress | Fit::Xtreg => String::new(),
-            Fit::Logit | Fit::Probit | Fit::Poisson | Fit::Nbreg | Fit::Ologit | Fit::Oprobit => {
-                est.dep.clone()
-            }
+            Fit::Regress | Fit::Xtreg | Fit::Ivregress | Fit::Stcox => String::new(),
+            Fit::Logit
+            | Fit::Probit
+            | Fit::Poisson
+            | Fit::Nbreg
+            | Fit::Ologit
+            | Fit::Oprobit
+            | Fit::Clogit => est.dep.clone(),
             f => {
                 return Err(no(format!(
                     "testparm after {} is not translated yet",

@@ -286,8 +286,15 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
   rlabs <- dot(rownames(t))
   clabs <- dot(colnames(t))
   # Stata 19: nofreq with no percentage prints nothing and leaves r() empty
+  # with chi2, only its line, and r() as always
   if (nofreq && !row && !column && !cell) {
-    if (ret) assign("stata_r", list(), envir = env)
+    if (chi2) {
+      s <- attr(t, "chi2")
+      cat("\n", strrep(" ", 10), sprintf("Pearson chi2(%d) = %8.4f   Pr = %5.3f", as.integer(s[["df"]]), s[["chi2"]], s[["p"]]), "\n", sep = "")
+      if (ret) assign("stata_r", list(N = sum(t), r = nrow(t), c = ncol(t), chi2 = s[["chi2"]], p = s[["p"]]), envir = env)
+    } else if (ret) {
+      assign("stata_r", list(), envir = env)
+    }
     return(invisible(t))
   }
   if (!is.null(xname) && !is.null(yname) && counts &&
@@ -514,17 +521,6 @@ impl Session {
         }
         let w = self.weight_of(c, &[W::F, W::A, W::I])?;
         tab_chi2_weight(opts, &w)?;
-        if opts.has("nofreq", 3)
-            && opts.has("chi2", 4)
-            && !["row", "column", "cell"]
-                .iter()
-                .zip([3, 3, 4])
-                .any(|(o, m)| opts.has(o, m))
-        {
-            return Err(no(
-                "tabulate, nofreq chi2 without row, column or cell is not translated yet",
-            ));
-        }
         let (src, _, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_tab_values");
         self.helpers.insert("stata_tabulate");

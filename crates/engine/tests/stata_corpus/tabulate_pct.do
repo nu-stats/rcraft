@@ -26,3 +26,5 @@ tabulate g k, cell
 display "@ wide " r(N) " " r(r) " " r(c)
 tabulate g h, row missing
 display "@ missing " r(N) " " r(r) " " r(c)
+tabulate g h, nofreq chi2
+display "@ nfchi2 " r(N) " " r(r) " " r(c) " " %24.17g r(chi2) " " %24.17g r(p)
