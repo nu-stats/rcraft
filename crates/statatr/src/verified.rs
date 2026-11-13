@@ -176,6 +176,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("tab1", &["extended_missing_commands"]),
     ("tab2", &["extended_missing_commands"]),
     ("tabm", &["tabm"]),
+    ("tabstat", &["tabstat"]),
     (
         "tabulate",
         &["checks", "descriptives", "extended_missing_commands"],

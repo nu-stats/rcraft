@@ -154,6 +154,7 @@ pub const MAX_ROUNDS: usize = 100_000;
 const VARLIST: &[&str] = &[
     "revrs",
     "tabm",
+    "tabstat",
     "prtest",
     "summarize",
     "tabulate",

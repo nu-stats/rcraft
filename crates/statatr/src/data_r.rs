@@ -73,6 +73,7 @@ mod survwgt;
 mod svy;
 mod tables;
 mod tabm;
+mod tabstat;
 mod ts;
 mod tsreg;
 mod weights;
@@ -446,6 +447,7 @@ const WEIGHTED: &[&str] = &[
     "svyset",
     "collapse",
     "summarize",
+    "tabstat",
     "tabulate",
     "tab1",
     "tab2",
@@ -934,6 +936,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_estpost" => estpost::ESTPOST_HELPER,
         "stata_revrs" => revrs::REVRS_HELPER,
         "stata_tabm" => tabm::TABM_HELPER,
+        "stata_tabstat" => tabstat::TABSTAT_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
         "stata_cm" => cm::CM_HELPER,
@@ -2240,6 +2243,7 @@ impl Session {
             "frame" => self.frame_cmd(c, &opts, out),
             "revrs" => self.revrs(c, &opts, out),
             "tabm" => self.tabm(c, &opts, out),
+            "tabstat" => self.tabstat(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),

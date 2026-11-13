@@ -199,6 +199,7 @@ pub const COMMANDS: &[&str] = &[
     "tab1",
     "tab2",
     "tabm",
+    "tabstat",
     "tabulate",
     "tempfile",
     "tempname",
@@ -673,6 +674,23 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("tabm", &["missing"]),
+    (
+        "tabstat",
+        &[
+            "by(",
+            "casewise",
+            "columns(",
+            "format(",
+            "labelwidth(",
+            "longstub",
+            "missing",
+            "noseparator",
+            "nototal",
+            "save",
+            "statistics(",
+            "varwidth(",
+        ],
+    ),
     (
         "tabulate",
         &[
@@ -1227,7 +1245,7 @@ mod tests {
         );
         assert_eq!(
             options("ta", VARS),
-            names(&["tab1", "tab2", "tabm", "tabulate"])
+            names(&["tab1", "tab2", "tabm", "tabstat", "tabulate"])
         );
         assert_eq!(options("q", VARS), names(&["quietly"]));
         assert_eq!(options("quietly regr", VARS), names(&["regress"]));

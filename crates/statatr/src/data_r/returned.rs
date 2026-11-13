@@ -1711,7 +1711,11 @@ impl Session {
                         ))
                     }
                     Returned::Kept { cmd, model, names } => {
-                        if MATRIX_NAMES.contains(&name) {
+                        // tabstat, save: its matrices and groups' names, as many as groups
+                        let tabstat = which == "r" && cmd == "tabstat";
+                        if MATRIX_NAMES.contains(&name)
+                            || (tabstat && super::tabstat::tabstat_matrix(name))
+                        {
                             return Err(no(format!(
                                 "{shown} is a matrix, which an expression cannot take (Stata: type mismatch); matrix list {shown} shows it"
                             )));
@@ -1726,13 +1730,18 @@ impl Session {
                                 return Err(no(format!("{shown} after {cmd} is not kept in R: {why}")));
                             }
                         }
-                        if which == "r" && !names.contains(&name) {
+                        if which == "r"
+                            && !names.contains(&name)
+                            && !(tabstat && super::tabstat::tabstat_text(name))
+                        {
                             return Err(no(format!(
                                 "{shown} after {cmd} is not kept in R yet (RCraft keeps r() {})",
                                 names.join(", ")
                             )));
                         }
-                        let text = TEXT_NAMES.contains(&name) || (which == "e" && self.e_text.contains(name));
+                        let text = TEXT_NAMES.contains(&name)
+                            || (tabstat && super::tabstat::tabstat_text(name))
+                            || (which == "e" && self.e_text.contains(name));
                         let get = if which == "e" { "stata_eget" } else { "stata_rget" };
                         Ok((
                             format!(
