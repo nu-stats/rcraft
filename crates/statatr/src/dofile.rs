@@ -157,6 +157,7 @@ const VARLIST: &[&str] = &[
     "tabstat",
     "centile",
     "prtest",
+    "rreg",
     "summarize",
     "tabulate",
     "tab1",

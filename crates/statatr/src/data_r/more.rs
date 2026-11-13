@@ -818,6 +818,7 @@ impl Session {
         out.package("haven");
         out.package("dplyr");
         self.helpers.insert("stata_merge");
+        self.saved_types(&path, &d, &keys, out);
         // the file may hold .a to .z (tagged NAs)
         self.tags.set(true);
         out.line(format!("merge_using <- haven::read_dta({})", r_text(&path)));
@@ -2464,5 +2465,39 @@ impl Session {
         }
         out.caveat("the display format is kept with the variable (and in a saved .dta); R's own printing does not use it");
         Ok(())
+    }
+}
+
+impl Session {
+    /// A file this do-file saved keeps its variables' kinds and storage types (a float
+    /// stays a float, as in Stata's .dta): `merge` takes them for the variables the
+    /// data in memory does not have (the keys stay the master's). Whether it has one RCraft does not
+    /// know of is R's to say, and it stops there rather than guess the type.
+    fn saved_types(&mut self, path: &str, d: &str, keys: &[String], out: &mut Out) {
+        let Some(kept) = self.saved.get(&self.file_key(path)).cloned() else {
+            return;
+        };
+        let new: Vec<String> = kept
+            .kinds
+            .keys()
+            .filter(|v| !self.kinds.contains_key(*v) && !keys.contains(*v))
+            .cloned()
+            .collect();
+        if new.is_empty() {
+            return;
+        }
+        out.line(format!(
+            "if (any(c({}) %in% names({d}))) stop(\"RCraft: the data in memory and {} share a variable whose storage type RCraft does not know; not translated yet\", call. = FALSE)",
+            new.iter().map(|v| r_text(v)).collect::<Vec<_>>().join(", "),
+            path.replace('\\', "/").replace('"', "")
+        ));
+        for v in new {
+            if let Some(k) = kept.kinds.get(&v) {
+                self.kinds.insert(v.clone(), *k);
+            }
+            if let Some(s) = kept.storage.get(&v) {
+                self.storage.insert(v, *s);
+            }
+        }
     }
 }

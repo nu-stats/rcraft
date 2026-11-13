@@ -4303,3 +4303,47 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   window opened by itself with the 18 packages 4.6 has and 4.4 lacks (R's own
   `installed.packages` gives the same 18), each marked "you". Nothing was
   installed.
+
+## rreg, esttab matrix(), %f near a half, floats through save and merge, 2026-11-13
+
+- Observed in Stata 19 with made-up data, no code read (`plan/stata/rreg.md`, `plan/stata/esttab-matrix.md`;
+  corpus `rreg.do`, `fmtround.do`, `savedfloat.do`):
+  - `rreg`: rows of Cook's distance above 1 left out; Huber weights min(1, 2M/|r|) until the largest change
+    is below 0.05, then biweight (4.685, s = M/0.6745) until below 0.01; the pseudovalues' variance
+    rmse^2 (X'X)^-1 with rmse^2 = sum((w r)^2)/(n - p)/m^2 (1 + (p/n')(1 - m)/m)^2. Logs, e(b), e(V) and e()
+    match on five datasets to 1e-15; the iteration log, header and table print as Stata's.
+  - `esttab matrix(M, fmt())`: screen, .txt, .tex (fragment, posthead/prefoot/postfoot) and .csv as Stata
+    writes them.
+  - `%f` of a value next to a half (0.005 is 0.01 in %9.2f): R's printf on Windows rounded it from 17
+    digits; stata_fmt now settles it from the double's bits, for every %f display.
+  - A float the do-file made stays a float through `save`, `use` and `merge` (the using file's types for
+    the variables the master lacks; R stops if the master has one whose type it does not know).
+- YFBPT6: every line translated (18,349 ran, none refused; 3 before: rreg and the two esttab matrix()).
+- The 11 packages, run dry: 94.9% of the run lines a dry run judges (92.0% on 2026-11-06), 82.6% of the
+  5,187 source lines (78.6%); `docs/stata-coverage.md`.
+
+## P2C.12 core statistics on the probes (the second stream), 2026-11-13
+
+From the commit messages of the core-statistics session (its own worktree; 4af96a1 to a0b27a7):
+
+- **Distribution functions** (4af96a1): Stata's t, F, chi2, normal, beta, gamma, binomial and Poisson
+  functions, 40 of them (`expr_r/dist.rs`), checked on 3,740 made-up arguments to 1e-9, Stata's missing
+  values where R gives a number; invF()/invFtail() through qbeta(). Corpus `distributions.do`; only far
+  tails differ (in the differences guide).
+- **tabstat** (c68a6b4): statistics(), by(), columns(), format(), labelwidth(), varwidth(), casewise,
+  nototal, missing, noseparator, longstub and save (r(StatTotal), r(Stat#), r(name#)), in Stata 19's
+  layout; corpus `tabstat.do`, 73 values to 1e-9. Probes' tier 2 50.7% to 51.0%.
+- **testparm** (3c7709f) after regress, xtreg and the likelihood models, with test's lines now in Stata
+  19's layout; corpus `testparm.do`, 14 results to 1e-8. Tier 2 to 51.1%.
+- **tabulate x y with row, column, cell and nofreq** (4baa027) in Stata 19's table; corpus
+  `tabulate_pct.do`. Tier 2 to 51.2%.
+- **oneway** (d39e4c5): the analysis of variance, Bartlett's test, tabulate, r() as Stata's; corpus
+  `oneway.do`, 9 results to 1e-9. Tier 2 to 51.3%.
+- **ci means, ci proportions, ci variances** (ac11ba7) with level() and weights for means: Stata 19's
+  table and the last variable's r(); corpus `ci.do`, 24 results to 1e-9. Every ci line of the probes
+  now translates (tier 2 stays at 51.3%).
+- **centile** (e166649) with centile() and level(): the centiles at rank (n + 1)q/100 and the
+  interpolated binomial interval, held and marked at the sample's ends, in Stata 19's table; r() as
+  Stata's; corpus `centile.do`, 9 results to 1e-9.
+- **nlcom** (a0b27a7) after regress, logit, probit and poisson: delta-method standard errors from
+  extrapolated central differences, Stata 19's table and r(b), r(V); corpus `nlcom.do`, 7 results to 1e-8.

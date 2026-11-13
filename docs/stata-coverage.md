@@ -125,6 +125,7 @@ at the worst it fared in any run:
 | With ibn., format, postfile, graph combine (2026-11-06) | 5149 | 3241 | 1123 | 785 | 74.3% |
 | With cluster2 (2026-11-06) | 5149 | 3416 | 948 | 785 | 78.3% |
 | An error ends the loops and programs around it (2026-11-06) | 5187 | 3457 | 941 | 789 | 78.6% |
+| The add-ons the packages use, cmclogit, rreg, esttab matrix() (2026-11-13) | 5187 | 3632 | 766 | 789 | 82.6% |
 
 Stata's matrix commands (`matrices.do`: `matrix A = ...` with `J()`, `I()`, joins, products, sums,
 transposes, `invsym()`, `inv()`, `vecdiag()`, `diag()`, `e()`; elements read and put in place; `nullmat()`;
@@ -173,6 +174,18 @@ Most of what is left comes from add-ons: `esttab`'s `cells()` and `mlabels()`, a
 The 36 `xtreg` and `reg` lines with `f.`, `d.` and `l.` in one package read a file saved after `cd` to a folder
 that a dry run does not know (`${root}`); when the do-file runs, the folder is known and its tsset comes back
 with the file.
+
+From 2026-11-07 to 2026-11-13 the add-ons and commands the packages use came over, each observed in Stata 19
+on made-up data (installed with the user's yes where needed, their code never read; `plan/stata/`): `isvar`,
+`center`, `winsor`, `survwgt`, `revrs`, `tabm`, `anovaplot`, `pdslasso` with the rigorous lasso, `prtest`,
+`which`, `frame`, `coefplot`'s further options, esttab's LaTeX layouts and `matrix()`, `cmset`, `cmclogit`
+and `margins` after it, and `rreg`. The run lines are now 94.9% of those a dry run judges translated (20,136
+translated, 1,083 not, 7,734 known when run, of 28,953); the source lines 82.6% of 5,187 (3,632 translated,
+766 not, 789 known when run). What a dry run still counts as not translated is mostly what only a run knows:
+TZEN38's lines after `if $qtr == 0` (90; Stata stops there too), files read after `cd` to a folder set at run
+time (87), `outreg2` after a model fitted in a do-file the dry run cannot open (58), and do-files that expect
+their data opened by hand (57). Run whole on R (below), ASKO93, AXYMDI, SI3BGA, TZEN38, YFBPT6 and ZNMIXH
+refuse no line.
 
 ## Whole packages run in Stata 19 and on R (2026-11-03)
 

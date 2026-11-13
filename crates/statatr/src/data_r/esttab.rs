@@ -72,10 +72,13 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
                        modelwidth, format, booktabs, mlabels, prehead, posthead, prefoot, postfoot,
                        fragment, alignment)
   }
+  if (is.null(file) && from_eststo) cat("(tabulating estimates stored by eststo; specify \".\" to tabulate the active results)\n")
+  # on the screen a blank line comes first
+  stata_esttab_emit(if (is.null(file) && format == "tex") c("", out) else out, file, replace)
+}
+# a table's lines on the screen, else in the file (Stata's \r\n line ends)
+stata_esttab_emit <- function(out, file, replace) {
   if (is.null(file)) {
-    if (from_eststo) cat("(tabulating estimates stored by eststo; specify \".\" to tabulate the active results)\n")
-    # on the screen a blank line comes first
-    if (format == "tex") out <- c("", out)
     cat(out, sep = "\n")
     cat("\n")
   } else {
@@ -87,6 +90,49 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
     cat("(output written to ", file, ")\n", sep = "")
   }
   invisible(out)
+}
+# esttab matrix(M, fmt()): the matrix's rows and columns by their names, a title row of
+# mlabel (the matrix's name unless given, none leaving it out); on the screen and in a .txt
+# 12 + 13-wide columns between rules, in a .tex `&` and 12-wide cells, the head and foot of
+# a tabular unless fragment, posthead() prefoot() postfoot() in their places; in a .csv
+# ="" cells
+stata_esttab_matrix <- function(M, name, fmts = NULL, mlabel = NULL, title = NULL, format = "screen",
+                                file = NULL, replace = FALSE, posthead = NULL, prefoot = NULL,
+                                postfoot = NULL, fragment = FALSE) {
+  M <- as.matrix(M)
+  if (is.null(rownames(M)) || is.null(colnames(M))) stop("RCraft: esttab matrix() of a matrix without row and column names is not translated yet", call. = FALSE)
+  if (any(grepl(":", c(rownames(M), colnames(M))))) stop("RCraft: esttab matrix() of a matrix with equation names is not translated yet", call. = FALSE)
+  k <- ncol(M)
+  if (!is.null(fmts) && length(fmts) != 1 && length(fmts) != k) stop("RCraft: esttab matrix(), fmt() with other than one format or one a column is not translated yet", call. = FALSE)
+  cell <- function(v, j) {
+    if (is.na(v)) return(".")
+    if (is.null(fmts)) return(trimws(stata_fmt(v, "%9.0g")))
+    trimws(stata_fmt(v, paste0("%30.", fmts[min(j, length(fmts))], "f")))
+  }
+  body <- lapply(seq_len(nrow(M)), function(i) vapply(seq_len(k), function(j) cell(M[i, j], j), ""))
+  wide <- c(rownames(M)[nchar(rownames(M)) > 12], unlist(body)[nchar(unlist(body)) > 12], colnames(M)[nchar(colnames(M)) > 12])
+  if (length(wide)) stop("RCraft: esttab matrix() with a name or a value wider than 12 characters is not translated yet", call. = FALSE)
+  ml <- if (is.null(mlabel)) name else mlabel
+  if (format == "csv") {
+    q <- function(x) paste0("=\"", x, "\"", collapse = ",")
+    out <- c(if (!is.na(ml)) q(c("", ml, rep("", k - 1))), q(c("", colnames(M))),
+             vapply(seq_len(nrow(M)), function(i) q(c(rownames(M)[i], body[[i]])), ""))
+  } else if (format == "tex") {
+    if (any(grepl("[\\\\&%_#$^~{}]", c(rownames(M), colnames(M), ml)))) stop("RCraft: esttab matrix() in .tex with names holding TeX's special characters is not translated yet", call. = FALSE)
+    row <- function(l, cells) paste0(stata_pad(l, -12), paste0("&", stata_pad(cells, 12), collapse = ""), "\\\\")
+    head <- c(if (!is.na(ml)) row("", c(ml, rep("", k - 1))), row("", colnames(M)))
+    out <- c(if (!fragment) c(sprintf("\\begin{tabular}{l*{%d}{c}}", k), "\\hline\\hline"), head,
+             if (is.null(posthead)) "\\hline" else posthead,
+             vapply(seq_len(nrow(M)), function(i) row(rownames(M)[i], body[[i]]), ""),
+             prefoot,
+             if (!is.null(postfoot)) postfoot else if (!fragment) c("\\hline\\hline", "\\end{tabular}"))
+  } else {
+    row <- function(l, cells) paste0(stata_pad(l, -12), paste0(stata_pad(cells, 13), collapse = ""))
+    rule <- strrep("-", 12 + 13 * k)
+    out <- c(if (!is.null(title)) title, rule, if (!is.na(ml)) row("", c(ml, rep("", k - 1))), row("", colnames(M)), rule,
+             vapply(seq_len(nrow(M)), function(i) row(rownames(M)[i], body[[i]]), ""), rule)
+  }
+  stata_esttab_emit(if (is.null(file)) c("", out) else out, file, replace)
 }
 # the lines of a table of models' coefficients
 stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_text, raw_stars, label,
@@ -667,7 +713,7 @@ impl Session {
             ));
         }
         if c.parts.main.trim_start().starts_with("matrix(") {
-            return Err(no("esttab matrix() is not translated yet"));
+            return self.esttab_matrix(c, opts, out);
         }
         // the models: names, else those eststo stored, else the active ones
         let mut names: Vec<String> = c
@@ -1001,7 +1047,7 @@ struct Extra {
 /// The lines of prehead() and the like: each quoted string (empty ones kept) and
 /// each word outside quotes (`posthead(\hline)`; the `}` ZNMIXH's postfoot has after
 /// a closing quote is a line of its own in Stata); `None` for an unclosed quote.
-fn quoted_lines(text: &str) -> Option<Vec<String>> {
+pub(super) fn quoted_lines(text: &str) -> Option<Vec<String>> {
     let mut out = Vec::new();
     let mut cur: Option<String> = None;
     let mut word = String::new();

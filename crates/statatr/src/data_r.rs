@@ -41,6 +41,7 @@ mod dates;
 mod eclass;
 mod estpost;
 mod esttab;
+mod esttab_matrix;
 mod esttable;
 mod filefilter;
 mod files;
@@ -69,6 +70,7 @@ mod reghdfe;
 mod returned;
 mod revrs;
 mod robreg;
+mod rreg;
 mod scalars;
 mod st;
 mod stats;
@@ -952,6 +954,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_prtest" => prtest::PRTEST_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
         "stata_cm" => cm::CM_HELPER,
+        "stata_rreg" => rreg::RREG_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_strmatch" => STRMATCH_HELPER,
@@ -1253,6 +1256,9 @@ struct Kept {
     panel: Option<String>,
     panel_time: Option<String>,
     ts_delta: Option<String>,
+    /// the kinds and storage types of the variables the do-file made, as the .dta keeps them
+    kinds: BTreeMap<String, Kind>,
+    storage: BTreeMap<String, Storage>,
 }
 
 /// The data and what the translator knows of it, as `preserve` left them.
@@ -2266,6 +2272,7 @@ impl Session {
             "pdslasso" => self.pdslasso(c, &opts, out),
             "cmset" => self.cmset(c, &opts, out),
             "cmclogit" => self.cmclogit(c, &opts, out),
+            "rreg" => self.rreg(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),
@@ -2557,8 +2564,9 @@ impl Session {
         self.panel_time = kept.panel_time;
         self.ts_delta = kept.ts_delta;
         self.file = Some(path);
-        self.kinds.clear();
-        self.storage.clear();
+        // a file this do-file saved keeps its variables' kinds and storage types
+        self.kinds = kept.kinds;
+        self.storage = kept.storage;
         if let Some(cond) = self.condition(c, out)? {
             steps.push(format!("dplyr::filter({cond})"));
         }
@@ -2597,6 +2605,8 @@ impl Session {
                 panel: self.panel.clone(),
                 panel_time: self.panel_time.clone(),
                 ts_delta: self.ts_delta.clone(),
+                kinds: self.kinds.clone(),
+                storage: self.storage.clone(),
             },
         );
         self.file = Some(path);

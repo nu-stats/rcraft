@@ -1,0 +1,4 @@
+* Stata 19.0's results for fmtround.do, recorded by cargo xtask stata-record
+@ a      0.01     -0.01      0.03      0.01      1.00
+@ b      2.67      0.12      0.04     12.35       0.3
+@ c       0.3         2         1     1.000

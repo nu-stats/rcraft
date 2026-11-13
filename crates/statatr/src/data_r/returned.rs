@@ -251,13 +251,15 @@ stata_fmt <- function(x, fmt = "%10.0g", trim = FALSE) {
   # m * 2^k with m whole, not from printed digits: a 17-digit form ending in
   # 5 is most often no half (.14761666666666665 is not), and R's printf past
   # 17 digits is not exact on every platform
-  rnd <- function(kind, digits, ax) {
+  rnd <- function(kind, digits, ax, even = FALSE) {
     out <- sprintf(paste0("%.", digits, kind), ax)
     if (ax == 0 || !is.finite(ax) || ax < 2^-1000) return(out)
     k <- floor(log2(ax)) - 52
     while (ax / 2^k >= 2^53) k <- k + 1
     while (ax / 2^k < 2^52) k <- k - 1
     m <- ax / 2^k
+    m0 <- m
+    k0 <- k
     # rounded at 10^-q: a half when ax * 2 * 10^q is whole and odd
     q <- if (kind == "e") digits - as.integer(sub("^.*e", "", sprintf("%.16e", ax))) else digits
     half <- if (q >= 0) {
@@ -275,7 +277,45 @@ stata_fmt <- function(x, fmt = "%10.0g", trim = FALSE) {
       p <= 22 && ax == floor(ax) && (2 * ax) %% 10^p == 0 && ((2 * ax) / 10^p) %% 2 == 1
     }
     # the next double up is past the half, by as little as can be
-    if (half) out <- sprintf(paste0("%.", digits, kind), ax + 2^k)
+    if (half && !even) out <- sprintf(paste0("%.", digits, kind), ax + 2^k)
+    # near a half but not one (.005 is 0.005000000000000000104): Windows' printf rounds
+    # from 17 digits, so the side is worked out from the double, m0 * 2^k0 * 10^q against
+    # the half, in whole numbers of 16 bits each
+    if (!half && kind == "f" && q >= 0 && q <= 30 && k0 < 0) {
+      z <- ax * 10^q
+      if (z < 2^52 && abs(z - floor(z) - 0.5) < 1e-6) {
+        limbs <- numeric()
+        mm <- m0
+        while (mm > 0) {
+          limbs <- c(limbs, mm %% 65536)
+          mm <- floor(mm / 65536)
+        }
+        for (i in seq_len(q)) {
+          carry <- 0
+          for (j in seq_along(limbs)) {
+            v <- limbs[j] * 10 + carry
+            limbs[j] <- v %% 65536
+            carry <- floor(v / 65536)
+          }
+          while (carry > 0) {
+            limbs <- c(limbs, carry %% 65536)
+            carry <- floor(carry / 65536)
+          }
+        }
+        bit <- function(b) {
+          j <- b %/% 16 + 1
+          if (j > length(limbs)) 0 else (limbs[j] %/% 2^(b %% 16)) %% 2
+        }
+        e <- -k0
+        # the fraction of N / 2^e against 1/2: bit e - 1, then any bit below it
+        above <- bit(e - 1) == 1 && any(vapply(seq_len(e - 1) - 1, bit, 0) == 1)
+        below <- bit(e - 1) == 0
+        lo <- floor(z) / 10^q
+        hi <- (floor(z) + 1) / 10^q
+        if (above) out <- sprintf(paste0("%.", digits, "f"), hi)
+        if (below) out <- sprintf(paste0("%.", digits, "f"), lo)
+      }
+    }
     out
   }
   e_str <- function(ax, digits) rnd("e", max(digits, 1) - 1, ax)
@@ -316,7 +356,8 @@ stata_fmt <- function(x, fmt = "%10.0g", trim = FALSE) {
     f <- fixed(ax)
     if (is.null(f)) paste0(sgn, e_str(ax, ed)) else if (x < 0) paste0("-", f) else f
   } else if (type == "f") {
-    s <- sprintf("%.*f", d, x)
+    # an exact half to even, as C does; a value near a half on its side (see rnd)
+    s <- if (x < 0) paste0("-", rnd("f", d, -x, even = TRUE)) else rnd("f", d, x, even = TRUE)
     if (comma) s <- commas(s)
     if (nchar(s) > w) {
       # too wide: e notation, unless that is wider still

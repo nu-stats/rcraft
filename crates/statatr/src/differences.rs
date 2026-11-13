@@ -89,8 +89,9 @@ pub const GUIDES: &[Guide] = &[
                 "generate without a type makes a float in Stata (about 7 digits); R keeps every \
                  number as a double. The translation rounds a new variable to float as Stata \
                  stores it, unless the do-file says double, so x == 0.1 behaves as in Stata. \
-                 replace keeps a float a float in Stata; R keeps full precision for a variable \
-                 the do-file did not make, with a note.",
+                 replace keeps a float a float in Stata, and so does the translation for a \
+                 variable the do-file made, also after it saved the data and read it back with \
+                 use or merge; R keeps full precision for one it did not make, with a note.",
             ),
             p(
                 "String widths",
@@ -1196,7 +1197,8 @@ pub const GUIDES: &[Guide] = &[
         points: &[p(
             "Storage type",
             "replace keeps a float a float in Stata; R keeps full precision unless the \
-             do-file made the variable, with a note.",
+             do-file made the variable (also when it saved the data and read it back with use \
+             or merge), with a note.",
         )],
     },
     Guide {
@@ -1844,6 +1846,28 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "rreg",
+        about: "Robust regression (Huber then biweight iterations)",
+        points: &[
+            p(
+                "In R",
+                "stata_rreg fits it as Stata 19 does, worked out from its logs and results: least \
+                 squares first, rows of Cook's distance above 1 left out (silently, as Stata); \
+                 Huber weights min(1, 2M/|r|), M the residuals' median absolute deviation, until \
+                 the largest change in a weight is below 0.05; then biweight weights with 4.685 \
+                 times M/0.6745 until it is below 0.01, each a weighted least-squares fit. The \
+                 variance is the pseudovalues' rmse^2 (X'X)^-1, F the Wald test of the slopes, \
+                 e() as Stata's (r2, mss, rss and beta from them). The iteration log, header and \
+                 table print as Stata's.",
+            ),
+            p(
+                "Not yet",
+                "Options (tune(), tolerance(), genwt(), level() and the rest), weights, factor \
+                 variables, and predict, test and margins after it are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "cmset",
         about: "Declares choice-model data: the case and alternatives variables",
         points: &[p(
@@ -1946,8 +1970,18 @@ pub const GUIDES: &[Guide] = &[
                  between the first note and the stars', as Stata 19 printed and wrote them.",
             ),
             p(
+                "matrix()",
+                "esttab matrix(M, fmt()) lays a matrix out as Stata 19 does: its row and column \
+                 names, a row of the matrix's name (mlabels(\" \") blank, mlabels(none) none), \
+                 each cell %9.0g or fmt()'s decimals (one for all or one a column), . for a \
+                 missing one; on the screen and in .txt between rules, in .tex a tabular unless \
+                 fragment with posthead() prefoot() postfoot() in their places, in .csv =\"\" \
+                 cells. fmt() with %formats, other options and names over 12 characters are \
+                 refused.",
+            ),
+            p(
                 "Not yet",
-                "wide, cells() of other models, matrix(), mlabels() with mtitles(), other @ \
+                "wide, cells() of other models, mlabels() with mtitles(), other @ \
                  substitutions, fragment with prehead() or postfoot(), .rtf (it carries the time \
                  it was written) and not with a file are refused.",
             ),

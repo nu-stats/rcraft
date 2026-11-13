@@ -291,6 +291,8 @@ impl Session {
             if force || ty == "double" {
                 if let Some(st) = st {
                     self.storage.insert(v.to_string(), st);
+                    // a number type takes a number only (R stops on text, as Stata does)
+                    self.kinds.insert(v.to_string(), Kind::Number);
                 }
             } else {
                 self.storage.remove(v);

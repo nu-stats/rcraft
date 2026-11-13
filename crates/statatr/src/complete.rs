@@ -180,6 +180,7 @@ pub const COMMANDS: &[&str] = &[
     "reshape",
     "restore",
     "revrs",
+    "rreg",
     "robreg",
     "return",
     "run",
