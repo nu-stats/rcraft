@@ -140,11 +140,13 @@ pub const GUIDES: &[Guide] = &[
                  binomial() and poisson() are cut to whole numbers, as Stata does, and \
                  normalden(., s) is 0, as in Stata. invF() and invFtail() come from qbeta(), \
                  since R's qf() gives 0 at small p and an approximation for df2 above 4e5. \
-                 Only at the far ends do the two differ: invt() below p = 1e-200 (Stata \
-                 loses digits, or gives missing with 1 degree of freedom), the densities \
-                 with degrees of freedom above 1e10, poisson() with a mean of 1e16 or more \
-                 and binomialp() or poissonp() with counts above 1e8, where Stata gives \
-                 missing or fewer digits and R its own number.",
+                 Stata's limits are kept too: missing for a Poisson mean above 2^53, \
+                 poissonp() with a mean above 1e8 or a count above 1e9, binomialp() with n \
+                 above 1e6, and invt() and invttail() past 9.3675e153. Only where Stata's own \
+                 number loses digits do the two differ: invt() below p = 1e-200 with a few \
+                 degrees of freedom, the densities with degrees of freedom of 1e10 or more, and \
+                 the Poisson probabilities near a mean of 1e15 (by 1e-9); RCraft gives R's \
+                 exact number there.",
             ),
             p(
                 "Returned values",

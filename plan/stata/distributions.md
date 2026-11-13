@@ -46,7 +46,7 @@ functions. Corpus `distributions.do`. Translated in `crates/statatr/src/expr_r/d
   complement y = qbeta(p, b/2, a/2) on the other tail and F = (b/a)·(1 - y)/y. That is Stata's to 1e-9
   everywhere probed but three subnormal or overflowing results.
 
-## Not matched (the far ends; written in the differences guide)
+## Not matched (the far ends; written in the differences guide; see the limits pinned down below)
 
 - `invt()`/`invttail()` below p = 1e-200: with 1 df Stata gives missing, with 2.5 df a number 9e-6 off the
   exact one, with 5 df 2e-9 off; R gives the exact quantile.
@@ -56,3 +56,16 @@ functions. Corpus `distributions.do`. Translated in `crates/statatr/src/expr_r/d
   from n = 1e10: Stata gives missing; between 1e15 and 1e16 for the mean and between 1e8 and 1e10 for the
   counts the edge was not pinned down, so R's number stands.
 - `invchi2()` and `invgammap()` at p = 1 - 1e-13: 3e-9 apart.
+
+## The limits pinned down (2026-11-13; probes `dist/out6`–`out9`, bisected)
+
+- `poisson()` and `poissontail()`: missing for a mean above 2^53 (9.007e15 a number, 9.008e15 missing).
+- `poissonp()`: missing for a mean above 1e8 (1.0000001e8 missing) or a count above 1e9.
+- `binomialp()`: missing for n, cut to a whole number, above 1e6 (1000000.5 a number, 1000001 missing);
+  `binomial()` and `binomialtail()` have no such limit there.
+- `invt()` and `invttail()`: missing where the quantile passes 9.3675e153 in size — bracketed between
+  9.365e153 and 9.370e153 with 1 and with 0.9 degrees of freedom, so a bound on the result, not on p.
+- `invttail(d, p)` is worked out as −invt(d, p): R's upper tail fails for tiny p below 1 degree of freedom.
+- Left as R's exact number (Stata's loses digits): `invt()` below p = 1e-200 with 2.5 or 5 df, the
+  densities with df of 1e10 or more, Poisson probabilities near a mean of 1e15 (by about 1e-9). 3,988 of
+  Stata's values checked: none now differs in being missing or not.

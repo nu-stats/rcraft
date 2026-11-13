@@ -78,8 +78,12 @@ stata_d_t <- function(d, x) stata_d_keep(stata_d_run(stats::pt(x, d)), stata_d_p
 stata_d_ttail <- function(d, x) stata_d_keep(stata_d_run(stats::pt(x, d, lower.tail = FALSE)), stata_d_pos(d, 2e17))
 stata_d_tden <- function(d, x) stata_d_keep(stata_d_run(stats::dt(x, d)), stata_d_pos(d))
 stata_d_tprob <- function(d, x) stata_d_keep(stata_d_run(2 * stats::pt(-abs(x), d)), stata_d_pos(d, 2e17))
-stata_d_invt <- function(d, p) stata_d_keep(stata_d_run(stats::qt(p, d)), stata_d_pos(d, 2e17))
-stata_d_invttail <- function(d, p) stata_d_keep(stata_d_run(stats::qt(p, d, lower.tail = FALSE)), stata_d_pos(d, 2e17))
+# Stata 19 gives missing where the quantile passes 9.3675e153 in size (bracketed to 9.365e153 ..
+# 9.370e153 with 1 and 0.9 degrees of freedom)
+stata_d_tbig <- function(q) { q[!is.na(q) & abs(q) > 9.3675e153] <- NA_real_; q }
+stata_d_invt <- function(d, p) stata_d_keep(stata_d_tbig(stata_d_run(stats::qt(p, d))), stata_d_pos(d, 2e17))
+# by symmetry: R's upper tail fails for tiny p below 1 degree of freedom, its lower tail does not
+stata_d_invttail <- function(d, p) stata_d_keep(stata_d_tbig(-stata_d_run(stats::qt(p, d))), stata_d_pos(d, 2e17))
 stata_d_F <- function(a, b, f) stata_d_keep(stata_d_run(stats::pf(f, a, b)), stata_d_pos(a, 2e17) & stata_d_pos(b, 2e17))
 stata_d_Ftail <- function(a, b, f) stata_d_keep(stata_d_run(stats::pf(f, a, b, lower.tail = FALSE)), stata_d_pos(a, 2e17) & stata_d_pos(b, 2e17))
 stata_d_Fden <- function(a, b, f) stata_d_keep(stata_d_run(stats::df(f, a, b)), stata_d_pos(a) & stata_d_pos(b))
@@ -132,13 +136,16 @@ stata_d_binok <- function(n, p) !is.na(n) & n >= 0 & n <= 1e17 & stata_d_prob(p)
 stata_d_binomial <- function(n, k, p) stata_d_keep(stata_d_run(stats::pbinom(floor(k), floor(n), p)), stata_d_binok(n, p))
 stata_d_binomialtail <- function(n, k, p) stata_d_keep(stata_d_run(stats::pbinom(floor(k) - 1, floor(n), p, lower.tail = FALSE)), stata_d_binok(n, p))
 stata_d_binomialp <- function(n, k, p) {
-  ok <- stata_d_binok(n, p) & floor(n) >= 1 & !is.na(k) & floor(k) >= 0 & floor(k) <= floor(n)
+  # Stata 19 gives missing for n (cut to a whole number) above 1e6
+  ok <- stata_d_binok(n, p) & floor(n) >= 1 & floor(n) <= 1e6 & !is.na(k) & floor(k) >= 0 & floor(k) <= floor(n)
   stata_d_keep(stata_d_run(stats::dbinom(floor(k), floor(n), p)), ok)
 }
-stata_d_poisok <- function(m, k) stata_d_pos(m) & !is.na(k) & k >= 0
+# Stata 19 gives missing for a mean above 2^53 (the cdf and tail), and above 1e8 or a count
+# above 1e9 (the probability)
+stata_d_poisok <- function(m, k) stata_d_pos(m, 2^53) & !is.na(k) & k >= 0
 stata_d_poisson <- function(m, k) stata_d_keep(stata_d_run(stats::ppois(floor(k), m)), stata_d_poisok(m, k))
 stata_d_poissontail <- function(m, k) stata_d_keep(stata_d_run(stats::ppois(floor(k) - 1, m, lower.tail = FALSE)), stata_d_poisok(m, k))
-stata_d_poissonp <- function(m, k) stata_d_keep(stata_d_run(stats::dpois(floor(k), m)), stata_d_poisok(m, k))"##;
+stata_d_poissonp <- function(m, k) stata_d_keep(stata_d_run(stats::dpois(floor(k), m)), stata_d_poisok(m, k) & m <= 1e8 & k <= 1e9)"##;
 
 impl Translator<'_> {
     /// A distribution function: its R helper on the arguments' numbers.

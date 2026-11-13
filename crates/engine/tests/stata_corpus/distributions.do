@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12): made-up data; Stata 19's results are in distributions.recorded
 * functions: F Fden Ftail betaden binomial binomialp binomialtail chi2 chi2den chi2tail comb digamma gammaden gammap gammaptail ibeta ibetatail invF invFtail invchi2 invchi2tail invgammap invgammaptail invibeta invibetatail invt invttail lnfactorial lngamma lnnormal lnnormalden normalden poisson poissonp poissontail t tden tprob trigamma ttail
-* (Stata's distribution functions in display and generate: t, F, chi2, normal, beta, gamma, binomial and Poisson, their tails, densities and inverses; the missing values Stata gives where R gives a number: a degree of freedom, shape or sd of 0, counts that are not whole, k outside 0..n; invF() at small p, where R's qf() gives 0)
+* (Stata's distribution functions in display and generate: t, F, chi2, normal, beta, gamma, binomial and Poisson, their tails, densities and inverses; the missing values Stata gives where R gives a number: a degree of freedom, shape or sd of 0, counts that are not whole, k outside 0..n, and the limits past which Stata gives missing; invF() at small p, where R's qf() gives 0)
 * tolerance: 1e-9
 version 19
 clear
@@ -48,3 +48,8 @@ forvalues i = 1/7 {
 }
 scalar s = invttail(df[2], .025)
 display "@ scalar " %24.17g s " " %24.17g chi2tail(2, s^2)
+* the limits past which Stata 19 gives missing
+display "@ lim_pois " %24.17g poisson(9.007e15, 2) " " poisson(9.008e15, 2) " " %24.17g poissontail(9e15, 9e15) " " poissontail(9.1e15, 2)
+display "@ lim_poisp " %24.17g poissonp(1e8, 5) " " poissonp(1.0000001e8, 5) " " %24.17g poissonp(5, 1e9) " " poissonp(5, 1.0000001e9)
+display "@ lim_binp " %24.17g binomialp(1e6, 5e5, .5) " " binomialp(1000001, 5, .5) " " %24.17g binomialp(1000000.5, 5e5, .5)
+display "@ lim_invt " %24.17g invt(1, 1e-154) " " invt(1, 1e-155) " " %24.17g invttail(1, 5e-155) " " invttail(1, 3e-155) " " %24.17g invttail(0.9, 1e-130) " " invt(0.9, 1e-140)
