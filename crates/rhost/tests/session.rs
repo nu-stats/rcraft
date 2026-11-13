@@ -696,3 +696,48 @@ fn the_panels_of_one_page_are_one_plot() {
     let (layout, _) = plots_of(&mut s, "par(mfrow = c(2, 1))");
     assert!(layout.is_empty(), "{layout:?}");
 }
+
+#[test]
+fn the_library_is_the_one_for_this_r_version_and_old_packages_move_out() {
+    let Some(install) = find_installs(&Env::from_process())
+        .into_iter()
+        .find(|i| i.is_supported())
+    else {
+        return;
+    };
+    let root = std::env::temp_dir()
+        .join(format!("rcraft-session-lib-{}", std::process::id()))
+        .join("R-library");
+    let _ = std::fs::remove_dir_all(&root);
+    // a package from the old flat library, built by some other R
+    let old = root.join("rcraftold");
+    std::fs::create_dir_all(&old).expect("old package folder");
+    std::fs::write(
+        old.join("DESCRIPTION"),
+        "Package: rcraftold\nVersion: 1.0\nBuilt: R 3.9.9; ; 2020-01-01; windows\n",
+    )
+    .expect("DESCRIPTION");
+    let lib = root.join(rcraft_rhost::library::version_folder(install.version));
+    let mut config = SessionConfig::new(install);
+    config.library = Some(lib.clone());
+    let Ok(mut s) = Session::start(config) else {
+        let _ = std::fs::remove_dir_all(root.parent().unwrap_or(&root));
+        return;
+    };
+    assert!(lib.is_dir(), "the version's folder is made");
+    assert!(root
+        .join("3.9")
+        .join("rcraftold")
+        .join("DESCRIPTION")
+        .is_file());
+    assert!(!old.exists());
+    let want = lib.to_string_lossy().replace('\\', "/");
+    let code = format!(
+        "cat(identical(normalizePath(.libPaths()[1]), normalizePath('{want}')), \
+         any(grepl('rcraftold', list.files(.libPaths()))))"
+    );
+    let out = s.run_to_end(&code, LIMIT).expect("run");
+    assert_eq!(out.stdout.trim(), "TRUE FALSE", "{}", out.stderr);
+    drop(s);
+    let _ = std::fs::remove_dir_all(root.parent().unwrap_or(&root));
+}

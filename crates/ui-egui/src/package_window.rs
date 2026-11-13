@@ -31,7 +31,6 @@ use rcraft_rpkg::refresh::Stage;
 use rcraft_rpkg::search::Filters;
 
 use crate::look::Palette;
-use crate::packages::library_dir;
 
 /// Most results listed for a search.
 const RESULT_LIMIT: usize = 100;
@@ -203,6 +202,8 @@ pub struct PackagesWindow {
     rc_note: Option<String>,
     /// This R's version number, such as 4.4.3, once the engine has said.
     r_version_number: String,
+    /// RCraft's own library for this R's minor version, once the engine has said.
+    own_library: Option<String>,
     mirror_text: String,
     mirror_note: Option<String>,
     show_mirror: bool,
@@ -252,6 +253,7 @@ impl Default for PackagesWindow {
             auto_confirm: false,
             rc_note: None,
             r_version_number: String::new(),
+            own_library: None,
             mirror_text: String::new(),
             mirror_note: None,
             show_mirror: false,
@@ -407,7 +409,7 @@ installation of package 'fixest' had non-zero exit status"
             return;
         }
         let installed = self.installed_map();
-        let own = library_dir();
+        let own = self.own_library.clone();
         match rc {
             Rc::Install {
                 packages,
@@ -561,6 +563,7 @@ installation of package 'fixest' had non-zero exit status"
         let Some(engine) = engine else {
             return;
         };
+        self.own_library = engine.library();
         if self.r_version_number.is_empty() {
             self.r_version_number = r_number(engine.r_version());
         }
@@ -702,7 +705,12 @@ installation of package 'fixest' had non-zero exit status"
         let asked: Vec<&str> = names.iter().map(String::as_str).collect();
         let pl = plan(ix, &have_now, &asked);
         let code = if pl.problems.is_empty() {
-            install_code(&pl.asked(), library_dir().as_deref(), index.mirror(), from)
+            install_code(
+                &pl.asked(),
+                self.own_library.as_deref(),
+                index.mirror(),
+                from,
+            )
         } else {
             Err("fix the problems first".into())
         };
@@ -716,7 +724,12 @@ installation of package 'fixest' had non-zero exit status"
 
     /// An older version of `package`, from CRAN's archive, built from source.
     fn begin_older_version(&mut self, index: &PackageIndexService, package: &str, version: &str) {
-        let code = install_version_code(package, version, library_dir().as_deref(), index.mirror());
+        let code = install_version_code(
+            package,
+            version,
+            self.own_library.as_deref(),
+            index.mirror(),
+        );
         let plan = Plan {
             steps: vec![Step {
                 name: package.to_string(),
@@ -1464,7 +1477,7 @@ if let Some(of) = index.views().map(|v| v.views_of(&p.name)) {                  
             );
             return None;
         }
-        let own = library_dir();
+        let own = self.own_library.clone();
         let installed = self.installed_map();
         let outdated: Vec<_> = index
             .index()
@@ -2062,7 +2075,7 @@ impl PackagesWindow {
 
     /// The list for what this session has, as the options say.
     fn make_lock(&self, index: &PackageIndexService, r_version: &str) -> Lock {
-        let own = library_dir();
+        let own = self.own_library.clone();
         let mut entries = self.lock_entries();
         if self.lock_library_only {
             let in_own: Vec<String> = self
@@ -2150,7 +2163,7 @@ impl PackagesWindow {
         let code = restore_code(
             &restore.current(),
             &restore.older(),
-            library_dir().as_deref(),
+            self.own_library.as_deref(),
             index.mirror(),
         );
         self.confirm = Some(Confirm::Restore { restore, code });
@@ -2499,7 +2512,7 @@ impl PackagesWindow {
         package: &Package,
     ) {
         let installed = self.installed_map();
-        let library = library_dir();
+        let library = self.own_library.clone();
         let mirror = index.mirror().to_string();
         let mut deps: Vec<Step> = Vec::new();
         let mut problems: Vec<String> = Vec::new();

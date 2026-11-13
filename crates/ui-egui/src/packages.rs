@@ -9,12 +9,6 @@ use rcraft_rcodegen::{missing_packages_code, r_string};
 
 use crate::look::Palette;
 
-/// RCraft's own package library, as a path R understands.
-pub(crate) fn library_dir() -> Option<String> {
-    rcraft_rhost::library::user_library_dir(&rcraft_rhost::Env::from_process())
-        .map(|p| p.to_string_lossy().replace('\\', "/"))
-}
-
 /// The CRAN mirror the user chose in the Packages window (the default when
 /// none was chosen).
 pub(crate) fn saved_mirror() -> String {
@@ -55,6 +49,8 @@ pub struct PackageCheck {
     /// An install was started from here; look again when R is free.
     installing: bool,
     seen_busy: bool,
+    /// RCraft's own library for the session's R version (where installs go).
+    library: Option<String>,
 }
 
 impl PackageCheck {
@@ -66,6 +62,7 @@ impl PackageCheck {
     /// Asks R, and takes in its answer. Call it every frame while the dialog is
     /// open, with the packages its present choices need (none for base R).
     pub fn service(&mut self, engine: &mut Engine, needed: &[&'static str]) {
+        self.library = engine.library();
         if self.installing {
             if engine.is_busy() {
                 self.seen_busy = true;
@@ -144,7 +141,7 @@ impl PackageCheck {
             ))
             .color(pal.warning),
         );
-        let code = install_code(&list, library_dir().as_deref());
+        let code = install_code(&list, self.library.as_deref());
         ui.label(
             RichText::new(
                 "RCraft can install it for you. It is downloaded from CRAN (with the packages it \
@@ -188,10 +185,10 @@ mod tests {
     fn installing_goes_to_rcrafts_own_library() {
         let code = install_code_from(
             &["haven"],
-            Some("C:/Users/me/AppData/Local/RCraft/R-library"),
+            Some("C:/Users/me/AppData/Local/RCraft/R-library/4.4"),
             "https://cloud.r-project.org",
         );
-        assert!(code.contains("lib = \"C:/Users/me/AppData/Local/RCraft/R-library\""));
+        assert!(code.contains("lib = \"C:/Users/me/AppData/Local/RCraft/R-library/4.4\""));
         assert!(code.contains("https://cloud.r-project.org"));
         assert!(code.starts_with("dir.create("));
         assert!(code.contains("install.packages(\"haven\","));

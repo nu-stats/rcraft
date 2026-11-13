@@ -177,12 +177,16 @@ pub struct SessionConfig {
     /// Checked every couple of seconds while a run is going. `None`: no limit.
     pub max_memory_bytes: Option<u64>,
     /// RCraft's own package library, put first on R's search path when the
-    /// folder exists. `None`: leave R's libraries as they are.
+    /// folder exists. `None`: leave R's libraries as they are. By default the
+    /// folder for this install's R minor version
+    /// ([`crate::library::user_library_dir`]), which the session creates.
     pub library: Option<PathBuf>,
 }
 
 impl SessionConfig {
     pub fn new(install: RInstall) -> SessionConfig {
+        let library =
+            crate::library::user_library_dir(&crate::find::Env::from_process(), install.version);
         SessionConfig {
             install,
             working_dir: None,
@@ -190,7 +194,7 @@ impl SessionConfig {
             max_output_bytes: 16 * 1024 * 1024,
             max_run_time: None,
             max_memory_bytes: None,
-            library: crate::library::user_library_dir(&crate::find::Env::from_process()),
+            library,
         }
     }
 }
@@ -290,6 +294,9 @@ impl Session {
                 command.env("PATH", joined);
             }
         }
+        if let Some(lib) = &config.library {
+            crate::library::prepare(lib);
+        }
         if let Some(lib) = config.library.as_ref().filter(|l| l.is_dir()) {
             let existing = std::env::var_os("R_LIBS");
             if let Some(value) = crate::library::libs_value(existing.as_deref(), lib) {
@@ -341,6 +348,12 @@ impl Session {
     /// The version string R reported, such as `R version 4.4.3 (...)`.
     pub fn r_version(&self) -> &str {
         &self.r_version
+    }
+
+    /// RCraft's own package library for this session (on R's search path
+    /// when it exists), if there is one.
+    pub fn library(&self) -> Option<&Path> {
+        self.config.library.as_deref()
     }
 
     pub fn is_running(&self) -> bool {

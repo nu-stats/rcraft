@@ -17,7 +17,7 @@ use rcraft_rdata::sniff::{sniff_file, Encoding, SniffError, Sniffed};
 use rcraft_rdata::unpack::{self, Inner, COMPRESSED_EXTENSIONS, MAX_UNPACKED};
 
 use crate::look::Palette;
-use crate::packages::{install_code, library_dir};
+use crate::packages::install_code;
 
 /// Rows shown in R's preview.
 const PREVIEW_ROWS: usize = 10;
@@ -80,6 +80,8 @@ pub struct ImportDialog {
     unpacked: Option<Unpacked>,
     /// The archive holds several data files: the user picks one.
     choices: Vec<Inner>,
+    /// RCraft's own library for the session's R version (where installs go).
+    library: Option<String>,
 }
 
 /// Where a data file taken out of an archive went.
@@ -290,6 +292,7 @@ impl ImportDialog {
     /// package is there, the sheet names, and the preview. Call it every frame
     /// while the dialog is open.
     pub fn service(&mut self, engine: &mut Engine) {
+        self.library = engine.library();
         if self.installing {
             if engine.is_busy() {
                 self.install_seen_busy = true;
@@ -724,8 +727,7 @@ impl ImportDialog {
                     ))
                     .color(pal.warning),
                 );
-                let library = library_dir();
-                let code = install_code(&[pkg], library.as_deref());
+                let code = install_code(&[pkg], self.library.as_deref());
                 ui.label(
                     RichText::new(
                         "RCraft can install it for you. It is downloaded from CRAN (with the \

@@ -164,6 +164,14 @@ impl Engine {
         self.session.r_version()
     }
 
+    /// RCraft's own package library for this session's R version (where
+    /// installs go), as a path R understands (forward slashes).
+    pub fn library(&self) -> Option<String> {
+        self.session
+            .library()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+    }
+
     pub fn is_busy(&self) -> bool {
         self.current.is_some()
     }
