@@ -184,6 +184,7 @@ const STATISTICS: &[&str] = &[
     "logit",
     "margins",
     "mean",
+    "medeff",
     "mlogit",
     "nbreg",
     "nlcom",

@@ -51,6 +51,7 @@ mod graph;
 mod iv;
 mod margins;
 mod matrices;
+mod medeff;
 mod mexpr;
 mod ml;
 mod model;
@@ -961,6 +962,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
         "stata_cm" => cm::CM_HELPER,
         "stata_rreg" => rreg::RREG_HELPER,
+        "stata_medeff" => medeff::MEDEFF_HELPER,
         "stata_est_mark" => returned::EST_MARK_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
@@ -2285,6 +2287,7 @@ impl Session {
             "cmset" => self.cmset(c, &opts, out),
             "cmclogit" => self.cmclogit(c, &opts, out),
             "rreg" => self.rreg(c, &opts, out),
+            "medeff" => self.medeff(c, &opts, out),
             "marginsplot" => self.marginsplot(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),

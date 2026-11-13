@@ -143,6 +143,7 @@ pub const COMMANDS: &[&str] = &[
     "margins",
     "marginsplot",
     "matrix",
+    "medeff",
     "merge",
     "mkmat",
     "mlogit",
@@ -352,6 +353,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("postfile", &["every(", "replace"]),
     ("prtest", &["by(", "level("]),
     ("marginsplot", &["noci", "title(", "xtitle(", "ytitle("]),
+    ("medeff", &["mediate(", "seed(", "sims(", "treat("]),
     (
         "putexcel",
         &[

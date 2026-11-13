@@ -4383,3 +4383,23 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   oneway, testparm and tabulate it had refused (tabstat format alone and wider formats; oneway with
   weights, bonferroni, scheffe and sidak, nomeans, nostandard, nofreq; testparm after more models; corpus
   `testparm_models.do`).
+
+## medeff (mediation, SSC), DZ8BUS with its data, 2026-11-13
+
+- With the user's yes: DZ8BUS's StudyTwo.csv and StudyThree.csv downloaded from its Dataverse page
+  into the scratch copy (the do-file says "Read in StudyTwo.csv" without a line that reads it; the
+  copies read them with `import delimited`), and SSC's `mediation` installed in Stata.
+- `medeff (regress ...) (regress ...), mediate() treat() sims() seed()` worked out from its output
+  (`plan/stata/medeff.md`; corpus `medeff.do`): the two fits as Stata prints them, the draws from
+  Stata's own generator (seed set before each model, a draw's coefficients from consecutive uniforms),
+  the effects as floats, _pctile's intervals, the share mediated's median, Stata's table and r(), the
+  generator left as medeff leaves it. Every value on the probes is Stata's.
+- DZ8BUS: every line translated (11 ran, none refused); its regressions and medeff tables match
+  Stata's. Still printed differently: variable names cut in coefficient tables (Stata keeps them
+  unique among the data's names: threatcre~ty, not threatcred~y), and destring's and import
+  delimited's messages, which RCraft does not print.
+- XURXZN cannot run: its processed data is not in the package (only a pseudo distribution file), in
+  Stata as on R.
+- The core-statistics session's next steps (from their commit messages): more of the refused forms
+  (cii, ci and oneway weights, mlogit, tabstat formats; b2c6fd2) and the distribution functions'
+  limits as Stata 19's (04074da).

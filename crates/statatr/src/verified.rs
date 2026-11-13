@@ -118,6 +118,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("margins", &["cmclogit", "regress"]),
     ("marginsplot", &["marginsplot"]),
     ("matrix", &["matfuncs", "matrices"]),
+    ("medeff", &["medeff"]),
     ("merge", &["extended_missing_groups", "merge", "savedfloat"]),
     ("mkmat", &["matrices"]),
     ("mlogit", &["collinear", "likelihood"]),
