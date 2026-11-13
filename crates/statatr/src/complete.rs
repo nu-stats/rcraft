@@ -140,6 +140,7 @@ pub const COMMANDS: &[&str] = &[
     "lowess",
     "macro",
     "margins",
+    "marginsplot",
     "matrix",
     "merge",
     "mkmat",
@@ -349,7 +350,13 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("pdslasso", &["robust"]),
     ("postfile", &["every(", "replace"]),
     ("prtest", &["by(", "level("]),
-    ("putexcel", &["modify", "replace", "sheet("]),
+    ("marginsplot", &["noci", "title(", "xtitle(", "ytitle("]),
+    (
+        "putexcel",
+        &[
+            "colnames", "modify", "names", "replace", "rownames", "sheet(",
+        ],
+    ),
     (
         "histogram",
         &[
@@ -1529,7 +1536,11 @@ mod tests {
             }
             "filefilter" if name == "from" => format!("filefilter a.txt b.txt, {o} to(y)"),
             "filefilter" => format!("filefilter a.txt b.txt, from(x) {o}"),
+            "putexcel" if matches!(name, "names" | "rownames" | "colnames") => format!(
+                "regress y x\nputexcel set \"a.xlsx\", replace\nputexcel A1 = matrix(e(b)), {o}"
+            ),
             "putexcel" => format!("putexcel set \"a.xlsx\", {o}"),
+            "marginsplot" => format!("regress y x\nmargins, at(x=(0 1))\nmarginsplot, {o}"),
             "winsor" if name == "generate" => format!("winsor y, {o} p(.1)"),
             "winsor" if name == "p" || name == "h" => format!("winsor y, gen(z) {o}"),
             "winsor" => format!("winsor y, gen(z) p(.1) {o}"),

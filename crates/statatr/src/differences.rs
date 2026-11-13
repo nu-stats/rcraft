@@ -586,6 +586,14 @@ pub const GUIDES: &[Guide] = &[
                  stored is Stata's error, r(111).",
             ),
             p(
+                "_est_name",
+                "Stata 19 keeps each stored model's e(sample) in the data, as the byte variable \
+                 _est_name (labelled esample() from estimates store) at the end; so does the \
+                 translation, and estimates drop and clear (and eststo drop and clear, eststo's \
+                 own) take them out again. Where R does not hold e(sample) (after cmclogit, \
+                 margins post), a line that reads _est_name is refused.",
+            ),
+            p(
                 "Not yet",
                 "estimates dir, table, replay, save and use, and options, are not translated. A \
                  name stored by a line that was not translated (eststo, a program) is not known, \
@@ -892,6 +900,10 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Standard errors",
                 "The delta method from the model's own variance, as Stata's.",
+            ),
+            p(
+                "r() and at()",
+                "r(table) (b se z or t pvalue ll ul df crit eform) and r(b) and r(V) with Stata's \n                 names (the first level of a term 1bn.: 1bn._at 2._at). at() over several \n                 variables is numbered as Stata 19 numbers it: the variables in the model's \n                 order, the last changing fastest. After xtreg the statistics are z, as in \n                 Stata.",
             ),
             p(
                 "After clogit",
@@ -1402,8 +1414,15 @@ pub const GUIDES: &[Guide] = &[
                  that exists, no set, a column past XFD). Written with the R package openxlsx2.",
             ),
             p(
+                "matrix()",
+                "cell = matrix(M) writes the values from the cell down and right; names puts the \
+                 column names on the first row and the row names in the first column (the corner \
+                 left as it was), rownames and colnames one of them. The names are Stata's full \
+                 ones (1bn._at, 1b.g). putexcel leaves r() as it was, as in Stata 19.",
+            ),
+            p(
                 "Not yet",
-                "Ranges, matrix(), etable, formula(), pictures, the formatting options (bold, \
+                "Ranges, matrices with equation names, etable, formula(), pictures, the formatting options (bold, \
                  nformat() and others), sheet(, replace), .xls files, and putexcel save, close \
                  and describe.",
             ),
@@ -1842,6 +1861,25 @@ pub const GUIDES: &[Guide] = &[
                  its parts on different rows, which RCraft does not reproduce. Collinear \
                  variables, factor variables and predict after it are not translated yet; the \
                  coefficient table is in R's layout.",
+            ),
+        ],
+    },
+    Guide {
+        command: "marginsplot",
+        about: "Plots the margins margins left",
+        points: &[
+            p(
+                "In R",
+                "After margins with one at() of lists and no terms or effects (not posted): \
+                 Stata 19's line naming the variables at() sets to several values (in at()'s \
+                 order), the margins drawn against the first with their intervals, a line for \
+                 each value of the others, by ggplot2 (so the look is R's). r() stays margins', \
+                 as in Stata.",
+            ),
+            p(
+                "Not yet",
+                "marginsplot after margins with terms, dydx() and the other effects, several \
+                 at(), or posted, and its options other than the titles and noci.",
             ),
         ],
     },

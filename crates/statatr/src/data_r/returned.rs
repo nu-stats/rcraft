@@ -1162,6 +1162,8 @@ impl Session {
                 if !rest.is_empty() {
                     return Err(no("estimates clear takes no names"));
                 }
+                let all: Vec<String> = self.stored_fits.keys().cloned().collect();
+                self.drop_est_vars(&all, out);
                 self.stored_fits.clear();
                 self.active_store = None;
                 out.line("stata_stored <- list()");
@@ -1214,8 +1216,55 @@ impl Session {
             "stata_stored[[{}]] <- mget(intersect({FIT_OBJECTS}, ls(sorted = FALSE)))",
             r_text(&name)
         ));
+        // Stata 19 keeps e(sample) in the data as _est_name (a byte, 1 in the sample),
+        // made again at the end when the name is stored again
+        let var = format!("_est_{name}");
+        if let Some(d) = self.data.clone() {
+            if self.esample && self.data_lost.is_none() {
+                self.helpers.insert("stata_est_mark");
+                out.line(format!(
+                    "{d} <- stata_est_mark({d}, {}, stata_esample)",
+                    r_text(&var)
+                ));
+                self.kinds.insert(var.clone(), Kind::Number);
+                self.storage.insert(var.clone(), super::Storage::Byte);
+                self.lost_vars.remove(&var);
+            } else {
+                self.lost_vars.insert(
+                    var.clone(),
+                    format!(
+                        "{who} {name} (Stata keeps e(sample) as {var}, which R does not hold here)"
+                    ),
+                );
+            }
+        }
         self.active_store = Some(name);
         Ok(())
+    }
+
+    /// The `_est_name` variables of `names` taken out of the data, as `estimates drop`,
+    /// `estimates clear` and `eststo clear` take them out in Stata 19.
+    pub(super) fn drop_est_vars(&mut self, names: &[String], out: &mut Out) {
+        let vars: Vec<String> = names.iter().map(|n| format!("_est_{n}")).collect();
+        if vars.is_empty() {
+            return;
+        }
+        if let Some(d) = self.data.clone() {
+            if self.data_lost.is_none() {
+                out.line(format!(
+                    "{d} <- {d}[setdiff(names({d}), c({}))]",
+                    vars.iter()
+                        .map(|v| r_text(v))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
+        }
+        for v in vars {
+            self.kinds.remove(&v);
+            self.storage.remove(&v);
+            self.lost_vars.remove(&v);
+        }
     }
 
     /// Makes the results kept under `name` the active ones (`estimates restore`).
@@ -1258,6 +1307,8 @@ impl Session {
             return Err(no("estimates drop needs names"));
         }
         if names.iter().any(|n| *n == "_all" || *n == "*") {
+            let all: Vec<String> = self.stored_fits.keys().cloned().collect();
+            self.drop_est_vars(&all, out);
             self.stored_fits.clear();
             self.active_store = None;
             out.line("stata_stored <- list()");
@@ -1266,6 +1317,8 @@ impl Session {
         if let Some(n) = names.iter().find(|n| !self.stored_fits.contains_key(**n)) {
             return self.not_stored("drop", n, out);
         }
+        let dropped: Vec<String> = names.iter().map(|n| n.to_string()).collect();
+        self.drop_est_vars(&dropped, out);
         for n in names {
             self.stored_fits.remove(*n);
             if self.active_store.as_deref() == Some(*n) {
@@ -1330,6 +1383,10 @@ const LEAVE_R_ALONE: &[&str] = &[
     "_rcraft_program_begin",
     "_rcraft_program_end",
     "_rcraft_fail",
+    // marginsplot draws the margins and leaves their r() (Stata 19)
+    "marginsplot",
+    // putexcel set and its writes leave r() (Stata 19)
+    "putexcel",
     "which",
     "return",
     "parmest",
@@ -1605,7 +1662,16 @@ pub(super) const R_TTEST: &[&str] = &[
     "sd",
     "level",
 ];
-pub(super) const R_MARGINS: &[&str] = &["N", "level", "cmd", "est_cmd", "est_cmdline", "b", "V"];
+pub(super) const R_MARGINS: &[&str] = &[
+    "N",
+    "level",
+    "cmd",
+    "est_cmd",
+    "est_cmdline",
+    "b",
+    "V",
+    "table",
+];
 
 /// The r() Stata leaves that R has nothing to give for, and why.
 fn r_not_kept(cmd: &str, name: &str) -> Option<&'static str> {
@@ -2373,6 +2439,9 @@ impl Session {
         let (sub, rest) = super::first_word(&c.parts.main);
         match sub {
             "clear" => {
+                // only eststo's own _est_ variables go (estimates store's stay, Stata 19)
+                let own = self.eststo_names.clone();
+                self.drop_est_vars(&own, out);
                 self.stored_fits.clear();
                 self.eststo_names.clear();
                 self.active_store = None;
@@ -2674,3 +2743,13 @@ pub(super) fn valid_date_format(f: &str) -> bool {
     }
     true
 }
+
+/// `_est_name`: e(sample) kept in the data by `estimates store` and `eststo`, a byte
+/// labelled as Stata 19 labels it, at the end of the variables (made again there when
+/// the name is stored again).
+pub(super) const EST_MARK_HELPER: &str = r#"stata_est_mark <- function(d, var, es) {
+  if (length(es) != nrow(d)) stop("RCraft: the rows changed since the model, so ", var, " (its e(sample)) is not known here; not translated yet", call. = FALSE)
+  d[[var]] <- NULL
+  d[[var]] <- structure(as.numeric(es), label = "esample() from estimates store", format.stata = "%8.0g")
+  d
+}"#;

@@ -4347,3 +4347,25 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   Stata's; corpus `centile.do`, 9 results to 1e-9.
 - **nlcom** (a0b27a7) after regress, logit, probit and poisson: delta-method standard errors from
   extrapolated central differences, Stata 19's table and r(b), r(V); corpus `nlcom.do`, 7 results to 1e-8.
+
+## marginsplot, margins' r(table) and at() order, putexcel matrix(), _est_ variables, 2026-11-13
+
+- Observed in Stata 19 with made-up data and FMDLII run whole in Stata (`plan/stata/marginsplot.md`;
+  corpus `marginsplot.do`):
+  - margins (not posted) leaves r(table) with Stata's full names (1bn._at 2._at); at() over several
+    variables is numbered in the model's order of the variables, the last changing fastest (RCraft had
+    the first changing fastest); after xtreg its statistics are z.
+  - `marginsplot` after margins with one at(): Stata's line and the graph, r() left alone; `putexcel`
+    leaves r() too.
+  - `putexcel cell = matrix(M) [, names rownames colnames]` as Stata writes it.
+  - `estimates store` and `eststo` keep e(sample) in the data as `_est_name` (a byte at the end);
+    drop and clear take them out as Stata does.
+- FMDLII: every line translated; the two lines that stop in R stop in Stata too (eqyr3 not found,
+  r(111)); margins_output.xlsx as Stata's (names exact, numbers to 1e-9), HDL_LA_equilibria.dta the same
+  14 variables and values (with `_est_level`), its 7 model lines Stata's. YFBPT6 unchanged (every line,
+  its tables byte for byte, 4,553 model lines).
+- The 11 packages, run dry: 94.9% of run lines, 82.7% of source lines.
+- The core-statistics session's next steps (from their commit messages): `sktest` with Royston's
+  adjustment (01c9887, corpus `sktest.do`, 60 results to 1e-9); ci poisson and exposure(), ci variances
+  bonett and sd, centile cci, normal and meansd, nlcom after nbreg, ologit, oprobit, xtreg, ivregress,
+  clogit and stcox (9a4c2b2); nlcom's df(), noheader and iterate() (97b0e90).

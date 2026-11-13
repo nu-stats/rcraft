@@ -126,7 +126,11 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
       x <- a[[v]]
       if (is.character(x)) stat(x, v) else x
     })
-    g <- expand.grid(a, KEEP.OUT.ATTRS = FALSE)
+    # the variables in the model's order (e(b)'s), the last changing fastest, as Stata 19
+    # numbers the _at: regress y w c.a##c.p, at(p=(0 1) a=(0 1)) is w a p
+    covs <- unique(sub("^.*\\.", "", unlist(strsplit(names(b), "#", fixed = TRUE))))
+    a <- a[order(match(names(a), covs, nomatch = length(covs) + seq_along(a)))]
+    g <- expand.grid(rev(a), KEEP.OUT.ATTRS = FALSE)[names(a)]
     for (r in seq_len(nrow(g))) ats[[length(ats) + 1]] <- as.list(g[r, , drop = FALSE])
   }
   at_names <- if (length(ats) > 0) paste0(seq_along(ats), "._at") else ""
@@ -328,7 +332,8 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
       return(invisible(list(b = m, V = Vm, full_b = full_b, full_V = full_V)))
     }
     tab <- stata_coefs(m, Vm, df, level, label = what)
-    return(invisible(list(b = m, V = Vm, table = tab, full_b = full_b, full_V = full_V)))
+    return(invisible(list(b = m, V = Vm, table = tab, full_b = full_b, full_V = full_V, at = ats, df = df, level = level,
+                          at_vars = if (length(at)) names(at[[1]]) else character())))
   }
   # contrasts of the margins of one term: each level against the first (r.),
   # every pair (pwcompare), or the joint test that they are all equal
@@ -389,6 +394,50 @@ pub(super) const MARGINS_HELPER: &str = r##"stata_margins <- function(fit, data,
   }
   tab <- stata_coefs(cc, Vc, df, level, label = "Contrast")
   invisible(list(b = cc, V = Vc, table = tab))
+}
+# the names Stata 19 gives margins' columns: the first level of each term is k bn.
+# (1bn._at 2._at, 1bn.g 2.g 3.g), as colfullnames r(b) shows
+stata_margins_names <- function(nm) {
+  one <- grepl("^[0-9]+\\.[A-Za-z_][A-Za-z0-9_]*$", nm)
+  term <- sub("^[0-9]+\\.", "", nm)
+  first <- one & !duplicated(ifelse(one, term, paste0("\001", seq_along(nm))))
+  ifelse(first, sub("^([0-9]+)\\.", "\\1bn.", nm), nm)
+}
+# r(table) of margins (not posted): b se z (t with the model's df) pvalue ll ul df crit
+# eform, a column each margin
+stata_margins_table <- function(m) {
+  # with the base levels (0) when margins has them, as r(b)
+  b <- if (is.null(m$full_b)) m$b else m$full_b
+  se <- sqrt(pmax(diag(as.matrix(if (is.null(m$full_V)) m$V else m$full_V)), 0))
+  df <- if (is.null(m$df)) Inf else m$df
+  lv <- if (is.null(m$level)) 0.95 else m$level
+  small <- is.finite(df)
+  z <- ifelse(se > 0, b / se, NA)
+  p <- if (small) 2 * stats::pt(-abs(z), df) else 2 * stats::pnorm(-abs(z))
+  crit <- if (small) stats::qt((1 + lv) / 2, df) else stats::qnorm((1 + lv) / 2)
+  tab <- rbind(b = b, se = se, z = z, pvalue = p, ll = ifelse(se > 0, b - crit * se, NA),
+               ul = ifelse(se > 0, b + crit * se, NA), df = if (small) df else NA, crit = crit, eform = 0)
+  if (small) rownames(tab)[3] <- "t"
+  colnames(tab) <- stata_margins_names(names(b))
+  tab
+}
+# marginsplot after margins with at(): the margins against the first at() variable,
+# a line for each value of the others, with their intervals (drawn by ggplot2)
+stata_marginsplot <- function(m, vars) {
+  cat("\nVariables that uniquely identify margins: ", paste(vars, collapse = " "), "\n", sep = "")
+  tab <- stata_margins_table(m)
+  ats <- m$at
+  if (length(ats) != ncol(tab)) stop("RCraft: marginsplot of these margins is not translated yet", call. = FALSE)
+  d <- data.frame(x = vapply(ats, function(a) as.numeric(a[[vars[1]]]), 0), b = tab["b", ],
+                  ll = tab["ll", ], ul = tab["ul", ])
+  g <- ggplot2::ggplot(d, ggplot2::aes(x = x, y = b))
+  if (length(vars) > 1) {
+    d$grp <- vapply(ats, function(a) paste(vapply(vars[-1], function(v) paste0(v, "=", format(a[[v]])), ""), collapse = " "), "")
+    g <- ggplot2::ggplot(d, ggplot2::aes(x = x, y = b, colour = grp, group = grp)) + ggplot2::labs(colour = NULL)
+  }
+  g + ggplot2::geom_line() + ggplot2::geom_point() +
+    ggplot2::geom_errorbar(ggplot2::aes(ymin = ll, ymax = ul), width = 0) +
+    ggplot2::labs(x = vars[1], y = "Linear prediction", title = "Adjusted predictions with 95% CIs")
 }"##;
 
 impl Session {
@@ -771,8 +820,14 @@ impl Session {
                     .join(", ")
             )
         };
+        // after xtreg Stata 19's margins are z statistics (its r(table) df is .), fe and re
+        let df = if matches!(est.fit, Fit::Xtreg) {
+            "Inf"
+        } else {
+            "stata_df"
+        };
         let call = format!(
-            "stata_margins({model}, {data}, stata_b, stata_vcov, stata_df, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond}{wts}{mc}{lv})",
+            "stata_margins({model}, {data}, stata_b, stata_vcov, {df}, type = \"{ty}\", terms = {terms}, within = {within}, at = {at}, dydx = {dydx}, eyex = {eyex}, dyex = {dyex}, eydx = {eydx}, factors = {factors}, atmeans = {}, level = {}, expression = {}, outcomes = {outcomes}, compare = {}{uncond}{wts}{mc}{lv})",
             r_logical(atmeans),
             r_number(level),
             r_text(&expression),
@@ -837,11 +892,18 @@ impl Session {
             // contrasts) with their variance, as a row vector and a matrix
             if let (Some(ec), false) = (&est_cmd, self.weighted_fit) {
                 out.line(format!(
-                    "stata_r <- list(N = sum(stata_esample), level = {}, cmd = \"margins\", est_cmd = {}, est_cmdline = stata_e$cmdline, b = if (is.null(stata_m$full_b)) matrix(stata_m$b, 1, dimnames = list(\"r1\", names(stata_m$b))) else matrix(stata_m$full_b, 1, dimnames = list(\"r1\", names(stata_m$full_b))), V = if (is.null(stata_m$full_V)) stata_m$V else stata_m$full_V)",
+                    "stata_r <- list(N = sum(stata_esample), level = {}, cmd = \"margins\", est_cmd = {}, est_cmdline = stata_e$cmdline, b = local({{ mb <- if (is.null(stata_m$full_b)) stata_m$b else stata_m$full_b; matrix(mb, 1, dimnames = list(\"r1\", stata_margins_names(names(mb)))) }}), V = local({{ mv <- if (is.null(stata_m$full_V)) stata_m$V else stata_m$full_V; dimnames(mv) <- list(stata_margins_names(rownames(mv)), stata_margins_names(colnames(mv))); mv }}), table = stata_margins_table(stata_m))",
                     r_number(super::returned::percent(level)),
                     r_text(ec)
                 ));
                 self.r_new = Some((super::returned::R_MARGINS, "margins".into()));
+                // kept for marginsplot, which is translated after one at() and no terms
+                out.line("stata_mplot <- stata_m");
+                self.mplot_ok = c.parts.main.trim().is_empty()
+                    && opts.0.iter().filter(|o| o.is("at", 2)).count() == 1
+                    && ["dydx", "eyex", "dyex", "eydx"]
+                        .iter()
+                        .all(|o| !opts.has(o, 4));
             }
             out.line("rm(stata_m)");
         }
@@ -1015,6 +1077,68 @@ pub(super) const UNCONDITIONAL_HELPER: &str = r#"stata_unconditional <- function
   }
   list(IF = IF, cluster = cluster, c = c)
 }"#;
+impl Session {
+    /// `marginsplot` after `margins, at()` (not posted): Stata's line naming the
+    /// variables, a graph of the margins against the first, and r() left alone.
+    pub(super) fn marginsplot(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        // the options that only change the graph's look
+        let look = [
+            ("title", 2),
+            ("subtitle", 3),
+            ("xtitle", 2),
+            ("ytitle", 2),
+            ("xlabel", 3),
+            ("ylabel", 3),
+            ("legend", 3),
+            ("scheme", 3),
+            ("name", 4),
+            ("graphregion", 6),
+            ("plotregion", 5),
+            ("noci", 4),
+        ];
+        if let Some(o) = opts.other(&look) {
+            return Err(no(format!(
+                "marginsplot with the option {o} is not translated yet"
+            )));
+        }
+        if !c.parts.main.trim().is_empty() || c.parts.if_exp.is_some() {
+            return Err(no("marginsplot takes no varlist or if"));
+        }
+        if !matches!(&self.r_ret, super::returned::Returned::Kept { cmd, .. } if cmd == "margins") {
+            return Err(no(
+                "marginsplot is translated right after margins (not posted) whose r() R holds",
+            ));
+        }
+        if !self.mplot_ok {
+            return Err(no(
+                "marginsplot is translated after margins with one at() and no terms or effects, so far",
+            ));
+        }
+        self.helpers.insert("stata_margins");
+        self.helpers.insert("stata_coefs");
+        out.package("ggplot2");
+        // the variables at() sets to more than one value, in its order
+        out.line(
+            "stata_graph <- local({ stata_av <- stata_mplot$at_vars; \
+             stata_av <- stata_av[vapply(stata_av, function(v) length(unique(vapply(stata_mplot$at, function(a) as.numeric(a[[v]]), 0))) > 1, TRUE)]; \
+             if (!length(stata_av) || any(lengths(stata_mplot$at) != length(stata_mplot$at[[1]]))) stop(\"RCraft: marginsplot of margins without at() lists is not translated yet\", call. = FALSE); \
+             if (!all(grepl(\"^[0-9]+[.]_at$\", names(stata_mplot$b)))) stop(\"RCraft: marginsplot of margins with terms or effects is not translated yet\", call. = FALSE); \
+             stata_marginsplot(stata_mplot, stata_av) })",
+        );
+        if !self.quiet(c) {
+            out.line("print(stata_graph)");
+        }
+        out.caveat("marginsplot drawn by ggplot2, so its look is R's");
+        self.graph_drawn = true;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

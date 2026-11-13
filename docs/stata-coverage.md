@@ -126,6 +126,7 @@ at the worst it fared in any run:
 | With cluster2 (2026-11-06) | 5149 | 3416 | 948 | 785 | 78.3% |
 | An error ends the loops and programs around it (2026-11-06) | 5187 | 3457 | 941 | 789 | 78.6% |
 | The add-ons the packages use, cmclogit, rreg, esttab matrix() (2026-11-13) | 5187 | 3632 | 766 | 789 | 82.6% |
+| marginsplot, margins r(table), putexcel matrix() (2026-11-13) | 5187 | 3635 | 763 | 789 | 82.7% |
 
 Stata's matrix commands (`matrices.do`: `matrix A = ...` with `J()`, `I()`, joins, products, sums,
 transposes, `invsym()`, `inv()`, `vecdiag()`, `diag()`, `e()`; elements read and put in place; `nullmat()`;

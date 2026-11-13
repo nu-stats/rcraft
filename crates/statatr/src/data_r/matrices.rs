@@ -260,6 +260,8 @@ pub(super) const MATRIX_LIST_HELPER: &str = r##"stata_matrix_list <- function(m,
   top <- ifelse(grepl("#", short, fixed = TRUE), sub("^(.*#).*$", "\\1", short),
                 ifelse(grepl(".", short, fixed = TRUE), sub("^(.*\\.).*$", "\\1", short), ""))
   bottom <- ab(substring(short, nchar(top) + 1))
+  # 1bn._at shows as 1. over _at, as Stata lists it
+  top <- gsub("([0-9])bn\\.", "\\1.", top)
   rl <- ab(rn)
   vals <- matrix(vapply(as.vector(m), function(v) stata_fmt(v, format, trim = TRUE), ""), nrow(m))
   W <- 2 + max(nchar(vals), nchar(bottom))

@@ -12,7 +12,10 @@
 //!   `sheet()` the sheet is `Sheet1`, added after the others if missing.
 //! - `file … saved` after each write, as Stata; a write before any `set` is
 //!   r(198), as is a column past XFD.
-//! - Not yet (refused): cell ranges, `matrix()`, `etable`, `formula()`,
+//! - `cell = matrix(M) [, names rownames colnames]`: the values from the cell, the
+//!   names on the first row and column when asked (Stata's full names, 1bn._at),
+//!   as Stata 19 writes them (`plan/stata/marginsplot.md`).
+//! - Not yet (refused): cell ranges, matrices with equation names, `etable`, `formula()`,
 //!   pictures, formatting options (bold, nformat(), ...), `sheet(, replace)`,
 //!   .xls, `putexcel save`/`close`/`describe`, and a value other than a
 //!   string, a number or `( expression )`.
@@ -49,6 +52,27 @@ stata_px_put <- function(p, cells) {
   cat("file ", p$file, " saved\n", sep = "")
   p$fresh <- FALSE
   p
+}
+# cell = matrix(M) [, names rownames colnames]: the values from the cell down and right,
+# the column names on the first row and the row names in the first column when asked
+# (the corner left as it was), a missing value an empty cell, as Stata 19 writes them
+stata_px_matrix <- function(p, at, M, rows = FALSE, cols = FALSE) {
+  if (is.null(M)) stop("matrix not found (Stata: r(111))", call. = FALSE)
+  why <- attr(M, "stata_names")
+  if (!is.null(why)) stop("RCraft: putexcel of a matrix not laid out here as Stata keeps it: ", why, call. = FALSE)
+  M <- as.matrix(M)
+  rn <- if (is.null(rownames(M))) paste0("r", seq_len(nrow(M))) else rownames(M)
+  cn <- if (is.null(colnames(M))) paste0("c", seq_len(ncol(M))) else colnames(M)
+  if ((rows && any(grepl(":", rn))) || (cols && any(grepl(":", cn)))) stop("RCraft: putexcel of a matrix with equation names is not translated yet", call. = FALSE)
+  c0 <- openxlsx2::col2int(gsub("[0-9]", "", at))
+  r0 <- as.integer(gsub("[A-Z]", "", at))
+  if (c0 + rows + ncol(M) - 1 > 16384 || r0 + cols + nrow(M) - 1 > 1048576) stop("Excel range out of range (Stata: r(198))", call. = FALSE)
+  cells <- list()
+  put <- function(r, c, v) cells[[paste0(openxlsx2::int2col(c), r)]] <<- v
+  if (cols) for (j in seq_len(ncol(M))) put(r0, c0 + rows + j - 1, cn[j])
+  if (rows) for (i in seq_len(nrow(M))) put(r0 + cols + i - 1, c0, rn[i])
+  for (i in seq_len(nrow(M))) for (j in seq_len(ncol(M))) put(r0 + cols + i - 1, c0 + rows + j - 1, unname(M[i, j]))
+  stata_px_put(p, cells)
 }"##;
 
 /// A cell's name upper-cased and checked: `Ok(None)` for a column past XFD
@@ -70,6 +94,15 @@ fn cell(name: &str) -> Result<Option<String>, Untranslated> {
         return Err(no(format!("putexcel {name}: a row Excel does not have")));
     }
     Ok((letters.len() <= 3 && column <= 16_384).then_some(up))
+}
+
+/// `cell = matrix(exp)` alone: the cell and the expression inside matrix().
+fn matrix_write(main: &str) -> Option<(String, String)> {
+    let (at, value) = main.split_once('=')?;
+    let at = at.trim();
+    let inner = value.trim().strip_prefix("matrix(")?.strip_suffix(')')?;
+    (!at.is_empty() && !at.contains(char::is_whitespace))
+        .then(|| (at.to_string(), inner.to_string()))
 }
 
 /// A number as Stata writes it in a do-file, for R; `.` is missing.
@@ -108,6 +141,38 @@ impl Session {
                 return Err(no(format!("putexcel {first} is not translated yet")))
             }
             _ => {}
+        }
+        // cell = matrix(M) [, names rownames colnames], alone on its line
+        if let Some((at, inner)) = matrix_write(main) {
+            if let Some(o) = opts.other(&[("names", 5), ("rownames", 8), ("colnames", 8)]) {
+                return Err(no(format!(
+                    "putexcel with the option {o} (a cell's format) is not translated yet"
+                )));
+            }
+            let Some(up) = cell(&at)? else {
+                out.line(format!(
+                    "stop({}, call. = FALSE)",
+                    r_text(&format!("{at}: Excel column out of range (Stata: r(198))"))
+                ));
+                return Ok(());
+            };
+            let (m, kind) = self.matrix_expr(inner.trim(), out)?;
+            if !matches!(kind, super::mexpr::MKind::Matrix) {
+                return Err(no(format!(
+                    "putexcel {at} = matrix({inner}): a matrix is translated here"
+                )));
+            }
+            let names = opts.has("names", 5);
+            self.helpers.insert("stata_putexcel");
+            self.helpers.insert("stata_matrix");
+            out.package("openxlsx2");
+            out.line(format!(
+                "stata_putexcel <- stata_px_matrix(get0(\"stata_putexcel\"), {}, {m}, rows = {}, cols = {})",
+                r_text(&up),
+                super::stats::r_logical(names || opts.has("rownames", 8)),
+                super::stats::r_logical(names || opts.has("colnames", 8))
+            ));
+            return Ok(());
         }
         if let Some(o) = opts.other(&[]) {
             return Err(no(format!(

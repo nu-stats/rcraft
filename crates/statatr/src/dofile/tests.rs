@@ -807,7 +807,8 @@ fn putexcel_leaves_the_model_and_the_data_alone() {
         .collect();
     assert_eq!(put.len(), 3);
     assert!(put[0].result.is_ok() && put[1].result.is_ok(), "{put:?}");
-    assert!(put[2].result.is_err());
+    // cell = matrix(e(b)) is translated too (as Stata 19 writes it)
+    assert!(put[2].result.is_ok(), "{put:?}");
     let code = put[1]
         .result
         .as_ref()

@@ -959,6 +959,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
         "stata_cm" => cm::CM_HELPER,
         "stata_rreg" => rreg::RREG_HELPER,
+        "stata_est_mark" => returned::EST_MARK_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_strmatch" => STRMATCH_HELPER,
@@ -1225,6 +1226,9 @@ struct Session {
     frame: Option<String>,
     /// cmset's case and alternatives variables.
     cmset: Option<(String, String)>,
+    /// Whether the last margins (not posted) is one marginsplot is translated for:
+    /// one at() of lists, no terms or effects.
+    mplot_ok: bool,
     /// The command being translated asked whether it is quiet, so it hides
     /// its own output.
     quiet_asked: std::cell::Cell<bool>,
@@ -2278,6 +2282,7 @@ impl Session {
             "cmset" => self.cmset(c, &opts, out),
             "cmclogit" => self.cmclogit(c, &opts, out),
             "rreg" => self.rreg(c, &opts, out),
+            "marginsplot" => self.marginsplot(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),
