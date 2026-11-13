@@ -1,8 +1,12 @@
 name: ci
 
 on:
+  # main and pull requests only: a branch pushed on its way to main is tested
+  # once, by its pull request or on main
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   ci:
@@ -18,6 +22,9 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       - name: Linux window libraries
         if: runner.os == 'Linux'
         run: |
@@ -36,6 +43,8 @@ jobs:
         with:
           r-version: ${{ steps.pins.outputs.r }}
           use-public-rspm: true
+          # the packages come built from the snapshot, so no compiler is needed
+          rtools-version: none
       - name: Use the pinned R everywhere
         shell: bash
         run: |
@@ -43,12 +52,19 @@ jobs:
           # first unless R_HOME says which one to use
           echo "R_HOME=$(Rscript -e 'cat(R.home())')" >> "$GITHUB_ENV"
           Rscript --version
+      - name: Cache the R packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: r-lib-${{ runner.os }}-${{ steps.pins.outputs.r }}-${{ steps.pins.outputs.snapshot }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: r-lib-${{ runner.os }}-${{ steps.pins.outputs.r }}-${{ steps.pins.outputs.snapshot }}-
       - name: R packages the file-format tests use
         shell: bash
         env:
           SNAPSHOT: ${{ steps.pins.outputs.snapshot }}
         run: |
           set -o pipefail
+          # only what the cache (keyed on the R and snapshot pins) does not have
           # the dated snapshot in ENVIRONMENT, so the packages match the pinned R
           if [ "$RUNNER_OS" = "Linux" ]; then
             export REPO="https://packagemanager.posit.co/cran/__linux__/$(lsb_release -cs)/$SNAPSHOT"
@@ -56,7 +72,7 @@ jobs:
             export REPO="https://packagemanager.posit.co/cran/$SNAPSHOT"
           fi
           echo "package repository: $REPO"
-          Rscript -e 'install.packages(c("readxl", "writexl", "haven", "arrow", "dplyr", "MASS", "nnet", "sandwich", "lmtest", "marginaleffects", "readr", "tidyr", "car", "ggplot2", "openxlsx2", "fixest", "plm", "survey", "sampleSelection", "lme4"), repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("writexl"), requireNamespace("haven"), requireNamespace("arrow"), requireNamespace("dplyr"), requireNamespace("MASS"), requireNamespace("nnet"), requireNamespace("sandwich"), requireNamespace("lmtest"), requireNamespace("marginaleffects"), requireNamespace("readr"), requireNamespace("tidyr"), requireNamespace("car"), requireNamespace("ggplot2"), requireNamespace("openxlsx2"), requireNamespace("fixest"), requireNamespace("plm"), requireNamespace("survey"), requireNamespace("sampleSelection"), requireNamespace("lme4"))' 2>&1 | tee pkgs.log || {
+          Rscript -e 'pk <- c("readxl", "writexl", "haven", "arrow", "dplyr", "MASS", "nnet", "sandwich", "lmtest", "marginaleffects", "readr", "tidyr", "car", "ggplot2", "openxlsx2", "fixest", "plm", "survey", "sampleSelection", "lme4"); need <- setdiff(pk, rownames(installed.packages(lib.loc = Sys.getenv("R_LIBS_USER")))); if (length(need)) install.packages(need, repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("writexl"), requireNamespace("haven"), requireNamespace("arrow"), requireNamespace("dplyr"), requireNamespace("MASS"), requireNamespace("nnet"), requireNamespace("sandwich"), requireNamespace("lmtest"), requireNamespace("marginaleffects"), requireNamespace("readr"), requireNamespace("tidyr"), requireNamespace("car"), requireNamespace("ggplot2"), requireNamespace("openxlsx2"), requireNamespace("fixest"), requireNamespace("plm"), requireNamespace("survey"), requireNamespace("sampleSelection"), requireNamespace("lme4"))' 2>&1 | tee pkgs.log || {
             tail -n 25 pkgs.log | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > pkgs-tail.txt
             echo "::error title=installing readxl, writexl, haven, arrow, dplyr, MASS, nnet, sandwich, lmtest, marginaleffects, tidyr, car, ggplot2, openxlsx2, fixest, plm, survey, sampleSelection and lme4 failed::$(cat pkgs-tail.txt)"
             exit 1

@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use rcraft_engine::{Engine, Item, Outcome, Source};
@@ -185,9 +186,69 @@ fn header<'a>(dofile: &'a str, name: &str) -> Option<&'a str> {
         .find_map(|l| l.strip_prefix(&format!("* {name}: ")))
 }
 
+/// Runs one corpus file in `e` and adds what differs from Stata's
+/// recorded results to `wrong`.
+fn check_file(e: &mut Engine, dir: &Path, name: &str, wrong: &mut Vec<String>) {
+    let dofile = std::fs::read_to_string(dir.join(format!("{name}.do"))).unwrap_or_default();
+    let recorded =
+        std::fs::read_to_string(dir.join(format!("{name}.recorded"))).unwrap_or_default();
+    let stata = results(&recorded);
+    if stata.is_empty() {
+        wrong.push(format!(
+            "{name}: nothing recorded; run cargo xtask stata-record"
+        ));
+        return;
+    }
+    let tol: f64 = header(&dofile, "tolerance")
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or(1e-8);
+    let folder = dir.display().to_string().replace('\\', "/");
+    let text = match run_dofile(e, &folder, &dofile) {
+        Ok(t) => t,
+        Err(why) => {
+            wrong.push(format!("{name}: {why}"));
+            return;
+        }
+    };
+    let got = results(&text);
+    for (key, want) in &stata {
+        let Some(have) = got.get(key) else {
+            wrong.push(format!("{name}: {key} was not printed"));
+            continue;
+        };
+        if have.len() != want.len() {
+            wrong.push(format!(
+                "{name}: {key} has {} values, Stata's {}",
+                have.len(),
+                want.len()
+            ));
+            continue;
+        }
+        for (i, (have, want)) in have.iter().zip(want).enumerate() {
+            let same = (want.is_nan() && have.is_nan())
+                || (have - want).abs() <= tol * want.abs().max(have.abs());
+            if !same {
+                wrong.push(format!(
+                    "{name}: {key} value {} is {have}, Stata's {want} (tolerance {tol})",
+                    i + 1
+                ));
+            }
+        }
+    }
+}
+
+/// How many R sessions share the corpus: `RCRAFT_CORPUS_THREADS`, or the
+/// machine's cores up to 4.
+fn corpus_threads(files: usize) -> usize {
+    std::env::var("RCRAFT_CORPUS_THREADS")
+        .ok()
+        .and_then(|t| t.trim().parse().ok())
+        .unwrap_or_else(|| std::thread::available_parallelism().map_or(1, |n| n.get().min(4)))
+        .clamp(1, files.max(1))
+}
+
 #[test]
 fn the_corpus_gives_statas_results() {
-    let Some(mut e) = engine() else { return };
     let dir = corpus();
     let mut names: Vec<String> = std::fs::read_dir(&dir)
         .map(|r| {
@@ -205,50 +266,37 @@ fn the_corpus_gives_statas_results() {
     if let Ok(only) = std::env::var("RCRAFT_CORPUS_ONLY") {
         names.retain(|n| n.contains(only.as_str()));
     }
-    let mut wrong = Vec::new();
-    for name in &names {
-        let dofile = std::fs::read_to_string(dir.join(format!("{name}.do"))).unwrap_or_default();
-        let recorded =
-            std::fs::read_to_string(dir.join(format!("{name}.recorded"))).unwrap_or_default();
-        let stata = results(&recorded);
-        assert!(
-            !stata.is_empty(),
-            "{name}: nothing recorded; run cargo xtask stata-record"
-        );
-        let tol: f64 = header(&dofile, "tolerance")
-            .and_then(|t| t.trim().parse().ok())
-            .unwrap_or(1e-8);
-        let folder = dir.display().to_string().replace('\\', "/");
-        let text = match run_dofile(&mut e, &folder, &dofile) {
-            Ok(t) => t,
-            Err(why) => panic!("{name}: {why}"),
-        };
-        let got = results(&text);
-        for (key, want) in &stata {
-            let Some(have) = got.get(key) else {
-                wrong.push(format!("{name}: {key} was not printed"));
-                continue;
-            };
-            if have.len() != want.len() {
-                wrong.push(format!(
-                    "{name}: {key} has {} values, Stata's {}",
-                    have.len(),
-                    want.len()
-                ));
-                continue;
-            }
-            for (i, (have, want)) in have.iter().zip(want).enumerate() {
-                let same = (want.is_nan() && have.is_nan())
-                    || (have - want).abs() <= tol * want.abs().max(have.abs());
-                if !same {
-                    wrong.push(format!(
-                        "{name}: {key} value {} is {have}, Stata's {want} (tolerance {tol})",
-                        i + 1
-                    ));
-                }
-            }
-        }
+    // Several R sessions share the files, each taking the next one in turn.
+    // The files write only files named for themselves, so they do not meet.
+    let next = AtomicUsize::new(0);
+    let threads = corpus_threads(names.len());
+    let found: Vec<Option<Vec<String>>> = std::thread::scope(|s| {
+        let workers: Vec<_> = (0..threads)
+            .map(|_| {
+                s.spawn(|| {
+                    let mut e = engine()?;
+                    let mut wrong = Vec::new();
+                    while let Some(name) = names.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        check_file(&mut e, &dir, name, &mut wrong);
+                    }
+                    Some(wrong)
+                })
+            })
+            .collect();
+        workers
+            .into_iter()
+            .map(|w| {
+                w.join()
+                    .unwrap_or_else(|_| Some(vec!["a corpus thread panicked".into()]))
+            })
+            .collect()
+    });
+    // no R session could start: skipped, with the note engine() printed
+    if found.iter().all(Option::is_none) {
+        return;
     }
+    let mut wrong: Vec<String> = found.into_iter().flatten().flatten().collect();
+    wrong.sort();
     assert!(wrong.is_empty(), "{}", wrong.join("\n"));
 }
 

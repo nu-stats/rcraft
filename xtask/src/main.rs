@@ -11,7 +11,8 @@ use std::process::{Command, ExitCode};
 const USAGE: &str = "\
 usage: cargo xtask <task>
 
-  ci                   fmt, clippy, tests, layers, assets and coverage (run before every commit)
+  ci                   fmt, clippy, tests, layers, assets and coverage (run before every commit;
+                       uses cargo-nextest when installed, so the test programs run side by side)
   layers               check that crates only depend on lower layers
   assets               check that every file in assets/ is listed in ATTRIBUTION.md
   coverage [--check]   regenerate docs/coverage.md from the catalog
@@ -53,12 +54,39 @@ fn ci() -> Result {
         "-D",
         "warnings",
     ])?;
-    cargo(&["test", "--workspace", "--quiet"])?;
+    tests()?;
     layers::check()?;
     assets::check()?;
     coverage::run(true)?;
     println!("ci: all checks passed");
     Ok(())
+}
+
+/// The workspace's tests. With cargo-nextest installed the test programs
+/// run side by side (cargo test runs them one after another), and the doc
+/// tests, which nextest does not run, follow; without it, plain cargo test.
+fn tests() -> Result {
+    let cargo_bin = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
+    let nextest = Command::new(cargo_bin)
+        .args(["nextest", "--version"])
+        .current_dir(root())
+        .output()
+        .is_ok_and(|o| o.status.success());
+    if nextest {
+        cargo(&[
+            "nextest",
+            "run",
+            "--workspace",
+            "--no-fail-fast",
+            "--status-level",
+            "fail",
+            "--final-status-level",
+            "slow",
+        ])?;
+        cargo(&["test", "--workspace", "--doc", "--quiet"])
+    } else {
+        cargo(&["test", "--workspace", "--quiet"])
+    }
 }
 
 fn cargo(args: &[&str]) -> Result {
