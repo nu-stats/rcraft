@@ -58,7 +58,8 @@ pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, 
     keep <- intersect(names(rows[[i]]), names(b))
     R[i, keep] <- rows[[i]][keep]
   }
-  for (i in seq_along(labels)) cat(sprintf(" (%d)  %s\n", i, labels[i]))
+  # Stata 19's layout: " ( 1)", F(  2,   192) =   24.21, Prob > F =    0.0000
+  for (i in seq_along(labels)) cat(sprintf(" (%2d)  %s\n", i, labels[i]))
   dropped <- which(rowSums(R != 0) == 0)
   # r(dropped_1) and the like, one for each constraint dropped
   stata_dropped <- function(i) if (length(i)) stats::setNames(as.list(rep(1, length(i))), paste0("dropped_", i)) else list()
@@ -89,12 +90,12 @@ pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, 
   if (is.finite(stata_df)) {
     F <- W / q
     p <- stats::pf(F, q, stata_df, lower.tail = FALSE)
-    cat(sprintf("\n       F(%d, %g) = %10.2f\n            Prob > F = %10.4f\n", q, stata_df, F, p))
+    cat(sprintf("\n       F(%3d, %5g) = %7.2f\n            Prob > F = %9.4f\n", q, stata_df, F, p))
     if (ret) assign("stata_r", c(drop_r, list(df_r = stata_df, F = F, df = q, p = p)), envir = env)
     invisible(c(F = F, df = q, df_r = stata_df, p = p))
   } else {
     p <- stats::pchisq(W, q, lower.tail = FALSE)
-    cat(sprintf("\n           chi2(%d) = %10.2f\n         Prob > chi2 = %10.4f\n", q, W, p))
+    cat(sprintf("\n           chi2(%3d) = %7.2f\n         Prob > chi2 = %9.4f\n", q, W, p))
     if (ret) assign("stata_r", c(drop_r, list(chi2 = W, df = q, p = p)), envir = env)
     invisible(c(chi2 = W, df = q, p = p))
   }

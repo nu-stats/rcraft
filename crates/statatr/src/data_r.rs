@@ -74,6 +74,7 @@ mod svy;
 mod tables;
 mod tabm;
 mod tabstat;
+mod testparm;
 mod ts;
 mod tsreg;
 mod weights;
@@ -937,6 +938,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_revrs" => revrs::REVRS_HELPER,
         "stata_tabm" => tabm::TABM_HELPER,
         "stata_tabstat" => tabstat::TABSTAT_HELPER,
+        "stata_testparm" => testparm::TESTPARM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
         "stata_cm" => cm::CM_HELPER,
@@ -2338,6 +2340,7 @@ impl Session {
             "mlogit" => self.ml(c, &opts, out, model::Fit::Mlogit),
             "predict" => self.predict(c, &opts, out),
             "test" => self.test(c, &opts, out),
+            "testparm" => self.testparm(c, &opts, out),
             "lincom" => self.lincom(c, &opts, out),
             "estat" => self.estat(c, &opts, out),
             "margins" => self.margins(c, &opts, out),
@@ -4823,7 +4826,7 @@ estat ic");
         // so do the commands that only read the model, unless they post
         let out = r("use s
 regress y x
-testparm x
+nlcom _b[x]
 lincom x
 estimates store m1
 lincom x

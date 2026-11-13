@@ -205,6 +205,7 @@ pub const COMMANDS: &[&str] = &[
     "tempname",
     "tempvar",
     "test",
+    "testparm",
     "tokenize",
     "tostring",
     "tsset",
@@ -674,6 +675,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("tabm", &["missing"]),
+    ("testparm", &["equal"]),
     (
         "tabstat",
         &[
