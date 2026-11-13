@@ -5,7 +5,7 @@
 //! nothing is installed, updated or removed without a clear yes to a list that
 //! shows the source and the exact R call (AGENTS.md section 1).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{self, RichText};
 use rcraft_engine::sources::{Found, Lookup, LookupState, SourceLookups};
@@ -21,9 +21,10 @@ use rcraft_rcodegen::sources::{
     check_path, describe_local_code, install_bioc_code, install_github_code, install_local_code,
     install_universe_code, LocalKind,
 };
+use rcraft_rhost::library::{other_versions, packages_in, said_not_now, say_not_now, KeptPackage};
 use rcraft_rhost::Platform;
 use rcraft_rpkg::describe::{describe, Source};
-use rcraft_rpkg::index::Package;
+use rcraft_rpkg::index::{Index, Package};
 use rcraft_rpkg::lockfile::{restore_plan, Action, Entry, Lock, Restore};
 use rcraft_rpkg::plan::{compare_versions, plan, updates, Plan, Step, Why};
 use rcraft_rpkg::provider::{is_universe, parse_github, Provider};
@@ -45,6 +46,9 @@ pub enum Tab {
     List,
     /// Bioconductor, r-universe, GitHub and local files.
     Sources,
+    /// The packages RCraft installed for another R version, to install again
+    /// for this one.
+    OtherR,
 }
 
 /// What the window asks the app to run.
@@ -204,6 +208,12 @@ pub struct PackagesWindow {
     r_version_number: String,
     /// RCraft's own library for this R's minor version, once the engine has said.
     own_library: Option<String>,
+    /// The From another R tab: the other versions' packages (read for
+    /// `other_read_for`), the version shown, and the packages the user unticked.
+    other: Vec<(String, Vec<KeptPackage>)>,
+    other_read_for: Option<String>,
+    other_pick: Option<String>,
+    other_unticked: HashSet<String>,
     mirror_text: String,
     mirror_note: Option<String>,
     show_mirror: bool,
@@ -254,6 +264,10 @@ impl Default for PackagesWindow {
             rc_note: None,
             r_version_number: String::new(),
             own_library: None,
+            other: Vec::new(),
+            other_read_for: None,
+            other_pick: None,
+            other_unticked: HashSet::new(),
             mirror_text: String::new(),
             mirror_note: None,
             show_mirror: false,
@@ -553,6 +567,7 @@ installation of package 'fixest' had non-zero exit status"
 
     pub fn open_on(&mut self, tab: Tab) {
         self.open = true;
+        self.other_read_for = None;
         self.tab = tab;
         self.r.stale = true;
     }
@@ -564,6 +579,9 @@ installation of package 'fixest' had non-zero exit status"
             return;
         };
         self.own_library = engine.library();
+        if self.other_read_for != self.own_library {
+            self.read_other_versions();
+        }
         if self.r_version_number.is_empty() {
             self.r_version_number = r_number(engine.r_version());
         }
@@ -810,6 +828,7 @@ installation of package 'fixest' had non-zero exit status"
                     Tab::Installed => run = self.installed_tab(ui, pal, index, r_present, r_ready),
                     Tab::List => run = self.list_tab(ui, pal, index, r_present, r_ready),
                     Tab::Sources => run = self.sources_tab(ui, pal, index, r_present, r_ready),
+                    Tab::OtherR => run = self.other_r_tab(ui, pal, index, r_present, r_ready),
                 }
             });
         self.open = open;
@@ -1005,6 +1024,7 @@ installation of package 'fixest' had non-zero exit status"
             ui.selectable_value(&mut self.tab, Tab::Installed, "Installed");
             ui.selectable_value(&mut self.tab, Tab::Sources, "Other sources");
             ui.selectable_value(&mut self.tab, Tab::List, "Project list");
+            ui.selectable_value(&mut self.tab, Tab::OtherR, "From another R");
             let wants_help = &mut self.wants_help;
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 // first in a right-to-left row is the far right: Help stays clear of
@@ -2304,6 +2324,328 @@ impl PackagesWindow {
                                 Action::Skip(why) => (format!("left alone: {why}"), pal.warning),
                             };
                             ui.label(RichText::new(text).small().color(color));
+                            ui.end_row();
+                        }
+                    });
+            });
+        run
+    }
+}
+
+/// One package RCraft installed for another R version, as the From another R
+/// tab lists it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Carry {
+    name: String,
+    /// The version the other R has.
+    had: String,
+    /// CRAN's version now, when the package list has it.
+    cran: Option<String>,
+    /// Why it cannot be installed from here, when it cannot.
+    blocked: Option<String>,
+}
+
+/// The packages of another R version that this R does not have yet: not the
+/// ones that come with R, not the ones this R can already load from any of its
+/// libraries. With the CRAN package list, a package CRAN lacks is listed but
+/// blocked, with where it came from.
+fn carry_rows(
+    packages: &[KeptPackage],
+    installed: &HashMap<String, String>,
+    index: Option<&Index>,
+) -> Vec<Carry> {
+    packages
+        .iter()
+        .filter(|p| !matches!(p.priority.as_str(), "base" | "recommended"))
+        .filter(|p| !installed.contains_key(&p.name))
+        .map(|p| {
+            let on_cran = index.and_then(|ix| ix.get(&p.name));
+            let blocked = match (index, on_cran) {
+                (Some(_), None) if p.repository.is_empty() || p.repository == "CRAN" => {
+                    Some("not on CRAN now (from GitHub or a file?): use Other sources".to_string())
+                }
+                (Some(_), None) => Some(format!(
+                    "not on CRAN: it came from {}, so use Other sources",
+                    p.repository
+                )),
+                _ => None,
+            };
+            Carry {
+                name: p.name.clone(),
+                had: p.version.clone(),
+                cran: on_cran.map(|c| c.version.clone()),
+                blocked,
+            }
+        })
+        .collect()
+}
+
+/// `4.4` from `4.4.3`.
+fn minor_of(version: &str) -> String {
+    let mut parts = version.split('.');
+    match (parts.next(), parts.next()) {
+        (Some(a), Some(b)) => format!("{a}.{b}"),
+        _ => version.to_string(),
+    }
+}
+
+impl PackagesWindow {
+    /// Reads again which packages RCraft has for the other R versions.
+    fn read_other_versions(&mut self) {
+        self.other = self
+            .own_library
+            .as_deref()
+            .map(|l| other_versions(std::path::Path::new(l)))
+            .unwrap_or_default();
+        self.other_read_for = self.own_library.clone();
+        let still_there = self
+            .other_pick
+            .as_ref()
+            .is_some_and(|p| self.other.iter().any(|(f, _)| f == p));
+        if !still_there {
+            self.other_pick = self.other.first().map(|(f, _)| f.clone());
+        }
+    }
+
+    /// Once R has started: opens the window on the From another R tab when
+    /// RCraft has nothing for this R yet, has packages for another R, and the
+    /// user has not said "Not now" for this R. Nothing is installed.
+    pub fn offer_other_r(&mut self, engine: &Engine) {
+        let Some(library) = engine.library() else {
+            return;
+        };
+        let path = std::path::Path::new(&library);
+        if !packages_in(path).is_empty() || said_not_now(path) || other_versions(path).is_empty() {
+            return;
+        }
+        self.own_library = Some(library);
+        self.read_other_versions();
+        self.open_on(Tab::OtherR);
+    }
+
+    /// The packages of the version shown that this R does not have yet.
+    fn other_rows(&self, index: Option<&Index>) -> (String, Vec<Carry>) {
+        let Some((folder, packages)) = self
+            .other_pick
+            .as_ref()
+            .and_then(|p| self.other.iter().find(|(f, _)| f == p))
+            .or_else(|| self.other.first())
+        else {
+            return (String::new(), Vec::new());
+        };
+        (
+            folder.clone(),
+            carry_rows(packages, &self.installed_map(), index),
+        )
+    }
+
+    /// Asks for the yes to install `names` (from the version `from`) for this R.
+    fn begin_carry(&mut self, index: &PackageIndexService, names: &[String], from: &str) {
+        let this = minor_of(&self.r_version_number);
+        let note = format!(
+            "These are installed for R {this} from CRAN's current versions, which can be newer \
+             than the ones R {from} has. The packages they need come too."
+        );
+        let installed = self.installed_map();
+        self.begin_install_of(
+            index,
+            names,
+            &installed,
+            InstallFrom::Default,
+            "Packages > From another R",
+            Some(note),
+        );
+    }
+
+    fn other_r_tab(
+        &mut self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        index: &mut PackageIndexService,
+        r_present: bool,
+        r_ready: bool,
+    ) -> Option<Run> {
+        let mut run = None;
+        if !r_present {
+            ui.label(
+                RichText::new("R is not available, so its packages cannot be compared.")
+                    .color(pal.error),
+            );
+            return None;
+        }
+        let this = minor_of(&self.r_version_number);
+        if self.other.is_empty() {
+            ui.label(format!(
+                "RCraft has no packages for another R version. When you install a new R, the \
+                 packages RCraft installed for the old one are listed here, so you can install \
+                 them again for the new one (R {this} now)."
+            ));
+            return None;
+        }
+        if self.other.len() > 1 {
+            ui.horizontal(|ui| {
+                ui.label("Packages RCraft installed for");
+                let shown = self.other_pick.clone().unwrap_or_default();
+                egui::ComboBox::from_id_salt("pkg_other_r")
+                    .selected_text(format!("R {shown}"))
+                    .show_ui(ui, |ui| {
+                        for (folder, _) in &self.other {
+                            ui.selectable_value(
+                                &mut self.other_pick,
+                                Some(folder.clone()),
+                                format!("R {folder}"),
+                            );
+                        }
+                    });
+            });
+        }
+        if !self.r.known {
+            ui.label(RichText::new("Asking R which packages it has…").color(pal.dim));
+            return None;
+        }
+        let (from, rows) = self.other_rows(index.index());
+        if rows.is_empty() {
+            ui.label(format!(
+                "R {this} already has every package RCraft installed for R {from}."
+            ));
+            return None;
+        }
+        ui.label(format!(
+            "RCraft installed {} packages for R {from} that this R ({this}) does not have yet. \
+             Packages built for one R version may not work in another, so they are installed \
+             again, from CRAN, for R {this}. Install them all, or untick the ones you do not \
+             want. Nothing is installed until you say yes to the list.",
+            rows.len()
+        ));
+        if let Some(Confirm::Install { .. }) = &self.confirm {
+            if let Some(confirm) = &self.confirm {
+                let (go, cancel) = confirm_panel(
+                    ui,
+                    pal,
+                    confirm,
+                    index.mirror(),
+                    r_ready,
+                    &mut self.source_understood,
+                );
+                if go {
+                    run = confirm.run_for();
+                }
+                if cancel {
+                    self.confirm = None;
+                }
+            }
+            return run;
+        }
+        let have_index = index.index().is_some();
+        if !have_index {
+            ui.label(
+                RichText::new(
+                    "Download the package list (Find on CRAN) to see what can be installed.",
+                )
+                .small()
+                .color(pal.warning),
+            );
+        }
+        let can: Vec<String> = rows
+            .iter()
+            .filter(|c| c.blocked.is_none())
+            .map(|c| c.name.clone())
+            .collect();
+        let ticked: Vec<String> = can
+            .iter()
+            .filter(|n| !self.other_unticked.contains(*n))
+            .cloned()
+            .collect();
+        let mut begin: Option<Vec<String>> = None;
+        ui.horizontal(|ui| {
+            let ready = have_index && r_ready;
+            ui.add_enabled_ui(ready && !can.is_empty(), |ui| {
+                if ui
+                    .button(format!("Install all ({})…", can.len()))
+                    .on_disabled_hover_text("Needs the package list, and R free")
+                    .clicked()
+                {
+                    self.other_unticked.clear();
+                    begin = Some(can.clone());
+                }
+            });
+            ui.add_enabled_ui(ready && !ticked.is_empty(), |ui| {
+                if ui
+                    .button(format!("Install the ticked ones ({})…", ticked.len()))
+                    .on_disabled_hover_text(
+                        "Tick some packages; needs the package list, and R free",
+                    )
+                    .clicked()
+                {
+                    begin = Some(ticked.clone());
+                }
+            });
+            if ui.small_button("Tick all").clicked() {
+                self.other_unticked.clear();
+            }
+            if ui.small_button("Untick all").clicked() {
+                self.other_unticked = can.iter().cloned().collect();
+            }
+            if ui
+                .small_button("Not now")
+                .on_hover_text(format!(
+                    "RCraft will not open this by itself again for R {this}; the tab stays here"
+                ))
+                .clicked()
+            {
+                if let Some(lib) = &self.own_library {
+                    say_not_now(std::path::Path::new(lib));
+                }
+                self.tab = Tab::Installed;
+            }
+        });
+        if let Some(names) = begin {
+            self.begin_carry(index, &names, &from);
+            return None;
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("pkg_other_r_list")
+            .max_height(self.list_height)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                egui::Grid::new("pkg_other_r_grid")
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label("");
+                        ui.label(RichText::new("Package").small().color(pal.dim));
+                        ui.label(
+                            RichText::new(format!("R {from} has"))
+                                .small()
+                                .color(pal.dim),
+                        );
+                        ui.label(RichText::new("CRAN now").small().color(pal.dim));
+                        ui.label("");
+                        ui.end_row();
+                        for c in &rows {
+                            let mut on =
+                                c.blocked.is_none() && !self.other_unticked.contains(&c.name);
+                            let changed = ui
+                                .add_enabled(
+                                    c.blocked.is_none(),
+                                    egui::Checkbox::without_text(&mut on),
+                                )
+                                .changed();
+                            if changed {
+                                if on {
+                                    self.other_unticked.remove(&c.name);
+                                } else {
+                                    self.other_unticked.insert(c.name.clone());
+                                }
+                            }
+                            ui.label(&c.name);
+                            ui.label(&c.had);
+                            ui.label(c.cran.clone().unwrap_or_else(|| "-".to_string()));
+                            match &c.blocked {
+                                Some(why) => {
+                                    ui.label(RichText::new(why).small().color(pal.warning))
+                                }
+                                None => ui.label(""),
+                            };
                             ui.end_row();
                         }
                     });
@@ -3678,5 +4020,112 @@ mod source_needs_tests {
             deps.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(),
             vec!["sandwich"]
         );
+    }
+}
+
+#[cfg(test)]
+mod other_r_tests {
+    use super::*;
+    use rcraft_rpkg::index::sample;
+
+    fn kept(name: &str, priority: &str, repository: &str) -> KeptPackage {
+        KeptPackage {
+            name: name.into(),
+            version: "1.0".into(),
+            repository: repository.into(),
+            priority: priority.into(),
+        }
+    }
+
+    fn others() -> Vec<KeptPackage> {
+        vec![
+            kept("MASS", "recommended", "CRAN"),
+            kept("Rcpp", "", "CRAN"),
+            kept("fixest", "", "CRAN"),
+            kept("mygh", "", ""),
+            kept("limma", "", "Bioconductor 3.22"),
+            kept("zoo", "", "CRAN"),
+        ]
+    }
+
+    #[test]
+    fn rows_leave_out_what_comes_with_r_or_is_there_and_say_what_cran_lacks() {
+        let have: HashMap<String, String> = [("zoo".to_string(), "1.8-12".to_string())].into();
+        let ix = sample();
+        let rows = carry_rows(&others(), &have, Some(&ix));
+        let names: Vec<&str> = rows.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["Rcpp", "fixest", "mygh", "limma"]);
+        let open: Vec<&str> = rows
+            .iter()
+            .filter(|c| c.blocked.is_none())
+            .map(|c| c.name.as_str())
+            .collect();
+        assert_eq!(open, vec!["Rcpp", "fixest"]);
+        assert!(rows.iter().all(|c| c.had == "1.0"));
+        assert!(rows.first().is_some_and(|c| c.cran.is_some()));
+        let limma = rows.iter().find(|c| c.name == "limma");
+        assert!(limma
+            .and_then(|c| c.blocked.as_deref())
+            .is_some_and(|b| b.contains("Bioconductor 3.22") && b.contains("Other sources")));
+        // without the CRAN list nothing is blocked (the buttons wait for the list)
+        let rows = carry_rows(&others(), &have, None);
+        assert_eq!(rows.len(), 4);
+        assert!(rows.iter().all(|c| c.blocked.is_none() && c.cran.is_none()));
+        assert_eq!(minor_of("4.4.3"), "4.4");
+        assert_eq!(minor_of(""), "");
+    }
+
+    fn window() -> (PackagesWindow, PackageIndexService) {
+        let mut w = PackagesWindow {
+            r_version_number: "4.4.3".into(),
+            own_library: Some("C:/Users/me/AppData/Local/RCraft/R-library/4.4".into()),
+            other: vec![("4.6".into(), others())],
+            other_pick: Some("4.6".into()),
+            ..PackagesWindow::default()
+        };
+        w.r.known = true;
+        (w, PackageIndexService::in_memory(sample()))
+    }
+
+    #[test]
+    fn installing_from_another_r_asks_for_the_yes_with_this_rs_library() {
+        let (mut w, s) = window();
+        let (from, rows) = w.other_rows(s.index());
+        assert_eq!(from, "4.6");
+        assert_eq!(rows.len(), 5);
+        w.begin_carry(&s, &["fixest".to_string(), "zoo".to_string()], &from);
+        let Some(Confirm::Install {
+            plan,
+            code,
+            menu,
+            note,
+        }) = &w.confirm
+        else {
+            panic!("no confirmation");
+        };
+        let steps: Vec<&str> = plan.steps.iter().map(|s| s.name.as_str()).collect();
+        assert!(steps.contains(&"fixest") && steps.contains(&"zoo") && steps.contains(&"Rcpp"));
+        let code = code.as_ref().map(String::as_str).unwrap_or("");
+        assert!(
+            code.contains("lib = \"C:/Users/me/AppData/Local/RCraft/R-library/4.4\""),
+            "{code}"
+        );
+        assert_eq!(*menu, "Packages > From another R");
+        assert!(note
+            .as_deref()
+            .is_some_and(|n| n.contains("R 4.4") && n.contains("R 4.6")));
+        // nothing runs without the yes; the yes gives the command
+        assert!(w.confirm.as_ref().and_then(Confirm::run_for).is_some());
+    }
+
+    #[test]
+    fn another_r_is_shown_newest_first_and_a_pick_that_went_is_replaced() {
+        let (mut w, _) = window();
+        w.other_pick = Some("3.9".into());
+        w.own_library = None;
+        w.read_other_versions();
+        assert!(w.other.is_empty());
+        assert_eq!(w.other_pick, None);
+        assert_eq!(w.other_read_for, None);
     }
 }

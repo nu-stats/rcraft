@@ -550,7 +550,10 @@ impl App {
     fn poll(&mut self, ctx: &egui::Context) {
         if let EngineState::Starting(rx) = &self.engine {
             match rx.try_recv() {
-                Ok(Ok(engine)) => self.engine = EngineState::Ready(Box::new(engine)),
+                Ok(Ok(engine)) => {
+                    self.packages_window.offer_other_r(&engine);
+                    self.engine = EngineState::Ready(Box::new(engine));
+                }
                 Ok(Err(why)) => self.engine = EngineState::Failed(why),
                 Err(TryRecvError::Empty) => ctx.request_repaint_after(Duration::from_millis(100)),
                 Err(TryRecvError::Disconnected) => {
@@ -1511,6 +1514,10 @@ impl App {
                 }
                 if ui.button("Project package list…").clicked() {
                     out.push(Action::OpenPackages(PackagesTab::List));
+                    ui.close_menu();
+                }
+                if ui.button("Packages from another R version…").clicked() {
+                    out.push(Action::OpenPackages(PackagesTab::OtherR));
                     ui.close_menu();
                 }
             });
@@ -2574,6 +2581,7 @@ impl App {
             "find" => PackagesTab::Find,
             "installed" => PackagesTab::Installed,
             "list" => PackagesTab::List,
+            "other" => PackagesTab::OtherR,
             "browse" => PackagesTab::Browse,
             other => {
                 return Err(format!(

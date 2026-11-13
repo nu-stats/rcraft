@@ -506,6 +506,7 @@ pub fn packages_window() -> DialogHelp {
             "Find searches the CRAN package list kept on this computer; press Refresh to download a newer list (it says which server it asks). Nothing is sent but your search words and package names.".into(),
             "Every install, update and removal shows exactly what will happen, with the R call, and waits for your yes. Packages run their authors' code when installed, so RCraft never installs on its own.".into(),
             "Other sources: Bioconductor, r-universe, GitHub and local files are labelled as reviewed or not; the ones nobody reviews need a tick before the Install button turns on.".into(),
+            "RCraft keeps its packages apart for each R version (4.4, 4.6, ...), because a package built for one may not work in another. From another R lists the packages RCraft installed for another R version that this one does not have yet: install them all, or tick the ones you want. RCraft offers this by itself, once, when a new R has none.".into(),
             "In the Command window, rc install, rc search, rc describe, rc installed, rc update and rc remove do the same things.".into(),
         ],
     }

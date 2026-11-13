@@ -4258,3 +4258,25 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
 - Tests: two versions give two folders on all three systems' path rules;
   the `Built:` line; sorting (never overwrite, lock folders skipped); a real
   session has the version folder first and does not see the moved package.
+
+## P3.2 continued: packages from another R version, 2026-11-12
+
+- New tab in the Packages window, From another R (also Packages > Packages from
+  another R version…): the packages RCraft installed for another R minor version
+  that this R cannot load yet, read from the other per-version folders
+  (`rhost::library::other_versions`, from each DESCRIPTION; newest R first, a
+  menu when there are several). Packages that come with R, and ones this R
+  already has in any of its libraries, are left out.
+- Every package is ticked. "Install all" or "Install the ticked ones" builds the
+  usual install list (with what the packages need, from CRAN's current versions,
+  into this R's folder) and waits for the yes. A package CRAN lacks is listed
+  but cannot be ticked, with where it came from and a pointer to Other sources.
+  The buttons wait for the CRAN package list.
+- RCraft offers it by itself once: when R starts, this R has nothing in RCraft's
+  library yet and another R has packages there, the window opens on the tab.
+  "Not now" is remembered per version in `R-library/not-now.txt`.
+- Checked with pictures on a copy of this machine's library under R 4.4.3: the
+  window opened by itself; with this machine's 42 packages it said R 4.4 already
+  has them all (true: CI's packages are in `win-library/4.4`); with two made-up
+  ones added, AER was ticked with CRAN's version and a no-repository package was
+  blocked. Nothing was installed.

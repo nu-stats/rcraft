@@ -166,6 +166,130 @@ fn read_capped(path: &Path) -> Option<String> {
     Some(String::from_utf8_lossy(&bytes).into_owned())
 }
 
+/// A package RCraft installed for some R version, as its DESCRIPTION says.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeptPackage {
+    pub name: String,
+    pub version: String,
+    /// Where it came from (`CRAN`, `Bioconductor`...); empty when not said
+    /// (GitHub and local installs often say nothing).
+    pub repository: String,
+    /// `base` or `recommended` for the packages that come with R, else empty.
+    pub priority: String,
+}
+
+/// The packages RCraft installed for the other R minor versions: the other
+/// per-version folders beside `library`, newest R first, each with its
+/// packages in name order. Empty when `library` is not one of RCraft's
+/// per-version folders or there are no others with packages in them.
+pub fn other_versions(library: &Path) -> Vec<(String, Vec<KeptPackage>)> {
+    let Some(root) = library.parent() else {
+        return Vec::new();
+    };
+    let own = library.file_name().and_then(OsStr::to_str);
+    if root.file_name() != Some(OsStr::new(LIBRARY_FOLDER)) || !own.is_some_and(is_version_folder) {
+        return Vec::new();
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut found: Vec<((u32, u32), String, Vec<KeptPackage>)> = Vec::new();
+    for entry in entries.flatten().take(MAX_FLAT_ENTRIES) {
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if !is_version_folder(&name) || Some(name.as_str()) == own {
+            continue;
+        }
+        let Some(key) = folder_key(&name) else {
+            continue;
+        };
+        let packages = packages_in(&entry.path());
+        if !packages.is_empty() {
+            found.push((key, name, packages));
+        }
+    }
+    found.sort_by_key(|a| std::cmp::Reverse(a.0));
+    found.into_iter().map(|(_, n, p)| (n, p)).collect()
+}
+
+/// The file, beside the per-version folders, that lists the versions whose
+/// offer to install another R's packages the user turned down.
+const NOT_NOW_FILE: &str = "not-now.txt";
+
+/// Whether the user said "not now" to installing other R versions' packages
+/// into `library` (one of RCraft's per-version folders).
+pub fn said_not_now(library: &Path) -> bool {
+    let (Some(root), Some(own)) = (library.parent(), library.file_name()) else {
+        return false;
+    };
+    let own = own.to_string_lossy();
+    read_capped(&root.join(NOT_NOW_FILE)).is_some_and(|text| text.lines().any(|l| l.trim() == own))
+}
+
+/// Remembers that the user said "not now" for `library`, so RCraft does not
+/// offer again on the next start. Failures are ignored (it offers again).
+pub fn say_not_now(library: &Path) {
+    if said_not_now(library) {
+        return;
+    }
+    let (Some(root), Some(own)) = (library.parent(), library.file_name()) else {
+        return;
+    };
+    let file = root.join(NOT_NOW_FILE);
+    let mut text = read_capped(&file).unwrap_or_default();
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(&own.to_string_lossy());
+    text.push('\n');
+    let _ = std::fs::write(file, text);
+}
+
+/// (major, minor) of a version folder's name, for ordering.
+fn folder_key(name: &str) -> Option<(u32, u32)> {
+    let (a, b) = name.split_once('.')?;
+    Some((a.parse().ok()?, b.parse().ok()?))
+}
+
+/// The packages in one library folder, in name order.
+pub fn packages_in(dir: &Path) -> Vec<KeptPackage> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut out: Vec<KeptPackage> = entries
+        .flatten()
+        .take(MAX_FLAT_ENTRIES)
+        .filter_map(|e| {
+            let folder = e.file_name().to_str()?.to_string();
+            let text = read_capped(&e.path().join("DESCRIPTION"))?;
+            let name = dcf_field(&text, "Package")?;
+            // a half-installed copy (`00LOCK-...`) or a renamed folder is not offered
+            if name != folder {
+                return None;
+            }
+            Some(KeptPackage {
+                version: dcf_field(&text, "Version").unwrap_or_default(),
+                repository: dcf_field(&text, "Repository").unwrap_or_default(),
+                priority: dcf_field(&text, "Priority").unwrap_or_default(),
+                name,
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    out
+}
+
+/// The value of a one-line DESCRIPTION field (`Version: 1.1.4`).
+fn dcf_field(text: &str, field: &str) -> Option<String> {
+    text.lines().find_map(|l| {
+        let (key, value) = l.split_once(':')?;
+        (key == field)
+            .then(|| value.trim().to_string())
+            .filter(|v| !v.is_empty())
+    })
+}
+
 /// The value for `R_LIBS`: RCraft's library first, then whatever the
 /// environment already had. R searches these folders, where they exist, before
 /// the user's own library (`R_LIBS_USER`), which is left to R so that packages
@@ -324,6 +448,65 @@ mod tests {
         assert!(!other.exists());
         prepare(Path::new(""));
         assert!(sort_flat_library(Path::new("/no/such/folder/here")) == Sorted::default());
+        let _ = std::fs::remove_dir_all(root.parent().unwrap_or(&root));
+    }
+
+    #[test]
+    fn the_other_versions_packages_are_listed_newest_r_first() {
+        let root = scratch("others");
+        let write = |dir: &Path, name: &str, extra: &str| {
+            let p = dir.join(name);
+            let _ = std::fs::create_dir_all(&p);
+            let _ = std::fs::write(
+                p.join("DESCRIPTION"),
+                format!("Package: {name}\nVersion: 1.0\n{extra}Built: R 4.6.1; ; 2026; windows\n"),
+            );
+        };
+        write(&root.join("4.6"), "dplyr", "Repository: CRAN\n");
+        write(&root.join("4.6"), "mine", "");
+        write(
+            &root.join("4.6"),
+            "MASS",
+            "Priority: recommended\nRepository: CRAN\n",
+        );
+        write(&root.join("4.10"), "rlang", "Repository: CRAN\n");
+        write(&root.join("4.4"), "here", "Repository: CRAN\n");
+        let _ = std::fs::create_dir_all(root.join("4.6").join("00LOCK-x"));
+        let _ = std::fs::create_dir_all(root.join("4.2"));
+        let lib = root.join("4.4");
+        let others = other_versions(&lib);
+        let folders: Vec<&str> = others.iter().map(|(f, _)| f.as_str()).collect();
+        // the own folder and empty ones are not listed; 4.10 is newer than 4.6
+        assert_eq!(folders, vec!["4.10", "4.6"]);
+        let six: Vec<&str> = others
+            .get(1)
+            .map(|(_, p)| p.iter().map(|k| k.name.as_str()).collect())
+            .unwrap_or_default();
+        assert_eq!(six, vec!["MASS", "dplyr", "mine"]);
+        let mine = others
+            .get(1)
+            .and_then(|(_, p)| p.iter().find(|k| k.name == "mine"))
+            .cloned();
+        assert_eq!(
+            mine,
+            Some(KeptPackage {
+                name: "mine".into(),
+                version: "1.0".into(),
+                repository: String::new(),
+                priority: String::new(),
+            })
+        );
+        assert!(other_versions(&root.parent().map(|p| p.join("x")).unwrap_or_default()).is_empty());
+        // "not now" is kept per version
+        assert!(!said_not_now(&lib));
+        say_not_now(&lib);
+        say_not_now(&lib);
+        assert!(said_not_now(&lib));
+        assert!(!said_not_now(&root.join("4.6")));
+        assert_eq!(
+            std::fs::read_to_string(root.join(NOT_NOW_FILE)).unwrap_or_default(),
+            "4.4\n"
+        );
         let _ = std::fs::remove_dir_all(root.parent().unwrap_or(&root));
     }
 
