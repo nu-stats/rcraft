@@ -619,10 +619,19 @@ pub const GUIDES: &[Guide] = &[
                  margins post), a line that reads _est_name is refused.",
             ),
             p(
+                "dir, stats and replay",
+                "Stata 19's tables: estimates dir (each stored model's command, dependent variable, \
+                 number of parameters and title), estimates stats (N, ll(null), ll(model), df, AIC \
+                 and BIC, with r(S)) of the active results or of the names given, and estimates \
+                 replay of regress fits, under a banner as wide as the line (Model name, or active \
+                 results).",
+            ),
+            p(
                 "Not yet",
-                "estimates dir, table, replay, save and use, and options, are not translated. A \
-                 name stored by a line that was not translated (eststo, a program) is not known, \
-                 so a restore of it is refused rather than guessed.",
+                "estimates replay of models other than regress (or with weights or robust errors), \
+                 estimates save and use, and options are not translated. A name stored by a line \
+                 that was not translated (eststo, a program) is not known, so a restore of it is \
+                 refused rather than guessed.",
             ),
         ],
     },
@@ -2143,6 +2152,33 @@ pub const GUIDES: &[Guide] = &[
                  patterns in the controls are refused; predict, test and margins after it too.",
             ),
         ],
+    },
+    Guide {
+        command: "sdtest",
+        about: "Tests of standard deviations (sdtest y == 1, sdtest y == x, sdtest y, by(g))",
+        points: &[
+            p(
+                "In R",
+                "stata_sdtest prints Stata 19's table and tests: one standard deviation against a \
+                 value by chi2 = (n - 1)s^2/sd0^2, two (two variables, each over its own rows, or \
+                 the two groups of by(), named by their value labels) by the F ratio of their \
+                 variances, with the Combined row of every value; the one-sided and two-sided p, \
+                 and r() as Stata's (N, df or df_1 and df_2, chi2 or F, sd, sd_1, sd_2, p_l, p_u, p).",
+            ),
+            p(
+                "Not yet",
+                "Options other than by() and level() are refused; weights are Stata's own error.",
+            ),
+        ],
+    },
+    Guide {
+        command: "sdtesti",
+        about: "sdtest from numbers typed in (sdtesti 50 . .9 1.5, sdtesti 30 2 1.3 25 1 .7)",
+        points: &[p(
+            "In R",
+            "As sdtest's, from #obs #mean #sd and a value, or two groups' #obs #mean #sd (named x \
+             and y, their Combined row pooled from them); a mean of . is shown as ., as in Stata.",
+        )],
     },
     Guide {
         command: "sktest",

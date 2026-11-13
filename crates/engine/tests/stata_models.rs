@@ -2197,3 +2197,25 @@ fn estat_tests_print_statas_tables() {
         assert!(text.contains(line), "{line:?} in {text}");
     }
 }
+
+/// estimates dir, stats and replay in Stata 19's layouts
+/// (plan/stata/estimates-dir-stats.md).
+#[test]
+fn estimates_dir_stats_replay_print_statas_tables() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let code = script(&format!(
+        "use \"{dir}/models.dta\"\nregress y x\nestimates store m1\nregress y x w\nestimates store m2\nestimates dir\nestimates stats m1 m2\nestimates replay m1\n"
+    ));
+    let text = ok(&mut e, &code);
+    for line in [
+        "        Name | Command    variable     param.  Title ",
+        "          m1 | regress           y          2  Linear regression",
+        "       Model |          N   ll(null)  ll(model)      df        AIC        BIC",
+        "Note: BIC uses N = number of observations. See [R] IC note.",
+        "Model m1",
+        "      Source |       SS           df       MS      Number of obs   =",
+    ] {
+        assert!(text.contains(line), "{line:?} in {text}");
+    }
+}

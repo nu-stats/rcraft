@@ -76,6 +76,7 @@ mod revrs;
 mod robreg;
 mod rreg;
 mod scalars;
+mod sdtest;
 mod sktest;
 mod st;
 mod stats;
@@ -1095,6 +1096,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tabsum2" => tabsum::TABSUM_HELPER,
         "stata_estat_more" => estat::ESTAT_MORE_HELPER,
         "stata_meanest" => meanest::MEANEST_HELPER,
+        "stata_sdtest" => sdtest::SDTEST_HELPER,
+        "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
+        "stata_replay" => estat::REPLAY_HELPER,
         "stata_tab_mats" => tabsum::TAB_MATS_HELPER,
         "stata_import_float" => IMPORT_FLOAT_HELPER,
         "stata_levelsof" => LEVELSOF_HELPER,
@@ -2335,6 +2339,8 @@ impl Session {
                 self.meanest(c, &kind, &opts, out)
             }
             "sktest" => self.sktest(c, &opts, out),
+            "sdtest" => self.sdtest(c, &opts, out),
+            "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),

@@ -194,6 +194,8 @@ pub const COMMANDS: &[&str] = &[
     "saveold",
     "scalar",
     "scatter",
+    "sdtest",
+    "sdtesti",
     "set",
     "sktest",
     "sort",
@@ -743,6 +745,8 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "agresti", "bonett", "exact", "jeffreys", "level(", "poisson", "sd", "wald", "wilson",
         ],
     ),
+    ("sdtest", &["by(", "level("]),
+    ("sdtesti", &["level("]),
     ("sktest", &["noadjust"]),
     (
         "ci",
@@ -862,6 +866,12 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("survwgt", &["rake"]),
     ("ereturn", &["list"]),
     ("estadd", &["local", "scalar"]),
+    (
+        "estimates",
+        &[
+            "clear", "dir", "drop", "replay", "restore", "stats", "store", "table",
+        ],
+    ),
     ("estpost", &["summarize"]),
     ("frame", &["change", "create", "drop", "pwf"]),
     (

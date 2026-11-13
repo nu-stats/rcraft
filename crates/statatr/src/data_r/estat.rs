@@ -481,3 +481,74 @@ impl Session {
         Ok(true)
     }
 }
+
+/// `estimates dir` and `estimates stats` (Stata 19's tables, r(S)).
+pub(super) const ESTIMATES_MORE_HELPER: &str = r##"stata_est_list <- function(names) {
+  st <- if (exists("stata_stored")) stata_stored else list()
+  if (is.null(names)) names <- names(st)
+  for (n in names) if (is.null(st[[n]])) stop("estimation result ", n, " not found (Stata: r(111))", call. = FALSE)
+  stats::setNames(lapply(names, function(n) st[[n]]$stata_e), names)
+}
+stata_est_dir <- function(names = NULL) {
+  es <- stata_est_list(names)
+  rule <- paste0(strrep("-", 64), "\n")
+  cat("\n", rule, "             |           Dependent  Number of        \n",
+      "        Name | Command    variable     param.  Title \n",
+      "-------------+", strrep("-", 50), "\n", sep = "")
+  for (n in names(es)) {
+    e <- es[[n]]
+    get <- function(k) if (is.null(e[[k]])) "" else as.character(e[[k]])
+    cat(sprintf("%12s | %-8s%11s%11s  %s", stata_tab_abbrev(n, 12), get("cmd"), stata_tab_abbrev(get("depvar"), 11),
+                get("rank"), get("title")), "\n", sep = "")
+  }
+  cat(rule)
+  invisible(NULL)
+}
+stata_est_stats <- function(names = NULL) {
+  es <- if (is.null(names)) {
+    e <- stata_e
+    stats::setNames(list(e), if (is.null(e[["_estimates_name"]])) "." else e[["_estimates_name"]])
+  } else stata_est_list(names)
+  num <- function(v) if (is.null(v) || length(v) == 0) NA_real_ else as.numeric(v)
+  S <- t(vapply(es, function(e) {
+    N <- num(e$N); ll <- num(e$ll); k <- num(e$rank)
+    c(N = N, ll0 = num(e$ll_0), ll = ll, df = k, AIC = -2 * ll + 2 * k, BIC = -2 * ll + log(N) * k)
+  }, numeric(6)))
+  rownames(S) <- names(es)
+  g <- function(v) if (is.na(v)) "." else stata_fmt(v, "%9.0g", trim = TRUE)
+  rule <- paste0(strrep("-", 77), "\n")
+  cat("\nAkaike's information criterion and Bayesian information criterion\n\n", rule,
+      "       Model |          N   ll(null)  ll(model)      df        AIC        BIC\n",
+      "-------------+", strrep("-", 63), "\n", sep = "")
+  for (i in seq_len(nrow(S))) {
+    cat(sprintf("%12s |%11s%11s%11s%8s%11s%11s", stata_tab_abbrev(rownames(S)[i], 12), g(S[i, 1]), g(S[i, 2]), g(S[i, 3]),
+                g(S[i, 4]), g(S[i, 5]), g(S[i, 6])), "\n", sep = "")
+  }
+  cat(rule, "Note: BIC uses N = number of observations. See [R] IC note.\n", sep = "")
+  invisible(list(S = S))
+}"##;
+
+/// `estimates replay`: a banner as wide as the line, then the model's table
+/// printed again from its stored results (regress, in Stata's layout).
+pub(super) const REPLAY_HELPER: &str = r##"stata_replay <- function(name = NULL, level = 0.95) {
+  env <- parent.frame()
+  # the active results: named as stored, until a fit replaces them
+  title <- if (!is.null(name)) paste("Model", name) else if (!is.null(stata_e[["_estimates_name"]])) paste("Model", stata_e[["_estimates_name"]]) else "active results"
+  w <- if (exists("stata_linesize")) stata_linesize else 79
+  cat("\n", strrep("-", w), "\n", title, "\n", strrep("-", w), "\n", sep = "")
+  if (is.null(name)) {
+    if (!stata_regress_print(level = level)) print(summary(stata_estimates))
+    return(invisible(NULL))
+  }
+  st <- stata_stored[[name]]
+  old <- lapply(names(st), function(n) if (exists(n, envir = env, inherits = FALSE)) get(n, envir = env) else NULL)
+  names(old) <- names(st)
+  on.exit(for (n in names(old)) {
+    if (is.null(old[[n]])) {
+      if (exists(n, envir = env, inherits = FALSE)) rm(list = n, envir = env)
+    } else assign(n, old[[n]], envir = env)
+  }, add = TRUE)
+  for (n in names(st)) assign(n, st[[n]], envir = env)
+  if (!stata_regress_print(level = level)) print(summary(stata_estimates))
+  invisible(NULL)
+}"##;

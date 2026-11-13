@@ -1195,6 +1195,97 @@ impl Session {
                 let names: Vec<&str> = rest.split_whitespace().collect();
                 self.drop_fits(&names, out)
             }
+            // estimates replay: regress fits printed in Stata's layout, again from what was stored
+            s if s.len() >= 3 && "replay".starts_with(s) => {
+                let names: Vec<&str> = rest.split_whitespace().collect();
+                let plain = |f: Option<&super::model::Estimates>, p: bool| {
+                    p && f.is_some_and(|e| e.fit == super::model::Fit::Regress)
+                };
+                if names.is_empty() {
+                    if matches!(self.e_ret, Returned::Nothing) {
+                        return Err(no(
+                            "estimates replay: no model is fitted before it in this do-file (Stata: last estimates not found, r(301))",
+                        ));
+                    }
+                    if !plain(self.estimates.as_ref(), self.plain_regress) {
+                        return Err(no(
+                            "estimates replay: only regress (without weights or robust errors) is replayed yet",
+                        ));
+                    }
+                }
+                for n in &names {
+                    match self.stored_fits.get(*n) {
+                        None => {
+                            return Err(no(format!(
+                                "estimates replay: {n} is not stored before it in this do-file (Stata: estimation result {n} not found, r(111))"
+                            )))
+                        }
+                        Some(f) if !plain(f.estimates.as_ref(), f.plain_regress) => {
+                            return Err(no(format!(
+                                "estimates replay {n}: only regress (without weights or robust errors) is replayed yet"
+                            )))
+                        }
+                        Some(_) => {}
+                    }
+                }
+                for h in ["stata_replay", "stata_tables", "stata_fmt", "stata_coefs"] {
+                    self.helpers.insert(h);
+                }
+                if names.is_empty() {
+                    out.line("stata_replay()");
+                }
+                for n in &names {
+                    out.line(format!("stata_replay({})", r_text(n)));
+                }
+                Ok(())
+            }
+            // estimates dir and estimates stats, Stata 19's tables (plan/stata/estimates-dir-stats.md)
+            s if s == "dir" || (s.len() >= 4 && "stats".starts_with(s)) => {
+                let names: Vec<&str> = rest.split_whitespace().collect();
+                if let Some(n) = names.iter().find(|n| !super::is_name(n)) {
+                    return Err(no(format!(
+                        "estimates {sub} {n}: names written out are translated"
+                    )));
+                }
+                if let Some(n) = names.iter().find(|n| !self.stored_fits.contains_key(**n)) {
+                    return Err(no(format!(
+                        "estimates {sub}: {n} is not stored before it in this do-file (Stata: estimation result {n} not found, r(111))"
+                    )));
+                }
+                let stats = s != "dir";
+                if stats && names.is_empty() && matches!(self.e_ret, Returned::Nothing) {
+                    return Err(no(
+                        "estimates stats: no model is fitted before it in this do-file (Stata: last estimates not found, r(301))",
+                    ));
+                }
+                for h in [
+                    "stata_est_more",
+                    "stata_fmt",
+                    "stata_tables",
+                    "stata_returned",
+                ] {
+                    self.helpers.insert(h);
+                }
+                let list = if names.is_empty() {
+                    "NULL".to_string()
+                } else {
+                    format!(
+                        "c({})",
+                        names
+                            .iter()
+                            .map(|n| r_text(n))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                if stats {
+                    out.line(format!("stata_r <- stata_est_stats({list})"));
+                    self.r_new = Some((&[], "estimates".into()));
+                } else {
+                    out.line(format!("stata_est_dir({list})"));
+                }
+                Ok(())
+            }
             other => Err(no(format!("estimates {other} is not translated yet"))),
         }
     }
