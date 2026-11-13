@@ -42,12 +42,21 @@ pub(super) const OUTCOME_PROBS_HELPER: &str = r#"stata_outcome_probs <- function
 
 /// Stata's `test`: the Wald test that each row's combination of
 /// coefficients equals its value, as an F or a chi-squared.
-pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, ret = FALSE) {
+pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, ret = FALSE, vlc = FALSE, mtest = NULL,
+                       accumulate = FALSE, notest = FALSE) {
   env <- parent.frame()
   res <- stata_resolve(rows, r, labels)
   rows <- res$rows
   r <- res$r
   labels <- res$labels
+  # accumulate: the last test's constraints first (Stata 19)
+  if (accumulate && exists("stata_test_last", envir = env)) {
+    last <- get("stata_test_last", envir = env)
+    rows <- c(last$rows, rows)
+    r <- c(last$r, r)
+    labels <- c(last$labels, labels)
+  }
+  assign("stata_test_last", list(rows = rows, r = r, labels = labels), envir = env)
   b <- stata_b
   R <- matrix(0, length(rows), length(b), dimnames = list(NULL, names(b)))
   for (i in seq_along(rows)) {
@@ -60,10 +69,16 @@ pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, 
   }
   # Stata 19's layout: " ( 1)", F(  2,   192) =   24.21, Prob > F =    0.0000
   for (i in seq_along(labels)) cat(sprintf(" (%2d)  %s\n", i, labels[i]))
+  # notest: the constraints only, and r() emptied
+  if (notest) {
+    if (ret) assign("stata_r", list(), envir = env)
+    return(invisible(NULL))
+  }
   dropped <- which(rowSums(R != 0) == 0)
   # r(dropped_1) and the like, one for each constraint dropped
   stata_dropped <- function(i) if (length(i)) stats::setNames(as.list(rep(1, length(i))), paste0("dropped_", i)) else list()
   for (i in dropped) cat(sprintf("       Constraint %d dropped\n", i))
+  if (length(dropped) && !is.null(mtest)) stop("test, mtest with a constraint dropped is not translated yet", call. = FALSE)
   if (length(dropped)) {
     R <- R[-dropped, , drop = FALSE]
     r <- r[-dropped]
@@ -84,10 +99,40 @@ pub(super) const TEST_HELPER: &str = r#"stata_test <- function(rows, r, labels, 
   drop_r <- c(stata_dropped(dropped),
               list(drop = as.numeric(length(dropped) > 0)))
   d <- R %*% b - r
-  W <- drop(t(d) %*% solve(R %*% stata_vcov %*% t(R), d))
+  RV <- R %*% stata_vcov %*% t(R)
+  # matvlc(): the variance of the constraints, as Stata names its rows and columns
+  if (vlc) assign("stata_vlc", matrix(RV, nrow(RV), dimnames = list(paste0("r", seq_len(nrow(RV))), paste0("c", seq_len(nrow(RV))))), envir = env)
+  W <- drop(t(d) %*% solve(RV, d))
   q <- nrow(R)
+  small <- is.finite(stata_df)
+  # mtest: each constraint's own test, its p adjusted, then the joint test (Stata 19's table)
+  if (!is.null(mtest)) {
+    w1 <- drop(d)^2 / diag(RV)
+    p1 <- if (small) stats::pf(w1, 1, stata_df, lower.tail = FALSE) else stats::pchisq(w1, 1, lower.tail = FALSE)
+    adj <- switch(mtest, noadjust = p1, bonferroni = pmin(1, p1 * q), holm = stats::p.adjust(p1, "holm"),
+                  sidak = 1 - (1 - p1)^q)
+    pall <- if (small) stats::pf(W / q, q, stata_df, lower.tail = FALSE) else stats::pchisq(W, q, lower.tail = FALSE)
+    cat("\n", strrep("-", 38), "\n", sep = "")
+    cat("       |", sprintf("%12s", if (small) paste0("F(df,", stata_fmt(stata_df, "%9.0g", trim = TRUE), ")") else "chi2"),
+        "     df", if (small) "      p > F" else "   p > chi2", "\n", sep = "")
+    mid <- paste0("-------+", strrep("-", 30), "\n")
+    cat(mid)
+    for (i in seq_len(q)) cat(sprintf("%6s |%12.2f%7d%11.4f*", paste0("(", i, ")"), w1[i], 1L, adj[i]), "\n", sep = "")
+    cat(mid)
+    cat(sprintf("%6s |%12.2f%7d%11.4f", "All", if (small) W / q else W, q, pall), "\n", sep = "")
+    cat(strrep("-", 38), "\n", sep = "")
+    cat("* ", switch(mtest, noadjust = "Unadjusted", bonferroni = "Bonferroni-adjusted", holm = "Holm-adjusted",
+                     sidak = "Sidak-adjusted"), " p-values\n", sep = "")
+    if (ret) {
+      M <- cbind(w1, 1, p1, if (mtest != "noadjust") adj)
+      dimnames(M) <- list(paste0("r", seq_len(q)), c(if (small) "F" else "chi2", "df", "p", if (mtest != "noadjust") "adjustp"))
+      tail <- if (small) list(df_r = stata_df, F = W / q, df = q, p = pall) else list(chi2 = W, df = q, p = pall)
+      assign("stata_r", c(drop_r, tail, list(mtmethod = mtest, mtest = M)), envir = env)
+    }
+    return(invisible(NULL))
+  }
   # ret: leave Stata's r() as stata_r where it was called from
-  if (is.finite(stata_df)) {
+  if (small) {
     F <- W / q
     p <- stats::pf(F, q, stata_df, lower.tail = FALSE)
     cat(sprintf("\n       F(%3d, %5g) = %7.2f\n            Prob > F = %9.4f\n", q, stata_df, F, p))
@@ -605,11 +650,57 @@ impl Session {
     ) -> Result<(), Untranslated> {
         self.no_by(c, "test")?;
         let est = self.estimates_for("test")?;
-        if let Some(o) = opts.other(&[]) {
+        if let Some(o) = opts.other(&[
+            ("matvlc", 6),
+            ("mtest", 5),
+            ("accumulate", 5),
+            ("notest", 6),
+        ]) {
             return Err(no(format!(
                 "test with the option {o} is not translated yet"
             )));
         }
+        let accumulate = opts.has("accumulate", 5);
+        let mtest = if opts.has("mtest", 5) {
+            if accumulate {
+                // Stata's error when the line runs (r() emptied), which capture takes
+                self.r_new = Some((&[], "test".into()));
+                out.line("stata_r <- list()");
+                out.line(
+                    "stop(\"options mtest and accumulate may not be combined (Stata: r(198))\", call. = FALSE)",
+                );
+                return Ok(());
+            }
+            let m = opts.arg("mtest", 5).unwrap_or_default();
+            let m = m.trim();
+            let full = if m.is_empty() {
+                "noadjust"
+            } else if let Some(f) = ["bonferroni", "holm", "sidak"]
+                .into_iter()
+                .find(|f| f.starts_with(m))
+            {
+                f
+            } else if m.len() >= 3 && "noadjust".starts_with(m) {
+                "noadjust"
+            } else {
+                return Err(no(format!(
+                    "mtest({m}): bonferroni, holm, sidak and noadjust are translated"
+                )));
+            };
+            Some(full)
+        } else {
+            None
+        };
+        let vlc = match opts.arg("matvlc", 6) {
+            Some(m) => {
+                let m = m.trim().to_string();
+                if !is_name(&m) {
+                    return Err(no(format!("matvlc({m}) needs a matrix name")));
+                }
+                Some(m)
+            }
+            None => None,
+        };
         let text = c.parts.main.trim();
         if text.is_empty() {
             return Err(no("test needs coefficients or an equation"));
@@ -645,13 +736,35 @@ impl Session {
         self.helpers.insert("stata_zero_term");
         self.helpers.insert("stata_names");
         self.r_new = Some((super::returned::R_TEST, "test".into()));
+        if mtest.is_some() {
+            self.helpers.insert("stata_fmt");
+        }
         let call = format!(
-            "stata_test(list({}), c({}), c({}), ret = TRUE)",
+            "stata_test(list({}), c({}), c({}), ret = TRUE{}{}{}{})",
             list.join(", "),
             values.join(", "),
-            labels.join(", ")
+            labels.join(", "),
+            if vlc.is_some() { ", vlc = TRUE" } else { "" },
+            mtest
+                .map(|m| format!(", mtest = {}", r_text(m)))
+                .unwrap_or_default(),
+            if accumulate {
+                ", accumulate = TRUE"
+            } else {
+                ""
+            },
+            if opts.has("notest", 6) {
+                ", notest = TRUE"
+            } else {
+                ""
+            }
         );
         out.line(super::returned::quietly(c, call));
+        if let Some(m) = vlc {
+            self.helpers.insert("stata_matrix");
+            out.line(format!("stata_mat[[{}]] <- stata_vlc", r_text(&m)));
+            self.matrix_made(&m);
+        }
         Ok(())
     }
 

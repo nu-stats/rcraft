@@ -84,6 +84,7 @@ mod tables;
 mod tabm;
 mod tabpct;
 mod tabstat;
+mod tabsum;
 mod testparm;
 mod ts;
 mod tsreg;
@@ -1065,6 +1066,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_scalar" => scalars::SCALAR_HELPER,
         "stata_tables" => tables::TABLES_HELPER,
         "stata_tabpct" => tabpct::TABPCT_HELPER,
+        "stata_tabsum2" => tabsum::TABSUM_HELPER,
+        "stata_tab_mats" => tabsum::TAB_MATS_HELPER,
         "stata_import_float" => IMPORT_FLOAT_HELPER,
         "stata_levelsof" => LEVELSOF_HELPER,
         "stata_set_obs" => SET_OBS_HELPER,

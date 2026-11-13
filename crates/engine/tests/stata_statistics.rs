@@ -953,3 +953,28 @@ fn by_runs_each_group_in_turn_as_stata_19_does() {
         "'in' may not be combined with 'by'"
     );
 }
+
+/// tabulate, summarize() and test, mtest in Stata 19's layouts
+/// (plan/stata/tabulate-summarize.md, plan/stata/lincom-test-lines.md).
+#[test]
+fn tabulate_summarize_and_test_mtest_print_statas_tables() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 8\ngenerate g = 1 + mod(_n, 2)\ngenerate b = _n > 4\ngenerate y = _n * _n / 4\n\
+         generate x = mod(_n * 3, 7)\ntabulate g b, summarize(y)\ntabulate g, summarize(y) means\n\
+         regress y x b\ntest x b, mtest(bonferroni)\n",
+    );
+    let text = ok(&mut e, &code);
+    for line in [
+        "              Means, Standard Deviations and Frequencies of y",
+        "         g |         0          1 |     Total",
+        "-----------+----------------------+----------",
+        "            | Summary of",
+        "          g |        Mean",
+        "       |     F(df,5)     df      p > F",
+        "-------+------------------------------",
+        "* Bonferroni-adjusted p-values",
+    ] {
+        assert!(text.contains(line), "{line:?} in {text}");
+    }
+}

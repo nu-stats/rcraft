@@ -982,6 +982,7 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 const TEXT_NAMES: &[&str] = &[
     "levels",
     "centiles",
+    "mtmethod",
     "exposure",
     "citype",
     "varlist",
@@ -1616,6 +1617,7 @@ pub(super) const R_TEST: &[&str] = &[
     "df",
     "p",
     "chi2",
+    "mtmethod",
 ];
 pub(super) const R_LINCOM: &[&str] = &["df", "ub", "lb", "p", "t", "z", "level", "se", "estimate"];
 pub(super) const R_TAB1: &[&str] = &["N", "r"];
@@ -1628,7 +1630,7 @@ pub(super) const R_FRE: &[&str] = &[
     "r_missing",
     "depvar",
 ];
-pub(super) const R_TAB2: &[&str] = &["N", "r", "c", "chi2", "p"];
+pub(super) const R_TAB2: &[&str] = &["N", "r", "c", "chi2", "p", "chi2_lr", "p_lr"];
 pub(super) const R_CORRELATE: &[&str] = &["sum_w", "N", "rho", "cov_12", "Var_2", "Var_1"];
 pub(super) const R_DESCRIBE: &[&str] = &["k", "N"];
 pub(super) const R_TTEST: &[&str] = &[

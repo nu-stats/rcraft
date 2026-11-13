@@ -691,6 +691,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("tabm", &["missing"]),
+    ("test", &["accumulate", "matvlc(", "mtest", "notest"]),
     ("testparm", &["equal"]),
     (
         "oneway",
@@ -759,12 +760,26 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "cell",
             "chi2",
             "column",
+            "freq",
             "generate(",
+            "lrchi2",
+            "matcell(",
+            "matcol(",
+            "matrow(",
+            "means",
             "missing",
             "nofreq",
+            "nokey",
             "nolabel",
+            "nomeans",
+            "noobs",
+            "nostandard",
+            "obs",
             "row",
             "sort",
+            "standard",
+            "summarize(",
+            "wrap",
         ],
     ),
     ("tostring", &["generate(", "replace"]),
@@ -1605,6 +1620,22 @@ gettoken a b : s, {o}"
             "ologit" | "oprobit" | "mlogit" => format!("{cmd} o x, {o}"),
             "lowess" | "pwcorr" | "correlate" | "regress" | "tab2" | "oneway" => {
                 format!("{cmd} y x, {o}")
+            }
+            // the columns summarize() shows
+            "tabulate"
+                if matches!(
+                    o.as_str(),
+                    "freq"
+                        | "means"
+                        | "nomeans"
+                        | "noobs"
+                        | "nostandard"
+                        | "obs"
+                        | "standard"
+                        | "wrap"
+                ) =>
+            {
+                format!("tabulate y, summarize(x) {o}")
             }
             "tabulate" if matches!(name, "generate" | "missing" | "nolabel" | "sort") => {
                 format!("tabulate y, {o}")

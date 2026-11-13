@@ -1658,7 +1658,7 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Printing",
                 "Stata's own table without detail or weights, checked character for character; \
-                 detail and weights keep R's layout.",
+                 detail and weights keep R's layout. meanonly may be written mean, as in Stata.",
             ),
         ],
     },
@@ -1719,6 +1719,23 @@ pub const GUIDES: &[Guide] = &[
                  variables keep R's layout. nofreq alone prints nothing and leaves r() empty, as \
                  in Stata 19; with chi2 it prints the chi2 line only and leaves r() whole.",
             ),
+            p(
+                "More options",
+                "lrchi2 (2 sum O ln(O/E), its line after Pearson's, r(chi2_lr) and r(p_lr); not \
+                 with analytic weights yet), nokey, and matcell(), matrow() and matcol(): the \
+                 counts as the table has them (analytic weights scaled to the rows) and the \
+                 values of the rows and columns, r1 r2 ... and c1 c2 ..., as Stata 19 leaves \
+                 them; matrow() of a string variable is Stata's error.",
+            ),
+            p(
+                "summarize()",
+                "Stata 19's tables of the summarized variable's mean, standard deviation, Freq. \
+                 and (with weights or obs) Obs: one way oneway's summary table, two ways a line \
+                 for each statistic in each cell (%10.0g, . for an empty cell, the title naming \
+                 the statistics shown, columns in blocks of five); means, standard, freq, obs and \
+                 their no forms choose the lines, with frequency and analytic weights as oneway's. \
+                 r() is left empty, as in Stata.",
+            ),
         ],
     },
     Guide {
@@ -1737,6 +1754,14 @@ pub const GUIDES: &[Guide] = &[
                  = 1), each name with its equation after the likelihood models ([yb]x) and the \
                  base outcome's as omitted after mlogit ([3]o.x). After the models where Stata's \
                  lines were not seen the line is the constraint as typed.",
+            ),
+            p(
+                "Options",
+                "matvlc() keeps the constraints' variance R V R' as a matrix; mtest (noadjust, \
+                 bonferroni, holm, sidak) prints Stata 19's table of each constraint's own test \
+                 with its adjusted p and the joint test, and leaves r(mtest) and r(mtmethod); \
+                 accumulate tests the last test's constraints with these; notest prints the \
+                 constraints only and empties r(). mtest with accumulate is Stata's error.",
             ),
         ],
     },

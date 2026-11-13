@@ -225,7 +225,7 @@ pub(super) const TAB_GENERATE_HELPER: &str = r#"stata_tab_generate <- function(d
 pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NULL, missing = FALSE, sort = FALSE,
                             row = FALSE, column = FALSE, cell = FALSE,
                             chi2 = FALSE, w = NULL, wtype = "f", ret = FALSE,
-                            xname = NULL, yname = NULL, nofreq = FALSE) {
+                            xname = NULL, yname = NULL, nofreq = FALSE, lrchi2 = FALSE, key = TRUE) {
   # ret: leave Stata's r() as stata_r where it was called from; with the
   # variables' names, the table is Stata's (counts, or frequency weights)
   env <- parent.frame()
@@ -282,16 +282,37 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
     r <- suppressWarnings(stats::chisq.test(t, correct = FALSE))
     attr(t, "chi2") <- c(chi2 = unname(r$statistic), df = unname(r$parameter), p = r$p.value)
   }
+  # the likelihood-ratio chi2: 2 sum O ln(O/E), its line after Pearson's (Stata 19)
+  lr <- NULL
+  if (lrchi2) {
+    E <- outer(rowSums(t), colSums(t)) / sum(t)
+    O <- matrix(as.numeric(t), nrow(t))
+    G <- 2 * sum(ifelse(O > 0, O * log(O / E), 0))
+    dfl <- (nrow(t) - 1) * (ncol(t) - 1)
+    lr <- c(chi2 = G, df = dfl, p = stats::pchisq(G, dfl, lower.tail = FALSE))
+  }
+  lrline <- function() {
+    if (is.null(lr)) return(invisible(NULL))
+    if (!chi2) cat("\n")
+    cat(sprintf(" Likelihood-ratio chi2(%d) = %8.4f   Pr = %5.3f", as.integer(lr[["df"]]), lr[["chi2"]], lr[["p"]]), "\n", sep = "")
+  }
+  rets <- function() {
+    rr <- list(N = sum(t), r = nrow(t), c = ncol(t))
+    if (chi2) rr <- c(rr, list(chi2 = attr(t, "chi2")[["chi2"]], p = attr(t, "chi2")[["p"]]))
+    if (!is.null(lr)) rr <- c(rr, list(chi2_lr = lr[["chi2"]], p_lr = lr[["p"]]))
+    assign("stata_r", rr, envir = env)
+  }
   dot <- function(v) ifelse(is.na(v), ".", v)
   rlabs <- dot(rownames(t))
   clabs <- dot(colnames(t))
   # Stata 19: nofreq with no percentage prints nothing and leaves r() empty
   # with chi2, only its line, and r() as always
   if (nofreq && !row && !column && !cell) {
-    if (chi2) {
+    if (chi2 || lrchi2) {
       s <- attr(t, "chi2")
-      cat("\n", strrep(" ", 10), sprintf("Pearson chi2(%d) = %8.4f   Pr = %5.3f", as.integer(s[["df"]]), s[["chi2"]], s[["p"]]), "\n", sep = "")
-      if (ret) assign("stata_r", list(N = sum(t), r = nrow(t), c = ncol(t), chi2 = s[["chi2"]], p = s[["p"]]), envir = env)
+      if (chi2) cat("\n", strrep(" ", 10), sprintf("Pearson chi2(%d) = %8.4f   Pr = %5.3f", as.integer(s[["df"]]), s[["chi2"]], s[["p"]]), "\n", sep = "")
+      lrline()
+      if (ret) rets()
     } else if (ret) {
       assign("stata_r", list(), envir = env)
     }
@@ -304,15 +325,12 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
     if (row || column || cell || nofreq) {
       # percentages in Stata 19's layout (nofreq alone prints nothing)
       stata_tab2_pct_print(xname, yname, rlabs, clabs, m, freq = !nofreq, row = row, column = column,
-                           cell = cell, chi2 = if (chi2) attr(t, "chi2"))
+                           cell = cell, chi2 = if (chi2) attr(t, "chi2"), key = key)
     } else {
       stata_tab2_print(xname, yname, rlabs, clabs, m, if (chi2) attr(t, "chi2"))
     }
-    if (ret) {
-      rr <- list(N = sum(t), r = nrow(t), c = ncol(t))
-      if (chi2) rr <- c(rr, list(chi2 = attr(t, "chi2")[["chi2"]], p = attr(t, "chi2")[["p"]]))
-      assign("stata_r", rr, envir = env)
-    }
+    lrline()
+    if (ret) rets()
     return(invisible(t))
   }
   if (!nofreq) print(stats::addmargins(t))
@@ -333,11 +351,8 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
     cat("\nPearson chi2(", s[["df"]], ") = ", format(s[["chi2"]], digits = 6),
         "   Pr = ", format(s[["p"]], digits = 4), "\n", sep = "")
   }
-  if (ret) {
-    rr <- list(N = sum(t), r = nrow(t), c = ncol(t))
-    if (chi2) rr <- c(rr, list(chi2 = attr(t, "chi2")[["chi2"]], p = attr(t, "chi2")[["p"]]))
-    assign("stata_r", rr, envir = env)
-  }
+  lrline()
+  if (ret) rets()
   invisible(t)
 }"#;
 
@@ -410,7 +425,7 @@ impl Session {
         self.no_by(c, "summarize")?;
         if let Some(o) = opts.other(&[
             ("detail", 1),
-            ("meanonly", 8),
+            ("meanonly", 4),
             ("separator", 3),
             ("format", 1),
         ]) {
@@ -425,7 +440,7 @@ impl Session {
             &[W::F, W::A, W::I]
         };
         let w = self.weight_of(c, allowed)?;
-        if opts.has("meanonly", 8) {
+        if opts.has("meanonly", 4) {
             if detail {
                 return Err(no("only one of meanonly or detail may be specified"));
             }
@@ -496,6 +511,17 @@ impl Session {
                      more)",
                 )),
             };
+        if let Some(v) = opts.arg("summarize", 2) {
+            let v = v.to_string();
+            for n in [Some(x), y].into_iter().flatten() {
+                if !is_name(n) || n.len() > 10 {
+                    return Err(no(format!(
+                        "tabulate {n}, summarize(): a variable name of up to 10 characters is translated"
+                    )));
+                }
+            }
+            return self.tabulate_summarize(c, opts, out, x, y, &v);
+        }
         let known: &[(&str, usize)] = if y.is_some() {
             &[
                 ("missing", 1),
@@ -504,10 +530,22 @@ impl Session {
                 ("column", 3),
                 ("cell", 4),
                 ("chi2", 4),
+                ("lrchi2", 6),
                 ("nofreq", 3),
+                ("nokey", 5),
+                ("matcell", 7),
+                ("matrow", 6),
+                ("matcol", 6),
             ]
         } else {
-            &[("missing", 1), ("nolabel", 3), ("sort", 4), ("generate", 3)]
+            &[
+                ("missing", 1),
+                ("nolabel", 3),
+                ("sort", 4),
+                ("generate", 3),
+                ("matcell", 7),
+                ("matrow", 6),
+            ]
         };
         if let Some(o) = opts.other(known) {
             return Err(no(format!(
@@ -558,11 +596,15 @@ impl Session {
             ("column", 3),
             ("cell", 4),
             ("chi2", 4),
+            ("lrchi2", 6),
             ("nofreq", 3),
         ] {
             if opts.has(name, min) {
                 args.push(format!("{name} = TRUE"));
             }
+        }
+        if opts.has("nokey", 5) {
+            args.push("key = FALSE".into());
         }
         // the names make the table Stata's
         args.push(format!("xname = {}", r_text(x)));
@@ -603,6 +645,8 @@ impl Session {
             None => None,
         };
         let call = format!("stata_tabulate({}{wargs}, ret = TRUE)", args.join(", "));
+        // the matrices first: Stata stops before the table when one is not allowed
+        self.tab_mats(opts, out, &src, x, y, &wargs)?;
         if self.quiet(c) {
             // nothing shown, r() still left
             out.line(format!("invisible(utils::capture.output({call}))"));
@@ -1232,6 +1276,10 @@ fn tab_chi2_weight(opts: &Opts, w: &Weighting) -> Result<(), Untranslated> {
     match w {
         Some((W::A, _)) if opts.has("chi2", 4) => Err(no("chi2 not allowed with aweights")),
         Some((W::I, _)) if opts.has("chi2", 4) => Err(no("option chi2 not allowed")),
+        // not seen in Stata with these weights
+        Some((W::A | W::I, _)) if opts.has("lrchi2", 6) => Err(no(
+            "tabulate, lrchi2 with analytic or importance weights is not translated yet",
+        )),
         _ => Ok(()),
     }
 }

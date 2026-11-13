@@ -6,7 +6,7 @@ use super::*;
 
 pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tabulate = FALSE, anova = TRUE, nolabel = FALSE, show = TRUE,
                          w = NULL, wtype = "f", compare = character(0), cols = c(TRUE, TRUE, TRUE),
-                         missing = FALSE, obs = TRUE) {
+                         missing = FALSE, obs = TRUE, obs_always = FALSE) {
   for (v in c(y, g)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
   if (is.character(d[[y]])) stop(y, " is a string variable; oneway needs a number (Stata: type mismatch, r(109))", call. = FALSE)
   num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
@@ -79,7 +79,7 @@ pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tab
   g9 <- function(v) stata_fmt(v, "%10.0g", trim = TRUE)
   if (tabulate && any(cols)) {
     weighted <- !is.null(w)
-    weighted <- weighted && obs
+    weighted <- (weighted && obs) || obs_always
     width <- 12 * (sum(cols) + weighted)
     rows_n <- vapply(lv, function(v) sum(gk == v), 0)
     # with weights: the weight sums as Freq., the rows (frequency weights: their sums) as Obs.

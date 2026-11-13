@@ -455,7 +455,7 @@ impl Session {
     }
 
     /// A matrix the line makes.
-    fn matrix_made(&mut self, name: &str) {
+    pub(super) fn matrix_made(&mut self, name: &str) {
         self.lost_mats.remove(name);
         self.maybe_moved.remove(name);
         self.user_mats.insert(name.to_string());

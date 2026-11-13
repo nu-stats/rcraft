@@ -6,7 +6,7 @@
 //! counts table's (`stata_tab2_print`): its widths, blocks and chi2 line.
 
 pub(super) const TABPCT_HELPER: &str = r##"stata_tab2_pct_print <- function(rname, cname, rlabs, clabs, counts, freq = TRUE,
-                                 row = FALSE, column = FALSE, cell = FALSE, chi2 = NULL) {
+                                 row = FALSE, column = FALSE, cell = FALSE, chi2 = NULL, key = TRUE) {
   shown <- c(frequency = freq, "row percentage" = row, "column percentage" = column, "cell percentage" = cell)
   shown <- names(shown)[shown]
   if (!length(shown)) return(invisible(NULL))
@@ -31,7 +31,7 @@ pub(super) const TABPCT_HELPER: &str = r##"stata_tab2_pct_print <- function(rnam
     out
   }
   many <- length(shown) > 1
-  if (many) {
+  if (many && key) {
     W <- max(nchar(shown)) + 2
     centre <- function(s) {
       l <- (W - nchar(s)) %/% 2
