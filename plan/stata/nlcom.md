@@ -17,7 +17,7 @@ Translated in `crates/statatr/src/data_r/nlcom.rs`.
 - `df(#)`: t in place of z (the headings, the critical value, r(table)'s t and df rows) and r(df_r) after
   r(level); `noheader` leaves out the expressions' lines; `iterate()` changes nothing in the results
   (probe `nl/l3.do` identical; corpus `nlcom.do`).
-- Not translated: after the models not listed below; `post` (it replaces e()); expressions of the
+- Not translated: after the models not listed below; expressions of the
   data's variables.
 
 ## More models (2026-11-13; probe `nl/l2.do`)
@@ -28,3 +28,10 @@ Translated in `crates/statatr/src/data_r/nlcom.rs`.
   stops iterating (corpus `nlcom_models.do`, to 6 digits).
 - After mlogit (`[2]_b[z]`, a base outcome's coefficient is missing, r(498)): the same table, the dependent
   variable in the stub (probe `rest/r3.do`; corpus `mlogit_tests.do`).
+
+## post (2026-11-13; probes `last/q1.do`, `last/q3.do`, `last/q4.do` identical; corpus `lincom_post.do`)
+
+- `nlcom ..., post` prints the same table, then e() is the combinations': e(b) (1 × k, row `y1`) and e(V)
+  under the names (`r`, `_nl_1`), e(N) the model's, e(rank), e(predict) `nlcom_p`, e(cmd) `nlcom`,
+  e(properties) `b V`, e(depvar), e(sample). test, lincom and nlcom then use them with z
+  (`test r = 1` is `( 1)  r = 1` and chi2; `nlcom _b[r] + 1` the dependent variable in the stub).

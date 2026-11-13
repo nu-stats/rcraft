@@ -168,7 +168,7 @@ impl Session {
                 "cii {kind} takes {want} numbers here (Stata: r(198))"
             )));
         }
-        let (Some(&n), Some(&a2)) = (nums.first(), nums.get(1)) else {
+        let (Some(&n), Some(&typed)) = (nums.first(), nums.get(1)) else {
             return Err(no(format!("cii {kind} needs its numbers")));
         };
         if !(whole(n) && n > 0.0) {
@@ -176,20 +176,25 @@ impl Session {
                 "first argument, #obs, must be a positive integer (Stata: r(198))",
             ));
         }
-        if kind == "proportions" && !(whole(a2) && a2 >= 0.0) {
-            return Err(no(
-                "cii proportions with a proportion in place of #succ is not translated yet",
-            ));
+        // a count, or (strictly between 0 and 1) a proportion or rate: Stata 19 takes the count
+        // it gives, rounded half up (60 .31 is 19 successes, 7 .5 is 4)
+        let counted = kind == "proportions" || poisson;
+        let a2 = if counted && typed > 0.0 && typed < 1.0 {
+            (typed * n + 0.5).floor()
+        } else {
+            typed
+        };
+        if counted && !(whole(a2) && a2 >= 0.0) {
+            return Err(no(if poisson {
+                "second argument, #events, must be a positive integer or between 0 and 1 (Stata: r(7))"
+            } else {
+                "second argument, #succ, must be a nonnegative integer or between 0 and 1 (Stata: r(7))"
+            }));
         }
         if kind == "proportions" && a2 > n {
             return Err(no(format!(
                 "the number of successes, {a2}, cannot exceed the number of observations, {n} (Stata: r(198))"
             )));
-        }
-        if poisson && !(whole(a2) && a2 >= 0.0) {
-            return Err(no(
-                "cii means, poisson with a rate in place of #events is not translated yet",
-            ));
         }
         let chosen: Vec<&str> = methods
             .iter()

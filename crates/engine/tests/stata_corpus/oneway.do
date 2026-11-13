@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12): made-up data; Stata 19's results are in oneway.recorded
 * commands: oneway
-* (oneway's analysis of variance and Bartlett's test: r() and r(ANOVA), with tabulate, noanova, nomeans and nostandard, a single-observation group left out of Bartlett's test, a string group, if; frequency and analytic weights with the multiple comparisons)
+* (oneway's analysis of variance and Bartlett's test: r() and r(ANOVA), with tabulate, noanova, nomeans and nostandard, a single-observation group left out of Bartlett's test, a string group, if; frequency and analytic weights with the multiple comparisons; missing as a group, noobs)
 * tolerance: 1e-9
 version 19
 clear
@@ -46,3 +46,9 @@ oneway y g2
 display "@ both " %24.17g r(chi2bart) " " r(df_bart) " " %24.17g r(F)
 oneway y educ [aweight = w], tabulate
 display "@ awtab " %24.17g r(F) " " %24.17g r(chi2bart)
+generate g3 = educ
+replace g3 = . in 1/10
+oneway y g3, missing
+display "@ miss " r(N) " " r(df_m) " " %24.17g r(F) " " %24.17g r(chi2bart)
+oneway y g3, tabulate missing noobs wrap
+display "@ misstab " r(N) " " %24.17g r(F)

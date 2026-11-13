@@ -80,12 +80,26 @@ pub(super) const TESTPARM_HELPER: &str = r##"stata_testparm <- function(terms, e
   if (multi) {
     # Stata 19: each coefficient in every outcome's equation, the base outcome's written o.
     # and dropped; equal compares them in the first equation only
-    if (any(vapply(coefs[hit], length, 0) > 1)) stop("testparm after mlogit with interactions is not translated yet", call. = FALSE)
+    if (any(vapply(coefs[hit], function(ps) sum(vapply(ps, function(p) p[1] == "c", TRUE)) > 1 && length(ps) > 1, TRUE))) {
+      stop("testparm after mlogit with an interaction of two continuous variables is not translated yet", call. = FALSE)
+    }
     levs <- as.character(stata_levels)
     base <- as.character(stata_base)
+    # a factor's base level: its first in the fit
+    xl <- tryCatch(stata_estimates$xlevels, error = function(e) NULL)
+    basel <- function(v) { l <- xl[[paste0("factor(", v, ")")]]; if (length(l)) l[1] else NA_character_ }
+    # Stata 19's names: the factors first, a base level keeping its b (1b.g#c.w), the base outcome's
+    # equation with o (2o.g, o.z) and co. for a continuous part of an interaction (co.w)
     lab1 <- function(ps, b) {
-      p <- ps[[1]]
-      if (p[1] == "f") paste0(p[3], if (b) "o" else "", ".", p[2]) else paste0(if (b) "o." else "", p[2])
+      one <- length(ps) == 1
+      fs <- Filter(function(p) p[1] == "f", ps)
+      cs <- Filter(function(p) p[1] == "c", ps)
+      fpart <- vapply(fs, function(p) {
+        mk <- if (!one && identical(p[3], basel(p[2]))) "b" else if (b) "o" else ""
+        paste0(p[3], mk, ".", p[2])
+      }, "")
+      cpart <- vapply(cs, function(p) if (one) paste0(if (b) "o." else "", p[2]) else paste0(if (b) "co." else "c.", p[2]), "")
+      paste(c(fpart, cpart), collapse = "#")
     }
     if (equal) {
       e1 <- levs[1]

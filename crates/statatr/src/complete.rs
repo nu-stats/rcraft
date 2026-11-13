@@ -696,21 +696,24 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         "oneway",
         &[
             "bonferroni",
+            "missing",
             "noanova",
             "nofreq",
             "nolabel",
             "nomeans",
+            "noobs",
             "nostandard",
             "scheffe",
             "sidak",
             "tabulate",
+            "wrap",
         ],
     ),
     (
         "centile",
         &["cci", "centile(", "level(", "meansd", "normal"],
     ),
-    ("nlcom", &["df(", "iterate(", "level(", "noheader"]),
+    ("nlcom", &["df(", "iterate(", "level(", "noheader", "post"]),
     (
         "cii",
         &[

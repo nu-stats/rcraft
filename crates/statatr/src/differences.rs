@@ -828,12 +828,22 @@ pub const GUIDES: &[Guide] = &[
     Guide {
         command: "lincom",
         about: "A linear combination of coefficients",
-        points: &[p(
-            "Tests",
-            "t on the model's degrees of freedom after regress, z after a likelihood model, as \
-             Stata's; with or, irr or rrr the estimate and its interval are exponentiated and \
-             the standard error is the delta method's.",
-        )],
+        points: &[
+            p(
+                "Tests",
+                "t on the model's degrees of freedom after regress, z after a likelihood model, as \
+                 Stata's; with or, irr or rrr the estimate and its interval are exponentiated and \
+                 the standard error is the delta method's.",
+            ),
+            p(
+                "Layout",
+                "Stata 19's line and table: ( 1) with the combination as test writes it (lincom x \
+                 + w - 1 is x + w = 1), then the (1) row under the dependent variable (none after \
+                 margins, post). A constant is part of the estimate; with or, irr, rrr or eform it \
+                 is Stata's own error (r(198)). After robreg, reghdfe, cluster2, asclogit and suest \
+                 the table is R's and a constant is refused.",
+            ),
+        ],
     },
     Guide {
         command: "list",
@@ -1714,11 +1724,21 @@ pub const GUIDES: &[Guide] = &[
     Guide {
         command: "test",
         about: "Wald tests after a model",
-        points: &[p(
-            "Statistic",
-            "F on the model's degrees of freedom after regress, chi2 after a likelihood \
-             model, as Stata's.",
-        )],
+        points: &[
+            p(
+                "Statistic",
+                "F on the model's degrees of freedom after regress, chi2 after a likelihood \
+                 model, as Stata's.",
+            ),
+            p(
+                "Lines",
+                "Each constraint is written as Stata 19 writes it: the coefficients on the left in \
+                 the order typed, the constant on the right (test 2*x = 3*w + 1 is ( 1)  2*x - 3*w \
+                 = 1), each name with its equation after the likelihood models ([yb]x) and the \
+                 base outcome's as omitted after mlogit ([3]o.x). After the models where Stata's \
+                 lines were not seen the line is the constraint as typed.",
+            ),
+        ],
     },
     Guide {
         command: "tostring",
@@ -2108,10 +2128,16 @@ pub const GUIDES: &[Guide] = &[
                  19's: r(b), r(V), r(table), r(N), r(level).",
             ),
             p(
+                "post",
+                "The combinations become e(b) and e(V) under their names (r, _nl_1), with Stata \
+                 19's e(N), e(rank), e(cmd) nlcom, e(depvar), e(predict) and e(properties); test, \
+                 lincom and nlcom then use them, with z.",
+            ),
+            p(
                 "Not yet",
                 "nlcom after models other than regress, logit, probit, poisson, nbreg, ologit, \
-                 oprobit, xtreg, ivregress, clogit, stcox and mlogit ([2]_b[x] for an equation), \
-                 post (which would replace e()) and \
+                 oprobit, xtreg, ivregress, clogit, stcox and mlogit ([2]_b[x] for an equation) \
+                 or nlcom's own posted results (after margins, post it is refused), and \
                  expressions of the data's variables are refused. After the likelihood models the \
                  results are as close to Stata's as the model's own estimates (6 digits or more).",
             ),
@@ -2159,8 +2185,9 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "A proportion or rate typed in place of the count (cii proportions 60 .3), and \
-                 values that are not numbers written out, are refused.",
+                "Values that are not numbers written out are refused. A proportion or rate typed in \
+                 place of the count (cii proportions 60 .31) is the count Stata 19 takes from it, \
+                 rounded half up (19).",
             ),
         ],
     },
@@ -2202,13 +2229,14 @@ pub const GUIDES: &[Guide] = &[
                  equal-valued groups are left out; the Bonferroni, Scheffe and Sidak comparisons \
                  of each pair of means; frequency and analytic weights (with analytic weights \
                  Bartlett's test counts each group's rows, as Stata 19 does). nomeans, nostandard \
-                 and nofreq drop the summary table's columns. r() is Stata's: N, mss, df_m, rss, \
-                 df_r, F, chi2bart, df_bart and the matrix r(ANOVA).",
+                 and nofreq drop the summary table's columns, noobs its Obs column; missing makes \
+                 the rows with a missing group a group of their own (.), and wrap changes nothing \
+                 here. r() is Stata's: N, mss, df_m, rss, df_r, F, chi2bart, df_bart and the \
+                 matrix r(ANOVA).",
             ),
             p(
                 "Not yet",
-                "noobs, missing, wrap and the comparisons of more groups than the line holds are \
-                 refused. With weights and tabulate the summary table gains Stata's Obs column \
+                "The comparisons of more groups than the line holds are refused. With weights and tabulate the summary table gains Stata's Obs column \
                  (analytic weights: the weight sums as Freq., the rows as Obs, summarize's standard \
                  deviation).",
             ),
@@ -2230,10 +2258,11 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "testparm after the other models and with interactions after mlogit (after mlogit \
-                 each coefficient is tested in every equation, the base outcome's dropped, as \
-                 Stata does), a level of its own (2.g), lists in \
-                 parentheses (i.(g h)) and the options other than equal are refused. No \
+                "testparm after the other models, interactions of two continuous variables after \
+                 mlogit (after mlogit each coefficient is tested in every equation, the base \
+                 outcome's dropped, as Stata does, factor-by-continuous interactions too), a level \
+                 of its own (2.g), lists in parentheses (i.(g h)) and the options other than equal \
+                 are refused. No \
                  coefficient matched is Stata's r(111), equal with one coefficient r(102).",
             ),
         ],

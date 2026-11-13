@@ -55,3 +55,9 @@ logs set line by line against RCraft's output); corpus `oneway.do`. Translated i
   and summarize's standard deviation (Σw(x − m)²/Σw · k/(k − 1), the groups' and the total's).
 - With both a single-observation group and a group of equal values, Bartlett's note has both lines, the
   single-observation one first.
+
+## missing, noobs, wrap (2026-11-13; probe `last/q1.do` identical; corpus `oneway.do`)
+
+- `missing`: the rows whose group is missing are a group of their own, last, labelled `.` (with
+  `nolabel` too), in every table and in r() (N, df_m, F, Bartlett's test). `noobs` drops the summary
+  table's Obs column (with weights); `wrap` changes nothing on these tables.

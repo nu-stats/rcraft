@@ -56,4 +56,11 @@ line by line against RCraft's output: identical but for the refused forms); corp
   exact and Poisson keep the `*` and "(*) one-sided" line.
 - Stata's errors (refused with them): #obs not a positive integer (r(198)), more successes than
   observations (r(198)), bonett without the kurtosis (r(198)). A proportion or rate typed in place of the
-  count ("or between 0 and 1") is not translated.
+  count ("or between 0 and 1"): see below.
+
+## A proportion or rate typed to cii (2026-11-13; probe `last/q1.do` identical; corpus `ci.do`)
+
+- `cii proportions #obs #p` with #p strictly between 0 and 1 is the count floor(#p · #obs + .5) (60 .31 is
+  19, 7 .5 is 4), and the table and r() are that count's; `cii means #exposure #rate, poisson` likewise
+  takes floor(#rate · #exposure + .5) events. Otherwise a fraction is Stata's r(7): "second argument,
+  #succ, must be a nonnegative integer or between 0 and 1" (#events: "a positive integer").

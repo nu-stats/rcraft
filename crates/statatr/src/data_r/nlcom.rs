@@ -130,7 +130,13 @@ impl Session {
         let est = self.estimates_for("nlcom")?;
         // iterate() bounds Stata's search for the derivatives' steps; the results are the
         // same (Stata 19), so it is taken and left aside
-        if let Some(o) = opts.other(&[("level", 1), ("noheader", 8), ("df", 2), ("iterate", 7)]) {
+        if let Some(o) = opts.other(&[
+            ("level", 1),
+            ("noheader", 8),
+            ("df", 2),
+            ("iterate", 7),
+            ("post", 4),
+        ]) {
             return Err(no(format!(
                 "nlcom with the option {o} is not translated yet"
             )));
@@ -149,22 +155,24 @@ impl Session {
             }
         };
         // the single-equation models whose nlcom table Stata 19 was seen to print (the
-        // dependent variable in the stub, _t after stcox)
-        if !matches!(
-            est.fit,
-            Fit::Regress
-                | Fit::Logit
-                | Fit::Probit
-                | Fit::Poisson
-                | Fit::Nbreg
-                | Fit::Ologit
-                | Fit::Oprobit
-                | Fit::Xtreg
-                | Fit::Ivregress
-                | Fit::Clogit
-                | Fit::Stcox
-                | Fit::Mlogit
-        ) {
+        // dependent variable in the stub, _t after stcox), and nlcom's own results posted
+        if !self.after_nlcom_post()
+            && !matches!(
+                est.fit,
+                Fit::Regress
+                    | Fit::Logit
+                    | Fit::Probit
+                    | Fit::Poisson
+                    | Fit::Nbreg
+                    | Fit::Ologit
+                    | Fit::Oprobit
+                    | Fit::Xtreg
+                    | Fit::Ivregress
+                    | Fit::Clogit
+                    | Fit::Stcox
+                    | Fit::Mlogit
+            )
+        {
             return Err(no(format!(
                 "nlcom after {} is not translated yet",
                 est.fit.name()
@@ -230,6 +238,37 @@ impl Session {
             },
             if self.quiet(c) { ", show = FALSE" } else { "" }
         ));
+        if opts.has("post", 4) {
+            // the combinations become e(b) and e(V), named as Stata names them; test,
+            // lincom and nlcom then use z (Stata 19's e() after nlcom, post)
+            out.line("stata_b <- stats::setNames(c(stata_r$b), colnames(stata_r$b))");
+            out.line("stata_vcov <- stata_r$V");
+            out.line("stata_df <- Inf");
+            out.line("stata_estimates <- list()");
+            out.line(format!(
+                "stata_e <- list(N = stata_r$N, rank = qr(stata_r$V)$rank, predict = \"nlcom_p\", cmd = \"nlcom\", properties = \"b V\", depvar = {}, b = matrix(stata_b, 1, dimnames = list(\"y1\", names(stata_b))), V = stata_r$V)",
+                r_text(&est.dep)
+            ));
+            self.estimates = Some(super::model::Estimates {
+                fit: Fit::Margins,
+                dep: est.dep.clone(),
+                factors: est.factors.clone(),
+            });
+            self.e_new = true;
+            for t in ["predict", "properties", "cmd", "depvar"] {
+                self.e_text.insert(t.to_string());
+            }
+            self.e_ret = super::returned::Returned::Kept {
+                cmd: "nlcom".into(),
+                model: String::new(),
+                names: &[],
+            };
+            self.r_ret = super::returned::Returned::Lost(
+                "r() after nlcom, post was not checked against Stata".into(),
+            );
+            out.caveat("post: the combinations are now e(b) and e(V), named as Stata names them");
+            return Ok(());
+        }
         self.r_new = Some((R_NLCOM, "nlcom".into()));
         Ok(())
     }

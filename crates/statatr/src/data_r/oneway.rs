@@ -5,7 +5,8 @@
 use super::*;
 
 pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tabulate = FALSE, anova = TRUE, nolabel = FALSE, show = TRUE,
-                         w = NULL, wtype = "f", compare = character(0), cols = c(TRUE, TRUE, TRUE)) {
+                         w = NULL, wtype = "f", compare = character(0), cols = c(TRUE, TRUE, TRUE),
+                         missing = FALSE, obs = TRUE) {
   for (v in c(y, g)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
   if (is.character(d[[y]])) stop(y, " is a string variable; oneway needs a number (Stata: type mismatch, r(109))", call. = FALSE)
   num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
@@ -13,7 +14,9 @@ pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tab
   gv <- d[[g]]
   gk <- if (is.character(gv)) ifelse(is.na(gv), "", gv) else num(gv)
   wv <- if (is.null(w)) rep(1, length(x)) else num(w)
-  keep <- !is.na(x) & !is.na(wv) & (if (is.character(gv)) gk != "" else !is.na(gk))
+  # with missing, the missing values of the group are a group of their own (Stata 19: ".")
+  if (missing && !is.character(gv)) gk[is.na(gk)] <- Inf
+  keep <- !is.na(x) & !is.na(wv) & (missing | (if (is.character(gv)) gk != "" else !is.na(gk)))
   x <- x[keep]
   gk <- gk[keep]
   wv <- wv[keep]
@@ -25,6 +28,7 @@ pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tab
   vl <- if (nolabel || is.character(gv)) NULL else attr(gv, "labels", exact = TRUE)
   name <- function(v) {
     if (is.character(v)) return(v)
+    if (is.infinite(v)) return(".")
     k <- if (!is.null(vl)) names(vl)[match(v, num(vl))] else NA
     if (length(k) && !is.na(k)) k else stata_fmt(v, "%9.0g", trim = TRUE)
   }
@@ -75,6 +79,7 @@ pub(super) const ONEWAY_HELPER: &str = r##"stata_oneway <- function(d, y, g, tab
   g9 <- function(v) stata_fmt(v, "%10.0g", trim = TRUE)
   if (tabulate && any(cols)) {
     weighted <- !is.null(w)
+    weighted <- weighted && obs
     width <- 12 * (sum(cols) + weighted)
     rows_n <- vapply(lv, function(v) sum(gk == v), 0)
     # with weights: the weight sums as Freq., the rows (frequency weights: their sums) as Obs.
@@ -187,6 +192,9 @@ impl Session {
             ("nomeans", 7),
             ("nostandard", 10),
             ("nofreq", 6),
+            ("missing", 1),
+            ("noobs", 5),
+            ("wrap", 4),
         ]) {
             return Err(no(format!(
                 "oneway with the option {o} is not translated yet"
@@ -235,6 +243,12 @@ impl Session {
         if cols.iter().any(|c| !c) {
             let v: Vec<&str> = cols.iter().map(|c| super::stats::r_logical(*c)).collect();
             args.push_str(&format!(", cols = c({})", v.join(", ")));
+        }
+        if opts.has("missing", 1) {
+            args.push_str(", missing = TRUE");
+        }
+        if opts.has("noobs", 5) {
+            args.push_str(", obs = FALSE");
         }
         if opts.has("nolabel", 7) {
             args.push_str(", nolabel = TRUE");

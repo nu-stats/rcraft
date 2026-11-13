@@ -38,4 +38,11 @@ log set against RCraft's output); corpus `testparm.do`. Translated in
 - Each coefficient matched is tested in every outcome's equation, the coefficient first and the equations
   inside: `[1]z [2]z [3]o.z [1]w ...`; the base outcome's written `o.z` (`2o.g` for a factor) and dropped
   ("Constraint 3 dropped"). `equal` compares the coefficients in the first equation only
-  (`- [1]z + [1]w = 0`). Interactions after mlogit are not translated.
+  (`- [1]z + [1]w = 0`). Interactions: see below.
+
+## Interactions after mlogit (2026-11-13; probe `last/q1.do` identical; corpus `mlogit_tests.do`)
+
+- `testparm i.g#c.w` and `c.w#i.g` (the same test): each level's interaction in every equation, the factor
+  part written first whichever order was typed, `1b.g#co.w` for the base level, `o.` on the base outcome's
+  parts, `c.`/`co.` on the continuous one; those Stata drops are dropped. Interactions of two continuous
+  variables after mlogit are still refused.

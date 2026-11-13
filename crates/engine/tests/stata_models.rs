@@ -650,6 +650,35 @@ fn lincom_and_test_after_logit_use_z_and_chi_squared() {
     );
 }
 
+/// test's and lincom's lines and lincom's table as Stata 19 prints them
+/// (plan/stata/lincom-test-lines.md).
+#[test]
+fn test_and_lincom_print_stata_lines() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let code = script(&format!(
+        "use \"{dir}/models.dta\"\nregress y x w\ntest 2*x = 3*w + 1\ntest -x + w = 0.25\nlincom x + w - 1\nlogit yb x w\ntest x = w\nlincom x, or\n"
+    ));
+    let text = ok(&mut e, &code);
+    for line in [
+        " ( 1)  2*x - 3*w = 1",
+        " ( 1)  - x + w = .25",
+        " ( 1)  x + w = 1",
+        "           y | Coefficient  Std. err.      t    P>|t|     [95% conf. interval]",
+        " ( 1)  [yb]x - [yb]w = 0",
+        " ( 1)  [yb]x = 0",
+        "          yb | Odds ratio   Std. err.      z    P>|z|     [95% conf. interval]",
+        "         (1) |",
+    ] {
+        assert!(text.contains(line), "{line:?} in {text}");
+    }
+    let refused = refusal("use \"d.dta\"\nlogit y x\nlincom x + 1, or\n");
+    assert!(
+        refused.contains("additive constant term not allowed with or option"),
+        "{refused}"
+    );
+}
+
 #[test]
 fn predict_after_regress_fills_every_row_as_a_float() {
     let Some(mut e) = engine() else { return };
@@ -806,8 +835,8 @@ fn what_is_not_translated_after_a_model_says_why() {
         "exposure and offset together"
     );
     assert!(
-        refusal("use \"d.dta\"\nregress y x\nlincom x - 1\n").contains("constant"),
-        "lincom with a constant"
+        refusal("use \"d.dta\"\nregress y x\nlincom x = 1\n").contains("without ="),
+        "lincom takes no ="
     );
     assert!(
         refusal("use \"d.dta\"\nlogit y x\nestat hettest\n").contains("after regress"),

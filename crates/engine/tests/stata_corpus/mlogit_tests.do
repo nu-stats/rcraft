@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12): made-up data; Stata 19's results are in mlogit_tests.recorded
 * commands: testparm nlcom
-* (testparm and nlcom after mlogit: every equation, the base outcome's coefficients dropped, equal in the first equation, baseoutcome(); to 6 digits, where Stata stops iterating)
+* (testparm and nlcom after mlogit: every equation, the base outcome's coefficients dropped, equal in the first equation, baseoutcome(), a factor-by-continuous interaction; to 6 digits, where Stata stops iterating)
 * tolerance: 1e-6
 version 19
 clear
@@ -27,3 +27,8 @@ display "@ nl2 " %24.17g el(r(b),1,2) " " %24.17g el(r(V),2,2) " " %24.17g el(r(
 quietly mlogit yo z w, baseoutcome(2)
 testparm z
 display "@ tb " %24.17g r(chi2) " " r(df)
+quietly mlogit yo z i.g c.w#i.g
+testparm i.g#c.w
+display "@ tint " %24.17g r(chi2) " " r(df) " " %24.17g r(p)
+testparm c.w#i.g
+display "@ tint2 " %24.17g r(chi2) " " r(df)

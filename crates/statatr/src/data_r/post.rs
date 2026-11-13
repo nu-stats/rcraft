@@ -115,10 +115,12 @@ pub(super) const ZERO_TERM_HELPER: &str = r#"stata_zero_term <- function(m, b) {
 
 /// Stata's `lincom`: one combination of the coefficients, its standard
 /// error, test and interval.
-pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, level = 0.95, eform = FALSE, what = "Coef.",
-                         ret = FALSE) {
+pub(super) const LINCOM_HELPER: &str = r##"stata_lincom <- function(a, label, level = 0.95, eform = FALSE, what = "Coef.",
+                         ret = FALSE, const = 0, stub = "", layout = TRUE) {
   env <- parent.frame()
-  a <- stata_resolve(list(a), 0, "")$rows[[1]]
+  res <- stata_resolve(list(a), 0, label, zero = TRUE)
+  a <- res$rows[[1]]
+  label <- res$labels[1]
   b <- stata_b
   miss <- setdiff(names(a), names(b))
   # a factor's base level (1.g where 1 is the base), alone or interacted, is
@@ -127,35 +129,59 @@ pub(super) const LINCOM_HELPER: &str = r#"stata_lincom <- function(a, label, lev
   a <- a[!names(a) %in% miss[base]]
   miss <- miss[!base]
   if (length(miss) > 0) stop(miss[1], " not found")
+  small <- is.finite(stata_df)
+  st <- if (small) "t" else "z"
+  rule <- strrep("-", 78)
+  # Stata 19's table: the dependent variable in the stub, the row (1)
+  head <- function() {
+    ab <- function(s) if (nchar(s) <= 12) s else paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s)))
+    cat(sprintf("\n ( 1)  %s\n\n%s\n", label, rule))
+    cat(sprintf("%12s |%s      %s    P>|%s|%25s", ab(stub),
+                if (what %in% c("Coef.", "Coefficient")) " Coefficient  Std. err." else sprintf("%11s   Std. err.", what),
+                st, st, paste0("[", stata_fmt(100 * level, "%9.0g", trim = TRUE), "% conf. interval]")), "\n", sep = "")
+    cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
+  }
   if (length(a) == 0) {
     # only base levels: Stata's 0 (omitted), with r(estimate) and r(se) 0
     if (ret) assign("stata_r", list(se = 0, estimate = 0), envir = env)
-    cat(sprintf(" ( 1)  %s = 0\n\n         (1) |          0  (omitted)\n", label))
+    if (layout) {
+      head()
+      cat("         (1) |          0  (omitted)\n", rule, "\n", sep = "")
+    } else {
+      cat(sprintf(" ( 1)  %s\n\n         (1) |          0  (omitted)\n", label))
+    }
     return(invisible(NULL))
   }
   L <- stats::setNames(numeric(length(b)), names(b))
   L[names(a)] <- a
-  est <- sum(L * b)
+  est <- sum(L * b) + const
   v <- drop(t(L) %*% stata_vcov %*% L)
+  se <- sqrt(v)
+  t <- est / se
+  q <- (1 + level) / 2
+  crit <- if (small) stats::qt(q, stata_df) else stats::qnorm(q)
+  p <- 2 * (if (small) stats::pt(-abs(t), stata_df) else stats::pnorm(-abs(t)))
+  f <- if (isTRUE(eform)) exp else identity
+  tab <- data.frame(f(est), if (isTRUE(eform)) exp(est) * se else se, t, p, f(est - crit * se), f(est + crit * se))
   if (ret) {
     # Stata's r(): t and df with a residual df, z without; with eform the
     # estimate, its bounds and (by the delta method) its se are exp()'s
-    se <- sqrt(v)
-    t <- est / se
-    q <- (1 + level) / 2
-    small <- is.finite(stata_df)
-    crit <- if (small) stats::qt(q, stata_df) else stats::qnorm(q)
-    p <- 2 * (if (small) stats::pt(-abs(t), stata_df) else stats::pnorm(-abs(t)))
-    f <- if (isTRUE(eform)) exp else identity
     rr <- if (small) list(df = stata_df) else list()
-    rr <- c(rr, list(ub = f(est + crit * se), lb = f(est - crit * se), p = p))
-    rr[[if (small) "t" else "z"]] <- t
-    rr <- c(rr, list(level = round(100 * level, 9), se = if (isTRUE(eform)) exp(est) * se else se, estimate = f(est)))
+    rr <- c(rr, list(ub = tab[[6]], lb = tab[[5]], p = p))
+    rr[[st]] <- t
+    rr <- c(rr, list(level = round(100 * level, 9), se = tab[[2]], estimate = tab[[1]]))
     assign("stata_r", rr, envir = env)
   }
-  cat(sprintf(" ( 1)  %s = 0\n\n", label))
-  stata_coefs(stats::setNames(est, "(1)"), matrix(v, 1, 1), stata_df, level, eform, what)
-}"#;
+  if (!layout) {
+    cat(sprintf(" ( 1)  %s\n\n", label))
+    return(stata_coefs(stats::setNames(est, "(1)"), matrix(v, 1, 1), stata_df, level, eform, what))
+  }
+  head()
+  g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
+  cat(sprintf("%12s |%11s%11s%9.2f%8.3f%13s%12s", "(1)", g(tab[[1]]), g(tab[[2]]), t, p, g(tab[[5]]), g(tab[[6]])),
+      "\n", rule, "\n", sep = "")
+  invisible(tab)
+}"##;
 
 /// `estat ic`, `estat hettest` and `estat ovtest`.
 pub(super) const ESTAT_HELPER: &str = r#"stata_estat_ic <- function(fit, fweights = FALSE) {
@@ -629,6 +655,14 @@ impl Session {
         Ok(())
     }
 
+    /// Whether e(b) and e(V) are those `nlcom, post` left.
+    pub(super) fn after_nlcom_post(&self) -> bool {
+        self.estimates
+            .as_ref()
+            .is_some_and(|e| e.fit == Fit::Margins)
+            && matches!(&self.e_ret, super::returned::Returned::Kept { cmd, .. } if cmd == "nlcom")
+    }
+
     pub(super) fn lincom(
         &mut self,
         c: &Command,
@@ -657,9 +691,23 @@ impl Session {
         let (coefs, constant) = linear(text, &est)?;
         // after mlogit a name without an equation is the first equation's, as in Stata
         let coefs = rename_any(coefs, "stata:first:");
-        if constant != 0.0 {
-            return Err(no("lincom takes coefficients only, not a constant"));
+        // Stata 19's line and table, after the models it was seen after; the
+        // constant goes to the right of the line (`x + w - 1` is `x + w = 1`)
+        let label = stata_label(text, None, &est);
+        let layout = label.is_some();
+        if constant != 0.0 && !layout {
+            return Err(no(format!(
+                "lincom with a constant after {} is not translated yet",
+                est.fit.name()
+            )));
         }
+        let label = label.unwrap_or_else(|| format!("{} = 0", tidy(text)));
+        // the dependent variable heads the table, but none after margins, post
+        let stub = if est.fit == Fit::Margins && !self.after_nlcom_post() {
+            r_text("")
+        } else {
+            r_text(&est.dep)
+        };
         if coefs.is_empty() {
             return Err(no("lincom needs at least one coefficient"));
         }
@@ -675,8 +723,19 @@ impl Session {
         } else {
             (false, "Coef.")
         };
+        if eform && constant != 0.0 {
+            // Stata 19 (seen with or)
+            let o = ["or", "irr", "rrr", "eform"]
+                .into_iter()
+                .find(|o| opts.has(o, o.len().min(3)))
+                .unwrap_or("eform");
+            return Err(no(format!(
+                "additive constant term not allowed with {o} option (Stata: r(198))"
+            )));
+        }
         self.helpers.insert("stata_coefs");
         self.helpers.insert("stata_lincom");
+        self.helpers.insert("stata_fmt");
         self.helpers.insert("stata_zero_term");
         self.helpers.insert("stata_names");
         let row = Row {
@@ -686,12 +745,22 @@ impl Session {
         };
         self.r_new = Some((super::returned::R_LINCOM, "lincom".into()));
         let call = format!(
-            "stata_lincom({}, label = {}, level = {}, eform = {}, what = {}, ret = TRUE)",
+            "stata_lincom({}, label = {}, level = {}, eform = {}, what = {}, ret = TRUE{}{})",
             row.r_vector(),
-            r_text(&tidy(text)),
+            r_text(&label),
             r_number(level),
             r_logical(eform),
-            r_text(what)
+            r_text(what),
+            if constant != 0.0 {
+                format!(", const = {}", r_number(constant))
+            } else {
+                String::new()
+            },
+            if layout {
+                format!(", stub = {stub}")
+            } else {
+                ", layout = FALSE".to_string()
+            }
         );
         out.line(super::returned::quietly(c, call));
         Ok(())
@@ -929,15 +998,17 @@ fn equation(text: &str, est: &Estimates) -> Result<Row, Untranslated> {
     if coefs.is_empty() {
         return Err(no(format!("{text}: no coefficient is left to test")));
     }
-    let label = format!(
-        "{} = {}",
-        tidy(lhs),
-        if text.contains('=') {
-            tidy(rhs)
-        } else {
-            "0".into()
-        }
-    );
+    let label = stata_label(lhs, text.contains('=').then_some(rhs), est).unwrap_or_else(|| {
+        format!(
+            "{} = {}",
+            tidy(lhs),
+            if text.contains('=') {
+                tidy(rhs)
+            } else {
+                "0".into()
+            }
+        )
+    });
     Ok(Row {
         coefs,
         value: rc - lc,
@@ -956,6 +1027,126 @@ fn rename_any(coefs: BTreeMap<String, f64>, to: &str) -> BTreeMap<String, f64> {
         .collect()
 }
 
+/// How `test` and `lincom` write a coefficient's name in their lines (Stata
+/// 19): as it is, with the dependent variable's equation after the models
+/// fitted by likelihood, with its own equation after mlogit; None after the
+/// models not checked, whose lines keep what was typed.
+enum Names {
+    Plain,
+    Equation(String),
+    Mlogit,
+}
+
+fn names_of(est: &Estimates) -> Option<Names> {
+    match est.fit {
+        Fit::Regress | Fit::Xtreg | Fit::Ivregress | Fit::Stcox | Fit::Margins => {
+            Some(Names::Plain)
+        }
+        Fit::Logit
+        | Fit::Probit
+        | Fit::Poisson
+        | Fit::Nbreg
+        | Fit::Ologit
+        | Fit::Oprobit
+        | Fit::Clogit => Some(Names::Equation(est.dep.clone())),
+        Fit::Mlogit => Some(Names::Mlogit),
+        _ => None,
+    }
+}
+
+/// A number as Stata's %9.0g writes it in these lines (`.5`, `-1.5`, `2`),
+/// or None when that takes more than the plain digits.
+fn short_number(v: f64) -> Option<String> {
+    let v: f64 = format!("{v:.12e}").parse().ok()?;
+    let s = format!("{}", v + 0.0);
+    let s = if let Some(r) = s.strip_prefix("0.") {
+        format!(".{r}")
+    } else if let Some(r) = s.strip_prefix("-0.") {
+        format!("-.{r}")
+    } else {
+        s
+    };
+    (s.len() <= 9 && !s.contains(['e', 'N', 'i'])).then_some(s)
+}
+
+/// The line `test` and `lincom` print for `lhs = rhs` (`rhs` None: `= 0`),
+/// as Stata 19 writes it: every coefficient on the left in the order typed,
+/// weights that are not 1 as `2*x`, and the constant on the right (`test 2*x
+/// = 3*w + 1` is `2*x - 3*w = 1`, `lincom x + w - 1` is `x + w = 1`, after
+/// logit `[yb]x - [yb]w = 0`). After mlogit `[stata:first]` stands for the
+/// first equation, which R names. None where that can't be told here.
+fn stata_label(lhs: &str, rhs: Option<&str>, est: &Estimates) -> Option<String> {
+    let style = names_of(est)?;
+    let mut coefs: Vec<(String, f64)> = Vec::new();
+    let mut constant = 0.0;
+    for (side, text) in [(1.0, Some(lhs)), (-1.0, rhs)] {
+        let Some(text) = text else { continue };
+        for (sign, t) in signed_terms(text).ok()? {
+            let (k, name) = term(t.trim()).ok()?;
+            match name {
+                Some(n) => {
+                    let n = shown_name(n, &style)?;
+                    match coefs.iter_mut().find(|(m, _)| *m == n) {
+                        Some((_, w)) => *w += side * sign * k,
+                        None => coefs.push((n, side * sign * k)),
+                    }
+                }
+                None => constant -= side * sign * k,
+            }
+        }
+    }
+    let mut out = String::new();
+    for (n, w) in coefs.iter().filter(|(_, w)| *w != 0.0) {
+        let a = w.abs();
+        let t = if a == 1.0 {
+            n.clone()
+        } else {
+            format!("{}*{n}", short_number(a)?)
+        };
+        out.push_str(&match (out.is_empty(), *w < 0.0) {
+            (true, false) => t,
+            (true, true) => format!("- {t}"),
+            (false, false) => format!(" + {t}"),
+            (false, true) => format!(" - {t}"),
+        });
+    }
+    if out.is_empty() {
+        return None;
+    }
+    Some(format!("{out} = {}", short_number(constant)?))
+}
+
+/// `_b[x]`, `[2]x`, `[2]_b[x]`, `_b[2:x]` as the line shows them.
+fn shown_name(t: &str, style: &Names) -> Option<String> {
+    let t: String = t.split_whitespace().collect();
+    let (eq, name) = match t.strip_prefix('[').and_then(|r| r.split_once(']')) {
+        Some((e, rest)) => (Some(e.to_string()), rest.to_string()),
+        None => (None, t.clone()),
+    };
+    let name = name
+        .strip_prefix("_b[")
+        .and_then(|r| r.strip_suffix(']'))
+        .map(str::to_string)
+        .unwrap_or(name);
+    let (eq, name) = match (eq, name.split_once(':')) {
+        (None, Some((e, n))) => (Some(e.to_string()), n.to_string()),
+        (eq, _) => (eq, name),
+    };
+    if name.is_empty() || name.contains(['[', ']', ':']) {
+        return None;
+    }
+    match (style, eq) {
+        (Names::Plain, None) => Some(name),
+        (Names::Equation(d), None) => Some(format!("[{d}]{name}")),
+        (Names::Equation(d), Some(e)) if e == *d => Some(format!("[{d}]{name}")),
+        (Names::Mlogit, None) => Some(format!("[stata:first]{name}")),
+        (Names::Mlogit, Some(e)) if !e.is_empty() && !e.starts_with('#') => {
+            Some(format!("[{e}]{name}"))
+        }
+        _ => None,
+    }
+}
+
 /// Spaces made single, for the lines `test` and `lincom` print.
 fn tidy(t: &str) -> String {
     t.split_whitespace().collect::<Vec<_>>().join(" ")
@@ -967,31 +1158,36 @@ fn linear(text: &str, est: &Estimates) -> Result<(BTreeMap<String, f64>, f64), U
     let mut coefs = BTreeMap::new();
     let mut constant = 0.0;
     for (sign, t) in signed_terms(text)? {
-        let t = t.trim();
-        let (k, name) = match t.split_once('*') {
-            Some((a, b)) => match (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
-                (Ok(k), Err(_)) => (k, Some(b.trim())),
-                (Err(_), Ok(k)) => (k, Some(a.trim())),
-                _ => {
-                    return Err(no(format!(
-                        "{t}: only a number times a coefficient is translated"
-                    )))
-                }
-            },
-            None => match t.parse::<f64>() {
-                Ok(k) => (k, None),
-                Err(_) => (1.0, Some(t)),
-            },
-        };
-        if !k.is_finite() {
-            return Err(no(format!("{t} is not a number")));
-        }
+        let (k, name) = term(t.trim())?;
         match name {
             Some(n) => *coefs.entry(coef_name(n, est)?).or_insert(0.0) += sign * k,
             None => constant += sign * k,
         }
     }
     Ok((coefs, constant))
+}
+
+/// `2*x`, `x*2`, `x` and `0.5` as a weight and a coefficient (None: a constant).
+fn term(t: &str) -> Result<(f64, Option<&str>), Untranslated> {
+    let (k, name) = match t.split_once('*') {
+        Some((a, b)) => match (a.trim().parse::<f64>(), b.trim().parse::<f64>()) {
+            (Ok(k), Err(_)) => (k, Some(b.trim())),
+            (Err(_), Ok(k)) => (k, Some(a.trim())),
+            _ => {
+                return Err(no(format!(
+                    "{t}: only a number times a coefficient is translated"
+                )))
+            }
+        },
+        None => match t.parse::<f64>() {
+            Ok(k) => (k, None),
+            Err(_) => (1.0, Some(t)),
+        },
+    };
+    if !k.is_finite() {
+        return Err(no(format!("{t} is not a number")));
+    }
+    Ok((k, name))
 }
 
 /// Splits at `+` and `-` (not those inside a number such as `1e-3`).
@@ -1248,7 +1444,7 @@ stata_bnames <- function() {
     stata_canon(paste0(eq, paste(vapply(strsplit(n, ":", fixed = TRUE)[[1]], part, ""), collapse = "#")))
   }, "")
 }
-stata_resolve <- function(rows, r, labels) {
+stata_resolve <- function(rows, r, labels, zero = FALSE) {
   st <- stata_bnames()
   nm <- names(stata_b)
   multi <- inherits(stata_estimates, "multinom")
@@ -1308,10 +1504,17 @@ stata_resolve <- function(rows, r, labels) {
     keep <- !is.na(keys)
     row <- row[keep]
     names(row) <- keys[keep]
-    if (length(row) == 0 && multi) {
+    if (length(row) == 0 && multi && !zero) {
       stop("[", stata_base, "] is the base outcome's equation, which Stata fixes at zero, so nothing is left to test")
     }
     add(row, r[i], labels[i])
+  }
+  if (multi) {
+    # Stata 19's lines: a name without an equation is the first equation's,
+    # and the base outcome's coefficients are omitted ones ([3]o.x)
+    lv <- as.character(sort(as.numeric(stata_estimates$lev)))
+    out$labels <- gsub("[stata:first]", paste0("[", lv[1], "]"), out$labels, fixed = TRUE)
+    out$labels <- gsub(paste0("[", stata_base, "]"), paste0("[", stata_base, "]o."), out$labels, fixed = TRUE)
   }
   out
 }"##;
@@ -1396,7 +1599,14 @@ mod tests {
         assert_eq!(r.coefs.get("x"), Some(&1.0));
         assert_eq!(r.coefs.get("w"), Some(&-1.0));
         assert_eq!(r.value, 0.0);
-        assert_eq!(r.label, "x = w");
+        assert_eq!(r.label, "x - w = 0", "Stata's line: everything on the left");
+        let label = |t: &str| equation(t, &e).map(|r| r.label).unwrap_or_default();
+        assert_eq!(label("2*x = 3*w + 1"), "2*x - 3*w = 1");
+        assert_eq!(label("-x + w = 0.25"), "- x + w = .25");
+        assert_eq!(label("1.5*x - 2 = w"), "1.5*x - w = 2");
+        assert_eq!(label("x = 2*x"), "- x = 0");
+        assert_eq!(label("_b[x] = _b[w]"), "x - w = 0");
+        assert_eq!(label("x = -1.5"), "x = -1.5");
         let r = equation("x + 1 = 3", &e).map(|r| r.value);
         assert_eq!(r, Ok(2.0));
         assert!(equation("x = x", &e).is_err(), "nothing left to test");

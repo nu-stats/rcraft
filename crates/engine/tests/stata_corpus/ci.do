@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12): made-up data; Stata 19's results are in ci.recorded
 * commands: ci cii
-* (ci means, ci proportions with every method, at 0 and 1 and in between, and ci variances: the last variable's r(); frequency and analytic weights for means; level(); one and no observations)
+* (ci means, ci proportions with every method, at 0 and 1 and in between, and ci variances: the last variable's r(); frequency and analytic weights for means; level(); one and no observations; cii with a proportion or rate typed in)
 * tolerance: 1e-9
 version 19
 clear
@@ -78,3 +78,9 @@ cii variances 50 9, sd
 display "@ cii_sd " %24.17g r(sd) " " %24.17g r(lb) " " %24.17g r(ub)
 cii variances 50 9 4, bonett
 display "@ cii_bon " %24.17g r(kurtosis) " " %24.17g r(lb) " " %24.17g r(ub)
+cii proportions 60 .31
+display "@ cii_frac " r(N) " " %24.17g r(proportion) " " %24.17g r(lb) " " %24.17g r(ub)
+cii proportions 7 .5, wilson
+display "@ cii_half " %24.17g r(proportion) " " %24.17g r(lb) " " %24.17g r(ub)
+cii means 120 .2531, poisson
+display "@ cii_rate " %24.17g r(mean) " " %24.17g r(se) " " %24.17g r(lb) " " %24.17g r(ub)
