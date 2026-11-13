@@ -1674,8 +1674,11 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Printing",
-                "Stata's own tables for counts, checked character for character; percentages, \
-                 analytic weights and string variables keep R's layout.",
+                "Stata's own tables for counts, and for two-way tables with row, column and \
+                 cell percentages (with nofreq too: the Key box, each cell's lines, the rules \
+                 between rows), checked character for character; analytic weights and string \
+                 variables keep R's layout. nofreq alone prints nothing and leaves r() empty, as \
+                 in Stata 19.",
             ),
         ],
     },

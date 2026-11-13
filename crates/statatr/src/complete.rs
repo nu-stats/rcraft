@@ -701,6 +701,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "column",
             "generate(",
             "missing",
+            "nofreq",
             "nolabel",
             "row",
             "sort",

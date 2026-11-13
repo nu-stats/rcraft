@@ -225,7 +225,7 @@ pub(super) const TAB_GENERATE_HELPER: &str = r#"stata_tab_generate <- function(d
 pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NULL, missing = FALSE, sort = FALSE,
                             row = FALSE, column = FALSE, cell = FALSE,
                             chi2 = FALSE, w = NULL, wtype = "f", ret = FALSE,
-                            xname = NULL, yname = NULL) {
+                            xname = NULL, yname = NULL, nofreq = FALSE) {
   # ret: leave Stata's r() as stata_r where it was called from; with the
   # variables' names, the table is Stata's (counts, or frequency weights)
   env <- parent.frame()
@@ -285,11 +285,22 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
   dot <- function(v) ifelse(is.na(v), ".", v)
   rlabs <- dot(rownames(t))
   clabs <- dot(colnames(t))
-  if (!is.null(xname) && !is.null(yname) && counts && !row && !column && !cell &&
+  # Stata 19: nofreq with no percentage prints nothing and leaves r() empty
+  if (nofreq && !row && !column && !cell) {
+    if (ret) assign("stata_r", list(), envir = env)
+    return(invisible(t))
+  }
+  if (!is.null(xname) && !is.null(yname) && counts &&
       !is.character(x) && !is.character(y) &&
       stata_tab2_fits(xname, yname, clabs)) {
     m <- matrix(as.numeric(t), nrow(t), ncol(t))
-    stata_tab2_print(xname, yname, rlabs, clabs, m, if (chi2) attr(t, "chi2"))
+    if (row || column || cell || nofreq) {
+      # percentages in Stata 19's layout (nofreq alone prints nothing)
+      stata_tab2_pct_print(xname, yname, rlabs, clabs, m, freq = !nofreq, row = row, column = column,
+                           cell = cell, chi2 = if (chi2) attr(t, "chi2"))
+    } else {
+      stata_tab2_print(xname, yname, rlabs, clabs, m, if (chi2) attr(t, "chi2"))
+    }
     if (ret) {
       rr <- list(N = sum(t), r = nrow(t), c = ncol(t))
       if (chi2) rr <- c(rr, list(chi2 = attr(t, "chi2")[["chi2"]], p = attr(t, "chi2")[["p"]]))
@@ -297,7 +308,7 @@ pub(super) const TABULATE_HELPER: &str = r#"stata_tabulate <- function(x, y = NU
     }
     return(invisible(t))
   }
-  print(stats::addmargins(t))
+  if (!nofreq) print(stats::addmargins(t))
   if (row) {
     cat("\nrow percentages\n")
     print(round(100 * prop.table(t, 1), 2))
@@ -486,6 +497,7 @@ impl Session {
                 ("column", 3),
                 ("cell", 4),
                 ("chi2", 4),
+                ("nofreq", 3),
             ]
         } else {
             &[("missing", 1), ("nolabel", 3), ("sort", 4), ("generate", 3)]
@@ -502,9 +514,21 @@ impl Session {
         }
         let w = self.weight_of(c, &[W::F, W::A, W::I])?;
         tab_chi2_weight(opts, &w)?;
+        if opts.has("nofreq", 3)
+            && opts.has("chi2", 4)
+            && !["row", "column", "cell"]
+                .iter()
+                .zip([3, 3, 4])
+                .any(|(o, m)| opts.has(o, m))
+        {
+            return Err(no(
+                "tabulate, nofreq chi2 without row, column or cell is not translated yet",
+            ));
+        }
         let (src, _, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_tab_values");
         self.helpers.insert("stata_tabulate");
+        self.helpers.insert("stata_tabpct");
         // importance weights' r() was not checked against Stata
         if !matches!(w, Some((W::I, _))) {
             self.r_new = Some((
@@ -538,6 +562,7 @@ impl Session {
             ("column", 3),
             ("cell", 4),
             ("chi2", 4),
+            ("nofreq", 3),
         ] {
             if opts.has(name, min) {
                 args.push(format!("{name} = TRUE"));
@@ -590,11 +615,10 @@ impl Session {
         }
         out.line(call);
         out.code.extend(generate);
-        let percents = ["row", "column", "cell"]
-            .iter()
-            .zip([3, 3, 4])
-            .any(|(o, m)| opts.has(o, m));
-        if percents || matches!(w, Some((W::A | W::I, _))) {
+        if matches!(w, Some((W::A | W::I, _)))
+            || (y.is_some() && x.len() > 10)
+            || y.is_some_and(|y| y.len() > 33)
+        {
             out.caveat("printed in R's layout, not Stata's table");
         }
         if opts.has("chi2", 4) {
@@ -946,6 +970,7 @@ impl Session {
         for h in [
             "stata_tab_values",
             "stata_tabulate",
+            "stata_tabpct",
             "stata_tab1",
             "stata_tables",
             "stata_fmt",
@@ -1005,6 +1030,7 @@ impl Session {
         for h in [
             "stata_tab_values",
             "stata_tabulate",
+            "stata_tabpct",
             "stata_tab2",
             "stata_tables",
             "stata_fmt",

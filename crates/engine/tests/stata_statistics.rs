@@ -250,7 +250,8 @@ fn tabulate_counts_and_its_chi_squared_has_no_continuity_correction() {
         "{text}"
     );
     assert!(text.contains("Pearson chi2"), "{text}");
-    assert!(text.contains("row percentages"), "{text}");
+    // Stata 19's table of percentages, with its Key box
+    assert!(text.contains("| row percentage |"), "{text}");
 
     let v = numbers(
         &mut e,

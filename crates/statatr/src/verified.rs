@@ -179,7 +179,12 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("tabstat", &["tabstat"]),
     (
         "tabulate",
-        &["checks", "descriptives", "extended_missing_commands"],
+        &[
+            "checks",
+            "descriptives",
+            "extended_missing_commands",
+            "tabulate_pct",
+        ],
     ),
     ("tempvar", &["control"]),
     ("test", &["regress"]),
