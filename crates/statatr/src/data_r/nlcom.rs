@@ -9,7 +9,8 @@
 use super::model::Fit;
 use super::*;
 
-pub(super) const NLCOM_HELPER: &str = r##"stata_nlcom <- function(exprs, names, texts, depvar, level = 95, show = TRUE) {
+pub(super) const NLCOM_HELPER: &str = r##"stata_nlcom <- function(exprs, names, texts, depvar, level = 95, show = TRUE,
+                        df = Inf, header = TRUE) {
   b0 <- stata_b
   env <- environment(stata_bget)
   on.exit(assign("stata_b", b0, envir = env), add = TRUE)
@@ -41,23 +42,27 @@ pub(super) const NLCOM_HELPER: &str = r##"stata_nlcom <- function(exprs, names, 
   dimnames(V) <- list(names, names)
   se <- sqrt(diag(V))
   z <- est / se
-  p <- 2 * stats::pnorm(-abs(z))
-  crit <- stats::qnorm(1 - (100 - level) / 200)
+  small <- is.finite(df)
+  p <- if (small) 2 * stats::pt(-abs(z), df) else 2 * stats::pnorm(-abs(z))
+  crit <- if (small) stats::qt(1 - (100 - level) / 200, df) else stats::qnorm(1 - (100 - level) / 200)
   lb <- est - crit * se
   ub <- est + crit * se
   bm <- matrix(est, 1, dimnames = list("c1", names))
-  tab <- rbind(b = est, se = se, z = z, pvalue = p, ll = lb, ul = ub, df = NA_real_, crit = crit, eform = 0)
+  tab <- rbind(b = est, se = se, z = z, pvalue = p, ll = lb, ul = ub, df = if (small) df else NA_real_, crit = crit, eform = 0)
+  if (small) rownames(tab)[3] <- "t"
   colnames(tab) <- names
   N <- tryCatch(stata_e[["N"]], error = function(e) NULL)
-  r <- list(level = level, N = if (is.null(N)) NA_real_ else N, table = tab, b = bm, V = V)
+  r <- c(list(level = level), if (small) list(df_r = df), list(N = if (is.null(N)) NA_real_ else N, table = tab, b = bm, V = V))
   if (!show) return(r)
   g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
   ab <- function(s) if (nchar(s) <= 12) s else paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s)))
-  cat("\n")
-  for (i in seq_along(names)) cat(sprintf("%12s: %s", names[i], texts[i]), "\n", sep = "")
+  if (header) {
+    cat("\n")
+    for (i in seq_along(names)) cat(sprintf("%12s: %s", names[i], texts[i]), "\n", sep = "")
+  }
   rule <- strrep("-", 78)
   cat("\n", rule, "\n", sep = "")
-  cat(sprintf("%12s | Coefficient  Std. err.      z    P>|z|%25s", ab(depvar),
+  cat(sprintf("%12s | Coefficient  Std. err.      %s    P>|%s|%25s", ab(depvar), if (small) "t" else "z", if (small) "t" else "z",
               paste0("[", stata_fmt(level, "%9.0g", trim = TRUE), "% conf. interval]")), "\n", sep = "")
   cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
   for (i in seq_along(names)) {
@@ -68,7 +73,7 @@ pub(super) const NLCOM_HELPER: &str = r##"stata_nlcom <- function(exprs, names, 
 }"##;
 
 /// The r() nlcom leaves (Stata 19), with the matrices r(b), r(V), r(table).
-const R_NLCOM: &[&str] = &["level", "N"];
+const R_NLCOM: &[&str] = &["level", "df_r", "N"];
 
 /// `(name: exp) (exp) ...` as its parts, or the whole text as one.
 fn parts(text: &str) -> Result<Vec<(Option<String>, String)>, Untranslated> {
@@ -123,11 +128,26 @@ impl Session {
     ) -> Result<(), Untranslated> {
         self.no_by(c, "nlcom")?;
         let est = self.estimates_for("nlcom")?;
-        if let Some(o) = opts.other(&[("level", 1)]) {
+        // iterate() bounds Stata's search for the derivatives' steps; the results are the
+        // same (Stata 19), so it is taken and left aside
+        if let Some(o) = opts.other(&[("level", 1), ("noheader", 8), ("df", 2), ("iterate", 7)]) {
             return Err(no(format!(
                 "nlcom with the option {o} is not translated yet"
             )));
         }
+        let df = match opts.arg("df", 2) {
+            None => None,
+            Some(d) => {
+                let v: f64 = d
+                    .trim()
+                    .parse()
+                    .map_err(|_| no(format!("df({d}) needs a number")))?;
+                if !(v > 0.0 && v.is_finite()) {
+                    return Err(no(format!("df({d}) must be above 0 (Stata: r(198))")));
+                }
+                Some(r_number(v))
+            }
+        };
         // the single-equation models whose nlcom table Stata 19 was seen to print (the
         // dependent variable in the stub, _t after stcox)
         if !matches!(
@@ -196,11 +216,17 @@ impl Session {
             self.helpers.insert(h);
         }
         out.line(format!(
-            "stata_r <- stata_nlcom(list({}), c({}), c({}), {}, level = {level}{})",
+            "stata_r <- stata_nlcom(list({}), c({}), c({}), {}, level = {level}{}{}{})",
             fns.join(", "),
             names.join(", "),
             texts.join(", "),
             r_text(&est.dep),
+            df.map(|d| format!(", df = {d}")).unwrap_or_default(),
+            if opts.has("noheader", 8) {
+                ", header = FALSE"
+            } else {
+                ""
+            },
             if self.quiet(c) { ", show = FALSE" } else { "" }
         ));
         self.r_new = Some((R_NLCOM, "nlcom".into()));

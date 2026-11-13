@@ -14,8 +14,11 @@ Translated in `crates/statatr/src/data_r/nlcom.rs`.
   missing, eform 0), r(b) (1 × k, the row named c1) and r(V). e() is left as it was.
 - RCraft takes the derivatives by central differences extrapolated (Richardson) on Stata mode's own
   translation of each expression, evaluated with the coefficients moved one at a time.
-- Not translated: after mlogit and the models not listed below; `post`, `df()`,
-  `iterate()`, `noheader`; expressions of the data's variables.
+- `df(#)`: t in place of z (the headings, the critical value, r(table)'s t and df rows) and r(df_r) after
+  r(level); `noheader` leaves out the expressions' lines; `iterate()` changes nothing in the results
+  (probe `nl/l3.do` identical; corpus `nlcom.do`).
+- Not translated: after mlogit and the models not listed below; `post` (it replaces e()); expressions of the
+  data's variables.
 
 ## More models (2026-11-13; probe `nl/l2.do`)
 

@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12): made-up data; Stata 19's results are in nlcom.recorded
 * commands: nlcom
-* (nlcom after regress and logit: ratios, products, exp(), sqrt() and ln(), invlogit(), factor-variable coefficients, named expressions, level(); r(b), r(V), r(N) and r(level))
+* (nlcom after regress and logit: ratios, products, exp(), sqrt() and ln(), invlogit(), factor-variable coefficients, named expressions, level(), df(), noheader, iterate(); r(b), r(V), r(table), r(N), r(df_r) and r(level))
 * tolerance: 1e-8
 version 19
 clear
@@ -29,3 +29,8 @@ nlcom (a: exp(_b[z])) (b: invlogit(_b[_cons]))
 display "@ logit " %24.17g el(r(b), 1, 1) " " %24.17g el(r(V), 1, 1) " " %24.17g el(r(b), 1, 2) " " %24.17g el(r(V), 2, 2) " " %24.17g el(r(V), 1, 2)
 quietly nlcom _b[z] / _b[w]
 display "@ quiet " %24.17g el(r(b), 1, 1) " " %24.17g el(r(V), 1, 1)
+regress y z w
+nlcom (r: _b[z] / _b[w]) (p: _b[z]*_b[w]), df(30) noheader
+display "@ df " %24.17g el(r(table), 3, 1) " " %24.17g el(r(table), 4, 2) " " %24.17g el(r(table), 5, 1) " " r(df_r) " " %24.17g el(r(table), 8, 1)
+nlcom _b[z] / _b[w], df(197) level(90) iterate(50)
+display "@ df90 " %24.17g el(r(table), 5, 1) " " %24.17g el(r(table), 6, 1) " " r(df_r) " " r(level)

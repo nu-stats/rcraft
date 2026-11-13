@@ -2043,7 +2043,7 @@ pub const GUIDES: &[Guide] = &[
                 "Not yet",
                 "nlcom after models other than regress, logit, probit, poisson, nbreg, ologit, \
                  oprobit, xtreg, ivregress, clogit and stcox (mlogit's several equations among \
-                 them), its options other than level() (post, df(), iterate(), noheader) and \
+                 them), post (which would replace e()) and \
                  expressions of the data's variables are refused. After the likelihood models the \
                  results are as close to Stata's as the model's own estimates (6 digits or more).",
             ),

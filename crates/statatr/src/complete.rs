@@ -687,7 +687,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         "centile",
         &["cci", "centile(", "level(", "meansd", "normal"],
     ),
-    ("nlcom", &["level("]),
+    ("nlcom", &["df(", "iterate(", "level(", "noheader"]),
     ("sktest", &["noadjust"]),
     (
         "ci",
@@ -1442,6 +1442,8 @@ mod tests {
         let arg = match name {
             "vce" if cmd == "svyset" => "linearized",
             "level" => "90",
+            "df" => "30",
+            "iterate" => "50",
             "vce" => "robust",
             "by" | "over" | "strata" => "g",
             "generate" => "z",
