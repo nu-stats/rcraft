@@ -4369,3 +4369,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   adjustment (01c9887, corpus `sktest.do`, 60 results to 1e-9); ci poisson and exposure(), ci variances
   bonett and sd, centile cci, normal and meansd, nlcom after nbreg, ologit, oprobit, xtreg, ivregress,
   clogit and stcox (9a4c2b2); nlcom's df(), noheader and iterate() (97b0e90).
+
+## pwcorr in Stata 19's layout, obs as o, coefplot ci(), 2026-11-13
+
+- Observed in Stata 19 with made-up data (probes `pw/p1.do`, `c1.do`): `pwcorr`'s table (names cut to
+  8 and 12, star() marks, print() blanks, sig and obs rows, blocks of seven columns) now prints as
+  Stata's, line for line; `o` is obs, as Stata takes it; coefplot `ci(95 90)` of numbers is
+  `levels(95 90)` (the same gen() rows).
+- TQN6ZN: every line translated (366 ran; the one line that stops in R, a second `label define
+  prom_congru`, stops in Stata too, r(110)); its 231 model lines match Stata's. FMDLII (7) and YFBPT6
+  (4,553) match too.
+- The core-statistics session's next step (97fc01e, from its commit message): the forms of tabstat,
+  oneway, testparm and tabulate it had refused (tabstat format alone and wider formats; oneway with
+  weights, bonferroni, scheffe and sidak, nomeans, nostandard, nofreq; testparm after more models; corpus
+  `testparm_models.do`).

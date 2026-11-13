@@ -919,24 +919,40 @@ pub(super) const PWCORR_HELPER: &str = r#"stata_pwcorr <- function(d, obs = FALS
       P[i, j] <- P[j, i] <- p
     }
   }
-  show <- matrix("", k, k, dimnames = dn)
-  for (i in seq_len(k)) {
-    for (j in seq_len(i)) {
-      p <- P[i, j]
-      if (i != j && !is.null(print) && (is.na(p) || p > print)) next
-      show[i, j] <- if (is.na(C[i, j])) "." else formatC(C[i, j], format = "f", digits = 4)
-      if (i != j && !is.null(star) && !is.na(p) && p <= star) show[i, j] <- paste0(show[i, j], "*")
+  # Stata 19's table: the names cut to 8 over the columns and 12 beside the rows, each
+  # correlation a mark (* for star(), else a blank) and %8.4f, the mark after the last
+  # ending the line; the p-values and counts below each row, then a blank row; seven
+  # columns to a block at 80 characters
+  cut <- function(s, w) ifelse(nchar(s) > w, paste0(substr(s, 1, w - 2), "~", substr(s, nchar(s), nchar(s))), s)
+  f8 <- function(v, digits) if (is.na(v)) formatC(".", width = 8) else formatC(sprintf(paste0("%.", digits, "f"), v), width = 8)
+  shown <- function(i, j) i == j || is.null(print) || (!is.na(P[i, j]) && P[i, j] <= print)
+  ls <- if (exists("stata_linesize")) stata_linesize else 80
+  per <- max(1, (ls - 15) %/% 9)
+  lines <- character()
+  blocks <- split(seq_len(k), (seq_len(k) - 1) %/% per)
+  for (bi in seq_along(blocks)) {
+    cols <- blocks[[bi]]
+    if (bi > 1) lines <- c(lines, "")
+    lines <- c(lines, paste0(strrep(" ", 13), "| ", paste(formatC(cut(names(d)[cols], 8), width = 8), collapse = " ")),
+               paste0(strrep("-", 13), "+", strrep("-", 9 * length(cols))))
+    for (i in cols[1]:k) {
+      js <- cols[cols <= i]
+      mark <- " "
+      r_line <- ""
+      for (j in js) {
+        r_line <- paste0(r_line, mark, if (shown(i, j)) f8(C[i, j], 4) else strrep(" ", 8))
+        mark <- if (i != j && !is.null(star) && shown(i, j) && !is.na(P[i, j]) && P[i, j] <= star) "*" else " "
+      }
+      lines <- c(lines, paste0(formatC(cut(names(d)[i], 12), width = 12), " |", r_line, mark))
+      if (sig) {
+        off <- js[js != i]
+        lines <- c(lines, paste0(strrep(" ", 13), "|", paste0(vapply(off, function(j) paste0(" ", if (shown(i, j)) f8(P[i, j], 4) else strrep(" ", 8)), ""), collapse = "")))
+      }
+      if (obs) lines <- c(lines, paste0(strrep(" ", 13), "|", paste0(" ", formatC(sprintf("%.0f", N[i, js]), width = 8), collapse = "")))
+      if (sig || obs) lines <- c(lines, paste0(strrep(" ", 13), "|"))
     }
   }
-  print(noquote(show), right = TRUE)
-  if (sig) {
-    cat("\nsignificance\n")
-    print(round(P, 4))
-  }
-  if (obs) {
-    cat("\nobservations\n")
-    print(N)
-  }
+  cat("\n", paste0(lines, "\n"), sep = "")
   # Stata's r(): the first pair's count and correlation, and the matrices
   if (ret) assign("stata_r", c(list(N = N[2, 1], rho = C[2, 1], Nobs = N, C = C), if (sig) list(sig = P)),
                   envir = parent.frame())
@@ -1086,7 +1102,7 @@ impl Session {
         self.no_by(c, "pwcorr")?;
         let w = self.weight_of(c, &[W::F, W::A])?;
         if let Some(o) = opts.other(&[
-            ("obs", 3),
+            ("obs", 1),
             ("sig", 3),
             ("star", 2),
             ("print", 2),
@@ -1110,7 +1126,12 @@ impl Session {
             self.helpers.insert("stata_wcov");
         }
         let mut args = vec![src + &wargs];
-        for (name, min) in [("obs", 3), ("sig", 3), ("bonferroni", 1), ("sidak", 4)] {
+        if opts.has("print", 2) && opts.has("obs", 1) {
+            return Err(no(
+                "pwcorr with print() and obs is not translated yet (not observed in Stata 19)",
+            ));
+        }
+        for (name, min) in [("obs", 1), ("sig", 3), ("bonferroni", 1), ("sidak", 4)] {
             if opts.has(name, min) {
                 args.push(format!("{name} = TRUE"));
             }
@@ -1144,7 +1165,6 @@ impl Session {
         } else {
             out.caveat("each correlation has the rows where both of its variables are present");
         }
-        out.caveat("printed in R's layout, not Stata's table");
         Ok(())
     }
 }

@@ -1110,7 +1110,13 @@ pub const GUIDES: &[Guide] = &[
                 "The p-value from t on n - 2 degrees of freedom, and Bonferroni's and Sidak's \
                  adjustments over the number of pairs, as Stata's.",
             ),
-            LAYOUT_R,
+            p(
+                "Layout",
+                "Stata 19's table: the names cut to 8 over the columns and 12 beside the rows, \
+                 star() marks, print() blanks, sig's p-values and obs's counts below each row \
+                 with a blank row after, seven columns to a block. print() with obs is refused \
+                 (not observed).",
+            ),
         ],
     },
     Guide {
@@ -1823,7 +1829,7 @@ pub const GUIDES: &[Guide] = &[
                  e(b): _cons included, base levels with baselevels and omitted terms with omitted \
                  (both 0), in the order they first appear with _cons last, keep(), drop() and \
                  order() with its empty rows; intervals with the model's residual df (the normal \
-                 without one) at levels(); several plots 1/(k+1) apart, offset() moving one; \
+                 without one) at levels() (or ci() of numbers); several plots 1/(k+1) apart, offset() moving one; \
                  headings(); subgraphs at ||. gen() leaves those rows, as floats, as coefplot does.",
             ),
             p(

@@ -385,6 +385,7 @@ impl Session {
             ("baselevels", 4),
             ("omitted", 4),
             ("levels", 3),
+            ("ci", 2),
             ("headings", 4),
             ("coeflabels", 6),
             ("vertical", 4),
@@ -476,7 +477,8 @@ impl Session {
         let head_offset = number(&head_opts, "offset", 6)?;
         let wrap = number(&sub_opts("coeflabels", 6), "wrap", 4)?;
         // levels(95 90): an interval for each, as Stata's ll1 ul1, ll2 ul2
-        let levels: Vec<f64> = match g.arg("levels", 3) {
+        // ci(95 90) of numbers is levels(95 90), as Stata 19 shows (other ci() forms refused below)
+        let levels: Vec<f64> = match g.arg("levels", 3).or_else(|| g.arg("ci", 2)) {
             None => vec![95.0],
             Some(l) => l
                 .split_whitespace()
