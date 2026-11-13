@@ -10,8 +10,9 @@ use std::path::Path;
 use eframe::egui::{self, Key, RichText};
 use rcraft_engine::{Engine, QueryId};
 use rcraft_rcodegen::{
-    package_check_code, parse_na_strings, sheets_code, ArrowFormat, ArrowImport, CsvImport,
-    ExcelImport, FileKind, HavenImport, HavenKind, Import, Quote, RObjectImport, DATA_EXTENSIONS,
+    catalog_beside, package_check_code, parse_na_strings, sheets_code, ArrowFormat, ArrowImport,
+    CsvImport, ExcelImport, FileKind, HavenImport, HavenKind, Import, Quote, RObjectImport,
+    DATA_EXTENSIONS,
 };
 use rcraft_rdata::sniff::{sniff_file, Encoding, SniffError, Sniffed};
 use rcraft_rdata::unpack::{self, Inner, COMPRESSED_EXTENSIONS, MAX_UNPACKED};
@@ -254,7 +255,11 @@ impl ImportDialog {
                 &path,
                 HavenKind::SpssPortable,
             ))),
-            FileKind::Sas => Some(Import::Haven(HavenImport::new(&path, HavenKind::Sas))),
+            FileKind::Sas => {
+                let mut sas = HavenImport::new(&path, HavenKind::Sas);
+                sas.catalog = catalog_next_to(Path::new(&path)).unwrap_or_default();
+                Some(Import::Haven(sas))
+            }
             FileKind::SasTransport => Some(Import::Haven(HavenImport::new(
                 &path,
                 HavenKind::SasTransport,
@@ -985,6 +990,52 @@ fn haven_options(ui: &mut egui::Ui, spec: &mut HavenImport) {
             "Keep user-defined missing values as values",
         );
     }
+    if spec.kind.has_catalog() {
+        ui.horizontal(|ui| {
+            ui.label("Format catalogue");
+            ui.add(
+                egui::TextEdit::singleline(&mut spec.catalog)
+                    .hint_text("none: a .sas7bcat file holds the value labels")
+                    .desired_width(320.0),
+            )
+            .on_hover_text(
+                "SAS keeps value labels (formats) in a separate .sas7bcat file. \
+                 RCraft fills this in when one is next to the data file.",
+            );
+            if ui.button("Browse…").clicked() {
+                let mut chooser = rfd::FileDialog::new()
+                    .set_title("Choose the format catalogue")
+                    .add_filter("SAS format catalogues", &["sas7bcat"])
+                    .add_filter("All files", &["*"]);
+                if let Some(dir) = Path::new(&spec.path).parent() {
+                    chooser = chooser.set_directory(dir);
+                }
+                if let Some(file) = chooser.pick_file() {
+                    spec.catalog = file.to_string_lossy().into_owned();
+                }
+            }
+            if !spec.catalog.is_empty() && ui.button("Clear").clicked() {
+                spec.catalog.clear();
+            }
+        });
+    }
+}
+
+/// The SAS format catalogue next to the data file at `data`, if one is plainly
+/// its own (see [`catalog_beside`]). At most this many names are looked at.
+fn catalog_next_to(data: &Path) -> Option<String> {
+    const MAX_NAMES: usize = 10_000;
+    let folder = data.parent()?;
+    let file = data.file_name()?.to_string_lossy().into_owned();
+    let names: Vec<String> = std::fs::read_dir(folder)
+        .ok()?
+        .flatten()
+        .take(MAX_NAMES)
+        .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    let found = catalog_beside(&file, &names)?;
+    Some(folder.join(found).to_string_lossy().into_owned())
 }
 
 /// The folder the file chooser opens in: where the file in the box is, else the
@@ -1335,6 +1386,98 @@ mod tests {
             return;
         };
         assert!(*ok && text.contains("2 columns; first 3 rows"), "{text}");
+    }
+
+    /// A folder of its own for one test, emptied first.
+    fn own_folder(name: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("rcraft-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::create_dir_all(&dir);
+        dir
+    }
+
+    fn sas_of(d: &ImportDialog) -> Option<&HavenImport> {
+        match &d.import {
+            Some(Import::Haven(h)) if h.kind == HavenKind::Sas => Some(h),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn the_format_catalogue_next_to_a_sas_file_is_filled_in() {
+        let dir = own_folder("sas-catalogue");
+        let data = dir.join("survey.sas7bdat");
+        let _ = std::fs::write(&data, b"sas \0 data");
+        let mut d = ImportDialog::default();
+        d.open_with(&data);
+        assert_eq!(
+            sas_of(&d).map(|h| h.catalog.as_str()),
+            Some(""),
+            "none there"
+        );
+
+        let _ = std::fs::write(dir.join("formats.sas7bcat"), b"cat");
+        d.open_with(&data);
+        let catalog = sas_of(&d).map(|h| h.catalog.clone()).unwrap_or_default();
+        assert!(catalog.ends_with("formats.sas7bcat"), "{catalog}");
+        let code = d.import.as_ref().map(Import::code).unwrap_or_default();
+        assert!(code.contains("catalog_file = \""), "{code}");
+        assert!(!code.contains('\\'), "R gets forward slashes: {code}");
+
+        // a catalogue named after the data file wins over formats.sas7bcat
+        let _ = std::fs::write(dir.join("Survey.sas7bcat"), b"cat");
+        d.open_with(&data);
+        let catalog = sas_of(&d).map(|h| h.catalog.clone()).unwrap_or_default();
+        assert!(catalog.ends_with("Survey.sas7bcat"), "{catalog}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn r_reads_a_sas_file_and_says_why_a_catalogue_will_not_do() {
+        let Some(mut e) = engine() else { return };
+        let dir = own_folder("sas-real");
+        let data = dir.join("iris.sas7bdat");
+        let code = format!(
+            "cat(file.copy(system.file(\"examples\", \"iris.sas7bdat\", package = \"haven\"), \"{}\"))",
+            data.to_string_lossy().replace('\\', "/")
+        );
+        let id = e.query(&code);
+        let started = std::time::Instant::now();
+        while e.query_result(id).is_none() && started.elapsed().as_secs() < 60 {
+            e.poll(std::time::Duration::from_millis(30));
+        }
+        if !e
+            .query_result(id)
+            .is_some_and(|r| r.ok && r.text.contains("TRUE"))
+        {
+            eprintln!("skipped: haven is not installed");
+            return;
+        }
+        let mut d = ImportDialog::default();
+        d.open_with(&data);
+        assert!(serve_until(&mut d, &mut e, |d| matches!(
+            d.preview,
+            Reply::Got(_)
+        )));
+        let Reply::Got((ok, text)) = &d.preview else {
+            return;
+        };
+        assert!(*ok && text.contains("5 columns; first 10 rows"), "{text}");
+
+        // a file that is not a catalogue: R says so, and nothing breaks
+        let bad = dir.join("formats.sas7bcat");
+        let _ = std::fs::write(&bad, b"not a catalogue");
+        d.open_with(&data);
+        assert!(sas_of(&d).is_some_and(|h| !h.catalog.is_empty()));
+        assert!(serve_until(&mut d, &mut e, |d| matches!(
+            d.preview,
+            Reply::Got(_)
+        )));
+        let Reply::Got((ok, text)) = &d.preview else {
+            return;
+        };
+        assert!(!*ok && !text.trim().is_empty(), "{ok} {text}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

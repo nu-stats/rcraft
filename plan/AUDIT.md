@@ -15,7 +15,7 @@ as it was; much of what it lists as not started has been built since (Phases 2A,
 | 2A Help | Done but **P2A.6** (RCraft's own manual as pages in the app) and **P2A.10** (RCraft's own PDF manuals, "down the road"). |
 | 2B Stata mode | Done (P2B.1 to P2B.12). |
 | 2C Run my do-file | Done (P2C.1 to P2C.16), with the leftovers below; verification goes on in StatCraft's probes and the replication packages. |
-| 3 Data | Done but `.sas7bdat` catalogue files (P3.2). |
+| 3 Data | Done (the `.sas7bdat` catalogue files of P3.2 followed on 2026-11-13). |
 | 4 Statistics | Done; a Q-Q plot and rich tables in Results (P4.1) are left. |
 | 5 Graphs | P5.1, P5.3, P5.4 done with leftovers. **P5.2 (ggplot2 builder) not started.** |
 | 6 Depth modules | Not started. |
@@ -53,7 +53,6 @@ Partly done, with what is missing:
 - P2C: `rpoisson()`, `rbeta()` with equal shapes above 1, KISS32 and `c(rngstate)` (P2C.11);
   `poisson` to 8 digits (P2C.12); collinear terms in the panel, survival and IV models (P2C.13);
   bootstrap's `bca` and `vce(bootstrap)` (P2C.16); probe 448's `c_local`.
-- P3.2 `.sas7bdat` catalogue files.
 - P4.1 a Q-Q plot and rich tables in Results.
 - P5.1 zoom and copy to clipboard; P5.3 heatmap and survival curves.
 

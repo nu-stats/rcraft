@@ -4422,3 +4422,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - The core-statistics session's next step (cf6896e, from its commit message): test's matvlc(), mtest,
   accumulate and notest; tabulate summarize(); matcell(), matrow(), matcol(); lrchi2 (corpus
   `tabulate_more.do`, `test_options.do`).
+
+## P3.2 done: a SAS file's format catalogue, 2026-11-13
+
+- Use my file reads a `.sas7bdat` file's value labels from its format catalogue (`.sas7bcat`):
+  `haven::read_sas(data, catalog_file = ...)`, shown in the generated R like every option. RCraft
+  fills the catalogue in when one is next to the data file (named like it, else `formats.sas7bcat`,
+  else the only catalogue in the folder; several others and none is chosen), and the SAS options
+  have a Format catalogue box with Browse and Clear. Anything but a `.sas7bcat` ending is refused
+  before R runs. The text encoding is used for the catalogue too (haven's default).
+- Checked against real R 4.4.3: haven's own `iris.sas7bdat` previews as before, and a file that is
+  not a catalogue gives haven's message ("Failed to parse ...") in the preview, nothing more.
+- Not checked: a real catalogue's labels. None is on this machine and haven cannot write one; a
+  SAS-made `.sas7bcat` would be the first check of the labels reaching the Variables pane.
+- Not done: a catalogue packed in the same archive as the data file is not taken out with it.

@@ -420,7 +420,8 @@ skipped. It never gives a silent wrong answer.
   `.dta`, `.sav`/`.zsav`/`.por`, `.xpt`, `.sas7bdat`, `.rds` and `.RData`, with R's own
   preview and the generated R shown; packages `readxl`/`haven`/`arrow` are installed on
   request into RCraft's own library; parquet and feather; a Browse button; the ten most
-  recent files remembered. Still to do: `.sas7bdat` catalogue files
+  recent files remembered; a `.sas7bdat` file's format catalogue (`.sas7bcat`, its value
+  labels) is found next to it or chosen (done 2026-11-13). P3.2 is done
 - P3.3 Labels (shown in the grid and Variables pane with a conversion report; variable
   labels and value labels kept as labelled vectors; conversion report of what was kept,
   changed or dropped; Data menu dialogs to set a variable label, set value labels and turn

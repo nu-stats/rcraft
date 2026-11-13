@@ -197,6 +197,11 @@ impl HavenKind {
         matches!(self, HavenKind::Stata | HavenKind::Spss | HavenKind::Sas)
     }
 
+    /// The reader takes a `catalog_file` argument (value labels kept apart).
+    pub fn has_catalog(self) -> bool {
+        matches!(self, HavenKind::Sas)
+    }
+
     /// The reader takes a `user_na` argument.
     pub fn has_user_na(self) -> bool {
         matches!(self, HavenKind::Spss | HavenKind::SpssPortable)
@@ -216,6 +221,9 @@ pub struct HavenImport {
     pub encoding: String,
     /// SPSS: keep user-defined missing values as ordinary values.
     pub user_na: bool,
+    /// SAS: the format catalogue (`.sas7bcat`) that holds the value labels;
+    /// empty reads the data without them.
+    pub catalog: String,
 }
 
 impl HavenImport {
@@ -228,11 +236,18 @@ impl HavenImport {
             labels_as_factors: false,
             encoding: String::new(),
             user_na: false,
+            catalog: String::new(),
         }
     }
 
     pub fn read_expr(&self, rows: Option<usize>) -> String {
         let mut args = vec![r_string(&self.path.replace('\\', "/"))];
+        if self.kind.has_catalog() && !self.catalog.trim().is_empty() {
+            args.push(format!(
+                "catalog_file = {}",
+                r_string(&self.catalog.trim().replace('\\', "/"))
+            ));
+        }
         if self.kind.has_encoding() && !self.encoding.trim().is_empty() {
             args.push(format!("encoding = {}", r_string(self.encoding.trim())));
         }
@@ -254,8 +269,41 @@ impl HavenImport {
         if self.path.trim().is_empty() {
             return Some("Choose a file.");
         }
+        let catalog = self.catalog.trim();
+        if self.kind.has_catalog()
+            && !catalog.is_empty()
+            && !catalog.to_ascii_lowercase().ends_with(".sas7bcat")
+        {
+            return Some("The format catalogue is a file ending in .sas7bcat.");
+        }
         name_problem(&self.name)
     }
+}
+
+/// The format catalogue to read with the SAS data file `data_file`, chosen from
+/// the names of the files in its folder: one with the same name ending in
+/// `.sas7bcat`, else `formats.sas7bcat` (the name SAS gives a library's
+/// catalogue), else the only catalogue there. `None` when there is none, or
+/// several and no way to tell which.
+pub fn catalog_beside(data_file: &str, folder: &[String]) -> Option<String> {
+    let lower = |s: &str| s.to_ascii_lowercase();
+    let stem = lower(data_file.rsplit_once('.').map_or(data_file, |(s, _)| s));
+    let catalogs: Vec<&String> = folder
+        .iter()
+        .filter(|f| lower(f).ends_with(".sas7bcat"))
+        .collect();
+    let named = |want: &str| {
+        catalogs
+            .iter()
+            .find(|f| lower(f) == want)
+            .map(|f| f.to_string())
+    };
+    named(&format!("{stem}.sas7bcat"))
+        .or_else(|| named("formats.sas7bcat"))
+        .or_else(|| match catalogs.as_slice() {
+            [only] => Some(only.to_string()),
+            _ => None,
+        })
 }
 
 /// A saved R object: `.rds` (one object, named here) or `.RData` (objects
@@ -637,6 +685,53 @@ col_names = TRUE, na = c(\"\", \"NA\"), trim_ws = TRUE, guess_max = 1000))"
             !x2.read_expr(None).contains("encoding"),
             "xpt has no encoding"
         );
+    }
+
+    #[test]
+    fn a_sas_file_can_bring_its_format_catalogue() {
+        let mut s = HavenImport::new("C:\\d\\survey.sas7bdat", HavenKind::Sas);
+        assert_eq!(
+            s.read_expr(None),
+            "as.data.frame(haven::read_sas(\"C:/d/survey.sas7bdat\"))"
+        );
+        s.catalog = " C:\\d\\formats.sas7bcat ".into();
+        s.encoding = "latin1".into();
+        assert_eq!(
+            s.read_expr(Some(5)),
+            "as.data.frame(haven::read_sas(\"C:/d/survey.sas7bdat\", \
+catalog_file = \"C:/d/formats.sas7bcat\", encoding = \"latin1\", n_max = 5))"
+        );
+        assert!(s.problem().is_none());
+        s.catalog = "C:\\d\\survey.sas7bdat".into();
+        assert!(s.problem().is_some(), "a data file is not a catalogue");
+        // only SAS data files have catalogues
+        let mut d = HavenImport::new("a.dta", HavenKind::Stata);
+        d.catalog = "f.sas7bcat".into();
+        assert!(!d.read_expr(None).contains("catalog"));
+        assert!(d.problem().is_none());
+    }
+
+    #[test]
+    fn the_catalogue_beside_a_sas_file_is_found() {
+        let names = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let f = |data: &str, folder: &[&str]| catalog_beside(data, &names(folder));
+        assert_eq!(
+            f(
+                "Survey.sas7bdat",
+                &["a.sas7bcat", "SURVEY.SAS7BCAT", "formats.sas7bcat"]
+            ),
+            Some("SURVEY.SAS7BCAT".into())
+        );
+        assert_eq!(
+            f("survey.sas7bdat", &["a.sas7bcat", "Formats.sas7bcat"]),
+            Some("Formats.sas7bcat".into())
+        );
+        assert_eq!(
+            f("survey.sas7bdat", &["survey.sas7bdat", "lib.sas7bcat"]),
+            Some("lib.sas7bcat".into())
+        );
+        assert_eq!(f("survey.sas7bdat", &["a.sas7bcat", "b.sas7bcat"]), None);
+        assert_eq!(f("survey.sas7bdat", &["survey.sas7bdat", "x.csv"]), None);
     }
 
     #[test]

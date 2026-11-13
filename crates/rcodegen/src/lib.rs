@@ -13,8 +13,8 @@ pub mod sources;
 pub mod tab;
 
 pub use files::{
-    is_cell_range, missing_packages_code, package_check_code, sheets_code, ArrowFormat,
-    ArrowImport, ExcelImport, FileKind, HavenImport, HavenKind, Import, RObjectImport,
+    catalog_beside, is_cell_range, missing_packages_code, package_check_code, sheets_code,
+    ArrowFormat, ArrowImport, ExcelImport, FileKind, HavenImport, HavenKind, Import, RObjectImport,
     DATA_EXTENSIONS,
 };
 pub use import::{

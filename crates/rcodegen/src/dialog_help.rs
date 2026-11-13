@@ -468,13 +468,13 @@ pub fn use_my_file() -> DialogHelp {
         needs: Vec::new(),
         other_style: None,
         example: Some("data <- read.csv(\"survey.csv\", stringsAsFactors = FALSE)".into()),
-        functions: ["read.csv", "readxl::read_excel", "haven::read_dta", "haven::read_sav", "arrow::read_parquet", "readRDS"]
+        functions: ["read.csv", "readxl::read_excel", "haven::read_dta", "haven::read_sav", "haven::read_sas", "arrow::read_parquet", "readRDS"]
             .iter()
             .map(|s| s.to_string())
             .collect(),
         notes: vec![
             "Choose a file with Browse, or pick one of the ten most recent. RCraft looks at the file first and shows R's own preview, so you can set the separator, quotes, missing-value words, sheet and cell range before anything is read.".into(),
-            "Text files (csv, tsv, txt) need no package. Excel (readxl), Stata, SPSS and SAS (haven), and Parquet or Feather (arrow) need an R package; the dialog offers to install it, and you say yes first.".into(),
+            "Text files (csv, tsv, txt) need no package. Excel (readxl), Stata, SPSS and SAS (haven), and Parquet or Feather (arrow) need an R package; the dialog offers to install it, and you say yes first. A SAS file's value labels live in a separate format catalogue (.sas7bcat): RCraft fills it in when one is next to the data file (named like it, or formats.sas7bcat), and Browse picks another.".into(),
             "Packed files open too: .zip, .gz, .bz2, .xz, .zst and .tar (also .tar.gz, .tgz and the like). RCraft checks the file is not damaged, takes the data file out next to the archive (never over a different file of the same name), and R reads that copy; the dialog says where it went. When the archive holds several data files, you pick one. Password-protected zips, 7-Zip and RAR files cannot be opened: unpack them on your computer first.".into(),
             "The R it writes is shown before it runs, and it is added to the Results, the log and the script like any command.".into(),
         ],
