@@ -121,7 +121,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("mlogit", &["collinear", "likelihood"]),
     ("nbreg", &["collinear"]),
     ("newey", &["arpanel"]),
-    ("nlcom", &["nlcom"]),
+    ("nlcom", &["nlcom", "nlcom_models"]),
     ("ologit", &["collinear", "likelihood"]),
     ("oneway", &["oneway"]),
     ("oprobit", &["collinear", "likelihood"]),

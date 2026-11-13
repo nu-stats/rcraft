@@ -28,3 +28,11 @@ centile t if t <= 4
 display "@ four " r(N) " " %24.17g r(c_1) " " r(lb_1) " " r(ub_1)
 quietly centile y, centile(33.3)
 display "@ quiet " r(N) " " %24.17g r(c_1) " " %24.17g r(lb_1) " " %24.17g r(ub_1)
+centile x, centile(5 50 95) cci
+display "@ cci " %24.17g r(lb_1) " " %24.17g r(ub_1) " " %24.17g r(lb_2) " " %24.17g r(ub_2) " " %24.17g r(lb_3) " " %24.17g r(ub_3)
+centile x y, centile(10 50) normal
+display "@ normal " %24.17g r(c_1) " " %24.17g r(lb_1) " " %24.17g r(ub_1) " " %24.17g r(lb_2) " " %24.17g r(ub_2)
+centile x, centile(25 50) meansd level(90)
+display "@ meansd " %24.17g r(c_1) " " %24.17g r(lb_1) " " %24.17g r(ub_1) " " %24.17g r(c_2) " " %24.17g r(ub_2)
+centile t if t <= 10, centile(10 50 90) cci
+display "@ cci10 " %24.17g r(lb_1) " " %24.17g r(ub_1) " " %24.17g r(lb_2) " " %24.17g r(ub_2) " " %24.17g r(lb_3) " " %24.17g r(ub_3)

@@ -683,12 +683,26 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("tabm", &["missing"]),
     ("testparm", &["equal"]),
     ("oneway", &["noanova", "nolabel", "tabulate"]),
-    ("centile", &["centile(", "level("]),
+    (
+        "centile",
+        &["cci", "centile(", "level(", "meansd", "normal"],
+    ),
     ("nlcom", &["level("]),
     ("sktest", &["noadjust"]),
     (
         "ci",
-        &["agresti", "exact", "jeffreys", "level(", "wald", "wilson"],
+        &[
+            "agresti",
+            "bonett",
+            "exact",
+            "exposure(",
+            "jeffreys",
+            "level(",
+            "poisson",
+            "sd",
+            "wald",
+            "wilson",
+        ],
     ),
     (
         "tabstat",
@@ -1481,6 +1495,8 @@ mod tests {
                 format!("survwgt rake w, {} {o}", rest.join(" "))
             }
             "append" => format!("append using t, {o}"),
+            "ci" if matches!(name, "poisson" | "exposure") => format!("ci means c, {o}"),
+            "ci" if matches!(name, "bonett" | "sd") => format!("ci variances y, {o}"),
             "ci" => format!("ci proportions d, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
             "cmclogit" => format!("cmset g t\ncmclogit d x, {o}"),

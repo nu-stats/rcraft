@@ -982,6 +982,7 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 const TEXT_NAMES: &[&str] = &[
     "levels",
     "centiles",
+    "exposure",
     "citype",
     "varlist",
     "badlist",

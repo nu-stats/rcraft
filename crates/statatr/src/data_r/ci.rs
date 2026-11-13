@@ -5,11 +5,13 @@
 use super::weights::{w_args, W};
 use super::*;
 
-pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level = 95, method = "normal", w = NULL, wtype = "f", show = TRUE) {
+pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level = 95, method = "normal", w = NULL, wtype = "f", show = TRUE,
+                     exposure = NULL, sd = FALSE) {
   num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
-  for (v in vars) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  for (v in c(vars, exposure)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
   weighted <- !is.null(w)
   wt <- if (weighted) num(w) else rep(1, nrow(d))
+  ex <- if (is.null(exposure)) NULL else num(d[[exposure]])
   a <- (100 - level) / 200
   z <- stats::qnorm(1 - a)
   rows <- list()
@@ -17,7 +19,7 @@ pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level
   for (v in vars) {
     if (is.character(d[[v]]) || is.factor(d[[v]])) { skipped <- TRUE; next }
     x <- num(d[[v]])
-    ok <- !is.na(x)
+    ok <- !is.na(x) & (if (is.null(ex)) TRUE else !is.na(ex))
     x <- x[ok]
     vw <- wt[ok]
     k <- length(x)
@@ -28,10 +30,27 @@ pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level
     ss <- if (k > 0) sum(vw * (x - m)^2) else NA_real_
     var <- if (N <= 1) NA_real_ else if (!weighted || wtype == "f") ss / (N - 1) else ss / W * k / (k - 1)
     mark <- ""
-    if (kind == "means") {
+    if (kind == "means" && method == "poisson") {
+      # the exact interval for a Poisson count, as rates over the exposure
+      E <- if (is.null(ex)) k else sum(ex[ok])
+      # Stata 19 takes the total count rounded (half up): 0.4 ten times is 4, 2.25 ten times 23
+      tot <- floor(sum(x) + 0.5)
+      lb <- if (tot > 0) stats::qgamma(a, tot) / E else 0
+      ub <- stats::qgamma(1 - a, tot + 1) / E
+      rows[[v]] <- list(N = E, est = tot / E, se = sqrt(tot) / E, lb = lb, ub = ub, mark = if (tot == 0) "*" else "")
+    } else if (kind == "means") {
       se <- sqrt(var / N)
       t <- if (N > 1) stats::qt(1 - a, N - 1) else NA_real_
       rows[[v]] <- list(N = N, est = m, se = se, lb = m - t * se, ub = m + t * se)
+    } else if (kind == "variances" && method == "bonett") {
+      # Bonett (2006) as Stata's manual gives it: the kurtosis about a trimmed mean,
+      # c = n/(n - z) and the interval on the log scale
+      tm <- mean(x, trim = 1 / (2 * sqrt(k - 4)))
+      kurt <- k * sum((x - tm)^4) / sum((x - m)^2)^2
+      cc <- k / (k - z)
+      se <- cc * sqrt((kurt - (k - 3) / k) / (k - 1))
+      rows[[v]] <- list(N = N, est = var, lb = exp(log(cc * var) - z * se), ub = exp(log(cc * var) + z * se),
+                        kurtosis = kurt)
     } else if (kind == "variances") {
       lb <- if (N > 1) (N - 1) * var / stats::qchisq(1 - a, N - 1) else NA_real_
       ub <- if (N > 1) (N - 1) * var / stats::qchisq(a, N - 1) else NA_real_
@@ -82,25 +101,37 @@ pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level
     r$N <- last$N
     if (kind == "variances") r$Var <- last$est else r[[if (kind == "means") "mean" else "proportion"]] <- last$est
     if (kind != "variances") r$se <- last$se
-    r$lb <- last$lb
-    r$ub <- last$ub
+    if (kind == "variances" && sd) r$sd <- sqrt(last$est)
+    if (!is.null(last$kurtosis)) r$kurtosis <- last$kurtosis
+    root <- if (kind == "variances" && sd) sqrt else identity
+    r$lb <- root(last$lb)
+    r$ub <- root(last$ub)
     r$level <- level
-    r$citype <- if (kind == "proportions") method else "normal"
+    r$citype <- method
+    if (!is.null(exposure)) r$exposure <- exposure
   }
+  # with sd, the standard deviations and their bounds
+  if (kind == "variances" && sd) for (v in names(rows)) for (f in c("est", "lb", "ub")) rows[[v]][[f]] <- sqrt(rows[[v]][[f]])
   if (!show) return(r)
   g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
   ab <- function(s) if (nchar(s) <= 12) s else paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s)))
   lev <- paste0("[", stata_fmt(level, "%9.0g", trim = TRUE), "% conf. interval]")
   wide <- kind != "variances"
-  title <- c(exact = "Binomial exact", wald = "Binomial Wald", wilson = "Wilson",
-             agresti = "Agresti–Coull", jeffreys = "Jeffreys")[[if (kind == "proportions") method else "exact"]]
+  titles <- c(exact = "Binomial exact", wald = "Binomial Wald", wilson = "Wilson",
+              agresti = "Agresti–Coull", jeffreys = "Jeffreys", poisson = "Poisson exact", bonett = "Bonett")
+  title <- if (method %in% names(titles)) titles[[method]] else ""
   cat("\n")
-  if (kind == "proportions") {
-    l <- 55 + (24 - nchar(title)) %/% 2
-    cat(strrep(" ", l), title, strrep(" ", 77 - l - nchar(title)), "\n", sep = "")
+  if (nzchar(title)) {
+    # centred over the interval's columns
+    width <- if (wide) 77 else 66
+    l <- width - 22 + (24 - nchar(title)) %/% 2
+    cat(strrep(" ", l), title, strrep(" ", width - l - nchar(title)), "\n", sep = "")
   }
   if (wide) {
-    cat("    Variable |        Obs  ", if (kind == "means") "      Mean" else "Proportion", "    Std. err.", sprintf("%27s", lev), "\n", sep = "")
+    cat("    Variable |", if (method == "poisson") "   Exposure  " else "        Obs  ",
+        if (kind == "means") "      Mean" else "Proportion", "    Std. err.", sprintf("%27s", lev), "\n", sep = "")
+  } else if (sd) {
+    cat("    Variable |        Obs      Std. dev.", sprintf("%26s", lev), "\n", sep = "")
   } else {
     cat("    Variable |        Obs      Variance", sprintf("%27s", lev), "\n", sep = "")
   }
@@ -112,15 +143,16 @@ pub(super) const CI_HELPER: &str = r##"stata_ci <- function(d, kind, vars, level
     if (i > 1 && (i - 1) %% 5 == 0) cat(rule)
     o <- rows[[v]]
     if (wide) {
-      cat(sprintf("%12s |%11s%12s%12s%16s%12s%s", ab(v), format(o$N, scientific = FALSE), g(o$est), g(o$se), g(o$lb), g(o$ub),
+      cat(sprintf("%12s |%11s%12s%12s%16s%12s%s", ab(v), if (o$N == round(o$N)) format(o$N, scientific = FALSE) else g(o$N),
+                  g(o$est), g(o$se), g(o$lb), g(o$ub),
                   if (is.null(o$mark)) "" else o$mark), "\n", sep = "")
     } else {
       cat(sprintf("%12s |%11s%14s%15s%12s", ab(v), format(o$N, scientific = FALSE), g(o$est), g(o$lb), g(o$ub)), "\n", sep = "")
     }
   }
   marks <- unlist(lapply(rows, function(o) o$mark))
-  if (kind == "proportions" && any(marks != "")) {
-    if (method == "exact") {
+  if (kind != "variances" && any(marks != "")) {
+    if (method %in% c("exact", "poisson")) {
       cat("(*) one-sided, ", stata_fmt((100 + level) / 2, "%9.0g", trim = TRUE), "% confidence interval\n", sep = "")
     } else {
       short <- c(wald = "Wald", wilson = "Wilson", agresti = "Agresti–Coull")[[method]]
@@ -163,8 +195,10 @@ impl Session {
         };
         let methods = ["exact", "wald", "wilson", "agresti", "jeffreys"];
         let mut known: Vec<(&str, usize)> = vec![("level", 1)];
-        if kind == "proportions" {
-            known.extend(methods.iter().map(|m| (*m, m.len())));
+        match kind {
+            "proportions" => known.extend(methods.iter().map(|m| (*m, m.len()))),
+            "means" => known.extend([("poisson", 7), ("exposure", 8)]),
+            _ => known.extend([("bonett", 6), ("sd", 2)]),
         }
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
@@ -181,11 +215,20 @@ impl Session {
                 "only one of exact, wald, wilson, agresti and jeffreys (Stata: r(198))",
             ));
         }
-        let method = if kind == "proportions" {
-            chosen.first().copied().unwrap_or("exact")
-        } else {
-            "normal"
+        let exposure = match opts.arg("exposure", 8).map(|e| e.trim().to_string()) {
+            None => None,
+            Some(e) if is_name(&e) => Some(e),
+            Some(e) => return Err(no(format!("exposure({e}): one variable is translated"))),
         };
+        let method = match kind {
+            "proportions" => chosen.first().copied().unwrap_or("exact"),
+            "means" if opts.has("poisson", 7) || exposure.is_some() => "poisson",
+            "variances" if opts.has("bonett", 6) => "bonett",
+            _ => "normal",
+        };
+        if method == "poisson" && c.parts.weight.is_some() {
+            return Err(no("ci means, poisson with weights is not translated yet"));
+        }
         let level = match opts.arg("level", 1) {
             None => "95".to_string(),
             Some(l) => {
@@ -225,12 +268,36 @@ impl Session {
         }
         let list: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
         out.line(format!(
-            "stata_r <- stata_ci({rows}, {}, c({}), level = {level}, method = {}{wargs}{})",
+            "stata_r <- stata_ci({rows}, {}, c({}), level = {level}, method = {}{wargs}{}{}{})",
             r_text(kind),
             list.join(", "),
             r_text(method),
+            exposure
+                .as_ref()
+                .map(|e| format!(", exposure = {}", r_text(e)))
+                .unwrap_or_default(),
+            if kind == "variances" && opts.has("sd", 2) {
+                ", sd = TRUE"
+            } else {
+                ""
+            },
             if self.quiet(c) { ", show = FALSE" } else { "" }
         ));
+        // the names this form leaves (Stata 19)
+        let names: &'static [&'static str] =
+            match (kind, method, opts.has("sd", 2), exposure.is_some()) {
+                ("means", "poisson", _, true) => {
+                    &["N", "mean", "se", "lb", "ub", "level", "citype", "exposure"]
+                }
+                ("variances", "bonett", true, _) => {
+                    &["N", "Var", "sd", "kurtosis", "lb", "ub", "level", "citype"]
+                }
+                ("variances", "bonett", false, _) => {
+                    &["N", "Var", "kurtosis", "lb", "ub", "level", "citype"]
+                }
+                ("variances", _, true, _) => &["N", "Var", "sd", "lb", "ub", "level", "citype"],
+                _ => names,
+            };
         self.r_new = Some((names, "ci".into()));
         Ok(())
     }

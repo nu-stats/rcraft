@@ -128,9 +128,21 @@ impl Session {
                 "nlcom with the option {o} is not translated yet"
             )));
         }
+        // the single-equation models whose nlcom table Stata 19 was seen to print (the
+        // dependent variable in the stub, _t after stcox)
         if !matches!(
             est.fit,
-            Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson
+            Fit::Regress
+                | Fit::Logit
+                | Fit::Probit
+                | Fit::Poisson
+                | Fit::Nbreg
+                | Fit::Ologit
+                | Fit::Oprobit
+                | Fit::Xtreg
+                | Fit::Ivregress
+                | Fit::Clogit
+                | Fit::Stcox
         ) {
             return Err(no(format!(
                 "nlcom after {} is not translated yet",

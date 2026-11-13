@@ -40,3 +40,19 @@ ci variances x
 display "@ v " r(N) " " %24.17g r(Var) " " %24.17g r(lb) " " %24.17g r(ub)
 ci variances y, level(99)
 display "@ v99 " r(N) " " %24.17g r(Var) " " %24.17g r(lb) " " %24.17g r(ub)
+generate k = mod(_n*7, 5) + (_n > 40)
+generate e = 1 + mod(_n, 4)
+ci means k, poisson
+display "@ pois " r(N) " " %24.17g r(mean) " " %24.17g r(se) " " %24.17g r(lb) " " %24.17g r(ub)
+ci means k z, poisson exposure(e) level(90)
+display "@ pois_e " r(N) " " %24.17g r(mean) " " %24.17g r(lb) " " %24.17g r(ub)
+ci means x, poisson
+display "@ pois_x " r(N) " " %24.17g r(mean) " " %24.17g r(se) " " %24.17g r(lb)
+ci variances x, bonett
+display "@ bon " %24.17g r(Var) " " %24.17g r(kurtosis) " " %24.17g r(lb) " " %24.17g r(ub)
+ci variances x in 1/8, bonett level(90)
+display "@ bon8 " %24.17g r(kurtosis) " " %24.17g r(lb) " " %24.17g r(ub)
+ci variances x, sd
+display "@ sd " %24.17g r(sd) " " %24.17g r(lb) " " %24.17g r(ub)
+ci variances y, sd bonett
+display "@ sdbon " %24.17g r(sd) " " %24.17g r(kurtosis) " " %24.17g r(lb) " " %24.17g r(ub)

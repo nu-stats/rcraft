@@ -2041,9 +2041,11 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "nlcom after models other than regress, logit, probit and poisson, its options \
-                 other than level() (post, df(), iterate(), noheader) and expressions of the \
-                 data's variables are refused.",
+                "nlcom after models other than regress, logit, probit, poisson, nbreg, ologit, \
+                 oprobit, xtreg, ivregress, clogit and stcox (mlogit's several equations among \
+                 them), its options other than level() (post, df(), iterate(), noheader) and \
+                 expressions of the data's variables are refused. After the likelihood models the \
+                 results are as close to Stata's as the model's own estimates (6 digits or more).",
             ),
         ],
     },
@@ -2061,9 +2063,15 @@ pub const GUIDES: &[Guide] = &[
                  c_#, lb_#, ub_#, centiles).",
             ),
             p(
+                "Other intervals",
+                "cci gives the conservative interval (the order statistics themselves), normal \
+                 the centile's standard error from a normal density at it, meansd the centile of \
+                 a normal with the sample's mean and standard deviation, all as Stata's manual \
+                 gives them and checked against Stata 19.",
+            ),
+            p(
                 "Not yet",
-                "cci, normal, meansd, weights and centile() lists that are not plain numbers are \
-                 refused.",
+                "Weights and centile() lists that are not plain numbers are refused.",
             ),
         ],
     },
@@ -2078,12 +2086,15 @@ pub const GUIDES: &[Guide] = &[
                  Proportions: the exact (Clopper-Pearson, from qbeta), Wald, Wilson, \
                  Agresti-Coull and Jeffreys intervals, with Stata's marks and notes where an \
                  interval is one-sided or clipped at 0 or 1, and only the 0/1 variables (a note \
-                 says so). Variances: the chi2 interval.",
+                 says so). Variances: the chi2 interval, or Bonett's (bonett: the kurtosis about \
+                 a trimmed mean, as Stata's manual gives it), and with sd the standard deviation. \
+                 Means, poisson (or exposure()): the exact Poisson interval of the total, which \
+                 Stata rounds to a whole number, as rates over the exposure.",
             ),
             p(
                 "Not yet",
-                "ci means, poisson and exposure(), ci variances, bonett, cii, weights other than \
-                 those for means, and patterns in the varlist are refused.",
+                "cii, weights other than those for means without poisson, and patterns in the \
+                 varlist are refused.",
             ),
         ],
     },

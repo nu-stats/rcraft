@@ -18,4 +18,14 @@ against RCraft's output: identical but for the refused forms); corpus `centile.d
   own with the stub and Obs blank. No observations: `           x |       0` and nothing else.
 - r(): the last variable's n_cent, N, then ub_k, lb_k, c_k from the last centile down, and r(centiles)
   the list as written ("25 50 75").
-- Not translated: `cci` ("Binomial exact", conservative), `normal`, `meansd`, weights, numlists with ranges.
+- Not translated: weights, numlists with ranges.
+
+## cci, normal, meansd (2026-11-13, from Stata's manual, [R] centile, Methods and formulas; probe `cn/n1.do` identical)
+
+- `cci` ("Binomial exact" above the table): with F the Binomial(n, q/100) cdf, F(-1) = 0, x(0) = x(1) and
+  x(n+1) = x(n): r with F(r) ≤ γ < F(r+1) and s with 1 − F(s) ≤ γ < 1 − F(s−1); the interval is
+  (x(r+1), x(s+1)), marked `*` when an end is x(0) or x(n+1).
+- `normal` ("-- Normal, based on observed centiles --" after 35 spaces): the centile as by default, its
+  se √(q(100 − q)) / (100·√n·φ(c; x̄, s)), s the sample sd, and c ± z·se.
+- `meansd` ("-- Normal, based on mean and std. dev.--"): the centile x̄ + z_q·s, its se
+  s·√(1/n + z_q²/(2(n − 1))), and ± z·se.

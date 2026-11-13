@@ -27,4 +27,16 @@ line by line against RCraft's output: identical but for the refused forms); corp
     0 (`*`) or above 1 (`**`) with the same notes; jeffreys: qbeta(α/2, k + .5, n − k + .5), 0 at 0
     successes and 1 at n, unmarked.
 - Variances: (N − 1)s² over the chi2 quantiles.
-- Not translated: `poisson`, `exposure()`, `bonett`, `cii`, weights for proportions and variances.
+- Not translated: `cii`, weights for proportions and variances and with `poisson`.
+
+## poisson, exposure(), bonett, sd (2026-11-13; probes `ci/c3.do`, `c4.do` identical; Stata's manual, [R] ci)
+
+- `ci means x, poisson [exposure(e)]` ("Poisson exact"): an Exposure column (the rows, or the sum of e) in
+  place of Obs; the total of x **rounded to a whole number** (half up: 0.4 ten times is 4, 2.25 ten times 23)
+  is k; mean k/E, se √k/E; the exact interval (gammap quantiles: G⁻¹(γ; k), G⁻¹(1 − γ; k + 1)) over E; at k = 0
+  the lower bound 0 and the upper one-sided, marked `*` with "(*) one-sided, 97.5% confidence interval".
+  r(N) is the exposure; r(citype) "poisson", r(exposure) the variable's name.
+- `ci variances x, bonett` ("Bonett"): the trimmed mean m with trim 1/(2√(n − 4)) from each end, the kurtosis
+  γ4 = n·Σ(x − m)⁴/(Σ(x − x̄)²)², c = n/(n − z), se = c·√((γ4 − (n − 3)/n)/(n − 1)), the interval
+  exp(ln(c·s²) ± z·se). r() adds kurtosis after Var.
+- `sd`: "Std. dev." in place of Variance, the square roots of the estimate and bounds; r() adds sd after Var.

@@ -14,5 +14,12 @@ Translated in `crates/statatr/src/data_r/nlcom.rs`.
   missing, eform 0), r(b) (1 × k, the row named c1) and r(V). e() is left as it was.
 - RCraft takes the derivatives by central differences extrapolated (Richardson) on Stata mode's own
   translation of each expression, evaluated with the coefficients moved one at a time.
-- Not translated: after models other than regress, logit, probit and poisson; `post`, `df()`,
+- Not translated: after mlogit and the models not listed below; `post`, `df()`,
   `iterate()`, `noheader`; expressions of the data's variables.
+
+## More models (2026-11-13; probe `nl/l2.do`)
+
+- The same table after xtreg (fe, re), ivregress, nbreg (`_b[/lnalpha]` too), ologit and oprobit (the cut
+  points too), clogit, stcox (the stub `_t`) and regress with robust errors. The values follow the model's:
+  to 1e-9 after the linear models and stcox, to about 1e-7 after ologit, oprobit and clogit, where Stata
+  stops iterating (corpus `nlcom_models.do`, to 6 digits).

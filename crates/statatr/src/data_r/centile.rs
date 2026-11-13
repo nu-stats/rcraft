@@ -4,7 +4,8 @@
 
 use super::*;
 
-pub(super) const CENTILE_HELPER: &str = r##"stata_centile <- function(d, vars, q = 50, qtext = "50", level = 95, show = TRUE) {
+pub(super) const CENTILE_HELPER: &str = r##"stata_centile <- function(d, vars, q = 50, qtext = "50", level = 95, show = TRUE,
+                          method = "interp") {
   num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
   for (v in vars) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
   a <- (100 - level) / 200
@@ -32,11 +33,36 @@ pub(super) const CENTILE_HELPER: &str = r##"stata_centile <- function(d, vars, q
     x <- sort(num(d[[v]]))
     n <- length(x)
     rows <- list()
+    z <- stats::qnorm(1 - a)
     if (n > 0) for (k in seq_along(q)) {
       p <- q[k] / 100
-      lb <- bound(x, p, a)
-      ub <- bound(x, p, 1 - a)
-      rows[[k]] <- list(c = at(x, (n + 1) * p), lb = lb$v, ub = ub$v, held = lb$held || ub$held)
+      cq <- at(x, (n + 1) * p)
+      rows[[k]] <- switch(method,
+        # cci, as Stata's manual gives it: x(r+1) and x(s+1), with x(0) = x(1) and x(n+1) = x(n)
+        cci = {
+          F <- stats::pbinom(0:n, n, p)
+          lo <- which(F > a)[1] - 1
+          hi <- which(F >= 1 - a)[1]
+          list(c = cq, lb = x[max(1, lo)], ub = x[min(n, hi)], held = lo < 1 || hi > n)
+        },
+        # normal: the centile's se from a normal density at it, with the sample's mean and sd
+        normal = {
+          se <- sqrt(q[k] * (100 - q[k])) / (100 * sqrt(n) * stats::dnorm(cq, mean(x), stats::sd(x)))
+          list(c = cq, lb = cq - z * se, ub = cq + z * se, held = FALSE)
+        },
+        # meansd: the centile of a normal with the sample's mean and sd
+        meansd = {
+          zq <- stats::qnorm(p)
+          s <- stats::sd(x)
+          cm <- mean(x) + zq * s
+          se <- s * sqrt(1 / n + zq^2 / (2 * (n - 1)))
+          list(c = cm, lb = cm - z * se, ub = cm + z * se, held = FALSE)
+        },
+        {
+          lb <- bound(x, p, a)
+          ub <- bound(x, p, 1 - a)
+          list(c = cq, lb = lb$v, ub = ub$v, held = lb$held || ub$held)
+        })
     }
     out[[v]] <- list(n = n, rows = rows)
   }
@@ -51,7 +77,11 @@ pub(super) const CENTILE_HELPER: &str = r##"stata_centile <- function(d, vars, q
   if (!show) return(r)
   g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
   ab <- function(s) if (nchar(s) <= 12) s else paste0(substr(s, 1, 10), "~", substr(s, nchar(s), nchar(s)))
-  cat("\n", strrep(" ", 58), "Binom. interp.   \n", sep = "")
+  cat("\n", switch(method,
+    cci = paste0(strrep(" ", 58), "Binomial exact   "),
+    normal = paste0(strrep(" ", 35), "-- Normal, based on observed centiles --"),
+    meansd = paste0(strrep(" ", 35), "-- Normal, based on mean and std. dev.--"),
+    paste0(strrep(" ", 58), "Binom. interp.   ")), "\n", sep = "")
   cat("    Variable |       Obs  Percentile    Centile",
       sprintf("%28s", paste0("[", stata_fmt(level, "%9.0g", trim = TRUE), "% conf. interval]")), "\n", sep = "")
   cat(strrep("-", 13), "+", strrep("-", 61), "\n", sep = "")
@@ -91,11 +121,25 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "centile")?;
-        if let Some(o) = opts.other(&[("centile", 7), ("level", 1)]) {
+        if let Some(o) = opts.other(&[
+            ("centile", 7),
+            ("level", 1),
+            ("cci", 3),
+            ("normal", 6),
+            ("meansd", 6),
+        ]) {
             return Err(no(format!(
                 "centile with the option {o} is not translated yet"
             )));
         }
+        let methods: Vec<&str> = ["cci", "normal", "meansd"]
+            .into_iter()
+            .filter(|m| opts.has(m, m.len()))
+            .collect();
+        if methods.len() > 1 {
+            return Err(no("only one of cci, normal and meansd (Stata: r(198))"));
+        }
+        let method = methods.first().copied().unwrap_or("interp");
         if c.parts.weight.is_some() {
             return Err(no("centile with weights is not translated yet"));
         }
@@ -155,10 +199,11 @@ impl Session {
         let names: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
         let qs: Vec<String> = q.iter().map(|v| r_number(*v)).collect();
         out.line(format!(
-            "stata_r <- stata_centile({rows}, c({}), q = c({}), qtext = {}, level = {level}{})",
+            "stata_r <- stata_centile({rows}, c({}), q = c({}), qtext = {}, level = {level}, method = {}{})",
             names.join(", "),
             qs.join(", "),
             r_text(&qtext),
+            r_text(method),
             if self.quiet(c) { ", show = FALSE" } else { "" }
         ));
         self.r_new = Some((&["n_cent", "N", "centiles"], "centile".into()));
