@@ -4433,6 +4433,9 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   before R runs. The text encoding is used for the catalogue too (haven's default).
 - Checked against real R 4.4.3: haven's own `iris.sas7bdat` previews as before, and a file that is
   not a catalogue gives haven's message ("Failed to parse ...") in the preview, nothing more.
-- Not checked: a real catalogue's labels. None is on this machine and haven cannot write one; a
-  SAS-made `.sas7bcat` would be the first check of the labels reaching the Variables pane.
+- Checked with a real catalogue the same day: haven's own test pair (`hadley.sas7bdat` with
+  `formats.sas7bcat`, from its tests, downloaded to a scratch folder and not kept in the repo), read
+  in R 4.4.3 with the code the dialog writes, gives `workshop` (1 = R, 2 = SAS) and `gender`
+  (f = Female, m = Male) as labelled variables, and none without the catalogue; `formats.sas7bcat`
+  is the name the dialog fills in there. Not done through the app's window itself.
 - Not done: a catalogue packed in the same archive as the data file is not taken out with it.
