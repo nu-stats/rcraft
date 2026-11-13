@@ -189,6 +189,7 @@ pub const COMMANDS: &[&str] = &[
     "scalar",
     "scatter",
     "set",
+    "sktest",
     "sort",
     "split",
     "ssc",
@@ -684,6 +685,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("oneway", &["noanova", "nolabel", "tabulate"]),
     ("centile", &["centile(", "level("]),
     ("nlcom", &["level("]),
+    ("sktest", &["noadjust"]),
     (
         "ci",
         &["agresti", "exact", "jeffreys", "level(", "wald", "wilson"],

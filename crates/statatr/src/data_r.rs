@@ -72,6 +72,7 @@ mod revrs;
 mod robreg;
 mod rreg;
 mod scalars;
+mod sktest;
 mod st;
 mod stats;
 mod suest;
@@ -456,6 +457,7 @@ const WEIGHTED: &[&str] = &[
     "collapse",
     "summarize",
     "ci",
+    "sktest",
     "tabstat",
     "tabulate",
     "tab1",
@@ -950,6 +952,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ci" => ci::CI_HELPER,
         "stata_centile" => centile::CENTILE_HELPER,
         "stata_nlcom" => nlcom::NLCOM_HELPER,
+        "stata_sktest" => sktest::SKTEST_HELPER,
         "stata_testparm" => testparm::TESTPARM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
@@ -2267,6 +2270,7 @@ impl Session {
             "ci" => self.ci(c, &opts, out),
             "centile" => self.centile(c, &opts, out),
             "nlcom" => self.nlcom(c, &opts, out),
+            "sktest" => self.sktest(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),

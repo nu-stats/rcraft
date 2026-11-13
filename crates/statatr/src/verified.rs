@@ -165,6 +165,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("robreg", &["robreg"]),
     ("rreg", &["rreg"]),
     ("set", &["made", "random"]),
+    ("sktest", &["sktest"]),
     ("sort", &["data", "extended_missing_commands"]),
     ("split", &["strings"]),
     ("stcox", &["likelihood"]),
