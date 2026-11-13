@@ -4216,3 +4216,19 @@ ZNMIXH's lassoClean.ado tries every pair of its ~130 variables (`isvar`, `reg`, 
   Both entries are marked **Verified**.
 - **Not yet:** forecast and fable, seasonal ARIMA, unit-root tests (Dickey-Fuller, Phillips-Perron),
   exponential smoothing, regressors in ARIMA, VAR, and a time-series plot.
+
+## cmset, cmclogit, margins after it, coefplot of several equations, esttab elist(), 2026-11-12
+
+- Observed in Stata 19 (`plan/stata/cmclogit.md`; corpus `cmclogit.do`): `cmset`; `cmclogit` with
+  alternative-specific factors, casevars() and vce(cluster) (the base alternative is the most frequent
+  one, the first of a tie), its e() and table; `margins, dydx(i.x) outcome() alt() asobserved post
+  vce(unconditional)`, its table and its e(b) of an equation a level; coefplot of those margins
+  (keep(*:), the first equation's alone without keep(), eq: lists, headings() and coeflabels() keyed by
+  equation, compound-quoted labels of several lines, wrap()); esttab varlabels(..., elist()) and
+  several equations side by side with eqlabels(none).
+- YFBPT6's rawall0.tex and rawall1govestimates.tex are written byte for byte as Stata's; its two
+  cmclogit fits match Stata's to about 1e-7 (Stata stops its iterations a little short), the margins
+  tables print as Stata's.
+- YFBPT6: 3 lines refused (14): rreg (1) and esttab matrix() (2).
+- Not checked here: `multilevel.rs` (P6.2's lme4 test) fails on this machine's R 4.6.2 with lme4 2.1.0
+  (the Poisson likelihood check); CI's pinned R 4.4.3 passes it.

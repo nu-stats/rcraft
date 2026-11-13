@@ -1783,6 +1783,14 @@ pub const GUIDES: &[Guide] = &[
                  headings(); subgraphs at ||. gen() leaves those rows, as floats, as coefplot does.",
             ),
             p(
+                "Several equations",
+                "A model with several equations (margins posted after cmclogit) is drawn alone \
+                 and with noeqlabels: its rows in e(b)'s order, only the first equation's unless \
+                 keep() says otherwise; keep(), headings() and coeflabels() read eq: names as \
+                 Stata 19 does (the equation kept for the names after it, eq: alone all its \
+                 names). Equation labels, order() and several plots of such models are refused.",
+            ),
+            p(
                 "Look",
                 "The graph is drawn by ggplot2, so it looks like R's; colours, markers and the \
                  like are not carried over. Labels are the variable's label or name, a factor \
@@ -1809,6 +1817,45 @@ pub const GUIDES: &[Guide] = &[
                  its parts on different rows, which RCraft does not reproduce. Collinear \
                  variables, factor variables and predict after it are not translated yet; the \
                  coefficient table is in R's layout.",
+            ),
+        ],
+    },
+    Guide {
+        command: "cmset",
+        about: "Declares choice-model data: the case and alternatives variables",
+        points: &[p(
+            "In R",
+            "Prints Stata 19's two lines and keeps the case and alternatives variables for \
+             cmclogit after it. Options of cmset (a panel's time variable, noalternatives) are \
+             refused.",
+        )],
+    },
+    Guide {
+        command: "cmclogit",
+        about: "Conditional logit choice model (McFadden's), with margins after it",
+        points: &[
+            p(
+                "In R",
+                "stata_cmclogit fits the conditional logit by Newton-Raphson in base R: each \
+                 alternative-specific term (x, i.x, ib#.x) one column, each case-specific term \
+                 of casevars() one coefficient for each alternative but the base one, which is \
+                 the one most frequent in the data (the first of a tie), as in Stata; each such \
+                 equation named by the alternative's value, a constant in each unless \
+                 noconstant. vce(cluster v) is H^-1 (sum of the clusters' scores) H^-1 times \
+                 G / (G - 1). e() and the table are Stata 19's; its iteration log is not shown.",
+            ),
+            p(
+                "margins",
+                "margins, dydx(i.x ...) outcome(#) alternative(#) asobserved post after it: for \
+                 each level the mean over cases of Pr(outcome) with the alternative's x at that \
+                 level less with it at the base, with the analytic gradient; vce(unconditional) \
+                 clusters each case's term as Stata does, the default is the delta method. e(b) \
+                 has an equation a level (1.x:_cons, the base 3b.x:o._cons), as Stata's.",
+            ),
+            p(
+                "Not yet",
+                "Weights, vce(robust), interactions, margins without post or of continuous \
+                 terms, and predict, test and lincom after cmclogit are refused.",
             ),
         ],
     },

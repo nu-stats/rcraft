@@ -23,7 +23,9 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("center", &["center"]),
     ("clogit", &["clogit"]),
     ("cluster2", &["cluster2"]),
-    ("coefplot", &["coefplot", "coefplot2"]),
+    ("cmclogit", &["cmclogit"]),
+    ("cmset", &["cmclogit"]),
+    ("coefplot", &["cmclogit", "coefplot", "coefplot2"]),
     (
         "collapse",
         &[
@@ -109,7 +111,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("lincom", &["panel", "regress"]),
     ("local", &["control"]),
     ("logit", &["collinear", "interactions", "likelihood"]),
-    ("margins", &["regress"]),
+    ("margins", &["cmclogit", "regress"]),
     ("matrix", &["matfuncs", "matrices"]),
     ("merge", &["extended_missing_groups", "merge"]),
     ("mkmat", &["matrices"]),

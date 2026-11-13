@@ -232,6 +232,7 @@ const MODELS: &[&str] = &[
     "cluster2",
     "cloglog",
     "cmclogit",
+    "cmset",
     "dfgls",
     "dfuller",
     "didregress",

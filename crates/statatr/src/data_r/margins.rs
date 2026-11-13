@@ -399,6 +399,11 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "margins")?;
+        // after cmclogit: its own margins
+        if matches!(&self.e_ret, super::returned::Returned::Program { cmd, .. } if cmd == "cmclogit")
+        {
+            return self.cm_margins(c, opts, out);
+        }
         // with weights the margins are weighted means, as Stata's; the means of
         // atmeans and at() statistics would need weighting too, not done yet
         if self.weighted_fit

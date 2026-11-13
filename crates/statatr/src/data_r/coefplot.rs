@@ -13,14 +13,18 @@
 //! row of their own, after an empty one below the first; subgraphs split at
 //! `||`, the options after the last applying to all unless one has its own.
 //! Labels are the variable's label, else its name; a factor's level is its
-//! value label, else `g=2`.
+//! value label, else `g=2`. A model with several equations (margins posted
+//! after cmclogit) is drawn alone with `noeqlabels`: rows `eq:name` in e(b)'s
+//! order, the first equation's only unless `keep()` names others, coefficient
+//! lists read as Stata 19 reads them (`plan/stata/cmclogit.md`).
 
 use super::*;
 
 /// The rows `coefplot` shows and their places: see the module.
 pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(subs, d, keep = NULL, drop = NULL, order = NULL, baselevels = FALSE,
                                 omitted = FALSE, level = 0.95, headings = character(), coeflabels = character(),
-                                gap = TRUE, swap = FALSE, eqrename = character()) {
+                                gap = TRUE, swap = FALSE, eqrename = character(), eqlabels = TRUE,
+                                wrap = NULL, head_offset = 0) {
   wild <- function(p) paste0("^", gsub("\\?", ".", gsub("\\*", ".*", gsub("([.+^$(){}|\\[\\]])", "\\\\\\1", p))), "$")
   hits <- function(n, pats) {
     pats <- sub(":$", ":*", pats)
@@ -38,9 +42,10 @@ pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(sub
     }
     if (is.null(e$b)) stop("coefplot: ", name, " has no e(b)")
     raw <- colnames(e$b)
+    eqs <- NULL
     if (any(grepl(":", raw))) {
       eq <- unique(sub(":.*$", "", raw[grepl(":", raw)]))
-      if (length(eq) > 1) stop("coefplot of a model with several equations is not translated yet")
+      if (length(eq) > 1) eqs <- sub(":.*$", "", raw)
       raw <- sub("^[^:]*:", "", raw)
     }
     if (any(grepl("#", raw))) stop("coefplot of interactions is not translated yet")
@@ -53,11 +58,53 @@ pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(sub
     se[base | om] <- 0
     df <- if (!is.null(e$df_r) && is.finite(e$df_r)) e$df_r else Inf
     show <- (!base | baselevels) & (!om | omitted)
-    data.frame(name = nm, b = b, se = se, df = df, stringsAsFactors = FALSE)[show, , drop = FALSE]
+    # several equations: each row is eq:name, in e(b)'s order
+    if (!is.null(eqs)) nm <- paste0(eqs, ":", nm)
+    t <- data.frame(name = nm, b = b, se = se, df = df, stringsAsFactors = FALSE)[show, , drop = FALSE]
+    attr(t, "eqs") <- if (!is.null(eqs)) unique(eqs)
+    t
   }
   tabs <- lapply(subs, function(s) lapply(s$plots, function(p) one(p$name)))
+  multi <- !is.null(attr(tabs[[1]][[1]], "eqs"))
+  if (!multi && any(vapply(tabs, function(t) any(vapply(t, function(x) !is.null(attr(x, "eqs")), TRUE)), TRUE))) {
+    stop("RCraft: coefplot of a model with several equations beside other plots is not translated yet", call. = FALSE)
+  }
+  if (multi) {
+    if (length(subs) > 1 || length(subs[[1]]$plots) > 1) stop("RCraft: coefplot of a model with several equations beside other plots is not translated yet", call. = FALSE)
+    if (eqlabels) stop("RCraft: coefplot of a model with several equations is translated with noeqlabels", call. = FALSE)
+    if (length(order) || swap) stop("RCraft: coefplot of a model with several equations with order() or swapnames is not translated yet", call. = FALSE)
+    first_eq <- attr(tabs[[1]][[1]], "eqs")[1]
+    # a coefficient list, as Stata 19 reads it: eq: names (the equation kept for the
+    # names after it, the first equation's before any), eq: alone all its names
+    hits <- function(n, pats, default = first_eq) {
+      ne <- sub(":.*$", "", n)
+      nc <- sub("^[^:]*:", "", n)
+      hit <- rep(FALSE, length(n))
+      cur <- default
+      pending <- FALSE
+      for (p in pats) {
+        if (grepl(":$", p)) {
+          if (pending) hit <- hit | grepl(wild(cur), ne)
+          cur <- sub(":$", "", p)
+          pending <- TRUE
+          next
+        }
+        if (grepl(":", p)) {
+          cur <- sub(":.*$", "", p)
+          p <- sub("^[^:]*:", "", p)
+        }
+        if (is.null(cur)) stop("RCraft: coefplot of a model with several equations: a name without its equation is not translated yet", call. = FALSE)
+        hit <- hit | (grepl(wild(cur), ne) & grepl(wild(p), nc))
+        pending <- FALSE
+      }
+      if (pending) hit <- hit | grepl(wild(cur), ne)
+      hit
+    }
+  }
   all <- unique(unlist(lapply(tabs, function(t) lapply(t, `[[`, "name"))))
   all <- c(setdiff(all, "_cons"), intersect(all, "_cons"))
+  # with several equations only the first shows unless keep() names others
+  if (multi && !length(keep)) all <- all[sub(":.*$", "", all) == first_eq]
   if (length(keep)) all <- all[hits(all, keep)]
   if (length(drop)) all <- all[!hits(all, drop)]
   rows <- all
@@ -67,6 +114,21 @@ pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(sub
       if (o == ".") rows <- c(rows, NA) else rows <- c(rows, setdiff(all[hits(all, o)], rows))
     }
     rows <- c(rows, setdiff(all, rows))
+  }
+  # with several equations headings() and coeflabels() are keyed by coefficient
+  # lists: a heading on the first row its list names, a label on each
+  if (multi) {
+    keyed <- function(v, firsts) {
+      out <- character()
+      for (k in names(v)) {
+        m <- rows[hits(rows, strsplit(trimws(k), "[[:space:]]+")[[1]], default = NULL)]
+        if (firsts) m <- m[1]
+        out[m[!is.na(m)]] <- unname(v[k])
+      }
+      out
+    }
+    headings <- keyed(headings, TRUE)
+    coeflabels <- keyed(coeflabels, FALSE)
   }
   # headings: a row each, after an empty one below the first
   pos <- numeric(length(rows))
@@ -78,14 +140,22 @@ pub(super) const COEFPLOT_HELPER: &str = r##"stata_coefplot_rows <- function(sub
     if (!is.na(h)) {
       at <- at + if (first || !gap) 1 else 2
       # {bf:text} and the like are Stata's markup: the text alone
-      heads <- rbind(heads, data.frame(at = at, text = gsub("\\{[a-z]+:([^}]*)\\}", "\\1", unname(h)), stringsAsFactors = FALSE))
+      heads <- rbind(heads, data.frame(at = at + head_offset, text = gsub("\\{[a-z]+:([^}]*)\\}", "\\1", unname(h)), stringsAsFactors = FALSE))
     }
     if (i > 0) first <- FALSE
     at <- at + 1
     pos[i] <- at
   }
   label <- function(n) {
-    if (!is.na(coeflabels[n])) return(unname(coeflabels[n]))
+    # wrap(#): each line broken at blanks to at most # characters
+    if (!is.na(coeflabels[n])) {
+      l <- unname(coeflabels[n])
+      if (!is.null(wrap)) {
+        l <- paste(unlist(lapply(strsplit(l, "\n", fixed = TRUE)[[1]], function(x) strwrap(x, width = wrap + 1))), collapse = "\n")
+      }
+      return(l)
+    }
+    if (multi) n <- sub("^[^:]*:", "", n)
     if (n == "_cons") return(n)
     m <- regmatches(n, regexec("^([0-9]+)\\.(.+)$", n))[[1]]
     if (length(m)) {
@@ -382,13 +452,29 @@ impl Session {
         };
         let headings = pairs("headings", 4)?;
         let coeflabels = pairs("coeflabels", 6)?;
-        // headings(..., nogap): no empty row before the headings after the first
-        let gap = !g.arg("headings", 4).is_some_and(|a| {
-            let (_, o) = split_top_comma(&a);
-            crate::lang::syntax::options(o)
-                .iter()
-                .any(|x| x.is("nogap", 5))
-        });
+        // the options after the pairs: headings(..., nogap offset(#)), coeflabels(..., wrap(#))
+        let sub_opts = |name: &str, m: usize| -> Vec<crate::lang::syntax::Opt> {
+            g.arg(name, m)
+                .map(|a| crate::lang::syntax::options(split_top_comma(&a).1))
+                .unwrap_or_default()
+        };
+        let number = |o: &[crate::lang::syntax::Opt], name: &str, m: usize| match o
+            .iter()
+            .find(|x| x.is(name, m))
+        {
+            None => Ok("NULL".to_string()),
+            Some(x) => x.arg().trim().parse::<f64>().map(r_number).map_err(|_| {
+                no(format!(
+                    "coefplot, {name}({}): a number is translated",
+                    x.arg()
+                ))
+            }),
+        };
+        let head_opts = sub_opts("headings", 4);
+        // nogap: no empty row before the headings after the first
+        let gap = !head_opts.iter().any(|x| x.is("nogap", 5));
+        let head_offset = number(&head_opts, "offset", 6)?;
+        let wrap = number(&sub_opts("coeflabels", 6), "wrap", 4)?;
         // levels(95 90): an interval for each, as Stata's ll1 ul1, ll2 ul2
         let levels: Vec<f64> = match g.arg("levels", 3) {
             None => vec![95.0],
@@ -515,7 +601,7 @@ impl Session {
         }
         out.package("ggplot2");
         out.line(format!(
-            "stata_cp <- stata_coefplot_rows(list({}), {d}, keep = c({}), drop = c({}), order = c({}), baselevels = {}, omitted = {}, level = c({}), headings = {headings}, coeflabels = {coeflabels}, gap = {}, swap = {}, eqrename = {eqrename})",
+            "stata_cp <- stata_coefplot_rows(list({}), {d}, keep = c({}), drop = c({}), order = c({}), baselevels = {}, omitted = {}, level = c({}), headings = {headings}, coeflabels = {coeflabels}, gap = {}, swap = {}, eqrename = {eqrename}, eqlabels = {}, wrap = {wrap}, head_offset = {})",
             sub_code.join(", "),
             keep.join(", "),
             drop.join(", "),
@@ -524,7 +610,9 @@ impl Session {
             super::stats::r_logical(g.has("omitted", 4)),
             levels.iter().map(|l| r_number(l / 100.0)).collect::<Vec<_>>().join(", "),
             super::stats::r_logical(gap),
-            super::stats::r_logical(swap)
+            super::stats::r_logical(swap),
+            super::stats::r_logical(!g.has("noeqlabels", 6)),
+            if head_offset == "NULL" { "0" } else { &head_offset }
         ));
         let title = g
             .arg("title", 2)
@@ -714,6 +802,32 @@ fn equal_pairs(text: &str) -> Result<Vec<(String, String)>, Untranslated> {
             .split_once('=')
             .ok_or_else(|| no(format!("{text}: name = \"text\" pairs are translated")))?;
         let after = after.trim_start();
+        // `" "line one" "line two" "': a text of several lines (one without inner
+        // quotes is that text)
+        if let Some(cq) = after.strip_prefix("`\"") {
+            let end = cq
+                .find("\"'")
+                .ok_or_else(|| no(format!("{text}: a `\" without its \"'")))?;
+            let body = cq.get(..end).unwrap_or("");
+            let lines: Vec<String> = if body.contains('"') {
+                quoted_words_kept(body)
+                    .iter()
+                    .map(|w| {
+                        w.strip_prefix('"')
+                            .and_then(|w| w.strip_suffix('"'))
+                            .map(str::to_string)
+                            .ok_or_else(|| {
+                                no(format!("{text}: the lines of a text need their quotes"))
+                            })
+                    })
+                    .collect::<Result<_, _>>()?
+            } else {
+                vec![body.trim().to_string()]
+            };
+            out.push((key.trim().to_string(), lines.join("\n")));
+            rest = cq.get(end + 2..).unwrap_or("").trim();
+            continue;
+        }
         let inner = after
             .strip_prefix('"')
             .ok_or_else(|| no(format!("{text}: the text needs quotes")))?;

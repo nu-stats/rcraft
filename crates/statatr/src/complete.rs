@@ -70,6 +70,8 @@ pub const COMMANDS: &[&str] = &[
     "clear",
     "clogit",
     "cluster2",
+    "cmclogit",
+    "cmset",
     "codebook",
     "coefplot",
     "collapse",
@@ -252,6 +254,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("cluster2", &["fcluster(", "tcluster("]),
+    ("cmclogit", &["casevars(", "noconstant", "vce("]),
     (
         "coefplot",
         &[
@@ -1444,6 +1447,7 @@ mod tests {
             }
             "append" => format!("append using t, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
+            "cmclogit" => format!("cmset g t\ncmclogit d x, {o}"),
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),
             "coefplot" => format!("regress y x\ncoefplot, {o}"),
             "collapse" => format!("collapse (mean) y, {o}"),

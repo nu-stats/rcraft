@@ -54,7 +54,7 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
                          cells = NULL, compress = FALSE, varwidth = NULL, modelwidth = NULL,
                          mlabels = NULL, prehead = NULL, posthead = NULL, prefoot = NULL, postfoot = NULL,
                          fragment = FALSE, alignment = NULL, format = "screen", booktabs = FALSE, file = NULL, replace = FALSE,
-                         from_eststo = FALSE, refcat = NULL, refcat_label = TRUE, eqlabels = TRUE) {
+                         from_eststo = FALSE, refcat = NULL, refcat_label = TRUE, eqlabels = TRUE, elist = NULL) {
   # compress narrows the columns: 9 for the models, 10 (16 with label) for the names
   if (is.null(modelwidth)) modelwidth <- if (compress) 9 else 12
   if (is.null(varwidth)) varwidth <- if (label) (if (compress) 16 else 20) else (if (compress) 10 else 12)
@@ -62,7 +62,7 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
     stata_esttab_side(models, d, cells$items, star, stars, raw_stars, label, nobase, keep, drop, sstats,
                       noobs, numbers, mtitles, nomtitles, title, varlabels, mlabels, refcat, refcat_label,
                       eqlabels, varwidth, modelwidth, format, booktabs, prehead, posthead, prefoot,
-                      postfoot, fragment)
+                      postfoot, fragment, elist)
   } else if (!is.null(cells)) {
     stata_esttab_cells(models, d, cells, label, varlabels, numbers, nomtitles, noobs, varwidth, modelwidth, format)
   } else {
@@ -383,7 +383,7 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
 stata_esttab_side <- function(models, d, items, star, stars, raw_stars, label, nobase, keep, drop, sstats,
                               noobs, numbers, mtitles, nomtitles, title, varlabels, mlabels, refcat,
                               refcat_label, eqlabels, vw, mw, format, booktabs, prehead, posthead, prefoot,
-                              postfoot, fragment) {
+                              postfoot, fragment, elist = NULL) {
   wild <- function(p) paste0("^", gsub("\\?", ".", gsub("\\*", ".*", gsub("([.+^$(){}|\\[\\]])", "\\\\\\1", p))), "$")
   hits <- function(n, pats) Reduce(`|`, lapply(pats, function(p) grepl(wild(p), n)), rep(FALSE, length(n)))
   getm <- function(name) {
@@ -394,7 +394,8 @@ stata_esttab_side <- function(models, d, items, star, stars, raw_stars, label, n
     }
     raw <- colnames(e$b)
     eq <- unique(ifelse(grepl(":", raw), sub(":.*$", "", raw), ""))
-    if (length(eq) > 1) stop("RCraft: esttab of a model with several equations is not translated yet")
+    # several equations: with eqlabels(none) their rows one after another (cmclogit's alt and 2), a name in one only
+    if (length(eq) > 1 && (eqlabels || anyDuplicated(sub("^[^:]*:", "", raw)))) stop("RCraft: esttab of a model with several equations is not translated yet (with eqlabels(none) and no name twice it is)")
     raw <- sub("^[^:]*:", "", raw)
     if (any(grepl("#", raw))) stop("RCraft: esttab of interactions is not translated yet")
     base <- grepl("^[0-9]+b?n?b\\.", raw) | grepl("^o\\.", raw) | grepl("^[0-9]+o\\.", raw)
@@ -481,7 +482,7 @@ stata_esttab_side <- function(models, d, items, star, stars, raw_stars, label, n
       if (first && !is.null(eqrow)) out <- c(out, emit$blank(eqrow))
       first <- FALSE
       if (!is.null(refcat) && n %in% names(refcat)) out <- c(out, emit$ref(refcat[[n]]))
-      out <- c(out, emit$coef(lab(n), lapply(ms, function(m) lapply(seq_len(k), function(i) cellv(m, n, i)))))
+      out <- c(out, emit$coef(lab(n), lapply(ms, function(m) lapply(seq_len(k), function(i) cellv(m, n, i))), n))
     }
     out
   }
@@ -493,7 +494,7 @@ stata_esttab_side <- function(models, d, items, star, stars, raw_stars, label, n
     line <- function(n, vals) paste0(nm_cell(n, vw), paste0(vapply(vals, function(m) paste0(vapply(seq_len(k), function(i) one(i, m[[i]]$v, m[[i]]$s), ""), collapse = ""), ""), collapse = ""))
     emit <- list(blank = function(n) line(n, blankm),
                  ref = function(txt) line(txt, if (refcat_label) firstonly(rep("ref.", nmod)) else blankm),
-                 coef = function(n, vals) line(n, vals))
+                 coef = function(n, vals, key = NULL) line(n, vals))
     out <- c(if (format == "screen") "", sect(prehead, c(title, rule)))
     if (numbers) out <- c(out, line("", firstonly(paste0("(", seq_len(nmod), ")"))))
     if (!is.null(titles)) out <- c(out, line("", firstonly(titles$h)))
@@ -524,7 +525,7 @@ stata_esttab_side <- function(models, d, items, star, stars, raw_stars, label, n
   open <- if (is.null(title)) "{" else "\\begin{table}[htbp]\\centering"
   emit <- list(blank = function(n) tline(tname(n), blankm),
                ref = function(txt) tline(padl(txt, vw), if (refcat_label) firstonly(rep("ref.", nmod)) else blankm),
-               coef = function(n, vals) tline(tname(n), vals))
+               coef = function(n, vals, key = NULL) { l <- tline(tname(n), vals); if (!is.null(key) && !is.null(elist) && key %in% names(elist)) paste0(l, elist[[key]]) else l })
   out <- sect(prehead, if (!fragment) c(open, if (star) "\\def\\sym#1{\\ifmmode^{#1}\\else\\(^{#1}\\)\\fi}",
            if (!is.null(title)) paste0("\\caption{", title, "}"), sprintf("\\begin{tabular}{l*{%d}{%s}}", nmod, strrep("c", k)), top))
   if (numbers) out <- c(out, hrow(paste0("(", seq_len(nmod), ")"), TRUE))
@@ -918,7 +919,7 @@ impl Session {
              addnotes = {}, varlabels = {}, nogaps = {}, mgroups = {}, cells = {}, compress = {}, \
              varwidth = {}, modelwidth = {}, mlabels = {}, prehead = {}, posthead = {}, prefoot = {}, postfoot = {}, \
              fragment = {}, alignment = {}, format = {}, booktabs = {}, file = {}, replace = {}, from_eststo = {}, \
-             refcat = {}, refcat_label = {}, eqlabels = {})",
+             refcat = {}, refcat_label = {}, eqlabels = {}, elist = {})",
             names.iter().map(|n| r_text(n)).collect::<Vec<_>>().join(", "),
             r_text(aux),
             r_text(&fmt_arg("b", 1).filter(|f| !f.is_empty()).unwrap_or_else(|| "a3".into())),
@@ -963,6 +964,7 @@ impl Session {
             extra.refcat,
             super::stats::r_logical(extra.refcat_label),
             super::stats::r_logical(extra.eqlabels),
+            extra.elist,
         );
         if file.is_none() && self.quiet(c) {
             return Ok(());
@@ -993,6 +995,7 @@ struct Extra {
     refcat: String,
     refcat_label: bool,
     eqlabels: bool,
+    elist: String,
 }
 
 /// The lines of prehead() and the like: each quoted string (empty ones kept) and
@@ -1137,16 +1140,36 @@ impl Extra {
                 )
             }
         };
+        let mut elist = "NULL".to_string();
         // varlabels(name label ...): pairs in turn, an odd word last left out
         let varlabels = match opts.arg("varlabels", 8) {
             None => "NULL".to_string(),
             Some(a) => {
                 plain("varlabels()", &a)?;
                 let p = crate::lang::syntax::parts(&a);
-                if !p.options.trim().is_empty() {
-                    return Err(no(
-                        "esttab, varlabels() with suboptions is not translated yet",
-                    ));
+                // elist(name text ...): text after the row's end (YFBPT6's \addlinespace)
+                for o in crate::lang::syntax::options(&p.options) {
+                    if o.is("elist", 5) && o.raw.is_some() {
+                        let w = quoted_words(&o.raw.clone().unwrap_or_default());
+                        if w.len() % 2 != 0 {
+                            return Err(no(
+                                "esttab, varlabels(..., elist()) takes name and text pairs",
+                            ));
+                        }
+                        let pairs: Vec<String> = w
+                            .chunks(2)
+                            .filter_map(|p| match p {
+                                [n, t] => Some(format!("{} = {}", r_text(n), r_text(t))),
+                                _ => None,
+                            })
+                            .collect();
+                        elist = format!("c({})", pairs.join(", "));
+                    } else {
+                        return Err(no(format!(
+                            "esttab, varlabels(..., {}) is not translated yet",
+                            o.name
+                        )));
+                    }
                 }
                 let w = quoted_words(&p.main);
                 let mut pairs = Vec::new();
@@ -1474,6 +1497,11 @@ impl Extra {
                 )))
             }
         };
+        if elist != "NULL" && (!side || kind != "tex") {
+            return Err(no(
+                "esttab, varlabels(..., elist()) is translated in .tex with cells() side by side",
+            ));
+        }
         if !side && (refcat != "NULL" || !eqlabels || opts.has("sfmt", 4)) {
             return Err(no(
                 "esttab, refcat(), eqlabels() and sfmt() are translated with cells() of a model's statistics side by side",
@@ -1492,6 +1520,7 @@ impl Extra {
             refcat,
             refcat_label,
             eqlabels,
+            elist,
         })
     }
 }

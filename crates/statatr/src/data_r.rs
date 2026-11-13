@@ -31,6 +31,7 @@ mod anovaplot;
 mod center;
 mod clogit;
 mod cluster2;
+mod cm;
 mod codebook;
 mod coefplot;
 mod contract;
@@ -935,6 +936,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_tabm" => tabm::TABM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
+        "stata_cm" => cm::CM_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
         "stata_strmatch" => STRMATCH_HELPER,
@@ -1197,6 +1199,8 @@ struct Session {
     frame_preserved: BTreeMap<String, Box<Preserved>>,
     /// The current frame's name, `None` for `default`.
     frame: Option<String>,
+    /// cmset's case and alternatives variables.
+    cmset: Option<(String, String)>,
     /// The command being translated asked whether it is quiet, so it hides
     /// its own output.
     quiet_asked: std::cell::Cell<bool>,
@@ -2238,6 +2242,8 @@ impl Session {
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),
+            "cmset" => self.cmset(c, &opts, out),
+            "cmclogit" => self.cmclogit(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "assert" => self.assert(c, &opts, out),
@@ -3939,6 +3945,12 @@ impl Session {
     pub(super) fn restated(&self, c: &Command) -> Option<Command> {
         let margins = c.name == "margins";
         if !MODELS.contains(&c.name.as_str()) && !margins {
+            return None;
+        }
+        // margins after cmclogit prints Stata's own table, cformat() and all
+        if margins
+            && matches!(&self.e_ret, returned::Returned::Program { cmd, .. } if cmd == "cmclogit")
+        {
             return None;
         }
         let mut c2 = c.clone();
