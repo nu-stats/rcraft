@@ -67,6 +67,7 @@ pub const COMMANDS: &[&str] = &[
     "capture",
     "cd",
     "center",
+    "centile",
     "ci",
     "clear",
     "clogit",
@@ -679,6 +680,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("tabm", &["missing"]),
     ("testparm", &["equal"]),
     ("oneway", &["noanova", "nolabel", "tabulate"]),
+    ("centile", &["centile(", "level("]),
     (
         "ci",
         &["agresti", "exact", "jeffreys", "level(", "wald", "wilson"],

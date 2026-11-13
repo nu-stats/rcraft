@@ -940,6 +940,7 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 /// The `e()` and `r()` names that are macros (text) in Stata.
 const TEXT_NAMES: &[&str] = &[
     "levels",
+    "centiles",
     "citype",
     "varlist",
     "badlist",
@@ -1734,6 +1735,7 @@ impl Session {
                         if which == "r"
                             && !names.contains(&name)
                             && !(tabstat && super::tabstat::tabstat_text(name))
+                            && !(cmd == "centile" && super::centile::centile_names(name))
                         {
                             return Err(no(format!(
                                 "{shown} after {cmd} is not kept in R yet (RCraft keeps r() {})",

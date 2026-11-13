@@ -1975,6 +1975,26 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "centile",
+        about: "Centiles with confidence intervals (centile x, centile(25 50 75))",
+        points: &[
+            p(
+                "In R",
+                "stata_centile gives Stata 19's centiles, at rank (n + 1)q/100 between the order \
+                 statistics (R's quantile type 6), and its default interval: where the binomial \
+                 cdf passes each tail, interpolated between the order statistics, held at the \
+                 sample's minimum or maximum (and marked) where that order statistic is not \
+                 there. Each variable uses its own rows; r() is the last variable's (N, n_cent, \
+                 c_#, lb_#, ub_#, centiles).",
+            ),
+            p(
+                "Not yet",
+                "cci, normal, meansd, weights and centile() lists that are not plain numbers are \
+                 refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "ci",
         about: "Confidence intervals for means, proportions and variances (ci means x, ci proportions b, ci variances x)",
         points: &[
