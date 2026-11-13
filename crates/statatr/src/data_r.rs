@@ -764,6 +764,46 @@ const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ..., guess
 /// copy into a float keeps them in Stata 19); too large for a float is `.`.
 const FLOAT_HELPER: &str = "stata_float <- function(x) {\n  x <- as.numeric(x)\n  y <- readBin(writeBin(x, raw(), size = 4), \"double\", size = 4, n = length(x))\n  y[!is.finite(y)] <- NA\n  y[is.na(x)] <- x[is.na(x)]\n  y\n}";
 
+/// What replace and generate say (Stata 19): `(7 real changes made)`, `(1
+/// real change made, 1 to missing)` (numbers only; `.` to `.a` is a change),
+/// `(6 missing values generated)`. replace counts in the mutate itself, a
+/// group at a time, so a `by` that sorts the rows counts the same.
+const CHANGES_HELPER: &str = r#"stata_changes <- new.env()
+stata_changes$n <- 0
+stata_changes$m <- 0
+stata_chg <- function(old, new) {
+  new <- rep_len(new, length(old))
+  if (is.character(old) || is.character(new)) {
+    o <- ifelse(is.na(old), "", as.character(old))
+    v <- ifelse(is.na(new), "", as.character(new))
+    stata_changes$n <- stata_changes$n + sum(o != v)
+    stata_changes$text <- TRUE
+    return(new)
+  }
+  # which missing value each is (haven tags .a to .z), . for all when the tags are not there
+  mvk <- function(x) if (anyNA(x) && requireNamespace("haven", quietly = TRUE)) stata_mv(x) else as.numeric(is.na(x))
+  ko <- mvk(old)
+  kn <- mvk(new)
+  ch <- (ko != kn) | (ko == 0 & kn == 0 & as.numeric(old) != as.numeric(new))
+  stata_changes$n <- stata_changes$n + sum(ch)
+  stata_changes$m <- stata_changes$m + sum(ch & kn > 0)
+  new
+}
+stata_chg_note <- function(show = TRUE) {
+  n <- stata_changes$n
+  m <- stata_changes$m
+  text <- isTRUE(stata_changes$text)
+  stata_changes$n <- 0
+  stata_changes$m <- 0
+  stata_changes$text <- NULL
+  if (show) cat("(", format(n, big.mark = ",", scientific = FALSE), if (n == 1) " real change made" else " real changes made",
+      if (!text && m > 0) paste0(", ", format(m, big.mark = ",", scientific = FALSE), " to missing"), ")\n", sep = "")
+}
+stata_gen_note <- function(v) {
+  k <- if (is.character(v)) sum(is.na(v) | v == "") else sum(is.na(v))
+  if (k > 0) cat("(", format(k, big.mark = ",", scientific = FALSE), if (k == 1) " missing value generated" else " missing values generated", ")\n", sep = "")
+}"#;
+
 /// Stata's order of missing values as a number, for comparisons with one:
 /// 0 a number, 1 for `.`, 2 to 27 for `.a` to `.z` (haven's tagged NAs).
 const MV_HELPER: &str = r#"stata_mv <- function(x) {
@@ -997,6 +1037,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_strmatch" => STRMATCH_HELPER,
         "stata_char" => CHAR_HELPER,
         "stata_mv" => MV_HELPER,
+        "stata_chg" => CHANGES_HELPER,
         "stata_untag" => UNTAG_HELPER,
         "stata_compare" => COMPARE_HELPER,
         "stata_sort_keys" => SORT_KEYS_HELPER,
@@ -2940,6 +2981,12 @@ impl Session {
             r_text(var)
         ));
         self.step(c, step, out)?;
+        // Stata's (6 missing values generated)
+        if !self.quiet(c) {
+            self.helpers.insert("stata_chg");
+            self.helpers.insert("stata_mv");
+            out.line(format!("stata_gen_note({d}[[{}]])", r_text(var)));
+        }
         self.kinds.insert(
             var.to_string(),
             if is_text { Kind::Text } else { Kind::Number },
@@ -3051,7 +3098,20 @@ impl Session {
             "if (!{} %in% names({d})) stop(\"variable {var} not found\")",
             r_text(var)
         ));
-        self.step(c, format!("dplyr::mutate({} = {value})", r_name(var)), out)?;
+        // Stata's (7 real changes made), counted as the rows change
+        for h in ["stata_chg", "stata_mv"] {
+            self.helpers.insert(h);
+        }
+        self.step(
+            c,
+            format!("dplyr::mutate({0} = stata_chg({0}, {value}))", r_name(var)),
+            out,
+        )?;
+        out.line(if self.quiet(c) {
+            "stata_chg_note(show = FALSE)"
+        } else {
+            "stata_chg_note()"
+        });
         if kind == Kind::Text {
             self.kinds.insert(var.to_string(), Kind::Text);
         }
@@ -4424,7 +4484,15 @@ sort a");
             all[1].lines().next(),
             Some("if (\"y\" %in% names(s)) stop(\"variable y already defined\")")
         );
-        let out: Vec<&str> = all.iter().map(|s| s.lines().last().unwrap_or("")).collect();
+        // (the notes Stata prints, after it, are left aside)
+        let out: Vec<&str> = all
+            .iter()
+            .map(|s| {
+                s.lines()
+                    .rfind(|l| !l.starts_with("stata_gen_note") && !l.starts_with("stata_chg_note"))
+                    .unwrap_or("")
+            })
+            .collect();
         // the data was read from a file, so .a to .z may be in x: x * 2 is `.` there
         assert_eq!(out[1], "s <- s |> dplyr::mutate(y = dplyr::if_else((!is.na(g) & g == 1), stata_float(stata_untag((x * 2))), NA_real_))");
         assert_eq!(out[2], "s <- s |> dplyr::mutate(z = 0.1)");
@@ -4432,7 +4500,7 @@ sort a");
         assert_eq!(out[3], "s <- s |> dplyr::mutate(t = dplyr::if_else((is.na(x) | x > 1), substr(paste0(\"a\", s), 1, 5), \"\"))");
         assert_eq!(
             out[4],
-            "s <- s |> dplyr::mutate(y = dplyr::if_else((stata_mv(y) == 1), stata_float(0), y))"
+            "s <- s |> dplyr::mutate(y = stata_chg(y, dplyr::if_else((stata_mv(y) == 1), stata_float(0), y)))"
         );
         // a .dta may hold .a to .z: each is a group of its own
         assert_eq!(out[5], "s <- s |> dplyr::arrange(stata_sort_keys(dplyr::pick(g))) |> dplyr::group_by(dplyr::pick(g), stata_tag_k = stata_tag_key(dplyr::pick(g))) |> dplyr::mutate(n = stata_float(dplyr::row_number())) |> dplyr::ungroup() |> dplyr::select(-stata_tag_k)");
@@ -4594,7 +4662,7 @@ sort a");
         assert_eq!(out[1], "stata_set_seed(11)");
         // the rows the if selects draw, one each, in order
         assert!(
-            out[3].ends_with("data <- data |> dplyr::mutate(x = dplyr::if_else(rep_len((!is.na(g) & g == 1), dplyr::n()), stata_runiform(rep_len((!is.na(g) & g == 1), dplyr::n())), NA_real_))"),
+            out[3].contains("data <- data |> dplyr::mutate(x = dplyr::if_else(rep_len((!is.na(g) & g == 1), dplyr::n()), stata_runiform(rep_len((!is.na(g) & g == 1), dplyr::n())), NA_real_))"),
             "{out:?}"
         );
         assert!(

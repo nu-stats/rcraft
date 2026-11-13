@@ -978,3 +978,34 @@ fn tabulate_summarize_and_test_mtest_print_statas_tables() {
         assert!(text.contains(line), "{line:?} in {text}");
     }
 }
+
+/// replace's and generate's notes and tsset's Delta line, as Stata 19 prints them
+/// (plan/stata/replace-notes.md).
+#[test]
+fn replace_and_generate_say_what_changed() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 10\ngenerate x = _n\ngenerate s = \"a\"\nreplace x = 2*x if _n > 3\nreplace x = . in 1/2\n\
+         replace x = x\nreplace x = 5 in 3\nreplace s = \"\" in 1/2\nreplace x = .a in 10\ngenerate y = x/(_n > 5)\n\
+         quietly replace y = 2\nbysort s: replace x = _n\ngenerate t = _n\ntsset t\n",
+    );
+    let text = ok(&mut e, &code);
+    for line in [
+        "(7 real changes made)",
+        "(2 real changes made, 2 to missing)",
+        "(0 real changes made)",
+        "(1 real change made)",
+        "(2 real changes made)\n",
+        "(1 real change made, 1 to missing)",
+        "(6 missing values generated)",
+        "(10 real changes made)",
+        "        Delta: 1 unit",
+    ] {
+        assert!(text.contains(line), "{line:?} in {text}");
+    }
+    assert_eq!(
+        text.matches("real change").count(),
+        7,
+        "nothing under quietly: {text}"
+    );
+}

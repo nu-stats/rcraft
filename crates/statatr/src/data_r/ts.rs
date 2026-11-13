@@ -45,7 +45,7 @@ pub(super) const TSSET_HELPER: &str = r#"stata_tsset <- function(d, time, panel 
   n <- function(v) sprintf("%.0f", v)
   span <- paste0(time, ", ", n(min(t1)), " to ", n(max(t1)),
                  if (gaps == 1) ", but with a gap" else if (gaps > 1) ", but with gaps" else "")
-  unit <- paste0(stata_fmt(delta), if (delta == 1) " unit" else " units")
+  unit <- paste0(stata_fmt(delta, "%9.0g", trim = TRUE), if (delta == 1) " unit" else " units")
   if (is.null(pv)) {
     cat("Time variable: ", span, "\n        Delta: ", unit, "\n", sep = "")
   } else {
