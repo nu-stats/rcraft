@@ -29,3 +29,9 @@ in `crates/statatr/src/data_r/estat.rs`.
   the probabilities up to each; df groups − 2. `table` lists Group, Prob (the quantile), Obs_1, Exp_1, Obs_0,
   Exp_0, Total, with a rule after every five groups. r(): N, m, chi2, df, p.
 - matrix list: a column is as wide as its equation name too (lags: over 1).
+
+## Errors on panel data and after robust (2026-11-13; probe `r7/f4.do` identical)
+
+- After regress, vce(robust): vif and imtest as without it; bgodfrey and durbinalt "This command does not work
+  after  regress, robust" (two spaces), before anything else; on panel data all three "sample may not include
+  multiple panels". vif: equal VIFs list the later variable first.

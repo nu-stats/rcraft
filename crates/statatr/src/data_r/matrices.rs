@@ -263,8 +263,12 @@ pub(super) const MATRIX_LIST_HELPER: &str = r##"stata_matrix_list <- function(m,
   bottom <- ab(substring(short, nchar(top) + 1))
   # over()'s names split at @: c.y@ over 0.b, 0.b@ over 1.g (Stata 19, after mean and proportion)
   at <- grepl("@", short, fixed = TRUE)
-  top <- ifelse(at, sub("^(.*@).*$", "\\1", short), top)
-  bottom <- ifelse(at, ab(gsub("([0-9])bn\\.", "\\1.", sub("^.*@", "", short))), bottom)
+  rest <- gsub("([0-9])bn\\.", "\\1.", sub("^.*@", "", short))
+  # two variables in over(): three lines, c.y@ over 1.g# over 0.b
+  deep <- at & grepl("#", rest, fixed = TRUE)
+  eq <- ifelse(deep, sub("^(.*@).*$", "\\1", short), eq)
+  top <- ifelse(at, ifelse(deep, sub("^(.*#).*$", "\\1", rest), sub("^(.*@).*$", "\\1", short)), top)
+  bottom <- ifelse(at, ab(ifelse(deep, sub("^.*#", "", rest), rest)), bottom)
   # 1bn._at shows as 1. over _at, as Stata lists it
   top <- gsub("([0-9])bn\\.", "\\1.", top)
   rl <- ab(rn)

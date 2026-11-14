@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12): made-up data; Stata 19's results are in meanest.recorded
 * commands: mean total proportion ratio
-* (mean, total, proportion and ratio: e(b), e(V), e(N), e(df_r), e(sd), e(freq), e(_N) and r(table), with frequency, analytic and probability weights, over(), level(); test and lincom after them, the lines naming over()'s and proportion's levels)
+* (mean, total, proportion and ratio: e(b), e(V), e(N), e(df_r), e(sd), e(freq), e(_N) and r(table), with frequency, analytic and probability weights, over(), level(), iweights, prop, two variables in over(); test and lincom after them, the lines naming over()'s and proportion's levels)
 * tolerance: 1e-9
 version 19
 clear
@@ -67,3 +67,11 @@ ratio y/x [fweight = wt]
 display "@ rfw " %24.17g _se[_ratio_1] " " e(N)
 ratio (a: y/x) (c: x/y), over(b)
 display "@ rover " %24.17g el(e(b),1,1) " " %24.17g sqrt(el(e(V),1,1)) " " %24.17g sqrt(el(e(V),4,4)) " " e(namelist)
+mean y [iweight = wt]
+display "@ miw " %24.17g _se[y] " " e(N) " " e(wtype)
+proportion g [iweight = wt]
+display "@ piw " %24.17g sqrt(el(e(V),1,1)) " " e(N)
+prop g
+display "@ prop2 " %24.17g el(e(b),1,2) " " e(cmd)
+mean y, over(g b)
+display "@ mover2 " %24.17g el(e(b),1,3) " " %24.17g sqrt(el(e(V),1,1)) " " %24.17g sqrt(el(e(V),6,6)) " " e(N_over)

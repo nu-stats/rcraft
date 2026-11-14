@@ -1207,9 +1207,9 @@ impl Session {
                             "estimates replay: no model is fitted before it in this do-file (Stata: last estimates not found, r(301))",
                         ));
                     }
-                    if !plain(self.estimates.as_ref(), self.plain_regress) {
+                    if !plain(self.estimates.as_ref(), !self.weighted_fit) {
                         return Err(no(
-                            "estimates replay: only regress (without weights or robust errors) is replayed yet",
+                            "estimates replay: only regress (without weights) is replayed yet",
                         ));
                     }
                 }
@@ -1220,9 +1220,9 @@ impl Session {
                                 "estimates replay: {n} is not stored before it in this do-file (Stata: estimation result {n} not found, r(111))"
                             )))
                         }
-                        Some(f) if !plain(f.estimates.as_ref(), f.plain_regress) => {
+                        Some(f) if !plain(f.estimates.as_ref(), !f.weighted_fit) => {
                             return Err(no(format!(
-                                "estimates replay {n}: only regress (without weights or robust errors) is replayed yet"
+                                "estimates replay {n}: only regress (without weights) is replayed yet"
                             )))
                         }
                         Some(_) => {}

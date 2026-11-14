@@ -37,7 +37,8 @@ stata_vif <- function(fit, uncentered = FALSE) {
   factors <- any(grepl("[.#]", nm))
   # Stata 19 sorts by VIF, largest first, unless the model has factor variables
   if (!factors) {
-    o <- order(-vif)
+    # ties: the later variable first (Stata 19: w before x at the same VIF)
+    o <- rev(order(vif))
     vif <- vif[o]
     nm <- nm[o]
   }
@@ -351,9 +352,30 @@ impl Session {
             } else {
                 refuse_others(&[("lags", 1), ("nomiss0", 7)], what)?;
             }
-            if self.panel.is_some() {
+            // Stata 19's errors as the line runs (capture takes them): bgodfrey and
+            // durbinalt refuse a robust fit first, then all three panel data
+            if self.fit_robust && what != "dwatson" {
+                out.line(
+                    "stop(\"This command does not work after  regress, robust\", call. = FALSE)",
+                );
+                return Ok(true);
+            }
+            if let Some(p) = self.panel.clone() {
+                out.line(format!(
+                    "if (length(unique(stats::na.omit(stata_data[[{}]]))) > 1) stop(\"sample may not include multiple panels\", call. = FALSE)",
+                    r_text(&p)
+                ));
+                if self.fit_robust || self.fit_cluster || self.panel_time.is_none() {
+                    // one panel only: not seen in Stata
+                    out.line(format!(
+                        "stop(\"estat {what} here (one panel, after this fit) is not translated in RCraft yet\", call. = FALSE)"
+                    ));
+                    return Ok(true);
+                }
+            }
+            if self.fit_robust || self.fit_cluster {
                 return Err(no(format!(
-                    "estat {what} on panel data is not translated yet"
+                    "estat {what} after regress with robust or clustered errors is not translated yet"
                 )));
             }
             let Some(t) = self.panel_time.clone() else {

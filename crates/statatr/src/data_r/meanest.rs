@@ -15,6 +15,9 @@ use super::*;
 pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, vars, w = NULL, wtype = "f", over = NULL, level = 95,
                           ratios = NULL, rnames = NULL, show = TRUE, cmdline = "", wexp = "") {
   num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
+  # importance weights count as frequency weights (Stata 19: the same N and errors)
+  wlab <- wtype
+  if (identical(wtype, "i")) wtype <- "f"
   used <- unique(c(vars, over))
   for (v in used) {
     if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
@@ -39,20 +42,37 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
     }, "")
   }
   lev_name <- function(u, first) paste0(stata_fmt(u, "%9.0g", trim = TRUE), if (first) "bn" else "", ".")
-  ov <- if (is.null(over)) rep(1, n) else col(over)
-  ol <- sort(unique(ov))
+  # over(): each cell a combination of the variables' values, in their order (Stata 19: 1 0, 1 1, 2 0 ...)
+  if (is.null(over)) {
+    ov <- rep(1, n)
+    ol <- 1
+  } else {
+    if (kind == "proportion") for (v in over) if (v %in% vars) stop("over variable ", v, " not allowed in varlist (Stata: r(198))", call. = FALSE)
+    om <- matrix(vapply(over, col, numeric(n)), n)
+    ov <- do.call(paste, c(as.data.frame(om), sep = "\r"))
+    ord <- do.call(order, as.data.frame(om))
+    first <- ord[!duplicated(ov[ord])]
+    ocells <- om[first, , drop = FALSE]
+    ol <- ov[first]
+  }
+  # a cell's name: each variable's level, its smallest written bn (c.y@1bn.g#0bn.b)
+  oname <- function(j) paste(vapply(seq_along(over), function(i) {
+    u <- ocells[j, i]
+    paste0(lev_name(u, u == min(ocells[, i])), over[i])
+  }, ""), collapse = "#")
+  ohead <- paste(over, collapse = "#")
   # each estimate: its rows (a group of over()), the variable(s) it reads, its name and label
   est <- list()
   add <- function(e) est[[length(est) + 1]] <<- e
   if (kind %in% c("mean", "total")) {
     for (v in vars) for (j in seq_along(ol)) {
       add(list(sel = ov == ol[j], y = col(v), x = NULL, var = v, j = j,
-               name = if (is.null(over)) v else paste0("c.", v, "@", lev_name(ol[j], j == 1), over)))
+               name = if (is.null(over)) v else paste0("c.", v, "@", oname(j))))
     }
   } else if (kind == "ratio") {
     for (r in seq_along(ratios)) for (j in seq_along(ol)) {
       add(list(sel = ov == ol[j], y = col(ratios[[r]][1]), x = col(ratios[[r]][2]), var = rnames[r], j = j,
-               name = if (is.null(over)) rnames[r] else paste0("c.", rnames[r], "@", lev_name(ol[j], j == 1), over)))
+               name = if (is.null(over)) rnames[r] else paste0("c.", rnames[r], "@", oname(j))))
     }
   } else {
     for (v in vars) {
@@ -61,7 +81,7 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
       lv <- sort(unique(yv))
       for (k in seq_along(lv)) for (j in seq_along(ol)) {
         add(list(sel = ov == ol[j], y = as.numeric(yv == lv[k]), x = NULL, var = v, j = j, k = k, val = lv[k],
-                 name = paste0(lev_name(lv[k], k == 1), v, if (!is.null(over)) paste0("@", lev_name(ol[j], j == 1), over))))
+                 name = paste0(lev_name(lv[k], k == 1), v, if (!is.null(over)) paste0("@", oname(j)))))
       }
     }
   }
@@ -158,13 +178,13 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
   e$title <- paste(title, "estimation")
   if (!is.null(w)) {
     e$wexp <- paste("=", wexp)
-    e$wtype <- c(f = "fweight", a = "aweight", p = "pweight")[[wtype]]
+    e$wtype <- c(f = "fweight", a = "aweight", p = "pweight", i = "iweight")[[wlab]]
   }
   if (kind == "ratio") e$namelist <- paste(rnames, collapse = " ")
   e$estat_cmd <- "estat_vce_only"
   e$varlist <- if (kind == "proportion") paste(unique(sub("@.*$", "", sub("bn\\.", ".", nm))), collapse = " ") else paste(vars, collapse = " ")
   e$marginsnotok <- "_ALL"
-  if (!is.null(over)) e$over <- over
+  if (!is.null(over)) e$over <- paste(over, collapse = " ")
   e$properties <- "b V"
   e$b <- matrix(b, 1, dimnames = list("y1", nm))
   e$V <- V
@@ -200,7 +220,7 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
               if (vce == "linearized") "   std. err." else "   Std. err.", stata_fmt(level, "%9.0g", trim = TRUE)), "\n", sep = "")
   cat("-------------+", strrep("-", 48), "\n", sep = "")
   row <- function(lab, i) cat(sprintf("%12s |%11s%11s%14s%12s", lab, g(b[i]), g(se[i]), g(lb[i]), g(ub[i])), "\n", sep = "")
-  olab <- if (!is.null(over)) labs_of(over, ol)
+  olab <- if (!is.null(over)) vapply(seq_along(ol), function(j) paste(vapply(seq_along(over), function(i) labs_of(over[i], ocells[j, i]), ""), collapse = " "), "")
   last <- ""
   for (i in seq_len(K)) {
     e <- est[[i]]
@@ -209,8 +229,8 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
       next
     }
     head <- if (kind == "proportion") {
-      if (is.null(over)) e$var else paste0(e$var, "@", over)
-    } else paste0("c.", e$var, "@", over)
+      if (is.null(over)) e$var else paste0(e$var, "@", ohead)
+    } else paste0("c.", e$var, "@", ohead)
     key <- if (kind == "proportion" && !is.null(over)) e$var else head
     if (key != last) {
       if (last != "") cat("             |\n")
@@ -246,21 +266,30 @@ impl Session {
                 "{kind} with the option {o} is not translated yet"
             )));
         }
-        let allowed: &[W] = match kind {
-            "mean" => &[W::F, W::A, W::P],
-            _ => &[W::F, W::P],
-        };
-        let w = self.weight_of(c, allowed)?;
-        let over = match opts.arg("over", 4) {
+        let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
+        match (&w, kind) {
+            // Stata 19: total, proportion and ratio take no analytic weights (an error as the
+            // line runs, which capture takes)
+            (Some((W::A, _)), "total" | "proportion" | "ratio") => {
+                out.line("stop(\"aweights not allowed (Stata: r(101))\", call. = FALSE)");
+                return Ok(());
+            }
+            // importance weights: as frequency weights (Stata 19), not checked after ratio
+            (Some((W::I, _)), "ratio") => {
+                return Err(no("ratio with iweights is not translated yet"));
+            }
+            _ => {}
+        }
+        let over: Option<Vec<String>> = match opts.arg("over", 4) {
             None => None,
             Some(o) => {
-                let o = o.trim().to_string();
-                if !is_name(&o) {
+                let vs: Vec<String> = o.split_whitespace().map(str::to_string).collect();
+                if vs.is_empty() || vs.iter().any(|v| !is_name(v)) {
                     return Err(no(format!(
-                        "over({o}): one variable written out is translated"
+                        "over({o}): variables written out are translated"
                     )));
                 }
-                Some(o)
+                Some(vs)
             }
         };
         let level = match opts.arg("level", 1) {
@@ -363,7 +392,7 @@ impl Session {
             r_text(kind),
             q(&vars),
             over.as_ref()
-                .map(|o| format!(", over = {}", r_text(o)))
+                .map(|o| format!(", over = c({})", q(o)))
                 .unwrap_or_default(),
             if self.quiet(c) { ", show = FALSE" } else { "" },
             r_text(format!("{} {}", c.written, super::returned::after_name(c).trim()).trim()),

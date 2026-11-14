@@ -563,8 +563,9 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "bgodfrey, durbinalt and dwatson on panel data and with small or robust; estat vce \
-                 keeps R's layout.",
+                "On panel data bgodfrey, durbinalt and dwatson are Stata's error (sample may not \
+                 include multiple panels), and after regress, robust bgodfrey and durbinalt are \
+                 too; small is refused, and estat vce keeps R's layout.",
             ),
         ],
     },
@@ -623,12 +624,12 @@ pub const GUIDES: &[Guide] = &[
                 "Stata 19's tables: estimates dir (each stored model's command, dependent variable, \
                  number of parameters and title), estimates stats (N, ll(null), ll(model), df, AIC \
                  and BIC, with r(S)) of the active results or of the names given, and estimates \
-                 replay of regress fits, under a banner as wide as the line (Model name, or active \
-                 results).",
+                 replay of regress fits (robust and clustered too), under a banner as wide as the \
+                 line (Model name, or active results).",
             ),
             p(
                 "Not yet",
-                "estimates replay of models other than regress (or with weights or robust errors), \
+                "estimates replay of models other than regress (or with weights), \
                  estimates save and use, and options are not translated. A name stored by a line \
                  that was not translated (eststo, a program) is not known, so a restore of it is \
                  refused rather than guessed.",
@@ -2326,8 +2327,9 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "Several variables in over(), vce(), the display options and iweights are \
-                 refused; _b[] and _se[] of over()'s names (c.y@0.b) are not read yet.",
+                "vce() and the display options are refused; _b[] and _se[] of over()'s names \
+                 (c.y@0.b) are not read yet. Several variables in over() make cells of their \
+                 values (c.y@1bn.g#0bn.b), and iweights count as frequency weights, as Stata 19's.",
             ),
         ],
     },
@@ -2338,7 +2340,8 @@ pub const GUIDES: &[Guide] = &[
             "In R",
             "As mean's (stata_meanest), each total the sum of the weights times the mean, its \
              variance that sum squared times the mean's, as Stata 19 gives it; frequency and \
-             probability weights, over(); analytic weights are refused.",
+             probability weights (iweights as frequency weights), over(); analytic weights are \
+             Stata's error (aweights not allowed).",
         )],
     },
     Guide {
@@ -2350,8 +2353,9 @@ pub const GUIDES: &[Guide] = &[
              variance (diag(p) - pp')/n, and Stata 19's logit interval; with probability weights \
              the linearized variance; over() each group on its own. e(b) is named 1bn.g 2.g ... \
              (0bn.b@1bn.g with over()), with e(freq) and e(_N), and lincom's lines name the \
-             levels so (1bn.g - 2.g = 0). Abbreviations of proportion and analytic weights are \
-             not translated yet.",
+             levels so (1bn.g - 2.g = 0). prop is proportion, as in Stata (propo is not); \
+             analytic weights are Stata's error (aweights not allowed), and iweights count as \
+             frequency weights.",
         )],
     },
     Guide {
@@ -2362,7 +2366,8 @@ pub const GUIDES: &[Guide] = &[
             "stata_meanest gives sum w y / sum w x and its linearized variance, n/(n-1) sum z z' \
              with z = w (y - R x) / sum w x, each group of over() on its own, as Stata 19's \
              (frequency weights counting rows); named ratios and _ratio_#, the lines naming \
-             each ratio before the table. Analytic weights are refused.",
+             each ratio before the table. Analytic weights are Stata's error (aweights not \
+             allowed); iweights are refused.",
         )],
     },
     Guide {

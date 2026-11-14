@@ -482,6 +482,7 @@ const WEIGHTED: &[&str] = &[
     "mean",
     "total",
     "proportion",
+    "prop",
     "ratio",
 ];
 
@@ -502,6 +503,7 @@ const NAME_TABLES: &[&str] = &[
     "mean",
     "total",
     "proportion",
+    "prop",
     "ratio",
 ];
 
@@ -2375,8 +2377,13 @@ impl Session {
             "cii" => self.cii(c, &opts, out),
             "centile" => self.centile(c, &opts, out),
             "nlcom" => self.nlcom(c, &opts, out),
-            "mean" | "total" | "proportion" | "ratio" => {
-                let kind = c.name.clone();
+            // prop is proportion (Stata 19; propo and the like are not)
+            "mean" | "total" | "proportion" | "prop" | "ratio" => {
+                let kind = if c.name == "prop" {
+                    "proportion".to_string()
+                } else {
+                    c.name.clone()
+                };
                 self.meanest(c, &kind, &opts, out)
             }
             "sktest" => self.sktest(c, &opts, out),

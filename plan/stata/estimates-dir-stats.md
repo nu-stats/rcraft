@@ -13,3 +13,5 @@ corpus `sdtest.do` (estimates stats). Translated in `returned.rs` (estimates_cmd
   mode), `Model name` (or `active results` when the active results are not a stored model), the rule, then the
   model's own output again. Translated for regress without weights or robust errors (stata_regress_print on the
   stored results).
+- Replay of regress with vce(robust) or clustered errors too (probe `r7/f4.do` identical); replay of logit, probit,
+  poisson waits on those models' Stata layout (their output is R's in RCraft), and is refused.
