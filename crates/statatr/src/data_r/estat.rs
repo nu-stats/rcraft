@@ -552,14 +552,25 @@ stata_est_stats <- function(names = NULL) {
 
 /// `estimates replay`: a banner as wide as the line, then the model's table
 /// printed again from its stored results (regress, in Stata's layout).
-pub(super) const REPLAY_HELPER: &str = r##"stata_replay <- function(name = NULL, level = 0.95) {
+pub(super) const REPLAY_HELPER: &str = r##"# the model's own table again: regress's, or logit's, probit's and poisson's (Stata 19 shows
+# their coefficients at 95%, with robust errors kept but or, irr and level() not, and no iteration log)
+stata_replay_table <- function(level) {
+  cmd <- stata_e[["cmd"]]
+  title <- c(logit = "Logistic regression", probit = "Probit regression", poisson = "Poisson regression")
+  ok <- if (identical(cmd, "regress")) stata_regress_print(level = level)
+    else if (!is.null(cmd) && cmd %in% names(title)) stata_ml_print(stata_estimates, title[[cmd]], robust = !is.null(stata_e[["vcetype"]]), level = 0.95)
+    else FALSE
+  if (!ok) print(summary(stata_estimates))
+  invisible(NULL)
+}
+stata_replay <- function(name = NULL, level = 0.95) {
   env <- parent.frame()
   # the active results: named as stored, until a fit replaces them
   title <- if (!is.null(name)) paste("Model", name) else if (!is.null(stata_e[["_estimates_name"]])) paste("Model", stata_e[["_estimates_name"]]) else "active results"
   w <- if (exists("stata_linesize")) stata_linesize else 79
   cat("\n", strrep("-", w), "\n", title, "\n", strrep("-", w), "\n", sep = "")
   if (is.null(name)) {
-    if (!stata_regress_print(level = level)) print(summary(stata_estimates))
+    stata_replay_table(level)
     return(invisible(NULL))
   }
   st <- stata_stored[[name]]
@@ -571,6 +582,6 @@ pub(super) const REPLAY_HELPER: &str = r##"stata_replay <- function(name = NULL,
     } else assign(n, old[[n]], envir = env)
   }, add = TRUE)
   for (n in names(st)) assign(n, st[[n]], envir = env)
-  if (!stata_regress_print(level = level)) print(summary(stata_estimates))
+  stata_replay_table(level)
   invisible(NULL)
 }"##;

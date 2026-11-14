@@ -632,12 +632,14 @@ pub const GUIDES: &[Guide] = &[
                 "Stata 19's tables: estimates dir (each stored model's command, dependent variable, \
                  number of parameters and title), estimates stats (N, ll(null), ll(model), df, AIC \
                  and BIC, with r(S)) of the active results or of the names given, and estimates \
-                 replay of regress fits (robust and clustered too), under a banner as wide as the \
-                 line (Model name, or active results).",
+                 replay of regress, logit, probit and poisson fits (robust and clustered too), \
+                 under a banner as wide as the line (Model name, or active results): as Stata 19, \
+                 the coefficients at 95% whatever or, irr or level() the fit had, and no \
+                 iteration log.",
             ),
             p(
                 "Not yet",
-                "estimates replay of models other than regress (or with weights), \
+                "estimates replay of other models (or with weights), \
                  estimates save and use, and options are not translated. A name stored by a line \
                  that was not translated (eststo, a program) is not known, so a restore of it is \
                  refused rather than guessed.",

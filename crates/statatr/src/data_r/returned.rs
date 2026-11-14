@@ -1199,7 +1199,13 @@ impl Session {
             s if s.len() >= 3 && "replay".starts_with(s) => {
                 let names: Vec<&str> = rest.split_whitespace().collect();
                 let plain = |f: Option<&super::model::Estimates>, p: bool| {
-                    p && f.is_some_and(|e| e.fit == super::model::Fit::Regress)
+                    use super::model::Fit;
+                    p && f.is_some_and(|e| {
+                        matches!(
+                            e.fit,
+                            Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson
+                        )
+                    })
                 };
                 if names.is_empty() {
                     if matches!(self.e_ret, Returned::Nothing) {
@@ -1209,7 +1215,7 @@ impl Session {
                     }
                     if !plain(self.estimates.as_ref(), !self.weighted_fit) {
                         return Err(no(
-                            "estimates replay: only regress (without weights) is replayed yet",
+                            "estimates replay: only regress, logit, probit and poisson (without weights) are replayed yet",
                         ));
                     }
                 }
@@ -1222,13 +1228,19 @@ impl Session {
                         }
                         Some(f) if !plain(f.estimates.as_ref(), !f.weighted_fit) => {
                             return Err(no(format!(
-                                "estimates replay {n}: only regress (without weights) is replayed yet"
+                                "estimates replay {n}: only regress, logit, probit and poisson (without weights) are replayed yet"
                             )))
                         }
                         Some(_) => {}
                     }
                 }
-                for h in ["stata_replay", "stata_tables", "stata_fmt", "stata_coefs"] {
+                for h in [
+                    "stata_replay",
+                    "stata_tables",
+                    "stata_fmt",
+                    "stata_coefs",
+                    "stata_ml_header",
+                ] {
                     self.helpers.insert(h);
                 }
                 if names.is_empty() {

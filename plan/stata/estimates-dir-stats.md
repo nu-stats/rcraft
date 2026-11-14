@@ -15,3 +15,7 @@ corpus `sdtest.do` (estimates stats). Translated in `returned.rs` (estimates_cmd
   stored results).
 - Replay of regress with vce(robust) or clustered errors too (probe `r7/f4.do` identical); replay of logit, probit,
   poisson waits on those models' Stata layout (their output is R's in RCraft), and is refused.
+- Replay of logit, probit and poisson (2026-11-14; probe `r9/g2.do` identical, with the models' Stata layout
+  from 4316e18): Stata 19 replays the coefficients at 95% whatever `or`, `irr` or `level()` the fit had, keeps
+  robust errors (Robust, Log pseudolikelihood, Wald chi2), and prints no iteration log. A model the layout can't
+  place falls back to R's, as at the fit.

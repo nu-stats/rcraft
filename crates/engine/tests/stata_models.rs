@@ -2219,3 +2219,30 @@ fn estimates_dir_stats_replay_print_statas_tables() {
         assert!(text.contains(line), "{line:?} in {text}");
     }
 }
+
+/// estimates replay of logit (fitted with or, robust) in Stata 19's layout: the
+/// coefficients again, robust errors kept, no iteration log (plan/stata/estimates-dir-stats.md).
+#[test]
+fn estimates_replay_of_logit_prints_statas_table() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let code = script(&format!(
+        "use \"{dir}/models.dta\"\nlogit yb x w, or\nestimates store a\nlogit yb x w, vce(robust)\nestimates store b\nestimates replay a b\n"
+    ));
+    let text = ok(&mut e, &code);
+    let tail = text.rsplit("Model a").next().unwrap_or("");
+    for line in [
+        "Logistic regression",
+        "          yb | Coefficient  Std. err.      z    P>|z|     [95% conf. interval]",
+        "Model b",
+        "             |               Robust",
+        "Log pseudolikelihood = ",
+    ] {
+        assert!(tail.contains(line), "{line:?} in {tail}");
+    }
+    assert!(!tail.contains("Iteration"), "no iteration log: {tail}");
+    assert!(
+        !tail.contains("Odds ratio"),
+        "replay shows coefficients: {tail}"
+    );
+}
