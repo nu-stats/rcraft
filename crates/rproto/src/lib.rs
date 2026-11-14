@@ -20,12 +20,15 @@
 //! <token>\tBEGIN\t<id>
 //! <token>\tWARN\t<id>\t<message>
 //! <token>\tERROR\t<id>\t<message>\t<call>
+//! <token>\tTABLE\t<id>\t<file name>   (a table R printed: see [`table`])
 //! <token>\tSYNC\t<id>        (on standard error, just before END)
 //! <token>\tEND\t<id>\t<ok|error|interrupted>
 //! ```
 //!
 //! Everything else on standard output is the run's printed output; standard
 //! error carries messages and is kept separate by the pipe itself.
+
+pub mod table;
 
 use std::collections::hash_map::RandomState;
 use std::fmt;
@@ -72,6 +75,11 @@ pub enum Frame {
         run: RunId,
         message: String,
         call: String,
+    },
+    /// A table R printed, written to this file in the plot folder.
+    Table {
+        run: RunId,
+        file: String,
     },
     End {
         run: RunId,
@@ -216,6 +224,10 @@ fn parse_fields(rest: &str) -> Result<Frame, ProtoError> {
             message: unescape(next("message")?),
             call: unescape(next("call")?),
         }),
+        "TABLE" => Ok(Frame::Table {
+            run: run(next("run id")?)?,
+            file: unescape(next("file name")?),
+        }),
         "SYNC" => Ok(Frame::Sync {
             run: run(next("run id")?)?,
         }),
@@ -322,6 +334,17 @@ mod tests {
             parse_frame(T, &line("SYNC\t3")),
             Some(Ok(Frame::Sync { run: 3 }))
         );
+        assert_eq!(
+            parse_frame(T, &line("TABLE\t3\t3-t1.rct")),
+            Some(Ok(Frame::Table {
+                run: 3,
+                file: "3-t1.rct".into()
+            }))
+        );
+        assert!(matches!(
+            parse_frame(T, &line("TABLE\t3")),
+            Some(Err(ProtoError::BadFrame(_)))
+        ));
         assert_eq!(
             parse_frame(T, &line("END\t3\tinterrupted")),
             Some(Ok(Frame::End {

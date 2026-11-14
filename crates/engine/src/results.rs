@@ -1,6 +1,7 @@
 //! P2.3: what the Results window shows, one block per command.
 
 use rcraft_rhost::Stream;
+pub use rcraft_rproto::table::ResultTable;
 
 use crate::history::{CommandId, Outcome};
 
@@ -14,6 +15,10 @@ pub enum Item {
     Text {
         stream: Stream,
         text: String,
+        /// When the text is R's print of a table (a data frame, matrix or
+        /// table the command returned), the table, for Results to show as a
+        /// grid. Such an item is never joined with others.
+        table: Option<Box<ResultTable>>,
     },
     Warning(String),
     Error {
@@ -28,10 +33,20 @@ pub enum Item {
     },
 }
 
+/// About how much memory a table holds, for the cap on what Results keeps.
+fn table_bytes(t: &ResultTable) -> usize {
+    let cells: usize = t
+        .rows
+        .iter()
+        .map(|(name, cells)| name.len() + cells.iter().map(String::len).sum::<usize>())
+        .sum();
+    cells + t.columns.iter().map(String::len).sum::<usize>() + t.title.len() + t.corner.len()
+}
+
 impl Item {
     fn bytes(&self) -> usize {
         match self {
-            Item::Text { text, .. } => text.len(),
+            Item::Text { text, table, .. } => text.len() + table.as_deref().map_or(0, table_bytes),
             Item::Warning(s) | Item::Notice(s) => s.len(),
             Item::Error { message, call } => message.len() + call.len(),
             // the picture is a file on disk, not text held here
@@ -78,8 +93,18 @@ impl Results {
         };
         self.bytes = self.bytes.saturating_add(item.bytes());
         // join a piece of text onto the one before it from the same stream
-        if let (Item::Text { stream, text }, Some(Item::Text { stream: s, text: t })) =
-            (&item, block.items.last_mut())
+        if let (
+            Item::Text {
+                stream,
+                text,
+                table: None,
+            },
+            Some(Item::Text {
+                stream: s,
+                text: t,
+                table: None,
+            }),
+        ) = (&item, block.items.last_mut())
         {
             if stream == s {
                 t.push_str(text);
@@ -120,7 +145,37 @@ mod tests {
         Item::Text {
             stream: Stream::Stdout,
             text: s.into(),
+            table: None,
         }
+    }
+
+    #[test]
+    fn a_table_is_never_joined_with_text_around_it() {
+        let table = || Item::Text {
+            stream: Stream::Stdout,
+            text: "  x\n1 2\n".into(),
+            table: Some(Box::new(ResultTable {
+                columns: vec!["x".into()],
+                numeric: vec![true],
+                rows: vec![("1".into(), vec!["2".into()])],
+                ..ResultTable::default()
+            })),
+        };
+        let mut r = Results::new();
+        r.begin(1);
+        r.add(1, text("before\n"));
+        r.add(1, table());
+        r.add(1, table());
+        r.add(1, text("after\n"));
+        r.add(1, text("more\n"));
+        let items = &r.blocks()[0].items;
+        assert_eq!(items.len(), 4, "{items:?}");
+        assert_eq!(items[1], table());
+        assert_eq!(items[2], table());
+        // text after a table starts afresh (and later text joins that)
+        assert_eq!(items[3], text("after\nmore\n"));
+        // the table counts toward what Results keeps
+        assert!(table().bytes() > "  x\n1 2\n".len());
     }
 
     #[test]
@@ -146,6 +201,7 @@ mod tests {
             Item::Text {
                 stream: Stream::Stderr,
                 text: "msg\n".into(),
+                table: None,
             },
         );
         assert_eq!(r.blocks()[0].items.len(), 2);

@@ -127,6 +127,101 @@ local({
     }
   }
 
+  # Tables: a visible value that is a data frame, matrix or table (or a named
+  # list of them) is sent as a table file in the plot folder, with what R
+  # prints for it, and Results shows a grid (see crates/rproto/src/table.rs).
+  # Anything else, anything larger, and anything that goes wrong prints as usual.
+  # options(rcraft.tables = FALSE) turns this off.
+  table_no <- 0L
+  or_else <- function(x, y) if (is.null(x)) y else x
+  cell_text <- function(x) {
+    out <- trimws(format(x))
+    out[is.na(out)] <- "NA"
+    out
+  }
+  grid_of <- function(v) {
+    if (is.data.frame(v)) {
+      ok <- length(v) > 0L && length(v) <= 50L && nrow(v) <= 500L &&
+        all(vapply(v, function(x) is.atomic(x) && is.null(dim(x)), TRUE))
+      if (!ok) return(NULL)
+      cells <- vapply(v, function(x) {
+        if (is.factor(x)) x <- as.character(x)
+        cell_text(x)
+      }, character(nrow(v)))
+      if (!is.matrix(cells)) cells <- matrix(cells, nrow = nrow(v))
+      return(list(corner = "", cols = names(v), num = vapply(v, is.numeric, TRUE),
+                  rows = as.character(row.names(v)), cells = cells))
+    }
+    if (inherits(v, "table") && length(dim(v)) == 1L) {
+      if (length(v) > 500L) return(NULL)
+      dn <- names(dimnames(v))
+      return(list(corner = if (length(dn) == 1L) dn else "", cols = "Count", num = TRUE,
+                  rows = or_else(names(v), as.character(seq_along(v))),
+                  cells = matrix(cell_text(as.vector(v)), ncol = 1L)))
+    }
+    two_d <- is.matrix(v) || (inherits(v, "table") && length(dim(v)) == 2L)
+    if (two_d && (is.numeric(v) || is.character(v) || is.logical(v))) {
+      m <- unclass(v)
+      if (nrow(m) > 500L || ncol(m) > 50L || ncol(m) == 0L) return(NULL)
+      cells <- matrix("", nrow(m), ncol(m))
+      for (j in seq_len(ncol(m))) cells[, j] <- cell_text(m[, j])
+      dn <- names(dimnames(v))
+      corner <- if (length(dn) == 2L && any(nzchar(dn))) paste(dn[nzchar(dn)], collapse = " \\ ") else ""
+      return(list(corner = corner,
+                  cols = or_else(colnames(m), sprintf("[,%d]", seq_len(ncol(m)))),
+                  num = rep(is.numeric(m), ncol(m)),
+                  rows = or_else(rownames(m), sprintf("[%d,]", seq_len(nrow(m)))),
+                  cells = cells))
+    }
+    NULL
+  }
+  write_table <- function(id, title, g, text) {
+    table_no <<- table_no + 1L
+    name <- sprintf("%s-t%d.rct", id, table_no)
+    rows <- vapply(seq_along(g$rows), function(i) {
+      paste(vapply(c(g$rows[[i]], g$cells[i, ]), esc, ""), collapse = "\t")
+    }, "")
+    lines <- c("RCT1", esc(title), esc(g$corner),
+               paste(vapply(g$cols, esc, ""), collapse = "\t"),
+               paste(as.integer(g$num), collapse = "\t"),
+               rows, "TEXT", esc(text))
+    out <- file(file.path(plot_dir, name), open = "wb")
+    on.exit(close(out))
+    writeLines(enc2utf8(lines), out, useBytes = TRUE)
+    name
+  }
+  printed <- function(v) {
+    text <- utils::capture.output(print(v))
+    if (length(text) == 0L) "" else paste0(paste(text, collapse = "\n"), "\n")
+  }
+  # TRUE when `v` went out as tables; FALSE to print it as usual
+  as_tables <- function(id, v) {
+    if (!nzchar(plot_dir) || !isTRUE(getOption("rcraft.tables", TRUE)) || sink.number() > 0L) {
+      return(FALSE)
+    }
+    g <- grid_of(v)
+    parts <- if (!is.null(g)) {
+      list(list(title = "", g = g))
+    } else if (is.list(v) && !is.object(v) && length(v) >= 1L && length(v) <= 20L &&
+               !is.null(names(v)) && all(nzchar(names(v))) &&
+               identical(names(attributes(v)), "names")) {
+      gs <- lapply(v, grid_of)
+      if (any(vapply(gs, is.null, TRUE))) return(FALSE)
+      Map(function(t, g) list(title = t, g = g), names(v), gs)
+    } else {
+      return(FALSE)
+    }
+    # all the text goes with the first table, so the log reads as R printed it
+    text <- printed(v)
+    names <- character()
+    for (i in seq_along(parts)) {
+      p <- parts[[i]]
+      names <- c(names, write_table(id, p$title, p$g, if (i == 1L) text else ""))
+    }
+    for (name in names) emit("TABLE", id, esc(name))
+    TRUE
+  }
+
   run_one <- function(id, n) {
     code <- readChar(con, n, useBytes = TRUE)
     Encoding(code) <- "UTF-8"
@@ -135,6 +230,7 @@ local({
     emit("BEGIN", id)
     cur_run <<- id
     page_no <<- 0L
+    table_no <<- 0L
     status <- "ok"
     tryCatch(
       withCallingHandlers(
@@ -142,7 +238,10 @@ local({
           exprs <- parse(text = code, keep.source = FALSE)
           for (e in exprs) {
             r <- withVisible(eval(e, globalenv()))
-            if (r$visible) print(r$value)
+            if (r$visible) {
+              shown <- tryCatch(as_tables(id, r$value), error = function(err) FALSE)
+              if (!shown) print(r$value)
+            }
           }
         }),
         warning = function(w) {

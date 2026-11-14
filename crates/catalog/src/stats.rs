@@ -140,10 +140,11 @@ pub const FREQUENCY: Spec = Spec {
         } else {
             "cbind(count = t)"
         };
+        // one table for each variable, named after it (a grid each in Results)
+        let names = names_vector(&vars);
         format!(
-            "invisible(lapply({}, function(v) {{\n  cat(\"\\n\", v, \"\\n\", sep = \"\")\n  \
-             t <- table({}[[v]], useNA = \"{use_na}\")\n  print({table})\n}}))",
-            names_vector(&vars),
+            "stats::setNames(lapply({names}, function(v) {{\n  \
+             t <- table({}[[v]], useNA = \"{use_na}\")\n  {table}\n}}), {names})",
             a.data(),
         )
     },
@@ -227,15 +228,21 @@ pub const CROSSTAB: Spec = Spec {
             "total" => Some(("Percentages of the whole table", "prop.table(t)")),
             _ => None,
         };
-        let mut body = String::from("  print(stats::addmargins(t))\n");
+        // the counts, the shares and the test, as a list of tables
+        let mut body = String::from("  out <- list(Counts = stats::addmargins(t))\n");
         if let Some((title, shares)) = share {
             body.push_str(&format!(
-                "  cat(\"\\n{title}\\n\")\n  print(round(100 * {shares}, 1))\n"
+                "  out[[\"{title}\"]] <- round(100 * {shares}, 1)\n"
             ));
         }
         if a.flag("test") {
-            body.push_str("  print(stats::chisq.test(t))\n");
+            body.push_str(
+                "  x <- stats::chisq.test(t)\n  \
+                 out[[x$method]] <- data.frame(`X-squared` = unname(x$statistic), \
+                 df = unname(x$parameter), `p-value` = x$p.value, check.names = FALSE)\n",
+            );
         }
+        body.push_str("  out\n");
         format!(
             "(function(t) {{\n{body}}})(table({d}[[{row}]], {d}[[{col}]], useNA = \"no\", \
              dnn = c({row}, {col})))",
@@ -317,18 +324,18 @@ pub const CORRELATION: Spec = Spec {
             ""
         };
         let p = if a.flag("p") {
-            "  cat(\"\\nP-values\\n\")\n  \
-             print(round(sapply(names(d), function(a) sapply(names(d), function(b) {\n    \
+            "  out[[\"P-values\"]] <- round(sapply(names(d), function(a) sapply(names(d), function(b) {\n    \
              if (a == b) return(NA_real_)\n    \
              tryCatch(stats::cor.test(d[[a]], d[[b]], method = m)$p.value, error = function(e) NA_real_)\n  \
-             })), 4))\n"
+             })), 4)\n"
         } else {
             ""
         };
+        // a list of tables: the correlations, the rows each pair used, the p-values
         format!(
-            "(function(d, m) {{\n  d[] <- lapply(d, as.numeric)\n{rows}  cat(\"Correlations\\n\")\n  \
-             print(round(stats::cor(d, use = \"pairwise.complete.obs\", method = m), 3))\n  \
-             cat(\"\\nRows used by each pair\\n\")\n  print(crossprod(!is.na(d)))\n{p}}})({}, {})",
+            "(function(d, m) {{\n  d[] <- lapply(d, as.numeric)\n{rows}  out <- list(\n    \
+             Correlations = round(stats::cor(d, use = \"pairwise.complete.obs\", method = m), 3),\n    \
+             `Rows used by each pair` = crossprod(!is.na(d))\n  )\n{p}  out\n}})({}, {})",
             subset(a, &vars),
             r_string(a.choice("method")),
         )

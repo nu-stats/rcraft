@@ -108,6 +108,12 @@ pub enum Event {
         run: RunId,
         path: PathBuf,
     },
+    /// A table the run printed (its visible value), with what R printed for it.
+    Table {
+        run: RunId,
+        table: Box<rcraft_rproto::table::ResultTable>,
+        text: String,
+    },
     Finished {
         run: RunId,
         status: RunStatus,
@@ -565,6 +571,8 @@ impl Session {
                     Stream::Stdout => out.stdout.push_str(&text),
                     Stream::Stderr => out.stderr.push_str(&text),
                 },
+                // a table R printed: what it printed is ordinary output here
+                Event::Table { run, text, .. } if run == id => out.stdout.push_str(&text),
                 Event::Warning { run, message } if run == id => out.warnings.push(message),
                 Event::Error { run, message, call } if run == id => {
                     out.error = Some(RError { message, call });
@@ -654,6 +662,27 @@ impl Session {
         }
     }
 
+    /// Reads and removes a table file R wrote in the plot folder for `run`.
+    fn read_table(
+        &self,
+        run: RunId,
+        file: &str,
+    ) -> Result<(rcraft_rproto::table::ResultTable, String), String> {
+        use rcraft_rproto::table::{is_table_file_name, parse_table, MAX_TABLE_FILE_BYTES};
+        if !is_table_file_name(file, run) {
+            return Err(format!("unexpected file name {file}"));
+        }
+        let path = self.plot_dir.join(file);
+        let size = std::fs::metadata(&path).map_err(|e| e.to_string())?.len();
+        if size > MAX_TABLE_FILE_BYTES {
+            let _ = std::fs::remove_file(&path);
+            return Err(format!("the table file is too large ({size} bytes)"));
+        }
+        let bytes = std::fs::read(&path).map_err(|e| e.to_string());
+        let _ = std::fs::remove_file(&path);
+        parse_table(&String::from_utf8_lossy(&bytes?))
+    }
+
     fn handle_frame(&mut self, frame: Frame) {
         match frame {
             Frame::Ready { .. } => {}
@@ -673,6 +702,20 @@ impl Session {
             }
             Frame::Error { run, message, call } => {
                 self.pending.push_back(Event::Error { run, message, call });
+            }
+            Frame::Table { run, file } => {
+                let event = match self.read_table(run, &file) {
+                    Ok((table, text)) => Event::Table {
+                        run,
+                        table: Box::new(table),
+                        text,
+                    },
+                    Err(why) => Event::Warning {
+                        run,
+                        message: format!("RCraft could not show a table R printed: {why}"),
+                    },
+                };
+                self.pending.push_back(event);
             }
             Frame::End { run, status } => {
                 if let Some(state) = self.current.as_mut().filter(|s| s.id == run) {

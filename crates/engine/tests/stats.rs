@@ -69,6 +69,23 @@ const MAKE: &str = "d <- data.frame(age = c(20, 30, 40, NA, 50), \
      grp = c('m', 'f', 'm', 'f', 'm'), z = c(NA, 1, NA, 2, NA), flat = c(1, 1, 1, 1, 1))";
 
 /// Makes `d`, builds the spec's code for it with these values and runs it.
+/// The titles of the tables the last command gave (a grid each in Results).
+fn last_tables(e: &Engine) -> Vec<String> {
+    e.results()
+        .blocks()
+        .last()
+        .map(|b| {
+            b.items
+                .iter()
+                .filter_map(|i| match i {
+                    Item::Text { table: Some(t), .. } => Some(t.title.clone()),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn dialog(
     e: &mut Engine,
     spec: &Spec,
@@ -185,7 +202,9 @@ fn frequency_and_cross_tabulation_count_the_rows() {
     assert!(text.contains("60") && text.contains("40"), "{text}");
     // the missing age is its own row
     assert!(text.contains("<NA>"), "{text}");
+    assert_eq!(last_tables(&e), ["g", "age"], "a table for each variable");
     let (_, plain) = dialog(&mut e, &FREQUENCY, &[], &[("vars", &["g"])], &[]);
+    assert_eq!(last_tables(&e), ["g"]);
     assert!(
         !plain.contains("percent") && !plain.contains("<NA>"),
         "{plain}"
@@ -201,6 +220,14 @@ fn frequency_and_cross_tabulation_count_the_rows() {
     assert!(text.contains("Sum"), "totals are added: {text}");
     assert!(text.contains("Row percentages"), "{text}");
     assert!(text.contains("Pearson's Chi-squared test"), "{text}");
+    // the test is named as R names it (a 2 by 2 table has Yates' correction)
+    let tables = last_tables(&e);
+    assert_eq!(tables.len(), 3, "{tables:?}");
+    assert_eq!(tables[..2], ["Counts", "Row percentages"]);
+    assert!(
+        tables[2].starts_with("Pearson's Chi-squared test"),
+        "{tables:?}"
+    );
     for share in ["column", "total", "none"] {
         let (_, text) = dialog(
             &mut e,
@@ -225,6 +252,7 @@ fn correlation_missing_patterns_and_normality_give_what_r_gives() {
     let (_, text) = dialog(&mut e, &CORRELATION, &[], &[("vars", &["x", "y"])], &[]);
     assert!(text.contains("0.775"), "cor(x, y) is 0.7746: {text}");
     assert!(text.contains("Rows used by each pair"), "{text}");
+    assert_eq!(last_tables(&e), ["Correlations", "Rows used by each pair"]);
     let (_, text) = dialog(
         &mut e,
         &CORRELATION,

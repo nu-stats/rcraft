@@ -2284,9 +2284,14 @@ fn results_list(
     out: &mut Vec<Action>,
 ) {
     for block in engine.results().blocks() {
+        // a Stata command's output reads as Stata's text, never as a grid
+        let mut as_stata = false;
         if let Some(entry) = engine.history().get(block.command) {
             match stata_mode::parts(&entry.code) {
-                Some(parts) => stata_parts(ui, pal, &parts, stata, out),
+                Some(parts) => {
+                    as_stata = true;
+                    stata_parts(ui, pal, &parts, stata, out);
+                }
                 None => {
                     for (i, line) in stata_mode::shown_lines(&entry.code).iter().enumerate() {
                         let prompt = if i == 0 { "> " } else { "+ " };
@@ -2295,9 +2300,14 @@ fn results_list(
                 }
             }
         }
-        for item in &block.items {
+        for (n, item) in block.items.iter().enumerate() {
             match item {
-                Item::Text { stream, text } => {
+                Item::Text {
+                    table: Some(table), ..
+                } if !as_stata => {
+                    crate::result_table::show(ui, pal, table, (block.command, n));
+                }
+                Item::Text { stream, text, .. } => {
                     let color = if *stream == Stream::Stderr {
                         pal.dim
                     } else {

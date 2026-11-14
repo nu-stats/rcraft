@@ -236,6 +236,7 @@ impl Engine {
                 } else {
                     format!("{text}\n")
                 },
+                table: None,
             };
             self.transcript.item(&item);
             self.results.add(id, item);
@@ -576,7 +577,11 @@ impl Engine {
                 run: r,
                 stream,
                 text,
-            } if r == run => Item::Text { stream, text },
+            } if r == run => Item::Text {
+                stream,
+                text,
+                table: None,
+            },
             Event::Warning { run: r, message } if r == run => Item::Warning(message),
             Event::Error {
                 run: r,
@@ -584,6 +589,15 @@ impl Engine {
                 call,
             } if r == run => Item::Error { message, call },
             Event::Plot { run: r, path } if r == run => Item::Plot { path },
+            Event::Table {
+                run: r,
+                table,
+                text,
+            } if r == run => Item::Text {
+                stream: Stream::Stdout,
+                text,
+                table: Some(table),
+            },
             Event::Truncated { run: r } if r == run => {
                 Item::Notice("output cut off: more than the limit was printed".into())
             }
@@ -622,6 +636,7 @@ impl Engine {
             | Event::Truncated { run }
             | Event::LimitReached { run, .. }
             | Event::Plot { run, .. }
+            | Event::Table { run, .. }
             | Event::Finished { run, .. } => *run,
             Event::Exited { .. } => return false,
         };
@@ -634,6 +649,9 @@ impl Engine {
                 text,
                 ..
             } if internal.out.len() < MAX_INTERNAL_BYTES => internal.out.push_str(text),
+            Event::Table { text, .. } if internal.out.len() < MAX_INTERNAL_BYTES => {
+                internal.out.push_str(text)
+            }
             Event::Error { message, .. } => {
                 internal.failed = true;
                 // an R error is the reason, shown if the table cannot come over

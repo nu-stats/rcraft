@@ -129,7 +129,9 @@ Limits:
   (done 2026-10-29: R completes the end of the line itself; see STATUS. Still to do: completion
   at the cursor, argument names, and columns inside `[[`)
 - P2.3 Results window: text output, errors and warnings with the failing
-  call, rich tables, copy and export
+  call, rich tables, copy and export (rich tables done 2026-11-14: a command whose value is a data
+  frame, matrix or table, or a named list of them, shows as a grid of R's own formatted cells, with
+  Copy (pastes as cells) and Save as CSV; the log and script keep R's printed text)
 - P2.4 Session log and script: every command and menu action recorded as R
 
 ## Phase 2A: Help
@@ -457,8 +459,9 @@ skipped. It never gives a silent wrong answer.
   gives the dialog and the code; snapshot tests of generated R
 - P4.1 Descriptives: summary statistics, frequency tables, cross-tabs,
   correlation, normality, missing-data patterns (done in base R, each run against real R;
-  a multi-variable widget was added to the dialog-spec format. Still to do: a Q-Q plot with
-  Phase 5, and rich tables in Results with P2.3)
+  a multi-variable widget was added to the dialog-spec format. The Q-Q plot came with Phase 5
+  (Graphs > Normal Q-Q plot); on 2026-11-14 frequency tables, cross-tabs and correlations return
+  their tables, so Results shows them as grids. P4.1 is done)
 - P4.2 Tests and intervals: t-tests, proportions, nonparametrics, variance
   tests, exact tests, agreement measures (done in base R, each checked against R's own
   report: one-sample, two-sample and paired t-tests, test of proportions, exact binomial,

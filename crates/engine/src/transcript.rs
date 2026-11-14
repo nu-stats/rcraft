@@ -80,7 +80,7 @@ impl Transcript {
     /// Something the command produced.
     pub fn item(&mut self, item: &Item) {
         let text = match item {
-            Item::Text { stream: _, text } => text.clone(),
+            Item::Text { text, .. } => text.clone(),
             Item::Warning(message) => format!("Warning: {message}\n"),
             Item::Error { message, call } if call.is_empty() => format!("Error: {message}\n"),
             Item::Error { message, call } => format!("Error in {call} : {message}\n"),
@@ -134,6 +134,7 @@ mod tests {
         t.item(&Item::Text {
             stream: Stream::Stdout,
             text: "[1] 1\n".into(),
+            table: None,
         });
         assert_eq!(t.log_text(), "> x <- 1\n+ print(x)\n[1] 1\n");
     }

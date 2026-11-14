@@ -4544,3 +4544,30 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Checked in real R 4.4.3: each form draws exactly one picture, and a constant variable with ordering
   on draws with the message. Drawn in the app on `mtcars` (8 variables): the values are R's own
   (mpg and wt -0.87, cyl and disp 0.90).
+
+## P2.3 and P4.1: rich tables in Results, 2026-11-14
+
+- A command whose visible value is a data frame, matrix or table (at most 500 rows and 50 columns,
+  plain columns), or a named list of up to 20 of them, shows in Results as a grid: R's own formatted
+  cells (`format()`), numbers on the right, the row names and a corner naming a table's variables
+  (`cyl \ gear`), a list element's name as its title. Copy puts it on the clipboard tab-separated (it
+  pastes as cells into a spreadsheet or a document's table); Save as CSV writes it. The first 200 rows
+  are drawn; Copy and Save take all.
+- How: the R session loop (`rproto/src/bootstrap.R`) writes such a value to a file in the plot folder
+  (`<run>-t<n>.rct`, format in `rproto::table`) with what R prints for it, and sends a TABLE frame;
+  `rhost` checks the file name, reads it (8 MB at most) and removes it; the engine keeps R's printed
+  text in the same `Item::Text`, now with the table beside it, never joined with other text. So the
+  text, the log, the script and every test that reads printed output see what R printed, as before.
+  Anything else prints as before, as does anything larger, anything inside `capture.output()` or
+  another sink, and everything when `options(rcraft.tables = FALSE)`. Stata-mode commands always show
+  their text.
+- Frequency table, Cross-tabulation and Correlation return a named list of tables instead of
+  printing with `cat()` (the chi-squared test as a one-row data frame named as R names the test), so
+  each shows as grids; Summary statistics already returned a matrix (a list of them by group).
+- Tests: the table format, its caps and the file names a run may use; Results never joins a table
+  with text; against R 4.4.3, data frames, one- and two-way tables, matrices and named lists come as
+  tables with R's printed text unchanged, other values and large tables print as before, the switch
+  and `capture.output()` work, the log keeps R's text, and the three dialogs give their grids. Drawn in
+  the app: `head(mtcars)`, `table(cyl, gear)`, a list, and the Cross-tabulation dialog.
+- Not done: Copy as rich text (HTML) for Word; tables inside printed objects (`summary(lm)`'s
+  coefficients) stay text.
