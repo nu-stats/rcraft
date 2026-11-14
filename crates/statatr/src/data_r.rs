@@ -45,6 +45,7 @@ mod estpost;
 mod esttab;
 mod esttab_matrix;
 mod esttable;
+mod factor;
 mod filefilter;
 mod files;
 mod fre;
@@ -1198,6 +1199,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_sdtest" => sdtest::SDTEST_HELPER,
         "stata_table" => table::TABLE_HELPER,
         "stata_pca" => pca::PCA_HELPER,
+        "stata_factor" => factor::FACTOR_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
         "stata_replay" => estat::REPLAY_HELPER,
         "stata_tab_mats" => tabsum::TAB_MATS_HELPER,
@@ -2461,6 +2463,7 @@ impl Session {
             "sdtest" => self.sdtest(c, &opts, out),
             "table" => self.table(c, &opts, out),
             "pca" => self.pca(c, &opts, out),
+            "factor" => self.factor(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),

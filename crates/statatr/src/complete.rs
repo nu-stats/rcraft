@@ -105,6 +105,7 @@ pub const COMMANDS: &[&str] = &[
     "esttab",
     "exit",
     "expand",
+    "factor",
     "file",
     "filefilter",
     "foreach",
@@ -372,6 +373,10 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("gsort", &["generate(", "mfirst"]),
+    (
+        "factor",
+        &["citerate(", "factors(", "ipf", "mineigen(", "pcf", "pf"],
+    ),
     ("pca", &["components(", "covariance"]),
     ("pdslasso", &["robust"]),
     ("postfile", &["every(", "replace"]),
