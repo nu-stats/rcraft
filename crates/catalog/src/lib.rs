@@ -225,6 +225,7 @@ pub const ENTRIES: &[Entry] = &[
     partial("Scatter plot", Area::Graphs),
     partial("Line plot", Area::Graphs),
     partial("Scatter plot matrix", Area::Graphs),
+    partial("Heatmap", Area::Graphs),
     partial("Export plot", Area::Graphs),
     planned("Model table", Area::Reports),
     partial("Search packages", Area::Packages),

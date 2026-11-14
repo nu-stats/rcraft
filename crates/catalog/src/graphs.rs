@@ -455,6 +455,152 @@ pub const SCATTER_MATRIX: Spec = Spec {
     },
 };
 
+// ---- Heatmap ----
+
+const HEAT_SHOWS: &[Opt] = &[
+    Opt {
+        value: "cor",
+        label: "Correlations between the variables",
+    },
+    Opt {
+        value: "values",
+        label: "The values, row by row (each variable standardised)",
+    },
+];
+
+const COR_METHODS: &[Opt] = &[
+    Opt {
+        value: "pearson",
+        label: "Pearson",
+    },
+    Opt {
+        value: "spearman",
+        label: "Spearman (ranks)",
+    },
+    Opt {
+        value: "kendall",
+        label: "Kendall",
+    },
+];
+
+/// The colours of a heatmap: blue for low, white for the middle, red for high.
+const HEAT_COLOURS: &str = "grDevices::hcl.colors(21, \"Blue-Red 3\")";
+
+pub const HEATMAP: Spec = Spec {
+    entry: "Heatmap",
+    menu: "Graphs > Several variables > Heatmap",
+    about: "A grid of coloured cells: the correlation of each pair of the chosen number \
+            variables, or each row's values with every variable standardised (blue below its \
+            mean, red above). Variables can be put in order of how alike they are.",
+    widgets: &[
+        Widget::Variables {
+            id: "vars",
+            label: "Variables",
+            kinds: NUMBERS,
+            min: 2,
+            hint: "",
+        },
+        Widget::Choice {
+            id: "show",
+            label: "Show",
+            options: HEAT_SHOWS,
+            default: "cor",
+            hint: "",
+        },
+        Widget::Choice {
+            id: "method",
+            label: "Correlation",
+            options: COR_METHODS,
+            default: "pearson",
+            hint: "For correlations: each pair uses the rows where both are present.",
+        },
+        Widget::Check {
+            id: "numbers",
+            label: "Write the correlation in each cell",
+            default: true,
+            hint: "For correlations.",
+        },
+        Widget::Check {
+            id: "cluster",
+            label: "Put alike variables next to each other",
+            default: false,
+            hint: "Orders the variables by a cluster analysis (hclust) instead of as chosen.",
+        },
+        TITLE,
+    ],
+    needs: &[],
+    styles: BASE,
+    check: no_check,
+    code: heatmap_code,
+};
+
+fn heatmap_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
+    let names: Vec<String> = a.vars("vars").iter().map(|v| r_string(v)).collect();
+    let data = format!("{}[c({})]", a.data(), names.join(", "));
+    let cluster = a.flag("cluster");
+    // the margins fit the longest name; restored when the plot is drawn
+    let margins = "  w <- max(4, 0.6 * max(nchar(colnames(m)))) + 1\n  \
+                   op <- graphics::par(mar = c(w, w, 4, 2)); on.exit(graphics::par(op))\n";
+    if a.choice("show") == "values" {
+        let order = if cluster {
+            "  o <- tryCatch(stats::hclust(stats::dist(t(m)))$order, error = function(e) {\n    \
+             message(\"The variables are left in the order chosen: \", conditionMessage(e))\n    \
+             seq_len(ncol(m))\n  })\n  m <- m[, o, drop = FALSE]\n"
+        } else {
+            ""
+        };
+        format!(
+            "(function(d) {{\n  \
+             m <- scale(as.matrix(d))\n{order}  \
+             n <- nrow(m); k <- ncol(m)\n  \
+             lim <- suppressWarnings(max(abs(m), na.rm = TRUE)); if (!is.finite(lim)) lim <- 1\n\
+             {margins}  \
+             graphics::image(seq_len(k), seq_len(n), t(m[n:1, , drop = FALSE]), \
+             zlim = c(-lim, lim), col = {HEAT_COLOURS}, axes = FALSE, xlab = \"\", ylab = \"\", \
+             main = {})\n  \
+             graphics::axis(1, seq_len(k), colnames(m), las = 2, tick = FALSE)\n  \
+             if (n <= 60) graphics::axis(2, seq_len(n), rev(rownames(d)), las = 1, tick = FALSE, \
+             cex.axis = 0.8)\n  \
+             invisible(m)\n}})({data})",
+            title(a, "Standardised values (blue below the mean, red above)"),
+        )
+    } else {
+        let method = a.choice("method");
+        let order = if cluster {
+            "  o <- tryCatch(stats::hclust(stats::as.dist(1 - abs(r)))$order, error = function(e) {\n    \
+             message(\"The variables are left in the order chosen: \", conditionMessage(e))\n    \
+             seq_len(ncol(r))\n  })\n  r <- r[o, o]\n"
+        } else {
+            ""
+        };
+        let numbers = if a.flag("numbers") {
+            "  graphics::text(rep(seq_len(k), times = k), rep(seq_len(k), each = k), \
+             sprintf(\"%.2f\", r[, k:1]), cex = if (k > 8) 0.7 else 0.9, \
+             col = ifelse(abs(r[, k:1]) > 0.6, \"white\", \"black\"))\n"
+        } else {
+            ""
+        };
+        let word = match method {
+            "spearman" => "Spearman correlations",
+            "kendall" => "Kendall correlations",
+            _ => "Correlations",
+        };
+        format!(
+            "(function(d) {{\n  \
+             r <- stats::cor(d, use = \"pairwise.complete.obs\", method = \"{method}\")\n{order}  \
+             k <- ncol(r); m <- r\n\
+             {margins}  \
+             graphics::image(seq_len(k), seq_len(k), r[, k:1], zlim = c(-1, 1), \
+             col = {HEAT_COLOURS}, axes = FALSE, xlab = \"\", ylab = \"\", main = {})\n  \
+             graphics::axis(1, seq_len(k), colnames(r), las = 2, tick = FALSE)\n  \
+             graphics::axis(2, seq_len(k), rev(colnames(r)), las = 1, tick = FALSE)\n\
+             {numbers}  \
+             invisible(r)\n}})({data})",
+            title(a, word),
+        )
+    }
+}
+
 /// The Graphs menu's dialogs, in menu order.
 pub const SPECS: &[&Spec] = &[
     &HISTOGRAM,
@@ -465,6 +611,7 @@ pub const SPECS: &[&Spec] = &[
     &SCATTER,
     &LINE_PLOT,
     &SCATTER_MATRIX,
+    &HEATMAP,
 ];
 
 #[cfg(test)]
@@ -645,6 +792,66 @@ mod tests {
              col = \"#2465b8\", main = \"All pairs\")"
         );
         assert!(message(&SCATTER_MATRIX, &[]).contains("at least 2 variables"));
+    }
+
+    #[test]
+    fn heatmap_shows_correlations_or_values_and_can_order_them() {
+        let vars: &[&str] = &["age", "blood pressure"];
+        let cor = make(&HEATMAP, &[], &[("vars", vars)], &["numbers"]).unwrap_or_default();
+        assert!(
+            cor.contains("stats::cor(d, use = \"pairwise.complete.obs\", method = \"pearson\")"),
+            "{cor}"
+        );
+        assert!(cor.contains("zlim = c(-1, 1)"), "{cor}");
+        assert!(cor.contains("sprintf(\"%.2f\", r[, k:1])"), "{cor}");
+        assert!(
+            cor.contains("col = ifelse(abs(r[, k:1]) > 0.6, \"white\", \"black\")"),
+            "{cor}"
+        );
+        assert!(cor.contains("main = \"Correlations\""), "{cor}");
+        assert!(!cor.contains("hclust"), "no order asked: {cor}");
+        assert!(
+            cor.ends_with("})(`my data`[c(\"age\", \"blood pressure\")])"),
+            "{cor}"
+        );
+        let ranked = make(
+            &HEATMAP,
+            &[("method", "spearman"), ("title", "Ranks")],
+            &[("vars", vars)],
+            &["cluster"],
+        )
+        .unwrap_or_default();
+        assert!(ranked.contains("method = \"spearman\""), "{ranked}");
+        assert!(ranked.contains("stats::as.dist(1 - abs(r))"), "{ranked}");
+        assert!(ranked.contains("tryCatch("), "{ranked}");
+        assert!(
+            ranked.contains("sprintf"),
+            "numbers are on by default: {ranked}"
+        );
+        let c = ctx();
+        let mut plain = HEATMAP.defaults(&c);
+        plain.set_list("vars", vars.iter().map(|v| v.to_string()).collect());
+        plain.set_flag("numbers", false);
+        let plain = HEATMAP
+            .generate(&c, &plain, Style::Base)
+            .unwrap_or_default();
+        assert!(plain.contains("graphics::image("), "{plain}");
+        assert!(!plain.contains("sprintf"), "numbers unticked: {plain}");
+        assert!(ranked.contains("main = \"Ranks\""), "{ranked}");
+        let values = make(
+            &HEATMAP,
+            &[("show", "values")],
+            &[("vars", vars)],
+            &["cluster"],
+        )
+        .unwrap_or_default();
+        assert!(values.contains("m <- scale(as.matrix(d))"), "{values}");
+        assert!(values.contains("stats::dist(t(m))"), "{values}");
+        assert!(!values.contains("stats::cor("), "{values}");
+        assert!(values.contains("if (n <= 60)"), "{values}");
+        assert!(message(&HEATMAP, &[]).contains("at least 2 variables"));
+        // the margins are put back, so the next plot is not squeezed
+        assert!(cor.contains("on.exit(graphics::par(op))"), "{cor}");
     }
 
     #[test]

@@ -497,7 +497,8 @@ skipped. It never gives a silent wrong answer.
   density, box plot, bar chart, normal Q-Q, scatter with a fit and smooth, line plot and a
   scatter plot matrix, each run against real R and required to draw exactly one picture; and a
   four-panel diagnostic plot for a fitted model in the Objects pane's Model menu. Survival curves
-  came with P6.3 (Statistics > Survival > Kaplan-Meier survival curves). Still to do: heatmap)
+  came with P6.3 (Statistics > Survival > Kaplan-Meier survival curves). A heatmap (Graphs > Several variables > Heatmap: correlations, or each row's
+  standardised values, optionally ordered by hclust) followed on 2026-11-14. P5.3 is done)
 - P5.4 Export: SVG, PDF, PNG at chosen size and dpi (done: Graphs > Export plot, and an Export button
   on the Graph tab, draw a captured plot again on a PNG, SVG or PDF file of the size given in
   inches, centimetres or pixels, at a chosen resolution; R keeps the newest 30 plots of a session

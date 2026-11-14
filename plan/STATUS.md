@@ -4531,3 +4531,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   "Log pseudolikelihood"; none with nolog). It had printed nothing: stata_ml_path lives in the probit
   helper, which a logit's translation did not load. poisson's log is still left out (Stata starts it from
   values of its own, already at the optimum on the probe).
+
+## P5.3 done: a heatmap, 2026-11-14
+
+- Graphs > Several variables > Heatmap, in base graphics (`graphics::image`, no package): the
+  correlations of the chosen number variables (Pearson, Spearman or Kendall, pairwise complete), with
+  each value written in its cell (white on the dark cells), or each row's values with every variable
+  standardised (blue below its mean, red above; row names shown up to 60 rows). "Put alike variables
+  next to each other" orders them by `hclust`; when it cannot (a variable that never changes has no
+  correlation), the chosen order is kept and R says why. The margins fit the longest name and are put
+  back after.
+- Checked in real R 4.4.3: each form draws exactly one picture, and a constant variable with ordering
+  on draws with the message. Drawn in the app on `mtcars` (8 variables): the values are R's own
+  (mpg and wt -0.87, cyl and disp 0.90).

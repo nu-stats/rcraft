@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::graphs::{
-    BAR_CHART, BOX_PLOT, DENSITY, HISTOGRAM, LINE_PLOT, QQ_PLOT, SCATTER, SCATTER_MATRIX,
+    BAR_CHART, BOX_PLOT, DENSITY, HEATMAP, HISTOGRAM, LINE_PLOT, QQ_PLOT, SCATTER, SCATTER_MATRIX,
 };
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind, Widget};
@@ -190,6 +190,60 @@ fn every_graph_dialog_draws_one_real_picture() {
         &[("vars", &["x", "y", "z"])],
         &[],
     );
+}
+
+#[test]
+fn the_heatmap_draws_one_picture_each_way_and_a_constant_variable_does_not_stop_it() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let xyz: &[&str] = &["x", "y", "z"];
+    one_plot(&mut e, &HEATMAP, &[], &[("vars", xyz)], &["numbers"]);
+    one_plot(
+        &mut e,
+        &HEATMAP,
+        &[("method", "kendall")],
+        &[("vars", xyz)],
+        &["cluster"],
+    );
+    one_plot(
+        &mut e,
+        &HEATMAP,
+        &[("show", "values")],
+        &[("vars", xyz)],
+        &[],
+    );
+    one_plot(
+        &mut e,
+        &HEATMAP,
+        &[("show", "values")],
+        &[("vars", xyz)],
+        &["cluster"],
+    );
+    // a variable that never changes has no correlation: the cells stay blank and
+    // the order asked for falls back to the chosen one, with a message
+    let (made, _, _) = run(&mut e, Source::Typed, "d$k <- 1; 0");
+    assert_eq!(made, Outcome::Ok);
+    let ctx = context();
+    let mut ctx = ctx;
+    ctx.columns.push(ColumnInfo {
+        name: "k".into(),
+        kind: VarKind::Number,
+    });
+    let mut values = HEATMAP.defaults(&ctx);
+    values.set_list("vars", vec!["x".into(), "k".into(), "z".into()]);
+    values.set_flag("cluster", true);
+    let code = HEATMAP
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    let (outcome, plots, text) = run(&mut e, Source::Menu(HEATMAP.menu.into()), &code);
+    assert_eq!(
+        outcome,
+        Outcome::Ok,
+        "{code}
+{text}"
+    );
+    assert_eq!(plots.len(), 1, "{text}");
+    assert!(text.contains("left in the order chosen"), "{text}");
 }
 
 #[test]
