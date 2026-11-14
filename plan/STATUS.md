@@ -4495,3 +4495,15 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   two share; "Robust t-statistics"; an e() statistic below 1e-4 in e-notation. import delimited reads a
   one-column file (Stata finds a comma or a tab itself). year(), month() and the other date functions
   take a %td variable read from a .dta file.
+## P5.1 done: zoom and copy on the Graph tab, 2026-11-14
+
+- The Graph tab has Fit (the default, and again for each new plot), −, a percentage that sets 100%
+  when pressed, and +, through 25% to 400%; Ctrl and the mouse wheel (or a pinch) over the plot do
+  the same. A zoomed plot scrolls and can be dragged.
+- Copy puts the plot on the system clipboard as a picture, its own pixels (the PNG R wrote), through
+  `arboard`, the clipboard crate egui already uses (MIT or Apache-2.0), added to `ui-egui` with its
+  image feature, which brings `tiff`, `zune-jpeg` and small helpers (MIT, Apache-2.0 or Zlib). A failure (no clipboard, a file gone) is said under the buttons.
+- Tests: the zoom steps and their bounds; the clipboard gets the PNG's straight RGBA, half-clear
+  pixels kept; a missing or damaged file is an error, not a panic.
+- Not checked: pasting into another program. Tests cannot reach a real clipboard; the user can try
+  Copy, then paste into Word or Paint.

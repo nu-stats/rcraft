@@ -489,7 +489,8 @@ skipped. It never gives a silent wrong answer.
 - P5.1 Graph window: capture R devices, history of plots, zoom (done: plots are captured as
   PNG snapshots from one live device that stays open between commands, so a later command can
   add to a plot; a Graph tab with older and newer, the command that drew each, fitted to the
-  pane, and Save as PNG. Still to do: zoom, and copy to the clipboard)
+  pane, and Save as PNG; zoom (Fit, smaller, 100%, larger, Ctrl and the wheel over the plot) and
+  Copy, which puts the plot on the clipboard as a picture (done 2026-11-14). P5.1 is done)
 - P5.2 ggplot2 builder: pick data, geoms and aesthetics; facets and themes
 - P5.3 Plot menus: histogram, density, box, bar, scatter with fit, line,
   heatmap, QQ, diagnostics, survival curves (done in base graphics under Graphs: histogram,

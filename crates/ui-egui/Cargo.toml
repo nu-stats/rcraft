@@ -28,6 +28,9 @@ softbuffer = { version = "0.4", default-features = false, features = ["x11", "wa
 # The native file dialog behind Browse. On Linux it asks the desktop's file
 # chooser portal, so no GTK libraries are needed.
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
+# Copy a plot to the clipboard as a picture (egui itself copies only text).
+# Already in the build through egui-winit; MIT or Apache-2.0.
+arboard = { version = "3.7", default-features = false, features = ["image-data"] }
 
 [lints]
 workspace = true

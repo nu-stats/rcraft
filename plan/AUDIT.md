@@ -54,7 +54,7 @@ Partly done, with what is missing:
   `poisson` to 8 digits (P2C.12); collinear terms in the panel, survival and IV models (P2C.13);
   bootstrap's `bca` and `vce(bootstrap)` (P2C.16); probe 448's `c_local`.
 - P4.1 a Q-Q plot and rich tables in Results.
-- P5.1 zoom and copy to clipboard; P5.3 heatmap and survival curves.
+- P5.3 heatmap and survival curves (P5.1's zoom and copy followed on 2026-11-14).
 
 Stale records to fix:
 
