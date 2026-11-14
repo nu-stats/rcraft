@@ -4495,6 +4495,7 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   two share; "Robust t-statistics"; an e() statistic below 1e-4 in e-notation. import delimited reads a
   one-column file (Stata finds a comma or a tab itself). year(), month() and the other date functions
   take a %td variable read from a .dta file.
+
 ## P5.1 done: zoom and copy on the Graph tab, 2026-11-14
 
 - The Graph tab has Fit (the default, and again for each new plot), −, a percentage that sets 100%
