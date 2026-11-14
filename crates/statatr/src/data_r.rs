@@ -2396,6 +2396,15 @@ impl Session {
     fn dispatch(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let opts = Opts(&c.options);
         match c.name.as_str() {
+            // a model's name alone shows its last fit again (Stata 19)
+            "regress" | "logit" | "probit" | "poisson"
+                if c.parts.main.trim().is_empty()
+                    && c.parts.if_exp.is_none()
+                    && c.parts.in_range.is_none()
+                    && c.parts.weight.is_none() =>
+            {
+                self.model_replay(c, &opts, out)
+            }
             "use" => self.use_(c, &opts, out),
             "save" | "saveold" => self.save(c, &opts, out),
             "import" => self.import(c, &opts, out),

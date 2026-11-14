@@ -996,15 +996,49 @@ impl Session {
                  a linear model also counts the variance",
             );
         } else if sub == "vce" {
-            if let Some(o) = opts.other(&[("correlation", 4)]) {
+            if let Some(o) = opts.other(&[("correlation", 4), ("covariance", 3), ("format", 1)]) {
                 return Err(no(format!(
                     "estat vce with the option {o} is not translated yet"
                 )));
             }
-            if opts.has("correlation", 4) {
-                out.line("print(stats::cov2cor(stata_vcov))");
+            let cor = opts.has("correlation", 4);
+            let fmt = match opts.arg("format", 1) {
+                None => None,
+                Some(f) => {
+                    let f = f.trim().to_string();
+                    if !super::returned::valid_format(&f) {
+                        return Err(no(format!(
+                            "estat vce, format({f}): not a format RCraft has"
+                        )));
+                    }
+                    Some(f)
+                }
+            };
+            // Stata 19's table when e(V) carries Stata's names; R's print otherwise
+            self.helpers.insert("stata_estat_more");
+            self.helpers.insert("stata_fmt");
+            let call = format!(
+                "stata_estat_vce(correlation = {}{})",
+                r_logical(cor),
+                fmt.map(|f| format!(", format = {}", r_text(&f)))
+                    .unwrap_or_default()
+            );
+            out.line(if self.quiet(c) {
+                format!("invisible(utils::capture.output({call}))")
             } else {
-                out.line("print(stata_vcov)");
+                call
+            });
+        } else if sub == "sd" && self.posted_estimates().is_some_and(|(k, _)| k == "mean") {
+            if let Some(o) = opts.other(&[]) {
+                return Err(no(format!(
+                    "estat sd with the option {o} is not translated yet"
+                )));
+            }
+            self.helpers.insert("stata_estat_more");
+            self.helpers.insert("stata_fmt");
+            self.helpers.insert("stata_tables");
+            if !self.quiet(c) {
+                out.line("stata_estat_sd()");
             }
         } else if is("hettest", 4) {
             regress_only("hettest")?;

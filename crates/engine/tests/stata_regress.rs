@@ -396,9 +396,10 @@ fn regress_says_why_it_refuses_what_it_refuses() {
         refusal("use \"d.dta\"\nregress y x, hascons\n").contains("hascons"),
         "an option that is not translated should be named"
     );
+    // regress alone shows the last fit again: with none, Stata's own error as the line runs
     assert!(
-        refusal("use \"d.dta\"\nregress\n").contains("needs a variable"),
-        "regress with nothing should say so"
+        script("use \"d.dta\"\nregress\n").contains("last estimates not found"),
+        "regress with no fit before it is Stata's error"
     );
     assert!(
         refusal("use \"d.dta\"\nregress y x, vce(cluster a b)\n").contains("one variable"),

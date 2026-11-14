@@ -2246,3 +2246,53 @@ fn estimates_replay_of_logit_prints_statas_table() {
         "replay shows coefficients: {tail}"
     );
 }
+
+/// A model's name alone shows its last fit again, with or and level(), as Stata 19;
+/// after another command's fit it is Stata's "last estimates not found".
+#[test]
+fn a_models_name_alone_shows_its_fit_again() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let code = script(&format!(
+        "use \"{dir}/models.dta\"\nlogit yb x w\nlogit, or\nlogit, level(90)\nregress y x\nregress\n"
+    ));
+    let text = ok(&mut e, &code);
+    for line in [
+        "          yb | Odds ratio   Std. err.      z    P>|z|     [95% conf. interval]",
+        "Note: _cons estimates baseline odds.",
+        "[90% conf. interval]",
+    ] {
+        assert!(text.contains(line), "{line:?} in {text}");
+    }
+    assert_eq!(
+        text.matches("      Source |       SS").count(),
+        2,
+        "regress twice: {text}"
+    );
+    let code = script(&format!("use \"{dir}/models.dta\"\nregress y x\nlogit\n"));
+    assert!(code.contains("last estimates not found"), "{code}");
+}
+
+/// estat vce (format(), correlation) and estat sd after mean, in Stata 19's
+/// layouts (plan/stata/estat-tests.md).
+#[test]
+fn estat_vce_and_sd_print_statas_tables() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let code = script(&format!(
+        "use \"{dir}/models.dta\"\nregress y x w\nestat vce\nestat vce, correlation format(%9.4f)\nlogit yb x w\nestat vce\nmean y x\nestat sd\n"
+    ));
+    let text = ok(&mut e, &code);
+    for line in [
+        "Covariance matrix of coefficients of regress model",
+        "        e(V) |          x           w       _cons ",
+        "-------------+-----------------------------------",
+        "Correlation matrix of coefficients of regress model",
+        "        e(V) |         x          w      _cons ",
+        "             | yb",
+        "yb           |",
+        "             |       Mean   Std. dev.",
+    ] {
+        assert!(text.contains(line), "{line:?} in {text}");
+    }
+}

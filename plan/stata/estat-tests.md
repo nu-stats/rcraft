@@ -35,3 +35,14 @@ in `crates/statatr/src/data_r/estat.rs`.
 - After regress, vce(robust): vif and imtest as without it; bgodfrey and durbinalt "This command does not work
   after  regress, robust" (two spaces), before anything else; on panel data all three "sample may not include
   multiple panels". vif: equal VIFs list the later variable first.
+
+## estat vce and estat sd (2026-11-14; probe `r11/v1.do` identical)
+
+- estat vce: "Covariance matrix of coefficients of regress model" (Correlation with `correlation`), then e(V)'s lower
+  triangle: `        e(V) |` and the names, the first column the format's width and 1, the others 1 more, a
+  space at the end of the head and each row, the rule under the stub `+`. After the likelihood models the
+  equation's name on a line of its own over the names (` yb`) and as a row (`yb           |`). Formats: %10.0g,
+  %8.4f with correlation, or format(). Factor variables, several equations and tables wider than the line keep R's
+  print.
+- estat sd after mean: `|       Mean   Std. dev.` (37 wide), e(sd); with over() the head `Over` and the groups as
+  mean's table shows them.

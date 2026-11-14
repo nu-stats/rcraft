@@ -196,6 +196,11 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
       sqrt(sum(ww * (est[[i]]$y[s] - b[i])^2) / (sum(ww) - 1))
     }, 0)
     e$sd <- matrix(sdv, 1, dimnames = list("y1", nm))
+    # for estat sd: each row's head and label, as the table shows them
+    if (!is.null(over)) {
+      attr(e$sd, "stata_heads") <- vapply(est, function(x) paste0("c.", x$var, "@", ohead), "")
+      attr(e$sd, "stata_labs") <- vapply(est, function(x) paste(vapply(seq_along(over), function(i) labs_of(over[i], ocells[x$j, i]), ""), collapse = " "), "")
+    }
   }
   if (kind == "proportion") e$freq <- matrix(vapply(seq_len(K), function(i) sum(wv[est[[i]]$sel] * est[[i]]$y[est[[i]]$sel]) *
                                                      (if (!is.null(w) && wtype == "a") sum(w[keep]) / n else 1), 0),

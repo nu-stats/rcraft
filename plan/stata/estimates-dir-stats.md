@@ -19,3 +19,6 @@ corpus `sdtest.do` (estimates stats). Translated in `returned.rs` (estimates_cmd
   from 4316e18): Stata 19 replays the coefficients at 95% whatever `or`, `irr` or `level()` the fit had, keeps
   robust errors (Robust, Log pseudolikelihood, Wald chi2), and prints no iteration log. A model the layout can't
   place falls back to R's, as at the fit.
+- `regress`, `logit`, `probit`, `poisson` alone (probe `r10/h1.do` identical): the last fit again, no iteration log,
+  with `level()`, `or` (logit, with its note) and `irr` (poisson); after another command's fit "last estimates not
+  found", r(301). Display-only options (baselevels ...) are left aside with a note, as at the fit.

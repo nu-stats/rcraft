@@ -106,6 +106,65 @@ stata_imtest <- function(fit, white = FALSE) {
   cat(rule)
   invisible(c(list(df_t = dt, chi2_t = ct, df_k = dk, chi2_k = ck, df_s = ds, chi2_s = cs, df_h = dh, chi2_h = ch), r))
 }
+# estat vce in Stata 19's layout: the lower triangle under the model's name, the first column
+# the format's width and 1, the others 1 more, an equation's name on lines of its own
+stata_estat_vce <- function(correlation = FALSE, format = NULL) {
+  e <- stata_e
+  V <- e$V
+  nm <- colnames(V)
+  fallback <- function() print(if (correlation) stats::cov2cor(stata_vcov) else stata_vcov)
+  if (is.null(V) || is.null(nm) || !is.null(attr(V, "stata_names"))) return(fallback())
+  eq <- ifelse(grepl(":", nm, fixed = TRUE), sub(":.*$", "", nm), "")
+  short <- sub("^[^:]*:", "", nm)
+  if (length(unique(eq)) > 1 || any(grepl("[.#@]", short))) return(fallback())
+  M <- if (correlation) stats::cov2cor(as.matrix(V)) else as.matrix(V)
+  f <- if (!is.null(format)) format else if (correlation) "%8.4f" else "%10.0g"
+  fw <- as.integer(sub("^%-?0?([0-9]+).*$", "\\1", f))
+  k <- length(nm)
+  W <- c(fw + 1, rep(fw + 2, k - 1))
+  span <- sum(W)
+  ls <- if (exists("stata_linesize")) stata_linesize else 79
+  if (14 + span + 1 > ls) return(fallback())
+  pad <- function(s, n) vapply(seq_along(s), function(i) formatC(s[i], width = rep_len(n, length(s))[i]), "")
+  cat("\n", if (correlation) "Correlation" else "Covariance", " matrix of coefficients of ", e$cmd, " model\n\n", sep = "")
+  if (eq[1] != "") cat(strrep(" ", 13), "|", formatC(paste0(" ", eq[1]), width = -span), "\n", sep = "")
+  cat(pad("e(V)", 12), " |", paste0(pad(stata_tab_abbrev(short, 12), W), collapse = ""), " \n", sep = "")
+  cat(strrep("-", 13), "+", strrep("-", span), "\n", sep = "")
+  if (eq[1] != "") cat(formatC(eq[1], width = -13), "|", strrep(" ", span), "\n", sep = "")
+  for (i in seq_len(k)) {
+    cells <- vapply(seq_len(k), function(j) if (j <= i) pad(stata_fmt(M[i, j], f, trim = TRUE), W[j]) else strrep(" ", W[j]), "")
+    cat(pad(stata_tab_abbrev(short[i], 12), 12), " |", paste0(cells, collapse = ""), " \n", sep = "")
+  }
+  invisible(NULL)
+}
+# estat sd after mean: each mean and its standard deviation (e(sd)), over()'s groups as mean's table has them
+stata_estat_sd <- function() {
+  e <- stata_e
+  nm <- colnames(e$b)
+  b <- as.vector(e$b)
+  sdv <- as.vector(e$sd)
+  heads <- attr(e$sd, "stata_heads")
+  labs <- attr(e$sd, "stata_labs")
+  g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
+  rule <- paste0(strrep("-", 37), "\n")
+  cat("\n", rule, sprintf("%12s |       Mean   Std. dev.", if (!is.null(heads)) "Over" else ""), "\n",
+      strrep("-", 13), "+", strrep("-", 23), "\n", sep = "")
+  last <- ""
+  for (i in seq_along(nm)) {
+    if (!is.null(heads)) {
+      if (heads[i] != last) {
+        if (last != "") cat(strrep(" ", 13), "|\n", sep = "")
+        cat(sprintf("%12s |", stata_tab_abbrev(heads[i], 12)), "\n", sep = "")
+        last <- heads[i]
+      }
+      cat(sprintf("%11s  |%11s%12s", labs[i], g(b[i]), g(sdv[i])), "\n", sep = "")
+    } else {
+      cat(sprintf("%12s |%11s%12s", stata_tab_abbrev(nm[i], 12), g(b[i]), g(sdv[i])), "\n", sep = "")
+    }
+  }
+  cat(rule)
+  invisible(NULL)
+}
 stata_tsresid <- function(fit, time, delta = 1) {
   e <- stats::residuals(fit)
   if (length(time) != length(e)) stop("the time variable does not match the estimation sample", call. = FALSE)
@@ -585,3 +644,99 @@ stata_replay <- function(name = NULL, level = 0.95) {
   stata_replay_table(level)
   invisible(NULL)
 }"##;
+
+impl Session {
+    /// `regress`, `logit`, `probit` and `poisson` with no variables: the last
+    /// fit's table again, with `level()`, and `or` (logit) or `irr` (poisson),
+    /// as Stata 19 shows it (no iteration log); after another command's fit,
+    /// Stata's "last estimates not found".
+    pub(super) fn model_replay(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let cmd = c.name.as_str();
+        let mut known = vec![("level", 1)];
+        match cmd {
+            "logit" => known.push(("or", 2)),
+            "poisson" => known.push(("irr", 3)),
+            _ => {}
+        }
+        if let Some(o) = opts.other(&known) {
+            return Err(no(format!(
+                "{cmd} with no variables (shown again) with the option {o} is not translated yet"
+            )));
+        }
+        let fit = match cmd {
+            "regress" => Fit::Regress,
+            "logit" => Fit::Logit,
+            "probit" => Fit::Probit,
+            _ => Fit::Poisson,
+        };
+        // a line that was not translated may have fitted the model Stata holds
+        if self.estimates_lost.is_some() {
+            return Err(no(format!(
+                "{cmd}: the model Stata holds here is not known"
+            )));
+        }
+        let last = self.estimates.as_ref().map(|e| e.fit);
+        if matches!(self.e_ret, super::returned::Returned::Nothing) || last != Some(fit) {
+            out.line("stop(\"last estimates not found (Stata: r(301))\", call. = FALSE)");
+            return Ok(());
+        }
+        if self.weighted_fit {
+            return Err(no(format!(
+                "{cmd} shown again after a fit with weights is not translated yet"
+            )));
+        }
+        let level = super::model::level(opts)?;
+        for h in [
+            "stata_tables",
+            "stata_fmt",
+            "stata_coefs",
+            "stata_ml_header",
+        ] {
+            self.helpers.insert(h);
+        }
+        let call = match fit {
+            Fit::Regress => format!(
+                "if (!stata_regress_print(level = {})) print(summary(stata_estimates))",
+                r_number(level)
+            ),
+            _ => {
+                let title = match fit {
+                    Fit::Logit => "Logistic regression",
+                    Fit::Probit => "Probit regression",
+                    _ => "Poisson regression",
+                };
+                let (label, eform, note) = if opts.has("or", 2) {
+                    (
+                        "Odds ratio",
+                        true,
+                        "\"Note: _cons estimates baseline odds.\"",
+                    )
+                } else if opts.has("irr", 3) {
+                    (
+                        "IRR",
+                        true,
+                        "\"Note: _cons estimates baseline incidence rate.\"",
+                    )
+                } else {
+                    ("Coefficient", false, "NULL")
+                };
+                format!(
+                    "if (!stata_ml_print(stata_estimates, {}, robust = !is.null(stata_e[[\"vcetype\"]]), level = {}, label = {}, eform = {}, note = {note})) print(summary(stata_estimates))",
+                    r_text(title),
+                    r_number(level),
+                    r_text(label),
+                    super::stats::r_logical(eform)
+                )
+            }
+        };
+        if !self.quiet(c) {
+            out.line(call);
+        }
+        Ok(())
+    }
+}

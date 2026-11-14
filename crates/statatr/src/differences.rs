@@ -573,7 +573,9 @@ pub const GUIDES: &[Guide] = &[
                 "Not yet",
                 "On panel data bgodfrey, durbinalt and dwatson are Stata's error (sample may not \
                  include multiple panels), and after regress, robust bgodfrey and durbinalt are \
-                 too; small is refused, and estat vce keeps R's layout.",
+                 too; small is refused. estat vce prints Stata 19's lower triangle (format(), \
+                 correlation), and estat sd after mean the means and standard deviations; estat \
+                 vce of factor variables or several equations keeps R's print.",
             ),
         ],
     },
@@ -635,7 +637,9 @@ pub const GUIDES: &[Guide] = &[
                  replay of regress, logit, probit and poisson fits (robust and clustered too), \
                  under a banner as wide as the line (Model name, or active results): as Stata 19, \
                  the coefficients at 95% whatever or, irr or level() the fit had, and no \
-                 iteration log.",
+                 iteration log. A model's name alone (regress, logit, probit, poisson, with \
+                 level(), or and irr) shows its last fit again in the same way; after another \
+                 command's fit it is Stata's error (last estimates not found).",
             ),
             p(
                 "Not yet",
