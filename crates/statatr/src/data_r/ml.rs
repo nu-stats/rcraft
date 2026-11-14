@@ -898,9 +898,17 @@ impl Session {
             };
             self.helpers.insert("stata_tables");
             self.helpers.insert("stata_fmt");
-            // the iteration log (Stata's own steps, stata_ml_iterations) is not printed yet: it
-            // matched Stata for logit and probit in R alone, not yet from the fit
-            let iterations = "NULL";
+            // the iteration log: Stata's own Newton steps from the constant-only fit
+            // (stata_ml_iterations, line for line on probes); poisson starts from values of its
+            // own, not known yet
+            let iterations = match fit {
+                Fit::Logit if !opts.has("nolog", 5) => "\"logit\"",
+                Fit::Probit if !opts.has("nolog", 5) => "\"probit\"",
+                _ => "NULL",
+            };
+            if iterations != "NULL" {
+                self.helpers.insert("stata_probit_newton");
+            }
             out.line(format!(
                 "if (!stata_ml_print(stata_estimates, {}, robust = {}{nobs}, level = {}, label = {}, eform = {}, note = {}, iterations = {iterations})) {{",
                 r_text(title),
@@ -957,7 +965,7 @@ impl Session {
             out.line("cat(\"(printed in R's layout: Stata's table for this model is not matched yet)\\n\")");
             out.line("}");
             out.caveat(
-                "the header and table as Stata 19 prints them; Stata's iteration log is not shown yet",
+                "the header and table as Stata 19 prints them (logit and probit with its iteration log; poisson's is not shown yet)",
             );
         } else {
             out.caveat("printed in R's layout, not Stata's table");

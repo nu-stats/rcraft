@@ -354,3 +354,65 @@ export delimited c1 c2 c3 c4 using "{d}/concat.csv", replace
     let _ = std::fs::remove_dir_all(&dir);
     assert!(wrong.is_empty(), "\n{}", wrong.join("\n\n"));
 }
+
+/// destring says what Stata 19 says on the same probe: the type it made (byte,
+/// int or long by range, double otherwise, byte when nothing is left) and the
+/// missing values; import delimited its count line, and a Latin-1 file is read.
+#[test]
+fn destring_and_import_say_what_stata_19_says() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let dir = std::env::temp_dir().join(format!("rcraft-destring-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(dir.join("latin.csv"), b"a,b\n1,caf\xe9\n2,3\n");
+    let d = slash(&dir);
+    let dofile = format!(
+        r#"import delimited using "{d}/latin.csv", clear
+clear
+set obs 6
+gen s1 = string(_n)
+gen s2 = string(_n * 1.5)
+gen s3 = string(_n * 1000)
+gen s4 = string(_n * 100000)
+gen s6 = "1" in 1/3
+replace s6 = "x" in 4
+gen s8 = string(-_n * 200)
+gen s9 = string(_n * 1e10)
+destring s1, replace
+destring s2, replace
+destring s3, replace
+destring s4, replace
+destring s6, replace force
+destring s8, generate(n8)
+destring s9, replace
+"#
+    );
+    let t = translate(&read(&dofile));
+    let not: Vec<String> = t
+        .lines
+        .iter()
+        .filter_map(|l| {
+            l.result
+                .as_ref()
+                .err()
+                .map(|e| format!("{} -> {}", l.stata, e.reason))
+        })
+        .collect();
+    assert!(not.is_empty(), "not translated: {}", not.join("; "));
+    let (ran, text) = run(&mut e, &t.script());
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(ran, Outcome::Ok, "{text}");
+    // Stata 19's lines
+    for want in [
+        "(2 vars, 2 obs)",
+        "s1: all characters numeric; replaced as byte",
+        "s2: all characters numeric; replaced as double",
+        "s3: all characters numeric; replaced as int",
+        "s4: all characters numeric; replaced as long",
+        "s6: contains nonnumeric characters; replaced as byte\n(3 missing values generated)",
+        "s8: all characters numeric; n8 generated as int",
+        "s9: all characters numeric; replaced as double",
+    ] {
+        assert!(text.contains(want), "{want}\n--\n{text}");
+    }
+}

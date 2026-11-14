@@ -4508,3 +4508,26 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   pixels kept; a missing or damaged file is an error, not a panic.
 - Not checked: pasting into another program. Tests cannot reach a real clipboard; the user can try
   Copy, then paste into Word or Paint.
+
+## TZEN38 against a fresh Stata run; destring's and import delimited's messages, 2026-11-14
+
+- TZEN38 run again in Stata 19 (57 s; its only errors are grstyle, not installed, in graph styling): the
+  861 model values are the Nov 3 log's exactly, so its 5 differences are not stale. All five are the age
+  coefficient in xtreg, fe with meeting dummies, where two dummies are left identical within the panels:
+  Stata omits 167 in 7 such models and 168 in 5, the same command going both ways on different samples,
+  so its rounding decides (RCraft already prints that note). They stay as rounding cases.
+- destring prints Stata 19's lines: "x: all characters numeric; replaced as byte" (or "contains nonnumeric
+  characters", or "y generated as"), the type by Stata's rule (byte, int or long by range, double, or
+  float with float, otherwise; byte when nothing is left), and "(N missing values generated)".
+  import delimited prints "(N vars, M obs)"; its encoding line is Stata's own guess (ISO-8859-9 for plain
+  ASCII on this machine, ISO-8859-1 on DZ8BUS's file) and is left out. A file that is not UTF-8 is read as
+  Latin-1 (R stopped on it). DZ8BUS's messages now match Stata's but for that encoding line.
+- ASKO93 and TQN6ZN run again in Stata 19 with tabm, anovaplot and coefplot installed (their Nov 3 logs
+  had 8 and 4 errors from add-ons missing then; now 0, and TQN6ZN's own 2, a label and a variable it
+  defines twice): the model values are the old ones, and RCraft matches all 241 and 231. recode with
+  generate() now stops on a variable already there, as Stata does at TQN6ZN's second one (r(110)).
+- logit and probit now print Stata's iteration log above the table (its own Newton steps from the
+  constant-only fit, line for line on a probe: logit, probit, factor variables with or, vce(robust)'s
+  "Log pseudolikelihood"; none with nolog). It had printed nothing: stata_ml_path lives in the probit
+  helper, which a logit's translation did not load. poisson's log is still left out (Stata starts it from
+  values of its own, already at the optimum on the probe).

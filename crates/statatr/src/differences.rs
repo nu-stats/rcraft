@@ -62,8 +62,9 @@ const ML_TABLE: Point = p(
     "Printing",
     "logit, probit and poisson print Stata 19's header and table (LR or Wald chi2, the log \
      likelihood or pseudolikelihood, Pseudo R2, the clusters' line, factor levels, Odds ratio \
-     and IRR with their notes), as Stata prints them with nolog; Stata's iteration log is not \
-     shown yet, and a model with an offset prints in R's layout.",
+     and IRR with their notes). logit and probit print Stata's iteration log too (its own \
+     Newton steps from the constant-only fit); poisson's is not shown yet (Stata starts it \
+     from values of its own), and a model with an offset prints in R's layout.",
 );
 const GRAPH: Point = p(
     "Look",

@@ -214,7 +214,7 @@ pub(super) const SAME_DATES_HELPER: &str = r#"stata_same_dates <- function(d, u)
 /// `destring`: Stata's rules for which text is a number (`""` and `.` are
 /// missing; "1,000", "5%" and "NA" are not numbers); without `force` a
 /// variable with any other text is left alone, with Stata's message.
-pub(super) const DESTRING_HELPER: &str = "stata_destring <- function(x, name, ignore = \"\", force = FALSE, generate = FALSE) {\n  if (!is.character(x)) {\n    message(name, \" already numeric; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  y <- x\n  for (ch in strsplit(ignore, \"\")[[1]]) y <- gsub(ch, \"\", y, fixed = TRUE)\n  y <- trimws(y)\n  number <- grepl(\"^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eEdD][+-]?[0-9]+)?$\", y)\n  missing <- is.na(y) | y == \"\" | grepl(\"^[.][a-z]?$\", y)\n  if (!force && !all(number | missing)) {\n    message(name, \": contains nonnumeric characters; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  out <- suppressWarnings(as.numeric(sub(\"[dD]\", \"e\", y)))\n  out[!number] <- NA\n  structure(out, label = attr(x, \"label\", exact = TRUE))\n}";
+pub(super) const DESTRING_HELPER: &str = "stata_destring <- function(x, name, ignore = \"\", force = FALSE, generate = FALSE, newname = NULL, float = FALSE) {\n  if (!is.character(x)) {\n    message(name, \" already numeric; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  y <- x\n  for (ch in strsplit(ignore, \"\")[[1]]) y <- gsub(ch, \"\", y, fixed = TRUE)\n  y <- trimws(y)\n  number <- grepl(\"^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eEdD][+-]?[0-9]+)?$\", y)\n  missing <- is.na(y) | y == \"\" | grepl(\"^[.][a-z]?$\", y)\n  if (!force && !all(number | missing)) {\n    message(name, \": contains nonnumeric characters; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  out <- suppressWarnings(as.numeric(sub(\"[dD]\", \"e\", y)))\n  out[!number] <- NA\n  # Stata 19 says which type it made: byte, int or long for whole numbers in their\n  # ranges, double (float with float) otherwise, byte when none is left\n  v <- out[!is.na(out)]\n  real <- if (float) \"float\" else \"double\"\n  type <- if (!length(v)) \"byte\" else if (any(v != round(v))) real else if (all(v >= -127 & v <= 100)) \"byte\" else if (all(v >= -32767 & v <= 32740)) \"int\" else if (all(v >= -2147483647 & v <= 2147483620)) \"long\" else real\n  cat(name, if (all(number | missing)) \": all characters numeric; \" else \": contains nonnumeric characters; \",\n      if (generate) paste(newname, \"generated as \") else \"replaced as \", type, \"\\n\", sep = \"\")\n  k <- sum(is.na(out))\n  if (k > 0) cat(\"(\", format(k, big.mark = \",\", scientific = FALSE), if (k == 1) \" missing value generated\" else \" missing values generated\", \")\\n\", sep = \"\")\n  structure(out, label = attr(x, \"label\", exact = TRUE))\n}";
 
 /// egen concat(): each variable as text (a number as string() writes it, or in
 /// format()), joined with punct() between them and blanks taken off both
@@ -500,6 +500,16 @@ impl Session {
             return Err(no(
                 "recode: generate() needs one new name for each variable",
             ));
+        }
+        // a new variable that is already there stops it (Stata: r(110))
+        if !new_names.is_empty() {
+            let d = self.data()?;
+            for n in &new_names {
+                out.line(format!(
+                    "if ({} %in% names({d})) stop(\"variable {n} already defined (Stata: r(110))\", call. = FALSE)",
+                    r_text(n)
+                ));
+            }
         }
         // labels in the rules make a label set for each new variable, named
         // after it or label(); one already there gains them, the later text
@@ -1661,8 +1671,9 @@ impl Session {
         };
         if opts.has("replace", 7) {
             let call = format!(
-                "stata_destring(v, dplyr::cur_column(), {}, {force})",
-                r_text(&ignore)
+                "stata_destring(v, dplyr::cur_column(), {}, {force}, float = {})",
+                r_text(&ignore),
+                if float { "TRUE" } else { "FALSE" }
             );
             out.line(format!(
                 "{d} <- {d} |> dplyr::mutate(dplyr::across({}, \\(v) {}))",
@@ -1683,10 +1694,12 @@ impl Session {
             let mut assigns = Vec::new();
             for (o, n) in olds.iter().zip(news.iter()) {
                 let call = format!(
-                    "stata_destring({}, {}, {}, {force}, generate = TRUE)",
+                    "stata_destring({}, {}, {}, {force}, generate = TRUE, newname = {}, float = {})",
                     r_name(o),
                     r_text(o),
-                    r_text(&ignore)
+                    r_text(&ignore),
+                    r_text(n),
+                    if float { "TRUE" } else { "FALSE" }
                 );
                 assigns.push(format!("{} = {}", r_name(n), wrap_float(call, self)));
                 self.kinds.insert(n.clone(), Kind::Number);

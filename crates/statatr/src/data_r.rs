@@ -755,7 +755,9 @@ fn no(reason: impl Into<String>) -> Untranslated {
 /// column of numbers with "NA" at row 6,583 is a string); readr would look at
 /// the first 1,000 and make the late text missing.
 const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ..., guess_max = NULL) {
-  lines <- readLines(file, warn = FALSE)
+  lines <- readLines(file, warn = FALSE, encoding = "UTF-8")
+  # a file that is not UTF-8 is read as Latin-1, as Stata guesses an ISO-8859 for it
+  if (!"locale" %in% names(list(...)) && !all(validUTF8(lines))) lines <- iconv(lines, from = "latin1", to = "UTF-8")
   lines <- lines[nzchar(sub("\r$", "", lines))]
   if (is.null(guess_max)) guess_max <- max(1000, length(lines))
   if (!"delim" %in% names(list(...))) {
@@ -2923,6 +2925,12 @@ impl Session {
         );
         out.package("dplyr");
         out.line(format!("{name} <- {}", steps.join(" |> ")));
+        // Stata 19's count line (its encoding line before it is its own guess, left out)
+        if "delimited".starts_with(kind) && kind.len() >= 5 {
+            out.line(format!(
+                "cat(\"(\", ncol({name}), \" vars, \", format(nrow({name}), big.mark = \",\", scientific = FALSE), \" obs)\\n\", sep = \"\")"
+            ));
+        }
         self.data = Some(name);
         self.file = None;
         self.kinds.clear();
