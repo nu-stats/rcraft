@@ -351,8 +351,17 @@ stata_ml_iterations <- function(fit, kind) {
   if (is.null(path) || path$odd || !path$converged) return(NULL)
   path$lls
 }
-stata_ml_print <- function(fit, title, robust = FALSE, nobs = NULL, level = 0.95, label = "Coefficient",
-                           eform = FALSE, note = NULL, iterations = NULL) {
+# prints the whole table or nothing: a model the layout can't place (an
+# omitted column, a missing variance) falls back to R's layout untouched
+stata_ml_print <- function(...) {
+  ok <- FALSE
+  out <- tryCatch(utils::capture.output(ok <- stata_ml_print_body(...)), error = function(e) NULL)
+  if (is.null(out) || !isTRUE(ok)) return(FALSE)
+  cat(paste0(out, "\n"), sep = "")
+  TRUE
+}
+stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level = 0.95, label = "Coefficient",
+                                eform = FALSE, note = NULL, iterations = NULL) {
   e <- stata_e
   # e(b) names the outcome's equation (y:x); the table's rows are the names alone
   nm <- colnames(e$b)

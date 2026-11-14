@@ -216,6 +216,91 @@ pub(super) const SAME_DATES_HELPER: &str = r#"stata_same_dates <- function(d, u)
 /// variable with any other text is left alone, with Stata's message.
 pub(super) const DESTRING_HELPER: &str = "stata_destring <- function(x, name, ignore = \"\", force = FALSE, generate = FALSE) {\n  if (!is.character(x)) {\n    message(name, \" already numeric; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  y <- x\n  for (ch in strsplit(ignore, \"\")[[1]]) y <- gsub(ch, \"\", y, fixed = TRUE)\n  y <- trimws(y)\n  number <- grepl(\"^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eEdD][+-]?[0-9]+)?$\", y)\n  missing <- is.na(y) | y == \"\" | grepl(\"^[.][a-z]?$\", y)\n  if (!force && !all(number | missing)) {\n    message(name, \": contains nonnumeric characters; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  out <- suppressWarnings(as.numeric(sub(\"[dD]\", \"e\", y)))\n  out[!number] <- NA\n  structure(out, label = attr(x, \"label\", exact = TRUE))\n}";
 
+/// egen concat(): each variable as text (a number as string() writes it, or in
+/// format()), joined with punct() between them and blanks taken off both
+/// ends, as Stata 19 makes it.
+pub(super) const CONCAT_HELPER: &str = r#"stata_concat <- function(m, punct = "", fmt = "%9.0g") {
+  parts <- lapply(m, function(v) {
+    if (is.character(v)) return(v)
+    if (inherits(v, "Date")) v <- v - as.Date("1960-01-01")
+    x <- as.numeric(as.vector(unclass(v)))
+    s <- vapply(x, function(x) sub("^ +", "", stata_fmt(x, fmt)), "", USE.NAMES = FALSE)
+    # .a to .z as themselves
+    tag <- rep(NA_character_, length(x))
+    if (anyNA(x)) tag[is.na(x)] <- haven::na_tag(x[is.na(x)])
+    s[!is.na(tag)] <- paste0(".", tag[!is.na(tag)])
+    s
+  })
+  # the joined text with blanks taken off both ends (Stata 19; those inside stay)
+  trimws(do.call(paste, c(unname(parts), sep = punct)), whitespace = "[ ]")
+}"#;
+
+/// export delimited as Stata 19 writes it (checked on probes): names on the first
+/// line, a double as %18.0g, a float to 8 digits (a whole one in full), a %t
+/// variable in its date format, value labels, `.` empty and `.a` kept; with datafmt
+/// each variable's display format (its commas left out); a string quoted only when
+/// it holds the delimiter, a quote or a line break (quotes doubled); CRLF on Windows.
+pub(super) const EXPORT_DELIM_HELPER: &str = r#"stata_export_delim <- function(d, file, shown, delim = ",", varnames = TRUE, nolabel = FALSE,
+                               datafmt = FALSE, quote = FALSE, replace = FALSE) {
+  if (file.exists(file) && !replace) stop("file ", shown, " already exists (Stata: r(602))", call. = FALSE)
+  existed <- file.exists(file)
+  q <- function(s) {
+    need <- quote | grepl(delim, s, fixed = TRUE) | grepl("\"", s, fixed = TRUE) | grepl("\n", s, fixed = TRUE)
+    s <- gsub("\"", "\"\"", s, fixed = TRUE)
+    ifelse(need, paste0("\"", s, "\""), s)
+  }
+  num <- function(x, fmt, isfloat) {
+    if (!is.null(fmt) && grepl("^%-?(t|d)", fmt)) return(vapply(x, function(v) stata_fmt(v, fmt, trim = TRUE), ""))
+    if (datafmt) {
+      if (is.null(fmt) || grepl("s$", fmt)) fmt <- if (isfloat) "%9.0g" else "%10.0g"
+      fmt <- sub("c$", "", fmt)
+      return(vapply(x, function(v) stata_fmt(v, fmt, trim = TRUE), ""))
+    }
+    if (!isfloat) return(vapply(x, function(v) stata_fmt(v, "%18.0g", trim = TRUE), ""))
+    whole <- x == round(x) & abs(x) < 1e15
+    s <- sprintf("%.8g", x)
+    e <- grepl("e", s, fixed = TRUE)
+    s[e] <- sprintf("%#.8g", x[e])
+    s[whole] <- sprintf("%.0f", x[whole])
+    sub("^(-?)0[.]", "\\1.", s)
+  }
+  col <- function(v) {
+    if (is.character(v)) return(q(ifelse(is.na(v), "", v)))
+    fmt <- attr(v, "format.stata", exact = TRUE)
+    if (inherits(v, "Date")) {
+      v <- as.numeric(v - as.Date("1960-01-01"))
+      if (is.null(fmt) || !grepl("^%-?(t|d)", fmt)) fmt <- "%td"
+    }
+    labs <- if (nolabel) NULL else attr(v, "labels", exact = TRUE)
+    x <- as.vector(unclass(v))
+    x <- as.numeric(x)
+    out <- rep("", length(x))
+    ok <- !is.na(x)
+    tag <- rep(NA_character_, length(x))
+    if (any(!ok)) tag[!ok] <- haven::na_tag(x[!ok])
+    out[!ok & !is.na(tag)] <- paste0(".", tag[!ok & !is.na(tag)])
+    if (any(ok)) {
+      xo <- x[ok]
+      isfloat <- all(xo == stata_float(xo))
+      s <- num(xo, fmt, isfloat)
+      if (length(labs)) {
+        hit <- match(xo, as.numeric(labs))
+        s[!is.na(hit)] <- q(names(labs)[hit[!is.na(hit)]])
+      }
+      out[ok] <- s
+    }
+    out
+  }
+  cells <- lapply(d, col)
+  body <- if (length(cells)) do.call(paste, c(unname(cells), sep = delim)) else character()
+  lines <- c(if (varnames) paste(names(d), collapse = delim), body)
+  eol <- if (.Platform$OS.type == "windows") "\r\n" else "\n"
+  if (!existed) cat("(file ", shown, " not found)\n", sep = "")
+  writeBin(charToRaw(enc2utf8(paste0(lines, eol, collapse = ""))), file)
+  cat("file ", shown, " saved\n", sep = "")
+  invisible(NULL)
+}"#;
+
 /// `tostring` of whole numbers, written as Stata's `%12.0g` writes them;
 /// missing becomes ".". Other numbers stop with a message (not translated).
 pub(super) const TOSTRING_HELPER: &str = "stata_tostring <- function(x, name, generate = FALSE) {\n  if (is.character(x)) {\n    message(name, \" already string; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  v <- as.numeric(x)\n  s <- ifelse(is.na(v), \".\", formatC(v, format = \"f\", digits = 0))\n  if (any(!is.na(v) & (v != trunc(v) | nchar(s) > 12))) stop(name, \": tostring of numbers that are not whole (or have more than 12 digits) is not translated yet\")\n  structure(s, label = attr(x, \"label\", exact = TRUE))\n}";
@@ -535,6 +620,9 @@ impl Session {
         }
         let (fname, args) =
             call_parts(rhs).ok_or_else(|| no("egen needs a function, like mean(x)"))?;
+        if fname == "concat" {
+            return self.egen_concat(c, opts, out, ty, var, args);
+        }
         let known: &[(&str, usize)] = &[
             ("by", 2),
             ("missing", 7),
@@ -732,6 +820,67 @@ impl Session {
             None => self.step(c, step, out)?,
         }
         self.kinds.insert(var.to_string(), Kind::Number);
+        Ok(())
+    }
+
+    /// egen concat(varlist) [, punct() format()]: a string variable, each
+    /// number as string() writes it (or in format()), strings as they are,
+    /// "" outside if/in (Stata 19, checked on a probe).
+    fn egen_concat(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+        ty: Option<&str>,
+        var: &str,
+        args: &str,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("punct", 5), ("format", 6)]) {
+            return Err(no(format!(
+                "egen concat() with the option {o} is not translated yet"
+            )));
+        }
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            return Err(no("egen concat() may not be combined with by"));
+        }
+        if let Some(t) = ty {
+            return Err(no(format!(
+                "egen {t} {var} = concat() is not translated yet"
+            )));
+        }
+        let fmt = match opts.arg("format", 6) {
+            None => "%9.0g".to_string(),
+            Some(f) if crate::expr_r::stata_number_format(f.trim()) => f.trim().to_string(),
+            Some(f) => {
+                return Err(no(format!(
+                    "egen concat(), format({f}) is translated only for a numeric format written out, as %9.2f"
+                )))
+            }
+        };
+        let punct = opts
+            .arg("punct", 5)
+            .map(|p| crate::dofile::macros::unquote(p.trim()))
+            .unwrap_or_default();
+        let cond = self.condition(c, out)?;
+        self.need_helper("stata_fmt");
+        self.need_helper("stata_concat");
+        let mut value = format!(
+            "stata_concat(dplyr::pick({}), punct = {}, fmt = {})",
+            select(args)?,
+            r_text(&punct),
+            r_text(&fmt)
+        );
+        if let Some(k) = &cond {
+            value = format!("dplyr::if_else({k}, {value}, \"\")");
+        }
+        out.package("dplyr");
+        let d = self.data()?;
+        out.line(format!(
+            "if ({} %in% names({d})) stop(\"variable {var} already defined\")",
+            r_text(var)
+        ));
+        self.step(c, format!("dplyr::mutate({} = {value})", r_name(var)), out)?;
+        self.kinds.insert(var.to_string(), Kind::Text);
         Ok(())
     }
 
@@ -2429,6 +2578,86 @@ impl Session {
     /// `format varlist %fmt` (or `format %fmt varlist`): how the variables are
     /// shown, kept as their `format.stata` attribute (which haven writes to a
     /// .dta file); the values do not change.
+    /// `export delimited [varlist] using file [if] [in] [, replace delimiter()
+    /// novarnames nolabel datafmt quote]` (and `export delimited file`).
+    pub(super) fn export(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let main = c.parts.main.trim();
+        let (kind, rest) = main.split_once(char::is_whitespace).unwrap_or((main, ""));
+        if !("delimited".starts_with(kind) && kind.len() >= 5) {
+            return Err(no(format!(
+                "export {kind} is not translated yet (export delimited is)"
+            )));
+        }
+        if let Some(o) = opts.other(&[
+            ("replace", 7),
+            ("delimiter", 5),
+            ("novarnames", 9),
+            ("nolabel", 7),
+            ("datafmt", 7),
+            ("quote", 5),
+        ]) {
+            return Err(no(format!(
+                "export delimited with the option {o} is not translated yet"
+            )));
+        }
+        let (vars, file) = match &c.using {
+            Some(f) => (Some(rest.trim()).filter(|v| !v.is_empty()), f.clone()),
+            None => (None, rest.trim().to_string()),
+        };
+        if file.trim().is_empty() {
+            return Err(no("export delimited needs a file name"));
+        }
+        let path = file_name(&file, "csv");
+        let delim = match opts
+            .arg("delimiter", 5)
+            .map(|d| crate::dofile::macros::unquote(d.trim()))
+        {
+            None => ",".to_string(),
+            Some(d) if d == "tab" => "\t".to_string(),
+            Some(d) if d.chars().count() == 1 => d,
+            Some(d) => {
+                return Err(no(format!(
+                    "export delimited, delimiter({d}) is translated for one character or tab"
+                )))
+            }
+        };
+        let d = self.data()?;
+        let mut frame = d.clone();
+        let mut steps = Vec::new();
+        if let Some(cond) = self.condition(c, out)? {
+            steps.push(format!("dplyr::filter({cond})"));
+        }
+        if let Some(v) = vars {
+            steps.push(format!("dplyr::select({})", select(v)?));
+        }
+        if !steps.is_empty() {
+            out.package("dplyr");
+            frame = format!("({d} |> {})", steps.join(" |> "));
+        }
+        out.package("haven");
+        self.need_helper("stata_fmt");
+        self.need_helper("stata_float");
+        self.need_helper("stata_export_delim");
+        let flag = |b: bool| if b { "TRUE" } else { "FALSE" };
+        out.line(format!(
+            "stata_export_delim({frame}, {p}, {shown}, delim = {}, varnames = {}, nolabel = {}, datafmt = {}, quote = {}, replace = {})",
+            r_text(&delim),
+            flag(!opts.has("novarnames", 9)),
+            flag(opts.has("nolabel", 7)),
+            flag(opts.has("datafmt", 7)),
+            flag(opts.has("quote", 5)),
+            flag(opts.has("replace", 7)),
+            p = r_text(&path),
+            shown = r_text(&path),
+        ));
+        Ok(())
+    }
+
     pub(super) fn format(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let words: Vec<&str> = c.parts.main.split_whitespace().collect();
         let (fmts, vars): (Vec<&str>, Vec<&str>) = words.iter().partition(|w| w.starts_with('%'));

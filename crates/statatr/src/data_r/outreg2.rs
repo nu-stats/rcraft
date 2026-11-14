@@ -18,7 +18,7 @@
 use super::*;
 
 /// Writes the table (`stata_e` is the model).
-pub(super) const OUTREG2_HELPER: &str = r##"stata_outreg2 <- function(file, bdec, tdec, keep = NULL, r2 = FALSE, adjr2 = FALSE,
+pub(super) const OUTREG2_HELPER: &str = r##"stata_outreg2 <- function(file, bdec, tdec, keep = NULL, sortvar = NULL, r2 = FALSE, adjr2 = FALSE,
                           extras = character(), replace = FALSE, se = FALSE, tex = FALSE,
                           lab = FALSE, ctitle = NULL, addtext = character(), addstat = list(),
                           data = NULL) {
@@ -35,7 +35,17 @@ pub(super) const OUTREG2_HELPER: &str = r##"stata_outreg2 <- function(file, bdec
   coef <- list()
   for (v in vars) {
     i <- match(v, nm)
-    if (is.na(b[i]) || !(sev[i] > 0)) next
+    if (is.na(b[i])) next
+    # no standard error (e(V) zero there): the coefficient with (.), no stars (Stata 19)
+    # an omitted term (o.x): "-" and an empty line under it
+    if (grepl("^([0-9]+)?o[.]", v)) {
+      coef[[v]] <- c("-", "")
+      next
+    }
+    if (!(sev[i] > 0)) {
+      coef[[if (v == "_cons") "Constant" else v]] <- c(num(b[i], bdec), "(.)")
+      next
+    }
     t <- b[i] / sev[i]
     p <- 2 * (if (is.finite(df)) stats::pt(-abs(t), df) else stats::pnorm(-abs(t)))
     # with se, the standard error has 3 decimals whatever tdec() says (Stata 19)
@@ -44,6 +54,8 @@ pub(super) const OUTREG2_HELPER: &str = r##"stata_outreg2 <- function(file, bdec
   }
   sig3 <- function(x) {
     if (x == round(x)) return(format(x, big.mark = ",", scientific = FALSE))
+    # below 1e-4, 3 significant digits in e-notation, as C's %g (-2.58e-05)
+    if (abs(x) < 1e-4) return(sprintf("%.2e", x))
     formatC(x, format = "f", digits = max(0, 2 - floor(log10(abs(x)))))
   }
   # the column's statistics: Observations, R-squared from the model, xtreg's
@@ -102,9 +114,24 @@ pub(super) const OUTREG2_HELPER: &str = r##"stata_outreg2 <- function(file, bdec
   }
   has_lab <- lab || had_lab
   robust <- identical(e$vcetype, "Robust")
-  if (is.null(foot)) foot <- if (!se) "t-statistics in parentheses" else if (robust) "Robust standard errors in parentheses" else "Standard errors in parentheses"
+  if (is.null(foot)) foot <- if (!se) paste0(if (robust) "Robust " else "", "t-statistics in parentheses") else if (robust) "Robust standard errors in parentheses" else "Standard errors in parentheses"
   k <- length(heads)
-  var_order <- c(setdiff(names(old_vars), "Constant"), setdiff(setdiff(names(coef), "Constant"), names(old_vars)))
+  # the rows: the table's own, a variable the model adds going before the next one the
+  # two share (in the model's order), else last; an omitted term (o.x) last of all
+  old <- setdiff(names(old_vars), "Constant")
+  new <- setdiff(names(coef), "Constant")
+  omitted <- grepl("^([0-9]+)?o[.]", new)
+  var_order <- old
+  shared <- new[!omitted & new %in% old]
+  for (j in which(!omitted)) {
+    v <- new[j]
+    if (v %in% var_order) next
+    after <- new[seq_along(new) > j & !omitted]
+    nxt <- after[after %in% shared][1]
+    var_order <- if (is.na(nxt)) c(var_order, v) else append(var_order, v, after = match(nxt, var_order) - 1)
+  }
+  var_order <- c(var_order, setdiff(new[omitted], var_order))
+  if (!is.null(sortvar)) var_order <- c(intersect(sortvar, var_order), setdiff(var_order, sortvar))
   if ("Constant" %in% c(names(old_vars), names(coef))) var_order <- c(var_order, "Constant")
   # the statistics' rows. One column: the model's own order (xtreg fe: the
   # Number of panels before R-squared), then e(), addtext() and addstat(). A
@@ -212,6 +239,7 @@ impl Session {
             ("adjr2", 5),
             ("r2", 2),
             ("keep", 4),
+            ("sortvar", 4),
             ("e", 1),
             ("replace", 7),
             ("append", 6),
@@ -325,6 +353,13 @@ impl Session {
         if let Some(k) = &keep {
             let names: Vec<String> = k.iter().map(|s| r_text(s)).collect();
             args.push_str(&format!(", keep = c({})", names.join(", ")));
+        }
+        // sortvar(): those variables first, in that order, then the rest
+        if let Some(s) = opts.arg("sortvar", 4) {
+            let names: Vec<String> = s.split_whitespace().map(r_text).collect();
+            if !names.is_empty() {
+                args.push_str(&format!(", sortvar = c({})", names.join(", ")));
+            }
         }
         if opts.has("r2", 2) {
             args.push_str(", r2 = TRUE");

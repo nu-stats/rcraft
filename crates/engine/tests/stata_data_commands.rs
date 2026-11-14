@@ -247,3 +247,110 @@ fn data_commands_translate_and_run_like_stata() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(wrong.is_empty(), "\n{}", wrong.join("\n\n"));
 }
+
+/// `export delimited` writes the files Stata 19 wrote from the same do-file
+/// (a probe, byte for byte but the line ends): a double as %18.0g, a float to
+/// 8 digits, the %td format kept, value labels, `.` empty and `.a` kept;
+/// datafmt's display formats; quotes only when needed; delimiter(), novarnames,
+/// nolabel and quote. And egen concat(), as Stata 19 joins the same values.
+#[test]
+fn export_delimited_writes_the_files_stata_19_writes() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let dir = std::env::temp_dir().join(format!("rcraft-export-{}", std::process::id()));
+    let _ = std::fs::create_dir_all(&dir);
+    let d = slash(&dir);
+    let dofile = format!(
+        r#"clear
+set obs 6
+gen double d = _n * 1.23456789
+replace d = . in 2
+replace d = -0.5 in 3
+replace d = 1234567.891 in 4
+replace d = 1e-7 in 5
+replace d = .a in 6
+gen float f = _n / 10
+replace f = 123456.7 in 4
+gen int i = _n * 1000
+replace i = . in 3
+gen str12 s = "plain"
+replace s = "a,b" in 2
+replace s = "q" + char(34) + "uote" in 3
+replace s = "" in 4
+replace s = " sp " in 5
+label define yn 1 "Yes" 2 "No, never"
+gen byte l = mod(_n, 3)
+label values l yn
+gen double t = mdy(1, 15, 2020) + _n
+format t %td
+format d %9.3f
+format f %6.2f
+format i %9.0gc
+export delimited using "{d}/plain.csv", replace
+export delimited using "{d}/fmt.csv", replace datafmt
+export delimited d s using "{d}/sub.csv" if _n < 4, replace nolabel quote
+export delimited using "{d}/semi.csv", replace delimiter(";") novarnames
+egen c1 = concat(d f)
+egen c2 = concat(s d), punct("-")
+egen c3 = concat(d i) if _n < 4
+egen c4 = concat(f d), format(%9.2f)
+export delimited c1 c2 c3 c4 using "{d}/concat.csv", replace
+"#
+    );
+    let t = translate(&read(&dofile));
+    let not: Vec<String> = t
+        .lines
+        .iter()
+        .filter_map(|l| {
+            l.result
+                .as_ref()
+                .err()
+                .map(|e| format!("{} -> {}", l.stata, e.reason))
+        })
+        .collect();
+    assert!(not.is_empty(), "not translated: {}", not.join("; "));
+    let (ran, text) = run(&mut e, &t.script());
+    assert_eq!(ran, Outcome::Ok, "{text}");
+    // Stata 19's files (its Windows line ends taken off)
+    let want = [
+        (
+            "plain",
+            "d,f,i,s,l,t\n1.23456789,.1,1000,plain,Yes,16jan2020\n,.2,2000,\"a,b\",\"No, never\",17jan2020\n\
+             -.5,.30000001,,\"q\"\"uote\",0,18jan2020\n1234567.891,123456.7,4000,,Yes,19jan2020\n\
+             1.00000000000e-07,.5,5000, sp ,\"No, never\",20jan2020\n.a,.60000002,6000,plain,0,21jan2020\n",
+        ),
+        (
+            "fmt",
+            "d,f,i,s,l,t\n1.235,0.10,1000,plain,Yes,16jan2020\n,0.20,2000,\"a,b\",\"No, never\",17jan2020\n\
+             -0.500,0.30,,\"q\"\"uote\",0,18jan2020\n1.23e+06,1.2e+05,4000,,Yes,19jan2020\n\
+             0.000,0.50,5000, sp ,\"No, never\",20jan2020\n.a,0.60,6000,plain,0,21jan2020\n",
+        ),
+        ("sub", "d,s\n1.23456789,\"plain\"\n,\"a,b\"\n-.5,\"q\"\"uote\"\n"),
+        (
+            "semi",
+            "1.23456789;.1;1000;plain;Yes;16jan2020\n;.2;2000;a,b;No, never;17jan2020\n\
+             -.5;.30000001;;\"q\"\"uote\";0;18jan2020\n1234567.891;123456.7;4000;;Yes;19jan2020\n\
+             1.00000000000e-07;.5;5000; sp ;No, never;20jan2020\n.a;.60000002;6000;plain;0;21jan2020\n",
+        ),
+        // egen concat() of the same values (blanks off both ends: "sp -1.00e-07")
+        (
+            "concat",
+            "c1,c2,c3,c4\n1.234568.1,plain-1.234568,1.2345681000,0.101.23\n..2,\"a,b-.\",.2000,0.20.\n\
+             -.5.3,\"q\"\"uote--.5\",-.5.,0.30-0.50\n1234568123456.7,-1234568,,123456.701.23e+06\n\
+             1.00e-07.5,sp -1.00e-07,,0.500.00\n.a.6,plain-.a,,0.60.a\n",
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (name, body) in want {
+        let got = std::fs::read_to_string(dir.join(format!("{name}.csv"))).unwrap_or_default();
+        if cfg!(windows) && !got.contains("\r\n") {
+            wrong.push(format!("{name}: not Windows line ends"));
+        }
+        let got = got.replace("\r\n", "\n");
+        if got != body {
+            wrong.push(format!("{name}:\n{got}\n-- Stata 19 --\n{body}"));
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(wrong.is_empty(), "\n{}", wrong.join("\n\n"));
+}

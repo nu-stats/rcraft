@@ -50,6 +50,8 @@ stata_dt_civil <- function(day) {
 }
 # f(day, civil) for the days Stata can show (0100 to 9999), else missing
 stata_dt_on <- function(d, f) {
+  # a %td variable read from a .dta file is R's Date: days since 1960 as Stata counts them
+  if (inherits(d, "Date")) d <- as.numeric(d - as.Date("1960-01-01"))
   day <- floor(d)
   ok <- !is.na(d) & is.finite(d) & day >= -679350 & day <= 2936549
   out <- rep(NA_real_, length(d))

@@ -62,9 +62,15 @@ pub(super) const REGHDFE_HELPER: &str = r#"stata_reghdfe <- function(formula, da
   if (!is.matrix(Xw)) Xw <- matrix(Xw, nrow = N, dimnames = list(NULL, colnames(X)))
   yw <- within(y)
   # a variable the absorbed ones explain is left out, as reghdfe does
-  q <- qr(Xw, tol = 1e-9)
+  # first those whose partialled-out values are close to zero against their own spread
+  # (qr would judge a column of rounding noise by its own tiny size)
+  ss0 <- colSums(sweep(X, 2, colMeans(X))^2)
+  gone <- colSums(Xw^2) <= 1e-9 * ss0
   keep <- rep(FALSE, ncol(X))
-  keep[q$pivot[seq_len(q$rank)]] <- TRUE
+  if (any(!gone)) {
+    q <- qr(Xw[, !gone, drop = FALSE], tol = 1e-9)
+    keep[which(!gone)[q$pivot[seq_len(q$rank)]]] <- TRUE
+  }
   if (notes) for (j in which(!keep)) cat("note: ", colnames(X)[j], " is probably collinear with the fixed effects (all partialled-out values are close to zero; tol = 1.0e-09)\n", sep = "")
   K <- sum(keep)
   mx <- colMeans(X[, keep, drop = FALSE])
@@ -94,7 +100,10 @@ pub(super) const REGHDFE_HELPER: &str = r#"stata_reghdfe <- function(formula, da
     length(unique(lab))
   }
   redundant <- rep(0, length(fes))
-  if (length(fes) >= 2) redundant[2] <- components(fes[[1]], fes[[2]])
+  # the pairwise count is not made for a second variable nested in a cluster variable
+  if (length(fes) >= 2 && !nested[2]) redundant[2] <- components(fes[[1]], fes[[2]])
+  # a third absorbed variable or more: only one nested in a cluster variable (it counts none)
+  if (length(fes) > 2 && !all(nested[-(1:2)])) stop("reghdfe with a third absorbed variable not nested in a cluster variable is not translated yet", call. = FALSE)
   counts <- ifelse(nested, 0, levels_of - redundant)
   df_a <- if (length(fes)) sum(counts) else 1
   df_a_full <- if (length(fes)) sum(levels_of - redundant) else 1
@@ -102,16 +111,35 @@ pub(super) const REGHDFE_HELPER: &str = r#"stata_reghdfe <- function(formula, da
   rss <- sum(e^2)
   meat <- function(cl) crossprod(rowsum(Xa * e, cl))
   G <- NA
+  # one slope fixed with the constant: Stata posts e(V) or zeroes it as its rounding of a
+  # correlation of exactly 1 falls (22 of 30 kept in XURXZN); RCraft keeps it
+  coin <- FALSE
   if (length(cluster) == 2) {
     c1 <- as.character(d[[cluster[1]]])
     c2 <- as.character(d[[cluster[2]]])
     Gs <- c(length(unique(c1)), length(unique(c2)))
     G <- min(Gs)
     V <- B %*% (meat(c1) + meat(c2) - meat(paste(c1, c2, sep = "\r"))) %*% B * (N - 1) / (N - Kt) * G / (G - 1)
-    ev <- eigen((V + t(V)) / 2, symmetric = TRUE)
-    if (any(ev$values < 0)) {
+    # Cameron, Gelbach and Miller's fix as reghdfe makes it (matched to its e(V)): on the
+    # slopes' block alone, each variable in units of its standard deviation; the constant's
+    # row and column from the same fix of the whole matrix, the constant in its own units
+    cgm <- function(A, s) {
+      A2 <- A * outer(s, s)
+      ev <- eigen((A2 + t(A2)) / 2, symmetric = TRUE)
+      neg <- any(ev$values < 0)
+      if (neg) A2 <- ev$vectors %*% diag(pmax(ev$values, 0), length(ev$values)) %*% t(ev$vectors)
+      list(V = A2 / outer(s, s), neg = neg)
+    }
+    sdx <- apply(X[, keep, drop = FALSE], 2, stats::sd)
+    sdx[!is.finite(sdx) | sdx == 0] <- 1
+    sl <- seq_len(K)
+    fs <- if (K > 0) cgm(V[sl, sl, drop = FALSE], sdx) else list(V = NULL, neg = FALSE)
+    fc <- cgm(V, c(sdx, 1))
+    if (fs$neg || fc$neg) {
       if (notes) cat("Warning: VCV matrix was non-positive semi-definite; adjustment from Cameron, Gelbach & Miller applied.\n")
-      V <- ev$vectors %*% diag(pmax(ev$values, 0), length(ev$values)) %*% t(ev$vectors)
+      V <- fc$V
+      if (K > 0) V[sl, sl] <- fs$V
+      coin <- K == 1 && !fs$neg
     }
     df_r <- G - 1
   } else if (length(cluster) == 1) {
@@ -136,7 +164,21 @@ pub(super) const REGHDFE_HELPER: &str = r#"stata_reghdfe <- function(formula, da
   Vf <- matrix(0, length(bf), length(bf), dimnames = list(names(bf), names(bf)))
   Vf[nm, nm] <- V
   slopes <- seq_len(K)
-  Fs <- if (K > 0) drop(t(b[slopes]) %*% solve(V[slopes, slopes, drop = FALSE], b[slopes])) / K else NA_real_
+  # F is missing when the slopes' VCV has rank below K (too few clusters, or a
+  # variable dropped), with reghdfe's warning
+  Vs <- V[slopes, slopes, drop = FALSE]
+  evs <- if (K > 0) eigen((Vs + t(Vs)) / 2, symmetric = TRUE, only.values = TRUE)$values else 0
+  full <- K > 0 && min(evs) > max(abs(evs)) * 1e-12
+  if (K > 0 && !full && notes) cat("warning: missing F statistic; dropped variables due to collinearity or too few clusters\n")
+  Fs <- if (full) drop(t(b[slopes]) %*% solve(Vs, b[slopes])) / K else NA_real_
+  # Stata's ereturn post refuses a variance with a covariance larger than its two
+  # variances allow (as the fix above can leave it): e(V) is then zero, the errors missing
+  sv <- sqrt(pmax(diag(V), 0))
+  if (!coin && any(abs(V) > outer(sv, sv) * (1 + 1e-9))) {
+    if (notes) cat("warning: variance matrix is nonsymmetric or highly singular.\n")
+    V[] <- 0
+    Vf[] <- 0
+  }
   tss <- sum((y - mean(y))^2)
   tss_w <- sum(yw^2)
   r2 <- 1 - rss / tss
@@ -146,7 +188,7 @@ pub(super) const REGHDFE_HELPER: &str = r#"stata_reghdfe <- function(formula, da
   fit$stata <- list(N = N, N_full = N_full, num_singletons = dropped, df_r = df_r, df_m = K, df_a = df_a,
                     df_a_initial = if (length(fes)) sum(levels_of) else 1, df_a_redundant = sum(redundant) + sum(ifelse(nested, levels_of - redundant, 0)),
                     df_a_nested = sum(ifelse(nested, levels_of, 0)), rss = rss, tss = tss, tss_within = tss_w,
-                    mss = tss - rss, rmse = sqrt(rss / (N - Kt)), F = Fs, r2 = r2, r2_within = r2_w,
+                    mss = tss - rss, rmse = sqrt(rss / (N - K - df_a_full)), F = Fs, r2 = r2, r2_within = r2_w,
                     r2_a = 1 - (1 - r2) * (N - 1) / (N - K - df_a_full),
                     r2_a_within = 1 - (1 - r2_w) * (N - df_a_full) / (N - K - df_a_full),
                     ll = ll(rss), ll_0 = ll(tss_w), G = Gs, absorb = absorb, cluster = cluster)
@@ -159,9 +201,9 @@ stata_reghdfe_header <- function(fit) {
   nh <- length(e$absorb)
   row("HDFE Linear regression", sprintf("Number of obs   = %10s", format(e$N, big.mark = ",")))
   row(if (nh) sprintf("Absorbing %d HDFE group%s", nh, if (nh == 1) "" else "s") else "",
-      sprintf("F(%4d,%6d) = %10.2f", e$df_m, e$df_r, e$F))
+      if (is.na(e$F)) sprintf("F(%4d,%6d) = %10s", e$df_m, e$df_r, ".") else sprintf("F(%4d,%6d) = %10.2f", e$df_m, e$df_r, e$F))
   row(if (length(e$cluster)) "Statistics robust to heteroskedasticity" else "",
-      sprintf("Prob > F        = %10.4f", stats::pf(e$F, e$df_m, e$df_r, lower.tail = FALSE)))
+      if (is.na(e$F)) sprintf("Prob > F        = %10s", ".") else sprintf("Prob > F        = %10.4f", stats::pf(e$F, e$df_m, e$df_r, lower.tail = FALSE)))
   row("", sprintf("R-squared       = %10.4f", e$r2))
   row("", sprintf("Adj R-squared   = %10.4f", e$r2_a))
   row("", sprintf("Within R-sq.    = %10.4f", e$r2_within))
@@ -214,11 +256,6 @@ impl Session {
             None if opts.has("noabsorb", 3) => Vec::new(),
             None => return Err(no("reghdfe needs absorb() or noabsorb (Stata: r(198))")),
         };
-        if absorb.len() > 2 {
-            return Err(no(
-                "reghdfe with more than two absorbed variables is not translated yet",
-            ));
-        }
         let mut robust = false;
         let mut cluster: Vec<String> = Vec::new();
         if let Some(v) = opts.arg("vce", 3) {

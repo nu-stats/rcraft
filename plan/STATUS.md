@@ -4461,7 +4461,37 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   probes: factor levels, robust and clustered errors, or and irr with their notes); with an offset R's
   layout stays. Stata's iteration log is not printed yet: Stata's own Newton path (stata_ml_path, already
   used for probit's estimates) gives its iteration lines exactly in R, to be wired up next.
+  The table is printed whole or not at all: a model the layout can't place (perfect prediction with
+  its omitted column) falls back to R's layout instead of stopping.
 - The core-statistics session's next steps (from their commit messages): estat vif, imtest, bgodfrey,
   durbinalt, dwatson, classification and gof (b6b5b3a); mean, total, proportion, ratio, its tables cutting
   names with stata_tab_abbrev (43a29be); sdtest, sdtesti, estimates dir, stats and replay (9941837).
   The other P3.2 commits (de421e0, 85080db) are the SAS format catalogue.
+
+## XURXZN on stand-in data: reghdfe's two-way fix, export delimited, egen concat, 2026-11-13
+
+- XURXZN (auto insurance) reads processed files its package leaves out. Stand-in files with the same
+  names and variables (made-up values, seed 20261113) were run in Stata 19 (no errors, 50 s) and in
+  RCraft: 297 refused and 64 stopped lines became 7 refused (nl and the six lines that use it) and none
+  stopped. 961 of 979 model values match; the 18 others are one-slope two-way models whose errors Stata
+  posts or zeroes as its own rounding falls (below). 36 of the 52 output tables are byte for byte
+  (Table1.csv and TableIA.I.csv among them); the rest differ only in those cells and in a constant of
+  about 1e-17 on demeaned data.
+- reghdfe, two-way clusters, matched to Stata's e(V): Cameron, Gelbach and Miller's fix on the slopes
+  alone, each in units of its standard deviation, with the constant's row from the fix of the whole
+  matrix; F missing (with reghdfe's warning) when the slopes' variance falls short of full rank; a
+  variance with a covariance larger than its variances allow posted as zero, as Stata's ereturn post
+  does (probed). With one slope the fixed matrix has a correlation of exactly 1, and Stata keeps or
+  zeroes it by rounding (22 of 30 kept): RCraft keeps it, and the guide says so. Root MSE and the
+  adjusted R-squared count every absorbed level less the pairwise redundancy, which is not made for a
+  second variable nested in a cluster variable; a third absorbed variable nested in a cluster variable
+  is translated; a variable whose partialled-out values are close to zero against its spread is
+  dropped with reghdfe's note (qr judged rounding noise by its own size).
+- export delimited (new): Stata 19's files byte for byte on probes (a double as %18.0g, a float to 8
+  digits, %t formats kept, value labels, `.` empty and `.a` kept, datafmt, quotes only when needed,
+  delimiter(), novarnames, nolabel, quote, CRLF on Windows). egen concat() (new), with punct() and
+  format(), blanks taken off both ends. outreg2: sortvar(); a coefficient with no standard error shown
+  with (.); an omitted term as "-" last; a variable a later model adds placed before the next one the
+  two share; "Robust t-statistics"; an e() statistic below 1e-4 in e-notation. import delimited reads a
+  one-column file (Stata finds a comma or a tab itself). year(), month() and the other date functions
+  take a %td variable read from a .dta file.

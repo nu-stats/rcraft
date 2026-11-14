@@ -1533,7 +1533,7 @@ fn missing_one_side(x: &str, op: BinaryOp, c: &str) -> String {
 
 /// A Stata numeric format written out: `%[-][0]w.d` then `f`, `g` or `e`, a
 /// `c` after `f` or `g` for commas.
-fn stata_number_format(f: &str) -> bool {
+pub(crate) fn stata_number_format(f: &str) -> bool {
     let digits = |s: &str| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit());
     let Some(rest) = f.strip_prefix('%') else {
         return false;

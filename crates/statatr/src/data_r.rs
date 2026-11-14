@@ -758,6 +758,14 @@ const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ..., guess
   lines <- readLines(file, warn = FALSE)
   lines <- lines[nzchar(sub("\r$", "", lines))]
   if (is.null(guess_max)) guess_max <- max(1000, length(lines))
+  if (!"delim" %in% names(list(...))) {
+    # Stata finds a comma or a tab itself; a file of one column has neither
+    head <- if (length(lines)) lines[1] else ""
+    tabs <- lengths(regmatches(head, gregexpr("\t", head, fixed = TRUE)))
+    commas <- lengths(regmatches(head, gregexpr(",", head, fixed = TRUE)))
+    return(readr::read_delim(I(paste0(lines, collapse = "\n")), delim = if (tabs > commas) "\t" else ",", ...,
+                             guess_max = guess_max, skip_empty_rows = FALSE))
+  }
   readr::read_delim(I(paste0(lines, collapse = "\n")), ..., guess_max = guess_max, skip_empty_rows = FALSE)
 }"#;
 
@@ -1050,6 +1058,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_post" => postfile::POST_HELPER,
         "stata_file" => files::FILE_HELPER,
         "stata_tostring" => more::TOSTRING_HELPER,
+        "stata_concat" => more::CONCAT_HELPER,
+        "stata_export_delim" => more::EXPORT_DELIM_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
         "stata_tabulate" => stats::TABULATE_HELPER,
@@ -2341,6 +2351,7 @@ impl Session {
             "save" | "saveold" => self.save(c, &opts, out),
             "import" => self.import(c, &opts, out),
             "insheet" => self.insheet(c, &opts, out),
+            "export" => self.export(c, &opts, out),
             "split" => self.split(c, &opts, out),
             "input" => self.input(c, out),
             "confirm" => self.confirm(c, out),
