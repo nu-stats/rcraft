@@ -2051,7 +2051,8 @@ impl Session {
 
     /// `display`: text, expressions, formats and the column directives.
     pub(super) fn display(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
-        let rest = after_name(c);
+        // over()'s names (_b[c.y@0.b]) past the expression reader, which takes no @
+        let rest = crate::expr_r::hide_at(&after_name(c));
         let chars: Vec<char> = rest.chars().collect();
         let mut i = 0;
         let mut pieces: Vec<String> = Vec::new();

@@ -128,6 +128,49 @@ pub fn translate_with(
     translate_drawing(text, kind_of, returned, use_, None, false)
 }
 
+/// What stands in for `@` inside `_b[]`, `_se[]` and `_coef[]` while the
+/// expression is read: over()'s names (`_b[c.y@0.b]`, after mean) have an
+/// `@` the expression reader does not take; the name gets it back when the
+/// coefficient is looked up.
+pub(crate) const AT: &str = "_stata_at_";
+
+/// `text` with each `@` inside `_b[...]`, `_se[...]` and `_coef[...]` as [`AT`].
+pub(crate) fn hide_at(text: &str) -> String {
+    if !text.contains('@') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut depth = 0usize;
+    let mut rest = text;
+    while let Some(ch) = rest.chars().next() {
+        if depth == 0 {
+            if let Some(open) = ["_b[", "_se[", "_coef["]
+                .iter()
+                .find(|o| rest.starts_with(**o))
+            {
+                out.push_str(open);
+                rest = &rest[open.len()..];
+                depth = 1;
+                continue;
+            }
+        } else {
+            match ch {
+                '[' => depth += 1,
+                ']' => depth -= 1,
+                '@' => {
+                    out.push_str(AT);
+                    rest = &rest[1..];
+                    continue;
+                }
+                _ => {}
+            }
+        }
+        out.push(ch);
+        rest = &rest[ch.len_utf8()..];
+    }
+    out
+}
+
 /// [`translate_with`] where Stata's random draws may be taken: `rows` is the
 /// R for the rows that draw, a count (`dplyr::n()`, `1`) or a condition, one
 /// draw a row in order (Stata draws only for the rows an `if` or `in`
@@ -147,7 +190,8 @@ pub fn translate_drawing(
     rows: Option<&str>,
     tags: bool,
 ) -> Result<RExpr, Untranslated> {
-    let tree = parse(text).map_err(|e| no(format!("Stata would not read it: {}", e.message)))?;
+    let hidden = hide_at(text);
+    let tree = parse(&hidden).map_err(|e| no(format!("Stata would not read it: {}", e.message)))?;
     let tagged = has_extended(&tree);
     let mut t = Translator {
         kind_of,
@@ -535,7 +579,7 @@ impl Translator<'_> {
         // a coefficient of the last model, or its standard error
         if matches!(name, "_b" | "_se" | "_coef") {
             return match index {
-                Expr::Text(key) => (self.returned)(name, key),
+                Expr::Text(key) => (self.returned)(name, &key.replace(AT, "@")),
                 _ => Err(no(format!("{name}[] needs a coefficient name"))),
             };
         }
@@ -1519,6 +1563,18 @@ fn stata_number_format(f: &str) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn an_at_in_a_coefficient_name_is_hidden_from_the_reader() {
+        assert_eq!(
+            super::hide_at("_b[c.y@0.b] + _se[x]"),
+            "_b[c.y_stata_at_0.b] + _se[x]"
+        );
+        assert_eq!(
+            super::hide_at("\"a@b\" + _b[x]"),
+            "\"a@b\" + _b[x]",
+            "outside _b[] it stays"
+        );
+    }
     fn none(_: &str) -> Option<Kind> {
         None
     }

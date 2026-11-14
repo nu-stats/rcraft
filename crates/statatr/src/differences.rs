@@ -2327,9 +2327,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "vce() and the display options are refused; _b[] and _se[] of over()'s names \
-                 (c.y@0.b) are not read yet. Several variables in over() make cells of their \
-                 values (c.y@1bn.g#0bn.b), and iweights count as frequency weights, as Stata 19's.",
+                "vce() and the display options are refused. Several variables in over() make \
+                 cells of their values (c.y@1bn.g#0bn.b), iweights count as frequency weights, as \
+                 Stata 19's, and _b[] and _se[] read over()'s names (_b[c.y@0.b], with or without \
+                 bn).",
             ),
         ],
     },

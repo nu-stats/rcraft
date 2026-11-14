@@ -75,3 +75,7 @@ prop g
 display "@ prop2 " %24.17g el(e(b),1,2) " " e(cmd)
 mean y, over(g b)
 display "@ mover2 " %24.17g el(e(b),1,3) " " %24.17g sqrt(el(e(V),1,1)) " " %24.17g sqrt(el(e(V),6,6)) " " e(N_over)
+mean y x, over(b)
+display "@ bat " %24.17g _b[c.y@0.b] " " %24.17g _se[c.x@1.b] " " %24.17g _b[c.x@1bn.b]
+proportion g
+display "@ bprop " %24.17g _b[2.g] " " %24.17g _se[1.g]

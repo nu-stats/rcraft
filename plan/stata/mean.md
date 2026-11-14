@@ -30,3 +30,4 @@ corpus `meanest.do` (25 results, 1e-9). Translated in `crates/statatr/src/data_r
 - Not yet: several over() variables, vce(), the display options, iweights, analytic weights with total,
   proportion and ratio, `prop` and the other abbreviations of proportion, `_b[c.y@0.b]` (the expression reader
   does not take @ in a name).
+- `_b[c.y@0.b]`, `_se[c.x@1.b]` (with or without bn) read over()'s names: the @ is hidden from the expression reader (vendored, it takes none) and given back for the lookup (corpus `meanest.do`).
