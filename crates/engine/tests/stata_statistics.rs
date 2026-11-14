@@ -1009,3 +1009,36 @@ fn replace_and_generate_say_what_changed() {
         "nothing under quietly: {text}"
     );
 }
+
+/// table (Stata 17+) in Stata 19's layout, line for line from Stata's own
+/// output on the same data (plan/stata/table.md).
+#[test]
+fn table_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 12\ngenerate g = 1 + mod(_n, 3)\nlabel define gl 1 \"one\" 2 \"two\" 3 \"three\"\n\
+         label values g gl\ngenerate h = _n > 6\ngenerate x = _n * 1.5\ntable g h\n\
+         table g, statistic(mean x) statistic(sd x)\ntable (g h) (), nototals\ntable () (g), statistic(mean x)\n\
+         table g h, statistic(frequency) statistic(percent)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "        |        h",
+        "        |  0   1   Total",
+        "--------+---------------",
+        "  Total |  6   6      12",
+        "        |   Mean   Standard deviation",
+        "  one   |  11.25             5.809475",
+        "  Total |   9.75             5.408327",
+        "    h   |",
+        "      1 |          2",
+        "     |    one    two   three   Total",
+        "Mean |  11.25   8.25    9.75    9.75",
+        "    Frequency |      6       6       12",
+        "    Percent   |  50.00   50.00   100.00",
+        "---------------------------------------",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

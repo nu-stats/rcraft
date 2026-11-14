@@ -83,6 +83,7 @@ mod stats;
 mod suest;
 mod survwgt;
 mod svy;
+mod table;
 mod tables;
 mod tabm;
 mod tabpct;
@@ -457,6 +458,7 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "table",
     "center",
     "contract",
     "svyset",
@@ -1152,6 +1154,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_estat_more" => estat::ESTAT_MORE_HELPER,
         "stata_meanest" => meanest::MEANEST_HELPER,
         "stata_sdtest" => sdtest::SDTEST_HELPER,
+        "stata_table" => table::TABLE_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
         "stata_replay" => estat::REPLAY_HELPER,
         "stata_tab_mats" => tabsum::TAB_MATS_HELPER,
@@ -2401,6 +2404,7 @@ impl Session {
             }
             "sktest" => self.sktest(c, &opts, out),
             "sdtest" => self.sdtest(c, &opts, out),
+            "table" => self.table(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),

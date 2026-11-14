@@ -212,6 +212,7 @@ pub const COMMANDS: &[&str] = &[
     "syntax",
     "tab1",
     "tab2",
+    "table",
     "tabm",
     "tabstat",
     "tabulate",
@@ -714,6 +715,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "row",
         ],
     ),
+    ("table", &["missing", "nformat(", "nototals", "statistic("]),
     ("tabm", &["missing"]),
     ("test", &["accumulate", "matvlc(", "mtest", "notest"]),
     ("testparm", &["equal"]),
@@ -1362,7 +1364,7 @@ mod tests {
         );
         assert_eq!(
             options("ta", VARS),
-            names(&["tab1", "tab2", "tabm", "tabstat", "tabulate"])
+            names(&["tab1", "tab2", "table", "tabm", "tabstat", "tabulate"])
         );
         assert_eq!(options("q", VARS), names(&["quietly"]));
         assert_eq!(options("quietly regr", VARS), names(&["regress"]));
