@@ -150,6 +150,7 @@ pub const COMMANDS: &[&str] = &[
     "mlogit",
     "nbreg",
     "newey",
+    "nl",
     "nlcom",
     "noisily",
     "ologit",
@@ -533,6 +534,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("newey", &["lag(", "level(", "noconstant"]),
+    ("nl", &["iterate(", "level(", "nolog", "variables("]),
     (
         "nbreg",
         &[
@@ -1597,6 +1599,7 @@ mod tests {
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),
             "coefplot" => format!("regress y x\ncoefplot, {o}"),
             "nlcom" => format!("regress y x\nnlcom _b[x], {o}"),
+            "nl" => format!("nl (y = {{a = 1}} * exp({{b = 0.1}} * x)), {o}"),
             "collapse" => format!("collapse (mean) y, {o}"),
             "contract" if name == "format" => format!("contract g, percent(p) {o}"),
             "contract" => format!("contract g, {o}"),

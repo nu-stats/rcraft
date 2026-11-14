@@ -59,6 +59,7 @@ mod ml;
 mod model;
 mod more;
 mod natscale;
+mod nl;
 mod nlcom;
 mod oneway;
 mod outreg;
@@ -758,19 +759,58 @@ fn no(reason: impl Into<String>) -> Untranslated {
 /// the first 1,000 and make the late text missing.
 const READ_DELIM_HELPER: &str = r#"stata_read_delim <- function(file, ..., guess_max = NULL) {
   lines <- readLines(file, warn = FALSE, encoding = "UTF-8")
-  # a file that is not UTF-8 is read as Latin-1, as Stata guesses an ISO-8859 for it
-  if (!"locale" %in% names(list(...)) && !all(validUTF8(lines))) lines <- iconv(lines, from = "latin1", to = "UTF-8")
+  # without encoding(), Stata 19 takes ICU's guess (the most confident; of a tie, the
+  # last ICU lists), says so, and reads the file in it; stringi has the same detector.
+  # Without stringi a file that is not UTF-8 is read as Latin-1 and nothing is said.
+  if (!"locale" %in% names(list(...))) {
+    enc <- NULL
+    if (requireNamespace("stringi", quietly = TRUE)) {
+      r <- tryCatch(stringi::stri_enc_detect(readBin(file, "raw", file.size(file)))[[1]], error = function(e) NULL)
+      if (!is.null(r) && NROW(r) > 0 && !anyNA(r$Confidence)) {
+        enc <- utils::tail(r$Encoding[r$Confidence == max(r$Confidence)], 1)
+        cat("(encoding automatically selected: ", enc, ")\n", sep = "")
+      }
+    }
+    if (!all(validUTF8(lines)) || (!is.null(enc) && enc != "UTF-8")) {
+      raw <- readLines(file, warn = FALSE)
+      got <- if (!is.null(enc) && enc != "UTF-8") suppressWarnings(iconv(raw, from = enc, to = "UTF-8")) else NULL
+      if (is.null(got) || anyNA(got)) got <- iconv(raw, from = "latin1", to = "UTF-8")
+      lines <- got
+    }
+  }
   lines <- lines[nzchar(sub("\r$", "", lines))]
   if (is.null(guess_max)) guess_max <- max(1000, length(lines))
-  if (!"delim" %in% names(list(...))) {
+  args <- list(...)
+  if (!"delim" %in% names(args)) {
     # Stata finds a comma or a tab itself; a file of one column has neither
     head <- if (length(lines)) lines[1] else ""
     tabs <- lengths(regmatches(head, gregexpr("\t", head, fixed = TRUE)))
     commas <- lengths(regmatches(head, gregexpr(",", head, fixed = TRUE)))
-    return(readr::read_delim(I(paste0(lines, collapse = "\n")), delim = if (tabs > commas) "\t" else ",", ...,
-                             guess_max = guess_max, skip_empty_rows = FALSE))
+    args$delim <- if (tabs > commas) "\t" else ","
   }
-  readr::read_delim(I(paste0(lines, collapse = "\n")), ..., guess_max = guess_max, skip_empty_rows = FALSE)
+  text <- I(paste0(lines, collapse = "\n"))
+  rd <- function(a) do.call(readr::read_delim, c(list(text), a, list(guess_max = guess_max, skip_empty_rows = FALSE)))
+  if (!"col_names" %in% names(args) && length(lines) > 1) {
+    # without varnames(), Stata 19 takes the first row as names only when some column is
+    # numeric on every later row and not on the first; else that row is data and the
+    # variables are v1, v2, ... (probed)
+    a <- args
+    a$col_names <- FALSE
+    a$col_types <- readr::cols(.default = "c")
+    cells <- as.data.frame(rd(a))
+    num <- function(v) grepl("^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eE][+-]?[0-9]+)?$", trimws(v))
+    named <- any(vapply(cells, function(v) {
+      rest <- v[-1]
+      rest <- rest[!is.na(rest) & nzchar(trimws(rest))]
+      length(rest) > 0 && all(num(rest)) && !(is.na(v[1]) || num(v[1]))
+    }, TRUE))
+    if (!named) {
+      args$col_names <- FALSE
+      out <- rd(args)
+      return(stats::setNames(out, paste0("v", seq_along(out))))
+    }
+  }
+  rd(args)
 }"#;
 
 /// R's version of Stata's float storage: a double rounded to the nearest
@@ -1045,6 +1085,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_cm" => cm::CM_HELPER,
         "stata_rreg" => rreg::RREG_HELPER,
         "stata_medeff" => medeff::MEDEFF_HELPER,
+        "stata_nl" => nl::NL_HELPER,
         "stata_est_mark" => returned::EST_MARK_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
@@ -1298,6 +1339,9 @@ struct Session {
     /// The data came from a file this do-file did not save, so whether it
     /// was `tsset` is not known.
     ts_unknown: bool,
+    /// `set type double`: new numeric variables are double, not float (Stata's
+    /// default for generate, egen and import delimited).
+    type_double: bool,
     /// The columns the last model's time-series operators added to its
     /// data (`dplyr::mutate()`'s arguments), for `predict`.
     fit_ts: Option<String>,
@@ -2413,6 +2457,7 @@ impl Session {
             "cmclogit" => self.cmclogit(c, &opts, out),
             "rreg" => self.rreg(c, &opts, out),
             "medeff" => self.medeff(c, &opts, out),
+            "nl" => self.nl(c, &opts, out),
             "marginsplot" => self.marginsplot(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
@@ -2836,7 +2881,7 @@ impl Session {
                     );
                 }
                 // Stata stores a column with decimals as float, unless asdouble
-                if !opts.has("asdouble", 8) && !all_text {
+                if !opts.has("asdouble", 8) && !self.type_double && !all_text {
                     self.helpers.insert("stata_float");
                     self.helpers.insert("stata_import_float");
                     steps.push("stata_import_float()".into());
@@ -2929,10 +2974,12 @@ impl Session {
         );
         out.package("dplyr");
         out.line(format!("{name} <- {}", steps.join(" |> ")));
-        // Stata 19's count line (its encoding line before it is its own guess, left out)
-        if "delimited".starts_with(kind) && kind.len() >= 5 {
+        // Stata 19's count line (import delimited's encoding line is printed as it reads)
+        if ("delimited".starts_with(kind) && kind.len() >= 5)
+            || ("excel".starts_with(kind) && kind.len() >= 3)
+        {
             out.line(format!(
-                "cat(\"(\", ncol({name}), \" vars, \", format(nrow({name}), big.mark = \",\", scientific = FALSE), \" obs)\\n\", sep = \"\")"
+                "cat(\"(\", ncol({name}), if (ncol({name}) == 1) \" var, \" else \" vars, \", format(nrow({name}), big.mark = \",\", scientific = FALSE), \" obs)\\n\", sep = \"\")"
             ));
         }
         self.data = Some(name);
@@ -2974,6 +3021,12 @@ impl Session {
         }
         let (cond, value, kind) = self.drawing_value(c, rhs, out)?;
         let storage = storage(ty).ok_or_else(|| no(format!("{ty} is not a storage type")))?;
+        // no type given: set type's (float unless set type double)
+        let storage = if words.len() == 1 && self.type_double && kind != Kind::Text {
+            Storage::Double
+        } else {
+            storage
+        };
         let is_text = kind == Kind::Text;
         if is_text != (storage == Storage::Str) && ty != "float" {
             return Err(no(format!(
@@ -3998,8 +4051,21 @@ impl Session {
                 out.line(format!("stata_linesize <- {n}"));
                 Ok(())
             }
-            "more" | "varabbrev" | "trace" | "rmsg" | "type" | "maxvar" | "matsize"
-            | "niceness" | "processors" | "max_memory" | "min_memory" | "segmentsize" => {
+            // the storage type of new numeric variables (generate, egen, import delimited)
+            "type" => {
+                let t = rest.split(',').next().unwrap_or("").trim();
+                match t {
+                    "double" => self.type_double = true,
+                    "float" => self.type_double = false,
+                    _ => return Err(no(format!("set type {t} (Stata: float or double)"))),
+                }
+                out.caveat(format!(
+                    "new numeric variables are {t} from here, as in Stata"
+                ));
+                Ok(())
+            }
+            "more" | "varabbrev" | "trace" | "rmsg" | "maxvar" | "matsize" | "niceness"
+            | "processors" | "max_memory" | "min_memory" | "segmentsize" => {
                 out.caveat(format!(
                     "nothing to do in R: set {what} only changes how Stata runs or prints"
                 ));

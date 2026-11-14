@@ -4571,3 +4571,28 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   the app: `head(mtcars)`, `table(cyl, gear)`, a list, and the Cross-tabulation dialog.
 - Not done: Copy as rich text (HTML) for Word; tables inside printed objects (`summary(lm)`'s
   coefficients) stay text.
+
+## Remaining and questionable matches: nl, set type, import's encoding and names, 2026-11-14
+
+- nl (new): XURXZN's Figures.do was its last refusal; now XURXZN runs every line (0 refused, 0 stopped).
+  Worked out from Stata 19's output on eight probe models, not its code: starting values as %9.0g writes
+  them (123456.789 is 123456.8, ln(.006) is -5.115996); Gauss-Newton with exact derivatives and ml's step
+  search (halve while worse, else step further while better); ml's stopping rule on the residual SS
+  (parameters' reldif at most 1e-6 or the RSS's at most 1e-7, and g'H^-1 g at most 1e-5). Every iteration
+  line of all eight matches, and the table: Res. dev., a parameter that is the constant (centered R2 and
+  Stata's note), the parameters in byte order (Mid before alpha). Corpus nl.do recorded from Stata 19.
+- set type double was ignored: generate, egen and import delimited now make doubles after it (Stata
+  imports decimals as double then; RCraft had stored floats). XURXZN's two do-files set it; its nl data
+  only matched Stata's with it.
+- import delimited: the encoding line is ICU's guess, and stringi has the same detector: the most
+  confident, of a tie the last listed (Stata on 12 probe files and DZ8BUS's two, all matched), and the file
+  read in that encoding (StudyThree.csv is ISO-8859-2, not Latin-1). Without varnames(), Stata takes the
+  first row as names only when some column is numeric on every later row and not on the first, else that
+  row is data and the variables are v1, v2, ... (RCraft always took the names). "(1 var, ...)"; import
+  excel's count line too.
+- regress tables with time-series operators in Stata's layout (TZEN38's 36): each variable's terms
+  grouped under it, F1. and D1. for one operator, LD. and FD. for several; identical to Stata's on TZEN38.
+- YFBPT6 run again in Stata 19 (17 min; only grstyle errors, a graph style): its Nov 3 log predated
+  survwgt, so 63 values were missing from it; all 4616 now match RCraft's.
+- Still decided by Stata's rounding: XURXZN's 18 one-slope reghdfe errors and TZEN38's 5 age
+  coefficients (both unchanged after set type double).

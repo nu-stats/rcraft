@@ -783,6 +783,7 @@ impl Session {
         let storage = match ty {
             Some(t) => storage(t).ok_or_else(|| no(format!("{t} is not a storage type")))?,
             None if byte => Storage::Byte,
+            None if self.type_double => Storage::Double,
             None => Storage::Float,
         };
         let mut value = if byte && ty.is_none() {

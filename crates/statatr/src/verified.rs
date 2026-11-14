@@ -129,6 +129,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("mlogit", &["collinear", "likelihood"]),
     ("nbreg", &["collinear"]),
     ("newey", &["arpanel"]),
+    ("nl", &["nl"]),
     (
         "nlcom",
         &["lincom_post", "mlogit_tests", "nlcom", "nlcom_models"],

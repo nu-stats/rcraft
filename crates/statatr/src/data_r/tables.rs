@@ -133,7 +133,10 @@ stata_coef_rows <- function(nm) {
     if (is.na(i)) l else names(s)[i]
   }
   short <- function(s) if (nchar(s) > 11) paste0(substr(s, 1, 9), "..") else s
+  # a time-series term (L.x, D.x, LD.x, F2.x): grouped under its variable
+  ts_re <- "^((?:[LFDS][0-9]*)+)[.]([A-Za-z_][A-Za-z0-9_]*)$"
   key <- function(n) {
+    if (grepl(ts_re, n, perl = TRUE)) return(paste0("ts:", sub(ts_re, "\\2", n, perl = TRUE)))
     if (grepl(one_f, n)) return(parts(n, one_f)[4])
     if (grepl(two_f, n)) return(paste0(parts(n, two_f)[4], "#", parts(n, two_f)[7]))
     if (grepl(f_c, n)) return(sub("^[0-9]+\\.", "", n))
@@ -168,6 +171,18 @@ stata_coef_rows <- function(nm) {
     if (k %in% seen) next
     seen <- c(seen, k)
     levels <- shown[!is.na(keys) & keys == k]
+    if (startsWith(k, "ts:")) {
+      # Stata 19: the variable, then each operator: one alone with its lag (F1., D1.), several
+      # as written in Stata's order (LD., FD.), right-aligned as a row; a group of its own
+      rows <- list(list(kind = "head", label = substring(k, 4)))
+      for (l in levels) {
+        op <- sub(ts_re, "\\1", l, perl = TRUE)
+        if (grepl("^[LFDS]$", op)) op <- paste0(op, "1")
+        rows[[length(rows) + 1]] <- list(kind = "row", label = paste0(op, "."), col = l)
+      }
+      terms[[length(terms) + 1]] <- list(big = TRUE, rows = rows)
+      next
+    }
     if (grepl(two_f, n)) {
       p <- parts(n, two_f)
       v1 <- p[4]
