@@ -2319,3 +2319,25 @@ fn poisson_and_nbreg_print_statas_iteration_logs() {
         assert!(text.contains(block), "{block:?} in {text}");
     }
 }
+
+/// glm by maximum likelihood as Stata 19 prints it: its log (one IRLS step, then
+/// Newton-Raphson), header (deviance, Pearson, AIC, BIC), OIM or robust table (probe GL).
+#[test]
+fn glm_prints_statas_log_header_and_table() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 60\ngenerate double x = sin(_n)\ngenerate double z = cos(_n * 2)\ngenerate c = floor(exp(0.4 + 0.5 * x + 0.4 * sin(_n * 3)) * 2)\ngenerate b = (x + 0.5 * z + sin(_n * 5)) > 0.1\nglm c x z, family(poisson)\nglm b x z, family(binomial) link(probit) vce(robust)\n",
+    );
+    let text = ok(&mut e, &code);
+    for block in [
+        "Iteration 0:  Log likelihood = -93.592019  \nIteration 1:  Log likelihood = -93.295586  \nIteration 2:  Log likelihood = -93.294691  \nIteration 3:  Log likelihood = -93.294691  \n",
+        "Deviance         =  20.42134241                   (1/df) Deviance =   .3582692",
+        "Log likelihood   = -93.29469093                   BIC             =  -212.9563",
+        "             |                 OIM\n           c | Coefficient  std. err.",
+        "           x |   .6527238   .1306931     4.99   0.000     .3965701    .9088775",
+        "Iteration 5:  Log pseudolikelihood = -19.419092  ",
+        "Link function    : g(u) = invnorm(u)              [Probit]",
+    ] {
+        assert!(text.contains(block), "{block:?} in {text}");
+    }
+}

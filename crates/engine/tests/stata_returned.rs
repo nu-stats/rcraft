@@ -1755,7 +1755,7 @@ fn what_is_not_kept_is_refused_with_the_reason() {
             "regress replaces r()",
         ),
         (
-            "use s\nregress y x\nglm y x\ndisplay e(N)\n",
+            "use s\nregress y x\nglm y x, family(gamma)\ndisplay e(N)\n",
             "glm was not translated",
         ),
         ("use s\nanova y g / h|g\ndisplay e(F)\n", "error terms"),

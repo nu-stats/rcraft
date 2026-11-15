@@ -373,6 +373,7 @@ impl Session {
             Fit::Stcox => &[("hr", 2), ("xb", 2)],
             Fit::Clogit => &[("pc1", 3), ("pu0", 3), ("xb", 2)],
             Fit::Robreg => &[("xb", 2), ("residuals", 1), ("weights", 1)],
+            Fit::Glm => &[("mu", 2), ("xb", 2), ("eta", 3)],
             Fit::Asclogit => {
                 return Err(no(
                     "predict after asclogit is not translated yet",
@@ -532,6 +533,18 @@ impl Session {
             if stat.is_some() {
                 self.helpers.insert("stata_predict_stat");
             }
+            // glm's default, as Stata says it
+            if fit == Fit::Glm
+                && !opts.has("xb", 2)
+                && !opts.has("eta", 3)
+                && !opts.has("mu", 2)
+                && !self.quiet(c)
+            {
+                out.line(format!(
+                    "cat(\"(option mu assumed; predicted mean {}){}\")",
+                    est.dep, "\n"
+                ));
+            }
             let v = match fit {
                 _ if stat.is_some() => format!(
                     "unname(stata_predict_stat(stata_estimates, {d}, {}))",
@@ -550,6 +563,13 @@ impl Session {
                     format!("pmin(1, stata_estimates$stata$k / abs(({e} - {xb}) / stata_estimates$stata$scale))")
                 }
                 Fit::Robreg => newdata(""),
+                Fit::Glm => {
+                    self.helpers.insert("stata_glm");
+                    format!(
+                        "unname(stata_glm_mu(stata_estimates, {d}, xb = {}))",
+                        r_logical(opts.has("xb", 2) || opts.has("eta", 3))
+                    )
+                }
                 Fit::Clogit if opts.has("xb", 2) => {
                     self.helpers.insert("stata_clogit");
                     format!("unname(stata_clogit_xb(stata_estimates, {d}))")

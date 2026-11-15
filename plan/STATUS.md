@@ -4801,3 +4801,31 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   lines 98.6%); probes 69.3% -> 69.8%. What is left in the probes: `_natscale`'s residue (probe 226's
   sweeps, 1,509 source lines, declined since 2026-11-04), then a long tail of commands not translated
   (lasso 161, xtdpdsys 77, stepwise 70, lassoknots 52, arima 50, mixed 48, gsem 46, ...).
+
+## glm by maximum likelihood, 2026-11-15
+
+- **What Stata does, observed** (probes 220-222 and 272 of StatCraft's, our GL probe of 21 models on
+  their data; no Stata code read): one IRLS step from mu = (y + mean(y)) / 2 (binomial n:
+  n(y + 0.5) / (n + 1); with an offset, the step works on z less the offset), then Newton-Raphson on
+  the observed information, which is the iteration log; a gaussian identity fit is that one line.
+  Variance: the inverse OIM times the scale (1 for poisson, binomial, nbinomial; Pearson chi2 / df for
+  gaussian and with scale(x2), with Stata's note); robust N / (N - 1), clustered G / (G - 1). Header:
+  deviance and Pearson (%12.0g), their ratios, AIC, BIC and the scale (%9.0g), the log likelihood
+  (%12.0g; gaussian's with the variance deviance / N); fweights count as copies (N = 401), aweights are
+  scaled to N with Stata's "(sum of wgt is ...)" (commas, up to 16 digits). offset()/exposure() show as
+  a row "ln(t) | 1 (exposure)". scale(dev) without irls is Stata's r(198).
+- **Translated** (`data_r/glm.rs`, `Fit::Glm`): gaussian identity; poisson log; binomial logit, probit,
+  cloglog (with n or #: logit); nbinomial # log; weights, robust, clusters, eform (IRR, Odds ratio,
+  exp(b) with Stata's notes), noconstant, scale(x2); e() as Stata's (constants of its ml included; power,
+  vf, hac_lag, the glim_* program names and margins lists not kept); predict mu (with Stata's "(option mu
+  assumed; predicted mean y)"), xb, eta. Probe GL: every line of 20 models, ereturn list and predict as
+  Stata 19 (e() digits beyond the 15th aside); a test (`glm_prints_statas_log_header_and_table`).
+- **Not yet:** irls; gamma and inverse gaussian (with scale(1) the OIM matches, but Stata's default scale
+  is not Pearson / df exactly: the implied dispersion is 0.99166 where Pearson / df is 0.99150, and the
+  gap changes with the link); gaussian with a log link (Stata's path, on the concentrated likelihood or
+  otherwise, not found: tried the full and Gauss-Newton Hessians, the scale fixed or lagged); other links.
+  A near-perfect probit fit (coefficient 4.6) ends about 1e-6 from Stata's: its steps on a flat
+  likelihood differ in the 8th digit (perhaps its second derivatives); the canonical links match exactly.
+- **SI3BGA's `keep if land==5100`:** the package's data has no variable `land`; Stata 19 stops there too
+  ("land not found", r(111)). Not RCraft's. Uncaptured, RCraft shows R's "object 'land' not found";
+  under capture it already gives Stata's words and r(111).

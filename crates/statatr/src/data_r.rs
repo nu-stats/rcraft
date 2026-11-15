@@ -50,6 +50,7 @@ mod factor;
 mod filefilter;
 mod files;
 mod fre;
+mod glm;
 mod graph;
 mod iv;
 mod margins;
@@ -475,6 +476,7 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "glm",
     "table",
     "center",
     "contract",
@@ -528,6 +530,7 @@ const NAME_TABLES: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "glm",
     "svy",
     "asclogit",
     "cluster2",
@@ -1166,6 +1169,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_unconditional" => margins::UNCONDITIONAL_HELPER,
         "stata_anova" => anova::ANOVA_HELPER,
         "stata_clogit" => clogit::CLOGIT_HELPER,
+        "stata_glm" => glm::GLM_HELPER,
         "stata_robreg" => robreg::ROBREG_HELPER,
         "stata_reghdfe" => reghdfe::REGHDFE_HELPER,
         "stata_cluster2" => cluster2::CLUSTER2_HELPER,
@@ -2639,6 +2643,7 @@ impl Session {
             "stset" => self.stset(c, &opts, out),
             "stcox" => self.stcox(c, &opts, out),
             "clogit" => self.clogit(c, &opts, out),
+            "glm" => self.ml(c, &opts, out, model::Fit::Glm),
             "robreg" => self.robreg(c, &opts, out),
             "reghdfe" => self.reghdfe(c, &opts, out),
             "cluster2" => self.cluster2(c, &opts, out),

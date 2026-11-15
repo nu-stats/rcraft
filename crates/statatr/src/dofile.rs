@@ -152,6 +152,7 @@ pub const MAX_ROUNDS: usize = 100_000;
 /// The commands whose main part is a varlist (with factor variables for the
 /// models): there a pattern, a range or `_all` is made the data's names.
 const VARLIST: &[&str] = &[
+    "glm",
     "revrs",
     "tabm",
     "tabstat",
@@ -220,6 +221,7 @@ fn file_read_local(c: &reader::Command) -> Option<String> {
 
 /// Commands that leave the data's variable names as they were.
 const NAMES_STAY: &[&str] = &[
+    "glm",
     "display",
     "summarize",
     "tabulate",

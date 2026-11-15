@@ -752,6 +752,34 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
         rss = e0$rss, r2_a = e0$r2_a, ll = e0$ll, ll_0 = e0$ll_0)
     put(cmd = "cluster2", depvar = depvar, method = "2-dimension clustered SEs",
         title = "Linear regression with clustered SEs", properties = "b V")
+  } else if (cmd == "glm") {
+    # glm by maximum likelihood (stata_glm), as Stata 19 leaves e() (probe 220)
+    s <- fit$stata
+    q <- sum(slopes)
+    chi2 <- wald(slopes)
+    put(N = s$N, ic = s$ic, k = s$k, k_eq = 1, k_dv = 1, converged = 1, ll = s$ll, chi2 = chi2,
+        p = stats::pchisq(chi2, q, lower.tail = FALSE), rc = 0, aic = s$aic, rank = s$k, df_m = q)
+    if (!is.null(G)) put(N_clust = G)
+    put(k_eq_model = 0, nbml = 0, bic = s$bic)
+    # the scaled deviance and Pearson chi2 equal them where the scale is 1
+    if (s$phi == 1 && !s$scaled) put(dispers_ps = s$pearson / s$df, deviance_ps = s$pearson)
+    put(dispers_p = s$pearson / s$df, deviance_p = s$pearson)
+    if (s$phi == 1 && !s$scaled) put(dispers_s = s$deviance / s$df, deviance_s = s$deviance)
+    put(dispers = s$deviance / s$df, deviance = s$deviance, phi = s$phi, df = s$df)
+    links <- list(identity = c("Identity", "u"), log = c("Log", "ln(u)"), probit = c("Probit", "invnorm(u)"),
+                  cloglog = c("Complementary log–log", "ln(-ln(1-u))"),
+                  logit = c("Logit", if (is.null(s$n)) "ln(u/(1-u))" else paste0("ln(u/(", s$n, "-u))")))
+    vfs <- switch(s$family, gaussian = c("Gaussian", "1"), poisson = c("Poisson", "u"),
+                  binomial = if (is.null(s$n)) c("Bernoulli", "u*(1-u)") else c("Binomial", paste0("u*(1-u/", s$n, ")")),
+                  nbinomial = c("Neg. Binomial", paste0("u+(", trimws(stata_fmt(s$k_nb, "%9.0g")), ")u^2")))
+    put(cmdline = cmdline, cmd = "glm", predict = "glim_p")
+    put(vcetype = if (robust) "Robust" else "OIM", vce = vce)
+    if (vce == "cluster") put(clustvar = clustvar)
+    weights()
+    put(linkt = links[[s$link]][1], linkf = links[[s$link]][2], varfunct = vfs[1], varfuncf = vfs[2],
+        opt1 = "ML", m = if (is.null(s$n)) "1" else as.character(s$n), chi2type = "Wald",
+        deriv_useminbound = "off", opt = "moptimize", title = "Generalized linear models", user = "glim_lf",
+        ml_method = "e2", technique = "nr", which = "max", depvar = depvar, properties = "b V")
   } else if (cmd == "robreg") {
     e0 <- fit$stata
     put(N = e0$N, k_omit = 0, rank = length(b), chi2 = e0$chi2,
@@ -847,6 +875,21 @@ fn e_not_kept(cmd: &str, model: &str) -> &'static [&'static str] {
             "V_modelbased",
         ],
         ("poisson" | "nbreg", _) => &["ic", "ilog", "gradient", "V_modelbased"],
+        ("glm", _) => &[
+            "power",
+            "vf",
+            "dispers_ps",
+            "deviance_ps",
+            "dispers_s",
+            "deviance_s",
+            "hac_lag",
+            "varfunc",
+            "link",
+            "marginsok",
+            "marginsnotok",
+            "ilog",
+            "gradient",
+        ],
         ("ologit" | "oprobit", _) => &["ic", "N_cd", "cat", "ilog", "gradient", "V_modelbased"],
         ("mlogit", _) => &["ic", "N_cd", "out", "ilog", "gradient", "V_modelbased"],
         ("xtreg", "fe") => &[

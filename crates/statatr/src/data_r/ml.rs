@@ -331,6 +331,7 @@ stata_ml_iterations <- function(fit, kind) {
     if (is.null(m) || m$odd || !m$converged) return(NULL)
     return(m$lls)
   }
+  if (kind == "glm") return(if (isTRUE(fit$stata_odd)) NULL else fit$stata_lls)
   if (kind %in% c("poisson", "nbreg")) return(stata_ml_count(fit, kind)$lls)
   X <- stats::model.matrix(fit)
   if (!"(Intercept)" %in% colnames(X)) return(NULL)
@@ -615,7 +616,7 @@ stata_ml_print <- function(...) {
 # mlogit). The header from e(): the model test is e(chi2) on e(df_m), Pseudo R2 e(r2_p)
 # (nbreg's against its constant-only fit, with "Dispersion: mean")
 stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level = 0.95, label = "Coefficient",
-                                eform = FALSE, note = NULL, iterations = NULL, data = NULL) {
+                                eform = FALSE, note = NULL, iterations = NULL, data = NULL, glm = NULL) {
   e <- stata_e
   kind <- switch(if (is.null(e$cmd)) "" else e$cmd, ologit = , oprobit = "ordered", nbreg = "nbreg",
                  mlogit = "mlogit", "single")
@@ -646,7 +647,9 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
     if (is.null(blocks[[k]]$rows)) return(FALSE)
   }
   n <- if (is.null(nobs)) NROW(stats::fitted(fit)) else nobs
-  if (kind == "single") {
+  if (!is.null(glm)) {
+    # glm: its own header (stata_glm_header)
+  } else if (kind == "single") {
     l <- stata_ml_ll(fit)
     ll <- l[["ll"]]
     b <- blocks[[1]]$b
@@ -679,6 +682,9 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
       }
     }
   }
+  if (!is.null(glm)) {
+    stata_glm_header(fit, robust)
+  } else {
   cat("\n")
   # the values right-aligned after "= " in 6 columns, or as wide as the widest (the left
   # column gives way: probe PN); Prob > chi2 is "." with no test (chi2(0))
@@ -693,15 +699,16 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
   row(paste0(if (robust) "Log pseudolikelihood = " else "Log likelihood = ", trimws(stata_fmt(ll, "%10.0g"))),
       "Pseudo R2", vals[4])
   cat("\n")
+  }
   if (!is.null(e[["N_clust"]])) {
     cat(pad(sprintf("(Std. err. adjusted for %s clusters in %s)", stata_tab_count(e$N_clust), e$clustvar), 78), "\n", sep = "")
   }
   qz <- stats::qnorm((1 + level) / 2)
   sep_line <- function() cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
   cat(strrep("-", 78), "\n", sep = "")
-  if (robust) cat("             |               Robust\n")
+  if (robust) cat("             |               Robust\n") else if (!is.null(glm)) cat("             |                 OIM\n")
   cat(pad(stata_tab_abbrev(e$depvar), 12), " | ", formatC(formatC(label, width = 10), width = -13, flag = "-"),
-      if (robust) "std. err." else "Std. err.", "      z    P>|z|     [", format(100 * level), "% conf. interval]\n", sep = "")
+      if (robust || !is.null(glm)) "std. err." else "Std. err.", "      z    P>|z|     [", format(100 * level), "% conf. interval]\n", sep = "")
   sep_line()
   # a row with no test (a cut point, /lnalpha, alpha): the estimate, its error and interval
   aux_row <- function(lab, shown) {
@@ -763,10 +770,15 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
           pad(sprintf("%.3f", p), 8), pad(stata_tab_g(shown[3]), 13), pad(stata_tab_g(shown[4]), 12), "\n", sep = "")
     }
   }
+  # glm's offset or exposure: a row of its own, as Stata prints it
+  off <- if (!is.null(glm)) fit$stata$offrow else NULL
+  if (!is.null(off)) cat(pad(off[1], 12), " |", pad("1", 11), "  (", off[2], ")\n", sep = "")
   cat(strrep("-", 78), "\n", sep = "")
   if (eform && kind == "ordered") cat("Note: Estimates are transformed only in the first equation to odds ratios.\n")
   if (eform && kind == "nbreg") cat("Note: Estimates are transformed only in the first equation to incidence-rate\n      ratios.\n")
   if (!is.null(note) && "_cons" %in% nm) cat(note, "\n", sep = "")
+  # glm's note on scaled standard errors
+  if (is.character(glm)) cat(glm, "\n", sep = "")
   # nbreg: the test of alpha = 0 against the Poisson fit, on the boundary (half chi2(1))
   if (kind == "nbreg" && !robust && !is.null(e$ll_c)) {
     chi <- max(0, 2 * (e$ll - e$ll_c))
@@ -856,6 +868,7 @@ impl Session {
             Fit::Stcox => return self.stcox(c, opts, out),
             Fit::Clogit => return self.clogit(c, opts, out),
             Fit::Robreg => return self.robreg(c, opts, out),
+            Fit::Glm => return self.glm(c, opts, out),
             Fit::Reghdfe => return self.reghdfe(c, opts, out),
             Fit::Cluster2 => return self.cluster2(c, opts, out),
             Fit::Asclogit => return self.asclogit(c, opts, out),
@@ -1063,6 +1076,7 @@ impl Session {
             | Fit::Stcox
             | Fit::Clogit
             | Fit::Robreg
+            | Fit::Glm
             | Fit::Reghdfe
             | Fit::Cluster2
             | Fit::Asclogit
@@ -1142,6 +1156,7 @@ impl Session {
             | Fit::Stcox
             | Fit::Clogit
             | Fit::Robreg
+            | Fit::Glm
             | Fit::Reghdfe
             | Fit::Cluster2
             | Fit::Asclogit

@@ -50,6 +50,8 @@ pub(super) enum Fit {
     Asclogit,
     /// `suest`: stored results combined
     Suest,
+    /// `glm` (maximum likelihood)
+    Glm,
 }
 
 impl Fit {
@@ -73,6 +75,7 @@ impl Fit {
             Fit::Cluster2 => "cluster2",
             Fit::Asclogit => "asclogit",
             Fit::Suest => "suest",
+            Fit::Glm => "glm",
         }
     }
 
