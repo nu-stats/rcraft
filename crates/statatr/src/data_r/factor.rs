@@ -131,12 +131,9 @@ impl Session {
             .split_whitespace()
             .map(str::to_string)
             .collect();
-        if let Some(v) = vars.iter().find(|v| !is_name(v)) {
-            return Err(no(format!(
-                "factor {v}: variable names written out are translated"
-            )));
-        }
-        if vars.len() < 2 {
+        // a range or a pattern (a1-a5) R makes the names of, from the data
+        let plain = vars.iter().all(|v| is_name(v));
+        if plain && vars.len() < 2 {
             return Err(no("factor needs two or more variables"));
         }
         let methods: Vec<&str> = [("pf", 2), ("pcf", 3), ("ipf", 3)]
@@ -181,10 +178,19 @@ impl Session {
         for h in ["stata_factor", "stata_fmt", "stata_tables"] {
             self.helpers.insert(h);
         }
-        let q: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+        let vars_r = if plain {
+            let q: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+            format!("c({})", q.join(", "))
+        } else {
+            out.package("dplyr");
+            format!(
+                "names(dplyr::select({rows}, {}))",
+                super::select(&c.parts.main)?
+            )
+        };
         out.line(format!(
-            "stata_e <- stata_factor({rows}, c({}), method = {}{}{}{}{}, cmdline = {})",
-            q.join(", "),
+            "stata_e <- stata_factor({rows}, {}, method = {}{}{}{}{}, cmdline = {})",
+            vars_r,
             r_text(method),
             k.map(|k| format!(", k = {k}")).unwrap_or_default(),
             mineigen

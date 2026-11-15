@@ -308,6 +308,30 @@ impl Session {
             })
     }
 
+    /// Whether the active results are xtregar's: e(b), e(V) and the df are set
+    /// (Stata's names), but predict and margins are not translated after it.
+    pub(super) fn xtregar_active(&self) -> bool {
+        self.estimates.is_none()
+            && matches!(&self.e_ret, super::returned::Returned::Kept { cmd, .. } if cmd == "xtregar")
+            && self
+                .estimates_lost
+                .as_deref()
+                .is_some_and(|w| w.contains("after xtregar"))
+    }
+
+    /// The results test, lincom, nlcom and estat vce read: the model's, or after
+    /// xtregar its e(b) and e(V) under Stata's names (as after margins, post).
+    pub(super) fn tested_estimates(&self, what: &str) -> Result<Estimates, Untranslated> {
+        if self.xtregar_active() {
+            return Ok(Estimates {
+                fit: Fit::Margins,
+                dep: String::new(),
+                factors: Default::default(),
+            });
+        }
+        self.estimates_for(what)
+    }
+
     pub(super) fn predict(
         &mut self,
         c: &Command,
@@ -649,7 +673,7 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "test")?;
-        let est = self.estimates_for("test")?;
+        let est = self.tested_estimates("test")?;
         // after over() and proportion the lines name e(b)'s levels (1bn.g), as Stata's
         let relabel = matches!(self.posted_estimates(), Some((_, true)));
         if let Some(o) = opts.other(&[
@@ -786,7 +810,7 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "lincom")?;
-        let est = self.estimates_for("lincom")?;
+        let est = self.tested_estimates("lincom")?;
         if let Some(o) = opts.other(&[
             ("level", 3),
             ("or", 2),
@@ -826,6 +850,8 @@ impl Session {
             let mut s = kind.clone();
             s[..1].make_ascii_uppercase();
             r_text(&s)
+        } else if self.xtregar_active() {
+            "stata_e[[\"depvar\"]]".to_string()
         } else if est.fit == Fit::Margins && !self.after_nlcom_post() {
             r_text("")
         } else {
@@ -914,7 +940,12 @@ impl Session {
                 )));
             }
         }
-        let est = self.estimates_for("estat")?;
+        // after xtregar, estat vce reads its e(V); the rest is not translated after it yet
+        let est = if self.xtregar_active() && first_word(&c.parts.main).0 == "vce" {
+            self.tested_estimates("estat")?
+        } else {
+            self.estimates_for("estat")?
+        };
         let (sub, rest) = first_word(&c.parts.main);
         let is = |full: &str, min: usize| sub.len() >= min && full.starts_with(sub);
         let regress_only = |what: &str| -> Result<(), Untranslated> {

@@ -100,12 +100,9 @@ impl Session {
             .split_whitespace()
             .map(str::to_string)
             .collect();
-        if let Some(v) = vars.iter().find(|v| !is_name(v)) {
-            return Err(no(format!(
-                "pca {v}: variable names written out are translated"
-            )));
-        }
-        if vars.len() < 2 {
+        // a range or a pattern (a1-a5) R makes the names of, from the data
+        let plain = vars.iter().all(|v| is_name(v));
+        if plain && vars.len() < 2 {
             return Err(no("pca needs two or more variables"));
         }
         let k = match opts.arg("components", 3) {
@@ -122,10 +119,19 @@ impl Session {
         for h in ["stata_pca", "stata_fmt", "stata_tables"] {
             self.helpers.insert(h);
         }
-        let q: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+        let vars_r = if plain {
+            let q: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+            format!("c({})", q.join(", "))
+        } else {
+            out.package("dplyr");
+            format!(
+                "names(dplyr::select({rows}, {}))",
+                super::select(&c.parts.main)?
+            )
+        };
         out.line(format!(
-            "stata_e <- stata_pca({rows}, c({}){}{}{}, cmdline = {})",
-            q.join(", "),
+            "stata_e <- stata_pca({rows}, {}{}{}{}, cmdline = {})",
+            vars_r,
             k.map(|k| format!(", k = {k}")).unwrap_or_default(),
             if opts.has("covariance", 3) {
                 ", covariance = TRUE"

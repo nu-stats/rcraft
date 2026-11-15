@@ -1042,3 +1042,46 @@ fn table_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+/// ranksum, signrank, signtest, kwallis and spearman's matrix in Stata 19's
+/// layout, line for line from Stata's own output on the same data
+/// (plan/stata/rank-tests.md).
+#[test]
+fn the_rank_tests_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 12\ngenerate g = _n > 6\ngenerate k = 1 + mod(_n, 3)\n\
+         generate x = mod(_n*7, 11)\ngenerate w = mod(_n*5, 9)\ngenerate z = mod(_n*3, 7)\n\
+         ranksum x, by(g)\nsignrank x = w\nsigntest x = w\nkwallis x, by(k)\nspearman x w z\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Two-sample Wilcoxon rank-sum (Mann–Whitney) test",
+        "           0 |        6        45.5          39",
+        "    Combined |       12          78          78",
+        "Adjustment for ties       -0.14",
+        "                     ----------",
+        "H0: x(g==0) = x(g==1)",
+        "         z =  1.043",
+        "Exact prob = 0.3312",
+        "    Positive |        7          51          39",
+        "Adjustment for zeros       0.00",
+        "Adjusted variance        161.62",
+        "Exact prob = 0.3721",
+        "    Negative |           5           6",
+        "      Pr(#positive >= 7 or #negative >= 7) =",
+        "         min(1, 2*Binomial(n = 12, x >= 7, p = 0.5)) = 0.7744",
+        "Kruskal–Wallis equality-of-populations rank test",
+        "  | k | Obs | Rank sum |",
+        "  | 1 |   4 |    41.50 |",
+        "  chi2(2) =  9.548",
+        "  chi2(2) with ties =  9.582",
+        "               Prob = 0.0083",
+        "Number of observations = 12",
+        "             |        x        w        z",
+        "           z |  -0.0177  -0.9752   1.0000",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

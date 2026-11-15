@@ -901,6 +901,11 @@ pub const GUIDES: &[Guide] = &[
                  is Stata's own error (r(198)). After robreg, reghdfe, cluster2, asclogit and suest \
                  the table is R's and a constant is refused.",
             ),
+            p(
+                "After xtregar",
+                "t on e(df_r) after fe, z after re, under the dependent variable, with the \
+                 constant in the estimate, as Stata 19 prints them; nlcom's table too.",
+            ),
         ],
     },
     Guide {
@@ -1825,6 +1830,12 @@ pub const GUIDES: &[Guide] = &[
                  lines were not seen the line is the constraint as typed.",
             ),
             p(
+                "After xtregar",
+                "xtregar's e(b) and e(V) as Stata 19 reads them: F on e(df_r) after fe, chi2 \
+                 after re. estat vce prints e(V) in Stata's layout; estat's other forms after \
+                 xtregar are refused.",
+            ),
+            p(
                 "Options",
                 "matvlc() keeps the constraints' variance R V R' as a matrix; mtest (noadjust, \
                  bonferroni, holm, sidak) prints Stata 19's table of each constraint's own test \
@@ -2258,6 +2269,84 @@ pub const GUIDES: &[Guide] = &[
             "As sdtest's, from #obs #mean #sd and a value, or two groups' #obs #mean #sd (named x \
              and y, their Combined row pooled from them); a mean of . is shown as ., as in Stata.",
         )],
+    },
+    Guide {
+        command: "ranksum",
+        about: "Wilcoxon rank-sum (Mann-Whitney) test (ranksum x, by(g))",
+        points: &[
+            p(
+                "In R",
+                "stata_ranksum prints Stata 19's table of the two groups' observed and expected \
+                 rank sums (named by their value labels), the unadjusted variance, the ties' \
+                 adjustment and the adjusted variance, the H0 line, z and Prob > |z|, and the \
+                 exact p when there are 200 observations or fewer, worked out over every way of \
+                 sharing the midranks between the groups; r() as Stata's (N_1, N_2, z, Var_a, \
+                 sum_obs, sum_exp, p, p_l, p_u, p_exact, p_l_exact, p_u_exact).",
+            ),
+            p(
+                "Not yet",
+                "Options other than by() (porder, exact) and weights are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "signrank",
+        about: "Wilcoxon matched-pairs signed-rank test (signrank x = w, signrank x = 0)",
+        points: &[
+            p(
+                "In R",
+                "stata_signrank prints Stata 19's table (positive, negative and zero differences \
+                 with their observed and expected rank sums), the unadjusted variance with the \
+                 ties' and the zeros' adjustments, z, Prob > |z| and the exact p (over every sign \
+                 of the nonzero ranks); r() as Stata's.",
+            ),
+            p(
+                "Not yet",
+                "Options, weights, and an expression on the right other than a variable or a \
+                 number are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "signtest",
+        about: "Sign test of matched pairs (signtest x = w, signtest x = 0)",
+        points: &[p(
+            "In R",
+            "stata_signtest prints Stata 19's table of positive, negative and zero signs, and the \
+             one-sided and two-sided binomial tests with their hypotheses; r() as Stata's \
+             (N_pos, N_neg, N_tie, p, p_l, p_u).",
+        )],
+    },
+    Guide {
+        command: "kwallis",
+        about: "Kruskal-Wallis equality-of-populations rank test (kwallis x, by(g))",
+        points: &[
+            p(
+                "In R",
+                "stata_kwallis prints Stata 19's table of each group's observations and rank sum, \
+                 chi2 with its degrees of freedom and probability, and chi2 with the ties' \
+                 correction; r() as Stata's (df, chi2, p, chi2_adj, p_adj). chi2 agrees with \
+                 Stata's to about 2e-7.",
+            ),
+            p("Not yet", "Weights are refused."),
+        ],
+    },
+    Guide {
+        command: "spearman",
+        about: "Spearman's rank correlations (spearman x w z)",
+        points: &[
+            p(
+                "In R",
+                "With three or more variables, the matrix of rank correlations as Stata 19 \
+                 prints it: the lower triangle, over the rows with none of them missing.",
+            ),
+            p(
+                "Not yet",
+                "Two variables are refused: Stata 19's p-value comes from its own approximation \
+                 to the permutation distribution, not R's, and is not matched yet. The options \
+                 (stats(), pw, star()), and r() after the matrix, too.",
+            ),
+        ],
     },
     Guide {
         command: "sktest",

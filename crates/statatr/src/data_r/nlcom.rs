@@ -128,7 +128,7 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "nlcom")?;
-        let est = self.estimates_for("nlcom")?;
+        let est = self.tested_estimates("nlcom")?;
         // iterate() bounds Stata's search for the derivatives' steps; the results are the
         // same (Stata 19), so it is taken and left aside
         if let Some(o) = opts.other(&[
@@ -158,6 +158,7 @@ impl Session {
         // the single-equation models whose nlcom table Stata 19 was seen to print (the
         // dependent variable in the stub, _t after stcox), and nlcom's own results posted
         if !self.after_nlcom_post()
+            && !self.xtregar_active()
             && !matches!(
                 est.fit,
                 Fit::Regress
@@ -230,7 +231,11 @@ impl Session {
             fns.join(", "),
             names.join(", "),
             texts.join(", "),
-            r_text(&est.dep),
+            if self.xtregar_active() {
+                "stata_e[[\"depvar\"]]".to_string()
+            } else {
+                r_text(&est.dep)
+            },
             df.map(|d| format!(", df = {d}")).unwrap_or_default(),
             if opts.has("noheader", 8) {
                 ", header = FALSE"

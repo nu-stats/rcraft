@@ -73,6 +73,7 @@ mod postfile;
 mod prtest;
 mod putexcel;
 mod random;
+mod ranktests;
 mod reghdfe;
 mod returned;
 mod revrs;
@@ -1199,6 +1200,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_sdtest" => sdtest::SDTEST_HELPER,
         "stata_table" => table::TABLE_HELPER,
         "stata_pca" => pca::PCA_HELPER,
+        "stata_ranktests" => ranktests::RANKTESTS_HELPER,
         "stata_factor" => factor::FACTOR_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
         "stata_replay" => estat::REPLAY_HELPER,
@@ -2463,6 +2465,7 @@ impl Session {
             "sdtest" => self.sdtest(c, &opts, out),
             "table" => self.table(c, &opts, out),
             "pca" => self.pca(c, &opts, out),
+            "ranksum" | "signrank" | "signtest" | "kwallis" | "spearman" => self.rank_test(c, &opts, out),
             "factor" => self.factor(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
