@@ -261,3 +261,24 @@ hi = lo + 0.84 and + 1.37 (296 results), and lo = 0.313, 0.347, 0.431, 0.469 wit
   same with [0:3], [4:7], [8:27]. So e is a step function of n − cnt with steps at 2 or 3 and at 11, the
   same places as near 17. What those two points are is still open: they are not where a coarser or
   finer step's label count crosses n, and not a fixed number of final steps (9 or 8 apart).
+
+## 2026-11-15, sixth pass: the jumps against the cost comparisons
+
+- The jumps are not cost events. Over the two probes (n 4 to 40), 494 pairs n → n + 1 keep the same step
+  and bottom label; the bottom's start set changes in 46 of them, and only 3 of those 46 fall where any
+  comparison of StatCraft's rule changes (the order of the candidate steps, or any step's choice of
+  inner or outer end; 14 such changes in all). Between 21 and 40 the ranking 0.02 < 0.05 < 0.1 < 0.2
+  never changes in the ranges below 1, yet the bottom jumps twice.
+- The jumps sit at fixed values, not at fixed n − cnt. Written as the absolute start index s = L − e
+  (start s·d), every range with step 0.02 + 1 ulp falls into the same blocks: s in 22:23, 19:21, 14:18,
+  10:13, then 9 or below (starts 0.44–0.46, 0.38–0.42, 0.28–0.36, 0.20–0.26, ≤ 0.18), whatever lo, hi or
+  cnt. At 17 with step 0.05 the blocks are 338:340, 333:337, 327:332. These are where walks from nearby
+  starts round to the same bits. So the "steps of e at n − cnt 2 and 11" were the start crossing two of
+  these block edges; the start itself moves smoothly down as n grows.
+- How fast it moves is not one constant. Fitting s = floor(A − r·n) per range: step 0.02 ranges give r
+  in [0.445, 0.570] (0.313–0.733), [0.405, 0.495] (0.347–0.767), [0.430, 0.495] (0.469–0.889),
+  [0.505, 0.710] (0.469–1.079); step 0.05 at 17 [0.505, 0.62]; 0.431–0.851 fits no straight line (it
+  drops 5 steps between n 24 and 32, then 3 or fewer from 32 to 40). Near half a step per n, as if a
+  label were added on each side for every two of n, but not exactly half, and not straight.
+- Next: probes built for narrow blocks (values where walks merge least) so that s(n) can be read
+  one n at a time, then fit s against lo, hi, n and range.
