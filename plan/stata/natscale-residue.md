@@ -87,3 +87,22 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   steps below (c about the label count, K a cap of 3 to 6), and a residue shows only when e reaches a
   count whose repeated additions do not land exactly (3 or more for 0.1 + 1 ulp). Not yet checked
   against the tops.
+
+## The likely mechanism: values kept in local macros (2026-11-15, later)
+
+- Stata 19 keeps a number put into a local (`local a = exp`) as text in %18.0g: 0.1 + 1 ulp becomes
+  `.1`, 0.30000000000000004 `.3`, 1.2000000000000002 `1.2`, 2^-55 `2.77555756156e-17`, 1/3
+  `.3333333333333333` (observed; RCraft's stata_fmt(x, "%18.0g") gives the same text in every case
+  tried). A number read back from such a local is the nearest double to that text.
+- Stata's r(min) and r(max) are not such text: 2^-55 and 1.0999999999999999 cannot be read from it.
+  They fit an expression evaluated when the result is returned, one local label and the live step:
+  (-.1) + (0.1 + 1 ulp) = 2^-55 and 1.2 - (0.1 + 1 ulp) = 1.0999999999999999. r(delta) keeps
+  0.1 + 1 ulp, so the step is computed live (10 × 10^-2, Stata's 10^k a product of tenths), not read
+  from a local.
+- That explains why no pure floating-point formula fitted: the labels round to 16 or 17 significant
+  digits at each step that goes through a local, and how many digits fit in %18.0g depends on the
+  sign and the scale (`-.1` against `.10000000000000002`; leading zeros of 0.0103).
+- Tried on 11,140 cases (c.txt and f.txt): simple forms (M(L·d), M((L-1)·d) + d, M((U+1)·d) - d, and
+  so on, M the %18.0g round trip) explain some form at the bottom in 9,926 and at the top in 8,068.
+  Next: model the loop itself, labels kept in locals and stepped by the live d, with the stopping
+  rule from StatCraft's costs, and fit when each end gets its final + d or - d.
