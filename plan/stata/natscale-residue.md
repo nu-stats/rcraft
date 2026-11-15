@@ -449,3 +449,24 @@ Scoreboard unchanged at 4,891 both ends.
   they changed together. So the residue does not come from arithmetic on lo or hi themselves (no
   lo − mod(lo, d) and the like): it comes from the labels and the steps, and a single decision moves both
   ends at once.
+
+## 2026-11-15: where both ends flipped, a tie broken by rounding
+
+Probe 13 (795 runs): the two residue cases from probe 12 whose ends flipped (lo 12.91, hi 15.53, n 41,
+step 0.1; lo −1.03, hi 0.202, n 24, step 0.1), with lo moved −30..30 ulps, hi moved −30..30, and a
+13 × 13 grid of both. (The third flip, lo −1.03 with step 0.01, is only the on-label clamp: lo/d = −103.)
+
+- The flips are not thresholds. About 1 move in 10, scattered: lo +1 ulp flips, +2 does not; the grid
+  shows no pattern along constant hi − lo or constant hi + lo. Such a fingerprint is what a floating
+  comparison gives when the two sides are equal in exact arithmetic for every lo and hi nearby (for
+  example the cost of extending at the bottom against the top, both outside): the last bits decide.
+- In 12.91–15.53 the three results are the same labels reached by walking in from different distances,
+  and the distance is the same at both ends: 236 points need e 9–12 below and 8–10 above (shared 9–10),
+  17 points 4–8 and 5–7 (5–7), 12 points 0–3 and 0–2 (0–2). One number decides both ends, and the
+  rounding of a tied comparison picks it: mostly the largest, sometimes it stops early. A loop that
+  extends while the cost does not rise, with ties at each step, would leave exactly this.
+- Over probes 6–8 a shared e is found in 82% of cases with both ends walked against 72% for tops paired
+  at random: weak in general because the sets are wide, sharp where they are narrow.
+- Next: write the loop (extend while the cost does not rise, with a candidate cost expression in
+  floating point) and fit its exact evaluation to the 530 fingerprint points of these two cases. A
+  formula that matches every point's choice is very unlikely by chance; that pins the cost arithmetic.
