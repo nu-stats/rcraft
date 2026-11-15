@@ -482,7 +482,7 @@ fn diagnostic_plots_draw_one_page_of_four_panels() {
 }
 
 /// Base R's stats; sandwich, lmtest and marginaleffects for three dialogs.
-const PACKAGES: &[&str] = &["sandwich", "lmtest", "marginaleffects"];
+const PACKAGES: &[&str] = &["sandwich", "lmtest", "marginaleffects", "gt", "openxlsx2"];
 
 /// The models of [`SETUP`] worked out in plain R, without lm or glm: least
 /// squares from the normal equations on the 11 rows with an x, and the
@@ -865,4 +865,98 @@ fn the_model_table_is_the_one_built_by_hand() {
             ],
         ),
     );
+}
+
+/// Export table (P7.2): a Model table written as a web page, an RTF document,
+/// LaTeX, an Excel workbook and Markdown; each file read back holds every
+/// cell, the workbook and the Markdown hold the table exactly, and the
+/// Model table's note and the title go with it. A file that is there is not
+/// written over unless asked.
+#[test]
+fn an_exported_table_holds_every_cell() {
+    use rcraft_catalog::report::{EXPORT_TABLE, MODEL_TABLE};
+    let Some(mut e) = started() else { return };
+    for package in ["gt", "openxlsx2"] {
+        let (outcome, _) = run(
+            &mut e,
+            Source::Typed,
+            &format!("stopifnot(requireNamespace('{package}', quietly = TRUE))"),
+        );
+        if outcome != Outcome::Ok {
+            eprintln!("skipped: the R package {package} is not installed");
+            return;
+        }
+    }
+    kept(
+        &mut e,
+        &MODEL_TABLE,
+        "m1",
+        &[("others", "g1"), ("save", "tab")],
+        &["stars", "n", "r2", "ic"],
+    );
+    let dir = std::env::temp_dir().join(format!("rcraft-tables-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(std::fs::create_dir_all(&dir).is_ok());
+    let file = |name: &str| dir.join(name).to_string_lossy().replace('\\', "/");
+    let ctx = Context {
+        dataset: "tab".into(),
+        frames: Vec::new(),
+        columns: Vec::new(),
+    };
+    let export = |e: &mut Engine, path: &str, replace: bool| {
+        let mut values = EXPORT_TABLE.defaults(&ctx);
+        values.set_text("file", path);
+        values.set_text("title", "Table 1");
+        values.set_flag("replace", replace);
+        let code = EXPORT_TABLE
+            .generate(&ctx, &values, Style::Base)
+            .unwrap_or_default();
+        run(e, Source::Menu(EXPORT_TABLE.menu.into()), &code)
+    };
+    for name in ["t.html", "t.rtf", "t.tex", "t.xlsx", "t.md"] {
+        let (outcome, text) = export(&mut e, &file(name), false);
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+    }
+    holds(
+        &mut e,
+        &pinned::all_of(
+            &format!(
+                "cells <- unique(c(names(tab), unlist(tab, use.names = FALSE))); cells <- cells[nzchar(cells)]; \
+                 has_all <- function(f) {{ x <- paste(readLines(f, warn = FALSE), collapse = '\\n'); \
+                   all(vapply(cells, function(c) grepl(c, x, fixed = TRUE), TRUE)) }}; \
+                 note <- attr(tab, 'note'); \
+                 wb <- openxlsx2::read_xlsx('{xlsx}', start_row = 3, col_names = TRUE); \
+                 wb <- wb[seq_len(nrow(tab)), , drop = FALSE]; wb[is.na(wb)] <- ''; \
+                 md <- readLines('{md}'); rows <- md[startsWith(md, '| ')][-1]; \
+                 split <- t(vapply(rows, function(r) \
+                   trimws(strsplit(r, '|', fixed = TRUE)[[1]][seq_len(ncol(tab)) + 1]), character(ncol(tab))))",
+                xlsx = file("t.xlsx"),
+                md = file("t.md"),
+            ),
+            &[
+                ("html", &format!("has_all('{}')", file("t.html"))),
+                ("rtf", &format!("has_all('{}')", file("t.rtf"))),
+                ("tex", &format!("has_all('{}')", file("t.tex"))),
+                (
+                    "html_note",
+                    &format!(
+                        "any(grepl('in parentheses', readLines('{}', warn = FALSE), fixed = TRUE))",
+                        file("t.html")
+                    ),
+                ),
+                (
+                    "xlsx",
+                    "identical(unname(as.matrix(wb)), unname(as.matrix(tab)))",
+                ),
+                ("md", "identical(unname(split), unname(as.matrix(trimws(as.matrix(tab)))))"),
+                ("md_note", "identical(tail(md, 1), note) && md[1] == 'Table 1'"),
+            ],
+        ),
+    );
+    // there now: not written over unless asked
+    let (outcome, _) = export(&mut e, &file("t.md"), false);
+    assert_eq!(outcome, Outcome::Error);
+    let (outcome, text) = export(&mut e, &file("t.md"), true);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let _ = std::fs::remove_dir_all(&dir);
 }

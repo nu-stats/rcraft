@@ -592,6 +592,10 @@ Each family is its own set of dialogs over a named CRAN package.
   rows, other model classes)
 - P7.2 Export to docx, xlsx, HTML, LaTeX and Markdown; one document built up
   across a session
+  (first part 2026-11-15: Export table, for any data frame in the Objects pane (a Model table, say):
+  .html, .rtf (which Word opens), .tex through gt, .xlsx through openxlsx2, .md in base R, chosen by
+  the file's ending, with a title and the Model table's note. Not yet: .docx (gt needs pandoc for
+  it; officer and flextable would do it without), and one document built up across a session)
 - P7.3 Script Editor: run selection, outline, find and replace
 - P7.4 Export the session as an R script, an R Markdown or Quarto document,
   or a Quarto project

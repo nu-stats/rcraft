@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 117 | 116 | 0 | 1 |
+| 118 | 117 | 0 | 1 |
 
 ## File
 
@@ -132,6 +132,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Entry | Status |
 |---|---|
 | Model table | verified |
+| Export table | verified |
 
 ## Packages
 

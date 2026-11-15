@@ -416,6 +416,15 @@ pub fn object_list(
                     ui.close_menu();
                 }
             }
+            // a data frame (a Model table, say) can be written as a formatted table (P7.2)
+            if item.is_data_frame() {
+                for spec in rcraft_catalog::report::TABLE_REPORTS {
+                    if ui.button(format!("{}…", spec.entry)).clicked() {
+                        out.push(ObjectClick::Dialog(spec, item.name.clone()));
+                        ui.close_menu();
+                    }
+                }
+            }
             // a fitted model has its own actions (P4.5)
             if rcraft_catalog::postest::is_model_class(&item.class) {
                 ui.separator();

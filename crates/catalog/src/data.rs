@@ -626,6 +626,7 @@ pub fn is_object_menu(menu: &str) -> bool {
         .iter()
         .chain(crate::postest::MODEL_SPECS)
         .chain(crate::report::MODEL_REPORTS)
+        .chain(crate::report::TABLE_REPORTS)
         .any(|s| s.menu == menu)
 }
 

@@ -143,6 +143,7 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
          check.names = FALSE, row.names = NULL)\n\
          {foot}  \
          cat(\"{note}\\n\")\n  \
+         attr(out, \"note\") <- \"{note}\"\n  \
          out\n}})(list({}), {})",
         list.join(", "),
         a.number("digits"),
@@ -241,6 +242,150 @@ pub const MODEL_TABLE: Spec = Spec {
 /// Objects pane's Model menu with the post-estimation ones.
 pub const MODEL_REPORTS: &[&Spec] = &[&MODEL_TABLE];
 
+// ---- Export table (P7.2) ----
+
+/// The kinds of file a table is written as, by the file name's ending.
+const TABLE_FILES: &[(&str, &str)] = &[
+    (".html", "a web page"),
+    (".htm", "a web page"),
+    (".rtf", "a Word document (RTF, which Word opens)"),
+    (".tex", "LaTeX"),
+    (".xlsx", "an Excel workbook"),
+    (".md", "Markdown"),
+];
+
+fn table_file_kind(path: &str) -> Option<&'static str> {
+    let lower = path.to_ascii_lowercase();
+    TABLE_FILES
+        .iter()
+        .find(|(end, _)| lower.ends_with(end))
+        .map(|(end, _)| *end)
+}
+
+fn export_check(a: &Args) -> Vec<Problem> {
+    let file = a.name_text("file");
+    if file.is_empty() {
+        vec![Problem::new("file", "Type where to write the table.")]
+    } else if table_file_kind(file).is_none() {
+        vec![Problem::new(
+            "file",
+            "End the file name in .html, .rtf (Word), .tex, .xlsx or .md.",
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
+fn export_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
+    let path_text = a.name_text("file").replace('\\', "/");
+    let path = rcraft_rcodegen::r_string(&path_text);
+    let title = a.values.text("title").trim().to_string();
+    let guard = if a.flag("replace") {
+        String::new()
+    } else {
+        format!(
+            "  if (file.exists(path)) stop({})\n",
+            rcraft_rcodegen::r_string("the file already exists; tick Replace to write over it")
+        )
+    };
+    let write = match table_file_kind(&path_text).unwrap_or(".html") {
+        ".xlsx" => {
+            let head = if title.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "  wb$add_data(x = {}, start_row = 1, col_names = FALSE)\n",
+                    rcraft_rcodegen::r_string(&title)
+                )
+            };
+            let first = if title.is_empty() { 1 } else { 3 };
+            format!(
+                "  wb <- openxlsx2::wb_workbook()\n  wb$add_worksheet(\"Table\")\n{head}  \
+                 wb$add_data(x = tab, start_row = {first})\n  \
+                 if (!is.null(note)) wb$add_data(x = note, start_row = {first} + nrow(tab) + 2, \
+                 col_names = FALSE)\n  \
+                 wb$save(path)\n"
+            )
+        }
+        ".md" => {
+            let head = if title.is_empty() {
+                String::new()
+            } else {
+                format!("{}, \"\", ", rcraft_rcodegen::r_string(&title))
+            };
+            format!(
+                "  cell <- function(x) gsub(\"|\", \"\\\\|\", ifelse(is.na(x), \"\", as.character(x)), fixed = TRUE)\n  \
+                 row <- function(x) paste0(\"| \", paste(cell(x), collapse = \" | \"), \" |\")\n  \
+                 body <- vapply(seq_len(nrow(tab)), function(i) row(unlist(tab[i, ], use.names = FALSE)), \"\")\n  \
+                 writeLines(c({head}row(names(tab)), paste0(\"|\", strrep(\"---|\", ncol(tab))), body, \
+                 if (!is.null(note)) c(\"\", note)), path)\n"
+            )
+        }
+        _ => {
+            let head = if title.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "  g <- gt::tab_header(g, title = {})\n",
+                    rcraft_rcodegen::r_string(&title)
+                )
+            };
+            format!(
+                "  g <- gt::gt(tab)\n{head}  \
+                 if (!is.null(note)) g <- gt::tab_source_note(g, note)\n  \
+                 gt::gtsave(g, path)\n"
+            )
+        }
+    };
+    format!(
+        "local({{\n  tab <- {}\n  \
+         stopifnot(\"only a data frame can be written as a table\" = is.data.frame(tab))\n  \
+         path <- {path}\n{guard}  \
+         note <- attr(tab, \"note\")\n{write}  \
+         if (!isTRUE(file.size(path) > 0)) stop(\"R wrote no file; check that the folder exists and can be written to\")\n  \
+         cat(\"Wrote \", path, \"\\n\", sep = \"\")\n}})",
+        a.data()
+    )
+}
+
+pub const EXPORT_TABLE: Spec = Spec {
+    entry: "Export table",
+    menu: "Objects > Export table",
+    about: "Write this data frame (a Model table, say) to a file as a formatted table: a web page \
+            (.html), a Word document (.rtf, which Word opens), LaTeX (.tex), an Excel workbook \
+            (.xlsx) or Markdown (.md), chosen by the file name's ending. A Model table's note goes \
+            below it.",
+    widgets: &[
+        Widget::Text {
+            id: "file",
+            label: "File",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Its ending chooses the kind: .html, .rtf, .tex, .xlsx or .md.",
+        },
+        Widget::Text {
+            id: "title",
+            label: "Title",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Optional: a line above the table.",
+        },
+        Widget::Check {
+            id: "replace",
+            label: "Replace the file if it is already there",
+            default: false,
+            hint: "Left unticked, nothing is written when the file exists.",
+        },
+    ],
+    needs: &["gt", "openxlsx2"],
+    styles: BASE,
+    check: export_check,
+    code: export_code,
+};
+
+/// The Reports dialogs that work on a data frame in the Objects pane.
+pub const TABLE_REPORTS: &[&Spec] = &[&EXPORT_TABLE];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,6 +459,41 @@ mod tests {
         let bare =
             make("fit", &[], &[("n", false), ("r2", false), ("ic", false)]).unwrap_or_default();
         assert!(!bare.contains("extra <- list("), "{bare}");
+    }
+
+    #[test]
+    fn a_table_is_written_as_its_file_ending_says() {
+        let c = Context {
+            dataset: "tab".into(),
+            frames: Vec::new(),
+            columns: Vec::new(),
+        };
+        let code = |file: &str, title: &str| {
+            let mut v: Values = EXPORT_TABLE.defaults(&c);
+            v.set_text("file", file);
+            v.set_text("title", title);
+            EXPORT_TABLE.generate(&c, &v, Style::Base)
+        };
+        let html = code(r"C:\out\t.HTML", "").unwrap_or_default();
+        assert!(html.contains("path <- \"C:/out/t.HTML\""), "{html}");
+        assert!(
+            html.contains("gt::gtsave(g, path)") && html.contains("if (file.exists(path)) stop("),
+            "{html}"
+        );
+        assert!(code("t.rtf", "Table 1")
+            .unwrap_or_default()
+            .contains("gt::tab_header(g, title = \"Table 1\")"));
+        assert!(code("t.tex", "").unwrap_or_default().contains("gt::gtsave"));
+        let xlsx = code("t.xlsx", "Table 1").unwrap_or_default();
+        assert!(
+            xlsx.contains("openxlsx2::wb_workbook()") && xlsx.contains("start_row = 3"),
+            "{xlsx}"
+        );
+        let md = code("t.md", "").unwrap_or_default();
+        assert!(md.contains("writeLines(c(row(names(tab))"), "{md}");
+        for bad in ["", "t.docx", "t.csv"] {
+            assert!(code(bad, "").is_err(), "{bad}");
+        }
     }
 
     #[test]

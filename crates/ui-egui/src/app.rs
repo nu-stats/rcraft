@@ -2973,6 +2973,7 @@ impl App {
             .chain(rcraft_catalog::graphs::SPECS)
             .chain(rcraft_catalog::postest::MODEL_SPECS)
             .chain(rcraft_catalog::report::MODEL_REPORTS)
+            .chain(rcraft_catalog::report::TABLE_REPORTS)
             .chain(rcraft_catalog::save::SPECS)
             .chain(rcraft_catalog::plot_export::PLOT_SPECS)
             .find(|s| s.entry.eq_ignore_ascii_case(entry))

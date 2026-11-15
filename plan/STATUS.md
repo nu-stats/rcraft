@@ -4998,3 +4998,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   something an earlier file leaves in the session is the likeliest cause; if it recurs, run made.do
   after the file that ran before it in that thread.
 
+## P7.2 first part: Export table, 2026-11-15
+
+- Any data frame in the Objects pane has **Export table** (`catalog::report::EXPORT_TABLE`): a web page
+  (.html), a Word document as RTF (.rtf, which Word opens) and LaTeX (.tex) through gt, an Excel
+  workbook (.xlsx) through openxlsx2 and Markdown (.md) in base R, chosen by the file's ending; an
+  optional title, and a Model table's note (now kept with the table as its `note`) below it. A file
+  that is there is not written over unless asked.
+- .docx is not offered: gt writes it through pandoc, which is not installed; officer and flextable
+  would write it without pandoc, if the user wants them installed.
+- Verified: a Model table written in all five; the HTML, RTF and LaTeX hold every cell, the HTML the
+  note, the workbook and the Markdown the table exactly, with the title and note. CI now installs gt.
+  118 entries: 117 verified, 1 planned.
+

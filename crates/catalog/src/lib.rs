@@ -107,13 +107,14 @@ const fn planned(name: &'static str, area: Area) -> Entry {
 /// Every dialog of the catalog, once each (a spec listed in two menus is not
 /// repeated).
 pub fn all_specs() -> Vec<&'static rcraft_rcodegen::dialog::Spec> {
-    let lists: [&[&'static rcraft_rcodegen::dialog::Spec]; 8] = [
+    let lists: [&[&'static rcraft_rcodegen::dialog::Spec]; 9] = [
         data::SPECS,
         data::OBJECT_SPECS,
         stats::SPECS,
         graphs::SPECS,
         postest::MODEL_SPECS,
         report::MODEL_REPORTS,
+        report::TABLE_REPORTS,
         save::SPECS,
         plot_export::PLOT_SPECS,
     ];
@@ -231,6 +232,7 @@ pub const ENTRIES: &[Entry] = &[
     verified("Heatmap", Area::Graphs),
     verified("Export plot", Area::Graphs),
     verified("Model table", Area::Reports),
+    verified("Export table", Area::Reports),
     verified("Search packages", Area::Packages),
     verified("Browse task views", Area::Packages),
     verified("Describe package", Area::Packages),
