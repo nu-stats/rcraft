@@ -150,18 +150,29 @@ scalars: lo and hi moved by single ulps around labels.
   1.5 at 14/15, 2.06 at 20/21, 0.84 at 4/5).
 - Stata's own floor(), ceil(), mod(), round() and int() are exact at ±300 ulps around labels (checked
   on x/d for 17.9, 0.9, 19.4, -1.6, 17, 0.3, -2.5, 5): any tolerance below is _natscale's own.
-- An on-label tolerance. With lo on a label or a few ulps below it, r(min) is lo itself, bit for bit:
-  `_natscale 16.999999999999893 17.84 10` (17 − 30 ulp) gives r(min) = 17 − 30 ulp. At 100 ulps below,
-  r(min) is the label just inside (17 + 1 ulp = 170·d). The same at the top: hi up to 30 to 100 ulps
-  above a label gives r(max) = hi. Window edges seen (in ulps of the end, inside / outside): lo 17 (step
-  0.1) 30/100, lo 0.3 (0.05) 30/100, lo 5 (0.1) 30/100, lo −2.5 (0.1) 100/300; hi 17.9 (0.1) 30/100,
-  hi 0.9 (0.05) 30/100, hi 19.4 and 19.2 (0.2) 100/300, hi −1.6 (0.1) 100/300. No relative tolerance
-  fits all eight (|x|, |x|+1, d, range, x/d); −2.5 is inside at 100 ulps while 5 is outside at the same
-  relative distance.
-- At the window's edge the end is neither lo/hi nor the label: lo = 0.3 − 100 ulp gives r(min) =
-  0.3 + 80 ulp, lo = 5 − 100 ulp gives 5 + 13 ulp, hi = 0.9 + 100 ulp gives r(max) = 0.9 + 10 ulp and
-  0.9 + 300 ulp gives 0.9 + 30 ulp. So there an expression in lo or hi itself (not a label product) is
-  returned.
+- An on-label clamp, read exactly (scalars, `%21x`, every ulp offset compared bit for bit). Let B be
+  the end Stata returns when lo or hi is a little off the label. Then r(min) is lo itself when
+  lo <= B and lo/d is within a tolerance of a whole number, and r(max) is hi itself when hi >= B and
+  hi/d is within it; on the far side (lo above B, hi below B) the end is B. `_natscale
+  16.999999999999893 17.84 10` (17 − 30 ulp) gives r(min) = 17 − 30 ulp; 17 + 3 ulp gives B. Windows
+  seen, in ulps of lo or hi (inside / first outside): lo 17, step 0.1: −30 / −100; lo 17, step 0.2:
+  −100 / −300; lo 1234, 0.1: 0 / −1; lo 0.3, 0.05: −1000 / −3000; lo −2.5, 0.1: −300 / −1000; lo 5,
+  0.1: −100 / −300; hi 19.4 and 19.2, 0.2: +100 / +300; hi 17.9, 0.1: +30 / +100; hi 0.9, 0.05:
+  +300 / +1000; hi −1.6, 0.1: +300 / +1000. One tolerance fits all twelve edges when it is measured
+  as |x/d − round(x/d)| in double: inside up to 1.82e-12, outside from 2.22e-12 (1234 is in at one
+  ulp of 12340, 1.819e-12, and out at three). In ulps of x, in |x|, in the range or in d no single
+  value fits. (An earlier reading here, from offsets against a rounded decimal, gave wrong edges for
+  0.9 and 1234; the edges above replace it.)
+- On all 27,795 distinct results: r(min) = lo in 16,427, and lo/d is within 2.22e-12 of a whole
+  number in all but 6; r(max) = hi in 694, hi/d within it in all but 6. With lo on a label, r(min)
+  is below lo in 1,781 (B below lo, e.g. lo = −2.5 gives −2.5 − 1 ulp = −25·d) and above lo in 1,243:
+  those are the lo = 0 residues (2^-56, 2^-55 ...), so the clamp comes before the final walk back by
+  the live step that leaves the residue.
+- B is not always L·d and depends on more than L and d: 17 to 17.84 with step 0.1 + 1 ulp and L = 170
+  gives B = 17 + 1 ulp (= 170·d) for n 8 (top label 178) and 17 + 2 ulp for n 10 (top label 179). The
+  latter is no product, no walk down from the top, and no walk up from 0; it is two or three steps
+  above walked down by d. Stata's B at lo = 1234 from below is 1234 exactly, while 12340·d is
+  1234 + 1 ulp.
 - Off a label, hi's last bits do not matter (hi ± 40 ulps leaves r() unchanged for 17–19.26,
   17–17.84, 0–1.03, 0–0.72, 0.3–0.866), except at a near-tie: 0.3 to 0.459 with n 21 flips between two
   answers as hi moves by 1, 5, 10, 20, 40 ulps, not monotonically. A cost comparison sits at a tie there.
@@ -184,7 +195,8 @@ scalars: lo and hi moved by single ulps around labels.
 - Where it stands: r(n) and the label set are StatCraft's cost rule; r(delta) is q × 10^k with an
   n-dependent base; each end is lo/hi inside a tolerance window, otherwise a label reached by walking
   with the live step from a start that is not yet known, and in the lo = 0 family the start lies e
-  steps beyond with e growing with n. Next experiments: map the tolerance window against d and n at one
-  magnitude (is it in ulps of x/d?); sweep n for fixed lo = 17.x ranges to find the n at which 0.2 moves
+  steps beyond with e growing with n. Next experiments: pin the clamp tolerance (between 1.82e-12 and
+  2.22e-12 of x/d; is it 2e-12?) and find how B is built (17 to 17.84: B moves with the top label);
+  sweep n for fixed lo = 17.x ranges to find the n at which 0.2 moves
   from 2 × 10^-1 to 20 × 10^-2; and probe the top's start with hi just off a label at large magnitude
   (1234.x), where every walk length leaves distinct bits.
