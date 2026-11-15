@@ -470,3 +470,21 @@ step 0.1; lo −1.03, hi 0.202, n 24, step 0.1), with lo moved −30..30 ulps, h
 - Next: write the loop (extend while the cost does not rise, with a candidate cost expression in
   floating point) and fit its exact evaluation to the 530 fingerprint points of these two cases. A
   formula that matches every point's choice is very unlikely by chance; that pins the cost arithmetic.
+
+## 2026-11-15: the padding against n at fixed points (probe 14)
+
+Probe 14 (616 runs): the base point and three points of each other result from probe 13, each at n 5–60.
+e is how far each end walks in (product start (L − e)·d, then live steps).
+
+- 12.91–15.53 (step 0.1, labels 129–156): e is a staircase in n. Base: n 28–33 e 0–2 at both ends,
+  n 34–39 e 5–7, n 40–43 e 9–10, n 44–52 bottom 9–12 and top 11–12. The points moved by a few ulps
+  follow the same staircase but drop back one or two levels at single n: lo +1 ulp at n 39, 41 and 43
+  (to e 0–2), lo −30 ulps at n 41 and 43 (to 5–7), lo −13 at n 38 (0–2) and 41 (5–7), lo −16 and −7 at
+  n 41 (0–2). So the tie is not "n against a threshold" (that would tie at one n only): it ties at
+  several n, mostly odd ones, as a choice between two options that cost the same whatever n is would.
+- −1.03–0.202 (step 0.1, labels −11–2): the padding moves from one end to the other as n grows. n 19–21
+  bottom e 1–3 and top 5–7; n 22–24 bottom 4–6 and top 1–4. At n 24 the moved points (lo −25 and −20
+  ulps) keep n 19–21's split.
+- With step 0.05 (n 53–60 at 12.91–15.53) the levels are 1–3, 3–5, 5–7 instead.
+- Next: fit a loop that adds one label at a time to whichever side is cheaper, with the comparison in
+  floating point, to these staircases and the probe 13 grid.
