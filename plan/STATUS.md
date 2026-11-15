@@ -4711,3 +4711,22 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   message). Drawn in the app: the section open on fixest's page.
 - **Not checked:** a real install of an older version from the new screen (nothing is installed by the
   tests), and a real install from a P1A.10 offer.
+
+## P1A.2 done: "Binary for this R" in Find, 2026-11-14
+
+- The build menu in Find on CRAN has **Binary for this R**. The first time it is picked, R is asked
+  (hidden) for `contrib.url("", type = "binary")`, its own binary folder, so no platform or macOS build
+  name is guessed; the mirror's `PACKAGES.gz` there is read on a worker (`sources::Lookup::Binaries`,
+  the folder checked by `binary_list_address`). Results then hold only packages with a binary, combined
+  with the task view and licence filters and the search; nothing shows until the list is in. Where R has
+  no binaries (Linux) the line under the filters says every package is built from source.
+- A package's page then says "Binary for this R: version x", or that the newest is not built yet, or that
+  there is none.
+- The task-view filter was already there (P1A.3); the other providers' lists are searched in Other
+  sources. P1A.2 is done.
+- Tests: the filter over the sample (none until the list, then only those, searched or not, not another
+  mirror's list); the address check; the lookup with a stand-in; a real R 4.4.3 naming
+  `/bin/windows/contrib/4.4`; and, with `RCRAFT_LIVE_SOURCES=1`, the real lists (23,668 Windows and
+  24,049 macOS arm binaries for R 4.4). Drawn in the app: the menu with the new choice.
+- **Not checked:** picking it in the running app (pictures never reach the network), and macOS, where R
+  names the folder.

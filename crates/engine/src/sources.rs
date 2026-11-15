@@ -1,6 +1,7 @@
 //! Looking up a package source beyond CRAN, on a worker thread: a GitHub
 //! repository's DESCRIPTION, an r-universe's package list, or Bioconductor's
-//! list for this R, or the older versions in CRAN's archive. Only on the user's request, through the same `Fetcher` as
+//! list for this R, the older versions in CRAN's archive, or CRAN's list of binary packages
+//! for this R. Only on the user's request, through the same `Fetcher` as
 //! the CRAN list (HTTPS only, capped, cancellable). Local files are read by R,
 //! not here.
 
@@ -47,6 +48,36 @@ pub enum Lookup {
         mirror: String,
         package: String,
     },
+    /// The binary packages a mirror has for this R: the address of their
+    /// `PACKAGES.gz` (see [`binary_list_address`]).
+    Binaries {
+        address: String,
+    },
+}
+
+/// R code that prints the folder, under a mirror, of the binary packages for
+/// this R (an error where CRAN has none, as on Linux).
+pub const BINARY_FOLDER_CODE: &str = "cat(contrib.url(\"\", type = \"binary\"))";
+
+/// Where a mirror lists the binary packages for this R, from the folder R
+/// gives as `contrib.url("", type = "binary")` (`/bin/windows/contrib/4.4`
+/// on Windows, `/bin/macosx/big-sur-arm64/contrib/4.4` on an arm Mac). `None`
+/// for anything else.
+pub fn binary_list_address(mirror: &str, folder: &str) -> Option<String> {
+    let folder = folder.trim();
+    let ok = folder.starts_with("/bin/")
+        && folder.len() <= 120
+        && !folder.contains("..")
+        && folder
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '/' | '.' | '-' | '_'));
+    ok.then(|| {
+        format!(
+            "{}{}/PACKAGES.gz",
+            mirror.trim_end_matches('/'),
+            folder.trim_end_matches('/')
+        )
+    })
 }
 
 impl Lookup {
@@ -66,6 +97,7 @@ impl Lookup {
             Lookup::Archive { mirror, package } => {
                 archive_folder_url(mirror, package).into_iter().collect()
             }
+            Lookup::Binaries { address } => vec![address.clone()],
         }
     }
 }
@@ -89,6 +121,8 @@ pub enum Found {
         package: String,
         versions: Vec<Archived>,
     },
+    /// The binary packages for this R: each name with its binary's version.
+    Binaries { versions: Vec<(String, String)> },
 }
 
 pub enum LookupState {
@@ -217,6 +251,17 @@ fn work(fetcher: &dyn Fetcher, lookup: &Lookup, cancel: &AtomicBool) -> Result<F
             Ok(Found::Versions {
                 package: package.clone(),
                 versions,
+            })
+        }
+        Lookup::Binaries { address } => {
+            let bytes = get(fetcher, address, MAX_LIST, cancel)?;
+            let (index, _) = list_from(&bytes)?;
+            Ok(Found::Binaries {
+                versions: index
+                    .packages()
+                    .iter()
+                    .map(|p| (p.name.clone(), p.version.clone()))
+                    .collect(),
             })
         }
     }
@@ -488,6 +533,46 @@ mod tests {
         s.start(archive("../x"));
         finish(&mut s);
         assert!(matches!(s.state(), LookupState::Failed(m) if m.contains("not a package name")));
+    }
+
+    #[test]
+    fn the_binary_list_is_read_from_the_folder_r_names() {
+        let address = binary_list_address("https://m.org/", "/bin/windows/contrib/4.4");
+        assert_eq!(
+            address.as_deref(),
+            Some("https://m.org/bin/windows/contrib/4.4/PACKAGES.gz")
+        );
+        assert_eq!(
+            binary_list_address("https://m.org", " /bin/macosx/big-sur-arm64/contrib/4.5/\n")
+                .as_deref(),
+            Some("https://m.org/bin/macosx/big-sur-arm64/contrib/4.5/PACKAGES.gz")
+        );
+        for bad in [
+            "",
+            "src/contrib",
+            "/bin/../x",
+            "/bin/a b",
+            "/bin/x?y=1",
+            "http://e.org/bin",
+        ] {
+            assert_eq!(binary_list_address("https://m.org", bad), None, "{bad}");
+        }
+        let mut s = SourceLookups::new(Arc::new(Canned(vec![(
+            "https://m.org/bin/windows/contrib/4.4/PACKAGES.gz".to_string(),
+            PACKAGES_GZ.to_vec(),
+        )])));
+        s.start(Lookup::Binaries {
+            address: address.unwrap_or_default(),
+        });
+        finish(&mut s);
+        let LookupState::Done(found) = s.state() else {
+            panic!("nothing found");
+        };
+        let Found::Binaries { versions } = &**found else {
+            panic!("not binaries");
+        };
+        assert_eq!(versions.len(), 4);
+        assert!(versions.iter().all(|(n, v)| !n.is_empty() && !v.is_empty()));
     }
 
     #[test]

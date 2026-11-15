@@ -62,8 +62,9 @@ Tasks:
   keywords, ranked; filters by provider, task view, licence, and "has
   binary for my platform"; results show title, version, date, maintainer
   and a one-line description
-  (done for CRAN: ranked, with licence, compiler and date filters; not yet: task view
-  and "has a binary" filters, other providers)
+  (done for CRAN: ranked, with licence, compiler, task view and, from 2026-11-14, "Binary for
+  this R" filters; the other providers' lists are searched in Packages > Other sources, not mixed
+  into Find. P1A.2 is done)
 - P1A.3 Browse: CRAN Task Views (Econometrics, Survival, Bayesian, Spatial
   and the rest) as a tree; "new" and "recently updated" lists
   (`ssc new`/`ssc hot` equivalents); optional download counts from the

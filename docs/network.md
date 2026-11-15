@@ -7,7 +7,7 @@ confirmed against the service's public documentation when its task is built.
 
 | Purpose | Service | Task |
 |---|---|---|
-| CRAN package index, task views, binaries | CRAN mirror chosen by the user (default the cloud mirror): `src/contrib/PACKAGES.gz`, `web/packages/packages.rds` and `src/contrib/Views.rds` (the task views, about 70 KB) for the index (all exist, checked 2026-10-28) | P1A.1, P1A.3, P1A.5, P3.2 (the "Install" button in Use my file, for readxl and haven) |
+| CRAN package index, task views, binaries | CRAN mirror chosen by the user (default the cloud mirror): `src/contrib/PACKAGES.gz`, `web/packages/packages.rds` and `src/contrib/Views.rds` (the task views, about 70 KB) for the index (all exist, checked 2026-10-28); when the user picks **Binary for this R** in Find, the `PACKAGES.gz` of the binary folder R names (`bin/windows/contrib/<x.y>/`, about 1 MB, or the macOS one, about 2.7 MB; checked 2026-11-14) | P1A.1, P1A.3, P1A.5, P3.2 (the "Install" button in Use my file, for readxl and haven) |
 | Older versions of a CRAN package | only when the user clicks **List older versions** on a package's page: `<mirror>/src/contrib/Archive/<package>/` (a folder listing, read for its file names; checked 2026-11-14); then, after the yes, R fetches `<mirror>/src/contrib/Archive/<package>/<package>_<version>.tar.gz` | P1A.5 |
 | Bioconductor packages | `bioconductor.org`: `config.yaml` (which release is for this R) and `packages/<release>/bioc/VIEWS` (the list), when the user looks Bioconductor up; then BiocManager's own requests during an install the user said yes to | P1A providers |
 | r-universe packages | `<universe>.r-universe.dev`, only for a universe the user typed: `src/contrib/PACKAGES.gz`, then R's install from it | P1A providers |

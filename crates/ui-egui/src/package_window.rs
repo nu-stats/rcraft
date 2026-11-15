@@ -8,7 +8,9 @@
 use std::collections::{HashMap, HashSet};
 
 use eframe::egui::{self, RichText};
-use rcraft_engine::sources::{Found, Lookup, LookupState, SourceLookups};
+use rcraft_engine::sources::{
+    binary_list_address, Found, Lookup, LookupState, SourceLookups, BINARY_FOLDER_CODE,
+};
 use rcraft_engine::{Engine, IndexStatus, PackageIndexService, QueryId};
 use rcraft_rcodegen::failure::{diagnose, Diagnosis, Os, Retry};
 use rcraft_rcodegen::packages::{
@@ -65,6 +67,8 @@ enum Compile {
     Any,
     Yes,
     No,
+    /// P1A.2: only packages CRAN has a binary of for this R.
+    Binary,
 }
 
 /// Something waiting for the user's yes.
@@ -98,6 +102,22 @@ enum Confirm {
         code: Result<String, String>,
         menu: &'static str,
     },
+}
+
+/// What a search was last run for: the words, licence, build, the list's
+/// time and size, the task view, and how many binaries were known.
+type SearchKey = (String, String, Compile, u64, usize, Option<String>, usize);
+
+/// What a package's page says about its binary for this R.
+fn binary_line(binary: Option<&str>, current: &str) -> String {
+    match binary {
+        None => "No binary for this R: installing builds it from source.".to_string(),
+        Some(b) if compare_versions(b, current) == std::cmp::Ordering::Less => format!(
+            "Binary for this R: version {b} (the newest, {current}, is not built yet; R offers \
+             the binary or builds {current} from source)."
+        ),
+        Some(b) => format!("Binary for this R: version {b}."),
+    }
 }
 
 /// Why the last install did not work, in words, and what can be tried.
@@ -199,6 +219,15 @@ pub struct PackagesWindow {
     archive: SourceLookups,
     archive_for: Option<String>,
     older_text: String,
+    /// P1A.2: "Binary for this R". The mirror whose binaries are wanted (R is
+    /// asked where they are when free), the question, the list being read,
+    /// what it found (the mirror and each package's binary version), and why
+    /// there is none.
+    binary_wanted: Option<String>,
+    binary_query: Option<(QueryId, String)>,
+    binary_lookup: SourceLookups,
+    binaries: Option<(String, HashMap<String, String>)>,
+    binary_note: Option<String>,
     /// A local file to read (when R is free), R reading it, and what it found.
     peek_pending: Option<String>,
     peek_query: Option<QueryId>,
@@ -236,7 +265,7 @@ pub struct PackagesWindow {
     list_height: f32,
     where_result: Option<String>,
     /// The last search: what it was for, and what it found.
-    found_for: Option<(String, String, Compile, u64, usize, Option<String>)>,
+    found_for: Option<SearchKey>,
     found: Vec<Package>,
 }
 
@@ -270,6 +299,11 @@ impl Default for PackagesWindow {
             archive: SourceLookups::for_machine(),
             archive_for: None,
             older_text: String::new(),
+            binary_wanted: None,
+            binary_query: None,
+            binary_lookup: SourceLookups::for_machine(),
+            binaries: None,
+            binary_note: None,
             peek_pending: None,
             peek_query: None,
             peek_found: None,
@@ -331,6 +365,7 @@ impl PackagesWindow {
     #[cfg(test)]
     pub(crate) fn set_lookups(&mut self, lookups: SourceLookups) {
         self.archive = lookups.sibling();
+        self.binary_lookup = lookups.sibling();
         self.lookups = lookups;
     }
 
@@ -682,6 +717,30 @@ installation of package 'fixest' had non-zero exit status"
                 self.peek_query = None;
             }
         }
+        if let Some(mirror) = self.binary_wanted.take() {
+            if engine.is_busy() {
+                self.binary_wanted = Some(mirror);
+            } else {
+                self.binary_query = Some((engine.query(BINARY_FOLDER_CODE), mirror));
+            }
+        }
+        if let Some((q, mirror)) = self.binary_query.clone() {
+            if let Some(r) = engine.query_result(q) {
+                self.binary_query = None;
+                match binary_list_address(&mirror, &r.text).filter(|_| r.ok) {
+                    Some(address) => {
+                        self.binary_lookup.start(Lookup::Binaries { address });
+                    }
+                    None => {
+                        self.binary_note = Some(
+                            "CRAN has no binary packages for this platform: R builds every \
+                             package from source here."
+                                .into(),
+                        )
+                    }
+                }
+            }
+        }
         if let Some(name) = self.where_pending.take() {
             if engine.is_busy() {
                 self.where_pending = Some(name);
@@ -791,6 +850,82 @@ installation of package 'fixest' had non-zero exit status"
                     .to_string(),
             ),
         });
+    }
+
+    /// The binaries read for this mirror, if they have been.
+    fn binaries_here(&self, mirror: &str) -> Option<&HashMap<String, String>> {
+        self.binaries
+            .as_ref()
+            .filter(|(m, _)| m == mirror)
+            .map(|(_, b)| b)
+    }
+
+    /// Asks for the list of binaries for `mirror` unless it is in, coming, or
+    /// known not to exist.
+    fn want_binaries(&mut self, mirror: &str, r_present: bool) {
+        let asked = self.binary_wanted.as_deref() == Some(mirror)
+            || self.binary_query.as_ref().is_some_and(|(_, m)| m == mirror)
+            || self.binary_lookup.is_busy();
+        if r_present && !asked && self.binary_note.is_none() && self.binaries_here(mirror).is_none()
+        {
+            self.binary_wanted = Some(mirror.to_string());
+        }
+    }
+
+    /// Takes in a finished list of binaries.
+    fn take_binaries(&mut self, mirror: &str) {
+        if !self.binary_lookup.poll() {
+            return;
+        }
+        match self.binary_lookup.state() {
+            LookupState::Done(found) => {
+                if let Found::Binaries { versions } = &**found {
+                    self.binaries = Some((mirror.to_string(), versions.iter().cloned().collect()));
+                }
+            }
+            LookupState::Failed(m) => {
+                self.binary_note = Some(format!("CRAN's list of binaries could not be read: {m}"));
+            }
+            _ => {}
+        }
+        self.binary_lookup.clear();
+    }
+
+    /// The line under the filters while "Binary for this R" is chosen.
+    fn binary_status(&mut self, ui: &mut egui::Ui, pal: &Palette, mirror: &str, r_present: bool) {
+        if let Some(note) = self.binary_note.clone() {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(note).small().color(pal.warning));
+                if ui.small_button("Try again").clicked() {
+                    self.binary_note = None;
+                }
+            });
+        } else if let Some(b) = self.binaries_here(mirror) {
+            ui.label(
+                RichText::new(format!(
+                    "{} packages have a binary for this R (R {}).",
+                    b.len(),
+                    self.r_version_number
+                ))
+                .small()
+                .color(pal.dim),
+            );
+        } else if !r_present {
+            ui.label(
+                RichText::new("Needs R running, to know which binaries fit it.")
+                    .small()
+                    .color(pal.dim),
+            );
+        } else {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    RichText::new("Reading CRAN's list of binaries for this R…")
+                        .small()
+                        .color(pal.dim),
+                );
+            });
+        }
     }
 
     /// P1A.5: the "Older versions" part of a package's page. Lists the
@@ -956,6 +1091,7 @@ installation of package 'fixest' had non-zero exit status"
         self.apply_pending_rc(index, r_present);
         self.lookups.poll();
         self.archive.poll();
+        self.take_binaries(index.mirror());
         if self.pending_bioc_lookup && !self.r_version_number.is_empty() {
             self.pending_bioc_lookup = false;
             self.lookups.start(Lookup::Bioconductor {
@@ -965,6 +1101,8 @@ installation of package 'fixest' had non-zero exit status"
         self.apply_pending_source(index, r_present);
         if self.lookups.is_busy()
             || self.archive.is_busy()
+            || self.binary_lookup.is_busy()
+            || self.binary_query.is_some()
             || self.peek_query.is_some()
             || self.peek_pending.is_some()
         {
@@ -1332,19 +1470,31 @@ installation of package 'fixest' had non-zero exit status"
             ix.fetched_at,
             ix.len(),
             self.view_filter.clone(),
+            self.binaries_here(index.mirror()).map_or(0, HashMap::len),
         );
         if self.found_for.as_ref() == Some(&key) {
             return;
         }
-        let only = self
+        let binaries = self.binaries_here(index.mirror());
+        let mut only = self
             .view_filter
             .as_deref()
             .zip(index.views())
             .map(|(name, views)| views.members_of(name));
+        if self.compile == Compile::Binary {
+            // none at all until the list of binaries is in
+            let have: HashSet<String> = binaries
+                .map(|b| b.keys().cloned().collect())
+                .unwrap_or_default();
+            only = Some(match only {
+                Some(view) => view.intersection(&have).cloned().collect(),
+                None => have,
+            });
+        }
         let filters = Filters {
             licence: Some(self.licence.trim().to_string()).filter(|l| !l.is_empty()),
             needs_compilation: match self.compile {
-                Compile::Any => None,
+                Compile::Any | Compile::Binary => None,
                 Compile::Yes => Some(true),
                 Compile::No => Some(false),
             },
@@ -1355,6 +1505,7 @@ installation of package 'fixest' had non-zero exit status"
             Compile::Any => true,
             Compile::Yes => p.needs_compilation == Some(true),
             Compile::No => p.needs_compilation == Some(false),
+            Compile::Binary => binaries.is_some_and(|b| b.contains_key(&p.name)),
         };
         let nothing_typed = self.query.trim().is_empty() && filters.licence.is_none();
         self.found = if nothing_typed && self.view_filter.is_some() {
@@ -1429,13 +1580,23 @@ installation of package 'fixest' had non-zero exit status"
                     Compile::Any => "Any build",
                     Compile::Yes => "Needs a compiler",
                     Compile::No => "No compiler",
+                    Compile::Binary => "Binary for this R",
                 })
                 .show_ui(ui, |ui| {
                     ui.selectable_value(&mut self.compile, Compile::Any, "Any build");
                     ui.selectable_value(&mut self.compile, Compile::Yes, "Needs a compiler");
                     ui.selectable_value(&mut self.compile, Compile::No, "No compiler");
+                    ui.selectable_value(&mut self.compile, Compile::Binary, "Binary for this R")
+                        .on_hover_text(
+                            "Packages CRAN has ready built for this R, so installing them needs \
+                             no compiler. Reads CRAN's list of binaries the first time.",
+                        );
                 });
         });
+        if self.compile == Compile::Binary {
+            self.want_binaries(index.mirror(), r_present);
+            self.binary_status(ui, pal, index.mirror(), r_present);
+        }
         self.refresh_results(index);
         ui.label(
             RichText::new(
@@ -1563,6 +1724,13 @@ installation of package 'fixest' had non-zero exit status"
                     }
                     None => ui.label(RichText::new("").color(pal.dim)),
                 };
+                if let Some(b) = self.binaries_here(index.mirror()) {
+                    ui.label(
+                        RichText::new(binary_line(b.get(&p.name).map(String::as_str), &p.version))
+                            .small()
+                            .color(pal.dim),
+                    );
+                }
                 ui.add_enabled_ui(r_present && r_ready, |ui| {
                     if ui
                         .button(if have.is_some() { "Reinstall or update…" } else { "Install…" })
@@ -3563,7 +3731,7 @@ impl PackagesWindow {
                         chosen = Some((pr, p));
                     }
                 }
-                Found::Versions { .. } => {}
+                Found::Versions { .. } | Found::Binaries { .. } => {}
                 Found::List {
                     provider,
                     release,
@@ -3707,7 +3875,7 @@ impl PackagesWindow {
                 Found::Description { provider, package } => {
                     Some((provider.clone(), (**package).clone()))
                 }
-                Found::Versions { .. } => None,
+                Found::Versions { .. } | Found::Binaries { .. } => None,
                 Found::List {
                     provider,
                     index: list,
@@ -3802,6 +3970,38 @@ mod window_tests {
         w.compile = Compile::Yes;
         w.refresh_results(&s);
         assert!(w.found.is_empty(), "the sample has no compiled package");
+        // binaries: none until the list is in, then only those, searched or not
+        w.compile = Compile::Binary;
+        w.refresh_results(&s);
+        assert!(w.found.is_empty());
+        w.binaries = Some((
+            s.mirror().to_string(),
+            [("zoo", "1.8-12"), ("Rcpp", "1.0.13")]
+                .iter()
+                .map(|(n, v)| (n.to_string(), v.to_string()))
+                .collect(),
+        ));
+        w.refresh_results(&s);
+        let mut names: Vec<&str> = w.found.iter().map(|p| p.name.as_str()).collect();
+        names.sort_unstable();
+        assert_eq!(names, vec!["Rcpp", "zoo"]);
+        w.query = "series".into();
+        w.refresh_results(&s);
+        assert_eq!(
+            w.found.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+            vec!["zoo"]
+        );
+        // another mirror's list is not used
+        w.binaries = Some(("https://other.org".into(), HashMap::new()));
+        w.query.clear();
+        w.refresh_results(&s);
+        assert!(w.found.is_empty());
+        assert!(binary_line(None, "1.0").contains("builds it from source"));
+        assert!(binary_line(Some("1.0.13"), "1.0.14").contains("1.0.14, is not built yet"));
+        assert_eq!(
+            binary_line(Some("1.0.14"), "1.0.14"),
+            "Binary for this R: version 1.0.14."
+        );
     }
 
     #[test]

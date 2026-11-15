@@ -6,7 +6,7 @@
 
 use std::time::{Duration, Instant};
 
-use rcraft_engine::sources::{Found, Lookup, LookupState, SourceLookups};
+use rcraft_engine::sources::{binary_list_address, Found, Lookup, LookupState, SourceLookups};
 
 fn run(lookup: Lookup) -> Result<String, String> {
     let mut s = SourceLookups::for_machine();
@@ -54,6 +54,7 @@ fn run(lookup: Lookup) -> Result<String, String> {
                     first.join("; ")
                 )
             }
+            Found::Binaries { versions } => format!("{} binaries", versions.len()),
             Found::Versions { package, versions } => {
                 let first: Vec<String> = versions
                     .iter()
@@ -111,4 +112,28 @@ fn the_real_archive_lists_older_versions() {
     let none = archive("zzzznotapkg");
     eprintln!("NO ARCHIVE: {none:?}");
     assert!(none.is_err_and(|m| m.contains("one release")));
+}
+
+#[test]
+fn the_real_binary_lists_are_read() {
+    if std::env::var("RCRAFT_LIVE_SOURCES").is_err() {
+        eprintln!("skipped: set RCRAFT_LIVE_SOURCES=1 to ask the real services");
+        return;
+    }
+    // the folders R 4.4 names with contrib.url("", type = "binary")
+    for folder in [
+        "/bin/windows/contrib/4.4",
+        "/bin/macosx/big-sur-arm64/contrib/4.4",
+    ] {
+        let address = binary_list_address("https://cloud.r-project.org/", folder);
+        let got = run(Lookup::Binaries {
+            address: address.unwrap_or_default(),
+        });
+        eprintln!("BINARIES {folder}: {got:?}");
+        let count: usize = got
+            .ok()
+            .and_then(|t| t.split(' ').next().and_then(|n| n.parse().ok()))
+            .unwrap_or(0);
+        assert!(count > 10_000, "{folder}: {count}");
+    }
 }
