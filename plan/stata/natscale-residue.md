@@ -126,3 +126,11 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   11,140 cases it fits both ends in 6,347; bottoms outside the data still miss in 1,670 of 10,256,
   and tops inside the data (r(max) below hi) need another form: 0 to 1.03 with n 10 gives
   1.0000000000000002 = 0 + 10·d, not M(10·d).
+- Baseline counts on the 11,140 swept cases (h20.R), both ends bit for bit: L·d and U·d (RCraft's
+  rule today, without its decline) 3,675; the labels read back from locals, M(L·d) and M(U·d), 3,112;
+  one or the other 4,954.
+- A finding about RCraft today: of the 11,140, it declines 6,271 (a label at 0 with a step below 1)
+  and translates 4,869, of which 1,196 are exact and 3,673 differ from Stata in the last bits (none at
+  7 significant digits). The probes (225, 226) are built around 0 and round numbers and did not show
+  this; ranges like 0.3 to 0.348 do (Stata's r(min) is 0.3 exactly, RCraft's 0.30000000000000004).
+- The bottom's step count (h19.R) is not a function of n minus the label count alone.
