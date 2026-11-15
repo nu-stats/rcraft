@@ -408,3 +408,24 @@ Stata's (15,244 of 15,245). The scripts and the pooled data are in the shared no
 - Tops are the main gap (9,115 misses). No single form wins in any class: L·d + (U − L)·d fits 699 of
   1,131 outside tops with n = cnt; U·d 598. Next: find the top's form class by class on the scoreboard,
   then the extension (n > cnt).
+
+## 2026-11-15: the tops, first pass on the scoreboard
+
+Scoreboard unchanged at 4,891 both ends (tops 6,129 of 15,244); no top rule beat U·d overall.
+
+- r(n) always equals the label count (4,185 probe results), so it carries no trace of the search.
+- In the cleanest family (probe 10, width 2.06, step 0.1, both labels outside, n 24–40) r(max) =
+  L·d + (U − L)·d for every label pair (10 of 10): the bottom label plus the span, not U·d. Over all
+  tops off hi that form fits 6,918 of 14,698 (U·d 6,101); with a free base L·d ± j ulp, 9,568. It holds
+  at large magnitudes (step 0.1 above 10: 72 of 76, above 1000: 20 of 20) and fails below 1 and for
+  negative ranges.
+- Negative ranges show what the top really is: lo −1.03, step 0.05. r(max) is reached by walking down
+  from a start above U, and the start depends on n and not in one direction: hi −0.723 (U −14) starts 3
+  or more steps up for n 7–8, at most 2 for n 9–11, 3 or more again for n 12–15; hi −0.612 (U −12) is
+  U·d for n 11 only, more than 12 steps up for n 9–10, 1–5 up for n 12–20. The StatCraft ranking of the
+  candidate steps does not change at those n, so the start is not simply the runner-up's top.
+- Mod-based forms (hi − mod(hi, d) + d and kin, with Stata's exact mod) fit fewer than U·d (at most
+  6,101).
+- Next: for the negative family, sweep n finely at fixed hi with lo moved, and read where the top's
+  start sits as an exact decimal on coarser grids (0.25, 0.5, 1), to see which candidate's labels it is
+  taken from at each n.
