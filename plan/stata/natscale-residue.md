@@ -385,3 +385,26 @@ left it: it translates only where it matches Stata 19 bit for bit and declines t
   ends follow inside/outside labels and switch at n 32 or 36), then probes 8 and 9, then the sweeps.
   The 0.2 step's bit form (2×10^-1 in 2,680 results, 20×10^-2 in 363) is not decided by range/n's decade
   and needs its own rule. Probe logs and the R scripts are in the session scratchpad (`n/`, `n/st/`).
+
+## 2026-11-15: resumed, with a scoreboard
+
+The user reversed the park ("keep working to get that 10.9 points"). Work now goes through one scoreboard:
+a rule gives r(min) and r(max) from lo, hi, n, the labels and Stata's step, and is scored bit for bit
+on all 15,244 swept results with steps below 1 (other than 0.5) where RCraft's labels agree with
+Stata's (15,244 of 15,245). The scripts and the pooled data are in the shared notes folder
+(`natscale-work/`, `harness.R`), outside the repo.
+
+- Step bits: Stata's d is always q × p with p = 10^k as a product of tenths; q = 5 always 5 × 10^k,
+  q = 1 always 10 × 10^(k−1), 0.2 is 2 × 10^-1 in 2,680 and 20 × 10^-2 in 363 (rule still open; not
+  the decade of range/n, range/(n−1) or range/(n+1)).
+- Baseline: L·d and U·d plus the on-label clamp: 4,850 both ends (bottoms 9,473, tops 6,129).
+- Bottom with the label inside the data (lo just below it): (L − 1)·d + d, one live step in from the
+  outside label. Exact in 278 of 278 when n < cnt and 357 of 385 when n = cnt. Score: 4,891 both
+  (bottoms 9,616). Outside labels with n ≤ cnt are L·d in 1,628 of 1,731.
+- lo = 0: the walk up from about −3·d appears only when the top label is outside the data, and from
+  an n that is constant over bands of hi: step 0.1 from n 12 for hi ≤ 0.9, 15 for 0.9 < hi ≤ 1.2,
+  20 for 1.2 < hi ≤ 1.5; step 0.05 from 15 for hi ≤ 0.6, 20 for 0.6 < hi ≤ 0.9; step 0.2 from 12 below
+  2.0, 15 above. The bands are not yet explained.
+- Tops are the main gap (9,115 misses). No single form wins in any class: L·d + (U − L)·d fits 699 of
+  1,131 outside tops with n = cnt; U·d 598. Next: find the top's form class by class on the scoreboard,
+  then the extension (n > cnt).
