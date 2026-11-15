@@ -200,3 +200,26 @@ scalars: lo and hi moved by single ulps around labels.
   sweep n for fixed lo = 17.x ranges to find the n at which 0.2 moves
   from 2 × 10^-1 to 20 × 10^-2; and probe the top's start with hi just off a label at large magnitude
   (1234.x), where every walk length leaves distinct bits.
+
+## 2026-11-15, fourth pass: ends are extended and walked away from 0 too
+
+New probe (756 results, `%21x` through scalars): lo = 17.03, 17.07, 17.13, 17.17, 1234.03 ..., 3.03 ...
+with hi = lo + 0.84, 1.37, 2.26, n 4 to 24. Counts are on these plus the earlier results: 11,632
+distinct results with steps 10 × 10^-2, 5 × 10^-2, 2 × 10^-1, 2 × 10^-2 and 10 × 10^-3.
+
+- Away from 0 and off a label, the ends are also extended and walked back, and the extension grows with
+  n: 17.13 to 17.97 (step 0.1) needs the bottom to start 3 or 4 steps below for n 9 to 11 and 5 to 7 for
+  n 13 and 14; 17.07 to 18.44 needs the top 0, 2–3, 4–6 and 7–8 steps above for n 16–17, 18–19, 22, 24.
+  (The lo = 17 family looked n-free only because the on-label clamp hides the bottom.)
+- Step 10 × 10^-2 (4,592 results), "the clamp, else start e steps beyond on the final step's product
+  grid (j·d) and add or subtract d e times", for some e in 0..12: bottoms 4,592 of 4,592, tops 4,083,
+  both 4,083. Letting a top start on the 2 × 10^-1, 5 × 10^-1 or 1 grid, from either side: 4,507. The 85
+  left are ranges ending at or below 0 (−1.03 to −0.168 gives r(max) = −0.1 − 17 ulp, a long walk at
+  magnitude 1 that no start within 25 labels reproduces).
+- All five steps: unclamped bottoms 7,269, of which 7,256 fit some e from below; unclamped tops 11,207,
+  of which 10,141 fit some e from above.
+- How e follows from lo, hi, n is not found. Best single formulas (e inside the fitting set):
+  bottoms round((n − range/d)/2) 5,448 of 7,269, ceil((n − cnt)/2) 5,305; tops ceil((n − range/d)/2)
+  5,737 of 11,207. A start of m labels centred on the data (m = n − 1, n, n + 1; floor, round, ceil):
+  best m = n + 1, ceil: bottoms 9,660 to 9,847 of 11,632 with the clamp, tops 5,855, both 5,096.
+- Not translated: no rule yet gives every case, so `natscale.rs` still declines these steps.
