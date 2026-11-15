@@ -610,6 +610,11 @@ Each family is its own set of dialogs over a named CRAN package.
   files there. Each runs again in a fresh R to the same objects. P7.4 is done)
 - P7.5 Project files: data, script, log and package snapshot together
   (renv-style lockfile)
+  (done 2026-11-15: File > Save project… writes the script, R's objects (workspace.RData), the log and
+  the package list (loaded packages, versions, base, CRAN or other) into a folder with `<folder>.rcraft`
+  naming them; File > Open project… moves R there, opens the script, loads the objects and puts the
+  package list in Packages > Project package list. A saved project opens in a fresh session to identical
+  objects. P7.5 is done; with it Phase 7)
 
 ## Phase 8: Interface and packaging
 

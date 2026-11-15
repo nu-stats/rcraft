@@ -27,6 +27,7 @@ use crate::help_window::{HelpOut, HelpWindow};
 use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 use crate::package_window::{PackagesWindow, Tab as PackagesTab};
+use crate::project;
 use crate::script_file::ScriptFile;
 use crate::script_tools;
 use crate::spec_dialog::{self, SpecAction, SpecDialog};
@@ -282,6 +283,14 @@ enum Action {
     SaveSessionProjectAs,
     /// Write the session as a Quarto project in this folder.
     SaveSessionProject(std::path::PathBuf),
+    /// File > Save project... (P7.5): choose its folder.
+    SaveProjectAs,
+    /// Save the script, R's objects, the log and the package list in this folder.
+    SaveProjectTo(std::path::PathBuf),
+    /// File > Open project...
+    OpenProject,
+    /// Open the project whose file this is.
+    OpenProjectPath(std::path::PathBuf),
     Quit,
 }
 
@@ -377,6 +386,8 @@ enum ScriptAsk {
     Choose,
     /// Open this file.
     Open(std::path::PathBuf),
+    /// Open this project (its script replaces this one).
+    Project(std::path::PathBuf),
 }
 
 impl App {
@@ -1132,6 +1143,7 @@ impl App {
                 }
                 match waiting {
                     ScriptAsk::Open(path) => self.perform(ctx, Action::OpenScriptPath(path)),
+                    ScriptAsk::Project(path) => self.perform(ctx, Action::OpenProjectPath(path)),
                     ScriptAsk::Choose => {
                         if let Some(path) = self.choose_script() {
                             self.perform(ctx, Action::OpenScriptPath(path));
@@ -1266,6 +1278,84 @@ impl App {
                     .and_then(|()| std::fs::write(&config, "project:\n  type: default\n"))
                     .and_then(|()| std::fs::write(&doc, text));
                 self.message = written.err().map(|e| format!("{}: {e}", dir.display()));
+            }
+            Action::SaveProjectAs => {
+                let mut chooser = rfd::FileDialog::new().set_title("Folder for the project");
+                if let Some(dir) = self.script_folder() {
+                    chooser = chooser.set_directory(dir);
+                }
+                if let Some(dir) = chooser.pick_folder() {
+                    self.perform(ctx, Action::SaveProjectTo(dir));
+                }
+            }
+            Action::SaveProjectTo(folder) => {
+                let Some(engine) = self.engine() else {
+                    self.message = Some("R is not running, so there is no session to save.".into());
+                    return;
+                };
+                let log = engine.log_text().to_string();
+                // a project already in the folder keeps its own file names
+                let file = project::project_file(&folder);
+                let proj = project::Project::read(&file).unwrap_or_else(|_| {
+                    project::Project::new(&project::name_of(&folder), self.stata.on)
+                });
+                let text = self.script.clone();
+                let written = std::fs::create_dir_all(&folder)
+                    .map_err(|e| format!("{}: {e}", folder.display()))
+                    .and_then(|()| self.script_file.save(&folder.join(&proj.script), &text))
+                    .and_then(|()| {
+                        std::fs::write(folder.join(&proj.log), log)
+                            .and_then(|()| std::fs::write(&file, proj.to_text()))
+                            .map_err(|e| format!("{}: {e}", folder.display()))
+                    });
+                if let Err(e) = written {
+                    self.message = Some(e);
+                    return;
+                }
+                let code = project::save_code(&folder, &proj, self.package_index.mirror());
+                self.perform(
+                    ctx,
+                    Action::Submit(Source::Menu("File > Save project".into()), code),
+                );
+            }
+            Action::OpenProject => {
+                let mut chooser = rfd::FileDialog::new()
+                    .set_title("Open project")
+                    .add_filter("RCraft project", &[project::ENDING]);
+                if let Some(dir) = self.script_folder() {
+                    chooser = chooser.set_directory(dir);
+                }
+                if let Some(path) = chooser.pick_file() {
+                    self.perform(ctx, Action::OpenProjectPath(path));
+                }
+            }
+            Action::OpenProjectPath(path) => {
+                if self.script_file.is_changed(&self.script) {
+                    self.script_ask = Some(ScriptAsk::Project(path));
+                    return;
+                }
+                let proj = match project::Project::read(&path) {
+                    Ok(p) => p,
+                    Err(e) => {
+                        self.message = Some(e);
+                        return;
+                    }
+                };
+                let folder = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+                let script = folder.join(&proj.script);
+                if script.exists() {
+                    self.perform(ctx, Action::OpenScriptPath(script));
+                }
+                let code = project::open_code(&folder, &proj);
+                self.perform(
+                    ctx,
+                    Action::Submit(Source::Menu("File > Open project".into()), code),
+                );
+                // the package list waits in the Packages window, to install what is missing
+                if let Ok(list) = std::fs::read_to_string(folder.join(&proj.packages)) {
+                    self.packages_window.load_lock_text(&list);
+                }
+                self.start_folder = Some(folder);
             }
             Action::GoToLine(line) => {
                 let at = script_tools::line_start(&self.script, line);
@@ -1994,6 +2084,24 @@ impl App {
                     .clicked()
                 {
                     out.push(Action::SaveSessionAs);
+                    ui.close_menu();
+                }
+                if ui
+                    .button("Open project…")
+                    .on_hover_text("A project saved by RCraft: its script, objects and package list")
+                    .clicked()
+                {
+                    out.push(Action::OpenProject);
+                    ui.close_menu();
+                }
+                if ui
+                    .button("Save project…")
+                    .on_hover_text(
+                        "The script, R's objects, the log and the package list together in a folder",
+                    )
+                    .clicked()
+                {
+                    out.push(Action::SaveProjectAs);
                     ui.close_menu();
                 }
                 if ui
@@ -5069,5 +5177,104 @@ mod tests {
                 spec.entry
             );
         }
+    }
+
+    /// P7.5: a project saved from one session and opened in a fresh one: the
+    /// same objects (identical in R), the script, R's working folder, the log,
+    /// and a package list the Packages window reads, naming the packages the
+    /// session had loaded with their versions.
+    #[test]
+    fn a_project_saved_and_opened_again_brings_the_work_back() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings = false;
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("rcraft-project-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let folder = dir.join("wages");
+        let want = dir
+            .join("want.rds")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        assert!(std::fs::create_dir_all(&dir).is_ok());
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                format!(
+                    "set.seed(3); d <- data.frame(w = rnorm(25), e = rep(1:5, 5)); \
+                     fit <- lm(w ~ e, data = d); .hidden <- 'kept too'; \
+                     saveRDS(list(d = d, b = coef(fit), h = .hidden), '{want}')"
+                ),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        app.script = "fit <- lm(w ~ e, data = d)\nsummary(fit)\n".into();
+        app.perform(&ctx, Action::SaveProjectTo(folder.clone()));
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        assert_eq!(app.message, None);
+        for name in [
+            "wages.rcraft",
+            "script.R",
+            "workspace.RData",
+            "session.log",
+            "rcraft-packages.txt",
+        ] {
+            assert!(folder.join(name).is_file(), "{name}");
+        }
+        assert_eq!(app.script_file.title(&app.script), "script.R");
+        assert!(std::fs::read_to_string(folder.join("session.log"))
+            .unwrap_or_default()
+            .contains("fit <- lm(w ~ e"));
+        let list = std::fs::read_to_string(folder.join("rcraft-packages.txt")).unwrap_or_default();
+        let lock =
+            rcraft_rpkg::lockfile::Lock::parse(&list).unwrap_or_else(|e| panic!("{e}\n{list}"));
+        assert!(lock.packages.iter().any(|p| p.name == "stats"), "{list}");
+
+        // a fresh session: the work comes back
+        let mut fresh = App::new(&ctx);
+        fresh.keep_settings = false;
+        assert!(frames_until(&mut fresh, &ctx, |a| a.is_settled()));
+        fresh.perform(&ctx, Action::OpenProjectPath(folder.join("wages.rcraft")));
+        assert!(frames_until(&mut fresh, &ctx, |a| a.is_settled()));
+        assert_eq!(fresh.script, "fit <- lm(w ~ e, data = d)\nsummary(fit)\n");
+        let wd = folder.display().to_string().replace('\\', "/");
+        fresh.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                format!(
+                    "stopifnot(identical(readRDS('{want}'), list(d = d, b = coef(fit), h = .hidden)), \
+                     normalizePath(getwd(), '/') == normalizePath('{wd}', '/'))"
+                ),
+            ),
+        );
+        assert!(frames_until(&mut fresh, &ctx, |a| a.is_settled()));
+        let last = fresh
+            .engine()
+            .and_then(|e| e.history().entries().last().and_then(|h| h.outcome));
+        assert_eq!(last, Some(Outcome::Ok), "{}", newest_text(&fresh));
+
+        // a project file that names a path outside its folder is refused
+        let bad = dir.join("bad.rcraft");
+        let text = std::fs::read_to_string(folder.join("wages.rcraft"))
+            .unwrap_or_default()
+            .replace("script\tscript.R", "script\t../escape.R");
+        assert!(std::fs::write(&bad, text).is_ok());
+        fresh.perform(&ctx, Action::OpenProjectPath(bad));
+        assert!(
+            fresh
+                .message
+                .as_deref()
+                .is_some_and(|m| m.contains("not a file name")),
+            "{:?}",
+            fresh.message
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

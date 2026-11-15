@@ -17,6 +17,7 @@ mod import_dialog;
 pub mod look;
 mod package_window;
 mod packages;
+mod project;
 mod result_table;
 mod script_file;
 mod script_tools;

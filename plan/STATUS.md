@@ -5078,3 +5078,24 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   Reports dialogs open with no data frame. 124 entries: 123 verified, 1 planned.
 - Not checked: opening the files in Word or a browser by hand.
 
+## P7.5 done: project files; Phase 7 done, 2026-11-15
+
+- File > **Save project…** (a folder): the Script Editor's text as `script.R` (or `script.do` in Stata
+  mode; the script then belongs to that file), R's objects as `workspace.RData` (`save()` of every
+  object, hidden ones too), the session log as `session.log`, the package list as
+  `rcraft-packages.txt` (each loaded package with its version and whether it came with R, from CRAN or
+  elsewhere, in the Packages window's own format) and `<folder>.rcraft` naming them
+  (`ui-egui/src/project.rs`). Saving again into the folder keeps the names its project file has.
+- File > **Open project…**: asks first if the script has changes not saved, then moves R to the folder,
+  opens the script (Stata mode for a do-file), loads the objects and puts the package list in Packages >
+  Project package list, where what is missing can be installed (with its usual question).
+- The project file is read strictly: every part must be a plain file name in the folder; one that is
+  not (`../escape.R`) is refused in words.
+- Checked: the project file's form and refusals; and with a real R, a project saved from one session
+  and opened in a fresh one gives identical objects (hidden ones too), the script, R's working folder,
+  the log, and a package list the Packages window parses with `stats` in it.
+- Not done: RCraft does not reopen the last project by itself, and closing does not ask about a project
+  not saved; sessions are still not saved when RCraft closes.
+- Phase 7 is done (P7.1 to P7.5). The build had two compiler crashes at four jobs this round (`ring`,
+  then a corrupt `statatr` object); cleaning the crate and building at two jobs cleared them.
+
