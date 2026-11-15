@@ -12,7 +12,7 @@ use rcraft_engine::sources::{Found, Lookup, LookupState, SourceLookups};
 use rcraft_engine::{Engine, IndexStatus, PackageIndexService, QueryId};
 use rcraft_rcodegen::failure::{diagnose, Diagnosis, Os, Retry};
 use rcraft_rcodegen::packages::{
-    install_code, install_version_code, installed_packages_code, installed_versions,
+    install_code, install_version_code, installed_packages_code, installed_versions, is_version,
     loaded_packages_code, parse_installed, parse_loaded, parse_user_libraries, remove_code,
     restore_code, user_libraries_code, where_code, InstallFrom, Installed,
 };
@@ -194,6 +194,11 @@ pub struct PackagesWindow {
     /// The tick an unreviewed source needs before the yes.
     source_understood: bool,
     lookups: SourceLookups,
+    /// P1A.5: the older versions of a CRAN package, read from the mirror's
+    /// archive when asked; the package asked about; a version typed instead.
+    archive: SourceLookups,
+    archive_for: Option<String>,
+    older_text: String,
     /// A local file to read (when R is free), R reading it, and what it found.
     peek_pending: Option<String>,
     peek_query: Option<QueryId>,
@@ -262,6 +267,9 @@ impl Default for PackagesWindow {
             source_selected: None,
             source_understood: false,
             lookups: SourceLookups::for_machine(),
+            archive: SourceLookups::for_machine(),
+            archive_for: None,
+            older_text: String::new(),
             peek_pending: None,
             peek_query: None,
             peek_found: None,
@@ -322,6 +330,7 @@ impl PackagesWindow {
     /// Uses another way of looking sources up (tests use a stand-in for the network).
     #[cfg(test)]
     pub(crate) fn set_lookups(&mut self, lookups: SourceLookups) {
+        self.archive = lookups.sibling();
         self.lookups = lookups;
     }
 
@@ -784,6 +793,143 @@ installation of package 'fixest' had non-zero exit status"
         });
     }
 
+    /// P1A.5: the "Older versions" part of a package's page. Lists the
+    /// versions in CRAN's archive when asked (the button says the address),
+    /// or takes a typed version. Returns the version to install.
+    #[allow(clippy::too_many_arguments)]
+    fn older_versions(
+        &mut self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        mirror: &str,
+        p: &Package,
+        have: Option<&str>,
+        compiles: bool,
+        can_install: bool,
+    ) -> Option<String> {
+        let name = p.name.as_str();
+        let mut chosen = None;
+        egui::CollapsingHeader::new("Older versions")
+            .id_salt("older-versions")
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "CRAN keeps every earlier release of a package in its archive. An older \
+                         version is built from source{}; the packages it needs are installed as \
+                         usual, at their current versions.",
+                        if compiles {
+                            ", and this package has compiled code, so that needs a compiler \
+                             (Rtools on Windows, the command line tools on macOS)"
+                        } else {
+                            ""
+                        }
+                    ))
+                    .small()
+                    .color(pal.dim),
+                );
+                let lookup = Lookup::Archive {
+                    mirror: mirror.to_string(),
+                    package: name.to_string(),
+                };
+                let ours = self.archive_for.as_deref() == Some(name);
+                match self.archive.state() {
+                    LookupState::Running(_) if ours => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label("Reading CRAN's archive…");
+                            if ui.button("Cancel").clicked() {
+                                self.archive.cancel();
+                            }
+                        });
+                    }
+                    LookupState::Done(found) if ours => {
+                        if let Found::Versions { versions, .. } = &**found {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} older versions; the current one is {}.",
+                                    versions.len(),
+                                    p.version
+                                ))
+                                .small()
+                                .color(pal.dim),
+                            );
+                            egui::ScrollArea::vertical()
+                                .id_salt("older-versions-list")
+                                .max_height(180.0)
+                                .show(ui, |ui| {
+                                    egui::Grid::new("older-versions-grid")
+                                        .num_columns(3)
+                                        .spacing([16.0, 4.0])
+                                        .show(ui, |ui| {
+                                            for a in versions {
+                                                ui.label(&a.version);
+                                                ui.label(
+                                                    RichText::new(a.date.as_deref().unwrap_or(""))
+                                                        .color(pal.dim),
+                                                );
+                                                if have == Some(a.version.as_str()) {
+                                                    ui.label(
+                                                        RichText::new("installed")
+                                                            .color(pal.accent),
+                                                    );
+                                                } else if ui
+                                                    .add_enabled(
+                                                        can_install,
+                                                        egui::Button::new("Install…"),
+                                                    )
+                                                    .on_hover_text(format!(
+                                                        "Install {name} {} from CRAN's archive",
+                                                        a.version
+                                                    ))
+                                                    .clicked()
+                                                {
+                                                    chosen = Some(a.version.clone());
+                                                }
+                                                ui.end_row();
+                                            }
+                                        });
+                                });
+                        }
+                    }
+                    state => {
+                        if let (LookupState::Failed(m), true) = (state, ours) {
+                            ui.label(RichText::new(m).color(pal.warning));
+                        }
+                        let busy = self.archive.is_busy();
+                        if ui
+                            .add_enabled(!busy, egui::Button::new("List older versions"))
+                            .on_hover_text(format!("Reads {}", lookup.addresses().join(", ")))
+                            .clicked()
+                        {
+                            self.archive_for = Some(name.to_string());
+                            self.archive.start(lookup);
+                        }
+                    }
+                }
+                ui.horizontal(|ui| {
+                    ui.label("Or type a version:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.older_text)
+                            .desired_width(90.0)
+                            .hint_text("1.2.3"),
+                    );
+                    let typed = self.older_text.trim();
+                    let ok = is_version(typed);
+                    if ui
+                        .add_enabled(can_install && ok, egui::Button::new("Install…"))
+                        .on_hover_text("R says so if the archive has no such version")
+                        .clicked()
+                    {
+                        chosen = Some(typed.to_string());
+                    }
+                });
+            });
+        if chosen.is_some() {
+            self.older_text.clear();
+        }
+        chosen
+    }
+
     fn installed_map(&self) -> HashMap<String, String> {
         installed_versions(&self.r.installed)
     }
@@ -809,6 +955,7 @@ installation of package 'fixest' had non-zero exit status"
         self.service(engine);
         self.apply_pending_rc(index, r_present);
         self.lookups.poll();
+        self.archive.poll();
         if self.pending_bioc_lookup && !self.r_version_number.is_empty() {
             self.pending_bioc_lookup = false;
             self.lookups.start(Lookup::Bioconductor {
@@ -816,7 +963,11 @@ installation of package 'fixest' had non-zero exit status"
             });
         }
         self.apply_pending_source(index, r_present);
-        if self.lookups.is_busy() || self.peek_query.is_some() || self.peek_pending.is_some() {
+        if self.lookups.is_busy()
+            || self.archive.is_busy()
+            || self.peek_query.is_some()
+            || self.peek_pending.is_some()
+        {
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
         let mut open = self.open;
@@ -1425,6 +1576,11 @@ installation of package 'fixest' had non-zero exit status"
                         self.begin_install(index, &p.name, &installed);
                     }
                 });
+                if let Some(v) =
+                    self.older_versions(ui, pal, index.mirror(), p, have.as_deref(), d.needs_compiler(), r_present && r_ready)
+                {
+                    self.begin_older_version(index, &p.name, &v);
+                }
                 ui.add_space(6.0);
                 for (label, value) in [
                     ("Published", p.published.as_str()),
@@ -3407,6 +3563,7 @@ impl PackagesWindow {
                         chosen = Some((pr, p));
                     }
                 }
+                Found::Versions { .. } => {}
                 Found::List {
                     provider,
                     release,
@@ -3550,6 +3707,7 @@ impl PackagesWindow {
                 Found::Description { provider, package } => {
                     Some((provider.clone(), (**package).clone()))
                 }
+                Found::Versions { .. } => None,
                 Found::List {
                     provider,
                     index: list,
@@ -4471,5 +4629,222 @@ mod other_r_tests {
         let note = note.as_deref().unwrap_or("");
         assert!(note.contains("needy (R 4.6.0)"), "{note}");
         assert!(!note.contains("plain ("), "{note}");
+    }
+}
+
+#[cfg(test)]
+mod older_version_tests {
+    use super::*;
+    use crate::look::Accent;
+    use eframe::epaint::Shape;
+
+    /// Serves an archive listing for zoo only.
+    struct ZooArchive;
+
+    impl rcraft_rpkg::refresh::Fetcher for ZooArchive {
+        fn get(
+            &self,
+            url: &str,
+            _max: u64,
+            _p: &mut dyn FnMut(u64, Option<u64>) -> rcraft_rpkg::refresh::Control,
+        ) -> rcraft_rpkg::Result<Vec<u8>> {
+            if url == "https://m.org/src/contrib/Archive/zoo/" {
+                Ok(
+                    b"<a href=\"zoo_0.9.tar.gz\">zoo_0.9.tar.gz</a>  2020-01-02 10:00  1K\n\
+                     <a href=\"zoo_1.7.tar.gz\">zoo_1.7.tar.gz</a>  2022-01-02 10:00  1K\n"
+                        .to_vec(),
+                )
+            } else {
+                Err(rcraft_rpkg::Error::Fetch(format!(
+                    "{url}: the server answered 404"
+                )))
+            }
+        }
+    }
+
+    /// Where each piece of text was drawn: its text and its centre.
+    fn texts(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, egui::Pos2)> {
+        fn walk(shape: &Shape, out: &mut Vec<(String, egui::Pos2)>) {
+            match shape {
+                Shape::Text(t) => out.push((
+                    t.galley.text().to_string(),
+                    t.galley.rect.translate(t.pos.to_vec2()).center(),
+                )),
+                Shape::Vec(v) => v.iter().for_each(|s| walk(s, out)),
+                _ => {}
+            }
+        }
+        let mut out = Vec::new();
+        for s in shapes {
+            walk(&s.shape, &mut out);
+        }
+        out
+    }
+
+    struct Harness {
+        ctx: egui::Context,
+        w: PackagesWindow,
+        p: Package,
+        pal: Palette,
+        have: Option<String>,
+        drawn: Vec<(String, egui::Pos2)>,
+        chosen: Option<String>,
+    }
+
+    impl Harness {
+        fn frame(&mut self, events: Vec<egui::Event>) {
+            let out = self.ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let got = self.w.older_versions(
+                            ui,
+                            &self.pal,
+                            "https://m.org/",
+                            &self.p,
+                            self.have.as_deref(),
+                            true,
+                            true,
+                        );
+                        if got.is_some() {
+                            self.chosen = got;
+                        }
+                    });
+                },
+            );
+            self.drawn = texts(&out.shapes);
+        }
+
+        fn has(&self, text: &str) -> bool {
+            self.drawn.iter().any(|(t, _)| t.contains(text))
+        }
+
+        fn click(&mut self, pos: egui::Pos2) {
+            let button = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            self.frame(vec![egui::Event::PointerMoved(pos)]);
+            self.frame(vec![button(true)]);
+            self.frame(vec![button(false)]);
+            self.frame(vec![]);
+        }
+
+        fn click_text(&mut self, text: &str) {
+            let Some(pos) = self.drawn.iter().find(|(t, _)| t == text).map(|(_, p)| *p) else {
+                panic!("no {text:?} in {:?}", self.drawn);
+            };
+            self.click(pos);
+        }
+
+        /// Clicks the "Install…" on the same row as `version`.
+        fn install_row(&mut self, version: &str) {
+            let Some(y) = self
+                .drawn
+                .iter()
+                .find(|(t, _)| t == version)
+                .map(|(_, p)| p.y)
+            else {
+                panic!("no {version} row in {:?}", self.drawn);
+            };
+            let Some(pos) = self
+                .drawn
+                .iter()
+                .filter(|(t, p)| t == "Install…" && (p.y - y).abs() < 4.0)
+                .map(|(_, p)| *p)
+                .next()
+            else {
+                panic!("no Install… on the {version} row");
+            };
+            self.click(pos);
+        }
+    }
+
+    #[test]
+    fn older_versions_are_listed_from_the_archive_and_one_is_picked() {
+        let mut w = PackagesWindow::default();
+        w.set_lookups(SourceLookups::new(std::sync::Arc::new(ZooArchive)));
+        let mut h = Harness {
+            ctx: egui::Context::default(),
+            w,
+            p: Package {
+                name: "zoo".into(),
+                version: "1.8".into(),
+                ..Package::default()
+            },
+            pal: Palette::new(Accent::default(), false),
+            have: Some("1.7".into()),
+            drawn: Vec::new(),
+            chosen: None,
+        };
+        h.frame(vec![]);
+        h.frame(vec![]);
+        assert!(!h.has("List older versions"), "closed at first");
+        h.click_text("Older versions");
+        assert!(h.has("needs a compiler"));
+        h.click_text("List older versions");
+        let started = std::time::Instant::now();
+        while h.w.archive.is_busy() {
+            h.w.archive.poll();
+            assert!(started.elapsed() < std::time::Duration::from_secs(10));
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        h.frame(vec![]);
+        assert!(
+            h.has("2 older versions; the current one is 1.8."),
+            "{:?}",
+            h.drawn
+        );
+        assert!(h.has("2020-01-02"));
+        // the installed one says so instead of offering
+        assert!(h.drawn.iter().any(|(t, _)| t == "installed"));
+        h.install_row("0.9");
+        assert_eq!(h.chosen.take().as_deref(), Some("0.9"));
+        // a typed version
+        h.w.older_text = " 0.8-1 ".into();
+        h.frame(vec![]);
+        let Some(pos) = h
+            .drawn
+            .iter()
+            .filter(|(t, _)| t == "Install…")
+            .map(|(_, p)| *p)
+            .max_by(|a, b| a.y.total_cmp(&b.y))
+        else {
+            panic!("no Install… for a typed version");
+        };
+        h.click(pos);
+        assert_eq!(h.chosen.take().as_deref(), Some("0.8-1"));
+        assert!(h.w.older_text.is_empty());
+        // another package's answer is not shown for this one
+        h.p.name = "other".into();
+        h.frame(vec![]);
+        assert!(!h.has("older versions; the current"));
+        assert!(h.has("List older versions"));
+    }
+
+    #[test]
+    fn a_chosen_version_waits_for_a_yes_with_the_archive_call() {
+        let s = PackageIndexService::in_memory(rcraft_rpkg::index::sample());
+        let mut w = PackagesWindow::default();
+        w.begin_older_version(&s, "zoo", "0.9");
+        let Some(Confirm::Install { code, note, .. }) = &w.confirm else {
+            panic!("no confirmation");
+        };
+        assert!(code
+            .as_ref()
+            .is_ok_and(|c| c.contains("/src/contrib/Archive/zoo/zoo_0.9.tar.gz")
+                && c.contains("repos = NULL")));
+        assert!(note
+            .as_deref()
+            .is_some_and(|n| n.contains("built from source")));
     }
 }

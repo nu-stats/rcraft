@@ -54,6 +54,18 @@ fn run(lookup: Lookup) -> Result<String, String> {
                     first.join("; ")
                 )
             }
+            Found::Versions { package, versions } => {
+                let first: Vec<String> = versions
+                    .iter()
+                    .take(3)
+                    .map(|a| format!("{} ({})", a.version, a.date.clone().unwrap_or_default()))
+                    .collect();
+                format!(
+                    "{package}: {} older versions; newest: {}",
+                    versions.len(),
+                    first.join(", ")
+                )
+            }
         }),
         LookupState::Failed(m) => Err(m.clone()),
         _ => Err("nothing".into()),
@@ -79,4 +91,24 @@ fn the_real_sources_answer_when_asked() {
     });
     eprintln!("GITHUB: {github:?}");
     assert!(bioc.is_ok() && universe.is_ok() && github.is_ok());
+}
+
+#[test]
+fn the_real_archive_lists_older_versions() {
+    if std::env::var("RCRAFT_LIVE_SOURCES").is_err() {
+        eprintln!("skipped: set RCRAFT_LIVE_SOURCES=1 to ask the real services");
+        return;
+    }
+    let archive = |package: &str| {
+        run(Lookup::Archive {
+            mirror: "https://cloud.r-project.org/".into(),
+            package: package.into(),
+        })
+    };
+    let fixest = archive("fixest");
+    eprintln!("ARCHIVE: {fixest:?}");
+    assert!(fixest.is_ok_and(|f| f.contains("0.14.1 (2026-05-04)")));
+    let none = archive("zzzznotapkg");
+    eprintln!("NO ARCHIVE: {none:?}");
+    assert!(none.is_err_and(|m| m.contains("one release")));
 }

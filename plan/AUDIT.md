@@ -10,7 +10,7 @@ as it was; much of what it lists as not started has been built since (Phases 2A,
 |---|---|
 | 0 Setup | Done. |
 | 1 R host and session | Done but **P1.2** (download a portable R when none is found), deferred on purpose. P1.6 was done 2026-10-30. |
-| 1A Packages | Done, with the gaps below. |
+| 1A Packages | Done, with the gaps below (P1A.10 for typed commands and P1A.5's older-version screen followed on 2026-11-14). |
 | 2 Command window, Results | Done (P2.2 finished 2026-11-14: Tab at the cursor, argument names, columns inside `[["`; P2.3: the table inside `summary(lm)` and Copy for Word, same day). |
 | 2A Help | Done but **P2A.6** (RCraft's own manual as pages in the app) and **P2A.10** (RCraft's own PDF manuals, "down the road"). |
 | 2B Stata mode | Done (P2B.1 to P2B.12). |
@@ -45,8 +45,6 @@ Partly done, with what is missing:
 
 - P1A.2: the task-view and "has a binary for my platform" filters, other providers in search.
 - P1A.3: download counts and a "new packages" list (CRAN's files do not say which are new).
-- P1A.5/P1A.7: installing an older version has code but no screen.
-- P1A.10: the missing-package prompt exists in dialogs (`Spec::needs`), not for typed commands.
 - P2B.5: `pie`, `graph matrix`, twoway `area`/`lfitci`/`function`, `by()` with fitted layers or
   histograms, `xlabel()` as axis breaks.
 - P2C: `rpoisson()`, `rbeta()` with equal shapes above 1, KISS32 and `c(rngstate)` (P2C.11);

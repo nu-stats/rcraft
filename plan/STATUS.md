@@ -4690,3 +4690,24 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   still off (2.000307 for 2, 4.00016 for 4).
 - Left in the packages: cd "" (16, refused on purpose), rangestat (6) and nsplit (4), SSC commands not
   installed in Stata here.
+
+## P1A.10 for typed commands; P1A.5's older-version screen, 2026-11-14
+
+- P1A.10 (c6ae888): when a typed command's error, warning or message says a package is missing, too old
+  or built before R 4.0 (`rcodegen::packages::package_to_install`), Results shows **Install x and run
+  again** and **Install x** under it. The install runs as an ordinary command into RCraft's library and
+  ends with a `requireNamespace` check, since install.packages only warns when it fails; the command
+  runs again only after that passes. A package not on CRAN points to Packages > Other sources.
+- P1A.5: a package's page in Packages has **Older versions**. **List older versions** reads the mirror's
+  `src/contrib/Archive/<package>/` listing (`rpkg::archive`, through a new `sources::Lookup::Archive`
+  on its own worker so Other sources keeps its state) and lists each version with its date and an
+  Install button; the installed one says so. A version can be typed instead. Either opens the usual
+  list with the exact `install.packages(<archive url>, repos = NULL, type = "source")` call and the
+  note that it is built from source. A package with one release (404) says so in words.
+- Tests: the listing parser (order 1.0-2 > 0.10.0 > 0.9.0, dates, nothing odd taken); the lookup with
+  a stand-in fetcher; the section driven by clicks in an egui frame (open, list, install a row, typed
+  version, another package's answer not shown); and, with `RCRAFT_LIVE_SOURCES=1`, the real cloud
+  mirror (fixest: 33 older versions, newest 0.14.1 of 2026-05-04; a made-up name gets the one-release
+  message). Drawn in the app: the section open on fixest's page.
+- **Not checked:** a real install of an older version from the new screen (nothing is installed by the
+  tests), and a real install from a P1A.10 offer.

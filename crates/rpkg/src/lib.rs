@@ -19,6 +19,7 @@
 //!
 //! Package metadata is data, never instructions: nothing here runs it.
 
+pub mod archive;
 pub mod cache;
 pub mod dcf;
 pub mod describe;

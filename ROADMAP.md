@@ -80,8 +80,10 @@ Tasks:
   `from()` choices); resolves dependencies, shows what will be installed
   and downloaded, prefers binaries, runs in a supervised R process with
   progress and a cancel button; the exact R call is shown and logged
-  (done for CRAN: plan, confirmation with the exact call, install through R; the older-version
-  call exists but is not in a screen; progress is R's own output and Stop cancels)
+  (done for CRAN: plan, confirmation with the exact call, install through R; progress is R's own
+  output and Stop cancels. Older versions, 2026-11-14: a package's page has Older versions, which
+  lists CRAN's archive for it on request, with an Install for each, or takes a typed version;
+  `rc install x, version()` and the failure retry use the same list. P1A.5 is done)
 - P1A.6 Installed packages: list, version, update available, update,
   remove, `which`-style "where does this function come from", load status
   (done in the Packages window: list, versions, loaded, updates for RCraft's own library,

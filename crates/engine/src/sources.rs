@@ -1,6 +1,6 @@
 //! Looking up a package source beyond CRAN, on a worker thread: a GitHub
 //! repository's DESCRIPTION, an r-universe's package list, or Bioconductor's
-//! list for this R. Only on the user's request, through the same `Fetcher` as
+//! list for this R, or the older versions in CRAN's archive. Only on the user's request, through the same `Fetcher` as
 //! the CRAN list (HTTPS only, capped, cancellable). Local files are read by R,
 //! not here.
 
@@ -9,6 +9,7 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::thread;
 
+use rcraft_rpkg::archive::{archive_folder_url, archived_versions, Archived};
 use rcraft_rpkg::dcf;
 use rcraft_rpkg::http::UreqFetcher;
 use rcraft_rpkg::index::{Index, Package, DB_COLUMNS};
@@ -25,6 +26,8 @@ const MAX_DESCRIPTION: u64 = 256 * 1024;
 const MAX_CONFIG: u64 = 1024 * 1024;
 /// Most bytes accepted for a package list.
 const MAX_LIST: u64 = 64 * 1024 * 1024;
+/// Most bytes accepted for an archive folder's listing.
+const MAX_ARCHIVE: u64 = 2 * 1024 * 1024;
 
 /// What to look up.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +41,11 @@ pub enum Lookup {
     /// Bioconductor's list for the R of this version.
     Bioconductor {
         r_version: String,
+    },
+    /// The older versions of a CRAN package, from the mirror's archive.
+    Archive {
+        mirror: String,
+        package: String,
     },
 }
 
@@ -55,6 +63,9 @@ impl Lookup {
                 BIOC_CONFIG_URL.to_string(),
                 "https://bioconductor.org/packages/<release>/bioc/VIEWS".to_string(),
             ],
+            Lookup::Archive { mirror, package } => {
+                archive_folder_url(mirror, package).into_iter().collect()
+            }
         }
     }
 }
@@ -72,6 +83,11 @@ pub enum Found {
         release: Option<String>,
         index: Box<Index>,
         searcher: Box<Searcher>,
+    },
+    /// The older versions of a CRAN package, newest first.
+    Versions {
+        package: String,
+        versions: Vec<Archived>,
     },
 }
 
@@ -180,6 +196,29 @@ fn work(fetcher: &dyn Fetcher, lookup: &Lookup, cancel: &AtomicBool) -> Result<F
                 searcher: Box::new(searcher),
             })
         }
+        Lookup::Archive { mirror, package } => {
+            let address = archive_folder_url(mirror, package)
+                .ok_or_else(|| format!("\"{package}\" is not a package name"))?;
+            let bytes = match get(fetcher, &address, MAX_ARCHIVE, cancel) {
+                Ok(b) => b,
+                Err(e) if e.contains(" 404") => {
+                    return Err(format!(
+                        "CRAN's archive has no older version of {package}: it has had one release."
+                    ))
+                }
+                Err(e) => return Err(e),
+            };
+            let versions = archived_versions(&String::from_utf8_lossy(&bytes), package);
+            if versions.is_empty() {
+                return Err(format!(
+                    "CRAN's archive lists no older version of {package}."
+                ));
+            }
+            Ok(Found::Versions {
+                package: package.clone(),
+                versions,
+            })
+        }
     }
 }
 
@@ -194,6 +233,11 @@ impl SourceLookups {
 
     pub fn for_machine() -> SourceLookups {
         SourceLookups::new(Arc::new(UreqFetcher::new()))
+    }
+
+    /// Another service that fetches the same way (its own job and state).
+    pub fn sibling(&self) -> SourceLookups {
+        SourceLookups::new(self.fetcher.clone())
     }
 
     pub fn state(&self) -> &LookupState {
@@ -306,6 +350,16 @@ mod tests {
             ),
             (BIOC_CONFIG_URL.to_string(), CONFIG.as_bytes().to_vec()),
             (bioc_views_url("3.20"), VIEWS.as_bytes().to_vec()),
+            (
+                "https://m.org/src/contrib/Archive/fakeone/".to_string(),
+                b"<a href=\"fakeone_0.9.tar.gz\">fakeone_0.9.tar.gz</a>  2020-01-02 10:00  1K\n\
+                  <a href=\"fakeone_0.10.tar.gz\">fakeone_0.10.tar.gz</a>  2021-01-02 10:00  1K\n"
+                    .to_vec(),
+            ),
+            (
+                "https://m.org/src/contrib/Archive/empty/".to_string(),
+                b"<html></html>".to_vec(),
+            ),
         ])))
     }
 
@@ -393,6 +447,47 @@ mod tests {
         assert!(
             matches!(s.state(), LookupState::Failed(m) if m.contains("no release for R 4.9.0"))
         );
+    }
+
+    #[test]
+    fn the_archive_lists_older_versions_or_says_there_are_none() {
+        let mut s = served().sibling();
+        let archive = |package: &str| Lookup::Archive {
+            mirror: "https://m.org/".into(),
+            package: package.into(),
+        };
+        assert_eq!(
+            archive("fakeone").addresses(),
+            vec!["https://m.org/src/contrib/Archive/fakeone/"]
+        );
+        s.start(archive("fakeone"));
+        finish(&mut s);
+        let LookupState::Done(found) = s.state() else {
+            panic!("nothing found");
+        };
+        let Found::Versions { package, versions } = &**found else {
+            panic!("not versions");
+        };
+        assert_eq!(package, "fakeone");
+        let v: Vec<(&str, Option<&str>)> = versions
+            .iter()
+            .map(|a| (a.version.as_str(), a.date.as_deref()))
+            .collect();
+        assert_eq!(
+            v,
+            vec![("0.10", Some("2021-01-02")), ("0.9", Some("2020-01-02"))]
+        );
+        s.start(archive("onlyone"));
+        finish(&mut s);
+        assert!(
+            matches!(s.state(), LookupState::Failed(m) if m.contains("no older version of onlyone: it has had one release")),
+        );
+        s.start(archive("empty"));
+        finish(&mut s);
+        assert!(matches!(s.state(), LookupState::Failed(m) if m.contains("lists no older")));
+        s.start(archive("../x"));
+        finish(&mut s);
+        assert!(matches!(s.state(), LookupState::Failed(m) if m.contains("not a package name")));
     }
 
     #[test]
