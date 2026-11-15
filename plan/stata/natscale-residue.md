@@ -111,3 +111,10 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   11,140 cases fit at both ends (one d at a time; 7,401 all at once). The one-d-at-a-time form fits
   10,471 bottoms. So the shape of the loop is still not right; the stopping rule (StatCraft's costs)
   and which values go through a local are the next things to model.
+- A hypothesis that fits the clue of 1.03 against 2.06: Stata's search moves an end one step at a
+  time (extending while there are fewer labels than about n, and trimming where the cost falls), and
+  each move is stored in a local as %18.0g text. In steps, 0 to 1.03 and 0 to 2.06 are the same
+  problem, so extending the top or the bottom costs exactly the same in exact arithmetic; rounding
+  breaks that tie one way for steps of 0.1 + 1 ulp and the other for 0.2, which would move where the
+  bottom first goes below 0 (n 15 against 14). Next: simulate that loop with StatCraft's costs, the
+  %18.0g round trip at each move, and the result computed at return, and fit it to every sweep case.
