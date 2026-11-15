@@ -4940,3 +4940,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   that size (the size, format and replay checks were there already).
 - 117 entries: 72 verified, 43 partial, 2 planned. Left: the File, Data, Packages and Help menus.
 
+
+
+## _natscale narrowed to where it matches Stata bit for bit, 2026-11-15
+
+- Sweeps in Stata 19 beyond probes 225 and 226 (lo other than 0, negative ranges, other scales: 27,647
+  results with the probes) showed the rule translating 3,673 ranges whose r(min) or r(max) differ from
+  Stata in the last bits (e.g. 0.3 to 0.348: Stata's r(min) is 0.3 exactly, RCraft gave
+  0.30000000000000004), none at 7 significant digits. Following refuse-rather-than-differ,
+  `_natscale` is now translated only for a step of 1 or more, or 0.5 (steps Stata holds exactly),
+  labels within 1e15, n of 4 or more, and a range (lo != hi); -0 is given as 0, as Stata's is.
+  On every swept result it still translates (14,841) it matches Stata bit for bit; n = 3 can choose
+  other ends (-4 to 0 with r(max) = hi for -2.5 to 0.47), so it is declined.
+- The rest is declined with the reason. The residue's source (labels kept in locals as %18.0g text)
+  and the search for the full rule are in plan/stata/natscale-residue.md.

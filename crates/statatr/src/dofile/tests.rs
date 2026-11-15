@@ -636,12 +636,13 @@ fn natscale_leaves_its_labels_in_r() {
         )),
         "{code:?}"
     );
-    // a label at 0 with a step below 1: Stata's r(min) can be 2^-55, so declined
+    // a step below 1 other than 0.5: Stata's last bits are not reproduced, so declined
     let d = run("clear\n_natscale 0 1.01 5\n");
     let s = shown(&d);
     assert!(
         s.iter()
-            .any(|l| l.contains("_natscale with a label at 0 and a step below 1")),
+            .any(|l| l
+                .contains("_natscale is translated only where it matches Stata 19 bit for bit")),
         "{s:?}"
     );
 }

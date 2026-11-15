@@ -212,17 +212,22 @@ impl Session {
         if !lo.is_finite() || !hi.is_finite() || n.is_nan() || n < 1.0 {
             return Err(no("_natscale with these values is not translated yet"));
         }
-        let s = natscale(lo, hi, n.floor());
-        // a label at 0 with a step below 1 (whatever the data and n: 0.045 to
-        // 0.667 with 10 shows it too): Stata's end there can be 2^-55 or
-        // -2^-54 rather than 0 (its 10^k for k below 0 is a product of
-        // tenths), and when it is has not been worked out, so it is declined
-        // rather than given as 0 (plan/stata/natscale-residue.md)
-        if s.delta < 1.0 && (s.min == 0.0 || s.max == 0.0) {
+        let mut s = natscale(lo, hi, n.floor());
+        // Stata's 0 is never -0
+        s.min += 0.0;
+        s.max += 0.0;
+        // Only where every swept case matches Stata bit for bit (2026-11-15: 27,000
+        // results, plan/stata/natscale-residue.md): a step Stata holds exactly (1 or
+        // more, or 0.5), labels within 1e15, at least 4 labels asked for, and a range.
+        // A step like 0.1 (Stata's 0.1 + 1 ulp) leaves residues in the last bits from
+        // labels kept in locals as %18.0g text, not reproduced yet; n = 3 can pick other
+        // ends than the rule here.
+        let exact_step = s.delta >= 1.0 || s.delta == 0.5;
+        if !exact_step || s.min.abs().max(s.max.abs()) > 1e15 || n < 4.0 || hi == lo {
             return Err(no(
-                "_natscale with a label at 0 and a step below 1 is not translated: Stata's r(min) or \
-                 r(max) there can carry the last bits of its own arithmetic (2^-55 rather than 0), \
-                 which are not reproduced yet",
+                "_natscale is translated only where it matches Stata 19 bit for bit (a step of 1 or \
+                 more, or 0.5, labels within 1e15, n of 4 or more): with other steps Stata's r(min) \
+                 and r(max) carry last bits of its own arithmetic, not reproduced yet",
             ));
         }
         self.helpers.insert("stata_returned");
