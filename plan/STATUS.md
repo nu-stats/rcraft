@@ -5005,8 +5005,9 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   workbook (.xlsx) through openxlsx2 and Markdown (.md) in base R, chosen by the file's ending; an
   optional title, and a Model table's note (now kept with the table as its `note`) below it. A file
   that is there is not written over unless asked.
-- .docx is not offered: gt writes it through pandoc, which is not installed; officer and flextable
-  would write it without pandoc, if the user wants them installed.
+- .docx through flextable and officer (0.9.7 and 0.6.7, installed with the user's yes the same day from
+  the pinned snapshot; gt would need pandoc for it): the Word file read back holds every cell, the title
+  and the note. CI installs officer and flextable too.
 - Verified: a Model table written in all five; the HTML, RTF and LaTeX hold every cell, the HTML the
   note, the workbook and the Markdown the table exactly, with the title and note. CI now installs gt.
   118 entries: 117 verified, 1 planned.

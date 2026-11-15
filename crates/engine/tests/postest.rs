@@ -482,7 +482,15 @@ fn diagnostic_plots_draw_one_page_of_four_panels() {
 }
 
 /// Base R's stats; sandwich, lmtest and marginaleffects for three dialogs.
-const PACKAGES: &[&str] = &["sandwich", "lmtest", "marginaleffects", "gt", "openxlsx2"];
+const PACKAGES: &[&str] = &[
+    "sandwich",
+    "lmtest",
+    "marginaleffects",
+    "gt",
+    "openxlsx2",
+    "flextable",
+    "officer",
+];
 
 /// The models of [`SETUP`] worked out in plain R, without lm or glm: least
 /// squares from the normal equations on the 11 rows with an x, and the
@@ -876,7 +884,7 @@ fn the_model_table_is_the_one_built_by_hand() {
 fn an_exported_table_holds_every_cell() {
     use rcraft_catalog::report::{EXPORT_TABLE, MODEL_TABLE};
     let Some(mut e) = started() else { return };
-    for package in ["gt", "openxlsx2"] {
+    for package in ["gt", "openxlsx2", "flextable", "officer"] {
         let (outcome, _) = run(
             &mut e,
             Source::Typed,
@@ -913,7 +921,7 @@ fn an_exported_table_holds_every_cell() {
             .unwrap_or_default();
         run(e, Source::Menu(EXPORT_TABLE.menu.into()), &code)
     };
-    for name in ["t.html", "t.rtf", "t.tex", "t.xlsx", "t.md"] {
+    for name in ["t.docx", "t.html", "t.rtf", "t.tex", "t.xlsx", "t.md"] {
         let (outcome, text) = export(&mut e, &file(name), false);
         assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
     }
@@ -934,6 +942,13 @@ fn an_exported_table_holds_every_cell() {
                 md = file("t.md"),
             ),
             &[
+                (
+                    "docx",
+                    &format!(
+                        "{{ s <- officer::docx_summary(officer::read_docx('{}'));                          x <- s$text[!is.na(s$text)]; all(cells %in% x) && 'Table 1' %in% x && note %in% x }}",
+                        file("t.docx")
+                    ),
+                ),
                 ("html", &format!("has_all('{}')", file("t.html"))),
                 ("rtf", &format!("has_all('{}')", file("t.rtf"))),
                 ("tex", &format!("has_all('{}')", file("t.tex"))),

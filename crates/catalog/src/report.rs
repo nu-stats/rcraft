@@ -248,6 +248,7 @@ pub const MODEL_REPORTS: &[&Spec] = &[&MODEL_TABLE];
 const TABLE_FILES: &[(&str, &str)] = &[
     (".html", "a web page"),
     (".htm", "a web page"),
+    (".docx", "a Word document"),
     (".rtf", "a Word document (RTF, which Word opens)"),
     (".tex", "LaTeX"),
     (".xlsx", "an Excel workbook"),
@@ -269,7 +270,7 @@ fn export_check(a: &Args) -> Vec<Problem> {
     } else if table_file_kind(file).is_none() {
         vec![Problem::new(
             "file",
-            "End the file name in .html, .rtf (Word), .tex, .xlsx or .md.",
+            "End the file name in .docx (Word), .html, .rtf, .tex, .xlsx or .md.",
         )]
     } else {
         Vec::new()
@@ -305,6 +306,24 @@ fn export_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
                  if (!is.null(note)) wb$add_data(x = note, start_row = {first} + nrow(tab) + 2, \
                  col_names = FALSE)\n  \
                  wb$save(path)\n"
+            )
+        }
+        ".docx" => {
+            let head = if title.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    "  ft <- flextable::add_header_lines(ft, {})
+",
+                    rcraft_rcodegen::r_string(&title)
+                )
+            };
+            format!(
+                "  ft <- flextable::flextable(tab)
+{head}                   if (!is.null(note)) ft <- flextable::add_footer_lines(ft, note)
+                   ft <- flextable::autofit(ft)
+                   flextable::save_as_docx(ft, path = path)
+"
             )
         }
         ".md" => {
@@ -352,8 +371,8 @@ pub const EXPORT_TABLE: Spec = Spec {
     entry: "Export table",
     menu: "Objects > Export table",
     about: "Write this data frame (a Model table, say) to a file as a formatted table: a web page \
-            (.html), a Word document (.rtf, which Word opens), LaTeX (.tex), an Excel workbook \
-            (.xlsx) or Markdown (.md), chosen by the file name's ending. A Model table's note goes \
+            (.html), a Word document (.docx, or .rtf), LaTeX (.tex), an Excel workbook (.xlsx) \
+            or Markdown (.md), chosen by the file name's ending. A Model table's note goes \
             below it.",
     widgets: &[
         Widget::Text {
@@ -361,7 +380,7 @@ pub const EXPORT_TABLE: Spec = Spec {
             label: "File",
             default: TextDefault::Empty,
             rule: TextRule::Any,
-            hint: "Its ending chooses the kind: .html, .rtf, .tex, .xlsx or .md.",
+            hint: "Its ending chooses the kind: .docx, .html, .rtf, .tex, .xlsx or .md.",
         },
         Widget::Text {
             id: "title",
@@ -377,7 +396,7 @@ pub const EXPORT_TABLE: Spec = Spec {
             hint: "Left unticked, nothing is written when the file exists.",
         },
     ],
-    needs: &["gt", "openxlsx2"],
+    needs: &["gt", "openxlsx2", "flextable", "officer"],
     styles: BASE,
     check: export_check,
     code: export_code,
@@ -491,7 +510,13 @@ mod tests {
         );
         let md = code("t.md", "").unwrap_or_default();
         assert!(md.contains("writeLines(c(row(names(tab))"), "{md}");
-        for bad in ["", "t.docx", "t.csv"] {
+        let docx = code("t.docx", "Table 1").unwrap_or_default();
+        assert!(
+            docx.contains("flextable::save_as_docx(ft, path = path)")
+                && docx.contains("flextable::add_header_lines(ft, \"Table 1\")"),
+            "{docx}"
+        );
+        for bad in ["", "t.doc", "t.csv"] {
             assert!(code(bad, "").is_err(), "{bad}");
         }
     }
