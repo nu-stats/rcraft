@@ -246,6 +246,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
         "test",
         &["lincom_post", "regress", "test_options", "xtregar_tests"],
     ),
+    ("testnl", &["testnl"]),
     ("testparm", &["mlogit_tests", "testparm", "testparm_models"]),
     ("tokenize", &["made"]),
     ("total", &["meanest"]),

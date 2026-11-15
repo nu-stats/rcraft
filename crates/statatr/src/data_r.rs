@@ -1133,6 +1133,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_cii" => cii::CII_HELPER,
         "stata_centile" => centile::CENTILE_HELPER,
         "stata_nlcom" => nlcom::NLCOM_HELPER,
+        "stata_testnl" => nlcom::TESTNL_HELPER,
         "stata_sktest" => sktest::SKTEST_HELPER,
         "stata_testparm" => testparm::TESTPARM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
@@ -2530,6 +2531,7 @@ impl Session {
             "cii" => self.cii(c, &opts, out),
             "centile" => self.centile(c, &opts, out),
             "nlcom" => self.nlcom(c, &opts, out),
+            "testnl" => self.testnl(c, &opts, out),
             // prop is proportion (Stata 19; propo and the like are not)
             "mean" | "total" | "proportion" | "prop" | "ratio" => {
                 let kind = if c.name == "prop" {
@@ -5287,7 +5289,7 @@ estat ic");
         // so do the commands that only read the model, unless they post
         let out = r("use s
 regress y x
-testnl _b[x] = 0
+lroc
 lincom x
 estimates store m1
 lincom x

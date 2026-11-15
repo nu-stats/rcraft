@@ -1135,6 +1135,8 @@ const MATRIX_NAMES: &[&str] = &[
     "V",
     "C",
     "stat_m",
+    "G",
+    "mtest",
     "Tau_a",
     "Tau_b",
     "Se_Score",

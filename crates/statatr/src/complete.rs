@@ -238,6 +238,7 @@ pub const COMMANDS: &[&str] = &[
     "tempname",
     "tempvar",
     "test",
+    "testnl",
     "testparm",
     "tokenize",
     "tostring",
@@ -805,6 +806,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("table", &["missing", "nformat(", "nototals", "statistic("]),
     ("tabm", &["missing"]),
     ("test", &["accumulate", "matvlc(", "mtest", "notest"]),
+    ("testnl", &["iterate(", "mtest"]),
     ("testparm", &["equal"]),
     (
         "oneway",
@@ -1756,6 +1758,7 @@ gettoken a b : s, {o}"
             "ktau" if name == "stats" => "ktau x y z, stats(taua p)".to_string(),
             "ktau" if matches!(name, "print" | "star") => format!("ktau x y z, {name}(.05)"),
             "ktau" => format!("ktau x y z, {o}"),
+            "testnl" => format!("regress y x\ntestnl _b[x] = 0, {o}"),
             "power" if matches!(name, "continuity" | "effect" | "test") => {
                 format!("power twoproportions 0.3 0.5, {o}")
             }

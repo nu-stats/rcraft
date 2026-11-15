@@ -1258,3 +1258,26 @@ fn ktau_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn testnl_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 60\ngenerate double z = mod(_n * 37, 101) / 7\n\
+         generate double w = mod(_n * 13, 17) / 3\n\
+         generate double x = 1 + .4 * z + .9 * w + mod(_n * 11, 23) / 5\nquietly regress x z w\n\
+         testnl _b[z] / _b[w] = 0.1\ntestnl (_b[z] = 0.4) (_b[w] = 1), mtest\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "  (1)  _b[z] / _b[w] = 0.1",
+        "               chi2(1) =       21.74",
+        "           Prob > chi2 =        0.0000",
+        "  (1)  |        0.37      1     0.5429*",
+        "  All  |        0.41      2     0.8160",
+        "* Unadjusted p-values",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

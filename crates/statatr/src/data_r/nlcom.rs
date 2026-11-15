@@ -73,6 +73,80 @@ pub(super) const NLCOM_HELPER: &str = r##"stata_nlcom <- function(exprs, names, 
   invisible(r)
 }"##;
 
+/// `testnl`: the Wald test of nonlinear restrictions, the derivatives as for nlcom
+/// (`plan/stata/nlcom.md`).
+pub(super) const TESTNL_HELPER: &str = r##"stata_testnl <- function(exprs, texts, mtest = NA, show = TRUE) {
+  b0 <- stata_b
+  env <- environment(stata_bget)
+  on.exit(assign("stata_b", b0, envir = env), add = TRUE)
+  at <- function(bv) {
+    assign("stata_b", bv, envir = env)
+    vapply(exprs, function(f) as.numeric(f()), 0)
+  }
+  m <- length(exprs)
+  # the equations first: Stata lists them before it works anything out (and stops after them)
+  if (show) {
+    cat("\n")
+    for (i in seq_len(m)) cat(sprintf("  (%d)  %s", i, texts[i]), "\n", sep = "")
+  }
+  g <- at(b0)
+  if (any(!is.finite(g))) stop("expression is not a number at the estimates (Stata: r(498))", call. = FALSE)
+  k <- length(b0)
+  J <- matrix(0, m, k)
+  for (j in seq_len(k)) {
+    if (is.na(b0[j])) next
+    d <- function(h) {
+      up <- b0
+      dn <- b0
+      up[j] <- up[j] + h
+      dn[j] <- dn[j] - h
+      (at(up) - at(dn)) / (2 * h)
+    }
+    h <- 1e-3 * (abs(b0[j]) + 1e-3)
+    J[, j] <- (4 * d(h / 2) - d(h)) / 3
+  }
+  assign("stata_b", b0, envir = env)
+  Vb <- as.matrix(stata_vcov)
+  if (!is.null(rownames(Vb)) && all(names(b0) %in% rownames(Vb))) Vb <- Vb[names(b0), names(b0), drop = FALSE]
+  Vb[is.na(Vb)] <- 0
+  W <- J %*% Vb %*% t(J)
+  chi2 <- drop(t(g) %*% solve(W, g))
+  rn <- paste0("r", seq_len(m))
+  # Stata's names and order: _cons last
+  nm <- tryCatch(stata_bnames(), error = function(e) names(b0))
+  o <- c(which(nm != "_cons"), which(nm == "_cons"))
+  G <- matrix(J[, o, drop = FALSE], m, k, dimnames = list(rn, nm[o]))
+  R <- matrix(g, m, 1, dimnames = list(rn, "c1"))
+  r <- list(p = stats::pchisq(chi2, m, lower.tail = FALSE), chi2 = chi2, df = m)
+  if (!is.na(mtest)) {
+    c1 <- g^2 / diag(W)
+    p0 <- stats::pchisq(c1, 1, lower.tail = FALSE)
+    r$mtmethod <- mtest
+    r$mtest <- matrix(c(c1, rep(1, m), p0), m, 3, dimnames = list(rn, c("chi2", "df", "p")))
+    p1 <- p0
+    # adjusted: a fourth column, adjustp (Stata 19)
+    if (mtest == "bonferroni") {
+      p1 <- pmin(1, p0 * m)
+      r$mtest <- cbind(r$mtest, adjustp = p1)
+    }
+  }
+  r$G <- G
+  r$R <- R
+  if (!show) return(r)
+  if (is.na(mtest)) {
+    cat("\n", sprintf("%22s =%12.2f", paste0("chi2(", m, ")"), chi2), "\n", sep = "")
+    cat(sprintf("%22s =%14.4f", "Prob > chi2", r$p), "\n", sep = "")
+  } else {
+    cat("\n--------------------------------------\n       |        chi2     df   p > chi2\n-------+------------------------------\n")
+    for (i in seq_len(m)) cat(sprintf("  %-5s|%12.2f%7d%11.4f*", paste0("(", i, ")"), c1[i], 1L, p1[i]), "\n", sep = "")
+    cat("-------+------------------------------\n")
+    cat(sprintf("  All  |%12.2f%7d%11.4f", chi2, m, r$p), "\n", sep = "")
+    cat("--------------------------------------\n")
+    cat(if (mtest == "bonferroni") "* Bonferroni-adjusted p-values\n" else "* Unadjusted p-values\n")
+  }
+  invisible(r)
+}"##;
+
 /// The r() nlcom leaves (Stata 19), with the matrices r(b), r(V), r(table).
 const R_NLCOM: &[&str] = &["level", "df_r", "N"];
 
@@ -278,7 +352,136 @@ impl Session {
         self.r_new = Some((R_NLCOM, "nlcom".into()));
         Ok(())
     }
+
+    /// `testnl exp = exp` and `testnl (exp = exp) (exp = exp) ... [, mtest[(opt)] iterate(#)]`.
+    pub(super) fn testnl(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "testnl")?;
+        let est = self.tested_estimates("testnl")?;
+        // an option Stata does not take: its error, r(198); iterate() bounds Stata's
+        // search for the derivatives' steps, taken and left aside as for nlcom
+        if let Some(o) = opts
+            .0
+            .iter()
+            .find(|o| !o.is("mtest", 2) && !o.is("iterate", 4))
+        {
+            let paren = if o.arg.is_some() { "()" } else { "" };
+            out.line(format!(
+                "stop({}, call. = FALSE)",
+                r_text(&format!(
+                    "option {}{paren} not allowed (Stata: r(198))",
+                    o.name
+                ))
+            ));
+            return Ok(());
+        }
+        let mtest = match opts.raw("mtest", 2).map(|m| m.trim().to_string()) {
+            _ if !opts.has("mtest", 2) => "NA",
+            None => "\"noadjust\"",
+            Some(m) if m.is_empty() || "noadjust".starts_with(m.as_str()) => "\"noadjust\"",
+            Some(m) if !m.is_empty() && "bonferroni".starts_with(m.as_str()) => "\"bonferroni\"",
+            Some(m) => {
+                return Err(no(format!(
+                    "testnl, mtest({m}) is not translated yet: no adjustment and bonferroni are"
+                )))
+            }
+        };
+        if !self.after_nlcom_post()
+            && !self.xtregar_active()
+            && !matches!(
+                est.fit,
+                Fit::Regress
+                    | Fit::Logit
+                    | Fit::Probit
+                    | Fit::Poisson
+                    | Fit::Nbreg
+                    | Fit::Ologit
+                    | Fit::Oprobit
+                    | Fit::Xtreg
+                    | Fit::Ivregress
+                    | Fit::Clogit
+                    | Fit::Stcox
+                    | Fit::Mlogit
+            )
+        {
+            return Err(no(format!(
+                "testnl after {} is not translated yet",
+                est.fit.name()
+            )));
+        }
+        let list = parts(&c.parts.main)?;
+        if list.is_empty() {
+            return Err(no("testnl needs an equation"));
+        }
+        let mut fns = Vec::new();
+        let mut texts = Vec::new();
+        for (i, (name, e)) in list.iter().enumerate() {
+            // a `name:` part is part of the equation's text here
+            let text = match name {
+                Some(n) => format!("{n}:{e}"),
+                None => e.clone(),
+            };
+            if ["<=", ">=", "!=", "~="].iter().any(|op| text.contains(op)) {
+                return Err(no(format!(
+                    "testnl {text}: an equation with one = is translated"
+                )));
+            }
+            let pieces: Vec<&str> = text.split('=').collect();
+            let [lhs, rhs] = pieces.as_slice() else {
+                if pieces.len() == 1 {
+                    out.line(format!(
+                        "stop({}, call. = FALSE)",
+                        r_text(&format!(
+                            "equation ({}) has no = sign (Stata: r(198))",
+                            i + 1
+                        ))
+                    ));
+                    return Ok(());
+                }
+                return Err(no(format!(
+                    "testnl {text}: an equation with one = is translated"
+                )));
+            };
+            if !text.contains("_b[") {
+                return Err(no(format!(
+                    "testnl {text}: an equation of the coefficients (_b[x]) is translated"
+                )));
+            }
+            let (code, kind) =
+                self.display_value(&format!("({}) - ({})", lhs.trim(), rhs.trim()), out)?;
+            if kind == Kind::Text {
+                return Err(no(format!(
+                    "testnl {text}: a string (Stata: type mismatch)"
+                )));
+            }
+            if code.contains("stata_v = ") {
+                return Err(no(format!(
+                    "testnl {text}: an expression of the data's variables is not translated"
+                )));
+            }
+            fns.push(format!("function() {code}"));
+            texts.push(r_text(text.trim()));
+        }
+        for h in ["stata_testnl", "stata_fmt", "stata_returned", "stata_names"] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_r <- stata_testnl(list({}), c({}), mtest = {mtest}{})",
+            fns.join(", "),
+            texts.join(", "),
+            if self.quiet(c) { ", show = FALSE" } else { "" }
+        ));
+        self.r_new = Some((R_TESTNL, "testnl".into()));
+        Ok(())
+    }
 }
+
+/// The r() testnl leaves (Stata 19).
+const R_TESTNL: &[&str] = &["p", "chi2", "df", "mtmethod", "mtest", "G", "R"];
 
 #[cfg(test)]
 mod tests {

@@ -35,3 +35,19 @@ Translated in `crates/statatr/src/data_r/nlcom.rs`.
   under the names (`r`, `_nl_1`), e(N) the model's, e(rank), e(predict) `nlcom_p`, e(cmd) `nlcom`,
   e(properties) `b V`, e(depvar), e(sample). test, lincom and nlcom then use them with z
   (`test r = 1` is `( 1)  r = 1` and chi2; `nlcom _b[r] + 1` the dependent variable in the stub).
+
+## testnl (2026-11-15)
+
+Observed on Stata 19 SE with made-up data (StatCraft's probes 250 and 418, `r21/n1.do` to `n3.do` in the session
+scratchpad, set line by line against RCraft's output: identical but for r() digits past the 10th, the two programs'
+numerical derivatives); corpus `testnl.do`. Translated in `stata_testnl` (`crates/statatr/src/data_r/nlcom.rs`).
+
+- The equations are listed first, `  (i)  text`, then (Stata stops after them on an error, `[q] not found`, r(111));
+  `chi2(m) = %12.2f`, `Prob > chi2 = %14.4f` (labels right-aligned to 22). chi2 = g′(GVG′)⁻¹g with g the left sides
+  minus the right, G their derivatives (central differences, extrapolated, as nlcom). chi2 after regress too.
+- mtest: a table of each equation's chi2(1) and p (starred) and All; "* Unadjusted p-values", or with mtest(b)
+  "* Bonferroni-adjusted p-values" (p × m, at most 1). r(mtmethod) "noadjust"/"bonferroni"; r(mtest) chi2, df, p, and
+  adjustp when adjusted.
+- r(): p, chi2, df; r(G) rows r1..rm, columns the coefficients in Stata's order (_cons last); r(R) the g's, column c1.
+- Errors: no `=` is "equation (1) has no = sign", r(198); an unknown option r(198).
+- Refused: mtest(holm), mtest(sidak); equations with <=, >=, != or two =.
