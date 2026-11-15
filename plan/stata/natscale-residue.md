@@ -245,3 +245,9 @@ hi = lo + 0.84 and + 1.37 (296 results), and lo = 0.313, 0.347, 0.431, 0.469 wit
 - Best formula for e found by a search over floor/ceil/round((a·n + b·cnt + c·range/d + k)/m), with
   small integer a, b, c, k, m: ceil((n − range/d + 4)/3), inside the bottom's block for 5,371 of 7,832
   bottoms and 2,783 of the 3,398 whose block excludes 0. Not a rule.
+- The walk is not through locals. On 1,500 sampled unclamped bottoms, "start e steps below, each step
+  kept as %18.0g text, the last step live" fits 613 (403 as a walk, 479 as the text of the label
+  itself), against 1,498 for the plain product walk; every bottom the text form fits, the product walk
+  fits too. Tops (1,500 sampled): product walk from above 1,372, any text form 1,055, either 1,419. So
+  the earlier reading that ends go out and back through locals (the third section) does not hold up:
+  the steps are taken in doubles, from a product start j·d.
