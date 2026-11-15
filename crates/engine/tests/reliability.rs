@@ -12,6 +12,8 @@
 //! separate route, so the dialog's arithmetic is checked, not only its
 //! agreement with a published figure.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::inference::{FLEISS, ICC};
@@ -27,7 +29,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, &[]);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {

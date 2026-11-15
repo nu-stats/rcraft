@@ -9,6 +9,8 @@
 //! * an interaction model: the estimated means equal the average of `predict()`
 //!   over the other factor's levels, with the covariate at its mean.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::postest::CONTRASTS;
@@ -24,7 +26,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, &[]);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {

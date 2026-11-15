@@ -3,6 +3,8 @@
 //! its spec and run; the model it saves must equal the model R fits for the call
 //! written out here by hand, and what it prints must equal R's own report.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::generalised::{LOGISTIC, MULTINOMIAL, NEGATIVE_BINOMIAL, ORDINAL, POISSON};
@@ -18,7 +20,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -455,4 +459,102 @@ fn multinomial_model_is_the_multinom_r_fits() {
     );
     assert_eq!(outcome, Outcome::Error, "{text}");
     assert!(text.contains("at least three"), "{text}");
+}
+
+/// Base R's stats; MASS and nnet for the other models of the file.
+const PACKAGES: &[&str] = &["MASS", "nnet"];
+
+/// Logistic and Poisson models against Newton-Raphson written out in plain
+/// R (no glm): the estimates, their standard errors from the information
+/// matrix, the Wald p-values and the deviance; an exposure as an offset, and
+/// quasi-Poisson's errors scaled by Pearson's dispersion. glm() takes its
+/// errors from the weights of its last iteration, one step behind its
+/// estimate, so they agree with the exact information to about 2e-5 here.
+#[test]
+fn logistic_and_poisson_estimates_are_newtons_method_by_hand() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+
+    dialog(
+        &mut e,
+        &LOGISTIC,
+        &[("y", "won")],
+        &[("x", &["x", "z"])],
+        &[],
+    );
+    let check = pinned::all_of(
+        "X <- cbind(1, d$x, d$z); y <- d$won; b <- rep(0, ncol(X)); \
+         for (i in 1:100) { p <- as.vector(plogis(X %*% b)); \
+           b <- b + as.vector(solve(t(X) %*% (p * (1 - p) * X), t(X) %*% (y - p))) }; \
+         p <- as.vector(plogis(X %*% b)); se <- sqrt(diag(solve(t(X) %*% (p * (1 - p) * X)))); \
+         dev <- -2 * sum(y * log(p) + (1 - y) * log(1 - p)); sm <- summary(model)",
+        &[
+            ("coef", "all.equal(unname(coef(model)), b, tolerance = 1e-7)"),
+            ("se", "all.equal(unname(sm$coefficients[, 2]), se, tolerance = 1e-4)"),
+            (
+                "p",
+                "all.equal(unname(sm$coefficients[, 4]), 2 * pnorm(-abs(b / se)), tolerance = 1e-4)",
+            ),
+            ("deviance", "all.equal(deviance(model), dev, tolerance = 1e-9)"),
+        ],
+    );
+    holds(&mut e, &check);
+
+    dialog(&mut e, &POISSON, &[("y", "n")], &[("x", &["x"])], &[]);
+    let check = pinned::all_of(
+        "X <- cbind(1, d$x); y <- d$n; b <- c(log(mean(y)), 0); \
+         for (i in 1:100) { mu <- as.vector(exp(X %*% b)); \
+           b <- b + as.vector(solve(t(X) %*% (mu * X), t(X) %*% (y - mu))) }; \
+         mu <- as.vector(exp(X %*% b)); se <- sqrt(diag(solve(t(X) %*% (mu * X)))); \
+         dev <- 2 * sum(ifelse(y > 0, y * log(y / mu), 0) - (y - mu)); sm <- summary(model)",
+        &[
+            (
+                "coef",
+                "all.equal(unname(coef(model)), b, tolerance = 1e-7)",
+            ),
+            (
+                "se",
+                "all.equal(unname(sm$coefficients[, 2]), se, tolerance = 1e-4)",
+            ),
+            (
+                "deviance",
+                "all.equal(deviance(model), dev, tolerance = 1e-9)",
+            ),
+        ],
+    );
+    holds(&mut e, &check);
+
+    dialog(
+        &mut e,
+        &POISSON,
+        &[
+            ("y", "n"),
+            ("exposure", "e"),
+            ("family", "quasipoisson"),
+            ("save", "rate"),
+        ],
+        &[("x", &["x", "grp"])],
+        &[],
+    );
+    let check = pinned::all_of(
+        "X <- cbind(1, d$x, d$grp == 'v'); y <- d$n; off <- log(d$e); \
+         b <- c(log(sum(y) / sum(d$e)), 0, 0); \
+         for (i in 1:100) { mu <- as.vector(exp(X %*% b + off)); \
+           b <- b + as.vector(solve(t(X) %*% (mu * X), t(X) %*% (y - mu))) }; \
+         mu <- as.vector(exp(X %*% b + off)); \
+         phi <- sum((y - mu)^2 / mu) / (nrow(X) - ncol(X)); \
+         se <- sqrt(phi * diag(solve(t(X) %*% (mu * X))))",
+        &[
+            ("coef", "all.equal(unname(coef(rate)), b, tolerance = 1e-7)"),
+            (
+                "se",
+                "all.equal(unname(sqrt(diag(vcov(rate)))), se, tolerance = 1e-4)",
+            ),
+            (
+                "phi",
+                "all.equal(summary(rate)$dispersion, phi, tolerance = 1e-4)",
+            ),
+        ],
+    );
+    holds(&mut e, &check);
 }

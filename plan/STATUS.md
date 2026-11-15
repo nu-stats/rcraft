@@ -4883,3 +4883,27 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `import excel`, `export delimited` ...); `prop`, `rm`, `args`, `marksample` and `mata` had no page in
   the guide (aliases, a note on marksample and a Mata page added).
 
+## 25 Statistics entries Verified, 2026-11-15
+
+- The engine tests of the Statistics menu now record the R and package versions they ran with
+  (`engine/tests/pinned`, which also says when R is not the pinned one), and each entry below has a
+  check against an answer worked out another way, in plain R, on the file's made-up data:
+  - Linear model: coefficients, errors, p-values, R2, F and intervals from the normal equations,
+    with and without weights. One-way ANOVA: sums of squares, F and Tukey's differences and p-values
+    from the studentized range. Factorial ANOVA: a balanced table's sums of squares from the means.
+  - Logistic and Poisson models: Newton-Raphson by hand (estimates to 1e-7, the deviance to 1e-9);
+    an exposure as an offset; quasi-Poisson's dispersion. glm() takes its errors from the weights of
+    its last iteration, one step behind its estimate, so they agree with the exact information to
+    about 2e-5 here; the check allows 1e-4.
+  - One-sample, Welch, pooled and paired t; a proportion and two with Yates' correction; the
+    binomial and Fisher sums; Mann-Whitney's W with its exact distribution counted over every split;
+    the signed-rank V with ties; Kruskal-Wallis H; Bartlett's K2; the F ratio.
+  - Frequency and cross-tabulation counts, shares and chi-square counted row by row; Pearson's r and
+    its p-value, Kendall's tau-b from the pairs.
+  - Already checked against hand-worked or published numbers, now with the versions recorded:
+    summary statistics, missing-data patterns, Cohen's and Fleiss' kappa, the intraclass
+    correlations, Type II/III sums of squares, custom contrasts.
+- 117 entries: 50 verified, 65 partial, 2 planned. Still partial in Statistics: Normality test
+  (Shapiro-Wilk's W has no short formula), the negative binomial, ordinal and multinomial models,
+  and the post-estimation dialogs.
+

@@ -11,6 +11,8 @@
 //! The data are made without random numbers, with unequal group sizes, so the
 //! orders of the terms and the codings really do matter.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::postest::SUMS_OF_SQUARES;
@@ -26,7 +28,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, &[]);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {

@@ -7,6 +7,8 @@
 //! * a 3 x 3 table 10 2 0 / 3 12 4 / 1 3 15 (n = 50): kappa .6056 unweighted,
 //!   .6732 with linear weights and .7444 with quadratic weights.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::inference::KAPPA;
@@ -22,7 +24,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, &[]);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {

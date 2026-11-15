@@ -55,11 +55,15 @@ Stale records to fix:
 
 - (Fixed 2026-11-15: `crates/catalog` marked the seven built Stata mode entries and Vignettes as
   `planned`; they are `partial` now. "RCraft manual" and "Model table" are planned rightly.)
-- Of the 117 menu entries, 25 are `Verified`: the Phase 6 entries (panel, survival, survey, IV,
-  multilevel, time series), checked in the pinned R by their engine tests, and, from 2026-11-15,
-  the seven Stata mode entries and Vignettes (`ui-egui/src/app/menu_checks.rs`). The other 90 are
-  `partial` and 2 `planned`. AGENTS.md section 5 asks for a check in the pinned R, with versions
-  recorded, before an entry moves to Verified; the Phase 2 to 5 menus have none yet.
+- Of the 117 menu entries, 50 are `Verified`: the Phase 6 entries (panel, survival, survey, IV,
+  multilevel, time series), checked in the pinned R by their engine tests; from 2026-11-15 the seven
+  Stata mode entries and Vignettes (`ui-egui/src/app/menu_checks.rs`); and 25 Statistics entries
+  (descriptives, the tests, kappa and intraclass correlations, linear models and ANOVA, logistic and
+  Poisson models, sums of squares, contrasts), each against formulas written out in plain R. The
+  other 65 are `partial` and 2 `planned`. Still without such a check: the File, Data, Graphs,
+  Packages and Help menus, Normality test, the negative binomial, ordinal and multinomial models and
+  the post-estimation dialogs (model fit, compare, predictions, diagnostics, robust errors, test
+  terms, marginal effects).
 
 ## Not checked by anyone yet
 

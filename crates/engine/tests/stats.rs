@@ -2,6 +2,8 @@
 //! with a note when none is found): build each dialog's code from its spec and
 //! the table's columns, run it, and check the numbers R prints or returns.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::stats::{CORRELATION, CROSSTAB, FREQUENCY, MISSING, NORMALITY, SUMMARY};
@@ -17,7 +19,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -295,4 +299,169 @@ fn correlation_missing_patterns_and_normality_give_what_r_gives() {
     // a constant variable cannot be tested: NA, not an error
     let (_, text) = dialog(&mut e, &NORMALITY, &[], &[("vars", &["flat"])], &[]);
     assert!(text.contains("NA"), "{text}");
+}
+
+/// Base R's stats only.
+const PACKAGES: &[&str] = &[];
+
+/// Runs the dialog's code as the menu does and keeps the tables it gives as
+/// `res`.
+fn kept(
+    e: &mut Engine,
+    spec: &Spec,
+    set: &[(&str, &str)],
+    lists: &[(&str, &[&str])],
+    flags: &[&str],
+) {
+    let (made, _) = run(e, Source::Typed, MAKE);
+    assert_eq!(made, Outcome::Ok);
+    let ctx = Context {
+        dataset: "d".into(),
+        frames: Vec::new(),
+        columns: [
+            ("age", VarKind::Number),
+            ("g", VarKind::Factor),
+            ("x", VarKind::Number),
+            ("y", VarKind::Number),
+            ("grp", VarKind::Text),
+            ("z", VarKind::Number),
+            ("flat", VarKind::Number),
+        ]
+        .into_iter()
+        .map(|(name, kind)| ColumnInfo {
+            name: name.into(),
+            kind,
+        })
+        .collect(),
+    };
+    let mut values = spec.defaults(&ctx);
+    for (id, text) in set {
+        values.set_text(id, *text);
+    }
+    for (id, names) in lists {
+        values.set_list(id, names.iter().map(|n| n.to_string()).collect());
+    }
+    for w in spec.widgets {
+        if let Widget::Check { id, .. } = w {
+            values.set_flag(id, flags.contains(id));
+        }
+    }
+    let code = spec
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    let (outcome, text) = run(
+        e,
+        Source::Menu(spec.menu.into()),
+        &pinned::keep_value(&code, "res"),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{code}\n{text}");
+}
+
+/// The frequency and cross-tabulation counts, shares and chi-square, and the
+/// correlations with their p-values, against counts and formulas written out
+/// in plain R (no table, chisq.test or cor): rows counted one by one, the
+/// chi-square with Yates' correction from the expected counts, Pearson's r
+/// from the sums of products and its t, and Kendall's tau-b from the
+/// concordant and discordant pairs.
+#[test]
+fn counts_and_correlations_are_the_textbook_formulas() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+
+    kept(
+        &mut e,
+        &FREQUENCY,
+        &[],
+        &[("vars", &["g", "age"])],
+        &["percent", "missing"],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "ga <- sum(d$g == 'a'); gb <- sum(d$g == 'b'); na <- sum(is.na(d$age))",
+            &[
+                ("g", "all(res$g[, 'count'] == c(ga, gb))"),
+                (
+                    "g_pct",
+                    "all(res$g[, 'percent'] == c(100 * ga / 5, 100 * gb / 5))",
+                ),
+                ("age_n", "sum(res$age[, 'count']) == 5"),
+                ("age_na", "tail(res$age[, 'count'], 1) == na"),
+                ("age_pct", "all(res$age[, 'percent'] == 20)"),
+            ],
+        ),
+    );
+
+    kept(
+        &mut e,
+        &CROSSTAB,
+        &[("row", "g"), ("col", "grp"), ("share", "row")],
+        &[],
+        &["test"],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "O <- matrix(0, 2, 2, dimnames = list(c('a', 'b'), c('f', 'm'))); \
+             for (i in seq_len(nrow(d))) O[as.character(d$g[i]), d$grp[i]] <- \
+             O[as.character(d$g[i]), d$grp[i]] + 1; \
+             E <- outer(rowSums(O), colSums(O)) / sum(O); \
+             x2 <- sum((abs(O - E) - min(0.5, abs(O - E)))^2 / E); \
+             test <- res[[3]]",
+            &[
+                ("counts", "all(res$Counts[1:2, 1:2] == O)"),
+                ("totals", "res$Counts[3, 3] == 5"),
+                (
+                    "row_pct",
+                    "all(res[['Row percentages']] == round(100 * O / rowSums(O), 1))",
+                ),
+                (
+                    "x2",
+                    "all.equal(test[['X-squared']], x2, tolerance = 1e-12)",
+                ),
+                (
+                    "p",
+                    "all.equal(test[['p-value']], pchisq(x2, 1, lower.tail = FALSE), tolerance = 1e-12)",
+                ),
+            ],
+        ),
+    );
+
+    kept(&mut e, &CORRELATION, &[], &[("vars", &["x", "y"])], &["p"]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "x <- d$x; y <- d$y; n <- 5; \
+             r <- sum((x - mean(x)) * (y - mean(y))) / \
+             sqrt(sum((x - mean(x))^2) * sum((y - mean(y))^2)); \
+             t <- r * sqrt(n - 2) / sqrt(1 - r^2)",
+            &[
+                ("r", "res$Correlations['x', 'y'] == round(r, 3)"),
+                ("rows", "all(res[['Rows used by each pair']] == 5)"),
+                (
+                    "p",
+                    "res[['P-values']]['x', 'y'] == round(2 * pt(-abs(t), n - 2), 4)",
+                ),
+            ],
+        ),
+    );
+
+    kept(
+        &mut e,
+        &CORRELATION,
+        &[("method", "kendall")],
+        &[("vars", &["x", "y"])],
+        &[],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "x <- d$x; y <- d$y; s <- 0; tx <- 0; ty <- 0; n0 <- 0; \
+             for (i in 1:4) for (j in (i + 1):5) { n0 <- n0 + 1; \
+               dx <- sign(x[j] - x[i]); dy <- sign(y[j] - y[i]); s <- s + dx * dy; \
+               tx <- tx + (dx == 0); ty <- ty + (dy == 0) }; \
+             tau <- s / sqrt((n0 - tx) * (n0 - ty))",
+            &[("tau", "res$Correlations['x', 'y'] == round(tau, 3)")],
+        ),
+    );
 }

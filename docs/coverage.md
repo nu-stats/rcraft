@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 117 | 25 | 90 | 2 |
+| 117 | 50 | 65 | 2 |
 
 ## File
 
@@ -57,30 +57,30 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| Summary statistics | partial |
-| Frequency table | partial |
-| Cross-tabulation | partial |
-| Correlation | partial |
-| Missing-data patterns | partial |
+| Summary statistics | verified |
+| Frequency table | verified |
+| Cross-tabulation | verified |
+| Correlation | verified |
+| Missing-data patterns | verified |
 | Normality test | partial |
-| One-sample t-test | partial |
-| Two-sample t-test | partial |
-| Paired t-test | partial |
-| Test of proportions | partial |
-| Exact binomial test | partial |
-| Fisher's exact test | partial |
-| Mann-Whitney test | partial |
-| Wilcoxon signed-rank test | partial |
-| Kruskal-Wallis test | partial |
-| Variance test | partial |
-| Agreement (kappa) | partial |
-| Agreement of several raters (Fleiss' kappa) | partial |
-| Reliability (intraclass correlation) | partial |
-| Linear model | partial |
-| One-way ANOVA | partial |
-| Factorial ANOVA | partial |
-| Logistic model | partial |
-| Poisson model | partial |
+| One-sample t-test | verified |
+| Two-sample t-test | verified |
+| Paired t-test | verified |
+| Test of proportions | verified |
+| Exact binomial test | verified |
+| Fisher's exact test | verified |
+| Mann-Whitney test | verified |
+| Wilcoxon signed-rank test | verified |
+| Kruskal-Wallis test | verified |
+| Variance test | verified |
+| Agreement (kappa) | verified |
+| Agreement of several raters (Fleiss' kappa) | verified |
+| Reliability (intraclass correlation) | verified |
+| Linear model | verified |
+| One-way ANOVA | verified |
+| Factorial ANOVA | verified |
+| Logistic model | verified |
+| Poisson model | verified |
 | Negative binomial model | partial |
 | Ordinal model | partial |
 | Multinomial model | partial |
@@ -108,8 +108,8 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Diagnostic plots | partial |
 | Robust standard errors | partial |
 | Test terms | partial |
-| Sums of squares (Type II/III) | partial |
-| Custom contrasts | partial |
+| Sums of squares (Type II/III) | verified |
+| Custom contrasts | verified |
 | Average marginal effects | partial |
 
 ## Graphs

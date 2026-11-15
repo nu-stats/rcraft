@@ -3,6 +3,8 @@
 //! its spec and run; the model it saves must equal the model R fits for the
 //! call written out here by hand, and the summary it prints must equal R's.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::models::{FACTORIAL, LINEAR, ONE_WAY};
@@ -18,7 +20,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -249,4 +253,113 @@ fn anova_dialogs_give_r_s_tables() {
         &mut e,
         "identical(attr(terms(main_only), 'term.labels'), c('a', 'b'))",
     );
+}
+
+/// Only base R's stats is used.
+const PACKAGES: &[&str] = &[];
+
+/// The numbers each dialog's model gives, against the textbook formulas
+/// written out in plain R (no lm or aov): least squares from the normal
+/// equations, with and without weights; one-way ANOVA's sums of squares, F and
+/// Tukey's honest differences from the studentized range; and a balanced
+/// two-way table's sums of squares from the cell, row and column means.
+#[test]
+fn the_models_numbers_are_the_textbook_formulas() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+
+    dialog(&mut e, &LINEAR, &[("y", "y")], &[("x", &["x", "z"])], &[]);
+    let check = pinned::all_of(
+        "X <- cbind(1, d$x, d$z); y <- d$y; n <- nrow(X); p <- ncol(X); \
+         XtX <- crossprod(X); b <- as.vector(solve(XtX, crossprod(X, y))); \
+         r <- y - X %*% b; s2 <- sum(r^2) / (n - p); se <- sqrt(diag(s2 * solve(XtX))); \
+         tss <- sum((y - mean(y))^2); r2 <- 1 - sum(r^2) / tss; \
+         f <- ((tss - sum(r^2)) / (p - 1)) / s2; sm <- summary(model); \
+         ci <- cbind(b - qt(0.975, n - p) * se, b + qt(0.975, n - p) * se)",
+        &[
+            ("coef", "all.equal(unname(coef(model)), b, tolerance = 1e-12)"),
+            ("se", "all.equal(unname(sm$coefficients[, 2]), se, tolerance = 1e-12)"),
+            (
+                "p",
+                "all.equal(unname(sm$coefficients[, 4]), 2 * pt(-abs(b / se), n - p), tolerance = 1e-10)",
+            ),
+            ("r2", "all.equal(sm$r.squared, r2, tolerance = 1e-12)"),
+            ("f", "all.equal(unname(sm$fstatistic[1]), f, tolerance = 1e-12)"),
+            ("ci", "all.equal(unname(confint(model)), unname(ci), tolerance = 1e-12)"),
+        ],
+    );
+    holds(&mut e, &check);
+
+    // weighted least squares
+    dialog(
+        &mut e,
+        &LINEAR,
+        &[("y", "y"), ("weights", "w"), ("save", "wfit")],
+        &[("x", &["x"])],
+        &[],
+    );
+    let check = pinned::all_of(
+        "X <- cbind(1, d$x); W <- diag(d$w); XWX <- t(X) %*% W %*% X; \
+         b <- as.vector(solve(XWX, t(X) %*% W %*% d$y)); r <- d$y - X %*% b; \
+         s2 <- sum(d$w * r^2) / (nrow(X) - 2); se <- sqrt(diag(s2 * solve(XWX)))",
+        &[
+            (
+                "coef",
+                "all.equal(unname(coef(wfit)), b, tolerance = 1e-12)",
+            ),
+            (
+                "se",
+                "all.equal(unname(sqrt(diag(vcov(wfit)))), se, tolerance = 1e-12)",
+            ),
+        ],
+    );
+    holds(&mut e, &check);
+
+    // one-way ANOVA and Tukey's honest differences
+    dialog(&mut e, &ONE_WAY, &[("y", "y"), ("g", "a")], &[], &["tukey"]);
+    let check = pinned::all_of(
+        "y <- d$y; g <- d$a; m <- tapply(y, g, mean); n <- tapply(y, g, length); \
+         k <- length(m); N <- length(y); ssb <- sum(n * (m - mean(y))^2); \
+         ssw <- sum((y - m[as.character(g)])^2); msw <- ssw / (N - k); \
+         f <- (ssb / (k - 1)) / msw; tab <- summary(anova)[[1]]; \
+         hsd <- stats::TukeyHSD(anova)$a; pairs <- utils::combn(levels(g), 2); \
+         diffs <- as.vector(m[pairs[2, ]] - m[pairs[1, ]]); \
+         q <- abs(diffs) / sqrt(msw / 2 * (1 / n[pairs[1, ]] + 1 / n[pairs[2, ]])); \
+         p <- as.vector(ptukey(q, k, N - k, lower.tail = FALSE)); \
+         rows <- paste(pairs[2, ], pairs[1, ], sep = '-')",
+        &[
+            ("ss", "all.equal(tab[['Sum Sq']], c(ssb, ssw), tolerance = 1e-12)"),
+            ("f", "all.equal(tab[['F value']][1], f, tolerance = 1e-12)"),
+            (
+                "p",
+                "all.equal(tab[['Pr(>F)']][1], pf(f, k - 1, N - k, lower.tail = FALSE), tolerance = 1e-10)",
+            ),
+            ("diff", "all.equal(unname(hsd[rows, 'diff']), diffs, tolerance = 1e-12)"),
+            ("padj", "all.equal(unname(hsd[rows, 'p adj']), p, tolerance = 1e-6)"),
+        ],
+    );
+    holds(&mut e, &check);
+
+    // two-way ANOVA, balanced (two rows a cell)
+    dialog(
+        &mut e,
+        &FACTORIAL,
+        &[("y", "y")],
+        &[("g", &["a", "b"])],
+        &[],
+    );
+    let check = pinned::all_of(
+        "y <- d$y; gm <- mean(y); ma <- ave(y, d$a); mb <- ave(y, d$b); \
+         mc <- ave(y, d$a, d$b); ssa <- sum((ma - gm)^2); ssb <- sum((mb - gm)^2); \
+         ssab <- sum((mc - ma - mb + gm)^2); sse <- sum((y - mc)^2); \
+         tab <- summary(anova)[[1]]",
+        &[
+            (
+                "ss",
+                "all.equal(tab[['Sum Sq']], c(ssa, ssb, ssab, sse), tolerance = 1e-12)",
+            ),
+            ("df", "all.equal(tab[['Df']], c(2, 1, 2, 6))"),
+        ],
+    );
+    holds(&mut e, &check);
 }
