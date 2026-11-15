@@ -251,3 +251,13 @@ hi = lo + 0.84 and + 1.37 (296 results), and lo = 0.313, 0.347, 0.431, 0.469 wit
   fits too. Tops (1,500 sampled): product walk from above 1,372, any text form 1,055, either 1,419. So
   the earlier reading that ends go out and back through locals (the third section) does not hold up:
   the steps are taken in doubles, from a product start j·d.
+- What changes at the jumps (n − cnt about 2–3 and 11), first look. The start is on the final step's own
+  grid, not a coarser one. For steps below 0.2 (5,709 bottoms off lo and 0), "(L − e)·d plus e steps"
+  fits 5,673, and 2,057 when the targets are moved one ulp; a start on Stata's 2 × 10^-1 grid fits 4,355
+  but 2,816 when moved, 5 × 10^-1 3,528 (1,608), 1 2,592 (845). So the 0.2-grid starts that fit near 17
+  (16.8, 16.6, 16.4 for 17.13–17.97, step 0.05) are mostly coincidence.
+- Below 1, where the blocks are narrow, e takes three values in steps: 0.313–0.733 with step 0.02 + 1 ulp
+  (cnt 23) has e in [0:1] for n − cnt ≤ 2, [2:5] for 3 to 10, and 6 or more from 11; 0.347–0.767 the
+  same with [0:3], [4:7], [8:27]. So e is a step function of n − cnt with steps at 2 or 3 and at 11, the
+  same places as near 17. What those two points are is still open: they are not where a coarser or
+  finer step's label count crosses n, and not a fixed number of final steps (9 or 8 apart).
