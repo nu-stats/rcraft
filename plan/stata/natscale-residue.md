@@ -118,3 +118,11 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   breaks that tie one way for steps of 0.1 + 1 ulp and the other for 0.2, which would move where the
   bottom first goes below 0 (n 15 against 14). Next: simulate that loop with StatCraft's costs, the
   %18.0g round trip at each move, and the result computed at return, and fit it to every sweep case.
+- The loop form tried (scratchpad nat/h17.R): each end starts at M(J·d) (M = the %18.0g round trip),
+  moves outward e times with each move kept in a local (v = M(v ∓ d)), and the result at return comes
+  back e steps (v ± d, one at a time). It gives r(min) = M(L·d) when an end does not move (Stata's 0.3
+  exactly for 0.3 to 0.348, `1.1` for 0 to 1.03 with n 12 to 14), and for 0 to 1.03 with n 15 to 20 it
+  fits with e = 2 at both ends (out to -.2 and 1.3, back to 2^-55 and 1.0999999999999999). Over all
+  11,140 cases it fits both ends in 6,347; bottoms outside the data still miss in 1,670 of 10,256,
+  and tops inside the data (r(max) below hi) need another form: 0 to 1.03 with n 10 gives
+  1.0000000000000002 = 0 + 10·d, not M(10·d).
