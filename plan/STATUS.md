@@ -5059,8 +5059,11 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   all three forms; each, run in a fresh R (the script with source(), the documents chunk by chunk),
   leaves objects identical() to the first session's; the two documents' chunks are the same. The app
   test writes each kind and the project, and the project is not written over.
-- Not checked: rendering (no Quarto or pandoc here); the output of a command is not in the document
-  until it is rendered.
+- Rendering checked 2026-11-15 with Quarto 1.11.9 (pandoc 3.10) in R 4.4.3: the session saved as a
+  Quarto project (`_quarto.yml` and the .qmd) renders with `quarto render`, and the .Rmd with
+  `rmarkdown::render` using Quarto's pandoc; each page holds the menu entry as text and the model's
+  printed summary, and not the command that failed. The test (`session_export.rs`) skips with a note
+  where Quarto, knitr or rmarkdown is missing, so CI, which has no Quarto, does not run it.
 
 ## P7.2 done: the session's report, 2026-11-15
 
