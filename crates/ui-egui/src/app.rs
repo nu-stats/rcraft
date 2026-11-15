@@ -27,7 +27,7 @@ use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 use crate::package_window::{PackagesWindow, Tab as PackagesTab};
 use crate::spec_dialog::{self, SpecAction, SpecDialog};
-use crate::stata_mode::{self, StataMode};
+use crate::stata_mode::{self, After, StataMode};
 
 /// What the middle pane shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -673,6 +673,11 @@ impl App {
                 }
             }
             Action::SubmitStata(source, text) => {
+                // a value the line before left is still being worked out: in turn
+                if self.stata.after.is_some() {
+                    self.stata.held.push((source, text));
+                    return;
+                }
                 let mut offer = Vec::new();
                 if let EngineState::Ready(engine) = &mut self.engine {
                     // the translator moves on only if R takes the line
@@ -695,6 +700,10 @@ impl App {
                     match engine.submit(source.clone(), &step.code) {
                         Ok(id) => {
                             self.stata.sent_with = Some((id, step.helpers.clone()));
+                            // the value its last line leaves, once it has run
+                            if let Some(code) = step.then_ask.clone() {
+                                self.stata.after = Some(After::Line(id, code));
+                            }
                             self.message = None;
                             if source == Source::Typed {
                                 self.stata.typed(text.trim());
@@ -1310,6 +1319,41 @@ impl App {
                     actions.push(Action::SubmitStata(source, text));
                 }
                 None => ctx.request_repaint_after(Duration::from_millis(30)),
+            }
+        }
+
+        // a value a typed line left (levelsof, local()), asked once it has run
+        match (self.stata.after.clone(), &mut self.engine) {
+            (Some(After::Line(id, code)), EngineState::Ready(e)) => {
+                match e.history().get(id).and_then(|h| h.outcome) {
+                    Some(Outcome::Ok) => {
+                        let q = e.query(&code);
+                        self.stata.after = Some(After::Answer(q));
+                        ctx.request_repaint_after(Duration::from_millis(30));
+                    }
+                    // R stopped at the line: the next step asks again
+                    Some(_) => self.stata.after = None,
+                    None => ctx.request_repaint_after(Duration::from_millis(30)),
+                }
+            }
+            (Some(After::Answer(q)), EngineState::Ready(e)) => match e.query_result(q) {
+                Some(r) => {
+                    let a = if r.ok {
+                        Ok(r.text.clone())
+                    } else {
+                        Err(format!("R could not work the value out: {}", r.text.trim()))
+                    };
+                    self.stata.live.give(a);
+                    self.stata.after = None;
+                }
+                None => ctx.request_repaint_after(Duration::from_millis(30)),
+            },
+            (Some(_), _) => self.stata.after = None,
+            (None, _) => {}
+        }
+        if self.stata.after.is_none() && !self.stata.held.is_empty() {
+            for (source, text) in std::mem::take(&mut self.stata.held) {
+                actions.push(Action::SubmitStata(source, text));
             }
         }
 
@@ -2796,6 +2840,8 @@ impl App {
                     && !self.help_window.is_busy()
                     && !self.dofile.is_running()
                     && self.stata.asking.is_none()
+                    && self.stata.after.is_none()
+                    && self.stata.held.is_empty()
             }
             EngineState::Failed(_) => true,
             EngineState::Starting(_) => false,
@@ -3036,6 +3082,10 @@ impl App {
         }
     }
 }
+
+/// The checks that make the Stata mode entries and Vignettes Verified.
+#[cfg(test)]
+mod menu_checks;
 
 #[cfg(test)]
 mod tests {

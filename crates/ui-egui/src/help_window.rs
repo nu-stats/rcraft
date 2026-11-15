@@ -125,6 +125,24 @@ impl HelpWindow {
         }
     }
 
+    /// The vignettes listed, if a list is showing (tests).
+    #[cfg(test)]
+    pub fn shown_vignettes(&self) -> Option<&[Vignette]> {
+        match self.current() {
+            Some(Content::Vignettes { list, .. }) => Some(list),
+            _ => None,
+        }
+    }
+
+    /// The text showing (a vignette's code or source, a NEWS file), if one is (tests).
+    #[cfg(test)]
+    pub fn shown_text(&self) -> Option<&str> {
+        match self.current() {
+            Some(Content::Text { text, .. }) => Some(text),
+            _ => None,
+        }
+    }
+
     /// Opens the window at the search box.
     pub fn open_search(&mut self) {
         self.open = true;

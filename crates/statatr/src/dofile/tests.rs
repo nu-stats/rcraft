@@ -1061,3 +1061,52 @@ fn errors_are_printed_in_statas_words() {
         "subscript out of bounds"
     );
 }
+
+#[test]
+fn the_scan_names_the_files_import_and_export_read_and_write() {
+    let opts = Options {
+        folder: "/home/me/proj".into(),
+        ..Options::default()
+    };
+    let d = dry_run(
+        "import delimited corpus.csv, clear\nimport delim \"two words.csv\"\nimport excel book.xlsx, firstrow\nimport delimited using other.csv\nexport delimited out.csv, replace\nimport delimited corpus.csv",
+        &NoFiles,
+        opts,
+    );
+    let sc = scan(&d);
+    let files: Vec<(&str, FileRole, FileStatus)> = sc
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.role, f.status))
+        .collect();
+    assert_eq!(
+        files,
+        [
+            (
+                "/home/me/proj/corpus.csv",
+                FileRole::Read,
+                FileStatus::Missing
+            ),
+            (
+                "/home/me/proj/two words.csv",
+                FileRole::Read,
+                FileStatus::Missing
+            ),
+            (
+                "/home/me/proj/book.xlsx",
+                FileRole::Read,
+                FileStatus::Missing
+            ),
+            (
+                "/home/me/proj/other.csv",
+                FileRole::Read,
+                FileStatus::Missing
+            ),
+            (
+                "/home/me/proj/out.csv",
+                FileRole::Write,
+                FileStatus::Written
+            ),
+        ]
+    );
+}

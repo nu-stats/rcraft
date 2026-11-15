@@ -55,11 +55,11 @@ Stale records to fix:
 
 - (Fixed 2026-11-15: `crates/catalog` marked the seven built Stata mode entries and Vignettes as
   `planned`; they are `partial` now. "RCraft manual" and "Model table" are planned rightly.)
-- Of the 117 menu entries, 17 are `Verified`: the Phase 6 entries (panel, survival, survey, IV,
-  multilevel, time series), checked in the pinned R by their engine tests. The other 98 are
+- Of the 117 menu entries, 25 are `Verified`: the Phase 6 entries (panel, survival, survey, IV,
+  multilevel, time series), checked in the pinned R by their engine tests, and, from 2026-11-15,
+  the seven Stata mode entries and Vignettes (`ui-egui/src/app/menu_checks.rs`). The other 90 are
   `partial` and 2 `planned`. AGENTS.md section 5 asks for a check in the pinned R, with versions
-  recorded, before an entry moves to Verified; the earlier menus have none yet (the Stata corpus
-  Verifies the translator's commands, not the menus).
+  recorded, before an entry moves to Verified; the Phase 2 to 5 menus have none yet.
 
 ## Not checked by anyone yet
 

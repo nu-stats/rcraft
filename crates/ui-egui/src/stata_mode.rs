@@ -54,12 +54,28 @@ pub struct StataMode {
     /// The last Stata step R was given, and the helpers it carried: if R
     /// stopped there they are given again with the next step.
     pub sent_with: Option<(rcraft_engine::CommandId, Vec<String>)>,
+    /// A typed step whose last line leaves a value only R knows
+    /// (`levelsof g, local(gs)`), worked out once the line has run.
+    pub after: Option<After>,
+    /// Stata lines given while `after` waits, run in turn once it is done.
+    pub held: Vec<(rcraft_engine::Source, String)>,
+}
+
+/// What a value a typed line left waits for.
+#[derive(Clone, Debug)]
+pub enum After {
+    /// The line to finish in R; then this is asked out of sight.
+    Line(rcraft_engine::CommandId, String),
+    /// R's answer.
+    Answer(rcraft_engine::QueryId),
 }
 
 impl StataMode {
     /// R was restarted: what the translator followed is gone with it.
     pub fn forget_r(&mut self) {
         self.live = Live::new();
+        self.after = None;
+        self.held.clear();
     }
 
     /// Keeps a typed line for Page Up.

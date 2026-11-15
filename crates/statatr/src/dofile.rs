@@ -2632,6 +2632,16 @@ impl<'f> Run<'f> {
                 },
             ),
             (None, "use" | "save" | "saveold") if !main.is_empty() => (main.to_string(), "dta"),
+            // import delimited file.csv, export excel file.xlsx: the file after the kind
+            (None, "import" | "export")
+                if word.starts_with("delim")
+                    || matches!(
+                        word,
+                        "excel" | "spss" | "sas" | "sasxport5" | "sasxport8" | "dbase"
+                    ) =>
+            {
+                (main.get(word.len()..).unwrap_or("").trim().to_string(), "")
+            }
             (None, "graph") if word == "export" => {
                 (main.get(word.len()..).unwrap_or("").trim().to_string(), "")
             }

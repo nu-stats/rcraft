@@ -816,6 +816,18 @@ impl DoFileWindow {
         self.saved_text(Save::Log)
     }
 
+    /// What Save as R script (or Save as Quarto) writes (tests).
+    #[cfg(test)]
+    pub fn saved(&self, quarto: bool) -> String {
+        self.saved_text(if quarto { Save::Quarto } else { Save::R })
+    }
+
+    /// The scan shown at the top of the window (tests).
+    #[cfg(test)]
+    pub fn scan(&self) -> &Scan {
+        &self.scan
+    }
+
     /// The run's state, for tests: whether it is done and how each line went.
     #[cfg(test)]
     pub fn outcome(&self) -> Option<(bool, Vec<Ran>, bool)> {

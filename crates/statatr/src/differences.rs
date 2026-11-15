@@ -501,6 +501,14 @@ pub const GUIDES: &[Guide] = &[
         points: &[p("Codes", "The codes follow the text's sorted order from 1, as Stata's.")],
     },
     Guide {
+        command: "mata",
+        about: "Stata's matrix language",
+        points: &[p(
+            "Not translated",
+            "Mata is not translated: a mata block or a mata: line is refused with the reason.              The one exception is mata: mata clear, which outreg do-files use to start over:              it empties outreg's tables, the only thing RCraft keeps where Stata keeps Mata's              memory.",
+        )],
+    },
+    Guide {
         command: "erase",
         about: "Deletes a file (rm is the same)",
         points: &[p(
@@ -1309,7 +1317,9 @@ pub const GUIDES: &[Guide] = &[
                 "There is no R function for a program: RCraft runs its lines where it is called, \
                  each translated as any line is, with locals of its own (`0', `1' ... and args), \
                  temporary variables dropped when it returns, exit returning from it, and an \
-                 r-class program's return scalar and return local as r() afterwards.",
+                 r-class program's return scalar and return local as r() afterwards. \
+                 marksample marks the rows its if and in keep, 0 where a variable of its \
+                 varlist is missing (unless novarlist), as Stata's.",
             ),
             p(
                 "Not yet",
@@ -3262,6 +3272,9 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
         "oprobit" => "ologit",
         "tsfill" => "tsset",
         "tab1" | "tab2" => "tabulate",
+        "prop" => "proportion",
+        "rm" => "erase",
+        "args" | "marksample" => "program",
         "scatter" | "line" | "connected" => "twoway",
         "bysort" => "by",
         "svyset" => "svy",
@@ -3377,6 +3390,11 @@ mod tests {
         assert_eq!(page("probit d x"), Some("logit"));
         assert_eq!(page("tab2 g h"), Some("tabulate"));
         assert_eq!(page("scatter y x"), Some("twoway"));
+        assert_eq!(page("prop g"), Some("proportion"));
+        assert_eq!(page("capture rm out.dta"), Some("erase"));
+        assert_eq!(page("args a b"), Some("program"));
+        assert_eq!(page("marksample touse"), Some("program"));
+        assert_eq!(page("mata: mata clear"), Some("mata"));
         assert_eq!(page("xtlogit y x"), None);
     }
 }

@@ -52,6 +52,11 @@ pub struct Step {
     /// cannot read runs nothing), hand them to [`Live::unsend`] so the next
     /// step gives them again.
     pub helpers: Vec<String>,
+    /// The text's last line leaves a value only R knows (`levelsof g,
+    /// local(gs)`): once `code` has run, run this out of sight and give what
+    /// it printed to [`Live::give`]; nothing is stepped again. If R stopped
+    /// at `code`, give nothing: the next step asks again.
+    pub then_ask: Option<String>,
 }
 
 /// The Stata of one session so far.
@@ -100,6 +105,7 @@ impl Live {
         whole.push_str(text.trim_end_matches(['\n', '\r']));
         whole.push('\n');
         let program = read(&whole);
+        let mut then_ask = None;
         let t = loop {
             let (t, ask) = self.replay(&whole);
             match ask {
@@ -113,6 +119,12 @@ impl Live {
                         helpers,
                         ..Step::default()
                     };
+                }
+                // the text's last line leaves the value: R gives it once the
+                // text has run
+                Some(v) if ends_text(&t, &whole) => {
+                    then_ask = Some(v.code);
+                    break t;
                 }
                 // lines of this text come first and have not run: R would give
                 // the value from before them
@@ -147,6 +159,7 @@ impl Live {
             ssc,
             ask: None,
             helpers,
+            then_ask,
         }
     }
 
@@ -224,6 +237,25 @@ impl Live {
     pub fn source(&self) -> &str {
         &self.source
     }
+}
+
+/// Whether the last line translated is the text's last command, so a value
+/// asked for there comes after everything the text runs.
+fn ends_text(t: &Translation, whole: &str) -> bool {
+    let last = whole
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| {
+            let l = l.trim();
+            !l.is_empty() && !l.starts_with('*') && !l.starts_with("//")
+        })
+        .map(|(i, _)| i + 1)
+        .last();
+    let end = t
+        .lines
+        .last()
+        .map(|l| l.span.line.saturating_add(l.span.lines.max(1)) - 1);
+    matches!((last, end), (Some(a), Some(b)) if b >= a)
 }
 
 /// The name a helper defines (`stata_fmt <- function` is `stata_fmt`).
@@ -328,6 +360,65 @@ mod tests {
         assert!(
             reasons.iter().any(|r| r.contains("on a line of its own")),
             "{reasons:?}"
+        );
+    }
+
+    #[test]
+    fn a_value_the_last_line_leaves_is_asked_for_once_it_has_run() {
+        let mut live = Live::new();
+        live.step("use auto");
+        live.give(Ok("make
+price
+rep78
+"
+        .into()));
+        let first = answered(&mut live, "levelsof rep78, local(gs)");
+        assert!(first.ask.is_none(), "{first:?}");
+        assert_eq!(first.lines.len(), 1, "{first:?}");
+        assert!(first.code.contains("stata_levelsof("), "{}", first.code);
+        let then = first.then_ask.clone().unwrap_or_default();
+        assert!(!then.is_empty(), "{first:?}");
+        live.give(Ok("1 2 3
+"
+        .into()));
+        // a later line uses it, as in a do-file
+        let used = live.step(
+            "foreach k of local gs {
+  display `k'
+}",
+        );
+        assert!(used.ask.is_none() && used.then_ask.is_none(), "{used:?}");
+        let shown: Vec<&str> = used
+            .lines
+            .iter()
+            .filter(|l| l.result.is_ok())
+            .map(|l| l.stata.as_str())
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                "foreach k of local gs {",
+                "display 1",
+                "display 2",
+                "display 3"
+            ],
+            "{used:?}"
+        );
+        let word = live.step("local first : word 2 of `gs'");
+        assert!(word.lines.iter().all(|l| l.result.is_ok()), "{word:?}");
+        assert_eq!(live.step("display `first'").lines[0].stata, "display 2");
+        // in the middle of a text, it is still said to need a line of its own
+        let mid = live.step(
+            "levelsof rep78, local(hs)
+display \"`hs'\"",
+        );
+        assert!(mid.then_ask.is_none(), "{mid:?}");
+        assert!(
+            mid.lines.iter().any(|l| l
+                .result
+                .as_ref()
+                .is_err_and(|e| e.reason.contains("on a line of its own"))),
+            "{mid:?}"
         );
     }
 

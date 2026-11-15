@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 117 | 17 | 98 | 2 |
+| 117 | 25 | 90 | 2 |
 
 ## File
 
@@ -148,13 +148,13 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| Stata mode switch | partial |
-| Translate Stata code | partial |
-| Translate do-file | partial |
-| Open do-file and run | partial |
-| Do-file dry-run report | partial |
-| Stata and R side by side | partial |
-| Stata differences guide | partial |
+| Stata mode switch | verified |
+| Translate Stata code | verified |
+| Translate do-file | verified |
+| Open do-file and run | verified |
+| Do-file dry-run report | verified |
+| Stata and R side by side | verified |
+| Stata differences guide | verified |
 
 ## Help
 
@@ -162,5 +162,5 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 |---|---|
 | Help topic | partial |
 | Search help | partial |
-| Vignettes | partial |
+| Vignettes | verified |
 | RCraft manual | planned |

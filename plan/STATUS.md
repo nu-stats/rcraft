@@ -4853,3 +4853,33 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   message and value as Stata 19 (list and describe in R's layout as elsewhere); a test.
 - Not yet: dictionaries (infile/infix using a .dct), infile with in, byvariable(), automatic, value
   labels.
+
+## Stata mode entries and Vignettes Verified, 2026-11-15
+
+- `crates/ui-egui/src/app/menu_checks.rs` drives the app with a real R, the way a user uses each
+  entry, and checks the result against a fixed answer; each test records the R and package versions
+  and says when R is not the one `ENVIRONMENT` pins. All eight pass in R 4.4.3, so the entries are
+  `verified` (117 entries: 25 verified, 90 partial, 2 planned):
+  - Stata mode switch: regress, ranktests, tabulate_pct, prtest, labels2 and aware.do of the corpus
+    typed line by line (a loop at once), every value Stata 19's to the file's tolerance.
+  - Translate Stata code: the R the Script Editor's pane shows for the plain files, run on its own.
+  - Stata and R side by side: each pane line sits at its script line, and its R alone prints its
+    own `@` results and no other line's.
+  - Open do-file and run: File > Run do-file… on aware, control (include, loops, macros), regress and
+    labels2.
+  - Translate do-file: after those runs, Save as R script and the Quarto document's chunks, each run
+    in a fresh R from the do-file's folder.
+  - Do-file dry-run report: a made-up do-file's scan (lines, the one not translated and why, the line
+    that waits for R, the files there and not there) against what its run then does, the values R
+    worked out checked against lm().
+  - Stata differences guide: a page for every command in the corpus's do-files, a line's note opening
+    its page, and 13 things the pages say R itself does checked in R.
+  - Vignettes: grid's list as `tools::getVignetteInfo()` has it (topics, titles, PDF and R files) and
+    a vignette's code as its file holds it.
+- What the checks found, fixed (in `statatr`, with the user's yes): a typed `levelsof x, local(gs)`
+  left `gs` refused for every later line (Live recorded a refusal where R's answer was due after the
+  line; now `Step::then_ask` is asked out of sight once the line has run, and Stata typed meanwhile
+  waits its turn); the dry-run report left out files named by `import delimited file.csv` (and
+  `import excel`, `export delimited` ...); `prop`, `rm`, `args`, `marksample` and `mata` had no page in
+  the guide (aliases, a note on marksample and a Mata page added).
+
