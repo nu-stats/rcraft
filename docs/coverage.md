@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 117 | 50 | 65 | 2 |
+| 117 | 61 | 54 | 2 |
 
 ## File
 
@@ -62,7 +62,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Cross-tabulation | verified |
 | Correlation | verified |
 | Missing-data patterns | verified |
-| Normality test | partial |
+| Normality test | verified |
 | One-sample t-test | verified |
 | Two-sample t-test | verified |
 | Paired t-test | verified |
@@ -81,9 +81,9 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Factorial ANOVA | verified |
 | Logistic model | verified |
 | Poisson model | verified |
-| Negative binomial model | partial |
-| Ordinal model | partial |
-| Multinomial model | partial |
+| Negative binomial model | verified |
+| Ordinal model | verified |
+| Multinomial model | verified |
 | Fixed-effects regression | verified |
 | Fixed-effects count or binary model | verified |
 | Panel model | verified |
@@ -101,16 +101,16 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Logistic or Poisson mixed model | verified |
 | ARIMA model | verified |
 | Autocorrelations | verified |
-| Model fit | partial |
-| Compare models | partial |
-| Predicted values and residuals | partial |
-| Model diagnostics | partial |
+| Model fit | verified |
+| Compare models | verified |
+| Predicted values and residuals | verified |
+| Model diagnostics | verified |
 | Diagnostic plots | partial |
-| Robust standard errors | partial |
-| Test terms | partial |
+| Robust standard errors | verified |
+| Test terms | verified |
 | Sums of squares (Type II/III) | verified |
 | Custom contrasts | verified |
-| Average marginal effects | partial |
+| Average marginal effects | verified |
 
 ## Graphs
 

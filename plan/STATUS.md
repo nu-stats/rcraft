@@ -4907,3 +4907,21 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   (Shapiro-Wilk's W has no short formula), the negative binomial, ordinal and multinomial models,
   and the post-estimation dialogs.
 
+## 11 more Statistics entries Verified, 2026-11-15
+
+- Normality test: W and its p-value against Royston's algorithm (AS R94, 1995) written out in plain
+  R, for 20, 11 and 5 values (both approximations, the short list of coefficients); equal to 1e-12.
+- Negative binomial, ordinal and multinomial models: their log-likelihoods written out and maximised
+  with optim. Each package stops at its own tolerance (glm.nb about 1e-7 from the optimum, polr
+  about 4e-5, nnet's multinom about 3e-3 where x and z go together, its log-likelihood the maximum to
+  1e-7); the checks allow that.
+- Post-estimation, against the models worked out by hand: Model fit (log-likelihood, AIC, BIC,
+  R-squared, deviances) and the Compare models table to the digits printed; the nested F test,
+  predictions and residuals (row 4 left empty), Koenker's Breusch-Pagan, Cook's distance and leverage
+  from the hat matrix, the HC0, HC1 and HC3 sandwiches through the intervals, the tests of terms (each,
+  together, the likelihood ratio) and the average marginal effect with its delta-method error
+  (marginaleffects takes its own finite differences, about 1e-4 away) as numbers.
+- 117 entries: 61 verified, 54 partial, 2 planned. Diagnostic plots and the Graphs menu are next: the
+  plots' shapes can be read back from R's display list (`recordPlot()`) and set against values worked
+  out by hand.
+

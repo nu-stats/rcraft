@@ -3,6 +3,8 @@
 //! then built on the model's name, run, and its output or the columns it adds
 //! compared with what R gives for the same question asked directly.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::postest::{
@@ -21,7 +23,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -475,4 +479,282 @@ fn diagnostic_plots_draw_one_page_of_four_panels() {
         "stopifnot(identical(par('mfrow'), c(1L, 1L)))",
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
+}
+
+/// Base R's stats; sandwich, lmtest and marginaleffects for three dialogs.
+const PACKAGES: &[&str] = &["sandwich", "lmtest", "marginaleffects"];
+
+/// The models of [`SETUP`] worked out in plain R, without lm or glm: least
+/// squares from the normal equations on the 11 rows with an x, and the
+/// logistic model by Newton-Raphson.
+const BY_HAND: &str = "ok <- !is.na(d$x); y <- d$y[ok]; n <- sum(ok); \
+     X1 <- cbind(1, d$x[ok]); X2 <- cbind(1, d$x[ok], d$z[ok]); \
+     ols <- function(X, y) { b <- as.vector(solve(crossprod(X), crossprod(X, y))); \
+       r <- as.vector(y - X %*% b); list(b = b, r = r, rss = sum(r^2), p = ncol(X)) }; \
+     f1 <- ols(X1, y); f2 <- ols(X2, y); tss <- sum((y - mean(y))^2); \
+     llf <- function(f) -n / 2 * (log(2 * pi) + log(f$rss / n) + 1); \
+     G <- cbind(1, d$z); w <- d$won; b <- c(0, 0); \
+     for (i in 1:100) { p <- as.vector(plogis(G %*% b)); \
+       b <- b + as.vector(solve(t(G) %*% (p * (1 - p) * G), t(G) %*% (w - p))) }; \
+     p <- as.vector(plogis(G %*% b)); \
+     dev <- function(p) -2 * sum(w * log(p) + (1 - w) * log(1 - p))";
+
+/// Runs `spec` on `model` as the menu does and keeps its value as `res`.
+fn kept(e: &mut Engine, spec: &Spec, model: &str, set: &[(&str, &str)], flags: &[&str]) {
+    let ctx = Context {
+        dataset: model.into(),
+        frames: Vec::new(),
+        columns: Vec::new(),
+    };
+    let mut values = spec.defaults(&ctx);
+    for (id, text) in set {
+        values.set_text(id, *text);
+    }
+    for w in spec.widgets {
+        if let Widget::Check { id, .. } = w {
+            values.set_flag(id, flags.contains(id));
+        }
+    }
+    let code = spec
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    let (outcome, text) = run(
+        e,
+        Source::Menu(spec.menu.into()),
+        &pinned::keep_value(&code, "res"),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{code}\n{text}");
+}
+
+/// What R prints for `code` run after [`BY_HAND`].
+fn hand_text(e: &mut Engine, code: &str) -> String {
+    let (outcome, text) = run(e, Source::Typed, &format!("local({{ {BY_HAND}; {code} }})"));
+    assert_eq!(outcome, Outcome::Ok, "{code}\n{text}");
+    text
+}
+
+/// Every line of `want` is among the lines of `got`.
+fn shows(got: &str, want: &str) {
+    let lines = tidy(got);
+    for line in tidy(want) {
+        assert!(lines.contains(&line), "missing {line:?} in\n{got}");
+    }
+}
+
+/// The post-estimation dialogs against the models worked out by hand: the fit
+/// numbers and the comparison table to the digits printed; the nested F test,
+/// the predictions and residuals, Cook's distance and leverage, the robust
+/// intervals, the tests of terms and the average marginal effect as numbers.
+#[test]
+fn post_estimation_numbers_are_the_textbook_formulas() {
+    let Some(mut e) = started() else { return };
+    for package in ["sandwich", "lmtest", "marginaleffects"] {
+        let (outcome, _) = run(
+            &mut e,
+            Source::Typed,
+            &format!("stopifnot(requireNamespace('{package}', quietly = TRUE))"),
+        );
+        if outcome != Outcome::Ok {
+            eprintln!("skipped: the R package {package} is not installed");
+            return;
+        }
+    }
+    let check = |e: &mut Engine, setup: &str, checks: &[(&str, &str)]| {
+        holds(e, &pinned::all_of(&format!("{BY_HAND}; {setup}"), checks));
+    };
+
+    // model fit, linear: the log-likelihood, AIC, BIC and R-squared
+    let (_, text) = on_model(&mut e, &MODEL_FIT, "m1", &[], &[]);
+    shows(
+        &text,
+        &hand_text(
+            &mut e,
+            "ll <- llf(f1); cat('Observations: ', n, '\\n', sep = ''); \
+             print(c(logLik = ll, df = 3, AIC = -2 * ll + 2 * 3, BIC = -2 * ll + log(n) * 3)); \
+             r2 <- 1 - f1$rss / tss; \
+             print(c(r.squared = r2, adj.r.squared = 1 - (1 - r2) * (n - 1) / (n - 2)))",
+        ),
+    );
+    // and logistic: the deviances
+    let (_, text) = on_model(&mut e, &MODEL_FIT, "g1", &[], &[]);
+    shows(
+        &text,
+        &hand_text(
+            &mut e,
+            "print(c(null = dev(rep(mean(w), length(w))), residual = dev(p)))",
+        ),
+    );
+
+    // compare models: the table to the digits printed, the F test as numbers
+    kept(
+        &mut e,
+        &COMPARE_MODELS,
+        "m1",
+        &[("others", "m2")],
+        &["nested"],
+    );
+    let (_, text) = on_model(&mut e, &COMPARE_MODELS, "m1", &[("others", "m2")], &[]);
+    shows(
+        &text,
+        &hand_text(
+            &mut e,
+            "ll <- c(llf(f1), llf(f2)); \
+             print(data.frame(model = c('m1', 'm2'), df = c(3, 4), logLik = ll, \
+             AIC = -2 * ll + 2 * c(3, 4), BIC = -2 * ll + log(n) * c(3, 4)))",
+        ),
+    );
+    check(
+        &mut e,
+        "f <- (f1$rss - f2$rss) / (f2$rss / (n - 3))",
+        &[
+            ("rss", "all.equal(res$RSS, c(f1$rss, f2$rss), tolerance = 1e-12)"),
+            ("f", "all.equal(res$F[2], f, tolerance = 1e-12)"),
+            (
+                "p",
+                "all.equal(res[['Pr(>F)']][2], pf(f, 1, n - 3, lower.tail = FALSE), tolerance = 1e-12)",
+            ),
+        ],
+    );
+
+    // predicted values and residuals, line by line, with none on row 4
+    on_model(
+        &mut e,
+        &PREDICTED,
+        "m1",
+        &[("data", "d"), ("fitted", "yhat"), ("resid", "e")],
+        &[],
+    );
+    on_model(
+        &mut e,
+        &PREDICTED,
+        "g1",
+        &[
+            ("data", "d"),
+            ("fitted", "pr"),
+            ("resid", "pe"),
+            ("rtype", "pearson"),
+        ],
+        &[],
+    );
+    on_model(
+        &mut e,
+        &PREDICTED,
+        "g1",
+        &[
+            ("data", "d"),
+            ("fitted", "lp"),
+            ("resid", ""),
+            ("type", "link"),
+        ],
+        &[],
+    );
+    check(
+        &mut e,
+        "",
+        &[
+            (
+                "fitted",
+                "all.equal(d$yhat[ok], as.vector(X1 %*% f1$b), tolerance = 1e-12)",
+            ),
+            ("resid", "all.equal(d$e[ok], f1$r, tolerance = 1e-10)"),
+            ("row4", "is.na(d$yhat[4]) && is.na(d$e[4])"),
+            ("prob", "all.equal(d$pr, p, tolerance = 1e-8)"),
+            (
+                "pearson",
+                "all.equal(d$pe, (w - p) / sqrt(p * (1 - p)), tolerance = 1e-8)",
+            ),
+            (
+                "link",
+                "all.equal(d$lp, as.vector(G %*% b), tolerance = 1e-8)",
+            ),
+        ],
+    );
+
+    // diagnostics: Shapiro-Wilk of the residuals, Koenker's Breusch-Pagan,
+    // Cook's distance and leverage from the hat matrix
+    let (_, text) = on_model(&mut e, &DIAGNOSTICS, "m1", &[], &[]);
+    let hand = hand_text(
+        &mut e,
+        &format!(
+            "{}; r <- f1$r; s <- sw(r); fit <- as.vector(X1 %*% f1$b); \
+             aux <- ols(cbind(1, fit), r^2); bp <- n * (1 - aux$rss / sum((r^2 - mean(r^2))^2)); \
+             h <- diag(X1 %*% solve(crossprod(X1)) %*% t(X1)); s2 <- f1$rss / (n - 2); \
+             cd <- r^2 / (2 * s2) * h / (1 - h)^2; \
+             cat('W = ', signif(s[['W']], 5), ', p = ', signif(s[['p.value']], 4), '\\n', \
+             'chi-squared(1) = ', signif(bp, 5), ', p = ', \
+             signif(pchisq(bp, 1, lower.tail = FALSE), 4), '\\n', \
+             'above 4/n: ', sum(cd > 4 / n), '\\n', 'above 2k/n: ', sum(h > 2 * 2 / n), '\\n', sep = '')",
+            pinned::SHAPIRO_BY_HAND
+        ),
+    );
+    for line in hand.lines().filter(|l| !l.trim().is_empty()) {
+        assert!(text.contains(line.trim()), "missing {line:?} in\n{text}");
+    }
+
+    // robust standard errors: the sandwich by hand, through the intervals
+    for (kind, meat) in [
+        ("HC3", "r^2 / (1 - h)^2"),
+        ("HC1", "r^2 * n / (n - 2)"),
+        ("HC0", "r^2"),
+    ] {
+        kept(&mut e, &ROBUST, "m1", &[("type", kind)], &[]);
+        check(
+            &mut e,
+            &format!(
+                "r <- f1$r; h <- diag(X1 %*% solve(crossprod(X1)) %*% t(X1)); \
+                 bread <- solve(crossprod(X1)); V <- bread %*% (t(X1) %*% (X1 * ({meat}))) %*% bread; \
+                 se <- sqrt(diag(V)); ci <- cbind(f1$b - qt(0.975, n - 2) * se, f1$b + qt(0.975, n - 2) * se)"
+            ),
+            &[("ci", "all.equal(unname(res), unname(ci), tolerance = 1e-10)")],
+        );
+    }
+
+    // test terms: each dropped in turn, together, and a likelihood ratio
+    kept(&mut e, &TEST_TERMS, "m2", &[], &[]);
+    check(
+        &mut e,
+        "fx <- (ols(X2[, -2], y)$rss - f2$rss) / (f2$rss / (n - 3)); \
+         fz <- (ols(X2[, -3], y)$rss - f2$rss) / (f2$rss / (n - 3))",
+        &[("f", "all.equal(res$F[2:3], c(fx, fz), tolerance = 1e-12)")],
+    );
+    kept(
+        &mut e,
+        &TEST_TERMS,
+        "m2",
+        &[("kind", "together"), ("terms", "x, z")],
+        &[],
+    );
+    check(
+        &mut e,
+        "f <- ((tss - f2$rss) / 2) / (f2$rss / (n - 3))",
+        &[
+            ("f", "all.equal(res$F[2], f, tolerance = 1e-12)"),
+            (
+                "p",
+                "all.equal(res[['Pr(>F)']][2], pf(f, 2, n - 3, lower.tail = FALSE), tolerance = 1e-12)",
+            ),
+        ],
+    );
+    kept(&mut e, &TEST_TERMS, "g1", &[], &[]);
+    check(
+        &mut e,
+        "lr <- dev(rep(mean(w), length(w))) - dev(p)",
+        &[("lr", "all.equal(res$LRT[2], lr, tolerance = 1e-8)")],
+    );
+
+    // the average marginal effect of z: mean(p(1 - p)) b, its error by the
+    // delta method on the exact information (marginaleffects takes its own
+    // finite differences, about 1e-4 away)
+    kept(&mut e, &MARGINAL_EFFECTS, "g1", &[], &[]);
+    check(
+        &mut e,
+        "ame <- function(b) { q <- as.vector(plogis(G %*% b)); mean(q * (1 - q)) * b[2] }; \
+         J <- sapply(1:2, function(j) { s <- 1e-6 * c(j == 1, j == 2); \
+           (ame(b + s) - ame(b - s)) / 2e-6 }); \
+         V <- solve(t(G) %*% (p * (1 - p) * G)); se <- sqrt(as.numeric(J %*% V %*% J))",
+        &[
+            ("ame", "all.equal(res$estimate, ame(b), tolerance = 1e-6)"),
+            ("se", "all.equal(res$std.error, se, tolerance = 1e-3)"),
+        ],
+    );
 }

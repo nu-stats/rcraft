@@ -558,3 +558,112 @@ fn logistic_and_poisson_estimates_are_newtons_method_by_hand() {
     );
     holds(&mut e, &check);
 }
+
+/// The negative binomial, ordinal and multinomial models against their
+/// log-likelihoods written out in plain R and maximised with optim (no
+/// glm.nb, polr or multinom): the estimates, theta, the cut points and the
+/// log-likelihood, and the ordinal model's errors from the Hessian. Each
+/// package stops at its own tolerance: glm.nb within about 1e-7 of the
+/// optimum here, polr about 4e-5 and nnet's multinom, whose default stop
+/// is loose where the likelihood is flat (x and z go together here), about
+/// 3e-3 while its log-likelihood is the maximum to 1e-7; the checks allow
+/// that.
+#[test]
+fn count_ordinal_and_multinomial_models_maximise_their_likelihoods() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !have_package(&mut e, "MASS") || !have_package(&mut e, "nnet") {
+        return;
+    }
+    let fit = "ctl <- list(reltol = 1e-14, maxit = 10000); \
+               best <- function(start, f) { o <- optim(start, f, method = 'BFGS', control = ctl); \
+                 o <- optim(o$par, f, method = 'Nelder-Mead', control = ctl); \
+                 optim(o$par, f, method = 'BFGS', control = ctl) }";
+
+    dialog(
+        &mut e,
+        &NEGATIVE_BINOMIAL,
+        &[("y", "nb")],
+        &[("x", &["x"])],
+        &[],
+    );
+    let check = pinned::all_of(
+        &format!(
+            "{fit}; X <- cbind(1, d$x); y <- d$nb; \
+             nll <- function(q) {{ mu <- as.vector(exp(X %*% q[1:2])); th <- exp(q[3]); \
+               -sum(lgamma(y + th) - lgamma(th) - lgamma(y + 1) + th * log(th / (th + mu)) + \
+               y * log(mu / (th + mu))) }}; o <- best(c(0, 0, 0), nll)"
+        ),
+        &[
+            (
+                "coef",
+                "all.equal(unname(coef(model)), o$par[1:2], tolerance = 1e-6)",
+            ),
+            (
+                "theta",
+                "all.equal(model$theta, exp(o$par[3]), tolerance = 1e-5)",
+            ),
+            (
+                "loglik",
+                "all.equal(as.numeric(logLik(model)), -o$value, tolerance = 1e-10)",
+            ),
+        ],
+    );
+    holds(&mut e, &check);
+
+    dialog(&mut e, &ORDINAL, &[("y", "sat")], &[("x", &["x"])], &[]);
+    let check = pinned::all_of(
+        &format!(
+            "{fit}; y <- as.integer(d$sat); \
+             nll <- function(q) {{ z <- c(-Inf, q[2], q[3], Inf); eta <- q[1] * d$x; \
+               -sum(log(plogis(z[y + 1] - eta) - plogis(z[y] - eta))) }}; \
+             o <- best(c(0, -1, 1), nll); se <- sqrt(diag(solve(optimHess(o$par, nll))))"
+        ),
+        &[
+            (
+                "coef",
+                "all.equal(unname(coef(model)), o$par[1], tolerance = 1e-4)",
+            ),
+            (
+                "cuts",
+                "all.equal(unname(model$zeta), o$par[2:3], tolerance = 1e-4)",
+            ),
+            (
+                "loglik",
+                "all.equal(as.numeric(logLik(model)), -o$value, tolerance = 1e-9)",
+            ),
+            (
+                "se",
+                "all.equal(unname(sqrt(diag(vcov(model)))), se, tolerance = 1e-4)",
+            ),
+        ],
+    );
+    holds(&mut e, &check);
+
+    dialog(
+        &mut e,
+        &MULTINOMIAL,
+        &[("y", "three")],
+        &[("x", &["x", "z"])],
+        &[],
+    );
+    let check = pinned::all_of(
+        &format!(
+            "{fit}; Z <- cbind(1, d$x, d$z); k <- as.integer(factor(d$three)); \
+             nll <- function(q) {{ E <- Z %*% cbind(0, matrix(q, 3, 2)); \
+               -sum(E[cbind(seq_len(nrow(Z)), k)] - log(rowSums(exp(E)))) }}; \
+             o <- best(rep(0, 6), nll)"
+        ),
+        &[
+            (
+                "coef",
+                "all.equal(as.vector(t(coef(model))), o$par, tolerance = 1e-2)",
+            ),
+            (
+                "loglik",
+                "all.equal(as.numeric(logLik(model)), -o$value, tolerance = 1e-7)",
+            ),
+        ],
+    );
+    holds(&mut e, &check);
+}

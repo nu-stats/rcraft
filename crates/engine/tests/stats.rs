@@ -465,3 +465,62 @@ fn counts_and_correlations_are_the_textbook_formulas() {
         ),
     );
 }
+
+/// Normality test: W and its p-value against Royston's algorithm written out
+/// in plain R, for 20 values (the large-n approximation), the 11 of them that
+/// are not missing (the small-n one) and 5 (the shortest list of
+/// coefficients).
+#[test]
+fn the_normality_test_is_roystons_algorithm_by_hand() {
+    let shapiro = pinned::SHAPIRO_BY_HAND;
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let (made, text) = run(
+        &mut e,
+        Source::Typed,
+        "w <- data.frame(big = c(2.3, 3.1, 1.8, 4.9, 2.7, 3.3, 2.9, 6.2, 3.8, 2.2, 3.5, 4.1, 2.6, \
+         3.0, 5.4, 3.7, 2.8, 3.2, 4.4, 1.9), \
+         some = c(2.3, NA, 1.8, 4.9, NA, 3.3, 2.9, NA, 3.8, 2.2, NA, 4.1, NA, 3.0, NA, 3.7, NA, NA, \
+         4.4, NA), five = c(1, 2, 4, 7, 11, rep(NA, 15)))",
+    );
+    assert_eq!(made, Outcome::Ok, "{text}");
+    let ctx = Context {
+        dataset: "w".into(),
+        frames: Vec::new(),
+        columns: ["big", "some", "five"]
+            .into_iter()
+            .map(|name| ColumnInfo {
+                name: name.into(),
+                kind: VarKind::Number,
+            })
+            .collect(),
+    };
+    let mut values = NORMALITY.defaults(&ctx);
+    values.set_list("vars", vec!["big".into(), "some".into(), "five".into()]);
+    let code = NORMALITY
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    let (outcome, text) = run(
+        &mut e,
+        Source::Menu(NORMALITY.menu.into()),
+        &pinned::keep_value(&code, "res"),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{code}\n{text}");
+    holds(
+        &mut e,
+        &pinned::all_of(
+            &format!(
+                "{shapiro}; want <- rbind(big = sw(w$big), some = sw(na.omit(w$some)), \
+                 five = sw(na.omit(w$five)))"
+            ),
+            &[
+                ("n", "all(res[, 'n'] == c(20, 11, 5))"),
+                ("w", "all.equal(unname(res[, 'W']), unname(want[, 'W']), tolerance = 1e-12)"),
+                (
+                    "p",
+                    "all.equal(unname(res[, 'p.value']), unname(want[, 'p.value']), tolerance = 1e-12)",
+                ),
+            ],
+        ),
+    );
+}
