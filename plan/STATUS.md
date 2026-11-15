@@ -4596,3 +4596,44 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   survwgt, so 63 values were missing from it; all 4616 now match RCraft's.
 - Still decided by Stata's rounding: XURXZN's 18 one-slope reghdfe errors and TZEN38's 5 age
   coefficients (both unchanged after set type double).
+
+## P2.2 finished: Tab at the cursor, argument names, columns in quotes; P2.3's leftovers, 2026-11-14
+
+- **Tab at the cursor.** Tab completes the text before the Command box's cursor (the far end of a
+  selection) and keeps what follows it; the cursor lands after the completed word. This holds for R
+  lines, Stata lines and `rc` lines alike. Before, Tab worked only at the end of the line.
+- **Argument names.** R's own completion already offered them (`mean(x, na` gives `na.rm=`). The
+  2026-10-29 note's example `lm(alp` gives none because `lm` has no argument starting with "alp".
+  Arguments are now listed first (R sorts them in with everything else), and a single one is
+  finished as `na.rm = `.
+- **Column names in quotes** (`rcodegen::tab::column_spot`), which R's console leaves to file names:
+  inside `df[["`, `df["`, `df[, "` and `df[, c("a", "`, with `df` a name and any `$` parts
+  (`res$tab[["`). The object is looked up by name with `get0` (nothing on the line is run).
+  `names()` is used before a comma and `colnames()` after one, so a matrix works too. A single
+  choice gets its closing quote, and `]]` as well when nothing follows the cursor. A function,
+  something that is not there, or anything else gives nothing.
+- **The table inside a printed object** (P2.3): `summary(lm)`, `summary(glm)`, `anova` and
+  `lmtest::coeftest` show their coefficient or anova table as a grid, with R's text above it (Call,
+  Residuals) and below it (significance codes, R²). The cells are read from R's own print by column
+  position: R right-aligns each column under its name, so `< 2e-16`, the stars and a left-out
+  coefficient's row of NAs come through as R printed them. If the reading fails, the object prints as
+  text, as before; this happens on a console too narrow for the table on one line, or a model with no
+  coefficients. The table file gains optional ABOVE and BELOW fields. The Linear and Logistic
+  regression dialogs, which print `summary()`, get the grid too.
+- **Copy for Word** (P2.3): Copy now puts an HTML table on the clipboard (`ResultTable::html`, with
+  top, bottom and header rules and numbers on the right), with the tab-separated cells as its
+  plain-text form, through `arboard` as the plot's Copy does. Word pastes a formatted table; Excel and
+  a plain editor get cells. If the clipboard will not take HTML, Copy falls back to text and says
+  "Copied as text."
+- **Tests:**
+  - `rcodegen::tab` unit tests: argument order and `name = `, column spots and lines that are not,
+    the R code, and finishing around the cursor.
+  - In real R 4.4.3 (`engine/tests/tab.rs`): arguments, columns in every form, `$` parts, a matrix,
+    `mtcars` from datasets, a missing object, a function, and the middle of a line.
+  - In the window: a test in `app.rs` presses Tab with the cursor mid-line, inside `[["` and after
+    `na.r`.
+  - `rproto::table` unit tests: the text around a table, and HTML escaping.
+  - In real R (`engine/tests/tables.rs`): `summary(lm)` with a left-out coefficient, `summary(glm)`,
+    `anova`, a narrow console, and an empty model.
+  - Drawn in the app: `summary(lm(mpg ~ wt + factor(cyl), mtcars))`.
+- **Not checked:** pasting into Word or Excel by hand (no test reaches a real clipboard).

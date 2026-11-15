@@ -126,12 +126,15 @@ Limits:
   History entry to put it back
 - P2.2 Tab completion: functions, objects, data-frame columns, file names,
   package names; a second Tab lists the choices
-  (done 2026-10-29: R completes the end of the line itself; see STATUS. Still to do: completion
-  at the cursor, argument names, and columns inside `[[`)
+  (done 2026-10-29: R completes the line itself; see STATUS. Finished 2026-11-14: at the cursor,
+  argument names first and a single one as `name = `, and column names inside `df[["`, `df["`,
+  `df[, "` and `df[, c("a", "`)
 - P2.3 Results window: text output, errors and warnings with the failing
   call, rich tables, copy and export (rich tables done 2026-11-14: a command whose value is a data
   frame, matrix or table, or a named list of them, shows as a grid of R's own formatted cells, with
-  Copy (pastes as cells) and Save as CSV; the log and script keep R's printed text)
+  Copy (pastes as cells) and Save as CSV; the log and script keep R's printed text. Also 2026-11-14:
+  the table inside `summary(lm)`, `summary(glm)`, `anova` and `lmtest::coeftest` as a grid within R's
+  own text, and Copy pastes a formatted table into Word)
 - P2.4 Session log and script: every command and menu action recorded as R
 
 ## Phase 2A: Help

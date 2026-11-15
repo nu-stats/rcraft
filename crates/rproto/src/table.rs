@@ -13,6 +13,10 @@
 //! <row name>\t<cell>\t<cell>...   (one line per row, escaped)
 //! TEXT
 //! <what R printed>           (escaped, one line)
+//! ABOVE                      (these four lines are optional)
+//! <text shown above the grid>    (escaped: summary(lm)'s Call and Residuals)
+//! BELOW
+//! <text shown below the grid>    (escaped: its significance codes and R²)
 //! ```
 //!
 //! Every field is escaped with [`crate::escape`]; cells are R's own formatted
@@ -37,6 +41,10 @@ pub struct ResultTable {
     pub numeric: Vec<bool>,
     /// Each row's name and its cells, one per column.
     pub rows: Vec<(String, Vec<String>)>,
+    /// R's text around the table when it was part of a larger print (the
+    /// coefficients of `summary(lm(...))`): shown above and below the grid.
+    pub above: String,
+    pub below: String,
 }
 
 impl ResultTable {
@@ -58,6 +66,66 @@ impl ResultTable {
             }
             out.push('\n');
         }
+        out
+    }
+
+    /// An HTML table: pastes into a word processor as a formatted table (and
+    /// into a spreadsheet as cells). Numbers are aligned to the right.
+    pub fn html(&self) -> String {
+        let esc = |s: &str| {
+            s.replace('&', "&amp;")
+                .replace('<', "&lt;")
+                .replace('>', "&gt;")
+                .replace('"', "&quot;")
+        };
+        let rule = "border-bottom:1px solid black;";
+        let mut out = String::from(
+            "<table style=\"border-collapse:collapse;border-top:1px solid black;border-bottom:1px solid black\">
+",
+        );
+        if !self.title.is_empty() {
+            out.push_str(&format!(
+                "<caption style=\"text-align:left\">{}</caption>
+",
+                esc(&self.title)
+            ));
+        }
+        out.push_str(&format!(
+            "<tr><th style=\"text-align:left;padding:2px 8px;{rule}\">{}</th>",
+            esc(&self.corner)
+        ));
+        for (c, numeric) in self.columns.iter().zip(&self.numeric) {
+            let align = if *numeric { "right" } else { "left" };
+            out.push_str(&format!(
+                "<th style=\"text-align:{align};padding:2px 8px;{rule}\">{}</th>",
+                esc(c)
+            ));
+        }
+        out.push_str(
+            "</tr>
+",
+        );
+        for (name, cells) in &self.rows {
+            out.push_str(&format!(
+                "<tr><td style=\"text-align:left;padding:2px 8px\">{}</td>",
+                esc(name)
+            ));
+            for (c, numeric) in cells.iter().zip(&self.numeric) {
+                let align = if *numeric { "right" } else { "left" };
+                out.push_str(&format!(
+                    "<td style=\"text-align:{align};padding:2px 8px\">{}</td>",
+                    esc(c)
+                ));
+            }
+            out.push_str(
+                "</tr>
+",
+            );
+        }
+        out.push_str(
+            "</table>
+",
+        );
         out
     }
 
@@ -130,6 +198,14 @@ pub fn parse_table(text: &str) -> Result<(ResultTable, String), String> {
         rows.push((name, cells));
     }
     let printed = unescape(next("its text")?);
+    let (mut above, mut below) = (String::new(), String::new());
+    while let Some(line) = lines.next() {
+        match line {
+            "ABOVE" => above = lines.next().map(unescape).unwrap_or_default(),
+            "BELOW" => below = lines.next().map(unescape).unwrap_or_default(),
+            _ => {}
+        }
+    }
     Ok((
         ResultTable {
             title,
@@ -137,6 +213,8 @@ pub fn parse_table(text: &str) -> Result<(ResultTable, String), String> {
             columns,
             numeric,
             rows,
+            above,
+            below,
         },
         printed,
     ))
@@ -235,5 +313,47 @@ mod tests {
         assert!(!is_table_file_name("../7-t1.rct", 7));
         assert!(!is_table_file_name("7-t1/../x.rct", 7));
         assert!(!is_table_file_name("7-t1234567.rct", 7));
+    }
+
+    #[test]
+    fn the_text_around_a_table_reads_back() {
+        let mut text = file(&["a\t3\t1.5"]);
+        text.push_str(&format!(
+            "ABOVE\n{}\nBELOW\n{}\n",
+            escape("Call:\nlm(y ~ x)\n\nCoefficients:"),
+            escape("---\nSignif. codes: 0 '***'")
+        ));
+        let Ok((t, _)) = parse_table(&text) else {
+            panic!("did not parse")
+        };
+        assert_eq!(t.above, "Call:\nlm(y ~ x)\n\nCoefficients:");
+        assert_eq!(t.below, "---\nSignif. codes: 0 '***'");
+        // without them (or cut short) they are empty
+        let Ok((t, _)) = parse_table(&(file(&[]) + "ABOVE\n")) else {
+            panic!("did not parse")
+        };
+        assert_eq!((t.above.as_str(), t.below.as_str()), ("", ""));
+    }
+
+    #[test]
+    fn html_is_a_table_with_its_text_escaped() {
+        let t = ResultTable {
+            title: "P < 0.05 & more".into(),
+            corner: "a \\ b".into(),
+            columns: vec!["Pr(>|t|)".into(), String::new()],
+            numeric: vec![true, false],
+            rows: vec![("(Intercept)".into(), vec!["< 2e-16".into(), "***".into()])],
+            ..ResultTable::default()
+        };
+        let html = t.html();
+        assert!(html.starts_with("<table"));
+        assert!(
+            html.contains("<caption style=\"text-align:left\">P &lt; 0.05 &amp; more</caption>")
+        );
+        assert!(html.contains(">Pr(&gt;|t|)</th>"));
+        assert!(html.contains("text-align:right;padding:2px 8px\">&lt; 2e-16</td>"));
+        assert!(html.contains("text-align:left;padding:2px 8px\">***</td>"));
+        assert_eq!(html.matches("<tr>").count(), 2);
+        assert!(html.trim_end().ends_with("</table>"));
     }
 }

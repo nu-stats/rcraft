@@ -1,7 +1,10 @@
 //! A table in Results (P2.3): a data frame, matrix or table a command returned,
-//! drawn as a grid of R's own formatted cells, numbers on the right, with Copy
-//! (tab-separated, so it pastes as cells into a spreadsheet or a document's
-//! table) and Save as CSV. R's printed text stays in the log and the script.
+//! or the table inside a larger print (`summary(lm(...))`'s coefficients, an
+//! anova table), drawn as a grid of R's own formatted cells, numbers on the
+//! right, with R's text around it above and below. Copy puts an HTML table on
+//! the clipboard (a formatted table in Word) with the tab-separated cells
+//! beside it (cells in a spreadsheet or a plain editor); Save as CSV. R's
+//! printed text stays in the log and the script.
 
 use eframe::egui::{self, RichText};
 use rcraft_engine::ResultTable;
@@ -14,6 +17,7 @@ pub const SHOWN_ROWS: usize = 200;
 /// Draws `table`. `salt` tells this table's widgets from other tables'.
 pub fn show(ui: &mut egui::Ui, pal: &Palette, table: &ResultTable, salt: impl std::hash::Hash) {
     let id = ui.make_persistent_id(("result-table", salt));
+    around(ui, pal, &table.above);
     ui.horizontal(|ui| {
         if !table.title.is_empty() {
             ui.label(RichText::new(&table.title).strong().color(pal.text));
@@ -23,8 +27,16 @@ pub fn show(ui: &mut egui::Ui, pal: &Palette, table: &ResultTable, salt: impl st
             .on_hover_text("Copy the table; it pastes as cells into a spreadsheet or a document")
             .clicked()
         {
-            ui.ctx().copy_text(table.tsv());
-            ui.data_mut(|d| d.insert_temp(id, "Copied.".to_string()));
+            // the HTML table, with the cells as plain text beside it; plain
+            // text alone if the clipboard will not take HTML
+            let note = match copy_html(table) {
+                Ok(()) => "Copied.".to_string(),
+                Err(_) => {
+                    ui.ctx().copy_text(table.tsv());
+                    "Copied as text.".to_string()
+                }
+            };
+            ui.data_mut(|d| d.insert_temp(id, note));
         }
         if ui.small_button("Save as CSV…").clicked() {
             let note = save_csv(table);
@@ -68,6 +80,27 @@ pub fn show(ui: &mut egui::Ui, pal: &Palette, table: &ResultTable, salt: impl st
             .color(pal.dim),
         );
     }
+    around(ui, pal, &table.below);
+}
+
+/// R's text above or below a table, as R printed it (blank lines at its ends
+/// left out).
+fn around(ui: &mut egui::Ui, pal: &Palette, text: &str) {
+    let text = text.trim_matches(['\n', '\r']);
+    if text.trim().is_empty() {
+        return;
+    }
+    ui.add(
+        egui::Label::new(RichText::new(text).monospace().color(pal.text))
+            .wrap_mode(egui::TextWrapMode::Extend),
+    );
+}
+
+fn copy_html(table: &ResultTable) -> Result<(), String> {
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    clipboard
+        .set_html(table.html(), Some(table.tsv()))
+        .map_err(|e| e.to_string())
 }
 
 fn cell(ui: &mut egui::Ui, text: &str, color: egui::Color32, strong: bool, right: bool) {

@@ -176,3 +176,64 @@ fn the_log_keeps_rs_text_for_a_table() {
         e.log_text()
     );
 }
+
+#[test]
+fn the_table_inside_a_models_summary_comes_as_a_grid() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+
+    // summary(lm): the coefficients as R printed them, stars and all, with
+    // the Call and Residuals above and R² below
+    let code = "d <- mtcars; d$z <- d$wt * 2; summary(lm(mpg ~ wt + z + factor(cyl), d))";
+    let items = run(&mut e, code);
+    assert_eq!(items.len(), 1, "{items:?}");
+    let (text, table) = &items[0];
+    assert_eq!(
+        *text,
+        printed(&mut e, "summary(lm(mpg ~ wt + z + factor(cyl), d))")
+    );
+    let t = table.clone().unwrap_or_default();
+    assert_eq!(
+        t.columns,
+        vec!["Estimate", "Std. Error", "t value", "Pr(>|t|)", ""]
+    );
+    assert_eq!(t.numeric, vec![true, true, true, true, false]);
+    assert_eq!(t.rows[0].0, "(Intercept)");
+    assert_eq!(t.rows[0].1[3], "< 2e-16");
+    assert_eq!(t.rows[0].1[4], "***");
+    // the coefficient left out is a row of NAs, as R prints it
+    assert_eq!(
+        t.rows[2],
+        (
+            "z".to_string(),
+            vec!["NA".into(); 4]
+                .into_iter()
+                .chain([String::new()])
+                .collect()
+        )
+    );
+    assert!(t.above.contains("Residuals:") && t.above.trim_end().ends_with("singularities)"));
+    assert!(t.below.contains("Signif. codes") && t.below.contains("R-squared"));
+
+    // summary(glm) and anova
+    let items = run(&mut e, "summary(glm(am ~ wt, binomial, mtcars))");
+    let t = items[0].1.clone().unwrap_or_default();
+    assert_eq!(t.columns[3], "Pr(>|z|)");
+    assert!(t.below.contains("AIC"));
+    let items = run(&mut e, "anova(lm(mpg ~ wt + hp, mtcars))");
+    let t = items[0].1.clone().unwrap_or_default();
+    assert_eq!(t.rows[2].0, "Residuals");
+    assert_eq!(t.rows[2].1[3], "", "R leaves the residuals' F blank");
+    assert!(t.above.contains("Response: mpg"));
+
+    // a console too narrow for the table on one line: text, as before
+    let items = run(
+        &mut e,
+        "local({ old <- options(width = 30); on.exit(options(old)); print(summary(lm(mpg ~ wt, mtcars))) })",
+    );
+    assert!(items.iter().all(|(_, t)| t.is_none()), "{items:?}");
+    let items = run(&mut e, "options(width = 30); summary(lm(mpg ~ wt, mtcars))");
+    assert!(items.iter().all(|(_, t)| t.is_none()), "{items:?}");
+    let items = run(&mut e, "options(width = 80); summary(lm(mpg ~ 0, mtcars))");
+    assert!(items.iter().all(|(_, t)| t.is_none()), "{items:?}");
+}

@@ -5,7 +5,7 @@
 use std::time::{Duration, Instant};
 
 use rcraft_engine::{Engine, Source};
-use rcraft_rcodegen::tab::{apply, completion_code, parse_answer};
+use rcraft_rcodegen::tab::{apply, completion_code, finish, parse_answer, query};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
 
 fn engine() -> Option<Engine> {
@@ -104,4 +104,66 @@ fn names_columns_packages_and_files_complete() {
     run(&mut e, "1 + 1");
     assert!(e.history().len() >= 2);
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// What Tab does with the cursor between `before` and `after`: the line, the
+/// cursor (in characters) and the choices shown.
+fn tab_at(e: &mut Engine, before: &str, after: &str) -> Option<(String, usize, Vec<String>)> {
+    let (code, close) = query(before);
+    let id = e.query(&code);
+    settle(e);
+    let r = e.query_result(id)?;
+    assert!(r.ok, "completion code failed: {}", r.text);
+    let c = parse_answer(before, &r.text)?;
+    Some(finish(before, after, &c, &close))
+}
+
+#[test]
+fn arguments_columns_in_quotes_and_the_cursor() {
+    let Some(mut e) = engine() else { return };
+    run(
+        &mut e,
+        "cars2 <- data.frame(mpg = 1, mpx = 2, cyl = 3); res <- list(tab = cars2); \
+         m <- matrix(1:4, 2, dimnames = list(NULL, c(\"left\", \"lower\")))",
+    );
+
+    // argument names come first, and one alone reads `name = `
+    let (line, _, _) = tab_at(&mut e, "mean(x, na.r", "").expect("na.rm");
+    assert_eq!(line, "mean(x, na.rm = ");
+    let (_, _, shown) = tab_at(&mut e, "lm(y ~ x, d", "").expect("data");
+    assert_eq!(
+        shown.first().map(String::as_str),
+        Some("data="),
+        "{shown:?}"
+    );
+
+    // columns inside [[" and ["
+    let (line, cursor, _) = tab_at(&mut e, "cars2[[\"cy", "").expect("cyl");
+    assert_eq!((line.as_str(), cursor), ("cars2[[\"cyl\"]]", 14));
+    let (line, _, shown) = tab_at(&mut e, "cars2[[\"m", "").expect("m");
+    assert_eq!(line, "cars2[[\"mp");
+    assert_eq!(shown, vec!["mpg", "mpx"]);
+    let (line, _, _) = tab_at(&mut e, "summary(cars2[, 'cy", "])").expect("cyl");
+    assert_eq!(line, "summary(cars2[, 'cyl'])");
+    let (line, _, _) = tab_at(&mut e, "cars2[, c(\"mpg\", \"cy", "").expect("cyl");
+    assert_eq!(line, "cars2[, c(\"mpg\", \"cyl\"");
+    let (line, _, _) = tab_at(&mut e, "res$tab[[\"cy", "").expect("$ parts");
+    assert_eq!(line, "res$tab[[\"cyl\"]]");
+    // a matrix's column names after the comma; a datasets data frame too
+    let (_, _, shown) = tab_at(&mut e, "m[, \"l", "").expect("matrix");
+    assert_eq!(shown, vec!["left", "lower"]);
+    let (line, _, _) = tab_at(&mut e, "mtcars[[\"dis", "").expect("mtcars");
+    assert_eq!(line, "mtcars[[\"disp\"]]");
+    // no such object, or not a list: nothing
+    assert!(tab_at(&mut e, "nothing_here[[\"a", "").is_none());
+    assert!(tab_at(&mut e, "mean[[\"a", "").is_none());
+
+    // in the middle of a line: what follows the cursor stays
+    let (line, cursor, _) = tab_at(&mut e, "summary(car", ", digits = 3)").expect("cars2");
+    assert!(
+        line.starts_with("summary(cars") && line.ends_with(", digits = 3)"),
+        "{line}"
+    );
+    assert!(cursor <= "summary(cars2".len(), "{cursor}");
+    run(&mut e, "1 + 1");
 }

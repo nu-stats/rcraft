@@ -40,7 +40,12 @@ fn table_bytes(t: &ResultTable) -> usize {
         .iter()
         .map(|(name, cells)| name.len() + cells.iter().map(String::len).sum::<usize>())
         .sum();
-    cells + t.columns.iter().map(String::len).sum::<usize>() + t.title.len() + t.corner.len()
+    cells
+        + t.columns.iter().map(String::len).sum::<usize>()
+        + t.title.len()
+        + t.corner.len()
+        + t.above.len()
+        + t.below.len()
 }
 
 impl Item {

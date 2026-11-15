@@ -175,7 +175,67 @@ local({
     }
     NULL
   }
-  write_table <- function(id, title, g, text) {
+  # A table inside what R printed (summary(lm)'s coefficients, an anova table):
+  # the `rows` lines that start with their row names, under a header naming
+  # `cols` in order. Each column ends where its name ends, as R right-aligns
+  # both, so the cells are R's own text (a column after the last, such as the
+  # significance stars, too). The lines above and below go with it.
+  printed_grid <- function(lines, rows, cols, from = 1L) {
+    n <- length(rows)
+    if (n == 0L || n > 500L || length(cols) == 0L || length(cols) > 49L ||
+        anyNA(rows) || anyNA(cols) || length(lines) - n < from) return(NULL)
+    w <- max(nchar(rows))
+    for (h in seq.int(from, length(lines) - n)) {
+      body <- lines[h + seq_len(n)]
+      if (!identical(trimws(substr(body, 1L, w), "right"), rows)) next
+      header <- lines[h]
+      if (!identical(trimws(substr(header, 1L, w)), "")) return(NULL)
+      ends <- integer(length(cols))
+      pos <- w
+      for (j in seq_along(cols)) {
+        k <- regexpr(cols[j], substring(header, pos + 1L), fixed = TRUE)
+        if (k < 1L) return(NULL)
+        ends[j] <- pos + k + nchar(cols[j]) - 1L
+        pos <- ends[j]
+      }
+      starts <- c(w + 1L, ends[-length(ends)] + 1L)
+      cells <- matrix("", n, length(cols))
+      for (j in seq_along(cols)) cells[, j] <- trimws(substr(body, starts[j], ends[j]))
+      num <- rep(TRUE, length(cols))
+      extra <- trimws(substring(body, pos + 1L))
+      if (any(nzchar(extra))) {
+        cells <- cbind(cells, extra)
+        cols <- c(cols, "")
+        num <- c(num, FALSE)
+      }
+      joined <- function(x) if (length(x) == 0L) "" else paste(x, collapse = "\n")
+      return(list(g = list(corner = "", cols = cols, num = num, rows = rows, cells = cells),
+                  above = joined(lines[seq_len(h - 1L)]),
+                  below = joined(lines[-seq_len(h + n)])))
+    }
+    NULL
+  }
+  # The printed objects whose table is read this way, or NULL.
+  inner_grid <- function(v, lines) {
+    if (inherits(v, c("summary.lm", "summary.glm"))) {
+      cf <- v$coefficients
+      if (!is.matrix(cf)) return(NULL)
+      rows <- rownames(cf)
+      # R prints a row of NAs for a coefficient left out (aliased)
+      if (!is.null(v$aliased) && any(v$aliased)) rows <- names(v$aliased)
+      at <- grep("^Coefficients:", lines)
+      if (length(at) == 0L || is.null(rows)) return(NULL)
+      return(printed_grid(lines, rows, colnames(cf), from = at[1L] + 1L))
+    }
+    if (inherits(v, "anova") && is.data.frame(v)) {
+      return(printed_grid(lines, row.names(v), names(v)))
+    }
+    if (inherits(v, "coeftest") && is.matrix(v)) {
+      return(printed_grid(lines, rownames(v), colnames(v)))
+    }
+    NULL
+  }
+  write_table <- function(id, title, g, text, above = "", below = "") {
     table_no <<- table_no + 1L
     name <- sprintf("%s-t%d.rct", id, table_no)
     rows <- vapply(seq_along(g$rows), function(i) {
@@ -184,7 +244,7 @@ local({
     lines <- c("RCT1", esc(title), esc(g$corner),
                paste(vapply(g$cols, esc, ""), collapse = "\t"),
                paste(as.integer(g$num), collapse = "\t"),
-               rows, "TEXT", esc(text))
+               rows, "TEXT", esc(text), "ABOVE", esc(above), "BELOW", esc(below))
     out <- file(file.path(plot_dir, name), open = "wb")
     on.exit(close(out))
     writeLines(enc2utf8(lines), out, useBytes = TRUE)
@@ -198,6 +258,15 @@ local({
   as_tables <- function(id, v) {
     if (!nzchar(plot_dir) || !isTRUE(getOption("rcraft.tables", TRUE)) || sink.number() > 0L) {
       return(FALSE)
+    }
+    if (inherits(v, c("summary.lm", "summary.glm", "anova", "coeftest"))) {
+      lines <- utils::capture.output(print(v))
+      inner <- inner_grid(v, lines)
+      if (!is.null(inner)) {
+        text <- paste0(paste(lines, collapse = "\n"), "\n")
+        emit("TABLE", id, esc(write_table(id, "", inner$g, text, inner$above, inner$below)))
+        return(TRUE)
+      }
     }
     g <- grid_of(v)
     parts <- if (!is.null(g)) {

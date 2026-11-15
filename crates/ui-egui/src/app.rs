@@ -80,7 +80,7 @@ struct SessionUi {
     type_filter: TypeFilter,
     show_when_listed: Option<String>,
     completions: Vec<String>,
-    tab_pending: Option<(QueryId, String)>,
+    tab_pending: Option<TabAsk>,
     stata: StataMode,
 }
 
@@ -244,9 +244,9 @@ pub struct App {
     help_window: HelpWindow,
     /// What Tab could complete the `rc` line to, when it was more than one word.
     completions: Vec<String>,
-    /// A completion asked of R and not yet answered: the question, and the
-    /// line it was asked for (an answer is used only if the line is unchanged).
-    tab_pending: Option<(QueryId, String)>,
+    /// A completion asked of R and not yet answered (an answer is used only
+    /// if the line is unchanged).
+    tab_pending: Option<TabAsk>,
     /// Whether choices (the working folder) are kept between runs. Pictures and
     /// tests turn it off, so they never touch the user's own settings.
     keep_settings: bool,
@@ -925,7 +925,14 @@ impl App {
         self.stata.complete(line, &variables, folder.as_deref())
     }
 
+    #[cfg(test)]
     fn complete_rc(&mut self) -> Option<String> {
+        let line = self.command.clone();
+        self.complete_rc_line(&line)
+    }
+
+    /// Completes an `rc` line's start (the text before the cursor).
+    fn complete_rc_line(&mut self, before: &str) -> Option<String> {
         let cran = |p: &str| -> Vec<String> {
             self.package_index
                 .index()
@@ -945,14 +952,14 @@ impl App {
                 .filter(|n| n.starts_with(p))
                 .collect()
         };
-        let c = rc::complete(&self.command, &cran, &mine)?;
+        let c = rc::complete(before, &cran, &mine)?;
         if c.options.is_empty() {
             self.completions.clear();
             return None;
         }
-        let typed = self.command.get(c.from..).unwrap_or("").to_string();
+        let typed = before.get(c.from..).unwrap_or("").to_string();
         let common = rc::common_prefix(&c.options);
-        let mut line = self.command.get(..c.from).unwrap_or("").to_string();
+        let mut line = before.get(..c.from).unwrap_or("").to_string();
         line.push_str(if common.len() > typed.len() {
             &common
         } else {
@@ -2072,6 +2079,8 @@ Click to choose another folder"
         // the recall keys, taken before the text box can use them
         let has_focus = ui.memory(|m| m.has_focus(id));
         let mut recalled: Option<String> = None;
+        // where the cursor goes in a recalled line, in characters (the end if None)
+        let mut cursor_at: Option<usize> = None;
         if has_focus {
             if let EngineState::Ready(engine) = &self.engine {
                 let back = ui.input_mut(|i| {
@@ -2110,19 +2119,21 @@ Click to choose another folder"
             });
         }
         // R's answer to an earlier Tab, if it has come and the line is the same
-        if let Some((id, line)) = self.tab_pending.clone() {
+        if let Some(ask) = self.tab_pending.clone() {
             let answer = self
                 .engine()
-                .and_then(|e| e.query_result(id))
+                .and_then(|e| e.query_result(ask.id))
                 .map(|r| (r.ok, r.text.clone()));
             match answer {
                 Some((ok, text)) => {
                     self.tab_pending = None;
-                    if ok && self.command == line {
-                        if let Some(c) = tab::parse_answer(&line, &text) {
-                            let (done, shown) = tab::apply(&line, &c);
+                    if ok && self.command == ask.line {
+                        if let Some(c) = tab::parse_answer(&ask.before, &text) {
+                            let (done, cursor, shown) =
+                                tab::finish(&ask.before, &ask.after, &c, &ask.close);
                             self.completions = shown;
                             recalled = Some(done);
+                            cursor_at = Some(cursor);
                         } else {
                             self.completions.clear();
                         }
@@ -2133,26 +2144,37 @@ Click to choose another folder"
         }
         // Tab completes an `rc` line (commands, CRAN package names, options);
         // any other line is completed by R itself (names, columns, files)
+        // Each completes the text before the cursor; what follows it stays.
         if has_focus && ui.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Tab)) {
-            let t = self.command.trim_start();
+            let (before, after) = split_at_cursor(ui.ctx(), id, &self.command);
+            let t = before.trim_start();
             if self.stata.on {
                 // a Stata line: completed here, from what the session holds
-                match self.complete_stata(&self.command) {
+                match self.complete_stata(&before) {
                     Some((done, shown)) => {
                         self.completions = shown;
-                        recalled = Some(done);
+                        cursor_at = Some(done.chars().count());
+                        recalled = Some(done + &after);
                     }
                     None => self.completions.clear(),
                 }
-            } else if t == "rc" || t.starts_with("rc ") || t.starts_with("rc	") {
-                if let Some(done) = self.complete_rc() {
-                    recalled = Some(done);
+            } else if t == "rc" || t.starts_with("rc ") || t.starts_with("rc\t") {
+                if let Some(done) = self.complete_rc_line(&before) {
+                    cursor_at = Some(done.chars().count());
+                    recalled = Some(done + &after);
                 }
-            } else if !busy && !self.command.trim().is_empty() && self.tab_pending.is_none() {
+            } else if !busy && !before.trim().is_empty() && self.tab_pending.is_none() {
                 let line = self.command.clone();
                 if let EngineState::Ready(engine) = &mut self.engine {
-                    let id = engine.query(&tab::completion_code(&line));
-                    self.tab_pending = Some((id, line));
+                    let (code, close) = tab::query(&before);
+                    let id = engine.query(&code);
+                    self.tab_pending = Some(TabAsk {
+                        id,
+                        line,
+                        before,
+                        after,
+                        close,
+                    });
                 }
             }
         }
@@ -2192,7 +2214,10 @@ Click to choose another folder"
         if let Some(text) = recalled {
             self.command = text;
             self.focus_command = true;
-            cursor_to_end(ui.ctx(), id, &self.command);
+            match cursor_at {
+                Some(at) => cursor_to(ui.ctx(), id, at),
+                None => cursor_to_end(ui.ctx(), id, &self.command),
+            }
         }
         if submit && !self.command.trim().is_empty() && !busy {
             let code = std::mem::take(&mut self.command);
@@ -2487,12 +2512,43 @@ fn selection_or_line(text: &str, a: usize, b: usize) -> Option<String> {
 
 /// Puts the text cursor at the end of the text in the box with `id`.
 fn cursor_to_end(ctx: &egui::Context, id: egui::Id, text: &str) {
+    cursor_to(ctx, id, text.chars().count());
+}
+
+/// Puts the text box's cursor `at` characters into its text.
+fn cursor_to(ctx: &egui::Context, id: egui::Id, at: usize) {
     let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
-    let end = egui::text::CCursor::new(text.chars().count());
+    let at = egui::text::CCursor::new(at);
     state
         .cursor
-        .set_char_range(Some(egui::text::CCursorRange::one(end)));
+        .set_char_range(Some(egui::text::CCursorRange::one(at)));
     state.store(ctx, id);
+}
+
+/// The text box's text before and after its cursor (the end when it has none;
+/// the far end of a selection).
+fn split_at_cursor(ctx: &egui::Context, id: egui::Id, text: &str) -> (String, String) {
+    let at = egui::TextEdit::load_state(ctx, id)
+        .and_then(|s| s.cursor.char_range())
+        .map_or(usize::MAX, |r| r.primary.index.max(r.secondary.index));
+    split_at_char(text, at)
+}
+
+fn split_at_char(text: &str, at: usize) -> (String, String) {
+    let byte = text.char_indices().nth(at).map_or(text.len(), |(b, _)| b);
+    let (before, after) = text.split_at(byte);
+    (before.to_string(), after.to_string())
+}
+
+/// A Tab completion asked of R: the line when it was asked, the text before
+/// and after the cursor, and what closes a single finished choice.
+#[derive(Clone, Debug)]
+struct TabAsk {
+    id: QueryId,
+    line: String,
+    before: String,
+    after: String,
+    close: String,
 }
 
 /// Finds R and starts the engine on another thread, so the window opens at
@@ -3673,6 +3729,72 @@ mod tests {
         app.engine()
             .and_then(|e| e.history().entries().last().map(|h| h.code.clone()))
             .unwrap_or_default()
+    }
+
+    #[test]
+    fn the_line_splits_at_the_cursor_in_characters() {
+        let s = |a: &str, b: &str| (a.to_string(), b.to_string());
+        assert_eq!(split_at_char("mean(é)", 6), s("mean(é", ")"));
+        assert_eq!(split_at_char("abc", 0), s("", "abc"));
+        assert_eq!(split_at_char("abc", 99), s("abc", ""));
+        assert_eq!(split_at_char("", 0), s("", ""));
+    }
+
+    #[test]
+    fn tab_in_the_window_completes_at_the_cursor() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                "my_cars2 <- data.frame(mpg = 1, cyl = 2)".into(),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let id = egui::Id::new(COMMAND_ID);
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, 700.0));
+        // types `line`, puts the cursor `at` characters in, presses Tab
+        let mut press_tab = |line: &str, at: usize| -> String {
+            app.perform(&ctx, Action::SetCommand(line.into()));
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                },
+                |ctx| app.ui(ctx),
+            );
+            cursor_to(&ctx, id, at);
+            let tab = egui::Event::Key {
+                key: Key::Tab,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            };
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(screen),
+                    events: vec![tab],
+                    ..Default::default()
+                },
+                |ctx| app.ui(ctx),
+            );
+            assert!(frames_until(&mut app, &ctx, |a| a.tab_pending.is_none()
+                && a.is_settled()));
+            app.command.clone()
+        };
+        // a name in the middle of the line; what follows stays
+        assert_eq!(press_tab("summary(my_ca)", 13), "summary(my_cars2)");
+        // a column inside [[" at the end, closed
+        assert_eq!(press_tab("my_cars2[[\"cy", 13), "my_cars2[[\"cyl\"]]");
+        // an argument name
+        assert_eq!(press_tab("mean(1:3, na.r", 14), "mean(1:3, na.rm = ");
     }
 
     #[test]
