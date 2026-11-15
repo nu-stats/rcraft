@@ -2,7 +2,7 @@ const path = require('path')
 module.exports = {
   version: "7.0",
   title: "RCraft",
-  description: "A point-and-click front end for R: menus, dialogs, a command window, data grid, graphs and a package finder. Every action shows the R code it runs. Needs R installed on this computer.",
+  description: "Menu-driven like Stata, accepts Stata syntax and files, but fully powered by R. A point-and-click front end for R: menus, dialogs, a command window, data grid, graphs and a package finder. Every action shows the R code it runs. Needs R installed on this computer.",
   menu: async (kernel, info) => {
     let exe = kernel.platform === "win32" ? ".exe" : ""
     let installed = info.exists(`target/release/rcraft-desktop${exe}`)

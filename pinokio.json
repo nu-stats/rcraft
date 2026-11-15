@@ -1,4 +1,4 @@
 {
   "title": "RCraft",
-  "description": "A point-and-click front end for R: menus, dialogs, a command window, data grid, graphs and a package finder. Every action shows the R code it runs. Needs R installed on this computer."
+  "description": "Menu-driven like Stata, accepts Stata syntax and files, but fully powered by R. A point-and-click front end for R: menus, dialogs, a command window, data grid, graphs and a package finder. Every action shows the R code it runs. Needs R installed on this computer."
 }

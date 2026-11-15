@@ -30,10 +30,18 @@ mod stata_mode;
 pub use headless::{run_headless, HeadlessOptions};
 pub use look::Accent;
 
+/// What RCraft is, shown beside its name.
+pub(crate) const TAGLINE: &str =
+    "Menu-driven like Stata, accepts Stata syntax and files, but fully powered by R.";
+
+/// The window title: the name, then the tagline.
+pub(crate) const WINDOW_TITLE: &str =
+    "RCraft: Menu-driven like Stata, accepts Stata syntax and files, but fully powered by R.";
+
 fn run_with(renderer: eframe::Renderer) -> Result<(), String> {
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
-            .with_title("RCraft")
+            .with_title(WINDOW_TITLE)
             .with_inner_size([1240.0, 780.0])
             .with_min_inner_size([760.0, 480.0]),
         renderer,
