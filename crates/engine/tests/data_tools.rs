@@ -3,6 +3,8 @@
 //! found): build each dialog's base-R code from its spec and the table's
 //! columns, run it, and compare what R gives back.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::data_tools::{
@@ -23,7 +25,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -429,3 +433,6 @@ fn date_dialogs_make_dates_and_take_them_apart() {
     );
     holds(&mut e, "identical(format(d$s), c('2026-03-27', NA, NA))");
 }
+
+/// The packages these checks use, recorded with R's version.
+const PACKAGES: &[&str] = &[];

@@ -55,12 +55,13 @@ Stale records to fix:
 
 - (Fixed 2026-11-15: `crates/catalog` marked the seven built Stata mode entries and Vignettes as
   `planned`; they are `partial` now. "RCraft manual" and "Model table" are planned rightly.)
-- Of the 117 menu entries, 72 are `Verified`: the Phase 6 entries (panel, survival, survey, IV,
-  multilevel, time series), checked in the pinned R by their engine tests; from 2026-11-15 the seven
-  Stata mode entries and Vignettes (`ui-egui/src/app/menu_checks.rs`), every Statistics entry
-  against formulas written out in plain R, and the Graphs menu, whose drawn shapes are read back
-  from R's display list. The other 43 are `partial` and 2 `planned`. Still without such a check:
-  the File, Data, Packages and Help menus.
+- Of the 117 menu entries, 115 are `Verified` (2026-11-15) and 2 `planned` ("Model table", "RCraft
+  manual"). Each has a check in the pinned R that records the R and package versions
+  (`engine/tests/pinned`): the Phase 6 entries by their engine tests; the Stata mode entries and
+  Vignettes through the app (`ui-egui/src/app/menu_checks.rs`); Statistics against formulas written
+  out in plain R; Graphs by the shapes read back from R's display list; File and Data against tables
+  written out by hand; Help and Packages against R's own help indexes, `readRDS()`,
+  `installed.packages()` and `old.packages()`.
 
 ## Not checked by anyone yet
 

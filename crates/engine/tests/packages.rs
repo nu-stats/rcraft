@@ -4,6 +4,8 @@
 //! listed with `write_PACKAGES`. The index, the plan, the install code, the
 //! installed list and the removal code are all the real ones.
 
+mod pinned;
+
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -25,7 +27,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -372,4 +376,182 @@ fn r_names_its_own_user_library_with_home_expanded() {
             "{libs:?} for {set:?}"
         );
     }
+}
+
+/// Base R's utils and tools only.
+const PACKAGES: &[&str] = &[];
+
+/// Where the files R wrote for the package reader's tests are.
+fn fixture(name: &str) -> String {
+    let p = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("rpkg")
+        .join("tests")
+        .join("fixtures")
+        .join(name);
+    std::path::absolute(&p)
+        .unwrap_or(p)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// The package screens against R's own answers on the same files: task
+/// views as `readRDS()` gives them, each package's page and the search on a
+/// package database R wrote (search must find exactly the packages in whose
+/// name, title, description, authors or maintainer every word is found, read
+/// in R), the installed list as `installed.packages()` gives it, and the
+/// updates as `old.packages()` gives them for a repository with a newer
+/// version.
+#[test]
+fn the_package_screens_say_what_r_says() {
+    use rcraft_rpkg::describe::describe;
+    use rcraft_rpkg::index::DB_COLUMNS;
+    use rcraft_rpkg::plan::updates;
+    use rcraft_rpkg::search::{Filters, Searcher};
+    use rcraft_rpkg::views::Views;
+    use rcraft_rpkg::{rds, table};
+
+    let Some(mut e) = engine() else { return };
+
+    // Browse task views
+    let views_path = fixture("Views.rds");
+    let bytes = std::fs::read(&views_path).unwrap_or_default();
+    let views = rds::read(&bytes)
+        .and_then(|n| Views::from_node(&n))
+        .unwrap_or_else(|err| panic!("{err}"));
+    let ours: Vec<String> = views
+        .views()
+        .iter()
+        .map(|v| {
+            let mut p: Vec<&str> = v.packages.iter().map(|p| p.name.as_str()).collect();
+            p.sort_unstable();
+            format!("{}\t{}\t{}", v.name, v.topic, p.join(","))
+        })
+        .collect();
+    let r = ask(
+        &mut e,
+        &format!(
+            "local({{ v <- readRDS('{views_path}'); for (x in v) cat(x$name, '\\t', x$topic, '\\t', \
+             paste(sort(x$packagelist$name, method = 'radix'), collapse = ','), '\\n', sep = '') }})"
+        ),
+    );
+    let mut theirs: Vec<String> = r.lines().map(str::to_string).collect();
+    let mut ours_sorted = ours.clone();
+    ours_sorted.sort();
+    theirs.sort();
+    assert!(!theirs.is_empty(), "{r}");
+    assert_eq!(ours_sorted, theirs);
+
+    // Describe package and Search packages, on a database R wrote
+    let db_path = fixture("db_matrix_v3.rds");
+    let bytes = std::fs::read(&db_path).unwrap_or_default();
+    let db = rds::read(&bytes)
+        .and_then(|n| table::from_node(&n, DB_COLUMNS))
+        .unwrap_or_else(|err| panic!("{err}"));
+    let index = Index::from_tables(Some(&db), None, 1);
+    let r = ask(
+        &mut e,
+        &format!(
+            "local({{ m <- readRDS('{db_path}'); for (i in seq_len(nrow(m))) {{ \
+             cat(m[i, 'Package'], m[i, 'Version'], m[i, 'License'], sep = '\\t'); cat('\\n') }} }})"
+        ),
+    );
+    let rows: Vec<&str> = r.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(rows.len(), 3, "{r}");
+    for row in &rows {
+        let f: Vec<&str> = row.split('\t').collect();
+        let d = describe(&index, f[0]).unwrap_or_else(|| panic!("no page for {}", f[0]));
+        assert_eq!(
+            (d.package.version.as_str(), d.package.license.as_str()),
+            (f[1], f[2]),
+            "{}",
+            f[0]
+        );
+    }
+    let searcher = Searcher::new(&index);
+    for query in ["fake", "made", "two", "müller", "made package", "zzz"] {
+        let mut ours: Vec<String> = searcher
+            .search(&index, query, &Filters::default(), 50)
+            .iter()
+            .filter_map(|h| index.packages().get(h.position).map(|p| p.name.clone()))
+            .collect();
+        ours.sort();
+        let words = query
+            .split_whitespace()
+            .map(|w| format!("'{w}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let r = ask(
+            &mut e,
+            &format!(
+                "local({{ m <- readRDS('{db_path}'); words <- c({words}); \
+                 hay <- tolower(apply(m[, c('Package', 'Title', 'Description', 'Author', 'Maintainer')], 1, \
+                   function(x) paste(x[!is.na(x)], collapse = ' '))); \
+                 hit <- vapply(hay, function(h) all(vapply(tolower(words), \
+                   function(w) grepl(w, h, fixed = TRUE), TRUE)), TRUE); \
+                 cat(sort(m[hit, 'Package'], method = 'radix'), sep = '\\n') }})"
+            ),
+        );
+        let theirs: Vec<String> = r
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(str::to_string)
+            .collect();
+        assert_eq!(ours, theirs, "{query}");
+    }
+
+    // Installed packages and Update packages, with pfold 1.0 installed and
+    // 2.0 in the repository
+    let dir = Folder::new("updates");
+    let root = dir.path("root");
+    let lib = dir.path("lib");
+    let repo_url = format!("file:///{}/repo", root.trim_start_matches('/'));
+    assert_eq!(run(&mut e, &build_archive_repository(&root)), Outcome::Ok);
+    assert_eq!(
+        run(
+            &mut e,
+            &format!(
+                "dir.create('{lib}'); .libPaths(c('{lib}', .libPaths())); \
+                 install.packages('{root}/repo/src/contrib/Archive/pfold/pfold_1.0.tar.gz', \
+                 repos = NULL, type = 'source', lib = '{lib}', quiet = TRUE)"
+            )
+        ),
+        Outcome::Ok
+    );
+    let installed = installed_versions(&parse_installed(&ask(&mut e, installed_packages_code())));
+    let r = ask(
+        &mut e,
+        "local({ ip <- installed.packages(); ip <- ip[!duplicated(ip[, 'Package']), , drop = FALSE]; \
+         cat(paste(ip[, 'Package'], ip[, 'Version'], sep = '\\t'), sep = '\\n') })",
+    );
+    let theirs: std::collections::HashMap<String, String> = r
+        .lines()
+        .filter_map(|l| l.split_once('\t'))
+        .map(|(a, b)| (a.to_string(), b.to_string()))
+        .collect();
+    assert_eq!(installed.get("pfold").map(String::as_str), Some("1.0"));
+    assert_eq!(installed, theirs);
+
+    let gz = std::fs::read(format!("{root}/repo/src/contrib/PACKAGES.gz"))
+        .unwrap_or_else(|err| panic!("no PACKAGES.gz: {err}"));
+    let table = dcf::read(&gz, DCF_FIELDS).unwrap_or_else(|err| panic!("{err}"));
+    let repo = Index::from_tables(None, Some(&table), 1);
+    let ours: Vec<String> = updates(&repo, &installed)
+        .iter()
+        .map(|u| format!("{}\t{}\t{}", u.name, u.installed, u.available))
+        .collect();
+    let r = ask(
+        &mut e,
+        &format!(
+            "local({{ o <- old.packages(lib.loc = '{lib}', repos = '{repo_url}', type = 'source'); \
+             if (!is.null(o)) cat(paste(o[, 'Package'], o[, 'Installed'], o[, 'ReposVer'], sep = '\\t'), sep = '\\n') }})"
+        ),
+    );
+    let theirs: Vec<String> = r
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    assert_eq!(ours, vec!["pfold\t1.0\t2.0".to_string()]);
+    assert_eq!(ours, theirs);
 }

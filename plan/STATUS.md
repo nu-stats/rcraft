@@ -4954,3 +4954,21 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   other ends (-4 to 0 with r(max) = hi for -2.5 to 0.47), so it is declined.
 - The rest is declined with the reason. The residue's source (labels kept in locals as %18.0g text)
   and the search for the full rule are in plan/stata/natscale-residue.md.
+## The File, Data, Help and Packages menus Verified, 2026-11-15
+
+- File and Data: their engine tests (import, formats, save, data_dialogs, data_tools, combine) already
+  set each dialog's result against tables written out by hand on made-up data; they now record the R
+  and package versions. Rename object and Remove object had no test: one now checks the object under
+  its new name is the same, a taken name is not written over, and a removed object is gone while the
+  others stay.
+- Search help: the hits are exactly the pages whose title, name or aliases, or keywords hold every
+  word, read by hand from each installed package's help index (`Meta/Rd.rds`, each package once, from
+  the first library that has it; words of four letters or fewer, so R's search is not fuzzy). Help
+  topic: lm's page (package, title, usage, examples that run) as well as mean's.
+- Packages: task views as `readRDS()` gives them; each package's page (version, licence) and the
+  search (exactly the packages in whose name, title, description, authors or maintainer every word is
+  found, read in R) on a package database R wrote; the installed list as `installed.packages()` gives
+  it; the updates as `old.packages()` gives them for a local repository with a newer version; install
+  and removal were checked already.
+- 117 entries: 115 verified, 2 planned ("Model table", "RCraft manual").
+

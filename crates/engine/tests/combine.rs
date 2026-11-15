@@ -2,6 +2,8 @@
 //! (skipped with a note when none is found): build each dialog's code from its
 //! spec and the table's columns, run it, and compare what R gives back.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::combine::{
@@ -21,7 +23,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -549,3 +553,6 @@ fn tidyverse_style_gives_the_same_tables_as_base_style() {
         assert_eq!(tidy.map(|t| t.nrow), base.map(|t| t.nrow), "{how}");
     }
 }
+
+/// The packages these checks use, recorded with R's version.
+const PACKAGES: &[&str] = &["dplyr", "tidyr"];

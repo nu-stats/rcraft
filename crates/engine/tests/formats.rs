@@ -2,6 +2,8 @@
 //! the `readxl` and `haven` packages (each test is skipped with a note when R
 //! or the packages are missing).
 
+mod pinned;
+
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -22,7 +24,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -541,3 +545,6 @@ fn parquet_and_feather_files_import_with_their_types() {
         );
     }
 }
+
+/// The packages these checks use, recorded with R's version.
+const PACKAGES: &[&str] = &["readxl", "haven", "arrow"];

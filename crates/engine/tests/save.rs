@@ -3,6 +3,8 @@
 //! read the file back in R to see that it holds what was saved. Formats that
 //! need a package (writexl, haven, arrow) are skipped when R lacks it.
 
+mod pinned;
+
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -21,7 +23,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -338,3 +342,6 @@ fn parquet_and_feather_files_read_back() {
         );
     }
 }
+
+/// The packages these checks use, recorded with R's version.
+const PACKAGES: &[&str] = &["writexl", "haven", "arrow", "readxl"];

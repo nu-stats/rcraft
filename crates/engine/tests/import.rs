@@ -2,6 +2,8 @@
 //! a note when none is found): write a file, let the sniffer and the code
 //! generator build the import, run it, bring the table over, compare.
 
+mod pinned;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -20,7 +22,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -238,3 +242,6 @@ fn a_missing_file_is_an_r_error_and_the_session_carries_on() {
     assert!(ok.is_ok());
     settle(&mut e);
 }
+
+/// The packages these checks use, recorded with R's version.
+const PACKAGES: &[&str] = &[];

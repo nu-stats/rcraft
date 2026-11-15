@@ -3,10 +3,13 @@
 //! dialog's base-R code from its spec and the table's columns, run it, and
 //! compare the table R gives back.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::data::{
-    COMPUTE, FILTER, LABELLED_TO_FACTOR, RENAME, SAVE_OBJECT, SORT, VALUE_LABELS, VARIABLE_LABEL,
+    COMPUTE, FILTER, LABELLED_TO_FACTOR, REMOVE_OBJECT, RENAME, RENAME_OBJECT, SAVE_OBJECT, SORT,
+    VALUE_LABELS, VARIABLE_LABEL,
 };
 use rcraft_engine::{Engine, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind};
@@ -22,7 +25,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -404,4 +409,77 @@ fn tidyverse_style_gives_the_same_tables_as_base_style() {
             spec.entry
         );
     }
+}
+
+/// Base R only.
+const PACKAGES: &[&str] = &["dplyr", "tidyr"];
+
+/// Rename object and Remove object: the object is under its new name exactly
+/// as it was, the old name is gone, a taken name is not written over, and a
+/// removed object is gone while the others stay.
+#[test]
+fn objects_are_renamed_and_removed_as_asked() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    assert_eq!(
+        run(
+            &mut e,
+            Source::Typed,
+            "d <- data.frame(id = 1:3, x = c(2.5, NA, 7)); keep <- d; other <- 'taken'"
+        ),
+        Outcome::Ok
+    );
+    let ctx = Context {
+        dataset: "d".into(),
+        frames: Vec::new(),
+        columns: Vec::new(),
+    };
+    let rename = |to: &str| {
+        let mut values = RENAME_OBJECT.defaults(&ctx);
+        values.set_text("result", to);
+        RENAME_OBJECT
+            .generate(&ctx, &values, Style::Base)
+            .unwrap_or_default()
+    };
+    let menu = Source::Menu(RENAME_OBJECT.menu.into());
+    // a name that is taken: nothing changes
+    assert_eq!(run(&mut e, menu.clone(), &rename("other")), Outcome::Error);
+    assert_eq!(
+        run(
+            &mut e,
+            Source::Typed,
+            "stopifnot(identical(other, 'taken'), identical(d, keep))"
+        ),
+        Outcome::Ok
+    );
+    assert_eq!(run(&mut e, menu, &rename("renamed")), Outcome::Ok);
+    assert_eq!(
+        run(
+            &mut e,
+            Source::Typed,
+            "stopifnot(!exists('d', inherits = FALSE), identical(renamed, keep))"
+        ),
+        Outcome::Ok
+    );
+
+    let ctx = Context {
+        dataset: "renamed".into(),
+        frames: Vec::new(),
+        columns: Vec::new(),
+    };
+    let code = REMOVE_OBJECT
+        .generate(&ctx, &REMOVE_OBJECT.defaults(&ctx), Style::Base)
+        .unwrap_or_default();
+    assert_eq!(
+        run(&mut e, Source::Menu(REMOVE_OBJECT.menu.into()), &code),
+        Outcome::Ok
+    );
+    assert_eq!(
+        run(
+            &mut e,
+            Source::Typed,
+            "stopifnot(!exists('renamed', inherits = FALSE), exists('keep'), exists('other'))"
+        ),
+        Outcome::Ok
+    );
 }

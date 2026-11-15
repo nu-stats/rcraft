@@ -2,6 +2,8 @@
 //! is found): the code the Help window sends is run as a hidden query and the
 //! answer is read back, so what is tested is what the window shows.
 
+mod pinned;
+
 use std::time::{Duration, Instant};
 
 use rcraft_engine::{Engine, Source};
@@ -18,7 +20,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -83,7 +87,7 @@ fn a_help_page_comes_with_text_examples_and_links() {
     // the examples run as they are
     let out = ask(
         &mut e,
-        &format!("local({{ {} ; cat(\"ran\\n\") }})", p.examples),
+        &format!("local({{\n{}\ncat(\"ran\\n\") }})", p.examples),
     );
     assert!(out.contains("ran"), "{out}");
 }
@@ -166,4 +170,75 @@ fn search_finds_and_ranks_pages() {
     // typed lines go through the same code
     e.submit(Source::Typed, "1").ok();
     settle(&mut e);
+}
+
+/// Base R's utils and tools.
+const PACKAGES: &[&str] = &[];
+
+/// Search help finds exactly the pages whose title, name or aliases, or
+/// keywords hold every word, read by hand from each installed package's own
+/// help index (`Meta/Rd.rds`, each package counted once, from the first
+/// library that has it): words of four letters or fewer, so R's search is not
+/// a fuzzy one.
+#[test]
+fn search_finds_the_pages_every_word_is_in() {
+    let Some(mut e) = engine() else { return };
+    for words in ["chi test", "plot line"] {
+        let text = ask(&mut e, &search_code(words));
+        let hits = parse_search(words, &text).unwrap_or_default();
+        let list = words
+            .split_whitespace()
+            .map(|w| format!("'{w}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let hand = ask(
+            &mut e,
+            &format!(
+                "local({{ words <- c({list}); rows <- list(); seen <- character(); \
+                 for (lib in .libPaths()) for (p in list.files(lib)) {{ \
+                   f <- file.path(lib, p, 'Meta', 'Rd.rds'); \
+                   if (!file.exists(f) || p %in% seen) next; seen <- c(seen, p); db <- readRDS(f); \
+                   for (i in seq_len(nrow(db))) {{ txt <- c(db$Title[i], db$Aliases[[i]], db$Keywords[[i]]); \
+                     if (all(vapply(words, function(w) any(grepl(w, txt, ignore.case = TRUE)), TRUE))) \
+                       rows[[length(rows) + 1]] <- paste(p, c(db$Name[i], sub('[.]Rd$', '', db$File[i]), \
+                         db$Aliases[[i]]), sep = '\\t') }} }}; \
+                 cat(length(rows), '\\n'); for (r in rows) cat(r, sep = '\\n') }})"
+            ),
+        );
+        let mut lines = hand.lines();
+        let count: usize = lines
+            .next()
+            .and_then(|l| l.trim().parse().ok())
+            .unwrap_or(usize::MAX);
+        let keys: std::collections::HashSet<&str> = lines.collect();
+        assert!(count > 0 && count <= 100, "{words}: {count} pages");
+        assert_eq!(hits.len(), count, "{words}: {hits:?}");
+        for h in &hits {
+            let key = format!("{}\t{}", h.package, h.topic);
+            assert!(
+                keys.contains(key.as_str()),
+                "{words}: {key} is not a page by hand"
+            );
+        }
+    }
+}
+
+/// Help topic: lm's page as R has it: its package, title and usage, and its
+/// examples run as they are.
+#[test]
+fn the_page_of_lm_is_rs_own() {
+    let Some(mut e) = engine() else { return };
+    let p = found(&mut e, "lm", None);
+    assert_eq!((p.package.as_str(), p.topic.as_str()), ("stats", "lm"));
+    assert_eq!(p.title, "Fitting Linear Models");
+    assert!(
+        p.text.contains("lm(formula, data, subset, weights"),
+        "{}",
+        p.text
+    );
+    let out = ask(
+        &mut e,
+        &format!("local({{\n{}\ncat(\"ran\\n\") }})", p.examples),
+    );
+    assert!(out.contains("ran"), "{out}");
 }

@@ -6,52 +6,52 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 117 | 72 | 43 | 2 |
+| 117 | 115 | 0 | 2 |
 
 ## File
 
 | Entry | Status |
 |---|---|
-| Use my file | partial |
-| Text file | partial |
-| Excel workbook | partial |
-| Stata, SPSS or SAS | partial |
-| R data | partial |
-| Parquet or Feather | partial |
-| Save workspace | partial |
-| Save object | partial |
+| Use my file | verified |
+| Text file | verified |
+| Excel workbook | verified |
+| Stata, SPSS or SAS | verified |
+| R data | verified |
+| Parquet or Feather | verified |
+| Save workspace | verified |
+| Save object | verified |
 
 ## Data
 
 | Entry | Status |
 |---|---|
-| New variable | partial |
-| Recode | partial |
-| Convert type | partial |
-| Reference level | partial |
-| Combine levels | partial |
-| Reorder levels | partial |
-| Text case and spaces | partial |
-| Find and replace text | partial |
-| Extract part of text | partial |
-| Text to date | partial |
-| Date part | partial |
-| Filter rows | partial |
-| Sort rows | partial |
-| Rename variable | partial |
-| Variable label | partial |
-| Value labels | partial |
-| Labelled to factor | partial |
-| Rename object | partial |
-| Remove object | partial |
-| Join | partial |
-| Append | partial |
-| Aggregate | partial |
-| Wide to long | partial |
-| Long to wide | partial |
-| Duplicates | partial |
-| Random sample | partial |
-| Drop missing values | partial |
+| New variable | verified |
+| Recode | verified |
+| Convert type | verified |
+| Reference level | verified |
+| Combine levels | verified |
+| Reorder levels | verified |
+| Text case and spaces | verified |
+| Find and replace text | verified |
+| Extract part of text | verified |
+| Text to date | verified |
+| Date part | verified |
+| Filter rows | verified |
+| Sort rows | verified |
+| Rename variable | verified |
+| Variable label | verified |
+| Value labels | verified |
+| Labelled to factor | verified |
+| Rename object | verified |
+| Remove object | verified |
+| Join | verified |
+| Append | verified |
+| Aggregate | verified |
+| Wide to long | verified |
+| Long to wide | verified |
+| Duplicates | verified |
+| Random sample | verified |
+| Drop missing values | verified |
 
 ## Statistics
 
@@ -137,12 +137,12 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| Search packages | partial |
-| Browse task views | partial |
-| Describe package | partial |
-| Install package | partial |
-| Installed packages | partial |
-| Update packages | partial |
+| Search packages | verified |
+| Browse task views | verified |
+| Describe package | verified |
+| Install package | verified |
+| Installed packages | verified |
+| Update packages | verified |
 
 ## Stata mode
 
@@ -160,7 +160,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| Help topic | partial |
-| Search help | partial |
+| Help topic | verified |
+| Search help | verified |
 | Vignettes | verified |
 | RCraft manual | planned |
