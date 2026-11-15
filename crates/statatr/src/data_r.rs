@@ -75,6 +75,7 @@ mod power;
 mod prtest;
 mod putexcel;
 mod random;
+mod rangestat;
 mod ranktests;
 mod reghdfe;
 mod returned;
@@ -1169,6 +1170,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_codebook" => codebook::CODEBOOK_HELPER,
         "stata_center" => center::CENTER_HELPER,
         "stata_winsor" => winsor::WINSOR_HELPER,
+        "stata_rangestat" => rangestat::RANGESTAT_HELPER,
+        "stata_nsplit" => rangestat::NSPLIT_HELPER,
         "stata_alpha" => alpha::ALPHA_HELPER,
         "stata_outreg" => outreg::OUTREG_HELPER,
         "stata_filefilter" => filefilter::FILEFILTER_HELPER,
@@ -2304,6 +2307,8 @@ impl Session {
                 | "compress"
                 | "center"
                 | "winsor"
+                | "rangestat"
+                | "nsplit"
                 | "alpha"
                 // ereturn post, esample() drops the variable it names
                 | "ereturn"
@@ -2542,6 +2547,8 @@ impl Session {
             "codebook" => self.codebook(c, out),
             "center" => self.center(c, &opts, out),
             "winsor" => self.winsor(c, &opts, out),
+            "rangestat" => self.rangestat(c, &opts, out),
+            "nsplit" => self.nsplit(c, &opts, out),
             "alpha" => self.alpha(c, &opts, out),
             "outreg" => self.outreg(c, &opts, out),
             "frmttable" => self.frmttable(c, &opts, out),

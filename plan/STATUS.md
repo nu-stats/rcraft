@@ -4730,3 +4730,18 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   24,049 macOS arm binaries for R 4.4). Drawn in the app: the menu with the new choice.
 - **Not checked:** picking it in the running app (pictures never reach the network), and macOS, where R
   names the folder.
+
+## rangestat and nsplit (SSC), 2026-11-14
+
+- Installed in Stata 19 from SSC with the user's OK (TZEN38 uses both); observed only, their programs not
+  read (plan in data_r/rangestat.rs's notes).
+- rangestat (stat) [new=]var, interval(key low high) [by()]: each row's window [key + low, key + high]
+  (. for no end), its by() group and the rows of if/in, itself included; an empty window gives missing,
+  one of missing values (sum) and (count) 0 and (obs) its rows; doubles labelled "sum of x"; a name in use
+  stops with Stata's r(110) line. sum, count, obs, mean, min, max and sd; probe RS matches Stata 19 on
+  every value (5 runs, by(), if, unbounded and empty windows).
+- nsplit var, digits(...) [generate()]: digits cut from the left, "Part 1 of var", byte/int/long by
+  length; Stata's errors (lengths that vary, with its note, r(459); fractional values; names in use).
+  Probe NS matches.
+- The 46 package do-files, dry run: 96.4% (20,447 of 21,219). The only line refused on purpose is cd ""
+  (16); the rest is what only a run knows.

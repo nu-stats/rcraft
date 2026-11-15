@@ -485,3 +485,62 @@ display "full " _N " " id[11] " " t[11]
         assert!(text.contains(want), "{want}\n--\n{text}");
     }
 }
+
+/// rangestat and nsplit (SSC) as Stata 19 gives them (probes RS and NS, 2026-11-14).
+#[test]
+fn rangestat_and_nsplit_as_stata_19() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let dofile = r#"clear
+set obs 8
+gen year = 1949 + _n
+replace year = 1951 in 3
+replace year = 1953 in 4
+replace year = 1955 in 5
+replace year = 1960 in 6
+replace year = . in 7
+replace year = 1962 in 8
+gen x = 1
+replace x = 0 in 2
+replace x = 3 in 3
+replace x = . in 4
+replace x = 2 in 5
+replace x = 5 in 6
+replace x = 4 in 7
+replace x = . in 8
+gen g = cond(inlist(_n, 3, 5, 8), 2, 1)
+rangestat (sum) x, interval(year 0 2)
+display "s " x_sum[1] " " x_sum[4] " " x_sum[7] " " x_sum[8]
+rangestat (mean) mx=x (count) cx=x (obs) o=x (sd) sd=x, interval(year -2 2)
+display "m " %9.0g mx[1] " " cx[4] " " o[4] " " %9.0g sd[2] " " sd[5]
+drop x_sum
+rangestat (sum) x, interval(year . 0) by(g)
+display "b " x_sum[4] " " x_sum[5] " " x_sum[6]
+gen long m = 20060131
+replace m = 19991202 in 2
+nsplit m, digits(4 2 2)
+display "n " m1[1] " " m2[1] " " m3[1] " " m2[2] " " m3[2]
+"#;
+    let t = translate(&read(dofile));
+    let not: Vec<String> = t
+        .lines
+        .iter()
+        .filter_map(|l| {
+            l.result
+                .as_ref()
+                .err()
+                .map(|e| format!("{} -> {}", l.stata, e.reason))
+        })
+        .collect();
+    assert!(not.is_empty(), "not translated: {}", not.join("; "));
+    let (ran, text) = run(&mut e, &t.script());
+    assert_eq!(ran, Outcome::Ok, "{text}");
+    for want in [
+        "s 4 2 . 0",
+        "m  1.333333 3 4  1.527525 .",
+        "b 1 5 6",
+        "n 2006 1 31 12 2",
+    ] {
+        assert!(text.contains(want), "{want}\n--\n{text}");
+    }
+}

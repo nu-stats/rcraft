@@ -1115,6 +1115,29 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "nsplit",
+        about: "Splits a number's digits into new variables (SSC)",
+        points: &[
+            p(
+                "As Stata 19",
+                "Each value's digits are cut from the left into parts of the lengths digits() \
+                 gives (20060131 with 4 2 2 is 2006, 1 and 31), into var1, var2, ... or \
+                 generate()'s names, labelled \"Part 1 of var\"; missing stays missing. Observed \
+                 in Stata 19 on made-up data; the add-on's program was not read.",
+            ),
+            p(
+                "Errors",
+                "Every value needs as many digits as the pattern adds up to, else Stata's \
+                 message (r(459)), after its note when the lengths vary; fractional values and \
+                 new names in use stop with Stata's words.",
+            ),
+            p(
+                "Not yet",
+                "nsplit without digits(), with if or in, or of negative values.",
+            ),
+        ],
+    },
+    Guide {
         command: "ologit",
         about: "Ordered logistic regression (ologit and oprobit alike)",
         points: &[
@@ -1228,6 +1251,26 @@ pub const GUIDES: &[Guide] = &[
                 "sclass, byable programs and program list are refused; a program with a line \
                  that is not translated leaves r() unknown, and an e-class one e(). An e-class \
                  program's ereturn lines are on the ereturn page.",
+            ),
+        ],
+    },
+    Guide {
+        command: "rangestat",
+        about: "Statistics over a range of each row's key (SSC)",
+        points: &[
+            p(
+                "As Stata 19",
+                "For each row with a key, the rows whose key lies in [key + low, key + high] (. \
+                 for no end), in its by() group and among the rows of if/in, itself included. A \
+                 window with no rows gives missing; one whose values are all missing gives \
+                 (sum) and (count) 0 and (obs) its rows. The new variable is var_stat or the \
+                 name given, a double labelled \"sum of x\"; one in use stops (r(110)). Observed \
+                 in Stata 19 on made-up data; the add-on's program was not read.",
+            ),
+            p(
+                "Not yet",
+                "Statistics other than sum, count, obs, mean, min, max and sd; bounds that are \
+                 variables; excludeself and the other options.",
             ),
         ],
     },
