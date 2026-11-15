@@ -79,3 +79,11 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   (hi / d, range / n, or a cost compared with n) decides where the wider set starts, and its rounding
   differs between the two. Next: sweep hi/d near 10.3 at several scales (0.103, 1.03, 10.3, 2.06,
   5.15) and n, and look at the scoring rule's comparisons (StatCraft's costs) at those n.
+- Scale sweep (lo = 0, n 10 to 22; scratchpad nat/e.txt): a residue at the bottom for hi = 0.0103 (n 16
+  to 20), 0.0206 (16 to 20), 0.515 (15 to 22), 1.03 (15 to 20), 2.06 (14 to 20); none for 0.0515, 0.103,
+  0.206, 5.15 and every scale with a step of 1 or more. Same problem in steps, different answers: what
+  decides is the step's own bits (0.1 + 1 ulp, 0.2, 0.05 + 1 ulp, 0.001 + ...), and how many steps the
+  wider set starts below. A model that fits the bottoms seen so far: the start is e = min(n - c, K)
+  steps below (c about the label count, K a cap of 3 to 6), and a residue shows only when e reaches a
+  count whose repeated additions do not land exactly (3 or more for 0.1 + 1 ulp). Not yet checked
+  against the tops.
