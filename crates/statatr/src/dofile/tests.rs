@@ -1037,3 +1037,27 @@ fn a_program_waiting_for_the_run_leaves_r_waiting() {
     let s = shown(&d);
     assert_eq!(d.origins.last().map(|o| o.what), Some(What::Later), "{s:?}");
 }
+
+/// An error R gives for a line, in Stata's words with its r(#): a variable the data
+/// does not have (dplyr's nested message too), RCraft's tagged messages; others kept.
+#[test]
+fn errors_are_printed_in_statas_words() {
+    let dplyr = "\u{2139} In argument: `(!is.na(land) & land == 5100)`.\nCaused by error:\n! object 'land' not found";
+    assert_eq!(stata_error_text(dplyr), "land not found\nr(111);");
+    assert_eq!(
+        stata_error_text("object 'x' not found"),
+        "x not found\nr(111);"
+    );
+    assert_eq!(
+        stata_error_text("variable nosuch not found (Stata: r(111))"),
+        "variable nosuch not found\nr(111);"
+    );
+    assert_eq!(
+        stata_error_text("option scale(dev) allowed only with option irls (Stata: r(198))"),
+        "option scale(dev) allowed only with option irls\nr(198);"
+    );
+    assert_eq!(
+        stata_error_text("subscript out of bounds"),
+        "subscript out of bounds"
+    );
+}

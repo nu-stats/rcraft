@@ -700,6 +700,7 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 const HARMLESS: &[&str] = &["putexcel", "outreg", "frmttable", "which", "_rcraft_fail"];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "type",
     "_rcraft_fail",
     "filefilter",
     "mata",
@@ -1022,6 +1023,32 @@ const EXCEL_NAMES_HELPER: &str = "stata_excel_names <- function(n, first = 1) {\
 /// is `110`, a file not found `601`, one that already exists `602` and a
 /// false assertion `9` (read off Stata 19). Any other error keeps R's
 /// message and leaves `_rc` missing.
+/// `type`: a text file's lines, tabs expanded to stops every 8 columns (or `<T>`).
+const TYPE_HELPER: &str = r#"stata_type <- function(path, showtabs = FALSE, lines = NULL) {
+  if (!file.exists(path)) stop("file ", path, " not found (Stata: r(601))", call. = FALSE)
+  l <- readLines(path, warn = FALSE, encoding = "UTF-8")
+  if (!is.null(lines)) l <- utils::head(l, lines)
+  expand <- function(s) {
+    if (!grepl("\t", s, fixed = TRUE)) return(s)
+    out <- character()
+    col <- 0
+    for (ch in strsplit(s, "", fixed = TRUE)[[1]]) {
+      if (ch == "\t") {
+        k <- 8 - col %% 8
+        out <- c(out, strrep(" ", k))
+        col <- col + k
+      } else {
+        out <- c(out, ch)
+        col <- col + 1
+      }
+    }
+    paste(out, collapse = "")
+  }
+  l <- if (showtabs) gsub("\t", "<T>", l, fixed = TRUE) else vapply(l, expand, "", USE.NAMES = FALSE)
+  if (length(l)) cat(l, "", sep = "\n")
+  invisible()
+}"#;
+
 const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
   while (inherits(e$parent, "condition")) e <- e$parent
   m <- sub("^! ", "", conditionMessage(e))
@@ -1082,6 +1109,7 @@ const ASSERT_HELPER: &str = r#"stata_assert <- function(ok, rc0 = FALSE) {
 fn helper_code(name: &str) -> &'static str {
     match name {
         "stata_captured" => CAPTURED_HELPER,
+        "stata_type" => TYPE_HELPER,
         "stata_assert" => ASSERT_HELPER,
         "stata_excel_names" => EXCEL_NAMES_HELPER,
         "stata_stats" => more::STAT_HELPERS,
@@ -2527,6 +2555,7 @@ impl Session {
             "marginsplot" => self.marginsplot(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
+            "type" => self.type_file(c, &opts, out),
             "assert" => self.assert(c, &opts, out),
             "fvset" => self.fvset(c, out),
             "compress" => {
@@ -4210,6 +4239,52 @@ impl Session {
             }
             other => Err(no(format!("set {other} is not translated yet"))),
         }
+    }
+
+    /// `type file [, showtabs lines(#)]`: the file's lines, tabs expanded to stops
+    /// every 8 columns (`<T>` with showtabs), the first # with lines(#); a file not
+    /// there is Stata's r(601) (observed in Stata 19, 2026-11-15).
+    fn type_file(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("showtabs", 8), ("lines", 1)]) {
+            return Err(no(format!(
+                "type with the option {o} is not translated yet"
+            )));
+        }
+        let main = c.parts.main.trim();
+        let one = match main.strip_prefix('"') {
+            Some(rest) => rest.strip_suffix('"').is_some_and(|f| !f.contains('"')),
+            None => !main.is_empty() && !main.contains(char::is_whitespace),
+        };
+        if !one {
+            return Err(no("type needs one file name"));
+        }
+        let lines = match opts.arg("lines", 1) {
+            Some(n) => match n.trim().parse::<u64>() {
+                Ok(v) => v.to_string(),
+                Err(_) => return Err(no(format!("type, lines({n}) needs a whole number"))),
+            },
+            None => "NULL".to_string(),
+        };
+        let path = file_name(main, "");
+        self.helpers.insert("stata_type");
+        if !self.quiet(c) {
+            out.line(format!(
+                "stata_type({}, showtabs = {}, lines = {lines})",
+                r_text(&path),
+                if opts.has("showtabs", 8) {
+                    "TRUE"
+                } else {
+                    "FALSE"
+                }
+            ));
+        } else {
+            out.line(format!(
+                "if (!file.exists({0})) stop({1}, call. = FALSE)",
+                r_text(&path),
+                r_text(&format!("file {path} not found (Stata: r(601))"))
+            ));
+        }
+        Ok(())
     }
 
     /// `erase` (and `rm`): one file deleted; one that is not there stops with

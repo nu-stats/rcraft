@@ -582,3 +582,30 @@ display "rc " _rc
         assert!(text.contains(want), "{want}\n--\n{text}");
     }
 }
+
+/// type as Stata 19 prints a file: tabs to stops every 8 columns, <T> with showtabs,
+/// lines(#), a missing file r(601) (2026-11-15).
+#[test]
+fn type_prints_a_file_as_stata_19() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let dir = std::env::temp_dir().join("rcraft_type_test");
+    let _ = std::fs::create_dir_all(&dir);
+    let file = dir.join("t2.txt");
+    let _ = std::fs::write(&file, "x1\n\tindented\nab\tcd efg\thi\n");
+    let p = file.to_string_lossy().replace('\\', "/");
+    let dofile = format!(
+        "type \"{p}\"\ntype \"{p}\", showtabs\ntype \"{p}\", lines(1)\ncapture type \"{p}.no\"\ndisplay \"rc \" _rc\n"
+    );
+    let t = translate(&read(&dofile));
+    assert!(t.lines.iter().all(|l| l.result.is_ok()), "{:?}", t.lines);
+    let (ran, text) = run(&mut e, &t.script());
+    assert_eq!(ran, Outcome::Ok, "{text}");
+    for want in [
+        "x1\n        indented\nab      cd efg  hi\n",
+        "<T>indented\nab<T>cd efg<T>hi\n",
+        "rc 601",
+    ] {
+        assert!(text.contains(want), "{want:?}\n--\n{text}");
+    }
+}

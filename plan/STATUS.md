@@ -4829,3 +4829,15 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **SI3BGA's `keep if land==5100`:** the package's data has no variable `land`; Stata 19 stops there too
   ("land not found", r(111)). Not RCraft's. Uncaptured, RCraft shows R's "object 'land' not found";
   under capture it already gives Stata's words and r(111).
+
+## Errors that stop a line, in Stata's words, 2026-11-15
+
+- An error R gives for a line that is not under `capture` now shows as Stata 19 prints it: Stata's
+  words, then `r(#);` (`dofile::stata_error_text`, the rules `capture` already followed). R's "object
+  'land' not found", dplyr's nested form too, is `land not found` / `r(111);`; RCraft's own messages
+  tagged "(Stata: r(#))" lose the tag; file not found 601, already exists 602, assertion 9, not sorted
+  5, string variables 109, already defined 110. Others stay R's. Used by the do-file window, the
+  console for Stata lines, and the e2e log (SI3BGA's line now reads as Stata's log does). A test.
+- **type** (`type_file`, `stata_type`): the file's lines, tabs expanded to stops every 8 columns,
+  `<T>` with showtabs, lines(#), a missing file r(601) (probe TY, as Stata 19 but for its log's
+  wrapping of a line longer than the line size). A test.

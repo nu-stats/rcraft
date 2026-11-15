@@ -2401,7 +2401,11 @@ fn results_list(
                     mono(ui, &format!("Warning: {message}"), pal.warning, false);
                 }
                 Item::Error { message, call } => {
-                    let text = if call.is_empty() {
+                    // a Stata line: Stata's words and r(#) where RCraft knows them
+                    let stata_text = rcraft_statatr::dofile::stata_error_text(message);
+                    let text = if as_stata && stata_text != *message {
+                        stata_text
+                    } else if call.is_empty() {
                         format!("Error: {message}")
                     } else {
                         format!("Error in {call} : {message}")

@@ -896,7 +896,10 @@ fn printed(engine: &Engine, id: CommandId) -> (String, String) {
             match item {
                 Item::Text { text: t, .. } => text.push_str(t),
                 Item::Warning(w) => text.push_str(&format!("Warning: {w}\n")),
-                Item::Error { message, .. } => error.push_str(message),
+                // in Stata's words and r(#), as Stata 19 prints an error that stops a line
+                Item::Error { message, .. } => {
+                    error.push_str(&rcraft_statatr::dofile::stata_error_text(message))
+                }
                 _ => {}
             }
         }

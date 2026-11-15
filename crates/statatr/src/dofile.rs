@@ -144,6 +144,50 @@ pub enum Event {
 /// A dry run's answer to every question for R.
 pub const KNOWN_WHEN_RUN: &str = "known only when the do-file runs";
 
+/// An error R gave for a line, as Stata 19 prints it when the line is not under
+/// `capture`: Stata's words, then `r(#);` (the rules `capture` follows,
+/// `stata_captured`). R's "object 'x' not found" (a variable the data does not
+/// have) is Stata's "x not found", r(111); RCraft's own messages naming Stata's code
+/// ("... (Stata: r(198))") lose the tag. Anything else stays R's message.
+pub fn stata_error_text(message: &str) -> String {
+    // the innermost condition (dplyr's "Caused by error: ! ...")
+    let m = match message.rfind("\n! ") {
+        Some(i) => message.get(i + 3..).unwrap_or(message),
+        None => message.strip_prefix("! ").unwrap_or(message),
+    }
+    .trim();
+    let tagged = m
+        .strip_suffix("))")
+        .and_then(|s| s.rsplit_once(" (Stata: r("))
+        .and_then(|(text, code)| code.parse::<u32>().ok().map(|c| (text.to_string(), c)));
+    let (text, rc) = if let Some((text, c)) = tagged {
+        (text, c)
+    } else if let Some(name) = m
+        .strip_prefix("object '")
+        .and_then(|s| s.strip_suffix("' not found"))
+        .filter(|n| !n.contains('\''))
+    {
+        (format!("{name} not found"), 111)
+    } else if m.starts_with("file ") && m.ends_with(" not found") && !m.contains('\n') {
+        (m.to_string(), 601)
+    } else if m.starts_with("file ") && m.ends_with(" already exists") && !m.contains('\n') {
+        (m.to_string(), 602)
+    } else if m == "assertion is false" || m.ends_with("\nassertion is false") {
+        (m.to_string(), 9)
+    } else if m == "not sorted" {
+        (m.to_string(), 5)
+    } else if m.starts_with("string variables not allowed in varlist") {
+        (m.to_string(), 109)
+    } else if m.starts_with("variable ") && m.ends_with(" already defined") && !m.contains('\n') {
+        (m.to_string(), 110)
+    } else if m.ends_with(" not found") && !m.contains('\n') {
+        (m.to_string(), 111)
+    } else {
+        return message.to_string();
+    };
+    format!("{text}\nr({rc});")
+}
+
 /// Most lines a run makes (a loop that goes on and on is stopped).
 pub const MAX_LINES: usize = 200_000;
 /// Most times a loop goes round.
@@ -221,6 +265,7 @@ fn file_read_local(c: &reader::Command) -> Option<String> {
 
 /// Commands that leave the data's variable names as they were.
 const NAMES_STAY: &[&str] = &[
+    "type",
     "glm",
     "display",
     "summarize",

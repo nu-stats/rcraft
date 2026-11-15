@@ -67,7 +67,15 @@ fn run(e: &mut Engine, code: &str, limit: Duration) -> (Outcome, String) {
                 .iter()
                 .map(|i| match i {
                     Item::Text { text, .. } => text.clone(),
-                    Item::Error { message, .. } => format!("error: {message}\n"),
+                    // in Stata's words and r(#) where RCraft knows them, as Stata's log has them
+                    Item::Error { message, .. } => {
+                        let s = rcraft_statatr::dofile::stata_error_text(message);
+                        if s == *message {
+                            format!("error: {message}\n")
+                        } else {
+                            format!("{s}\n")
+                        }
+                    }
                     _ => String::new(),
                 })
                 .collect::<String>()

@@ -1552,6 +1552,7 @@ pub(super) enum Returned {
 /// Commands after which Stata 19 still holds the r() it held before
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
+    "type",
     // file open, write and close (file read sets r() itself)
     "file",
     // a program called and returning, and return inside it, set r() themselves
