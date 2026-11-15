@@ -223,3 +223,25 @@ distinct results with steps 10 × 10^-2, 5 × 10^-2, 2 × 10^-1, 2 × 10^-2 and 
   5,737 of 11,207. A start of m labels centred on the data (m = n − 1, n, n + 1; floor, round, ceil):
   best m = n + 1, ceil: bottoms 9,660 to 9,847 of 11,632 with the clamp, tops 5,855, both 5,096.
 - Not translated: no rule yet gives every case, so `natscale.rs` still declines these steps.
+
+## 2026-11-15, fifth pass: e against n
+
+Two new probes (`%21x` through scalars), n 4 to 40: lo = 17.03, 17.13, 12345.03, 12345.13 with
+hi = lo + 0.84 and + 1.37 (296 results), and lo = 0.313, 0.347, 0.431, 0.469 with hi = lo + 0.42 and
++ 0.61 (296 results).
+
+- The product-walk model is not chance. With the same e range (0 to 12), the 7,269 unclamped bottoms fit
+  in 7,256; the same targets moved by one ulp fit in about 2,080, by two ulps in about 1,330.
+- What can be read is not e itself but a block of e that all give the same bits, and the block moves in
+  jumps as n grows, not by one label per n. Step 0.05 at 17 (17.13–17.97, 17.03–18.4, 17.13–18.5): the
+  bottom's block changes exactly at n − cnt = 2 and at n − cnt = 11, in all three ranges (e.g. 17.13 to
+  17.97, cnt 19: [0:4] for n 19–20, [5:9] for n 21–29, [10:15] for n 30–40). Step 0.1 at 17: one change,
+  at n − cnt = 3 ([2:3] or [3:4] before, [4:6] or [5:7] after). Step 0.02 + 1 ulp below 1 (0.313–0.733,
+  0.347–0.767, cnt 23): changes at n − cnt = 2 or 3 and at 11.
+- At 17, walks from different decimal starts merge (16.5 + (0.05 + 1 ulp) rounds to the double nearest
+  16.55), so many starts give the same bits: 16.5, 16.6, 16.4 and products 16.65..16.85 all fit
+  17.13–17.97 n 21. At 12345 the blocks are wider still ([1:5]). Below 1 the blocks are narrow but often
+  fit from both sides (0.313–0.733 step 0.05: from 13–17 below or 9–11 above).
+- Best formula for e found by a search over floor/ceil/round((a·n + b·cnt + c·range/d + k)/m), with
+  small integer a, b, c, k, m: ceil((n − range/d + 4)/3), inside the bottom's block for 5,371 of 7,832
+  bottoms and 2,783 of the 3,398 whose block excludes 0. Not a rule.
