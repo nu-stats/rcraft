@@ -282,3 +282,30 @@ hi = lo + 0.84 and + 1.37 (296 results), and lo = 0.313, 0.347, 0.431, 0.469 wit
   label were added on each side for every two of n, but not exactly half, and not straight.
 - Next: probes built for narrow blocks (values where walks merge least) so that s(n) can be read
   one n at a time, then fit s against lo, hi, n and range.
+
+## 2026-11-15, seventh pass: ranges where walk starts can be told apart
+
+- Where to look. In R, for each step and bottom label, how many of 25 walk starts (L − 24 .. L) give
+  different bits: with step 0.05 + 1 ulp the best labels are 3.15–3.85 (11 or 12 distinct results, runs
+  of 3 at most), with 0.2 they are 12.6–15.2; below 1 with 0.02 never more than 5. Probe 8 (`%21x`
+  through scalars, 1,080 runs, n 4 to 48): lo 3.13, 3.16, 3.22, 3.28, 3.31, 3.37 with widths 0.52, 0.62,
+  0.72, and lo 12.63, 12.87, 13.11 with widths 2.06, 2.62.
+- Most ends are the plain product. Of the 1,034 rows with an inexact step, 793 of the 872 bottoms off lo
+  are exactly L·d and 809 of the 1,033 tops off hi exactly U·d. In 59 of the 74 groups with the same
+  range, step and labels over three n or more, neither end changes with n at all: every range at
+  3.1–4.1 with step 0.05 keeps its bottom bits from its first n to its last (n − cnt up to 21), and
+  12.63–15.25 with step 0.1 has r(min) = 126·d exactly for n 27 to 48 (only start 126 gives those bits).
+- A few ranges drift, and they switch on at an n of their own. Step 0.1, width 2.62, 28 labels, three
+  positions: 12.63 never moves (to n 48); 12.87 holds to n 41, then at n 42 the bottom start jumps from
+  within 2 steps of L to 8–11 steps below in one n; 13.11 moves at n 30, 37, 40 and 47, its r(min) going
+  +2, +1, 0, −1 ulp from the decimal and r(max) +2, 0, −1, −3, −5. Same width, step and label count;
+  only the position differs. Others that move: 12.63–15.25 step 0.2 (n 20, 23), the three 2.06-wide
+  ranges with step 0.05 (n 42 to 46), and the top alone in a few step 0.02 and 0.1 ranges at 3.1–3.3.
+- Ruled out on these data: one upward walk from the bottom's start also giving the top (56 of 871); a
+  formula in n, cnt, range/d and the end distances (best 1,084 of 1,448 bottoms, and the best ones do
+  not use n); a start on the grid of 5·d (bottoms 851 of 1,448, but 624 and 776 when moved one ulp);
+  an end that goes out e steps and back e (fits 1,059 bottoms, but almost all of those are just L·d).
+  Which ends are not the product does not follow the step or how far the end is outside the data.
+- So the earlier picture (a start that slides down about half a step per n) was taken from ranges where
+  the walk shows; on most ranges there is no walk. The open question is now what switches it on, and why
+  at n 30 for 13.11–15.73 but not by n 48 for 12.63–15.25.
