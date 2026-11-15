@@ -416,3 +416,72 @@ destring s9, replace
         assert!(text.contains(want), "{want}\n--\n{text}");
     }
 }
+
+/// recode's counts (rules with or without parentheses), collapse with aweights and
+/// fweights, and tsfill, as Stata 19 gives them (probe BI, 2026-11-14).
+#[test]
+fn recode_collapse_weights_and_tsfill_as_stata_19() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let dofile = r#"clear
+set obs 7
+gen id = cond(_n <= 3, 1, cond(_n <= 6, 2, 3))
+gen t = _n
+replace t = 4 in 3
+replace t = 1 in 4
+replace t = 3 in 5
+replace t = 5 in 6
+replace t = 2 in 7
+gen x = 2 * _n + 1
+replace x = 2 in 4
+replace x = 4 in 5
+replace x = . in 6
+replace x = 6 in 7
+gen w = 1
+replace w = 2 in 2
+replace w = 3 in 4
+replace w = 2 in 6
+gen g = cond(_n >= 4 & _n <= 6, 2, 1)
+recode g 1=10 2=20, generate(g2)
+recode x 3=30 5=50 7 = 70
+preserve
+collapse (mean) x (sum) sx=x (count) n=x (sd) s=x [aweight=w], by(g)
+display "aw " x[1] " " sx[1] " " n[1] " " %9.0g s[1] " " x[2] " " sx[2] " " n[2]
+restore
+preserve
+collapse (sum) sx=x (count) n=x (median) m=x [fweight=w], by(g)
+display "fw " sx[1] " " n[1] " " m[1] " " sx[2] " " n[2] " " m[2]
+restore
+generate s = "a"
+tsset id t
+tsfill
+display "fill " _N " " t[3] " " missing(x[3]) " [" s[3] "]"
+tsfill, full
+display "full " _N " " id[11] " " t[11]
+"#;
+    let t = translate(&read(dofile));
+    let not: Vec<String> = t
+        .lines
+        .iter()
+        .filter_map(|l| {
+            l.result
+                .as_ref()
+                .err()
+                .map(|e| format!("{} -> {}", l.stata, e.reason))
+        })
+        .collect();
+    assert!(not.is_empty(), "not translated: {}", not.join("; "));
+    let (ran, text) = run(&mut e, &t.script());
+    assert_eq!(ran, Outcome::Ok, "{text}");
+    for want in [
+        "(7 differences between g and g2)",
+        "(3 changes made to x)",
+        "(note: aweights not used to compute counts)",
+        "aw 41.2 164.8 4  25.02692 2.5 5 2",
+        "fw 206 5 50 10 4 2",
+        "fill 10 3 1 []",
+        "full 15 3 1",
+    ] {
+        assert!(text.contains(want), "{want}\n--\n{text}");
+    }
+}

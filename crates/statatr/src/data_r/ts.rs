@@ -350,7 +350,87 @@ pub(super) fn ts_words(text: &str) -> Vec<String> {
     seen
 }
 
+/// `tsfill`: a row for each time missing between a panel's first and last (from the
+/// data's first to its last for every panel with `full`), its other variables missing
+/// ("" for text), the data in panel and time order (Stata 19).
+pub(super) const TSFILL_HELPER: &str = r#"stata_tsfill <- function(d, time, panel = NULL, delta = 1, full = FALSE) {
+  tv <- as.numeric(d[[time]])
+  pv <- if (is.null(panel)) rep(0, nrow(d)) else as.numeric(d[[panel]])
+  if (anyNA(tv) || anyNA(pv)) stop("tsfill with missing times or panels is not translated yet", call. = FALSE)
+  if (!nrow(d)) return(d)
+  lo <- min(tv)
+  hi <- max(tv)
+  step <- function(t) round((t - lo) / delta)
+  add_p <- numeric(0)
+  add_t <- numeric(0)
+  for (p in unique(pv)) {
+    have <- tv[pv == p]
+    span <- if (full) seq(0, step(hi)) else seq(step(min(have)), step(max(have)))
+    miss <- setdiff(span, step(have))
+    add_p <- c(add_p, rep(p, length(miss)))
+    add_t <- c(add_t, lo + miss * delta)
+  }
+  if (!length(add_t)) return(d)
+  new <- d[rep(NA_integer_, length(add_t)), , drop = FALSE]
+  for (v in names(new)) if (is.character(new[[v]])) new[[v]][] <- ""
+  x <- new[[time]]
+  x[] <- add_t
+  new[[time]] <- x
+  if (!is.null(panel)) {
+    x <- new[[panel]]
+    x[] <- add_p
+    new[[panel]] <- x
+  }
+  out <- dplyr::bind_rows(d, new)
+  out <- out[order(c(pv, add_p), c(tv, add_t)), , drop = FALSE]
+  rownames(out) <- NULL
+  out
+}"#;
+
 impl Session {
+    /// `tsfill [, full]` with the panel and time `tsset` or `xtset` gave.
+    pub(super) fn tsfill(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[("full", 4)]) {
+            return Err(no(format!(
+                "tsfill with the option {o} is not translated yet"
+            )));
+        }
+        if !c.parts.main.trim().is_empty() || c.parts.if_exp.is_some() || c.parts.in_range.is_some()
+        {
+            return Err(no("tsfill takes only options"));
+        }
+        if self.ts_unknown {
+            return Err(no(
+                "the data were read from a file whose xtset or tsset settings are not known here; \
+                 set them again with xtset",
+            ));
+        }
+        let Some(time) = self.panel_time.clone() else {
+            return Err(no(
+                "time variable not set, use tsset varname ... (Stata: r(111))",
+            ));
+        };
+        let d = self.data()?;
+        self.helpers.insert("stata_tsfill");
+        out.package("dplyr");
+        out.line(format!(
+            "{d} <- stata_tsfill({d}, {}{}, delta = {}, full = {})",
+            r_text(&time),
+            self.panel
+                .as_ref()
+                .map(|p| format!(", {}", r_text(p)))
+                .unwrap_or_default(),
+            self.ts_delta.clone().unwrap_or_else(|| "1".to_string()),
+            if opts.has("full", 4) { "TRUE" } else { "FALSE" }
+        ));
+        Ok(())
+    }
+
     /// New data: no `tsset` or `xtset`.
     pub(super) fn forget_ts(&mut self) {
         self.panel = None;

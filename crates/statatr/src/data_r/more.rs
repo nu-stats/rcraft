@@ -4,7 +4,9 @@
 //! StatCraft implements them (`crates/engine/src/commands/{convert,egen,
 //! combine,reshape,collapse,duplicates}.rs` there, each checked against Stata).
 
+use super::weights::W;
 use super::*;
+use crate::lang::syntax::WeightKind;
 
 /// Small R functions with Stata's rules for statistics over a column:
 /// missing values are skipped, and an all-missing column gives missing
@@ -216,6 +218,46 @@ pub(super) const SAME_DATES_HELPER: &str = r#"stata_same_dates <- function(d, u)
 /// variable with any other text is left alone, with Stata's message.
 pub(super) const DESTRING_HELPER: &str = "stata_destring <- function(x, name, ignore = \"\", force = FALSE, generate = FALSE, newname = NULL, float = FALSE) {\n  if (!is.character(x)) {\n    message(name, \" already numeric; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  y <- x\n  for (ch in strsplit(ignore, \"\")[[1]]) y <- gsub(ch, \"\", y, fixed = TRUE)\n  y <- trimws(y)\n  number <- grepl(\"^[+-]?([0-9]+[.]?[0-9]*|[.][0-9]+)([eEdD][+-]?[0-9]+)?$\", y)\n  missing <- is.na(y) | y == \"\" | grepl(\"^[.][a-z]?$\", y)\n  if (!force && !all(number | missing)) {\n    message(name, \": contains nonnumeric characters; no \", if (generate) \"generate\" else \"replace\")\n    return(if (generate) NULL else x)\n  }\n  out <- suppressWarnings(as.numeric(sub(\"[dD]\", \"e\", y)))\n  out[!number] <- NA\n  # Stata 19 says which type it made: byte, int or long for whole numbers in their\n  # ranges, double (float with float) otherwise, byte when none is left\n  v <- out[!is.na(out)]\n  real <- if (float) \"float\" else \"double\"\n  type <- if (!length(v)) \"byte\" else if (any(v != round(v))) real else if (all(v >= -127 & v <= 100)) \"byte\" else if (all(v >= -32767 & v <= 32740)) \"int\" else if (all(v >= -2147483647 & v <= 2147483620)) \"long\" else real\n  cat(name, if (all(number | missing)) \": all characters numeric; \" else \": contains nonnumeric characters; \",\n      if (generate) paste(newname, \"generated as \") else \"replaced as \", type, \"\\n\", sep = \"\")\n  k <- sum(is.na(out))\n  if (k > 0) cat(\"(\", format(k, big.mark = \",\", scientific = FALSE), if (k == 1) \" missing value generated\" else \" missing values generated\", \")\\n\", sep = \"\")\n  structure(out, label = attr(x, \"label\", exact = TRUE))\n}";
 
+/// `collapse` with aweights or fweights, as Stata 19 computes them: the mean
+/// weighted; aweights scaled to each group's rows, so a sum is the weighted mean
+/// times the rows with a value and a count those rows; fweights as copies of the
+/// row; the standard deviation over the weights' sum less one. Missing or zero
+/// weights stop (not checked against Stata yet).
+pub(super) const COLLAPSE_W_HELPER: &str = r#"stata_cw_check <- function(d, w, kind) {
+  v <- unclass(d[[w]])
+  attributes(v) <- NULL
+  if (anyNA(v) || any(v == 0)) stop("collapse with missing or zero weights is not translated yet", call. = FALSE)
+  if (any(v < 0)) stop("negative weights encountered", call. = FALSE)
+  if (kind == "f" && any(v != floor(v))) stop("may not use noninteger frequency weights", call. = FALSE)
+  invisible(NULL)
+}
+stata_cw_mean <- function(x, w) {
+  x <- as.numeric(x)
+  ok <- !is.na(x)
+  if (!any(ok)) NA_real_ else sum(w[ok] * x[ok]) / sum(w[ok])
+}
+stata_cw_sum <- function(x, w, kind) {
+  x <- as.numeric(x)
+  ok <- !is.na(x)
+  if (!any(ok)) return(0)
+  if (kind == "a") sum(w[ok] * x[ok]) / sum(w[ok]) * sum(ok) else sum(w[ok] * x[ok])
+}
+stata_cw_count <- function(x, w, kind) {
+  ok <- !is.na(as.numeric(x))
+  if (kind == "a") as.numeric(sum(ok)) else as.numeric(sum(w[ok]))
+}
+stata_cw_sd <- function(x, w, kind) {
+  x <- as.numeric(x)
+  ok <- !is.na(x)
+  x <- x[ok]
+  w <- w[ok]
+  if (kind == "a") w <- w * length(x) / sum(w)
+  W <- sum(w)
+  if (W <= 1) return(NA_real_)
+  m <- sum(w * x) / W
+  sqrt(sum(w * (x - m)^2) / (W - 1))
+}"#;
+
 /// egen concat(): each variable as text (a number as string() writes it, or in
 /// format()), joined with punct() between them and blanks taken off both
 /// ends, as Stata 19 makes it.
@@ -410,6 +452,60 @@ fn rule_condition(
     }
 }
 
+/// `recode` in the older syntax, rules without parentheses (`x 3=30 5=50 7 = 70`,
+/// `x 1 2=0`), written in the newer one (`x (3=30) (5=50) (7=70)`): the variables are
+/// the names before the first rule, and each rule runs to the value after its `=`.
+fn bare_recode_rules(main: &str) -> Result<String, Untranslated> {
+    if main.contains('"') {
+        return Err(no("recode with labels needs its rules in parentheses"));
+    }
+    // `7 = 70` as one word
+    let mut joined = String::new();
+    for part in main.split('=') {
+        if !joined.is_empty() {
+            joined = joined.trim_end().to_string();
+            joined.push('=');
+        }
+        joined.push_str(if joined.is_empty() {
+            part
+        } else {
+            part.trim_start()
+        });
+    }
+    let words: Vec<&str> = joined.split_whitespace().collect();
+    let keyword = |w: &str| {
+        matches!(w, "min" | "max" | "else" | "missing" | "nonmissing")
+            || w.starts_with("min/")
+            || w.contains('=')
+    };
+    let nvars = words
+        .iter()
+        .take_while(|w| is_name(w) && !keyword(w))
+        .count();
+    if nvars == 0 || nvars == words.len() {
+        return Err(no("recode needs rules in parentheses"));
+    }
+    let mut out = words.get(..nvars).unwrap_or_default().join(" ");
+    let mut rule: Vec<&str> = Vec::new();
+    for w in words.get(nvars..).unwrap_or_default() {
+        rule.push(w);
+        if w.contains('=') {
+            if w.ends_with('=') {
+                return Err(no(format!(
+                    "recode: {} needs a value after =",
+                    rule.join(" ")
+                )));
+            }
+            out.push_str(&format!(" ({})", rule.join(" ")));
+            rule.clear();
+        }
+    }
+    if !rule.is_empty() {
+        return Err(no(format!("recode: {} has no =", rule.join(" "))));
+    }
+    Ok(out)
+}
+
 /// The pieces of `name(args)`.
 fn call_parts(text: &str) -> Option<(&str, &str)> {
     let text = text.trim();
@@ -443,6 +539,15 @@ impl Session {
             )));
         }
         let main = c.parts.main.trim();
+        // the older syntax Stata 19 still takes, rules without parentheses
+        // (recode x 3=30 5=50 7 = 70): written as the newer one
+        let bare;
+        let main = if main.contains('(') {
+            main
+        } else {
+            bare = bare_recode_rules(main)?;
+            bare.as_str()
+        };
         let open = main
             .find('(')
             .ok_or_else(|| no("recode needs rules in parentheses"))?;
@@ -605,7 +710,39 @@ impl Session {
             }
         }
         out.package("dplyr");
-        self.step(c, format!("dplyr::mutate({})", assigns.join(", ")), out)
+        // Stata 19's count for each variable, always plural: "(1 changes made to x)", and
+        // "(N differences between x and new)" with generate() or prefix()
+        let say = !self.quiet(c);
+        let d = self.data()?;
+        let olds: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+        if say && new_names.is_empty() {
+            out.line(format!("stata_recode_old <- {d}[c({})]", olds.join(", ")));
+        }
+        self.step(c, format!("dplyr::mutate({})", assigns.join(", ")), out)?;
+        if say {
+            let same = "function(a, b) { a <- as.numeric(a); b <- as.numeric(b); (is.na(a) & is.na(b)) | (!is.na(a) & !is.na(b) & a == b) }";
+            for (i, v) in vars.iter().enumerate() {
+                let (before, after, text) = match new_names.get(i) {
+                    Some(n) => (
+                        format!("{d}[[{}]]", r_text(v)),
+                        format!("{d}[[{}]]", r_text(n)),
+                        format!("differences between {v} and {n}"),
+                    ),
+                    None => (
+                        format!("stata_recode_old[[{}]]", r_text(v)),
+                        format!("{d}[[{}]]", r_text(v)),
+                        format!("changes made to {v}"),
+                    ),
+                };
+                out.line(format!(
+                    "cat(\"(\", format(sum(!({same})({before}, {after})), big.mark = \",\"), \" {text})\\n\", sep = \"\")"
+                ));
+            }
+            if new_names.is_empty() {
+                out.line("rm(stata_recode_old)");
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn egen(
@@ -1231,9 +1368,19 @@ impl Session {
         opts: &Opts,
         out: &mut Out,
     ) -> Result<(), Untranslated> {
-        if c.parts.weight.is_some() {
-            return Err(no("collapse with weights is not translated yet"));
+        // aweights and fweights (Stata 19): aweights scaled to the group's rows, so a sum is
+        // the weighted mean times the rows and a count is the rows; fweights as copies
+        if c.parts
+            .weight
+            .as_ref()
+            .is_some_and(|w| matches!(w.kind, WeightKind::Sampling | WeightKind::Importance))
+        {
+            return Err(no(
+                "collapse with pweights or iweights is not translated yet",
+            ));
         }
+        let w = self.weight_of(c, &[W::A, W::F])?;
+        let wk = w.as_ref().map(|(k, v)| (r_text(k.code()), r_name(v)));
         if let Some(o) = opts.other(&[("by", 2), ("cw", 2), ("fast", 4)]) {
             return Err(no(format!(
                 "collapse with the option {o} is not translated yet"
@@ -1245,6 +1392,7 @@ impl Session {
         let mut targets: Vec<(String, String)> = Vec::new(); // new name -> R expression
         let mut sources = Vec::new();
         let mut percents = Vec::new();
+        let mut count_note = false;
         let mut rest = c.parts.main.trim().to_string();
         while !rest.is_empty() {
             if let Some(r) = rest.strip_prefix('(') {
@@ -1289,6 +1437,66 @@ impl Session {
                 && self.mv_on(out);
             if keeps {
                 self.need_helper("stata_mv_stats");
+            }
+            // with a weight: the statistics checked in Stata 19; the order ones take no weight
+            if let Some((k, wv)) = &wk {
+                let weighted = match stat.as_str() {
+                    "mean" => Some(format!("stata_cw_mean({x}, {wv})")),
+                    "sum" => Some(format!("stata_cw_sum({x}, {wv}, {k})")),
+                    "count" => {
+                        if w.as_ref().is_some_and(|(kind, _)| *kind == W::A) {
+                            count_note = true;
+                        }
+                        Some(format!("stata_cw_count({x}, {wv}, {k})"))
+                    }
+                    "sd" => Some(format!("stata_cw_sd({x}, {wv}, {k})")),
+                    "rawsum" | "max" | "min" | "first" | "last" | "firstnm" | "lastnm" => None,
+                    // fweights are copies of the row: the percentiles of the copies
+                    s if w.as_ref().is_some_and(|(kind, _)| *kind == W::F)
+                        && (s == "median"
+                            || s == "iqr"
+                            || s.strip_prefix('p').is_some_and(|n| {
+                                n.parse::<u8>().is_ok_and(|n| (1..=99).contains(&n))
+                            })) =>
+                    {
+                        let copies = format!("rep(as.numeric({x}), {wv})");
+                        let (label, e) = match s {
+                            "median" => ("p 50".to_string(), format!("stata_pctile({copies}, 50)")),
+                            "iqr" => (
+                                "iqr".to_string(),
+                                format!("stata_pctile({copies}, 75) - stata_pctile({copies}, 25)"),
+                            ),
+                            p => {
+                                let n = p.get(1..).unwrap_or("50");
+                                (format!("p {n}"), format!("stata_pctile({copies}, {n})"))
+                            }
+                        };
+                        let e = format!(
+                            "structure({e}, label = {})",
+                            r_text(&format!("({label}) {src}"))
+                        );
+                        targets.retain(|(n, _)| n != &new);
+                        targets.push((new.clone(), e));
+                        sources.push(src);
+                        continue;
+                    }
+                    other => {
+                        return Err(no(format!(
+                            "collapse ({other}) with weights is not translated yet"
+                        )))
+                    }
+                };
+                if let Some(e) = weighted {
+                    self.need_helper("stata_collapse_w");
+                    let e = format!(
+                        "structure({e}, label = {})",
+                        r_text(&format!("({stat}) {src}"))
+                    );
+                    targets.retain(|(n, _)| n != &new);
+                    targets.push((new.clone(), e));
+                    sources.push(src);
+                    continue;
+                }
             }
             let (label, expr) = match stat.as_str() {
                 "max" if keeps => plain(format!("stata_mv_max({x})")),
@@ -1335,6 +1543,14 @@ impl Session {
             return Err(no("collapse needs variables"));
         }
         out.package("dplyr");
+        if let Some((k, _)) = &wk {
+            let v = w.as_ref().map(|(_, v)| v.clone()).unwrap_or_default();
+            self.need_helper("stata_collapse_w");
+            out.line(format!("stata_cw_check({d}, {}, {k})", r_text(&v)));
+            if count_note {
+                out.line("cat(\"(note: aweights not used to compute counts)\\n\")");
+            }
+        }
         for p in &percents {
             out.line(format!(
                 "collapse_total_{p} <- sum(!is.na({d}${}))",

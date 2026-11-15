@@ -1140,6 +1140,21 @@ impl Translator<'_> {
             "subinstr" | "usubinstr" => {
                 want(4)?;
                 let (s, _) = self.expr(arg(0)?)?;
+                // looking for char(0): R's text holds no NUL byte, so there is none to replace
+                // (Stata's text from import excel, an XML file, has none either)
+                if let Expr::Call(f, a) = arg(1)? {
+                    if f == "char" && a.len() == 1 && a.first().and_then(plain_number) == Some(0.0)
+                    {
+                        // checked for errors as Stata would read it, then left as it is
+                        self.expr(arg(2)?)?;
+                        self.caveat(
+                            "subinstr(s, char(0), ...): R's text holds no NUL byte, so s is left as \
+                             it is; Stata's would hold one only from a file with NUL bytes in its \
+                             text, which R could not have read as Stata does",
+                        );
+                        return Ok((s, Kind::Text));
+                    }
+                }
                 // subinstr() works on bytes in Stata: so does R with useBytes,
                 // and char(128) to char(255) can be searched for and put in
                 let bytes = name == "subinstr";

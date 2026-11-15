@@ -351,11 +351,26 @@ pub const GUIDES: &[Guide] = &[
     Guide {
         command: "collapse",
         about: "Makes a dataset of summary statistics",
-        points: &[p(
-            "Precision",
-            "Stata stores means and the like of float variables as floats; R keeps full \
-             precision, so the 8th digit can differ.",
-        )],
+        points: &[
+            p(
+                "Precision",
+                "Stata stores means and the like of float variables as floats; R keeps full \
+                 precision, so the 8th digit can differ.",
+            ),
+            p(
+                "Weights",
+                "aweights and fweights as Stata 19 uses them: the mean weighted; aweights scaled \
+                 to each group's rows, so (sum) is the weighted mean times the rows with a value \
+                 and (count) is those rows (with Stata's note); fweights as copies of the row, \
+                 percentiles included; (sd) over the weights' sum less one; rawsum, min, max, \
+                 first and last unweighted.",
+            ),
+            p(
+                "Not yet",
+                "pweights and iweights; percentiles with aweights; missing or zero weights (the \
+                 R stops and says so).",
+            ),
+        ],
     },
     Guide {
         command: "compress",
@@ -1224,7 +1239,10 @@ pub const GUIDES: &[Guide] = &[
             "The rules are taken in Stata's order, the first that matches a value deciding it; \
              missing values are kept unless a rule names them, as in Stata. Labels in the \
              rules (`1 \"low\"`) make a label set for each new variable, named after it or \
-             label(), as Stata does; they need generate() or prefix().",
+             label(), as Stata does; they need generate() or prefix(). The older syntax without \
+             parentheses (recode x 1=10 2=20) is taken too. Stata's count follows for each \
+             variable, always plural: (1 changes made to x), or (N differences between x and \
+             new) with generate().",
         )],
     },
     Guide {
@@ -3101,6 +3119,12 @@ pub const GUIDES: &[Guide] = &[
                  names the panel variable.",
             ),
             p(
+                "tsfill",
+                "A row for each time missing between a panel's first and last (from the data's \
+                 first to its last for every panel with full), its other variables missing and \
+                 text \"\", the data in panel and time order, as Stata 19 does.",
+            ),
+            p(
                 "Not yet",
                 "replace that reads its own variable at other times (replace x = L.x + 1) runs \
                  row by row in Stata and is not translated yet; nor are the operators on a string \
@@ -3117,6 +3141,7 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
     let page = match full.as_str() {
         "probit" => "logit",
         "oprobit" => "ologit",
+        "tsfill" => "tsset",
         "tab1" | "tab2" => "tabulate",
         "scatter" | "line" | "connected" => "twoway",
         "bysort" => "by",

@@ -4664,3 +4664,29 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - SI3BGA's 12 oprobit models: every iteration, header and table line matches, except where its reference
   log was made with set linesize 255, at which Stata widens the name column to the longest name
   (e4socdem_pty2) instead of abbreviating it as at the default 80 (checked: abcdefghij~m at 80).
+
+## The packages' last refusals: char(0), recode's older syntax, weighted collapse, tsfill, 2026-11-14
+
+- The 46 package do-files, dry run: 95.2% of the lines a dry run judges were translated, now 96.3% (20,435
+  of 21,219). Programs and file were no longer among the refusals there (programs run where called, file
+  open/write/close translate); what is left is mostly what only a run knows (data from another do-file,
+  globals set by a master do-file), which the e2e runs translate.
+- subinstr(s, char(0), ...): R's text holds no NUL byte, so s is left as it is (TZEN38's transcripts come
+  from import excel, an XML file, which holds none either). It freed 235 lines of TZEN38's text cleaning.
+- recode's older syntax, rules without parentheses (recode country_id 3=1 35=2 ..., YFBPT6), and Stata's
+  count after every recode, always plural: "(1 changes made to x)", "(N differences between x and new)".
+- collapse with aweights and fweights (YFBPT6's (mean) [aweight=w]): the mean weighted; aweights scaled
+  to each group's rows, so (sum) is the weighted mean times the rows with a value and (count) those rows,
+  with Stata's "(note: aweights not used to compute counts)"; fweights as copies, percentiles included;
+  (sd) over the weights' sum less one (25.02692 with aweights, 24.23221 with fweights, as Stata 19).
+  pweights, iweights, aweighted percentiles and missing or zero weights are refused.
+- tsfill and tsfill, full (TZEN38's Chair_Projections): each panel's gaps, or every panel over the data's
+  span; text "" in the new rows. Probe BI and RC: every value and message matches Stata 19.
+- Poisson's starting values, for its and nbreg's iteration logs, are still not found. Stata's start is
+  unchanged by duplicating the rows, scaling or flipping a regressor, reordering the regressors, and
+  centering one shifts only the constant (so it is affine-equivariant and depends on no sample size); it
+  is not an iterate of IRLS from glm's start (checked against Stata's own glm, irls) nor of Newton, ml's
+  path, a fixed Hessian or BHHH from the constant-only fit, and with y constant within two groups it is
+  still off (2.000307 for 2, 4.00016 for 4).
+- Left in the packages: cd "" (16, refused on purpose), rangestat (6) and nsplit (4), SSC commands not
+  installed in Stata here.
