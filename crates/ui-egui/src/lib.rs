@@ -18,6 +18,7 @@ pub mod look;
 mod package_window;
 mod packages;
 mod result_table;
+mod script_file;
 mod softraster;
 mod softwindow;
 mod spec_dialog;

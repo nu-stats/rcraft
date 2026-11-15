@@ -5012,3 +5012,20 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   note, the workbook and the Markdown the table exactly, with the title and note. CI now installs gt.
   118 entries: 117 verified, 1 planned.
 
+## P7.3 first part: scripts open and save, 2026-11-15
+
+- File > **Open script…** (was greyed out; Ctrl+O), **Save script** (Ctrl+S) and **Save script as…**, each
+  session with its own script file (`ui-egui/src/script_file.rs`). An R script or a Stata do-file; a
+  do-file opens with Stata mode on, an R script with it off. A file is read as UTF-8 with a byte-order
+  mark dropped and Windows line endings made plain for the editor, and written back with the endings it
+  had. The Script pane's title is the file's name, with a dot while there are changes not saved; opening
+  another script then asks Save, Don't save or Cancel. Scripts over 20 MB are refused with the reason.
+- Checked: the reader and writer on files with a mark, Windows endings and bytes that are not UTF-8; and
+  the app, with real files, through every answer to the question (Cancel keeps all, Don't save leaves
+  the file as it was, Save writes the change first), Save as, and a file that cannot be read.
+- Not yet: outline, find and replace; closing RCraft does not ask about a script not saved; not tried
+  by hand in the running app (the file choosers are the system's own).
+- CI: officer and flextable are only tried on macOS (the pinned snapshot has no macOS binary of
+  gdtools, whose source build fails there); the Word export check skips with a note where they are
+  missing.
+

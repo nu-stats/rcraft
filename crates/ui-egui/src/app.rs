@@ -26,6 +26,7 @@ use crate::help_window::{HelpOut, HelpWindow};
 use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 use crate::package_window::{PackagesWindow, Tab as PackagesTab};
+use crate::script_file::ScriptFile;
 use crate::spec_dialog::{self, SpecAction, SpecDialog};
 use crate::stata_mode::{self, After, StataMode};
 
@@ -85,6 +86,7 @@ struct SessionUi {
     completions: Vec<String>,
     tab_pending: Option<TabAsk>,
     stata: StataMode,
+    script_file: ScriptFile,
 }
 
 impl SessionUi {
@@ -123,6 +125,7 @@ impl SessionUi {
             completions: Vec::new(),
             tab_pending: None,
             stata: StataMode::default(),
+            script_file: ScriptFile::unnamed(SCRIPT_START),
         }
     }
 }
@@ -197,6 +200,18 @@ enum Action {
     CopyScript,
     SetAccent(Accent),
     SetTheme(egui::ThemePreference),
+    /// File > Open script... (asks first when the script has changes not saved).
+    OpenScript,
+    /// Open this script file (after any question).
+    OpenScriptPath(std::path::PathBuf),
+    /// File > Save script: to its file, or as a new one.
+    SaveScript,
+    /// File > Save script as...
+    SaveScriptAs,
+    /// Write the script to this file.
+    SaveScriptTo(std::path::PathBuf),
+    /// The answer to "save the changes first?": save, don't, or cancel.
+    ScriptAnswer(Option<bool>),
     Quit,
 }
 
@@ -265,6 +280,19 @@ pub struct App {
     stata: StataMode,
     /// Run my do-file (P2C).
     dofile: DoFileWindow,
+    /// The Script Editor's file (P7.3), for the session shown.
+    script_file: ScriptFile,
+    /// The script has changes not saved and another is about to replace it.
+    script_ask: Option<ScriptAsk>,
+}
+
+/// What waits for the answer to "save the script's changes first?".
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ScriptAsk {
+    /// Choose a script to open.
+    Choose,
+    /// Open this file.
+    Open(std::path::PathBuf),
 }
 
 impl App {
@@ -319,6 +347,8 @@ impl App {
             keep_settings: true,
             stata: StataMode::default(),
             dofile: DoFileWindow::default(),
+            script_file: ScriptFile::unnamed(SCRIPT_START),
+            script_ask: None,
         }
     }
 
@@ -366,6 +396,7 @@ impl App {
         swap(&mut self.completions, &mut other.completions);
         swap(&mut self.tab_pending, &mut other.tab_pending);
         swap(&mut self.stata, &mut other.stata);
+        swap(&mut self.script_file, &mut other.script_file);
         if let Some(slot) = self.sessions.get_mut(i) {
             *slot = other;
         }
@@ -927,8 +958,148 @@ impl App {
                     }
                 }
             }
+            Action::OpenScript => {
+                if self.script_file.is_changed(&self.script) {
+                    self.script_ask = Some(ScriptAsk::Choose);
+                } else if let Some(path) = self.choose_script() {
+                    self.perform(ctx, Action::OpenScriptPath(path));
+                }
+            }
+            Action::OpenScriptPath(path) => {
+                if self.script_file.is_changed(&self.script) {
+                    self.script_ask = Some(ScriptAsk::Open(path));
+                    return;
+                }
+                match ScriptFile::open(&path) {
+                    Ok(opened) => {
+                        let stata = opened.file.is_stata();
+                        self.script = opened.text;
+                        self.script_file = opened.file;
+                        if stata != self.stata.on {
+                            self.stata.on = stata;
+                            self.completions.clear();
+                        }
+                        self.message = None;
+                    }
+                    Err(e) => self.message = Some(e),
+                }
+            }
+            Action::SaveScript => match self.script_file.path().map(|p| p.to_path_buf()) {
+                Some(path) => self.perform(ctx, Action::SaveScriptTo(path)),
+                None => self.perform(ctx, Action::SaveScriptAs),
+            },
+            Action::SaveScriptAs => {
+                let (kind, ext) = if self.stata.on {
+                    ("Stata do-file", "do")
+                } else {
+                    ("R script", "R")
+                };
+                let name = self
+                    .script_file
+                    .path()
+                    .and_then(|p| p.file_name())
+                    .map_or_else(
+                        || format!("script.{ext}"),
+                        |n| n.to_string_lossy().into_owned(),
+                    );
+                let mut chooser = rfd::FileDialog::new()
+                    .set_title("Save script")
+                    .set_file_name(&name)
+                    .add_filter(kind, &[ext]);
+                if let Some(dir) = self.script_folder() {
+                    chooser = chooser.set_directory(dir);
+                }
+                if let Some(path) = chooser.save_file() {
+                    self.perform(ctx, Action::SaveScriptTo(path));
+                }
+            }
+            Action::SaveScriptTo(path) => {
+                let text = self.script.clone();
+                self.message = self.script_file.save(&path, &text).err();
+            }
+            Action::ScriptAnswer(answer) => {
+                let Some(waiting) = self.script_ask.take() else {
+                    return;
+                };
+                let Some(save_first) = answer else {
+                    return;
+                };
+                if save_first {
+                    self.perform(ctx, Action::SaveScript);
+                    // not saved (cancelled or failed): nothing is replaced
+                    if self.script_file.is_changed(&self.script) {
+                        return;
+                    }
+                } else {
+                    // the changes are let go
+                    self.script_file = ScriptFile::unnamed(&self.script);
+                }
+                match waiting {
+                    ScriptAsk::Open(path) => self.perform(ctx, Action::OpenScriptPath(path)),
+                    ScriptAsk::Choose => {
+                        if let Some(path) = self.choose_script() {
+                            self.perform(ctx, Action::OpenScriptPath(path));
+                        }
+                    }
+                }
+            }
             Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
+    }
+
+    /// Where the script's file choosers start: its own folder, or R's.
+    fn script_folder(&self) -> Option<std::path::PathBuf> {
+        self.script_file
+            .path()
+            .and_then(|p| p.parent())
+            .map(|p| p.to_path_buf())
+            .or_else(|| {
+                self.engine()
+                    .and_then(|e| e.working_dir())
+                    .map(std::path::PathBuf::from)
+            })
+    }
+
+    /// File > Open script...: an R script or a Stata do-file.
+    fn choose_script(&self) -> Option<std::path::PathBuf> {
+        let mut chooser = rfd::FileDialog::new()
+            .set_title("Open script")
+            .add_filter("R script or Stata do-file", &["R", "r", "do", "doh"])
+            .add_filter("All files", &["*"]);
+        if let Some(dir) = self.script_folder() {
+            chooser = chooser.set_directory(dir);
+        }
+        chooser.pick_file()
+    }
+
+    /// Asks whether to save the script's changes before another replaces it.
+    fn script_question(&mut self, ctx: &egui::Context, out: &mut Vec<Action>) {
+        if self.script_ask.is_none() {
+            return;
+        }
+        let name = self
+            .script_file
+            .title(&self.script)
+            .trim_end_matches(" •")
+            .to_string();
+        egui::Window::new("Save the script?")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                ui.label(format!("{name} has changes that are not saved."));
+                ui.horizontal(|ui| {
+                    if ui.button("Save").clicked() {
+                        out.push(Action::ScriptAnswer(Some(true)));
+                    }
+                    if ui.button("Don't save").clicked() {
+                        out.push(Action::ScriptAnswer(Some(false)));
+                    }
+                    if ui.button("Cancel").clicked() {
+                        out.push(Action::ScriptAnswer(None));
+                    }
+                });
+            });
     }
 }
 
@@ -1369,6 +1540,8 @@ impl App {
             ctx.request_repaint();
         }
         dofile_out.extend(self.dofile.show(ctx, &pal, &session));
+        // save the script's changes before another replaces them?
+        self.script_question(ctx, &mut actions);
         if self.dofile.is_running() {
             ctx.request_repaint_after(Duration::from_millis(30));
         }
@@ -1517,7 +1690,18 @@ impl App {
                     out.push(Action::OpenDoFile);
                     ui.close_menu();
                 }
-                ui.add_enabled(false, egui::Button::new("Open script…"));
+                if ui.button("Open script…").clicked() {
+                    out.push(Action::OpenScript);
+                    ui.close_menu();
+                }
+                if ui.button("Save script").clicked() {
+                    out.push(Action::SaveScript);
+                    ui.close_menu();
+                }
+                if ui.button("Save script as…").clicked() {
+                    out.push(Action::SaveScriptAs);
+                    ui.close_menu();
+                }
                 ui.separator();
                 let has_data = self
                     .dataset
@@ -1872,8 +2056,19 @@ Click to choose another folder"
 
     fn script_pane(&mut self, ui: &mut egui::Ui, pal: &Palette, busy: bool, out: &mut Vec<Action>) {
         let stata = self.stata.on;
+        // Ctrl+S saves the script, Ctrl+O opens one
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::S)) {
+            out.push(Action::SaveScript);
+        }
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::O)) {
+            out.push(Action::OpenScript);
+        }
         ui.horizontal(|ui| {
-            pane_title(ui, pal, "Script");
+            let title = self.script_file.title(&self.script);
+            let label = ui.label(RichText::new(&title).strong().color(pal.dim));
+            if let Some(path) = self.script_file.path() {
+                label.on_hover_text(path.display().to_string());
+            }
             stata_switch(ui, stata, out);
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 let run_all = ui.add_enabled(!busy, egui::Button::new("Run all"));
@@ -4299,5 +4494,78 @@ mod tests {
             "{}",
             newest_text(&app)
         );
+    }
+
+    /// P7.3: File > Open script and Save script, with real files: an R script
+    /// with Windows line endings and a do-file (which turns Stata mode on);
+    /// changes not saved are asked about before another script replaces them
+    /// (Cancel keeps all, Don't save lets them go, Save writes them first);
+    /// Save as gives the script a new file.
+    #[test]
+    fn scripts_open_and_save_and_changes_are_not_lost_unasked() {
+        let dir = std::env::temp_dir().join(format!("rcraft-scripts-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(std::fs::create_dir_all(&dir).is_ok());
+        let (a, b, c) = (dir.join("a.R"), dir.join("b.do"), dir.join("c.R"));
+        assert!(std::fs::write(&a, "x <- 1\r\ny <- 2\r\n").is_ok());
+        assert!(std::fs::write(&b, "sysuse auto\nsummarize price\n").is_ok());
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings = false;
+
+        // nothing typed yet: opens at once, Windows endings made plain
+        app.perform(&ctx, Action::OpenScriptPath(a.clone()));
+        assert_eq!(app.script, "x <- 1\ny <- 2\n");
+        assert_eq!(app.script_file.title(&app.script), "a.R");
+        assert!(!app.stata.on);
+
+        // changed: opening another asks, and Cancel keeps everything
+        app.script.push_str("z <- 3\n");
+        assert_eq!(app.script_file.title(&app.script), "a.R •");
+        app.perform(&ctx, Action::OpenScriptPath(b.clone()));
+        assert_eq!(app.script_ask, Some(ScriptAsk::Open(b.clone())));
+        app.perform(&ctx, Action::ScriptAnswer(None));
+        assert_eq!(app.script_ask, None);
+        assert!(app.script.ends_with("z <- 3\n"));
+
+        // Don't save: the do-file opens in Stata mode, a.R is as it was on disk
+        app.perform(&ctx, Action::OpenScriptPath(b.clone()));
+        app.perform(&ctx, Action::ScriptAnswer(Some(false)));
+        assert_eq!(app.script, "sysuse auto\nsummarize price\n");
+        assert!(app.stata.on);
+        assert_eq!(
+            std::fs::read(&a).unwrap_or_default(),
+            b"x <- 1\r\ny <- 2\r\n".to_vec()
+        );
+
+        // Save: the do-file's change is written before a.R replaces it
+        app.script.push_str("regress price mpg\n");
+        app.perform(&ctx, Action::OpenScriptPath(a.clone()));
+        app.perform(&ctx, Action::ScriptAnswer(Some(true)));
+        assert_eq!(
+            std::fs::read_to_string(&b).unwrap_or_default(),
+            "sysuse auto\nsummarize price\nregress price mpg\n"
+        );
+        assert_eq!(app.script, "x <- 1\ny <- 2\n");
+        assert!(!app.stata.on);
+
+        // Save as: a new file, which the script then belongs to, keeping a.R's endings out of it
+        app.script.push_str("w <- 4\n");
+        app.perform(&ctx, Action::SaveScriptTo(c.clone()));
+        assert_eq!(
+            std::fs::read_to_string(&c).unwrap_or_default(),
+            "x <- 1\ny <- 2\nw <- 4\n"
+        );
+        assert_eq!(app.script_file.title(&app.script), "c.R");
+        assert_eq!(app.message, None);
+
+        // a file that cannot be read says why and leaves the script alone
+        app.perform(&ctx, Action::OpenScriptPath(dir.join("missing.R")));
+        assert!(app
+            .message
+            .as_deref()
+            .is_some_and(|m| m.contains("missing.R")));
+        assert!(app.script.ends_with("w <- 4\n"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

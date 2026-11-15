@@ -597,6 +597,9 @@ Each family is its own set of dialogs over a named CRAN package.
   the file's ending, with a title and the Model table's note; .docx through flextable and officer,
   installed with the user's yes the same day. Not yet: one document built up across a session)
 - P7.3 Script Editor: run selection, outline, find and replace
+  (run selection was done with P2.4; 2026-11-15: File > Open script (Ctrl+O; a do-file opens in Stata
+  mode), Save script (Ctrl+S) and Save script as, the file's name in the pane with a dot for changes
+  not saved, and a question before they would be lost. Not yet: outline, find and replace)
 - P7.4 Export the session as an R script, an R Markdown or Quarto document,
   or a Quarto project
 - P7.5 Project files: data, script, log and package snapshot together
