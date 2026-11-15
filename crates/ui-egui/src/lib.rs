@@ -19,6 +19,7 @@ mod package_window;
 mod packages;
 mod result_table;
 mod script_file;
+mod script_tools;
 mod softraster;
 mod softwindow;
 mod spec_dialog;

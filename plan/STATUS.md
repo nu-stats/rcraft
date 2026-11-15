@@ -5029,3 +5029,19 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   gdtools, whose source build fails there); the Word export check skips with a note where they are
   missing.
 
+## P7.3 done: find and replace, outline, 2026-11-15
+
+- The Script pane has **Find** (Ctrl+F; Ctrl+H with the Replace row): match case, whole word (not part of
+  a longer name), Next and Previous wrapping round the script, Enter for the next and Shift+Enter for the
+  one before, Replace (the selected match, then the next is selected) and Replace all (how many it
+  replaced); what is selected when it opens is what it looks for; Esc closes it.
+- **Outline** lists the script's sections, comment lines ending in four or more `-`, `=` or `#`
+  (`# Data ----`, `## Models ====`, `* Setup ----` in a do-file, more marks deeper), and functions
+  defined at the start of a line (`fit <- function(`); a pick puts the cursor at its line.
+- The text work is in `ui-egui/src/script_tools.rs`, by characters as the editor counts them. Checked:
+  matches with case, whole words and letters that are not ASCII; next and previous at each place and
+  wrapping; one and all replaced (a replacement that holds the text looked for does not loop); the
+  outline's sections, depths and functions; and the window's actions in turn on one script.
+- Not tried by hand: the bar in the running app, and whether the editor scrolls to a match far down a
+  long script (the cursor is moved there; egui scrolls when the editor next has the focus).
+

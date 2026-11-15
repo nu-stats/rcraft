@@ -27,6 +27,7 @@ use crate::import_dialog::{DialogAction, ImportDialog};
 use crate::look::{self, Accent, Palette};
 use crate::package_window::{PackagesWindow, Tab as PackagesTab};
 use crate::script_file::ScriptFile;
+use crate::script_tools;
 use crate::spec_dialog::{self, SpecAction, SpecDialog};
 use crate::stata_mode::{self, After, StataMode};
 
@@ -47,6 +48,32 @@ enum SideTab {
 
 const COMMAND_ID: &str = "command-line";
 const SCRIPT_ID: &str = "script-editor";
+/// The find bar's text box.
+const FIND_ID: &str = "script-find";
+
+/// What is selected in the Script Editor, as character positions, in order.
+fn editor_selection(ctx: &egui::Context) -> Option<(usize, usize)> {
+    egui::TextEdit::load_state(ctx, egui::Id::new(SCRIPT_ID))
+        .and_then(|s| s.cursor.char_range())
+        .map(|r| {
+            let (a, b) = (r.primary.index, r.secondary.index);
+            (a.min(b), a.max(b))
+        })
+}
+
+/// Selects characters `a` to `b` in the Script Editor and gives it the focus.
+fn select_in_editor(ctx: &egui::Context, a: usize, b: usize) {
+    let id = egui::Id::new(SCRIPT_ID);
+    let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::two(
+            egui::text::CCursor::new(a),
+            egui::text::CCursor::new(b),
+        )));
+    state.store(ctx, id);
+    ctx.memory_mut(|m| m.request_focus(id));
+}
 /// History lines drawn (the newest); the rest stay in the engine.
 const HISTORY_SHOWN: usize = 1000;
 
@@ -212,6 +239,16 @@ enum Action {
     SaveScriptTo(std::path::PathBuf),
     /// The answer to "save the changes first?": save, don't, or cancel.
     ScriptAnswer(Option<bool>),
+    /// Show the find bar, with the Replace row or not.
+    OpenFind(bool),
+    CloseFind,
+    /// Select the next (or previous) match after the cursor.
+    FindStep(bool),
+    /// Replace the selected match and select the next one.
+    ReplaceOne,
+    ReplaceAll,
+    /// Put the cursor at the start of this line of the script (the outline).
+    GoToLine(usize),
     Quit,
 }
 
@@ -284,6 +321,20 @@ pub struct App {
     script_file: ScriptFile,
     /// The script has changes not saved and another is about to replace it.
     script_ask: Option<ScriptAsk>,
+    /// The Script Editor's find and replace bar (P7.3).
+    find: FindBar,
+}
+
+/// The Script Editor's find and replace bar.
+#[derive(Debug, Clone, Default)]
+struct FindBar {
+    open: bool,
+    /// The Replace row is shown too.
+    replace: bool,
+    search: script_tools::Search,
+    with: String,
+    /// What the last step found or did, in words.
+    note: Option<String>,
 }
 
 /// What waits for the answer to "save the script's changes first?".
@@ -349,6 +400,7 @@ impl App {
             dofile: DoFileWindow::default(),
             script_file: ScriptFile::unnamed(SCRIPT_START),
             script_ask: None,
+            find: FindBar::default(),
         }
     }
 
@@ -1043,7 +1095,128 @@ impl App {
                     }
                 }
             }
+            Action::OpenFind(replace) => {
+                self.find.open = true;
+                self.find.replace = replace;
+                self.find.note = None;
+                // what is selected is what to look for
+                if let Some((a, b)) = editor_selection(ctx) {
+                    if a != b {
+                        let picked: String = self.script.chars().skip(a).take(b - a).collect();
+                        if !picked.contains('\n') {
+                            self.find.search.needle = picked;
+                        }
+                    }
+                }
+                ctx.memory_mut(|m| m.request_focus(egui::Id::new(FIND_ID)));
+            }
+            Action::CloseFind => {
+                self.find.open = false;
+                self.find.note = None;
+                ctx.memory_mut(|m| m.request_focus(egui::Id::new(SCRIPT_ID)));
+            }
+            Action::FindStep(forward) => {
+                let from = editor_selection(ctx).map_or(0, |(a, b)| if forward { b } else { a });
+                match self.find.search.next(&self.script, from, forward) {
+                    Some((a, b)) => {
+                        select_in_editor(ctx, a, b);
+                        let n = self.find.search.matches(&self.script).len();
+                        self.find.note = Some(if n == 1 {
+                            "1 found".into()
+                        } else {
+                            format!("{n} found")
+                        });
+                    }
+                    None => self.find.note = Some("Not found".into()),
+                }
+            }
+            Action::ReplaceOne => {
+                let selected = editor_selection(ctx);
+                let all = self.find.search.matches(&self.script);
+                match selected.filter(|r| all.contains(r)) {
+                    Some(range) => {
+                        let (text, end) =
+                            script_tools::replace_range(&self.script, range, &self.find.with);
+                        self.script = text;
+                        select_in_editor(ctx, end, end);
+                        self.perform(ctx, Action::FindStep(true));
+                    }
+                    // nothing found is selected yet: find it first
+                    None => self.perform(ctx, Action::FindStep(true)),
+                }
+            }
+            Action::ReplaceAll => {
+                let (text, n) =
+                    script_tools::replace_all(&self.script, &self.find.search, &self.find.with);
+                if n > 0 {
+                    self.script = text;
+                    select_in_editor(ctx, 0, 0);
+                }
+                self.find.note = Some(match n {
+                    0 => "Not found".into(),
+                    1 => "1 replaced".into(),
+                    n => format!("{n} replaced"),
+                });
+            }
+            Action::GoToLine(line) => {
+                let at = script_tools::line_start(&self.script, line);
+                select_in_editor(ctx, at, at);
+            }
             Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+        }
+    }
+
+    /// The find bar above the Script Editor.
+    fn find_bar(&mut self, ui: &mut egui::Ui, pal: &Palette, out: &mut Vec<Action>) {
+        if !self.find.open {
+            return;
+        }
+        ui.horizontal(|ui| {
+            ui.label("Find");
+            let field = ui.add(
+                egui::TextEdit::singleline(&mut self.find.search.needle)
+                    .id(egui::Id::new(FIND_ID))
+                    .desired_width(160.0),
+            );
+            if field.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
+                let back = ui.input(|i| i.modifiers.shift);
+                out.push(Action::FindStep(!back));
+                field.request_focus();
+            }
+            if field.has_focus() && ui.input(|i| i.key_pressed(Key::Escape)) {
+                out.push(Action::CloseFind);
+            }
+            ui.checkbox(&mut self.find.search.match_case, "Match case");
+            ui.checkbox(&mut self.find.search.whole_word, "Whole word");
+            if ui.button("Next").clicked() {
+                out.push(Action::FindStep(true));
+            }
+            if ui.button("Previous").clicked() {
+                out.push(Action::FindStep(false));
+            }
+            if let Some(note) = &self.find.note {
+                ui.label(RichText::new(note).small().color(pal.dim));
+            }
+            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                if ui.small_button("✕").on_hover_text("Close (Esc)").clicked() {
+                    out.push(Action::CloseFind);
+                }
+                if !self.find.replace && ui.small_button("Replace…").clicked() {
+                    self.find.replace = true;
+                }
+            });
+        });
+        if self.find.replace {
+            ui.horizontal(|ui| {
+                ui.label("Replace with");
+                ui.add(egui::TextEdit::singleline(&mut self.find.with).desired_width(160.0));
+                if ui.button("Replace").clicked() {
+                    out.push(Action::ReplaceOne);
+                }
+                if ui.button("Replace all").clicked() {
+                    out.push(Action::ReplaceAll);
+                }
+            });
         }
     }
 
@@ -2063,6 +2236,13 @@ Click to choose another folder"
         if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::O)) {
             out.push(Action::OpenScript);
         }
+        // Ctrl+F finds in the script, Ctrl+H replaces
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::F)) {
+            out.push(Action::OpenFind(false));
+        }
+        if ui.input_mut(|i| i.consume_key(Modifiers::COMMAND, Key::H)) {
+            out.push(Action::OpenFind(true));
+        }
         ui.horizontal(|ui| {
             let title = self.script_file.title(&self.script);
             let label = ui.label(RichText::new(&title).strong().color(pal.dim));
@@ -2089,8 +2269,31 @@ Click to choose another folder"
                     let r = self.stata.translation(&self.script).script();
                     ui.ctx().copy_text(r);
                 }
+                // the script's sections and functions; a pick moves the cursor there
+                let sections = script_tools::outline(&self.script);
+                if !sections.is_empty() {
+                    ui.menu_button("Outline", |ui| {
+                        for sec in &sections {
+                            let indent = "   ".repeat(sec.depth.saturating_sub(1).min(3));
+                            if ui.button(format!("{indent}{}", sec.title)).clicked() {
+                                out.push(Action::GoToLine(sec.line));
+                                ui.close_menu();
+                            }
+                        }
+                    })
+                    .response
+                    .on_hover_text("Sections (# Title ----) and functions in the script");
+                }
+                if ui
+                    .button("Find")
+                    .on_hover_text("Find and replace in the script (Ctrl+F, Ctrl+H)")
+                    .clicked()
+                {
+                    out.push(Action::OpenFind(false));
+                }
             });
         });
+        self.find_bar(ui, pal, out);
         let editor = egui::Id::new(SCRIPT_ID);
         // Tab in Stata mode completes the line up to the cursor, as on the
         // Command line (taken before the editor would insert a tab)
@@ -4567,5 +4770,65 @@ mod tests {
             .is_some_and(|m| m.contains("missing.R")));
         assert!(app.script.ends_with("w <- 4\n"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P7.3: find and replace in the Script Editor, and the outline, through
+    /// the window's actions: Next and Previous select each match in turn
+    /// (whole words, wrapping), Replace changes the selected match and moves
+    /// on, Replace all says how many, and an outline pick puts the cursor at
+    /// the start of its line.
+    #[test]
+    fn find_replace_and_the_outline_move_through_the_script() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings = false;
+        app.script = "# Models ----\nfit <- lm(y ~ x)\nfit2 <- 1\nsummary(fit)\n".into();
+        app.perform(&ctx, Action::OpenFind(true));
+        assert!(app.find.open && app.find.replace);
+        app.find.search.needle = "fit".into();
+        app.find.search.whole_word = true;
+
+        let at = |s: &str, from: usize| s.chars().skip(from).take(3).collect::<String>();
+        app.perform(&ctx, Action::FindStep(true));
+        let first = editor_selection(&ctx);
+        assert_eq!(first, Some((14, 17)), "{:?}", app.find.note);
+        assert_eq!(app.find.note.as_deref(), Some("2 found"));
+        app.perform(&ctx, Action::FindStep(true));
+        let second = editor_selection(&ctx).unwrap_or_default();
+        assert_eq!(at(&app.script, second.0), "fit");
+        assert!(second.0 > 30, "summary(fit), not fit2: {second:?}");
+        // wraps to the first, and back again
+        app.perform(&ctx, Action::FindStep(true));
+        assert_eq!(editor_selection(&ctx), Some((14, 17)));
+        app.perform(&ctx, Action::FindStep(false));
+        assert_eq!(editor_selection(&ctx), Some(second));
+
+        // Replace: the selected match, then the next is selected
+        app.find.with = "model".into();
+        app.perform(&ctx, Action::ReplaceOne);
+        assert!(app.script.ends_with("summary(model)\n"), "{}", app.script);
+        assert_eq!(editor_selection(&ctx), Some((14, 17)));
+        app.perform(&ctx, Action::ReplaceAll);
+        assert_eq!(
+            app.script,
+            "# Models ----\nmodel <- lm(y ~ x)\nfit2 <- 1\nsummary(model)\n"
+        );
+        assert_eq!(app.find.note.as_deref(), Some("1 replaced"));
+        app.perform(&ctx, Action::FindStep(true));
+        assert_eq!(app.find.note.as_deref(), Some("Not found"));
+
+        // the outline lists the section; a pick goes to its line
+        let sections = script_tools::outline(&app.script);
+        assert_eq!(sections.first().map(|s| s.title.as_str()), Some("Models"));
+        app.perform(&ctx, Action::GoToLine(2));
+        let line3 = "# Models ----\nmodel <- lm(y ~ x)\n".chars().count();
+        assert_eq!(editor_selection(&ctx), Some((line3, line3)));
+
+        // what is selected becomes what to look for
+        select_in_editor(&ctx, line3, line3 + 4);
+        app.perform(&ctx, Action::OpenFind(false));
+        assert_eq!(app.find.search.needle, "fit2");
+        app.perform(&ctx, Action::CloseFind);
+        assert!(!app.find.open);
     }
 }
