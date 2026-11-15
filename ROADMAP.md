@@ -595,7 +595,8 @@ Each family is its own set of dialogs over a named CRAN package.
   (first part 2026-11-15: Export table, for any data frame in the Objects pane (a Model table, say):
   .html, .rtf (which Word opens), .tex through gt, .xlsx through openxlsx2, .md in base R, chosen by
   the file's ending, with a title and the Model table's note; .docx through flextable and officer,
-  installed with the user's yes the same day. Not yet: one document built up across a session)
+  installed with the user's yes the same day; and the session's report, built up from the Reports
+  menu (text, plots) and a data frame's menu (tables), saved as .docx or .html. P7.2 is done)
 - P7.3 Script Editor: run selection, outline, find and replace
   (run selection was done with P2.4; 2026-11-15: File > Open script (Ctrl+O; a do-file opens in Stata
   mode), Save script (Ctrl+S) and Save script as, the file's name in the pane with a dot for changes

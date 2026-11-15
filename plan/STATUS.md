@@ -5062,3 +5062,19 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Not checked: rendering (no Quarto or pandoc here); the output of a command is not in the document
   until it is rendered.
 
+## P7.2 done: the session's report, 2026-11-15
+
+- A new **Reports** menu: Add text to report, Add plot to report (the newest plot or one named in the
+  Graph tab, at a size in inches), Report contents, Save report and Clear report; a data frame's menu in
+  Objects has **Add table to report** (a Model table keeps its note). The report is an R list,
+  `rcraft_report`, so every step is ordinary R in the script and log.
+- **Save report** writes, in the order added, a Word document (.docx, officer and flextable: headings,
+  paragraphs, tables with their notes, plots drawn again from R's record of them) or a web page (.html
+  with gt's tables and the plots as PNG files in `<name>_files` beside it; text escaped). An empty
+  report is refused in words; a file there is not written over unless asked.
+- Checked in R 4.4.3: a table with a note and a cell needing escapes, the newest plot and a paragraph;
+  the Word file read back with officer holds the title, headings, text as written, cells and note, and
+  one picture; the web page holds them escaped, its plot a real PNG; the empty report is refused. The
+  Reports dialogs open with no data frame. 124 entries: 123 verified, 1 planned.
+- Not checked: opening the files in Word or a browser by hand.
+

@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use rcraft_catalog::plot_export::EXPORT_PLOT;
 use rcraft_engine::{Engine, Item, Outcome, Source};
-use rcraft_rcodegen::dialog::{Context, Style};
+use rcraft_rcodegen::dialog::{Context, Spec, Style};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
 
 fn engine() -> Option<Engine> {
@@ -433,7 +433,7 @@ fn a_device_that_writes_no_file_is_reported_not_called_success() {
 }
 
 /// Base R's grDevices only.
-const PACKAGES: &[&str] = &[];
+const PACKAGES: &[&str] = &["gt", "flextable", "officer"];
 
 /// Export plot: the PNG it writes is, byte for byte, the plot drawn straight
 /// onto a PNG device of the same size by hand; so is a second export of an
@@ -475,4 +475,130 @@ fn an_exported_png_is_the_plot_drawn_by_hand_at_that_size() {
         a.len(),
         b.len()
     );
+}
+
+/// The session report (P7.2): a table with a note, the newest plot and a
+/// paragraph added through the Reports dialogs, then saved as a Word document
+/// and as a web page; each read back holds the headings, the text as written,
+/// the table's cells and note, and the plot as a picture. An empty report is
+/// refused in words.
+#[test]
+fn the_report_gathers_tables_plots_and_text_into_one_document() {
+    use rcraft_catalog::report::{
+        ADD_PLOT, ADD_TABLE, ADD_TEXT, CLEAR_REPORT, REPORT_CONTENTS, SAVE_REPORT,
+    };
+    let Some(mut e) = engine() else { return };
+    for package in ["gt", "flextable", "officer"] {
+        let (o, _, _) = run(
+            &mut e,
+            Source::Typed,
+            &format!("stopifnot(requireNamespace('{package}', quietly = TRUE))"),
+        );
+        if o != Outcome::Ok {
+            eprintln!("skipped: the R package {package} is not installed");
+            return;
+        }
+    }
+    let dir = Folder::new("report");
+    let (o, drawn, text) = run(&mut e, Source::Typed, "plot(1:10, main = 'ten')");
+    assert_eq!((o, drawn.len()), (Outcome::Ok, 1), "{text}");
+    let (o, _, text) = run(
+        &mut e,
+        Source::Typed,
+        "d <- data.frame(a = c(1.5, 2), b = c('x', '<y>')); attr(d, 'note') <- 'a note'",
+    );
+    assert_eq!(o, Outcome::Ok, "{text}");
+    let dialog = |e: &mut Engine, spec: &Spec, data: &str, set: &[(&str, &str)], replace: bool| {
+        let ctx = Context {
+            dataset: data.into(),
+            frames: Vec::new(),
+            columns: Vec::new(),
+        };
+        let mut values = spec.defaults(&ctx);
+        for (id, text) in set {
+            values.set_text(id, *text);
+        }
+        values.set_flag("replace", replace);
+        let code = spec
+            .generate(&ctx, &values, Style::Base)
+            .unwrap_or_else(|p| panic!("{p:?}"));
+        run(e, Source::Menu(spec.menu.into()), &code)
+    };
+    let (o, _, text) = dialog(&mut e, &ADD_TABLE, "d", &[("title", "Table 1")], false);
+    assert_eq!(o, Outcome::Ok, "{text}");
+    assert!(text.contains("The report has 1 part."), "{text}");
+    let (o, _, text) = dialog(
+        &mut e,
+        &ADD_PLOT,
+        "(report)",
+        &[("title", "Figure 1")],
+        false,
+    );
+    assert_eq!(o, Outcome::Ok, "{text}");
+    let (o, _, text) = dialog(
+        &mut e,
+        &ADD_TEXT,
+        "(report)",
+        &[
+            ("title", "Notes"),
+            ("text", "Values & <tags> stay as written."),
+        ],
+        false,
+    );
+    assert_eq!(o, Outcome::Ok, "{text}");
+    assert!(text.contains("The report has 3 parts."), "{text}");
+    let (_, _, text) = dialog(&mut e, &REPORT_CONTENTS, "(report)", &[], false);
+    for word in ["table", "plot", "text", "Table 1", "Figure 1", "Notes"] {
+        assert!(text.contains(word), "{word}: {text}");
+    }
+
+    let docx = dir.file("r.docx");
+    let (o, plots, text) = dialog(
+        &mut e,
+        &SAVE_REPORT,
+        "(report)",
+        &[("file", &docx), ("title", "My report")],
+        false,
+    );
+    assert_eq!(o, Outcome::Ok, "{text}");
+    assert!(
+        plots.is_empty(),
+        "saving draws no new plot in the Graph tab"
+    );
+    let (o, _, text) = run(
+        &mut e,
+        Source::Typed,
+        &format!(
+            "local({{ s <- officer::docx_summary(officer::read_docx('{docx}')); x <- s$text[!is.na(s$text)]; \
+             media <- grep('^word/media/', utils::unzip('{docx}', list = TRUE)$Name, value = TRUE); \
+             stopifnot(all(c('My report', 'Table 1', 'Figure 1', 'Notes', \
+             'Values & <tags> stay as written.', 'a note', '1.5', '<y>') %in% x), length(media) == 1) }})"
+        ),
+    );
+    assert_eq!(o, Outcome::Ok, "{text}");
+
+    let html = dir.file("r.html");
+    let (o, _, text) = dialog(&mut e, &SAVE_REPORT, "(report)", &[("file", &html)], false);
+    assert_eq!(o, Outcome::Ok, "{text}");
+    let page = String::from_utf8_lossy(&dir.bytes("r.html")).into_owned();
+    for part in [
+        "<h2>Table 1</h2>",
+        "<h2>Figure 1</h2>",
+        "<p>Values &amp; &lt;tags&gt; stay as written.</p>",
+        "&lt;y&gt;",
+        "a note",
+        "<img src=\"r_files/plot1.png\"",
+    ] {
+        assert!(page.contains(part), "{part} not in the page");
+    }
+    assert!(png_size(&dir.bytes("r_files/plot1.png")).is_some_and(|(w, _)| w > 0));
+    // there now: not written over unless asked
+    let (o, _, _) = dialog(&mut e, &SAVE_REPORT, "(report)", &[("file", &html)], false);
+    assert_eq!(o, Outcome::Error);
+
+    let (o, _, text) = dialog(&mut e, &CLEAR_REPORT, "(report)", &[], false);
+    assert_eq!(o, Outcome::Ok, "{text}");
+    let (o, _, text) = dialog(&mut e, &SAVE_REPORT, "(report)", &[("file", &html)], true);
+    assert_eq!(o, Outcome::Error);
+    assert!(text.contains("the report is empty"), "{text}");
 }

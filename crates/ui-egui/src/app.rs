@@ -226,6 +226,8 @@ enum Action {
     OpenObjectSpec(&'static Spec, String),
     /// Open Export plot on this plot (its file name; empty: the newest).
     OpenPlotExport(String),
+    /// A Reports menu dialog, which needs no data frame (P7.2).
+    OpenFreeSpec(&'static Spec),
     /// Close this data frame's tab (the data frame stays in R).
     CloseFrame(String),
     SetView(View),
@@ -944,6 +946,17 @@ impl App {
                     spec,
                     rcraft_rcodegen::dialog::Context {
                         dataset: name,
+                        frames: Vec::new(),
+                        columns: Vec::new(),
+                    },
+                );
+            }
+            Action::OpenFreeSpec(spec) => {
+                // the Reports menu's dialogs need no data frame
+                self.spec_dialog.open(
+                    spec,
+                    rcraft_rcodegen::dialog::Context {
+                        dataset: "(report)".into(),
                         frames: Vec::new(),
                         columns: Vec::new(),
                     },
@@ -2077,6 +2090,24 @@ impl App {
                     out.push(Action::OpenPlotExport(String::new()));
                     ui.close_menu();
                 }
+            });
+            ui.menu_button("Reports", |ui| {
+                for spec in rcraft_catalog::report::REPORT_SPECS {
+                    if ui
+                        .button(format!("{}…", spec.entry))
+                        .on_hover_text(spec.about)
+                        .clicked()
+                    {
+                        out.push(Action::OpenFreeSpec(spec));
+                        ui.close_menu();
+                    }
+                }
+                ui.separator();
+                ui.label(
+                    RichText::new("A table goes in from its data frame's menu in Objects")
+                        .small()
+                        .color(pal.dim),
+                );
             });
             ui.menu_button("Packages", |ui| {
                 if ui.button("Find and install…").clicked() {
@@ -3488,11 +3519,17 @@ impl App {
             .chain(rcraft_catalog::postest::MODEL_SPECS)
             .chain(rcraft_catalog::report::MODEL_REPORTS)
             .chain(rcraft_catalog::report::TABLE_REPORTS)
+            .chain(rcraft_catalog::report::REPORT_SPECS)
             .chain(rcraft_catalog::save::SPECS)
             .chain(rcraft_catalog::plot_export::PLOT_SPECS)
             .find(|s| s.entry.eq_ignore_ascii_case(entry))
             .ok_or_else(|| format!("no dialog called {entry}"))?;
-        if spec.entry == rcraft_catalog::plot_export::EXPORT_PLOT.entry {
+        if rcraft_catalog::report::REPORT_SPECS
+            .iter()
+            .any(|s| s.entry == spec.entry)
+        {
+            self.perform(ctx, Action::OpenFreeSpec(spec));
+        } else if spec.entry == rcraft_catalog::plot_export::EXPORT_PLOT.entry {
             // a plot needs no data frame
             self.perform(ctx, Action::OpenPlotExport(String::new()));
         } else if rcraft_catalog::data::is_object_menu(spec.menu) {
@@ -5010,5 +5047,27 @@ mod tests {
         assert_eq!(file_stem_of("Session 2: test/run"), "Session_2__test_run");
         assert_eq!(file_stem_of("  ::  "), "session");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P7.2: the Reports menu's dialogs open with no data frame shown.
+    #[test]
+    fn the_reports_dialogs_need_no_data_frame() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings = false;
+        assert_eq!(app.dataset, None);
+        for spec in rcraft_catalog::report::REPORT_SPECS {
+            assert!(
+                app.open_dialog(&ctx, spec.entry, &[]).is_ok(),
+                "{}",
+                spec.entry
+            );
+            assert_eq!(
+                app.spec_dialog.dataset(),
+                Some("(report)"),
+                "{}",
+                spec.entry
+            );
+        }
     }
 }

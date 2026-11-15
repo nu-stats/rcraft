@@ -403,7 +403,329 @@ pub const EXPORT_TABLE: Spec = Spec {
 };
 
 /// The Reports dialogs that work on a data frame in the Objects pane.
-pub const TABLE_REPORTS: &[&Spec] = &[&EXPORT_TABLE];
+pub const TABLE_REPORTS: &[&Spec] = &[&EXPORT_TABLE, &ADD_TABLE];
+
+// ---- The session report (P7.2): tables, plots and text gathered into one document ----
+
+/// R that gives the report so far (an empty list if there is none yet).
+const REPORT_SO_FAR: &str =
+    "if (exists(\"rcraft_report\", envir = globalenv(), inherits = FALSE)) \
+     get(\"rcraft_report\", envir = globalenv()) else list()";
+
+/// R that adds `part` (an R expression for a list) to the report and says how
+/// many parts it has.
+fn add_part(part: &str) -> String {
+    format!(
+        "assign(\"rcraft_report\", c({REPORT_SO_FAR}, list({part})), envir = globalenv())\n\
+         cat(\"The report has \", length(rcraft_report), \" part\", \
+         if (length(rcraft_report) == 1) \"\" else \"s\", \". Reports > Save report writes it.\\n\", sep = \"\")"
+    )
+}
+
+fn part_title(a: &Args) -> String {
+    rcraft_rcodegen::r_string(a.values.text("title").trim())
+}
+
+const PART_TITLE: Widget = Widget::Text {
+    id: "title",
+    label: "Heading",
+    default: TextDefault::Empty,
+    rule: TextRule::Any,
+    hint: "Optional: a heading above it in the report.",
+};
+
+pub const ADD_TABLE: Spec = Spec {
+    entry: "Add table to report",
+    menu: "Objects > Add table to report",
+    about: "Add this data frame (a Model table, say) to the session's report, as it is now; \
+            Reports > Save report writes the report as a Word document or a web page.",
+    widgets: &[PART_TITLE],
+    needs: &[],
+    styles: BASE,
+    check: |_| Vec::new(),
+    code: |a, _| {
+        format!(
+            "stopifnot(\"only a data frame can go in the report as a table\" = is.data.frame({d}))\n{}",
+            add_part(&format!(
+                "list(kind = \"table\", title = {}, value = {d})",
+                part_title(a),
+                d = a.data()
+            )),
+            d = a.data()
+        )
+    },
+};
+
+pub const ADD_PLOT: Spec = Spec {
+    entry: "Add plot to report",
+    menu: "Reports > Add plot to report",
+    about: "Add a plot to the session's report: the newest one, or one named in the Graph tab. \
+            It is drawn again at the size given when the report is saved.",
+    widgets: &[
+        Widget::Text {
+            id: "plot",
+            label: "Plot",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Empty for the newest plot, or its name in the Graph tab.",
+        },
+        PART_TITLE,
+        Widget::Text {
+            id: "width",
+            label: "Width (inches)",
+            default: TextDefault::Fixed("6"),
+            rule: TextRule::Number,
+            hint: "",
+        },
+        Widget::Text {
+            id: "height",
+            label: "Height (inches)",
+            default: TextDefault::Fixed("4"),
+            rule: TextRule::Number,
+            hint: "",
+        },
+    ],
+    needs: &[],
+    styles: BASE,
+    check: |a| {
+        let ok = |id: &str| {
+            a.number(id)
+                .parse::<f64>()
+                .is_ok_and(|v| (0.5..=20.0).contains(&v))
+        };
+        let mut out = Vec::new();
+        for id in ["width", "height"] {
+            if !ok(id) {
+                out.push(Problem::new(id, "Type a size from 0.5 to 20 inches."));
+            }
+        }
+        out
+    },
+    code: |a, _| {
+        let lookup = if a.name_text("plot").is_empty() {
+            "if (length(plots)) plots[[length(plots)]]".to_string()
+        } else {
+            format!(
+                "plots[[{}]]",
+                rcraft_rcodegen::r_string(a.name_text("plot"))
+            )
+        };
+        format!(
+            "local({{\n  plots <- getOption(\"rcraft.plots\")\n  rec <- {lookup}\n  \
+             if (is.null(rec)) stop(\"that plot is no longer kept; draw it again, then add it\")\n  \
+             {}\n}})",
+            add_part(&format!(
+                "list(kind = \"plot\", title = {}, value = rec, width = {}, height = {})",
+                part_title(a),
+                a.number("width"),
+                a.number("height")
+            ))
+            .replace('\n', "\n  ")
+        )
+    },
+};
+
+pub const ADD_TEXT: Spec = Spec {
+    entry: "Add text to report",
+    menu: "Reports > Add text to report",
+    about: "Add a paragraph of text, under an optional heading, to the session's report.",
+    widgets: &[
+        PART_TITLE,
+        Widget::Text {
+            id: "text",
+            label: "Text",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "",
+        },
+    ],
+    needs: &[],
+    styles: BASE,
+    check: |a| {
+        if a.values.text("text").trim().is_empty() && a.values.text("title").trim().is_empty() {
+            vec![Problem::new(
+                "text",
+                "Type the text, or at least a heading.",
+            )]
+        } else {
+            Vec::new()
+        }
+    },
+    code: |a, _| {
+        add_part(&format!(
+            "list(kind = \"text\", title = {}, value = {})",
+            part_title(a),
+            rcraft_rcodegen::r_string(a.values.text("text").trim())
+        ))
+    },
+};
+
+pub const REPORT_CONTENTS: Spec = Spec {
+    entry: "Report contents",
+    menu: "Reports > Report contents",
+    about: "List what is in the session's report so far, in order.",
+    widgets: &[],
+    needs: &[],
+    styles: BASE,
+    check: |_| Vec::new(),
+    code: |_, _| {
+        format!(
+            "local({{\n  rep <- {REPORT_SO_FAR}\n  \
+             if (!length(rep)) cat(\"The report is empty.\\n\") else \
+             print(data.frame(part = seq_along(rep), kind = vapply(rep, `[[`, \"\", \"kind\"), \
+             heading = vapply(rep, `[[`, \"\", \"title\")), row.names = FALSE)\n}})"
+        )
+    },
+};
+
+pub const CLEAR_REPORT: Spec = Spec {
+    entry: "Clear report",
+    menu: "Reports > Clear report",
+    about: "Start the session's report again, empty. Files already saved are not touched.",
+    widgets: &[],
+    needs: &[],
+    styles: BASE,
+    check: |_| Vec::new(),
+    code: |_, _| {
+        "if (exists(\"rcraft_report\", envir = globalenv(), inherits = FALSE)) \
+         rm(\"rcraft_report\", envir = globalenv())\ncat(\"The report is empty.\\n\")"
+            .to_string()
+    },
+};
+
+fn save_report_check(a: &Args) -> Vec<Problem> {
+    let file = a.name_text("file").to_ascii_lowercase();
+    if file.is_empty() {
+        vec![Problem::new("file", "Type where to write the report.")]
+    } else if !(file.ends_with(".docx") || file.ends_with(".html") || file.ends_with(".htm")) {
+        vec![Problem::new(
+            "file",
+            "End the file name in .docx (Word) or .html.",
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
+fn save_report_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
+    let path_text = a.name_text("file").replace('\\', "/");
+    let path = rcraft_rcodegen::r_string(&path_text);
+    let title = a.values.text("title").trim().to_string();
+    let guard = if a.flag("replace") {
+        String::new()
+    } else {
+        format!(
+            "  if (file.exists(path)) stop({})\n",
+            rcraft_rcodegen::r_string("the file already exists; tick Replace to write over it")
+        )
+    };
+    let draw = "    png_of <- function(p, f) {\n      before <- grDevices::dev.cur()\n      \
+                grDevices::png(f, width = p$width, height = p$height, units = \"in\", res = 150)\n      \
+                opened <- grDevices::dev.cur()\n      \
+                if (opened == before) stop(\"R could not open a file to draw the plot in\")\n      \
+                on.exit(grDevices::dev.off(opened))\n      grDevices::replayPlot(p$value)\n    }\n";
+    let body = if path_text.to_ascii_lowercase().ends_with(".docx") {
+        let head = if title.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "  doc <- officer::body_add_par(doc, {}, style = \"heading 1\")\n",
+                rcraft_rcodegen::r_string(&title)
+            )
+        };
+        format!(
+            "  doc <- officer::read_docx()\n{head}{draw}  \
+             for (p in rep) {{\n    \
+             if (nzchar(p$title)) doc <- officer::body_add_par(doc, p$title, style = \"heading 2\")\n    \
+             if (p$kind == \"text\" && nzchar(p$value)) doc <- officer::body_add_par(doc, p$value, style = \"Normal\")\n    \
+             if (p$kind == \"table\") {{\n      ft <- flextable::autofit(flextable::flextable(p$value))\n      \
+             if (!is.null(attr(p$value, \"note\"))) ft <- flextable::add_footer_lines(ft, attr(p$value, \"note\"))\n      \
+             doc <- flextable::body_add_flextable(doc, ft)\n    }}\n    \
+             if (p$kind == \"plot\") {{\n      f <- tempfile(fileext = \".png\")\n      png_of(p, f)\n      \
+             doc <- officer::body_add_img(doc, f, width = p$width, height = p$height)\n    }}\n  }}\n  \
+             print(doc, target = path)\n"
+        )
+    } else {
+        let head = if title.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "  out <- c(out, paste0(\"<h1>\", esc({}), \"</h1>\"))\n",
+                rcraft_rcodegen::r_string(&title)
+            )
+        };
+        format!(
+            "  esc <- function(x) {{ x <- gsub(\"&\", \"&amp;\", x, fixed = TRUE); \
+             x <- gsub(\"<\", \"&lt;\", x, fixed = TRUE); gsub(\">\", \"&gt;\", x, fixed = TRUE) }}\n  \
+             images <- paste0(tools::file_path_sans_ext(path), \"_files\")\n  \
+             out <- c(\"<!DOCTYPE html>\", \"<html><head><meta charset=\\\"utf-8\\\"><title>\", \
+             esc({}), \"</title></head><body>\")\n{head}{draw}  \
+             n <- 0\n  \
+             for (p in rep) {{\n    \
+             if (nzchar(p$title)) out <- c(out, paste0(\"<h2>\", esc(p$title), \"</h2>\"))\n    \
+             if (p$kind == \"text\" && nzchar(p$value)) out <- c(out, paste0(\"<p>\", esc(p$value), \"</p>\"))\n    \
+             if (p$kind == \"table\") {{\n      g <- gt::gt(p$value)\n      \
+             if (!is.null(attr(p$value, \"note\"))) g <- gt::tab_source_note(g, attr(p$value, \"note\"))\n      \
+             out <- c(out, as.character(gt::as_raw_html(g)))\n    }}\n    \
+             if (p$kind == \"plot\") {{\n      n <- n + 1\n      dir.create(images, showWarnings = FALSE)\n      \
+             f <- file.path(images, sprintf(\"plot%d.png\", n))\n      png_of(p, f)\n      \
+             out <- c(out, sprintf(\"<p><img src=\\\"%s/%s\\\" width=\\\"%d\\\"></p>\", \
+             basename(images), basename(f), round(p$width * 96)))\n    }}\n  }}\n  \
+             writeLines(c(out, \"</body></html>\"), path, useBytes = TRUE)\n",
+            rcraft_rcodegen::r_string(if title.is_empty() { "Report" } else { &title })
+        )
+    };
+    format!(
+        "local({{\n  rep <- {REPORT_SO_FAR}\n  \
+         if (!length(rep)) stop(\"the report is empty; add a table, a plot or text first\")\n  \
+         path <- {path}\n{guard}{body}  \
+         if (!isTRUE(file.size(path) > 0)) stop(\"R wrote no file; check that the folder exists and can be written to\")\n  \
+         cat(\"Wrote the report (\", length(rep), \" part\", if (length(rep) == 1) \"\" else \"s\", \") to \", path, \"\\n\", sep = \"\")\n}})"
+    )
+}
+
+pub const SAVE_REPORT: Spec = Spec {
+    entry: "Save report",
+    menu: "Reports > Save report",
+    about: "Write the session's report, its tables, plots and text in the order they were \
+            added, as a Word document (.docx) or a web page (.html, its plots in a folder beside \
+            it).",
+    widgets: &[
+        Widget::Text {
+            id: "file",
+            label: "File",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "End it in .docx or .html.",
+        },
+        Widget::Text {
+            id: "title",
+            label: "Title",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Optional: a title at the top.",
+        },
+        Widget::Check {
+            id: "replace",
+            label: "Replace the file if it is already there",
+            default: false,
+            hint: "",
+        },
+    ],
+    needs: &["gt", "flextable", "officer"],
+    styles: BASE,
+    check: save_report_check,
+    code: save_report_code,
+};
+
+/// The Reports menu's dialogs, in menu order. They need no data frame.
+pub const REPORT_SPECS: &[&Spec] = &[
+    &ADD_TEXT,
+    &ADD_PLOT,
+    &REPORT_CONTENTS,
+    &SAVE_REPORT,
+    &CLEAR_REPORT,
+];
 
 #[cfg(test)]
 mod tests {

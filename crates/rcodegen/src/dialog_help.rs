@@ -203,6 +203,7 @@ fn sample_text(id: &str, rule: TextRule) -> Option<&'static str> {
         "others" => Some("fit2"),
         "factor" => Some("group"),
         "contrasts" => Some("a = 1, b = -1"),
+        "text" => Some("The models below use the survey's second wave."),
         _ => match rule {
             TextRule::Name => Some("new_name"),
             TextRule::Number => Some("1"),
@@ -296,6 +297,7 @@ const SAMPLE_FILES: &[&str] = &[
     "data.parquet",
     "data.RData",
     "data.png",
+    "report.docx",
 ];
 
 /// The first values for which `spec` writes code in `style`, with that code.
