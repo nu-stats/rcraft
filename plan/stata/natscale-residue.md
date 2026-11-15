@@ -106,3 +106,8 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   so on, M the %18.0g round trip) explain some form at the bottom in 9,926 and at the top in 8,068.
   Next: model the loop itself, labels kept in locals and stepped by the live d, with the stopping
   rule from StatCraft's costs, and fit when each end gets its final + d or - d.
+- Tried next (scratchpad nat/h16.R): each end kept in a local e steps beyond its final label and the
+  result computed at return as that local ± e·d (all at once, or one d at a time). At most 8,713 of
+  11,140 cases fit at both ends (one d at a time; 7,401 all at once). The one-d-at-a-time form fits
+  10,471 bottoms. So the shape of the loop is still not right; the stopping rule (StatCraft's costs)
+  and which values go through a local are the next things to model.
