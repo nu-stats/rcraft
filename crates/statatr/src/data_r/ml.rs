@@ -99,6 +99,13 @@ pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robu
 /// differenced once).
 pub(super) const NBREG_VCOV_HELPER: &str = r#"stata_nbreg_vcov <- function(fit) {
   X <- stats::model.matrix(fit)
+  # at the end of Stata's own path: the exact inverse of -H there
+  V <- fit$stata_count$V
+  if (!is.null(V) && all(dim(V) == ncol(X) + 1)) {
+    nm <- c(colnames(X), "/lnalpha")
+    dimnames(V) <- list(nm, nm)
+    return(V)
+  }
   y <- fit$y
   off <- stats::model.offset(stats::model.frame(fit))
   if (is.null(off)) off <- 0
@@ -324,6 +331,7 @@ stata_ml_iterations <- function(fit, kind) {
     if (is.null(m) || m$odd || !m$converged) return(NULL)
     return(m$lls)
   }
+  if (kind %in% c("poisson", "nbreg")) return(stata_ml_count(fit, kind)$lls)
   X <- stats::model.matrix(fit)
   if (!"(Intercept)" %in% colnames(X)) return(NULL)
   off <- fit$offset
@@ -352,6 +360,112 @@ stata_ml_iterations <- function(fit, kind) {
   path <- tryCatch(stata_ml_path(ll, deriv, b0), error = function(e) NULL)
   if (is.null(path) || path$odd || !path$converged) return(NULL)
   path$lls
+}
+# poisson's start (found on probes, 2026-11-15, to 1e-16): the slopes of the least-squares
+# fit of y on the centred regressors over mean(y), the constant then exactly
+# ln(sum y / sum exp(x'b)), and one full Newton step from there; its log is the path from
+# that start. nbreg's log has three stages: that Poisson fit; the constant-only model from
+# (ln mean(y), lnalpha 0); the full model from Poisson's slopes, the constant
+# ln mean(y) - b'mean(x) and the constant-only lnalpha. NULL without a constant, with an
+# offset or weights, or where a step was halved. With the path's end (nbreg's lnalpha last)
+stata_ml_count <- function(fit, kind) {
+  X <- stats::model.matrix(fit)
+  ic <- colnames(X) == "(Intercept)"
+  if (sum(ic) != 1) return(NULL)
+  off <- stats::model.offset(stats::model.frame(fit))
+  if (!is.null(off) && any(off != 0)) return(NULL)
+  y <- fit$y
+  pw <- fit$prior.weights
+  if (is.null(pw)) pw <- rep(1, length(y))
+  if (any(pw != 1) || length(y) != nrow(X) || !(mean(y) > 0)) return(NULL)
+  ybar <- mean(y)
+  Xs <- X[, !ic, drop = FALSE]
+  pois_ll <- function(b) {
+    e <- drop(X %*% b)
+    sum(y * e - exp(e) - lgamma(y + 1))
+  }
+  pois_deriv <- function(b) {
+    mu <- exp(drop(X %*% b))
+    list(ll = pois_ll(b), g = colSums(X * (y - mu)), nh = crossprod(X * mu, X))
+  }
+  b <- rep(0, ncol(Xs))
+  if (ncol(Xs) > 0) {
+    b <- qr.coef(qr(sweep(Xs, 2, colMeans(Xs))), y - ybar) / ybar
+    if (anyNA(b)) return(NULL)
+  }
+  b0 <- numeric(ncol(X))
+  b0[!ic] <- b
+  b0[ic] <- log(sum(y) / sum(exp(drop(Xs %*% b))))
+  d0 <- pois_deriv(b0)
+  b0 <- b0 + drop(solve(d0$nh, d0$g))
+  pois <- tryCatch(stata_ml_path(pois_ll, pois_deriv, b0), error = function(e) NULL)
+  if (is.null(pois) || pois$odd || !pois$converged) return(NULL)
+  if (kind == "poisson") return(list(lls = pois$lls, b = pois$b))
+  nb <- function(X) {
+    k <- ncol(X)
+    ll <- function(p) {
+      mu <- exp(drop(X %*% p[seq_len(k)]))
+      a <- exp(p[k + 1])
+      m <- 1 / a
+      sum(lgamma(y + m) - lgamma(m) - lgamma(y + 1) - (m + y) * log1p(a * mu) + y * (log(a) + log(mu)))
+    }
+    deriv <- function(p) {
+      mu <- exp(drop(X %*% p[seq_len(k)]))
+      a <- exp(p[k + 1])
+      m <- 1 / a
+      q <- 1 + a * mu
+      D <- digamma(y + m) - digamma(m)
+      H <- matrix(0, k + 1, k + 1)
+      H[seq_len(k), seq_len(k)] <- crossprod(X * (-mu * (1 + a * y) / q^2), X)
+      H[seq_len(k), k + 1] <- H[k + 1, seq_len(k)] <- colSums(X * (a * mu * (mu - y) / q^2))
+      H[k + 1, k + 1] <- sum(m * D + m^2 * (trigamma(y + m) - trigamma(m)) - m * log(q) + mu / q - (y - mu) * a * mu / q^2)
+      list(ll = ll(p), g = c(colSums(X * ((y - mu) / q)), sum(-m * D + m * log(q) + (y - mu) / q)), nh = -H)
+    }
+    list(ll = ll, deriv = deriv)
+  }
+  f0 <- nb(X[, ic, drop = FALSE])
+  cons <- tryCatch(stata_ml_path(f0$ll, f0$deriv, c(log(ybar), 0)), error = function(e) NULL)
+  if (is.null(cons) || cons$odd || !cons$converged) return(NULL)
+  bs <- pois$b[!ic]
+  start <- numeric(ncol(X) + 1)
+  start[which(!ic)] <- bs
+  start[which(ic)] <- log(ybar) - sum(bs * colMeans(Xs))
+  start[ncol(X) + 1] <- cons$b[2]
+  f1 <- nb(X)
+  full <- tryCatch(stata_ml_path(f1$ll, f1$deriv, start), error = function(e) NULL)
+  if (is.null(full) || full$odd || !full$converged) return(NULL)
+  V <- tryCatch(solve(f1$deriv(full$b)$nh), error = function(e) NULL)
+  list(lls = list(`Fitting Poisson model:` = pois$lls, `Fitting constant-only model:` = cons$lls,
+                  `Fitting full model:` = full$lls), b = full$b, V = V,
+       ll_0 = cons$lls[length(cons$lls)], ll_c = pois$lls[length(pois$lls)])
+}
+# poisson's and nbreg's fit moved to where Stata's path ends: its estimates, likelihood and
+# fitted values (the variance, robust or not, is then worked out there)
+stata_ml_count_fit <- function(fit, kind) {
+  r <- tryCatch(stata_ml_count(fit, kind), error = function(e) NULL)
+  if (is.null(r) || anyNA(stats::coef(fit))) return(fit)
+  X <- stats::model.matrix(fit)
+  k <- ncol(X)
+  b <- r$b
+  y <- fit$y
+  eta <- drop(X %*% b[seq_len(k)])
+  mu <- exp(eta)
+  fit$coefficients[] <- b[seq_len(k)]
+  fit$linear.predictors[] <- eta
+  fit$fitted.values[] <- mu
+  if (kind == "poisson") {
+    fit$deviance <- 2 * sum(ifelse(y > 0, y * log(y / mu), 0) - (y - mu))
+    fit$aic <- -2 * sum(stats::dpois(y, mu, log = TRUE)) + 2 * fit$rank
+  } else {
+    a <- exp(b[k + 1])
+    m <- 1 / a
+    fit$theta <- m
+    # the exact variance (the inverse of -H) and the constant-only and Poisson likelihoods
+    # where Stata's paths end, for e(ll_0) and e(ll_c)
+    fit$stata_count <- list(V = r$V, ll_0 = r$ll_0, ll_c = r$ll_c)
+    fit$twologlik <- 2 * sum(lgamma(y + m) - lgamma(m) - lgamma(y + 1) - (m + y) * log1p(a * mu) + y * (log(a) + log(mu)))
+  }
+  fit
 }
 # where Stata's Newton-Raphson stops, each point's likelihood, and the variance there
 # (the inverse of -H, exact); NULL when R cannot follow it
@@ -551,24 +665,33 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
     if (is.null(ll) || is.null(q) || is.null(stat) || is.null(r2p)) return(FALSE)
   }
   pad <- stata_tab_pad
-  row <- function(left, label, value) cat(formatC(left, width = -56, flag = "-"), formatC(label, width = -13, flag = "-"), " =", pad(value, 7), "\n", sep = "")
   # the iteration log, as Stata prints it before the header
   if (!is.null(iterations)) {
     lls <- stata_ml_iterations(fit, iterations)
-    if (!is.null(lls)) {
+    # one stage, or nbreg's three, each under its title
+    stages <- if (is.null(lls)) list() else if (is.list(lls)) lls else list(lls)
+    for (s in seq_along(stages)) {
+      if (!is.null(names(stages))) cat("\n", names(stages)[s], "\n", sep = "")
       cat("\n")
-      for (i in seq_along(lls)) {
+      for (i in seq_along(stages[[s]])) {
         cat("Iteration ", i - 1, ":  ", if (robust) "Log pseudolikelihood" else "Log likelihood", " = ",
-            stata_fmt(lls[i], "%10.0g"), "  \n", sep = "")
+            stata_fmt(stages[[s]][i], "%10.0g"), "  \n", sep = "")
       }
     }
   }
   cat("\n")
-  row(title, "Number of obs", stata_tab_count(n))
-  row("", sprintf(if (robust) "Wald chi2(%d)" else "LR chi2(%d)", q), sprintf("%.2f", stat))
-  row(if (kind == "nbreg") "Dispersion: mean" else "", "Prob > chi2", sprintf("%.4f", stats::pchisq(stat, q, lower.tail = FALSE)))
+  # the values right-aligned after "= " in 6 columns, or as wide as the widest (the left
+  # column gives way: probe PN); Prob > chi2 is "." with no test (chi2(0))
+  vals <- c(stata_tab_count(n), if (is.na(stat)) "." else sprintf("%.2f", stat),
+            if (q == 0 || is.na(stat)) "." else sprintf("%.4f", stats::pchisq(stat, q, lower.tail = FALSE)),
+            sprintf("%.4f", r2p))
+  wv <- max(6, nchar(vals))
+  row <- function(left, label, value) cat(formatC(left, width = -(56 - (wv - 6)), flag = "-"), formatC(label, width = -13, flag = "-"), " = ", pad(value, wv), "\n", sep = "")
+  row(title, "Number of obs", vals[1])
+  row("", sprintf(if (robust) "Wald chi2(%d)" else "LR chi2(%d)", q), vals[2])
+  row(if (kind == "nbreg") "Dispersion: mean" else "", "Prob > chi2", vals[3])
   row(paste0(if (robust) "Log pseudolikelihood = " else "Log likelihood = ", trimws(stata_fmt(ll, "%10.0g"))),
-      "Pseudo R2", sprintf("%.4f", r2p))
+      "Pseudo R2", vals[4])
   cat("\n")
   if (!is.null(e[["N_clust"]])) {
     cat(pad(sprintf("(Std. err. adjusted for %s clusters in %s)", stata_tab_count(e$N_clust), e$clustvar), 78), "\n", sep = "")
@@ -647,7 +770,8 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
   # nbreg: the test of alpha = 0 against the Poisson fit, on the boundary (half chi2(1))
   if (kind == "nbreg" && !robust && !is.null(e$ll_c)) {
     chi <- max(0, 2 * (e$ll - e$ll_c))
-    cat(formatC(sprintf("LR test of alpha=0: chibar2(01) = %.2f", chi), width = -55, flag = "-"),
+    # %8.2f, which Stata writes as 5.3e+05 when it does not fit (probe PN)
+    cat(formatC(paste0("LR test of alpha=0: chibar2(01) = ", trimws(stata_fmt(chi, "%8.2f"))), width = -55, flag = "-"),
         "Prob >= chibar2 = ", sprintf("%5.3f", 0.5 * stats::pchisq(chi, 1, lower.tail = FALSE)), "\n", sep = "")
   }
   TRUE
@@ -665,6 +789,17 @@ impl Session {
             r_text(fit.name())
         ));
         out.line("if (!is.null(stata_estimates$stata_exact)) { stata_b[] <- stata_estimates$stata_exact$b; stata_vcov[] <- stata_estimates$stata_exact$V }");
+    }
+
+    /// poisson and nbreg: the fit moved to where Stata's own path ends
+    /// (`stata_ml_count_fit`), before the estimates and variance are read.
+    fn count_ml(&mut self, fit: Fit, out: &mut Out) {
+        self.helpers.insert("stata_ml_header");
+        self.helpers.insert("stata_probit_newton");
+        out.line(format!(
+            "stata_estimates <- stata_ml_count_fit(stata_estimates, {})",
+            r_text(fit.name())
+        ));
     }
 
     pub(super) fn ml(
@@ -938,6 +1073,9 @@ impl Session {
                 self.helpers.insert("stata_glm_vcov");
                 self.fit_robust = (robust || cluster.is_some()) && w.is_none();
                 self.fit_cluster = cluster.is_some() && w.is_none();
+                if fit == Fit::Poisson {
+                    self.count_ml(fit, out);
+                }
                 out.line("stata_b <- stats::coef(stata_estimates)");
                 match &cluster {
                     Some(v) => {
@@ -970,6 +1108,7 @@ impl Session {
             }
             Fit::Nbreg => {
                 self.helpers.insert("stata_nbreg_vcov");
+                self.count_ml(fit, out);
                 out.line(
                     "stata_b <- c(stats::coef(stata_estimates), \"/lnalpha\" = log(1 / stata_estimates$theta))",
                 );
@@ -1120,9 +1259,8 @@ impl Session {
             };
             self.helpers.insert("stata_tables");
             self.helpers.insert("stata_fmt");
-            // the iteration log: Stata's own Newton steps from the constant-only fit
-            // (stata_ml_iterations, line for line on probes); poisson starts from values of its
-            // own, not known yet, and nbreg's log begins with poisson's
+            // the iteration log: Stata's own Newton steps from its starting values
+            // (stata_ml_iterations, line for line on probes); nbreg's in three stages
             let iterations = match fit {
                 _ if opts.has("nolog", 5) => "NULL",
                 Fit::Logit => "\"logit\"",
@@ -1130,6 +1268,8 @@ impl Session {
                 Fit::Ologit => "\"ologit\"",
                 Fit::Oprobit => "\"oprobit\"",
                 Fit::Mlogit => "\"mlogit\"",
+                Fit::Poisson => "\"poisson\"",
+                Fit::Nbreg => "\"nbreg\"",
                 _ => "NULL",
             };
             if iterations != "NULL" {
@@ -1198,9 +1338,7 @@ impl Session {
         if stata_open {
             out.line("cat(\"(printed in R's layout: Stata's table for this model is not matched yet)\\n\")");
             out.line("}");
-            out.caveat(
-                "the header and table as Stata 19 prints them, with its iteration log (not yet for poisson and nbreg)",
-            );
+            out.caveat("the header and table as Stata 19 prints them, with its iteration log");
         } else {
             out.caveat("printed in R's layout, not Stata's table");
         }

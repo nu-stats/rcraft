@@ -163,8 +163,13 @@ stata_coef_rows <- function(nm, data = NULL) {
     k <- keys[[n]]
     if (is.na(k)) {
       plain <- sub("^o\\.", "", n)
-      # a plain variable or the constant; an interaction of continuous
-      # variables was not checked
+      # an interaction of continuous variables (c.x#c.w): a row of its own between separators,
+      # labelled as written (probe PN, 2026-11-15); longer labels were not checked
+      if (n == plain && grepl("^c\\.[A-Za-z_][A-Za-z0-9_]*(#c\\.[A-Za-z_][A-Za-z0-9_]*)+$", n) && nchar(n) <= 12) {
+        terms[[length(terms) + 1]] <- list(big = TRUE, rows = list(list(kind = "row", label = n, col = n)))
+        next
+      }
+      # a plain variable or the constant
       if (grepl("#", plain, fixed = TRUE) || grepl(".", plain, fixed = TRUE)) return(NULL)
       terms[[length(terms) + 1]] <- list(big = FALSE, rows = list(
         list(kind = "row", label = plain, col = n, note = if (plain != n) "(omitted)")))

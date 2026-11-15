@@ -4753,3 +4753,29 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   P2B.7, P2B.8, P2C.1, P2C.6, P2C.7) and Vignettes (P2A.4). They are `partial` now, like the other
   built entries without a menu check in the pinned R. "Model table" (Phase 7) and "RCraft manual" stay
   planned. `docs/coverage.md` regenerated: 117 entries, 17 verified, 98 partial, 2 planned.
+
+## poisson's and nbreg's iteration logs, 2026-11-15
+
+- **Poisson's start, found** (on 16 designed datasets and the probes, to 1e-16, by watching its
+  `iterate(0)` estimates; no Stata code read): the slopes of the least-squares fit of y on the centred
+  regressors, divided by the mean of y; the constant then exactly ln(sum y / sum exp(x'b)); then one full
+  Newton step. The log is Stata's Newton path from there (`stata_ml_count`). What gave it away: the start
+  depends only on the groups' means, is unchanged when y is scaled, and is affine-equivariant, yet links
+  the groups of a two-group design, which no IRLS, Newton, BFGS, DFP or line-search path from ln(mean y)
+  does; inverting one Newton step from it gave the earlier point exactly.
+- **nbreg's log**, in Stata's three stages: that Poisson fit; the constant-only model from
+  (ln mean y, lnalpha 0); the full model from Poisson's slopes, the constant ln mean(y) - b'mean(x) and
+  the constant-only lnalpha, on the exact Hessian of the NB2 likelihood in (b, lnalpha).
+- **Estimates where Stata stops:** poisson's and nbreg's fits are moved to the end of that path (R's
+  optimisers stop a hair away: last digits differed near alpha = 0 and with factor variables); nbreg's
+  variance is the exact inverse of -H there, and e(ll_0) and e(ll_c) the ends of its constant-only and
+  Poisson paths (a constant-only nbreg now prints Stata's chi2 0.00 and Pseudo R2 0.0000).
+- **Found on the way, now as Stata prints them:** Prob > chi2 is "." with chi2(0); the header's values
+  are right-aligned in 6 columns or as wide as the widest, the left column giving way (LR chi2 =
+  108524.04); nbreg's chibar2 is %8.2f, so 5.3e+05 when it does not fit; c.x#c.w is a row of its own
+  between separators (the table had fallen back to R's layout).
+- **Checked:** probes ORD (16 models) and PN (18: constant-only, i.g, c.x##c.w, counts in the
+  thousands, near alpha = 0, if, clusters, irr) match Stata 19 on every line; a new test
+  (`poisson_and_nbreg_print_statas_iteration_logs`).
+- **Not done:** the log with weights, an offset or exposure, or noconstant (Stata's start there is not
+  known; the table prints without the log).

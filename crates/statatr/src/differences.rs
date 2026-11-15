@@ -64,11 +64,13 @@ const ML_TABLE: Point = p(
      table (LR or Wald chi2, the log likelihood or pseudolikelihood, Pseudo R2, the clusters' \
      line, factor levels, Odds ratio, IRR and RRR with their notes; the cut points, /lnalpha \
      and alpha below their rules; nbreg's Dispersion line and test of alpha=0; each mlogit \
-     outcome's equation under its value label, the base outcome marked). logit, probit, \
-     ologit, oprobit and mlogit print Stata's iteration log too (its own Newton steps from \
-     the constant-only fit). poisson's and nbreg's logs are not shown yet (Stata starts \
-     poisson from values of its own, and nbreg's log begins with poisson's); a model with \
-     an offset prints in R's layout.",
+     outcome's equation under its value label, the base outcome marked). Each prints Stata's \
+     iteration log too, its own Newton steps: logit, probit, ologit, oprobit and mlogit from \
+     the constant-only fit; poisson from Stata's start (the least-squares slopes over the \
+     mean of y, the constant that fits the total, one Newton step); nbreg in Stata's three \
+     stages (the Poisson model, the constant-only model, the full model). The log is left \
+     out with weights, an offset or exposure, or no constant, where Stata's start is not \
+     known; a model with an offset prints in R's layout.",
 );
 const ML_EXACT: Point = p(
     "Where Stata stops",

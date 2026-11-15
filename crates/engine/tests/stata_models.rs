@@ -2296,3 +2296,26 @@ fn estat_vce_and_sd_print_statas_tables() {
         assert!(text.contains(line), "{line:?} in {text}");
     }
 }
+
+/// poisson's and nbreg's iteration logs as Stata 19 prints them: poisson from Stata's
+/// start (the least-squares slopes over the mean, the constant fitting the total, one
+/// Newton step), nbreg in its three stages (probes PN and ORD, 2026-11-15).
+#[test]
+fn poisson_and_nbreg_print_statas_iteration_logs() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 8\ngenerate y = 0\nreplace y = 1 in 2\nreplace y = 2 in 3\nreplace y = 3 in 4\nreplace y = 1 in 5\nreplace y = 4 in 6\nreplace y = 5 in 7\nreplace y = 6 in 8\ngenerate d = _n > 4\npoisson y d\n\
+         clear\nset obs 120\ngenerate double x = sin(_n)\ngenerate double w = cos(_n * 3)\ngenerate c = floor(exp(0.3 + 0.4 * x + 0.9 * sin(_n * 5)) * 2)\nnbreg c x w\n",
+    );
+    let text = ok(&mut e, &code);
+    let expected = "\nFitting Poisson model:\n\nIteration 0:  Log likelihood = -248.52167  \nIteration 1:  Log likelihood = -248.52167  \n\nFitting constant-only model:\n\nIteration 0:  Log likelihood = -264.02367  \nIteration 1:  Log likelihood =  -252.1212  \nIteration 2:  Log likelihood =  -252.1044  \nIteration 3:  Log likelihood = -252.10437  \n\nFitting full model:\n\nIteration 0:  Log likelihood = -243.01426  \nIteration 1:  Log likelihood = -241.95307  \nIteration 2:  Log likelihood = -241.91921  \nIteration 3:  Log likelihood = -241.91921  \n\nNegative binomial regression";
+    for block in [
+        "Iteration 0:  Log likelihood = -14.416209  \nIteration 1:  Log likelihood = -14.416203  \nIteration 2:  Log likelihood = -14.416203  \n\nPoisson regression",
+        expected,
+        "           x |   .4630569   .0994343     4.66   0.000     .2681692    .6579445",
+        "    /lnalpha |  -1.619492   .3784453                     -2.361231   -.8777525",
+        "LR test of alpha=0: chibar2(01) = 13.20                Prob >= chibar2 = 0.000",
+    ] {
+        assert!(text.contains(block), "{block:?} in {text}");
+    }
+}

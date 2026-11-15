@@ -580,8 +580,10 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
                                         control = stats::glm.control(epsilon = 1e-12, maxit = 100)))
     pois <- stats::glm(fit$y ~ stats::model.matrix(fit) - 1, family = stats::poisson(), offset = fit$offset,
                        weights = fit$prior.weights, control = stats::glm.control(epsilon = 1e-14, maxit = 100))
-    l <- ml(2, ll_0 = as.numeric(stats::logLik(f0)), aux = list(rank0 = 2))
-    put(ll_c = as.numeric(stats::logLik(pois)), alpha = exp(b[["/lnalpha"]]), k_aux = 1)
+    # where Stata's own constant-only and Poisson paths end, when RCraft followed them
+    sc <- fit$stata_count
+    l <- ml(2, ll_0 = if (!is.null(sc$ll_0)) sc$ll_0 else as.numeric(stats::logLik(f0)), aux = list(rank0 = 2))
+    put(ll_c = if (!is.null(sc$ll_c)) sc$ll_c else as.numeric(stats::logLik(pois)), alpha = exp(b[["/lnalpha"]]), k_aux = 1)
     r2_p(l)
     put(cmdline = cmdline, cmd = "nbreg", predict = "nbreg_p")
     if (!is.null(extra$offset)) put(offset = extra$offset)
