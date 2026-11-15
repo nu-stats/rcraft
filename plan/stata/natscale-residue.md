@@ -429,3 +429,23 @@ Scoreboard unchanged at 4,891 both ends (tops 6,129 of 15,244); no top rule beat
 - Next: for the negative family, sweep n finely at fixed hi with lo moved, and read where the top's
   start sits as an exact decimal on coarser grids (0.25, 0.5, 1), to see which candidate's labels it is
   taken from at each n.
+
+## 2026-11-15: the negative family, a cascade, and lo moved by ulps
+
+Scoreboard unchanged at 4,891 both ends.
+
+- Probe 11 (672 runs): lo −1.01 to −1.09, hi −0.76, −0.723, −0.686, −0.612, n 5–25, mostly step 0.05.
+  Near zero, walks from many starts merge, so a top's start is a set: read as exact quarter values it
+  is one of {0.25}, {0.75}, {−0.5, 0, 0.5} or {−1, 0, 1}, and which one changes with n back and forth
+  (lo −1.09, hi −0.723: 0.25 at n 8, 0.75 at 9–11, 0.25 at 12–14, 0.75 at 15–18). Bottoms likewise
+  {−0.75, −0.25} or {−2.25, −1, 2.5}. This family does not pin the start.
+- A cascade (each end put on the coarsest visited grid, then walked by each finer visited step to its
+  outside label, the last step walked to Stata's label) fits both ends in 1,177 of 2,000 sampled cases
+  for some path, against 470–504 with the targets moved one ulp. But 770 of the 1,177 are plain
+  products; on the 1,230 others it fits 407 (33%), little above chance. Full 1-2-5 cascades fit at most
+  223. So a cascade is not the mechanism.
+- Probe 12 (540 runs): 40 cases with residues at both ends and 20 without, each with lo and hi moved by
+  −2 to +2 ulps. In the residue cases r(min) changed in 5 of 320 runs and r(max) in 5; when they changed
+  they changed together. So the residue does not come from arithmetic on lo or hi themselves (no
+  lo − mod(lo, d) and the like): it comes from the labels and the steps, and a single decision moves both
+  ends at once.
