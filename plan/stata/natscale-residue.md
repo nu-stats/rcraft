@@ -134,3 +134,57 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   7 significant digits). The probes (225, 226) are built around 0 and round numbers and did not show
   this; ranges like 0.3 to 0.348 do (Stata's r(min) is 0.3 exactly, RCraft's 0.30000000000000004).
 - The bottom's step count (h19.R) is not a function of n minus the label count alone.
+
+## 2026-11-15, third pass: the step's base, an on-label tolerance, and five models ruled out
+
+Data: the earlier sweeps (c, e, f, g, b) and probes 225/226 put together, 28,406 results (11,679
+distinct ones with a step below 1 other than 0.5), plus two new probes printed with `%21x` through
+scalars: lo and hi moved by single ulps around labels.
+
+- r(delta) is always q × 10^k with q one of 2, 5, 10, 20 and Stata's 10^k: a step of 1 × 10^z is never
+  1 × 10^z but 10 × 10^(z-1) (0.1 is always 0.1 + 1 ulp). A step of 0.2 is 2 × 10^-1 (the nearest double)
+  or 20 × 10^-2 (one ulp above) depending on n: 0 to 1.03 gives the first for n 5, 6 and the second for
+  n 7 to 9; 17 to 17.84 the first for n 4 and the second for n 5 to 7. So the search goes power by power
+  with those multipliers, and which power it is at when it settles depends on n. The base k is not
+  floor(log10) of range/n, range/(n-1) or range/(n+1) (no constant splits 0.72 at n 6/7, 1.03 at 6/7,
+  1.5 at 14/15, 2.06 at 20/21, 0.84 at 4/5).
+- Stata's own floor(), ceil(), mod(), round() and int() are exact at ±300 ulps around labels (checked
+  on x/d for 17.9, 0.9, 19.4, -1.6, 17, 0.3, -2.5, 5): any tolerance below is _natscale's own.
+- An on-label tolerance. With lo on a label or a few ulps below it, r(min) is lo itself, bit for bit:
+  `_natscale 16.999999999999893 17.84 10` (17 − 30 ulp) gives r(min) = 17 − 30 ulp. At 100 ulps below,
+  r(min) is the label just inside (17 + 1 ulp = 170·d). The same at the top: hi up to 30 to 100 ulps
+  above a label gives r(max) = hi. Window edges seen (in ulps of the end, inside / outside): lo 17 (step
+  0.1) 30/100, lo 0.3 (0.05) 30/100, lo 5 (0.1) 30/100, lo −2.5 (0.1) 100/300; hi 17.9 (0.1) 30/100,
+  hi 0.9 (0.05) 30/100, hi 19.4 and 19.2 (0.2) 100/300, hi −1.6 (0.1) 100/300. No relative tolerance
+  fits all eight (|x|, |x|+1, d, range, x/d); −2.5 is inside at 100 ulps while 5 is outside at the same
+  relative distance.
+- At the window's edge the end is neither lo/hi nor the label: lo = 0.3 − 100 ulp gives r(min) =
+  0.3 + 80 ulp, lo = 5 − 100 ulp gives 5 + 13 ulp, hi = 0.9 + 100 ulp gives r(max) = 0.9 + 10 ulp and
+  0.9 + 300 ulp gives 0.9 + 30 ulp. So there an expression in lo or hi itself (not a label product) is
+  returned.
+- Off a label, hi's last bits do not matter (hi ± 40 ulps leaves r() unchanged for 17–19.26,
+  17–17.84, 0–1.03, 0–0.72, 0.3–0.866), except at a near-tie: 0.3 to 0.459 with n 21 flips between two
+  answers as hi moves by 1, 5, 10, 20, 40 ulps, not monotonically. A cost comparison sits at a tie there.
+- The lo = 0 residue does not come from lo: for 0 to 0.72 with n 20, any lo in [−0.001, 0.001] gives
+  r(min) = 2^-56 (r(max) does change, 0.75 for lo < 0 and 0.75 − 1 ulp for lo > 0).
+- Away from 0 the ends do not depend on n once the step is fixed (17 to 17.84, 18.55, 19.26, 19.97 and
+  1234 to 1234.84 ...: n only moves L, U and d). The n-dependence of the last bits is in the lo = 0
+  family, where labels go below 0.
+- With a product start ((L − e)·d, then e additions of d) every lo = 0 bottom has an e that reproduces
+  it: e of 0 to 2 (bits as if no extension) or 3 or more. e reaches 3 at n ≈ 1.3–1.46 × (hi/d): 0 to
+  0.53 (0.05) at n 15, 0.72 (0.05) at 20, 0.9 (0.1) at 12, 1.03 (0.1) at 15, 1.5 (0.1) at 21, 2.06 (0.2)
+  at 14; never up to n 30 for 1.03 (0.05), 0.9 (0.05), 2.06 (0.1). No single factor fits (0.9 needs
+  below 1.333, 1.03 above 1.359). The top is walked down from above in nearly every lo = 0 case, even
+  with no extension (0 to 0.72, step 0.1: from 3 or 4 steps above).
+- Ruled out this pass (both ends bit for bit, on the 11,679): one walk through both ends from a common
+  start (667 of 3,166 distinct); decimal starts on coarser grids, intersected over the steps a range
+  gets (empty for most ranges); ends carried from coarse steps to fine ones and trimmed with each step
+  (1,896, below L·d and U·d at 3,464); snapping by mod (hi + d − mod(hi, d), hi − mod(hi, d) + d,
+  lo − mod(lo, d), d·ceil(hi/d) ...: at most 2,356 outside tops and 6,419 outside bottoms).
+- Where it stands: r(n) and the label set are StatCraft's cost rule; r(delta) is q × 10^k with an
+  n-dependent base; each end is lo/hi inside a tolerance window, otherwise a label reached by walking
+  with the live step from a start that is not yet known, and in the lo = 0 family the start lies e
+  steps beyond with e growing with n. Next experiments: map the tolerance window against d and n at one
+  magnitude (is it in ulps of x/d?); sweep n for fixed lo = 17.x ranges to find the n at which 0.2 moves
+  from 2 × 10^-1 to 20 × 10^-2; and probe the top's start with hi just off a label at large magnitude
+  (1234.x), where every walk length leaves distinct bits.
