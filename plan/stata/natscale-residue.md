@@ -47,3 +47,24 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   in probe 226's sweeps, built around 0, the residue shows in 112 of 4,915 (2.3%) and the rule declines
   1,479. None of the 46 packages calls `_natscale`; RCraft's own graphs choose their labels without it.
 - The probes then match on every compared `_natscale` line; the declined ones count as not translated.
+
+## Found, 2026-11-15: the residue is trimming from a wider label set
+
+- Read with scalars, not locals: a local keeps a value as text and loses the last bits (an earlier
+  probe of ours printed 1.fffffffffdb59X-038 for 2^-55 that way).
+- On 88 cases (lo = 0; hi 1.03, 1.05, 1.08, 1.1, 1.12, 0.7, 0.53, 2.06; n = 10 to 20), every r(min) and
+  r(max) is reproduced bit for bit by: start from labels L0·d and U0·d (j·d, with Stata's d, e.g.
+  0.1 + 1 ulp), then step inward one d at a time (min + d, max - d, each rounded) to the final L·d and
+  U·d. The residue is that arithmetic: (-3·d) + d + d + d is 2^-55, not 0. Each end can start at a
+  range of L0 (or U0) that give the same bits; the sets per case are in the session's
+  scratchpad (nat/h2.R output).
+- What is left: how L0 and U0 follow from lo, hi and n. They jump at n = 15 for 0 to 1.03-1.08
+  (U0 from 12..14 to 15..17, L0 from 0..-2 to -3..-6), at 14 for 0 to 2.06 (L0) and at 20 for 0 to 0.7.
+  Next: a dense sweep in n and hi (and lo other than 0), then fit L0 and U0.
+- Dense sweep (lo = 0, hi 0.51 to 2.20 by 0.01, n 5 to 30: 4,420 cases, scratchpad nat/c.txt): the
+  trimming model reproduces r(min) in all 4,420 and r(max) in 4,204. The other 216 tops (e.g. hi 0.72,
+  n 20: 0.7499999999999999 = 0.8 - (0.05 + 1 ulp)) start from a label on another step's grid: j·0.1
+  (nearest double) explains 129 of them, j·0.2 93, j·0.02 36. So the wider set's ends seem to come from
+  the grid of a candidate step tried before the final one, then are trimmed with the final d.
+- Next: find which candidate step gives each end (and L0, U0 from lo, hi, n), then build _natscale
+  from that and check all 4,915 probe results and these 4,420 bit for bit.
