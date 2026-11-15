@@ -366,3 +366,22 @@ hi = lo + 0.84 and + 1.37 (296 results), and lo = 0.313, 0.347, 0.431, 0.469 wit
 - Next: simulate that search (extend while labels < about n, trim where the cost falls, each move
   through a %18.0g local, result computed at return) with StatCraft's costs, and fit it to probes 8–10
   map by map, starting with width 2.06.
+
+## 2026-11-15: parked
+
+The user parked the search to move on to graphs, esttab and coefplot. `natscale.rs` stays as 4af4a35
+left it: it translates only where it matches Stata 19 bit for bit and declines the rest.
+
+- Why parked: no safe subset exists to widen into. Over all 15,245 swept results with steps below 1
+  (other than 0.5), RCraft's labels agree with Stata's in 15,244, but the last bits do not follow any
+  simple condition: with both labels outside the data and n at or below the label count, Stata gives
+  L·d and U·d in only 296 of 589; where L·d equals the decimal label at both ends, in 326 of 946. Going
+  through a macro does not hide it (`%18.0g` keeps 16 digits: `.5000000000000002`, `1.38777878078e-17`).
+  Of the 511 corpus do-files only the three `_natscale` probes (225–227) call it; no replication package
+  does. It holds the probes' share below 89.1% (about 10.9 points).
+- Where to pick up: simulate the search that moves the ends one step at a time (extend while there are
+  fewer labels than about n, trim where the cost falls, each move through a `%18.0g` local, the result
+  computed at return), with StatCraft's costs, and fit it map by map: probe 10 at width 2.06 first (its
+  ends follow inside/outside labels and switch at n 32 or 36), then probes 8 and 9, then the sweeps.
+  The 0.2 step's bit form (2×10^-1 in 2,680 results, 20×10^-2 in 363) is not decided by range/n's decade
+  and needs its own rule. Probe logs and the R scripts are in the session scratchpad (`n/`, `n/st/`).
