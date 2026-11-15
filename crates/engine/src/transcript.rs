@@ -3,7 +3,8 @@
 //! The **log** is a transcript of the session: each command after a prompt,
 //! then what it printed. The **script** is only the code that ran without
 //! error, as plain R a user can keep and run elsewhere. Menu actions are in
-//! both, as the R they ran.
+//! both, as the R they ran. P7.4: the same commands as an R Markdown or
+//! Quarto document, one chunk each, with the menu entry above its chunk.
 
 use std::fs::File;
 use std::io::Write;
@@ -18,11 +19,21 @@ const MAX_LOG_BYTES: usize = 32 * 1024 * 1024;
 const PROMPT: &str = "> ";
 const CONTINUATION: &str = "+ ";
 
+/// A document the session's commands can be written as (P7.4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DocKind {
+    /// `.qmd`, rendered by Quarto.
+    Quarto,
+    /// `.Rmd`, rendered by rmarkdown.
+    RMarkdown,
+}
+
 #[derive(Debug, Default)]
 pub struct Transcript {
     log: String,
-    /// Commands that ran without error, in order, ready to join.
-    script: Vec<String>,
+    /// Commands that ran without error, in order: the menu entry each came
+    /// from, if one, and its code.
+    script: Vec<(Option<String>, String)>,
     file: Option<File>,
 }
 
@@ -39,12 +50,38 @@ impl Transcript {
     /// came from a menu is preceded by a comment naming the menu entry.
     pub fn script_text(&self) -> String {
         let mut out = String::from("# Script from an RCraft session\n");
-        for part in &self.script {
+        for (menu, code) in &self.script {
             out.push('\n');
-            out.push_str(part);
-            if !part.ends_with('\n') {
+            if let Some(menu) = menu {
+                out.push_str(&format!("# {menu}\n"));
+            }
+            out.push_str(code);
+            if !code.ends_with('\n') {
                 out.push('\n');
             }
+        }
+        out
+    }
+
+    /// The commands that ran without error as a document: a header with
+    /// `title`, then each command in an R chunk, a menu entry's name as a line
+    /// of text above its chunk. Rendering it runs the session again.
+    pub fn document_text(&self, kind: DocKind, title: &str) -> String {
+        let title = title.replace('\\', "\\\\").replace('"', "\\\"");
+        let mut out = match kind {
+            DocKind::Quarto => format!("---\ntitle: \"{title}\"\nformat: html\n---\n"),
+            DocKind::RMarkdown => format!("---\ntitle: \"{title}\"\noutput: html_document\n---\n"),
+        };
+        out.push_str("\nFrom an RCraft session: the commands that ran without error, in order.\n");
+        for (menu, code) in &self.script {
+            out.push('\n');
+            if let Some(menu) = menu {
+                out.push_str(&format!("*{menu}*\n\n"));
+            }
+            // a chunk's fence must be longer than any run of backticks inside it
+            let longest = code.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+            let fence = "`".repeat(longest.max(2) + 1);
+            out.push_str(&format!("{fence}{{r}}\n{}\n{fence}\n", code.trim_end()));
         }
         out
     }
@@ -96,12 +133,11 @@ impl Transcript {
         if outcome != Outcome::Ok {
             return;
         }
-        let mut part = String::new();
-        if let Source::Menu(name) = source {
-            part.push_str(&format!("# {name}\n"));
-        }
-        part.push_str(code.trim_end());
-        self.script.push(part);
+        let menu = match source {
+            Source::Menu(name) => Some(name.clone()),
+            _ => None,
+        };
+        self.script.push((menu, code.trim_end().to_string()));
     }
 
     fn append(&mut self, text: &str) {
@@ -170,6 +206,48 @@ mod tests {
         assert!(!script.contains("stop"));
         assert!(!script.contains("Sys.sleep"));
         assert!(script.contains("# Histogram\nhist(a)\n"));
+    }
+
+    #[test]
+    fn the_session_as_quarto_and_r_markdown_has_a_chunk_per_command() {
+        let mut t = Transcript::new();
+        t.finished(&Source::Typed, "a <- 1\n", Outcome::Ok);
+        t.finished(&Source::Typed, "stop('x')", Outcome::Error);
+        t.finished(
+            &Source::Menu("Graphs > Histogram".into()),
+            "hist(a)",
+            Outcome::Ok,
+        );
+        // a Stata line's comment is code, not a menu name
+        t.finished(
+            &Source::Typed,
+            "# Stata: keep if x > 5\nd <- d[d$x > 5, ]",
+            Outcome::Ok,
+        );
+        t.finished(&Source::Typed, "x <- \"```\"", Outcome::Ok);
+        let q = t.document_text(DocKind::Quarto, "My \"study\"");
+        assert!(
+            q.starts_with("---\ntitle: \"My \\\"study\\\"\"\nformat: html\n---\n"),
+            "{q}"
+        );
+        assert!(q.contains("\n```{r}\na <- 1\n```\n"), "{q}");
+        assert!(
+            q.contains("\n*Graphs > Histogram*\n\n```{r}\nhist(a)\n```\n"),
+            "{q}"
+        );
+        assert!(
+            q.contains("```{r}\n# Stata: keep if x > 5\nd <- d[d$x > 5, ]\n```"),
+            "{q}"
+        );
+        // a longer fence round code that holds three backticks
+        assert!(q.contains("````{r}\nx <- \"```\"\n````\n"), "{q}");
+        assert!(!q.contains("stop"), "{q}");
+        let r = t.document_text(DocKind::RMarkdown, "Session");
+        assert!(
+            r.starts_with("---\ntitle: \"Session\"\noutput: html_document\n---\n"),
+            "{r}"
+        );
+        assert_eq!(r.matches("{r}").count(), 4, "{r}");
     }
 
     #[test]

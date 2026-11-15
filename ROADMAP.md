@@ -603,6 +603,10 @@ Each family is its own set of dialogs over a named CRAN package.
   whole word, wrapping) and an Outline of sections and functions. P7.3 is done)
 - P7.4 Export the session as an R script, an R Markdown or Quarto document,
   or a Quarto project
+  (done 2026-11-15: File > Save session as… writes the commands that ran without error as an R
+  script, a Quarto document or an R Markdown document, one chunk a command with its menu entry above
+  it; Save session as Quarto project… writes _quarto.yml and the document into a folder, never over
+  files there. Each runs again in a fresh R to the same objects. P7.4 is done)
 - P7.5 Project files: data, script, log and package snapshot together
   (renv-style lockfile)
 

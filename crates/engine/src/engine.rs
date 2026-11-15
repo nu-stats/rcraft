@@ -190,6 +190,12 @@ impl Engine {
         self.transcript.script_text()
     }
 
+    /// The code that ran without error as a Quarto or R Markdown document
+    /// (P7.4), one chunk a command.
+    pub fn document_text(&self, kind: crate::transcript::DocKind, title: &str) -> String {
+        self.transcript.document_text(kind, title)
+    }
+
     /// Also write the log to a file from now on.
     pub fn log_to(&mut self, path: &Path) -> std::io::Result<()> {
         self.transcript.log_to(path)

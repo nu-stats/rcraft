@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
 use rcraft_engine::{
-    CommandId, Engine, History, Item, Outcome, PackageIndexService, QueryId, Recall, Source,
+    CommandId, DocKind, Engine, History, Item, Outcome, PackageIndexService, QueryId, Recall,
+    Source,
 };
 use rcraft_rcodegen::dialog::Spec;
 use rcraft_rcodegen::dialog_help;
@@ -50,6 +51,28 @@ const COMMAND_ID: &str = "command-line";
 const SCRIPT_ID: &str = "script-editor";
 /// The find bar's text box.
 const FIND_ID: &str = "script-find";
+
+/// A file name made from a session's name: letters, digits, `-` and `_`
+/// kept, the rest made `_`; `session` if nothing is left.
+fn file_stem_of(name: &str) -> String {
+    let stem: String = name
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let stem = stem.trim_matches('_').to_string();
+    if stem.is_empty() {
+        "session".to_string()
+    } else {
+        stem
+    }
+}
 
 /// What is selected in the Script Editor, as character positions, in order.
 fn editor_selection(ctx: &egui::Context) -> Option<(usize, usize)> {
@@ -249,6 +272,14 @@ enum Action {
     ReplaceAll,
     /// Put the cursor at the start of this line of the script (the outline).
     GoToLine(usize),
+    /// File > Save session as... (P7.4): an R script, Quarto or R Markdown.
+    SaveSessionAs,
+    /// Write the session to this file, the kind by its ending.
+    SaveSessionTo(std::path::PathBuf),
+    /// File > Save session as Quarto project...
+    SaveSessionProjectAs,
+    /// Write the session as a Quarto project in this folder.
+    SaveSessionProject(std::path::PathBuf),
     Quit,
 }
 
@@ -1158,6 +1189,71 @@ impl App {
                     n => format!("{n} replaced"),
                 });
             }
+            Action::SaveSessionAs => {
+                let stem = file_stem_of(&self.session_name);
+                let mut chooser = rfd::FileDialog::new()
+                    .set_title("Save session as")
+                    .set_file_name(format!("{stem}.R"))
+                    .add_filter("R script", &["R"])
+                    .add_filter("Quarto document", &["qmd"])
+                    .add_filter("R Markdown document", &["Rmd"]);
+                if let Some(dir) = self.script_folder() {
+                    chooser = chooser.set_directory(dir);
+                }
+                if let Some(path) = chooser.save_file() {
+                    self.perform(ctx, Action::SaveSessionTo(path));
+                }
+            }
+            Action::SaveSessionTo(path) => {
+                let Some(engine) = self.engine() else {
+                    self.message = Some("R is not running, so there is no session to save.".into());
+                    return;
+                };
+                let title = format!("RCraft session: {}", self.session_name);
+                let ending = path
+                    .extension()
+                    .and_then(|e| e.to_str())
+                    .map(|e| e.to_ascii_lowercase());
+                let text = match ending.as_deref() {
+                    Some("qmd") => engine.document_text(DocKind::Quarto, &title),
+                    Some("rmd") => engine.document_text(DocKind::RMarkdown, &title),
+                    _ => engine.script_text(),
+                };
+                self.message = std::fs::write(&path, text)
+                    .err()
+                    .map(|e| format!("{}: {e}", path.display()));
+            }
+            Action::SaveSessionProjectAs => {
+                let mut chooser = rfd::FileDialog::new().set_title("Folder for the Quarto project");
+                if let Some(dir) = self.script_folder() {
+                    chooser = chooser.set_directory(dir);
+                }
+                if let Some(dir) = chooser.pick_folder() {
+                    self.perform(ctx, Action::SaveSessionProject(dir));
+                }
+            }
+            Action::SaveSessionProject(dir) => {
+                let Some(engine) = self.engine() else {
+                    self.message = Some("R is not running, so there is no session to save.".into());
+                    return;
+                };
+                let title = format!("RCraft session: {}", self.session_name);
+                let doc = dir.join(format!("{}.qmd", file_stem_of(&self.session_name)));
+                let config = dir.join("_quarto.yml");
+                // nothing already there is written over
+                if let Some(there) = [&config, &doc].into_iter().find(|p| p.exists()) {
+                    self.message = Some(format!(
+                        "{} is already there; choose an empty folder for the project.",
+                        there.display()
+                    ));
+                    return;
+                }
+                let text = engine.document_text(DocKind::Quarto, &title);
+                let written = std::fs::create_dir_all(&dir)
+                    .and_then(|()| std::fs::write(&config, "project:\n  type: default\n"))
+                    .and_then(|()| std::fs::write(&doc, text));
+                self.message = written.err().map(|e| format!("{}: {e}", dir.display()));
+            }
             Action::GoToLine(line) => {
                 let at = script_tools::line_start(&self.script, line);
                 select_in_editor(ctx, at, at);
@@ -1873,6 +1969,26 @@ impl App {
                 }
                 if ui.button("Save script as…").clicked() {
                     out.push(Action::SaveScriptAs);
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui
+                    .button("Save session as…")
+                    .on_hover_text(
+                        "The commands that ran without error, as an R script, a Quarto or an R \
+                         Markdown document",
+                    )
+                    .clicked()
+                {
+                    out.push(Action::SaveSessionAs);
+                    ui.close_menu();
+                }
+                if ui
+                    .button("Save session as Quarto project…")
+                    .on_hover_text("A folder with _quarto.yml and the session as a Quarto document")
+                    .clicked()
+                {
+                    out.push(Action::SaveSessionProjectAs);
                     ui.close_menu();
                 }
                 ui.separator();
@@ -4830,5 +4946,69 @@ mod tests {
         assert_eq!(app.find.search.needle, "fit2");
         app.perform(&ctx, Action::CloseFind);
         assert!(!app.find.open);
+    }
+
+    /// P7.4: File > Save session as writes the kind its ending names, and Save
+    /// session as Quarto project writes _quarto.yml and the document into a
+    /// folder, never over files already there.
+    #[test]
+    fn the_session_saves_as_a_script_a_document_or_a_quarto_project() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings = false;
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(&ctx, Action::Submit(Source::Typed, "kept <- 41 + 1".into()));
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let dir = std::env::temp_dir().join(format!("rcraft-save-session-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(std::fs::create_dir_all(&dir).is_ok());
+
+        for (name, start) in [
+            ("s.R", "# Script from an RCraft session"),
+            ("s.qmd", "---\ntitle: \"RCraft session: "),
+            ("s.Rmd", "---\ntitle: \"RCraft session: "),
+        ] {
+            app.perform(&ctx, Action::SaveSessionTo(dir.join(name)));
+            assert_eq!(app.message, None, "{name}");
+            let text = std::fs::read_to_string(dir.join(name)).unwrap_or_default();
+            assert!(
+                text.starts_with(start) && text.contains("kept <- 41 + 1"),
+                "{name}: {text}"
+            );
+        }
+        let rmd = std::fs::read_to_string(dir.join("s.Rmd")).unwrap_or_default();
+        assert!(rmd.contains("output: html_document"), "{rmd}");
+
+        let project = dir.join("project");
+        app.perform(&ctx, Action::SaveSessionProject(project.clone()));
+        assert_eq!(app.message, None);
+        assert_eq!(
+            std::fs::read_to_string(project.join("_quarto.yml")).unwrap_or_default(),
+            "project:\n  type: default\n"
+        );
+        let docs: Vec<std::path::PathBuf> = std::fs::read_dir(&project)
+            .map(|r| r.flatten().map(|e| e.path()).collect())
+            .unwrap_or_default();
+        assert!(
+            docs.iter()
+                .any(|p| p.extension().is_some_and(|e| e == "qmd")),
+            "{docs:?}"
+        );
+        // again into the same folder: nothing is written over
+        app.perform(&ctx, Action::SaveSessionProject(project.clone()));
+        assert!(
+            app.message
+                .as_deref()
+                .is_some_and(|m| m.contains("already there")),
+            "{:?}",
+            app.message
+        );
+        assert_eq!(file_stem_of("Session 2: test/run"), "Session_2__test_run");
+        assert_eq!(file_stem_of("  ::  "), "session");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

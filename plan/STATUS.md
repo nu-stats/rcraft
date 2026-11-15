@@ -5045,3 +5045,20 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Not tried by hand: the bar in the running app, and whether the editor scrolls to a match far down a
   long script (the cursor is moved there; egui scrolls when the editor next has the focus).
 
+## P7.4 done: the session as an R script, Quarto, R Markdown or a Quarto project, 2026-11-15
+
+- File > **Save session as…**: the commands that ran without error (as Edit > Copy session as script
+  had them) written as an R script (.R), a Quarto document (.qmd) or an R Markdown document (.Rmd), by
+  the file's ending. In a document each command is an R chunk, with the menu entry it came from as a
+  line of text above it; a chunk's fence is longer than any run of backticks in its code. The
+  transcript now keeps each command's menu entry apart from its code, so a comment such as `# Stata:
+  keep if x > 5` stays code.
+- File > **Save session as Quarto project…**: `_quarto.yml` and `<session>.qmd` in a chosen folder,
+  written only where neither is there yet.
+- Checked in R 4.4.3: a session (typed, a menu command, one that failed, code with backticks) saved in
+  all three forms; each, run in a fresh R (the script with source(), the documents chunk by chunk),
+  leaves objects identical() to the first session's; the two documents' chunks are the same. The app
+  test writes each kind and the project, and the project is not written over.
+- Not checked: rendering (no Quarto or pandoc here); the output of a command is not in the document
+  until it is rendered.
+
