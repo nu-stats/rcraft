@@ -5111,3 +5111,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   numbers, factors and text by hand; and against R's own mean, distinct count, missing count, minimum
   and maximum on a real data frame. Drawn in the app: the pane on a data frame.
 
+## P8.3 done: example data, 2026-11-15
+
+- File > **Example data…** (`catalog::examples`): 20 data frames to practise on, taken from R's own
+  `datasets` package, which every R has, so RCraft redistributes no data and needs no attribution of
+  its own; R's help page for each (`?mtcars`) gives its source. Each is listed with a description in
+  RCraft's own words and its size; picking one runs `mtcars <- as.data.frame(datasets::mtcars)` and
+  shows it.
+- Checked in R 4.4.3: every example's code makes a data frame equal to R's, with the rows and variables
+  its description gives. 125 entries: 124 verified, 1 planned.
+

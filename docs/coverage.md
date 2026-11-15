@@ -6,13 +6,14 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 124 | 123 | 0 | 1 |
+| 125 | 124 | 0 | 1 |
 
 ## File
 
 | Entry | Status |
 |---|---|
 | Use my file | verified |
+| Example data | verified |
 | Text file | verified |
 | Excel workbook | verified |
 | Stata, SPSS or SAS | verified |

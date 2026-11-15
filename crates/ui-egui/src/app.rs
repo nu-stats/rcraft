@@ -2103,6 +2103,14 @@ impl App {
                     ui.close_menu();
                 }
                 if ui
+                    .button("Example data…")
+                    .on_hover_text("Data frames to practise on, from R's own datasets package")
+                    .clicked()
+                {
+                    out.push(Action::OpenFreeSpec(&rcraft_catalog::examples::EXAMPLE_DATA));
+                    ui.close_menu();
+                }
+                if ui
                     .button("Run do-file…")
                     .on_hover_text("Run a Stata do-file on R, unchanged")
                     .clicked()
@@ -3680,12 +3688,14 @@ impl App {
             .chain(rcraft_catalog::report::MODEL_REPORTS)
             .chain(rcraft_catalog::report::TABLE_REPORTS)
             .chain(rcraft_catalog::report::REPORT_SPECS)
+            .chain(rcraft_catalog::examples::SPECS)
             .chain(rcraft_catalog::save::SPECS)
             .chain(rcraft_catalog::plot_export::PLOT_SPECS)
             .find(|s| s.entry.eq_ignore_ascii_case(entry))
             .ok_or_else(|| format!("no dialog called {entry}"))?;
         if rcraft_catalog::report::REPORT_SPECS
             .iter()
+            .chain(rcraft_catalog::examples::SPECS)
             .any(|s| s.entry == spec.entry)
         {
             self.perform(ctx, Action::OpenFreeSpec(spec));

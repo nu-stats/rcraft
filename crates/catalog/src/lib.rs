@@ -8,6 +8,7 @@
 pub mod combine;
 pub mod data;
 pub mod data_tools;
+pub mod examples;
 pub mod generalised;
 pub mod graphs;
 pub mod inference;
@@ -107,7 +108,7 @@ const fn planned(name: &'static str, area: Area) -> Entry {
 /// Every dialog of the catalog, once each (a spec listed in two menus is not
 /// repeated).
 pub fn all_specs() -> Vec<&'static rcraft_rcodegen::dialog::Spec> {
-    let lists: [&[&'static rcraft_rcodegen::dialog::Spec]; 10] = [
+    let lists: [&[&'static rcraft_rcodegen::dialog::Spec]; 11] = [
         data::SPECS,
         data::OBJECT_SPECS,
         stats::SPECS,
@@ -116,6 +117,7 @@ pub fn all_specs() -> Vec<&'static rcraft_rcodegen::dialog::Spec> {
         report::MODEL_REPORTS,
         report::TABLE_REPORTS,
         report::REPORT_SPECS,
+        examples::SPECS,
         save::SPECS,
         plot_export::PLOT_SPECS,
     ];
@@ -131,6 +133,7 @@ pub fn all_specs() -> Vec<&'static rcraft_rcodegen::dialog::Spec> {
 /// The inventory. Seeded from ROADMAP.md; grows with each phase.
 pub const ENTRIES: &[Entry] = &[
     verified("Use my file", Area::File),
+    verified("Example data", Area::File),
     verified("Text file", Area::File),
     verified("Excel workbook", Area::File),
     verified("Stata, SPSS or SAS", Area::File),

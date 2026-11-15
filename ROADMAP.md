@@ -626,6 +626,9 @@ Each family is its own set of dialogs over a named CRAN package.
 - P8.2 Installers: Windows MSI and portable zip (signed), macOS universal DMG
   (signed and notarised), Linux AppImage, deb, rpm, tar.gz
 - P8.3 Example datasets that RCraft may redistribute, with attribution
+  (done 2026-11-15, without redistributing anything: File > Example data… copies one of 20 data frames
+  from R's own datasets package, which comes with every R, into the workspace and shows it; R's help
+  page on each gives its source, and the descriptions are RCraft's own. P8.3 is done)
 - P8.4 Help polish: see Phase 2A; here only the final review of every
   dialog's help page and the manual
 - P8.5 Browser build, if feasible
