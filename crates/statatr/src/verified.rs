@@ -199,6 +199,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("restore", &["made"]),
     ("revrs", &["revrs"]),
     ("robreg", &["robreg"]),
+    ("rotate", &["rotate"]),
     ("rreg", &["rreg"]),
     ("sdtest", &["sdtest"]),
     ("sdtesti", &["sdtest"]),

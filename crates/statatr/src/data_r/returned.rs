@@ -1015,6 +1015,10 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
     if e_not_kept(cmd, model).contains(&name) {
         return true;
     }
+    // what quartimax and equamax minimized, on a scale not matched yet
+    if name == "r_fmin" && (cmd == "factor" || cmd == "pca") {
+        return true;
+    }
     // anova's terms, numbered: ss_1, df_1, F_1, term_1, ...
     cmd == "anova"
         && ["ss_", "df_", "F_", "term_"].iter().any(|p| {
@@ -1026,6 +1030,7 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 /// The `e()` and `r()` names that are macros (text) in Stata.
 const TEXT_NAMES: &[&str] = &[
     "levels",
+    "rtext",
     "centiles",
     "mtmethod",
     "lags",
@@ -1134,6 +1139,10 @@ const MATRIX_NAMES: &[&str] = &[
     "b",
     "V",
     "C",
+    "r_L",
+    "r_T",
+    "r_Phi",
+    "r_Ev",
     "stat_m",
     "G",
     "mtest",
@@ -2079,6 +2088,16 @@ impl Session {
 
     /// Why `matrix list` cannot show this matrix a command left as Stata does.
     pub(super) fn matrix_list_refused(&self, which: &str, name: &str) -> Option<String> {
+        // an orthogonal rotation's factors' correlations: Stata computes T'T, whose 0s
+        // are its own rounding (1e-16 and the like)
+        if let Returned::Kept { cmd, model, .. } = &self.e_ret {
+            if which == "e" && name == "r_Phi" && cmd == "factor" && model == "orthogonal" {
+                return Some(
+                    "matrix list e(r_Phi) after an orthogonal rotation is not translated: Stata's off-diagonal 0s are its own rounding"
+                        .into(),
+                );
+            }
+        }
         match &self.r_ret {
             // mvtest normality, bivariate: its rows are pairs, eq:name
             Returned::Kept { cmd, .. } if which == "r" && cmd == "mvtest" && name == "Btest" => Some(
@@ -2338,7 +2357,12 @@ impl Session {
             Returned::Lost(why) => return Err(no(format!("{} list: {why}", c.name))),
             Returned::Program { .. } => {}
             Returned::Kept { cmd, model, .. } => {
-                if which == "e" {
+                if which == "e" && (cmd == "factor" || cmd == "pca") {
+                    out.caveat(format!(
+                        "Stata also lists {}e(r_fmin) after a quartimax or equamax rotation, which RCraft does not keep",
+                        if cmd == "factor" { "e(rngstate) after factor, and " } else { "" }
+                    ));
+                } else if which == "e" {
                     let missing = e_not_kept(cmd, model);
                     if !missing.is_empty() {
                         out.caveat(format!(

@@ -202,6 +202,7 @@ pub const COMMANDS: &[&str] = &[
     "revrs",
     "rreg",
     "robreg",
+    "rotate",
     "return",
     "run",
     "save",
@@ -394,6 +395,22 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         &["citerate(", "factors(", "ipf", "mineigen(", "pcf", "pf"],
     ),
     ("pca", &["components(", "covariance"]),
+    (
+        "rotate",
+        &[
+            "blanks(",
+            "clear",
+            "equamax",
+            "horst",
+            "nonormalize",
+            "normalize",
+            "oblique",
+            "orthogonal",
+            "promax",
+            "quartimax",
+            "varimax",
+        ],
+    ),
     ("ranksum", &["by("]),
     ("kwallis", &["by("]),
     (
@@ -1759,6 +1776,9 @@ gettoken a b : s, {o}"
             "ktau" if matches!(name, "print" | "star") => format!("ktau x y z, {name}(.05)"),
             "ktau" => format!("ktau x y z, {o}"),
             "testnl" => format!("regress y x\ntestnl _b[x] = 0, {o}"),
+            "rotate" if name == "blanks" => "factor x y z\nrotate, blanks(.3)".to_string(),
+            "rotate" if name == "oblique" => "factor x y z\nrotate, oblique promax".to_string(),
+            "rotate" => format!("factor x y z\nrotate, {o}"),
             "power" if matches!(name, "continuity" | "effect" | "test") => {
                 format!("power twoproportions 0.3 0.5, {o}")
             }

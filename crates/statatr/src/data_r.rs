@@ -84,6 +84,7 @@ mod reghdfe;
 mod returned;
 mod revrs;
 mod robreg;
+mod rotate;
 mod rreg;
 mod scalars;
 mod sdtest;
@@ -1263,6 +1264,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_epitab" => epitab::EPITAB_HELPER,
         "stata_mvtest" => mvtest::MVTEST_HELPER,
         "stata_factor" => factor::FACTOR_HELPER,
+        "stata_rotate" => rotate::ROTATE_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
         "stata_replay" => estat::REPLAY_HELPER,
         "stata_tab_mats" => tabsum::TAB_MATS_HELPER,
@@ -2553,6 +2555,7 @@ impl Session {
             "mvtest" => self.mvtest(c, &opts, out),
             "tabodds" => self.tabodds(c, &opts, out),
             "factor" => self.factor(c, &opts, out),
+            "rotate" => self.rotate(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),

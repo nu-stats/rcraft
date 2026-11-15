@@ -1281,3 +1281,45 @@ fn testnl_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn rotate_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 90\ngenerate double f = mod(_n * 37, 101) / 101 - .5\n\
+         generate double g = mod(_n * 53, 97) / 97 - .5\n\
+         generate double h = mod(_n * 29, 89) / 89 - .5\n\
+         generate double x1 = f + .5 * (mod(_n * 11, 83) / 83 - .5)\n\
+         generate double x2 = f + .3 * g + .6 * (mod(_n * 17, 79) / 79 - .5)\n\
+         generate double x3 = -f + .7 * (mod(_n * 19, 73) / 73 - .5)\n\
+         generate double x4 = .5 * f + g + .5 * (mod(_n * 23, 71) / 71 - .5)\n\
+         generate double x5 = g + .4 * (mod(_n * 31, 67) / 67 - .5)\n\
+         generate double x6 = h + .3 * g + .5 * (mod(_n * 41, 61) / 61 - .5)\n\
+         generate double x7 = h - .4 * f + .5 * (mod(_n * 43, 59) / 59 - .5)\n\
+         quietly factor x1-x7, factors(2)\nrotate\nrotate, promax blanks(.3)\n\
+         quietly pca x1-x7, components(2)\nrotate\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "    Rotation: orthogonal varimax (Kaiser off)    Number of params =         13",
+        "         Factor  |     Variance   Difference        Proportion   Cumulative",
+        "        Factor1  |      2.60621      0.77299            0.5473       0.5473",
+        "Rotated factor loadings (pattern matrix) and unique variances",
+        "              x4 |   0.5969    0.6680 |      0.1975",
+        "         Factor1 |  0.9499   0.3127",
+        "    Rotation: oblique promax (Kaiser off)        Number of params =         13",
+        "         Factor  |     Variance   Proportion    Rotated factors are correlated",
+        "        Factor2  |      1.84520       0.3875",
+        "              x6 |             0.8046 |      0.3500",
+        "    (blanks represent abs(loading)<.3)",
+        "         Factor2 | -0.2900   0.9433",
+        "    Rotation: orthogonal varimax (Kaiser off)    Rho              =     0.7248",
+        "           Comp1 |      2.95856      .843423             0.4227       0.4227",
+        "              x6 |  -0.0542    0.6119 |        .214",
+        "Component rotation matrix",
+        "           Comp2 |  -0.2401    0.9707",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
