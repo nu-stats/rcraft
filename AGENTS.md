@@ -148,8 +148,27 @@ concatenation in the UI.
   `docs/coverage.md` with it.
 - One task id per commit, for example `P3.2: Use my file, xlsx`.
 - Update `plan/STATUS.md` when a task finishes.
-- Parallel agents use separate `CARGO_TARGET_DIR` folders, edit only the
-  crates they own, and delete their target folder when done.
+- Parallel agents edit only the crates they own.
+
+### Build folders
+
+Build output is large (a single target folder can pass 25 GB), so keep it
+where it gets cleaned up:
+
+- **Build inside your own checkout.** Use its `target/`, plus one
+  `target-<toolchain>/` (for example `target-msvc/`) if you also build with
+  a second toolchain. A worktree's folders are removed with the worktree.
+  Never point `CARGO_TARGET_DIR` outside the checkout: not at a temp or
+  scratchpad folder, your home folder or the folder above the repo.
+  Nothing ever cleans those up.
+- **One folder per toolchain.** Reuse it; don't start a fresh one per task.
+  Agents that share one checkout may each add a single `target-<task id>/`
+  inside it.
+- **Release builds only when the task needs them.** With LTO they are
+  several times larger than debug builds.
+- **Clean up when the task is finished** (committed, or its PR merged): run
+  `cargo clean`, and `cargo clean --target-dir <folder>` for each extra
+  folder you used, then say so in your last message.
 
 ## 7. Assets
 
