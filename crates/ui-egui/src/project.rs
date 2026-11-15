@@ -197,19 +197,27 @@ mod tests {
 
     #[test]
     fn the_r_names_the_files_in_the_folder() {
-        let folder = Path::new("C:\\work\\wages");
+        // a folder as this platform writes one; R is given it with `/`
+        let folder = PathBuf::from("work").join("wages");
+        let folder = folder.as_path();
         let p = Project::new("wages", false);
         let save = save_code(folder, &p, "https://cloud.r-project.org");
         assert!(
-            save.contains("file = \"C:/work/wages/workspace.RData\""),
+            save.contains("file = \"work/wages/workspace.RData\""),
             "{save}"
         );
         assert!(
-            save.contains("writeLines(lines, \"C:/work/wages/rcraft-packages.txt\")"),
+            save.contains("writeLines(lines, \"work/wages/rcraft-packages.txt\")"),
             "{save}"
         );
         let open = open_code(folder, &p);
-        assert!(open.starts_with("setwd(\"C:/work/wages\")\n"), "{open}");
+        assert!(
+            open.starts_with(
+                "setwd(\"work/wages\")
+"
+            ),
+            "{open}"
+        );
         assert_eq!(name_of(folder), "wages");
         assert_eq!(project_file(folder), folder.join("wages.rcraft"));
     }
