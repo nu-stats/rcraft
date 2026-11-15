@@ -309,3 +309,29 @@ hi = lo + 0.84 and + 1.37 (296 results), and lo = 0.313, 0.347, 0.431, 0.469 wit
 - So the earlier picture (a start that slides down about half a step per n) was taken from ranges where
   the walk shows; on most ranges there is no walk. The open question is now what switches it on, and why
   at n 30 for 13.11–15.73 but not by n 48 for 12.63–15.25.
+
+## 2026-11-15, eighth pass: what switches the walk on
+
+- At 17.03–17.87 and 17.13–17.97 (step 0.05) the two ends move in turn: the bottom's start changes at
+  n 21 and 30, the top's at 26 and 36 (and the top falls back for n = 30 alone). Both ranges give the
+  same starts at every n.
+- Probe 9 (`%21x` through scalars, 1,196 runs): step 0.1, lo from 12.61 to 13.11 by 0.02, widths 2.06
+  (n 21–40) and 2.62 (n 26–51). For each lo the first n where an end stops being the plain product:
+  - Width 2.06 (22 labels): it depends on where the data ends sit against the labels, and repeats
+    every 0.1. Bottom label 0.1 or 0.3 step outside, top 0.3 or 0.1 outside: no walk to n 40 (five
+    positions each). Bottom 0.5 outside, top 0.1 inside: the bottom walks from n 29 (12.65, 12.85, 13.05)
+    or 33 (12.75, 12.95). Bottom 0.1 inside, top 0.5 outside: from n 24 (12.69 to 12.99), 21 at 13.09.
+  - Width 2.62 (28 labels) instead depends on which label block lo is in, not on the gaps: L = 126
+    never by n 51; 127: n 46; 128: 42; 129: 34; 130: 30 (32 at 13.07); 131: 30. Within a block the
+    four positions (gaps 0.1 to 0.7) switch at the same n, both ends together.
+- After the switch the ends are reproduced by walking from round values on the 0.5 grid (exact
+  decimals, then steps of 0.1 + 1 ulp): bottoms from 13, 12.5, 12, tops from 15.5, 16, 16.5, and the same
+  values serve many positions (12.73–15.35: 12.5 and 15.5 from n 46, 12 and 16.5 from 49; 12.83–15.45:
+  the same from 42 and 47; 13.03–15.65: 13 and 16 from 30, 12.5 from 38, 16.5 from 40, 12 from 47).
+  The ends jump outward in these coarse units at n shared across positions (40, 47).
+- Ruled out: a start floor((lo − p)/0.5)·0.5 and ceil((hi + q)/0.5)·0.5 with p, q depending on n only
+  (no p, q fits every lo at most n). Coarse starts in general are weak evidence alone: on the 400
+  walked bottoms of probes 6–8, starts on the 5·d grid fit 349 but 294–320 after a one-ulp shift. The
+  evidence here is that one value fits each end over a whole run of n and across positions.
+- Next: probe lo finely across a 0.5 block (several widths) at fixed n to map which coarse value each
+  end starts from, and read the n at which each value takes over.
