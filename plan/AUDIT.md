@@ -53,12 +53,13 @@ Partly done, with what is missing:
 
 Stale records to fix:
 
-- `crates/catalog` (and so `docs/coverage.md`) still marks built entries as `planned`: the seven
-  Stata mode entries (switch, translate code, translate do-file, open and run, dry-run report, side
-  by side, differences guide) and Vignettes. "RCraft manual" and "Model table" are planned rightly.
-- No menu entry is `Verified` (99 entries: 89 partial, 10 planned). AGENTS.md section 5 asks for a
-  check in the pinned R, with versions recorded, before an entry moves to Verified; none has been
-  written for the menus yet (the Stata corpus Verifies the translator's commands, not the menus).
+- (Fixed 2026-11-15: `crates/catalog` marked the seven built Stata mode entries and Vignettes as
+  `planned`; they are `partial` now. "RCraft manual" and "Model table" are planned rightly.)
+- Of the 117 menu entries, 17 are `Verified`: the Phase 6 entries (panel, survival, survey, IV,
+  multilevel, time series), checked in the pinned R by their engine tests. The other 98 are
+  `partial` and 2 `planned`. AGENTS.md section 5 asks for a check in the pinned R, with versions
+  recorded, before an entry moves to Verified; the earlier menus have none yet (the Stata corpus
+  Verifies the translator's commands, not the menus).
 
 ## Not checked by anyone yet
 

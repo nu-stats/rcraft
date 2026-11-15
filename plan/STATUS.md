@@ -4745,3 +4745,11 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   Probe NS matches.
 - The 46 package do-files, dry run: 96.4% (20,447 of 21,219). The only line refused on purpose is cd ""
   (16); the rest is what only a run knows.
+
+## The catalog's stale `planned` entries, 2026-11-15
+
+- `crates/catalog` marked eight built menu entries as `planned`: the seven Stata mode entries (switch,
+  translate code, translate do-file, open and run, dry-run report, side by side, differences guide;
+  P2B.7, P2B.8, P2C.1, P2C.6, P2C.7) and Vignettes (P2A.4). They are `partial` now, like the other
+  built entries without a menu check in the pinned R. "Model table" (Phase 7) and "RCraft manual" stay
+  planned. `docs/coverage.md` regenerated: 117 entries, 17 verified, 98 partial, 2 planned.
