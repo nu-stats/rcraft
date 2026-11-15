@@ -313,15 +313,17 @@ stata_ml_header <- function(fit, robust = FALSE, nobs = NULL) {
   cat(sprintf("Log likelihood  = %.4f\n\n", ll))
   invisible(c(N = n, ll = ll, ll_0 = ll0))
 }
-# logit, probit and poisson in Stata 19's layout (its iteration log aside): the title and
-# Number of obs, LR chi2 (Wald chi2 with robust or clustered errors), Prob > chi2, the log
-# (pseudo)likelihood and Pseudo R2; the clusters' line; the coefficient table as regress's
-# rows with z, Robust over std. err., Odds ratio or IRR with their notes. FALSE when the
-# rows are not ones Stata's table was checked for (then R's layout is printed).
-# Stata's iteration log of logit or probit: its own Newton-Raphson from the constant-only
-# fit (stata_ml_path), each point's likelihood; NULL when the model has no constant or an
-# offset, or a step was halved or -H not concave (marked in Stata's log, not checked)
+# Stata's iteration log: its own Newton-Raphson (stata_ml_path) from the constant-only fit,
+# each point's likelihood. logit and probit start at the constant; ologit and oprobit at the
+# cut points of the outcome's shares, the slopes 0; mlogit at each outcome's log odds against
+# the base. NULL when the model has no constant (logit, probit, mlogit) or an offset, or a
+# step was halved or -H not concave (marked in Stata's log, not checked)
 stata_ml_iterations <- function(fit, kind) {
+  if (kind %in% c("ologit", "oprobit", "mlogit")) {
+    m <- stata_ml_exact(fit, kind)
+    if (is.null(m) || m$odd || !m$converged) return(NULL)
+    return(m$lls)
+  }
   X <- stats::model.matrix(fit)
   if (!"(Intercept)" %in% colnames(X)) return(NULL)
   off <- fit$offset
@@ -351,7 +353,139 @@ stata_ml_iterations <- function(fit, kind) {
   if (is.null(path) || path$odd || !path$converged) return(NULL)
   path$lls
 }
-# prints the whole table or nothing: a model the layout can't place (an
+# where Stata's Newton-Raphson stops, each point's likelihood, and the variance there
+# (the inverse of -H, exact); NULL when R cannot follow it
+stata_ml_end <- function(ll, deriv, b0) {
+  path <- tryCatch(stata_ml_path(ll, deriv, b0), error = function(e) NULL)
+  if (is.null(path)) return(NULL)
+  V <- tryCatch(solve(deriv(path$b)$nh), error = function(e) NULL)
+  if (is.null(V)) return(NULL)
+  list(lls = path$lls, b = path$b, V = V, odd = path$odd, converged = path$converged)
+}
+# ologit, oprobit and mlogit as Stata estimates them: its path's end and exact variance, in
+# the order of stata_b (polr's slopes then cut points; multinom's equations in turn)
+stata_ml_exact <- function(fit, kind) {
+  if (kind == "mlogit") stata_ml_mlogit(fit) else stata_ml_ordered(fit, kind == "ologit")
+}
+# the fit moved to Stata's estimates (its probabilities too, which predict and the scores
+# read); stata_b and stata_vcov take them where the path ends converged
+stata_ml_exact_fit <- function(fit, kind) {
+  m <- tryCatch(stata_ml_exact(fit, kind), error = function(e) NULL)
+  if (is.null(m) || !m$converged || length(m$b) != length(stata_b)) return(fit)
+  b <- m$b
+  if (kind == "mlogit") {
+    X <- stats::model.matrix(fit)
+    E <- exp(X %*% matrix(b, ncol(X)))
+    P <- cbind(1, E) / (1 + rowSums(E))
+    dimnames(P) <- list(rownames(X), fit$lev)
+    fit$fitted.values <- if (ncol(P) == 2) P[, 2] else P
+  } else {
+    k <- length(fit$coefficients)
+    fit$coefficients[] <- b[seq_len(k)]
+    fit$zeta[] <- b[k + seq_along(fit$zeta)]
+    mf <- stats::model.frame(fit)
+    X <- stats::model.matrix(stats::delete.response(stats::terms(fit)), mf)
+    X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+    eta <- if (k > 0) drop(X %*% fit$coefficients) else rep(0, nrow(X))
+    cdf <- if (kind == "ologit") stats::plogis else stats::pnorm
+    cum <- cbind(0, sapply(fit$zeta, function(z) cdf(z - eta)), 1)
+    P <- cum[, -1, drop = FALSE] - cum[, -ncol(cum), drop = FALSE]
+    dimnames(P) <- list(rownames(X), fit$lev)
+    fit$fitted.values <- P
+    fit$lp <- eta
+  }
+  fit$stata_exact <- list(b = b, V = m$V)
+  fit
+}
+# ologit and oprobit (polr): the likelihood in the slopes and cut points, its exact
+# derivatives; each row's probability is F(upper cut - x'b) - F(lower cut - x'b)
+stata_ml_ordered <- function(fit, logistic) {
+  mf <- stats::model.frame(fit)
+  if (!is.null(stats::model.offset(mf))) return(NULL)
+  X <- stats::model.matrix(stats::delete.response(stats::terms(fit)), mf)
+  X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+  j <- as.integer(stats::model.response(mf))
+  w <- stats::model.weights(mf)
+  if (is.null(w)) w <- rep(1, length(j))
+  J <- length(fit$lev)
+  if (J < 2 || any(tabulate(j, J) == 0)) return(NULL)
+  k <- ncol(X)
+  n <- length(j)
+  cdf <- function(z) if (logistic) stats::plogis(z) else stats::pnorm(z)
+  pdf <- function(z) {
+    r <- if (logistic) stats::dlogis(z) else stats::dnorm(z)
+    r[!is.finite(z)] <- 0
+    r
+  }
+  slope <- function(z) {
+    r <- if (logistic) stats::dlogis(z) * (1 - 2 * stats::plogis(z)) else -z * stats::dnorm(z)
+    r[!is.finite(z)] <- 0
+    r
+  }
+  # each row's upper and lower bound minus x'b, as functions of (b, cuts)
+  Du <- cbind(-X, matrix(0, n, J - 1))
+  Dl <- Du
+  up <- which(j <= J - 1)
+  lo <- which(j >= 2)
+  Du[cbind(up, k + j[up])] <- 1
+  Dl[cbind(lo, k + j[lo] - 1)] <- 1
+  bounds <- function(b) {
+    eta <- if (k > 0) drop(X %*% b[seq_len(k)]) else rep(0, n)
+    cu <- c(-Inf, b[k + seq_len(J - 1)], Inf)
+    u <- cu[j + 1] - eta
+    l <- cu[j] - eta
+    list(u = u, l = l, p = cdf(u) - cdf(l))
+  }
+  ll <- function(b) {
+    q <- bounds(b)
+    if (any(!(q$p > 0))) return(NaN)
+    sum(w * log(q$p))
+  }
+  deriv <- function(b) {
+    q <- bounds(b)
+    G <- Du * (pdf(q$u) / q$p) - Dl * (pdf(q$l) / q$p)
+    H <- crossprod(Du * (w * slope(q$u) / q$p), Du) - crossprod(Dl * (w * slope(q$l) / q$p), Dl) - crossprod(G * w, G)
+    list(ll = sum(w * log(q$p)), g = colSums(G * w), nh = -H)
+  }
+  cp <- cumsum(tapply(w, factor(j, levels = seq_len(J)), sum)) / sum(w)
+  b0 <- c(rep(0, k), if (logistic) stats::qlogis(cp[-J]) else stats::qnorm(cp[-J]))
+  stata_ml_end(ll, deriv, unname(b0))
+}
+# mlogit (nnet::multinom, the base outcome its first level): each other outcome's
+# equation; the path does not depend on which outcome is the base
+stata_ml_mlogit <- function(fit) {
+  mf <- fit$model
+  X <- stats::model.matrix(fit)
+  ic <- which(colnames(X) == "(Intercept)")
+  if (length(ic) != 1 || !is.null(stats::model.offset(mf))) return(NULL)
+  y <- stats::model.response(mf)
+  w <- stats::model.weights(mf)
+  if (is.null(w)) w <- rep(1, length(y))
+  lev <- levels(y)
+  if (length(lev) < 2) return(NULL)
+  Y <- matrix(vapply(lev[-1], function(l) as.numeric(y == l), numeric(length(y))), nrow = length(y))
+  k <- ncol(X)
+  m <- ncol(Y)
+  ll <- function(b) {
+    E <- X %*% matrix(b, k)
+    sum(w * (rowSums(Y * E) - log(1 + rowSums(exp(E)))))
+  }
+  deriv <- function(b) {
+    E <- exp(X %*% matrix(b, k))
+    P <- E / (1 + rowSums(E))
+    H <- matrix(0, k * m, k * m)
+    for (a in seq_len(m)) for (c in seq_len(m)) {
+      H[(a - 1) * k + seq_len(k), (c - 1) * k + seq_len(k)] <- crossprod(X * (w * P[, a] * ((a == c) - P[, c])), X)
+    }
+    list(ll = ll(b), g = as.vector(crossprod(X, w * (Y - P))), nh = H)
+  }
+  pj <- colSums(Y * w) / sum(w)
+  pb <- 1 - sum(pj)
+  if (any(pj <= 0) || pb <= 0) return(NULL)
+  b0 <- as.vector(vapply(seq_len(m), function(a) replace(rep(0, k), ic, log(pj[a] / pb)), numeric(k)))
+  stata_ml_end(ll, deriv, b0)
+}
+# prints the whole table or nothing: a model the layout cannot place (an
 # omitted column, a missing variance) falls back to R's layout untouched
 stata_ml_print <- function(...) {
   ok <- FALSE
@@ -360,27 +494,65 @@ stata_ml_print <- function(...) {
   cat(paste0(out, "\n"), sep = "")
   TRUE
 }
+# The table in blocks, as Stata 19 lays them out: logit, probit and poisson one block;
+# ologit and oprobit the slopes, then the cut points (/cut1, ... with no z or P); nbreg the
+# slopes, /lnalpha, then alpha; mlogit each outcome's equation under its value, the base
+# outcome marked. Odds ratios, IRR and RRR transform the first block only (each equation of
+# mlogit). The header from e(): the model test is e(chi2) on e(df_m), Pseudo R2 e(r2_p)
+# (nbreg's against its constant-only fit, with "Dispersion: mean")
 stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level = 0.95, label = "Coefficient",
-                                eform = FALSE, note = NULL, iterations = NULL) {
+                                eform = FALSE, note = NULL, iterations = NULL, data = NULL) {
   e <- stata_e
-  # e(b) names the outcome's equation (y:x); the table's rows are the names alone
-  nm <- colnames(e$b)
-  eqs <- unique(sub(":.*$", "", nm[grepl(":", nm, fixed = TRUE)]))
-  if (length(eqs) > 1) return(FALSE)
-  nm <- sub("^[^:]*:", "", nm)
-  rows <- stata_coef_rows(nm)
-  if (is.null(rows)) return(FALSE)
-  l <- stata_ml_ll(fit)
-  ll <- l[["ll"]]
-  ll0 <- l[["ll_0"]]
+  kind <- switch(if (is.null(e$cmd)) "" else e$cmd, ologit = , oprobit = "ordered", nbreg = "nbreg",
+                 mlogit = "mlogit", "single")
+  full <- colnames(e$b)
+  eq <- ifelse(grepl(":", full, fixed = TRUE), sub(":.*$", "", full), "")
+  nm <- sub("^[^:]*:", "", full)
+  bf <- stats::setNames(as.vector(e$b), full)
+  sf <- stats::setNames(sqrt(pmax(diag(as.matrix(e$V)), 0)), full)
+  block <- function(i, ...) list(b = stats::setNames(bf[i], nm[i]), se = stats::setNames(sf[i], nm[i]), ...)
+  if (kind == "single") {
+    if (length(unique(eq[eq != ""])) > 1) return(FALSE)
+    blocks <- list(block(seq_along(full)))
+  } else if (kind == "mlogit") {
+    base <- as.character(e$baseout)
+    blocks <- lapply(unique(eq), function(q) block(which(eq == q), head = q, base = identical(q, base)))
+  } else {
+    if (!any(eq == "/") || !any(eq != "/")) return(FALSE)
+    blocks <- list(block(which(eq != "/")), block(which(eq == "/"), aux = TRUE))
+    if (kind == "nbreg") {
+      if (!identical(nm[eq == "/"], "lnalpha")) return(FALSE)
+      blocks[[3]] <- list(alpha = TRUE)
+    }
+  }
+  for (k in seq_along(blocks)) {
+    bl <- blocks[[k]]
+    if (isTRUE(bl$aux) || isTRUE(bl$base) || isTRUE(bl$alpha)) next
+    blocks[[k]]$rows <- stata_coef_rows(names(bl$b), data)
+    if (is.null(blocks[[k]]$rows)) return(FALSE)
+  }
   n <- if (is.null(nobs)) NROW(stats::fitted(fit)) else nobs
-  b <- stats::setNames(as.vector(e$b), nm)
-  se <- stats::setNames(sqrt(pmax(diag(as.matrix(e$V)), 0)), nm)
-  keep <- nm != "_cons" & !grepl("^[0-9]+[bo]+\\.|^o\\.", nm) & se > 0
-  q <- sum(keep)
+  if (kind == "single") {
+    l <- stata_ml_ll(fit)
+    ll <- l[["ll"]]
+    b <- blocks[[1]]$b
+    se <- blocks[[1]]$se
+    keep <- names(b) != "_cons" & !grepl("^[0-9]+[bo]+\\.|^o\\.", names(b)) & se > 0
+    q <- sum(keep)
+    stat <- if (!robust) 2 * (ll - l[["ll_0"]]) else if (q > 0) {
+      drop(t(b[keep]) %*% solve(as.matrix(e$V)[keep, keep, drop = FALSE], b[keep]))
+    } else NA_real_
+    r2p <- 1 - ll / l[["ll_0"]]
+  } else {
+    ll <- e$ll
+    q <- e$df_m
+    stat <- e$chi2
+    r2p <- e$r2_p
+    if (is.null(ll) || is.null(q) || is.null(stat) || is.null(r2p)) return(FALSE)
+  }
   pad <- stata_tab_pad
   row <- function(left, label, value) cat(formatC(left, width = -56, flag = "-"), formatC(label, width = -13, flag = "-"), " =", pad(value, 7), "\n", sep = "")
-  # the iteration log (logit, probit), as Stata prints it before the header
+  # the iteration log, as Stata prints it before the header
   if (!is.null(iterations)) {
     lls <- stata_ml_iterations(fit, iterations)
     if (!is.null(lls)) {
@@ -393,65 +565,108 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
   }
   cat("\n")
   row(title, "Number of obs", stata_tab_count(n))
-  if (robust) {
-    w <- if (q > 0) drop(t(b[keep]) %*% solve(as.matrix(e$V)[keep, keep, drop = FALSE], b[keep])) else NA_real_
-    row("", sprintf("Wald chi2(%d)", q), sprintf("%.2f", w))
-    row("", "Prob > chi2", sprintf("%.4f", stats::pchisq(w, q, lower.tail = FALSE)))
-  } else {
-    lr <- 2 * (ll - ll0)
-    row("", sprintf("LR chi2(%d)", q), sprintf("%.2f", lr))
-    row("", "Prob > chi2", sprintf("%.4f", stats::pchisq(lr, q, lower.tail = FALSE)))
-  }
+  row("", sprintf(if (robust) "Wald chi2(%d)" else "LR chi2(%d)", q), sprintf("%.2f", stat))
+  row(if (kind == "nbreg") "Dispersion: mean" else "", "Prob > chi2", sprintf("%.4f", stats::pchisq(stat, q, lower.tail = FALSE)))
   row(paste0(if (robust) "Log pseudolikelihood = " else "Log likelihood = ", trimws(stata_fmt(ll, "%10.0g"))),
-      "Pseudo R2", sprintf("%.4f", 1 - ll / ll0))
+      "Pseudo R2", sprintf("%.4f", r2p))
   cat("\n")
   if (!is.null(e[["N_clust"]])) {
     cat(pad(sprintf("(Std. err. adjusted for %s clusters in %s)", stata_tab_count(e$N_clust), e$clustvar), 78), "\n", sep = "")
   }
   qz <- stats::qnorm((1 + level) / 2)
+  sep_line <- function() cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
   cat(strrep("-", 78), "\n", sep = "")
   if (robust) cat("             |               Robust\n")
   cat(pad(stata_tab_abbrev(e$depvar), 12), " | ", formatC(formatC(label, width = 10), width = -13, flag = "-"),
       if (robust) "std. err." else "Std. err.", "      z    P>|z|     [", format(100 * level), "% conf. interval]\n", sep = "")
-  cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
-  for (r in rows) {
-    if (r$kind == "blank") {
-      cat(strrep(" ", 13), "|\n", sep = "")
+  sep_line()
+  # a row with no test (a cut point, /lnalpha, alpha): the estimate, its error and interval
+  aux_row <- function(lab, shown) {
+    cat(pad(lab, 12), " |", pad(stata_tab_g(shown[1]), 11), pad(stata_tab_g(shown[2]), 11), strrep(" ", 17),
+        pad(stata_tab_g(shown[3]), 13), pad(stata_tab_g(shown[4]), 12), "\n", sep = "")
+  }
+  # an outcome's value, or its value label as Stata names the equation (spaces as _)
+  outcome <- function(v) {
+    s <- attr((if (is.null(data)) stata_data else data)[[e$depvar]], "labels")
+    i <- if (is.null(s)) NA else match(suppressWarnings(as.numeric(v)), as.numeric(s))
+    if (is.na(i)) v else gsub(" ", "_", names(s)[i], fixed = TRUE)
+  }
+  for (k in seq_along(blocks)) {
+    bl <- blocks[[k]]
+    if (k > 1) sep_line()
+    if (!is.null(bl$head)) {
+      cat(formatC(stata_tab_abbrev(outcome(bl$head)), width = -13, flag = "-"), "|",
+          if (isTRUE(bl$base)) "  (base outcome)", "\n", sep = "")
+      if (isTRUE(bl$base)) next
+    }
+    if (isTRUE(bl$alpha)) {
+      lna <- bf[["/:lnalpha"]]
+      s <- sf[["/:lnalpha"]]
+      aux_row("alpha", c(exp(lna), exp(lna) * s, exp(lna - qz * s), exp(lna + qz * s)))
       next
     }
-    if (r$kind == "head") {
-      cat(pad(stata_tab_abbrev(r$label), 12), " |\n", sep = "")
+    if (isTRUE(bl$aux)) {
+      for (i in seq_along(bl$b)) {
+        aux_row(paste0("/", names(bl$b)[i]), c(bl$b[[i]], bl$se[[i]], bl$b[[i]] - qz * bl$se[[i]], bl$b[[i]] + qz * bl$se[[i]]))
+      }
       next
     }
-    if (r$kind == "wrap") {
-      cat(pad(r$label, 11), " #|\n", sep = "")
-      next
+    for (r in bl$rows) {
+      if (r$kind == "blank") {
+        cat(strrep(" ", 13), "|\n", sep = "")
+        next
+      }
+      if (r$kind == "head") {
+        cat(pad(stata_tab_abbrev(r$label), 12), " |\n", sep = "")
+        next
+      }
+      if (r$kind == "wrap") {
+        cat(pad(r$label, 11), " #|\n", sep = "")
+        next
+      }
+      lab <- if (r$kind == "level") paste0(pad(r$label, 11), " ") else pad(stata_tab_abbrev(r$label), 12)
+      if (!is.null(r$note)) {
+        cat(lab, " |", pad(if (eform) "1" else "0", 11), "  ", r$note, "\n", sep = "")
+        next
+      }
+      bi <- bl$b[[r$col]]
+      si <- bl$se[[r$col]]
+      z <- bi / si
+      p <- 2 * stats::pnorm(-abs(z))
+      lo <- bi - qz * si
+      hi <- bi + qz * si
+      shown <- if (eform) c(exp(bi), exp(bi) * si, exp(lo), exp(hi)) else c(bi, si, lo, hi)
+      cat(lab, " |", pad(stata_tab_g(shown[1]), 11), pad(stata_tab_g(shown[2]), 11), pad(sprintf("%.2f", z), 9),
+          pad(sprintf("%.3f", p), 8), pad(stata_tab_g(shown[3]), 13), pad(stata_tab_g(shown[4]), 12), "\n", sep = "")
     }
-    lab <- if (r$kind == "level") paste0(pad(r$label, 11), " ") else pad(stata_tab_abbrev(r$label), 12)
-    if (!is.null(r$note)) {
-      cat(lab, " |", pad(if (eform) "1" else "0", 11), "  ", r$note, "\n", sep = "")
-      next
-    }
-    bi <- b[[r$col]]
-    si <- se[[r$col]]
-    z <- bi / si
-    p <- 2 * stats::pnorm(-abs(z))
-    lo <- bi - qz * si
-    hi <- bi + qz * si
-    if (eform) {
-      shown <- c(exp(bi), exp(bi) * si, exp(lo), exp(hi))
-    } else {
-      shown <- c(bi, si, lo, hi)
-    }
-    cat(lab, " |", pad(stata_tab_g(shown[1]), 11), pad(stata_tab_g(shown[2]), 11), pad(sprintf("%.2f", z), 9),
-        pad(sprintf("%.3f", p), 8), pad(stata_tab_g(shown[3]), 13), pad(stata_tab_g(shown[4]), 12), "\n", sep = "")
   }
   cat(strrep("-", 78), "\n", sep = "")
+  if (eform && kind == "ordered") cat("Note: Estimates are transformed only in the first equation to odds ratios.\n")
+  if (eform && kind == "nbreg") cat("Note: Estimates are transformed only in the first equation to incidence-rate\n      ratios.\n")
   if (!is.null(note) && "_cons" %in% nm) cat(note, "\n", sep = "")
+  # nbreg: the test of alpha = 0 against the Poisson fit, on the boundary (half chi2(1))
+  if (kind == "nbreg" && !robust && !is.null(e$ll_c)) {
+    chi <- max(0, 2 * (e$ll - e$ll_c))
+    cat(formatC(sprintf("LR test of alpha=0: chibar2(01) = %.2f", chi), width = -55, flag = "-"),
+        "Prob >= chibar2 = ", sprintf("%5.3f", 0.5 * stats::pchisq(chi, 1, lower.tail = FALSE)), "\n", sep = "")
+  }
   TRUE
 }"#;
 
 impl Session {
+    /// ologit, oprobit and mlogit at Stata's estimates: its Newton-Raphson's end from the
+    /// constant-only fit and the exact variance there (R's optimisers stop a hair away, and
+    /// polr's variance is a numerical Hessian's), where the path ends converged.
+    fn exact_ml(&mut self, fit: Fit, out: &mut Out) {
+        self.helpers.insert("stata_ml_header");
+        self.helpers.insert("stata_probit_newton");
+        out.line(format!(
+            "stata_estimates <- stata_ml_exact_fit(stata_estimates, {})",
+            r_text(fit.name())
+        ));
+        out.line("if (!is.null(stata_estimates$stata_exact)) { stata_b[] <- stata_estimates$stata_exact$b; stata_vcov[] <- stata_estimates$stata_exact$V }");
+    }
+
     pub(super) fn ml(
         &mut self,
         c: &Command,
@@ -770,17 +985,15 @@ impl Session {
                 );
                 out.line("stata_vcov <- stats::vcov(stata_estimates)");
                 out.line("dimnames(stata_vcov) <- list(names(stata_b), names(stata_b))");
+                self.exact_ml(fit, out);
                 out.caveat("the cut points are R's zeta, which are Stata's /cut1, /cut2, ... with the same sign");
-                out.caveat(
-                    "the standard errors come from R's numerical Hessian, so the last digit or \
-                     two can differ from Stata's",
-                );
             }
             Fit::Mlogit => {
                 self.helpers.insert("stata_multinom_b");
                 out.line("stata_b <- stata_multinom_b(stata_estimates)");
                 out.line("stata_vcov <- stats::vcov(stata_estimates)");
                 out.line("dimnames(stata_vcov) <- list(names(stata_b), names(stata_b))");
+                self.exact_ml(fit, out);
                 out.caveat("each coefficient is named outcome:variable; the base outcome has none");
             }
             Fit::Regress
@@ -875,12 +1088,15 @@ impl Session {
         } else {
             ""
         };
-        // logit, probit and poisson in Stata 19's layout (not with an offset, whose row
-        // was not checked), else R's
+        // Stata 19's layout (not with an offset, whose row was not checked), else R's
         let stata_title = match fit {
             Fit::Logit => Some("Logistic regression"),
             Fit::Probit => Some("Probit regression"),
             Fit::Poisson => Some("Poisson regression"),
+            Fit::Nbreg => Some("Negative binomial regression"),
+            Fit::Ologit => Some("Ordered logistic regression"),
+            Fit::Oprobit => Some("Ordered probit regression"),
+            Fit::Mlogit => Some("Multinomial logistic regression"),
             _ => None,
         }
         .filter(|_| offset_var.is_none());
@@ -889,10 +1105,16 @@ impl Session {
                 Fit::Logit if opts.has("or", 2) => {
                     ("Odds ratio", true, "Note: _cons estimates baseline odds.")
                 }
-                Fit::Poisson if opts.has("irr", 3) => (
+                Fit::Poisson | Fit::Nbreg if opts.has("irr", 3) => (
                     "IRR",
                     true,
                     "Note: _cons estimates baseline incidence rate.",
+                ),
+                Fit::Ologit if opts.has("or", 2) => ("Odds ratio", true, ""),
+                Fit::Mlogit if opts.has("rrr", 3) => (
+                    "RRR",
+                    true,
+                    "Note: _cons estimates baseline relative risk for each outcome.",
                 ),
                 _ => ("Coefficient", false, ""),
             };
@@ -900,17 +1122,29 @@ impl Session {
             self.helpers.insert("stata_fmt");
             // the iteration log: Stata's own Newton steps from the constant-only fit
             // (stata_ml_iterations, line for line on probes); poisson starts from values of its
-            // own, not known yet
+            // own, not known yet, and nbreg's log begins with poisson's
             let iterations = match fit {
-                Fit::Logit if !opts.has("nolog", 5) => "\"logit\"",
-                Fit::Probit if !opts.has("nolog", 5) => "\"probit\"",
+                _ if opts.has("nolog", 5) => "NULL",
+                Fit::Logit => "\"logit\"",
+                Fit::Probit => "\"probit\"",
+                Fit::Ologit => "\"ologit\"",
+                Fit::Oprobit => "\"oprobit\"",
+                Fit::Mlogit => "\"mlogit\"",
                 _ => "NULL",
             };
             if iterations != "NULL" {
                 self.helpers.insert("stata_probit_newton");
             }
+            // the model's rows, for value labels: a one-outcome fit keeps them as stata_data
+            let data = if fit.one_outcome() {
+                String::new()
+            } else {
+                self.helpers.insert("stata_slice");
+                self.helpers.insert("stata_fit_rows");
+                format!(", data = stata_slice({src}, stata_fit_rows(stata_estimates, {src}))")
+            };
             out.line(format!(
-                "if (!stata_ml_print(stata_estimates, {}, robust = {}{nobs}, level = {}, label = {}, eform = {}, note = {}, iterations = {iterations})) {{",
+                "if (!stata_ml_print(stata_estimates, {}, robust = {}{nobs}, level = {}, label = {}, eform = {}, note = {}, iterations = {iterations}{data})) {{",
                 r_text(title),
                 r_logical(robust),
                 r_number(level),
@@ -965,7 +1199,7 @@ impl Session {
             out.line("cat(\"(printed in R's layout: Stata's table for this model is not matched yet)\\n\")");
             out.line("}");
             out.caveat(
-                "the header and table as Stata 19 prints them (logit and probit with its iteration log; poisson's is not shown yet)",
+                "the header and table as Stata 19 prints them, with its iteration log (not yet for poisson and nbreg)",
             );
         } else {
             out.caveat("printed in R's layout, not Stata's table");

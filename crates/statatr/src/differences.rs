@@ -60,11 +60,21 @@ const ML_DIGITS: Point = p(
 );
 const ML_TABLE: Point = p(
     "Printing",
-    "logit, probit and poisson print Stata 19's header and table (LR or Wald chi2, the log \
-     likelihood or pseudolikelihood, Pseudo R2, the clusters' line, factor levels, Odds ratio \
-     and IRR with their notes). logit and probit print Stata's iteration log too (its own \
-     Newton steps from the constant-only fit); poisson's is not shown yet (Stata starts it \
-     from values of its own), and a model with an offset prints in R's layout.",
+    "logit, probit, poisson, nbreg, ologit, oprobit and mlogit print Stata 19's header and \
+     table (LR or Wald chi2, the log likelihood or pseudolikelihood, Pseudo R2, the clusters' \
+     line, factor levels, Odds ratio, IRR and RRR with their notes; the cut points, /lnalpha \
+     and alpha below their rules; nbreg's Dispersion line and test of alpha=0; each mlogit \
+     outcome's equation under its value label, the base outcome marked). logit, probit, \
+     ologit, oprobit and mlogit print Stata's iteration log too (its own Newton steps from \
+     the constant-only fit). poisson's and nbreg's logs are not shown yet (Stata starts \
+     poisson from values of its own, and nbreg's log begins with poisson's); a model with \
+     an offset prints in R's layout.",
+);
+const ML_EXACT: Point = p(
+    "Where Stata stops",
+    "The estimates and their variance are where Stata's own Newton-Raphson stops, from the \
+     constant-only fit, with the exact Hessian; R's optimiser stops a hair away and polr's \
+     variance is a numerical Hessian's, which moved the last printed digit.",
 );
 const GRAPH: Point = p(
     "Look",
@@ -1062,6 +1072,8 @@ pub const GUIDES: &[Guide] = &[
                 "Each coefficient is named outcome:variable; the base outcome's equation is \
                  zeros, as in Stata's e(b).",
             ),
+            ML_EXACT,
+            ML_TABLE,
             ML_ROBUST,
             ML_DIGITS,
             MISSING_IN_MODELS,
@@ -1076,6 +1088,7 @@ pub const GUIDES: &[Guide] = &[
                 "alpha is 1 / theta of MASS::glm.nb; the standard errors come from the whole \
                  likelihood, alpha included, as Stata's (glm.nb's own leave theta out).",
             ),
+            ML_TABLE,
             ML_ROBUST,
             ML_DIGITS,
             MISSING_IN_MODELS,
@@ -1089,10 +1102,8 @@ pub const GUIDES: &[Guide] = &[
                 "Cut points",
                 "R's zeta are Stata's /cut1, /cut2, ... with the same sign.",
             ),
-            p(
-                "Standard errors",
-                "From R's numerical Hessian, so the last digit or two can differ from Stata's.",
-            ),
+            ML_EXACT,
+            ML_TABLE,
             ML_ROBUST,
             ML_DIGITS,
             MISSING_IN_MODELS,

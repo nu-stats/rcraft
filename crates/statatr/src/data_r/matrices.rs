@@ -199,9 +199,16 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
       if (q == stata_base) {
         # the base outcome's equation: Stata's columns of the others, left out
         # an omitted term is o. there already
-        n0 <- sub("^o\\.", "", got[[1]]$n)
-        if (any(grepl("[.#]", n0))) return(approx(why))
-        names_out <- c(names_out, paste0(q, ":o.", n0))
+        # (Stata 19): each part of a name marked o unless marked b or o already, x as
+        # o.x, 2.g as 2o.g, c.x as co.x, _cons as o._cons (1b.g#co.x stays)
+        mark <- function(p) {
+          if (grepl("^(o|co|[0-9]+[bo])\\.", p)) return(p)
+          if (startsWith(p, "c.")) return(paste0("co.", substring(p, 3)))
+          if (grepl("^[0-9]+\\.", p)) return(sub("^([0-9]+)\\.", "\\1o.", p))
+          paste0("o.", p)
+        }
+        n0 <- vapply(strsplit(got[[1]]$n, "#", fixed = TRUE), function(ps) paste(vapply(ps, mark, ""), collapse = "#"), "")
+        names_out <- c(names_out, paste0(q, ":", n0))
         from <- c(from, rep(NA_character_, length(n0)))
       } else {
         names_out <- c(names_out, paste0(q, ":", got[[q]]$n))

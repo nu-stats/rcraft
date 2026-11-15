@@ -120,13 +120,15 @@ stata_tab2_print <- function(rname, cname, rlabs, clabs, counts, chi2 = NULL) {
 # interacted (cells 2 1, or 2#yes with labels) and any interaction with a
 # continuous variable, as a group (its name, then its levels); NULL for a
 # shape not checked against Stata (read off Stata 19, probes 286 and P2C.15's)
-stata_coef_rows <- function(nm) {
+stata_coef_rows <- function(nm, data = NULL) {
+  # the model's rows: stata_data (kept by one-outcome fits, read only when needed), or those given
+  rows_of <- function() if (is.null(data)) stata_data else data
   one_f <- "^([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)$"
   two_f <- "^([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)#([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)$"
   f_c <- "^[0-9]+\\.[A-Za-z_][A-Za-z0-9_]*(#c\\.[A-Za-z_][A-Za-z0-9_]*)+$"
   parts <- function(n, re) regmatches(n, regexec(re, n))[[1]]
   # a value's label (the data's value labels), or the value itself
-  labs <- function(v) attr(stata_data[[v]], "labels")
+  labs <- function(v) attr(rows_of()[[v]], "labels")
   lab <- function(v, l) {
     s <- labs(v)
     i <- if (is.null(s)) NA else match(as.numeric(l), as.numeric(s))
@@ -195,7 +197,8 @@ stata_coef_rows <- function(nm) {
         b2 <- lab(v2, q[5])
         note <- NULL
         if (q[3] == "o" || q[6] == "o") {
-          cnt <- sum(stata_data[[v1]] == as.numeric(q[2]) & stata_data[[v2]] == as.numeric(q[5]), na.rm = TRUE)
+          dd <- rows_of()
+          cnt <- sum(dd[[v1]] == as.numeric(q[2]) & dd[[v2]] == as.numeric(q[5]), na.rm = TRUE)
           note <- if (cnt == 0) "(empty)" else "(omitted)"
         }
         text <- paste0(a, sep, b2)

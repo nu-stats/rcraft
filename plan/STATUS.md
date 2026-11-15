@@ -4637,3 +4637,30 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
     `anova`, a narrow console, and an empty model.
   - Drawn in the app: `summary(lm(mpg ~ wt + factor(cyl), mtcars))`.
 - **Not checked:** pasting into Word or Excel by hand (no test reaches a real clipboard).
+
+## nbreg, ologit, oprobit and mlogit tables as Stata 19 prints them, 2026-11-14
+
+- One printer for every likelihood model, in blocks: ologit and oprobit their slopes then /cut1, ...
+  (no z or P); nbreg the slopes, /lnalpha, then alpha, with "Dispersion: mean" in the header and the
+  test of alpha=0 (not with robust errors); mlogit each outcome's equation under its value or value label
+  (spaces as _, abbreviated to 12 with ~), the base outcome marked. Odds ratios, IRR and RRR transform the
+  first block only, with Stata's notes. The header reads e(): chi2 on df_m, Pseudo R2 (nbreg's against
+  its constant-only fit). A probe of 15 models (each with robust, clustered, or, irr, rrr, i.g,
+  baseoutcome) matches Stata 19 line for line.
+- Iteration logs of ologit, oprobit and mlogit: Stata's Newton-Raphson from the constant-only fit
+  (ordered: the slopes 0, the cut points at the outcome's cumulative shares; mlogit: each outcome's log
+  odds against the base), with exact derivatives; every line of the probe matches.
+- Their estimates and variance are now where that path stops, with the exact Hessian: R's optimisers
+  stopped a hair away and polr's variance was a numerical Hessian's, which moved the 7th printed digit
+  of 21 cells in the probe; none differ now.
+- Not yet: poisson's and nbreg's logs. Stata's poisson starts near its maximum from values of its own
+  (trace shows them about 1e-4 away; neither IRLS nor Newton from the constant, from several starts,
+  gives them). nbreg's later stages are decoded: the constant-only fit starts at ln(mean y) with
+  lnalpha 0, the full fit at poisson's slopes, constant ln(mean y) - b'mean(x) and the constant-only
+  lnalpha, and both then follow ml's path line for line; only its first stage, poisson's log, is missing.
+- mlogit's e(b) with a factor variable: the base equation's columns were R's names (constant first, no
+  base level). Now Stata 19's: each part marked o unless marked already (o.x, 1b.g, 2o.g, co.x, o._cons;
+  1b.g#co.x, 2o.g#1b.cl), checked on three models.
+- SI3BGA's 12 oprobit models: every iteration, header and table line matches, except where its reference
+  log was made with set linesize 255, at which Stata widens the name column to the longest name
+  (e4socdem_pty2) instead of abbreviating it as at the default 80 (checked: abcdefghij~m at 80).
