@@ -758,3 +758,45 @@ fn post_estimation_numbers_are_the_textbook_formulas() {
         ],
     );
 }
+
+/// Diagnostic plots: the four panels' points, read back from R's display
+/// list, against the linear model worked out by hand: residuals against
+/// fitted values, the standardised residuals against their normal scores,
+/// the root of their size against fitted values, and against the leverage
+/// from the hat matrix.
+#[test]
+fn diagnostic_plots_draw_the_residuals_worked_out_by_hand() {
+    let Some(mut e) = started() else { return };
+    let ctx = Context {
+        dataset: "m1".into(),
+        frames: Vec::new(),
+        columns: Vec::new(),
+    };
+    let values = DIAGNOSTIC_PLOTS.defaults(&ctx);
+    let code = DIAGNOSTIC_PLOTS
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    let (outcome, text) = run(
+        &mut e,
+        Source::Menu(DIAGNOSTIC_PLOTS.menu.into()),
+        &pinned::drawn(&code),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{code}\n{text}");
+    holds(
+        &mut e,
+        &pinned::all_of(
+            &format!(
+                "{BY_HAND}; fit <- as.vector(X1 %*% f1$b); r <- f1$r; \
+                 h <- diag(X1 %*% solve(crossprod(X1)) %*% t(X1)); s2 <- f1$rss / (n - 2); \
+                 sr <- r / sqrt(s2 * (1 - h)); a <- if (n <= 10) 3 / 8 else 1 / 2; \
+                 sc <- qnorm((seq_len(n) - a) / (n + 1 - 2 * a))[rank(sr, ties.method = 'first')]"
+            ),
+            &[
+                ("residuals", "has_xy(s, fit, r)"),
+                ("qq", "has_xy(s, sc, sr)"),
+                ("scale", "has_xy(s, fit, sqrt(abs(sr)))"),
+                ("leverage", "has_xy(s, h, sr)"),
+            ],
+        ),
+    );
+}

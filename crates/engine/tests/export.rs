@@ -3,6 +3,8 @@
 //! dialog's code, and look at the files themselves for the size they were asked
 //! to have.
 
+mod pinned;
+
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -19,7 +21,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -426,4 +430,49 @@ fn a_device_that_writes_no_file_is_reported_not_called_success() {
     let missing = dir.file("no-such-folder/x.pdf");
     let (o, _, text) = export(&mut e, &[("file", &missing), ("format", "pdf")], false);
     assert_eq!(o, Outcome::Error, "{text}");
+}
+
+/// Base R's grDevices only.
+const PACKAGES: &[&str] = &[];
+
+/// Export plot: the PNG it writes is, byte for byte, the plot drawn straight
+/// onto a PNG device of the same size by hand; so is a second export of an
+/// older plot by its name.
+#[test]
+fn an_exported_png_is_the_plot_drawn_by_hand_at_that_size() {
+    let Some(mut e) = engine() else { return };
+    let dir = Folder::new("same");
+    let (outcome, drawn, text) = run(&mut e, Source::Typed, "plot(1:10, main = 'ten')");
+    assert_eq!((outcome, drawn.len()), (Outcome::Ok, 1), "{text}");
+    let set = [
+        ("format", "png"),
+        ("width", "800"),
+        ("height", "600"),
+        ("units", "px"),
+        ("dpi", "100"),
+    ];
+    let file = dir.file("exported.png");
+    let mut all = vec![("file", file.as_str())];
+    all.extend_from_slice(&set);
+    let (o, _, text) = export(&mut e, &all, false);
+    assert_eq!(o, Outcome::Ok, "{text}");
+    let (o, _, text) = run(
+        &mut e,
+        Source::Typed,
+        &format!(
+            "local({{ before <- grDevices::dev.cur(); \
+             grDevices::png('{}', width = 800, height = 600, units = 'px', res = 100); \
+             opened <- grDevices::dev.cur(); plot(1:10, main = 'ten'); grDevices::dev.off(opened); \
+             if (before > 1) grDevices::dev.set(before); invisible() }})",
+            dir.file("by_hand.png")
+        ),
+    );
+    assert_eq!(o, Outcome::Ok, "{text}");
+    let (a, b) = (dir.bytes("exported.png"), dir.bytes("by_hand.png"));
+    assert!(
+        !a.is_empty() && a == b,
+        "{} and {} bytes differ",
+        a.len(),
+        b.len()
+    );
 }

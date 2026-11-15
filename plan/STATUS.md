@@ -4925,3 +4925,18 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   plots' shapes can be read back from R's display list (`recordPlot()`) and set against values worked
   out by hand.
 
+## The Graphs menu and Diagnostic plots Verified, 2026-11-15
+
+- What a graph draws is read back from R's display list (`recordPlot()` on a recording device:
+  each rectangle, polygon, set of points, line, segment, image and text with its coordinates;
+  `engine/tests/pinned::SHAPES`) and set against values worked out by hand: the histogram's bars
+  from Sturges' classes and counts made row by row (and as densities), the density curves against a
+  Gaussian kernel written out (density() bins first: within 1e-3 of its peak), Tukey's five numbers
+  in each box, the bars' counts and shares, the Q-Q points from the normal scores and the line through
+  the quartiles, a scatter plot's points and least-squares line, a line plot in the order of x, every
+  panel of a scatter plot matrix, a heatmap's colours and printed correlations, standardised values'
+  colours, and the four diagnostic panels from the model worked out by hand.
+- Export plot: the PNG it writes is byte for byte the plot drawn by hand straight onto a PNG device of
+  that size (the size, format and replay checks were there already).
+- 117 entries: 72 verified, 43 partial, 2 planned. Left: the File, Data, Packages and Help menus.
+

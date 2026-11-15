@@ -2,6 +2,8 @@
 //! when none is found): each dialog's code is built from its spec, run, and must
 //! draw exactly the plots it should, as real PNG files, without an error.
 
+mod pinned;
+
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -20,7 +22,9 @@ fn engine() -> Option<Engine> {
         eprintln!("skipped: no supported R on this machine");
         return None;
     };
-    Engine::start(SessionConfig::new(install)).ok()
+    let mut e = Engine::start(SessionConfig::new(install)).ok()?;
+    pinned::record(&mut e, PACKAGES);
+    Some(e)
 }
 
 fn settle(e: &mut Engine) {
@@ -286,4 +290,245 @@ fn missing_values_do_not_stop_a_plot() {
     let (outcome, plots, text) = run(&mut e, Source::Menu(SCATTER.menu.into()), &code);
     assert_eq!(outcome, Outcome::Ok, "{text}");
     assert_eq!(plots.len(), 1);
+}
+
+/// Base R's graphics only.
+const PACKAGES: &[&str] = &[];
+
+/// Runs R that stops unless `exprs` holds.
+fn holds(e: &mut Engine, exprs: &str) {
+    let (outcome, _, text) = run(e, Source::Typed, &format!("stopifnot({exprs})"));
+    assert_eq!(outcome, Outcome::Ok, "{exprs}\n{text}");
+}
+
+/// Draws the dialog's code on a recording device and keeps what it drew as
+/// `s` (see `pinned::SHAPES`).
+fn shapes_of(
+    e: &mut Engine,
+    spec: &Spec,
+    set: &[(&str, &str)],
+    lists: &[(&str, &[&str])],
+    flags: &[&str],
+) {
+    let (made, _, _) = run(e, Source::Typed, MAKE);
+    assert_eq!(made, Outcome::Ok);
+    let ctx = context();
+    let mut values = spec.defaults(&ctx);
+    for (id, text) in set {
+        values.set_text(id, *text);
+    }
+    for (id, names) in lists {
+        values.set_list(id, names.iter().map(|n| n.to_string()).collect());
+    }
+    for w in spec.widgets {
+        if let Widget::Check { id, .. } = w {
+            values.set_flag(id, flags.contains(id));
+        }
+    }
+    let code = spec
+        .generate(&ctx, &values, Style::Base)
+        .unwrap_or_default();
+    let (outcome, _, text) = run(e, Source::Menu(spec.menu.into()), &pinned::drawn(&code));
+    assert_eq!(outcome, Outcome::Ok, "{code}\n{text}");
+}
+
+/// What each graph draws, read back from R's display list, against values
+/// worked out by hand: the histogram's bars from Sturges' number of classes
+/// and counts made row by row, densities from a Gaussian kernel written out
+/// (density() bins first, so within 1e-3 of its largest value), Tukey's five
+/// numbers in each box, the bars' counts and shares, the Q-Q points from the
+/// normal scores and its line through the quartiles, the points and the
+/// least-squares line of a scatter plot, a line plot in the order of x, every
+/// panel of a scatter plot matrix, and a heatmap's colours and printed values
+/// from correlations and standardised values computed by hand.
+#[test]
+fn what_each_graph_draws_is_what_the_data_give() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+
+    shapes_of(&mut e, &HISTOGRAM, &[("x", "x")], &[], &[]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "v <- d$x; k <- ceiling(log2(length(v)) + 1); br <- pretty(range(v), k); \
+             n <- vapply(seq_len(length(br) - 1), function(i) \
+               sum(v > br[i] & v <= br[i + 1]) + (i == 1) * sum(v == br[1]), 0); \
+             r <- pick(s, 'C_rect')[[1]]",
+            &[
+                ("left", "same(r[[1]], head(br, -1))"),
+                ("right", "same(r[[3]], br[-1])"),
+                ("counts", "same(r[[4]], n)"),
+            ],
+        ),
+    );
+    shapes_of(&mut e, &HISTOGRAM, &[("x", "z")], &[], &["density"]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "v <- d$z; k <- ceiling(log2(length(v)) + 1); br <- pretty(range(v), k); \
+             n <- vapply(seq_len(length(br) - 1), function(i) \
+               sum(v > br[i] & v <= br[i + 1]) + (i == 1) * sum(v == br[1]), 0); \
+             r <- pick(s, 'C_rect')[[1]]; \
+             curve <- Filter(function(a) length(a[[1]]$x) == 512, pick(s, 'C_plotXY'))[[1]][[1]]; \
+             f <- kde(v, curve$x)",
+            &[
+                ("density", "same(r[[4]], n / (length(v) * diff(br)))"),
+                ("curve", "max(abs(curve$y - f)) < 1e-3 * max(f)"),
+            ],
+        ),
+    );
+
+    shapes_of(&mut e, &DENSITY, &[("x", "y")], &[], &[]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "p <- pick(s, 'C_polygon')[[1]]; f <- kde(d$y, p[[1]])",
+            &[("curve", "max(abs(p[[2]] - f)) < 1e-3 * max(f)")],
+        ),
+    );
+    shapes_of(&mut e, &DENSITY, &[("x", "y"), ("g", "g")], &[], &[]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "curves <- Filter(function(a) length(a[[1]]$x) == 512, pick(s, 'C_plotXY')); \
+             ok <- vapply(seq_along(levels(d$g)), function(i) { c <- curves[[i]][[1]]; \
+               f <- kde(d$y[d$g == levels(d$g)[i]], c$x); max(abs(c$y - f)) < 1e-3 * max(f) }, TRUE)",
+            &[("groups", "length(curves) == 3 && all(ok)")],
+        ),
+    );
+
+    shapes_of(&mut e, &BOX_PLOT, &[("x", "y"), ("g", "g")], &[], &[]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "five <- function(v) { v <- sort(v); n <- length(v); n4 <- floor((n + 3) / 2) / 2; \
+               i <- c(1, n4, (n + 1) / 2, n + 1 - n4, n); 0.5 * (v[floor(i)] + v[ceiling(i)]) }; \
+             want <- unlist(lapply(levels(d$g), function(l) five(d$y[d$g == l]))); \
+             got <- c(unlist(lapply(pick(s, 'C_polygon'), `[[`, 2)), \
+               unlist(lapply(pick(s, 'C_segments'), function(a) c(a[[2]], a[[4]])))) ",
+            &[("five", "all(round(want, 10) %in% round(got, 10))")],
+        ),
+    );
+
+    shapes_of(&mut e, &BAR_CHART, &[("x", "t")], &[], &[]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "u <- sum(d$t == 'u', na.rm = TRUE); v <- sum(d$t == 'v', na.rm = TRUE)",
+            &[("counts", "same(pick(s, 'C_rect')[[1]][[4]], c(u, v))")],
+        ),
+    );
+    shapes_of(&mut e, &BAR_CHART, &[("x", "t")], &[], &["percent"]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "u <- sum(d$t == 'u', na.rm = TRUE); v <- sum(d$t == 'v', na.rm = TRUE)",
+            &[(
+                "shares",
+                "same(pick(s, 'C_rect')[[1]][[4]], 100 * c(u, v) / (u + v))",
+            )],
+        ),
+    );
+
+    shapes_of(&mut e, &QQ_PLOT, &[("x", "z")], &[], &[]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "v <- d$z; n <- length(v); a <- if (n <= 10) 3 / 8 else 1 / 2; \
+             sc <- qnorm((seq_len(n) - a) / (n + 1 - 2 * a))[rank(v, ties.method = 'first')]; \
+             yq <- c(q7(v, 0.25), q7(v, 0.75)); xq <- qnorm(c(0.25, 0.75)); \
+             slope <- diff(yq) / diff(xq); line <- pick(s, 'C_abline')[[1]]",
+            &[
+                ("points", "has_xy(s, sc, v)"),
+                (
+                    "line",
+                    "same(c(line[[1]], line[[2]]), c(yq[1] - slope * xq[1], slope))",
+                ),
+            ],
+        ),
+    );
+
+    shapes_of(&mut e, &SCATTER, &[("x", "x"), ("y", "y")], &[], &["fit"]);
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "X <- cbind(1, d$x); b <- solve(crossprod(X), crossprod(X, d$y)); \
+             line <- pick(s, 'C_abline')[[1]]",
+            &[
+                ("points", "has_xy(s, d$x, d$y)"),
+                ("line", "same(c(line[[1]], line[[2]]), b)"),
+            ],
+        ),
+    );
+
+    shapes_of(&mut e, &LINE_PLOT, &[("x", "z"), ("y", "y")], &[], &[]);
+    holds(
+        &mut e,
+        &pinned::all_of("o <- order(d$z)", &[("line", "has_xy(s, d$z[o], d$y[o])")]),
+    );
+
+    shapes_of(
+        &mut e,
+        &SCATTER_MATRIX,
+        &[],
+        &[("vars", &["x", "y", "z"])],
+        &[],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            "v <- c('x', 'y', 'z'); \
+             ok <- outer(1:3, 1:3, Vectorize(function(i, j) i == j || has_xy(s, d[[v[j]]], d[[v[i]]])))",
+            &[("panels", "all(ok)")],
+        ),
+    );
+
+    // correlations with their values printed, then standardised values
+    let codes = "codes <- function(v, lim) { br <- seq(-lim, lim, length.out = 22); \
+                 vapply(v, function(t) max(1, sum(br < t)) - 1, 0) }";
+    shapes_of(
+        &mut e,
+        &HEATMAP,
+        &[],
+        &[("vars", &["x", "y", "z"])],
+        &["numbers"],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            &format!(
+                "{codes}; v <- d[c('x', 'y', 'z')]; \
+                 R <- outer(1:3, 1:3, Vectorize(function(i, j) {{ a <- v[[i]] - mean(v[[i]]); \
+                   b <- v[[j]] - mean(v[[j]]); sum(a * b) / sqrt(sum(a^2) * sum(b^2)) }})); \
+                 img <- pick(s, 'C_image')[[1]]; txt <- pick(s, 'C_text')"
+            ),
+            &[
+                ("colours", "same(as.vector(img[[3]]), codes(as.vector(R[, 3:1]), 1))"),
+                (
+                    "labels",
+                    "any(vapply(txt, function(a) identical(a[[2]], sprintf('%.2f', R[, 3:1])), TRUE))",
+                ),
+            ],
+        ),
+    );
+    shapes_of(
+        &mut e,
+        &HEATMAP,
+        &[("show", "values")],
+        &[("vars", &["x", "y", "z"])],
+        &[],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            &format!(
+                "{codes}; m <- sapply(d[c('x', 'y', 'z')], function(c) (c - mean(c)) / sd(c)); \
+                 n <- nrow(m); lim <- max(abs(m)); img <- pick(s, 'C_image')[[1]]"
+            ),
+            &[(
+                "colours",
+                "same(as.vector(img[[3]]), codes(as.vector(t(m[n:1, ])), lim))",
+            )],
+        ),
+    );
 }

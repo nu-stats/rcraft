@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 117 | 61 | 54 | 2 |
+| 117 | 72 | 43 | 2 |
 
 ## File
 
@@ -105,7 +105,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Compare models | verified |
 | Predicted values and residuals | verified |
 | Model diagnostics | verified |
-| Diagnostic plots | partial |
+| Diagnostic plots | verified |
 | Robust standard errors | verified |
 | Test terms | verified |
 | Sums of squares (Type II/III) | verified |
@@ -116,16 +116,16 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entry | Status |
 |---|---|
-| Histogram | partial |
-| Density plot | partial |
-| Box plot | partial |
-| Bar chart | partial |
-| Normal Q-Q plot | partial |
-| Scatter plot | partial |
-| Line plot | partial |
-| Scatter plot matrix | partial |
-| Heatmap | partial |
-| Export plot | partial |
+| Histogram | verified |
+| Density plot | verified |
+| Box plot | verified |
+| Bar chart | verified |
+| Normal Q-Q plot | verified |
+| Scatter plot | verified |
+| Line plot | verified |
+| Scatter plot matrix | verified |
+| Heatmap | verified |
+| Export plot | verified |
 
 ## Reports
 
