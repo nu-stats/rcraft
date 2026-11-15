@@ -609,3 +609,37 @@ fn type_prints_a_file_as_stata_19() {
         assert!(text.contains(want), "{want:?}\n--\n{text}");
     }
 }
+
+/// infix and free-format infile as Stata 19 reads raw text (probe RW): columns,
+/// values flowing across lines, Stata's messages for what is not a number.
+#[test]
+fn infix_and_infile_read_as_stata_19() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let dir = std::env::temp_dir().join("rcraft_raw_test");
+    let _ = std::fs::create_dir_all(&dir);
+    let _ = std::fs::write(
+        dir.join("p1.raw"),
+        "1 2.5 abc\n3, -4 def\n5 . ghi\n7 1e3 \"two words\"\nx 8 jkl\n",
+    );
+    let _ = std::fs::write(
+        dir.join("p3.raw"),
+        "Alice3412345\nBob  27 99.5\nCarol 5    7\nDan  x9-1.25\n",
+    );
+    let d = dir.to_string_lossy().replace('\\', "/");
+    let dofile = format!(
+        "infix str name 1-5 age 6-7 inc 8-12 using \"{d}/p3.raw\", clear\ndisplay \"i \" name[2] \" \" age[2] \" \" inc[4]\ninfile a b str8 s using \"{d}/p1\" if a > 2, clear\ndisplay \"f \" a[3] \" \" s[3] \" \" _N\n"
+    );
+    let t = translate(&read(&dofile));
+    assert!(t.lines.iter().all(|l| l.result.is_ok()), "{:?}", t.lines);
+    let (ran, text) = run(&mut e, &t.script());
+    assert_eq!(ran, Outcome::Ok, "{text}");
+    for want in [
+        "'x9' cannot be read as a number for age[4]\n(4 observations read)",
+        "i Bob 27 -1.25",
+        "'x' cannot be read as a number for a[4]\n(4 observations read)",
+        "f 7 two word 4",
+    ] {
+        assert!(text.contains(want), "{want:?}\n--\n{text}");
+    }
+}

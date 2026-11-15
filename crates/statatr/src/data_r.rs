@@ -78,6 +78,7 @@ mod putexcel;
 mod random;
 mod rangestat;
 mod ranktests;
+mod rawread;
 mod reghdfe;
 mod returned;
 mod revrs;
@@ -1110,6 +1111,7 @@ fn helper_code(name: &str) -> &'static str {
     match name {
         "stata_captured" => CAPTURED_HELPER,
         "stata_type" => TYPE_HELPER,
+        "stata_rawread" => rawread::RAWREAD_HELPER,
         "stata_assert" => ASSERT_HELPER,
         "stata_excel_names" => EXCEL_NAMES_HELPER,
         "stata_stats" => more::STAT_HELPERS,
@@ -2556,6 +2558,8 @@ impl Session {
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),
             "type" => self.type_file(c, &opts, out),
+            "infix" => self.infix(c, &opts, out),
+            "infile" => self.infile(c, &opts, out),
             "assert" => self.assert(c, &opts, out),
             "fvset" => self.fvset(c, out),
             "compress" => {

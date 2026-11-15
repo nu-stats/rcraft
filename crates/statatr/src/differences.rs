@@ -787,6 +787,31 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "infile",
+        about: "Reads raw text, free format",
+        points: &[p(
+            "As Stata",
+            "Values separated by blanks or commas, a quoted string one value, flowing across \
+             lines; variables typed byte, int, long, float (the default), double or str#; \
+             ranges (x1-x3) and _skip(#); a string cut to its width; what is not a number is \
+             missing with Stata's message, numbered among the observations if keeps; an \
+             observation the file ends inside is kept, with \"(eof not at end of obs)\". A \
+             file with no extension is .raw. Not yet: dictionaries, in, byvariable(), \
+             automatic, value labels (v:lbl).",
+        )],
+    },
+    Guide {
+        command: "infix",
+        about: "Reads raw text by columns",
+        points: &[p(
+            "As Stata",
+            "Each field is its columns, blanks trimmed; str alone is as wide as its columns, \
+             str# cut to #; # lines with #: for records of several lines; in counts records; \
+             if keeps observations; Stata's messages for what is not a number and its count. \
+             Not yet: dictionaries (infix using a .dct).",
+        )],
+    },
+    Guide {
         command: "input",
         about: "Data typed into the do-file",
         points: &[p(

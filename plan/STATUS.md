@@ -4841,3 +4841,15 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **type** (`type_file`, `stata_type`): the file's lines, tabs expanded to stops every 8 columns,
   `<T>` with showtabs, lines(#), a missing file r(601) (probe TY, as Stata 19 but for its log's
   wrapping of a line longer than the line size). A test.
+
+## infix and infile (free format), 2026-11-15
+
+- `data_r/rawread.rs`: infix with column specifications (types, `str` as wide as its columns, `# lines`
+  and `#:`, in counting records, if) and free-format infile (values across lines, blanks and commas,
+  quoted strings, ranges, `_skip(#)`, strings cut to their width, the partial last observation with
+  "(eof not at end of obs)"), as Stata 19 reads them: Stata's number syntax, "'x' cannot be read as a
+  number for v[#]" numbered among the observations if keeps, "(# observations read)", r(18) without
+  clear, r(601) for a missing file (.raw added). Probe RW (58 lines, from StatCraft's probe 524): every
+  message and value as Stata 19 (list and describe in R's layout as elsewhere); a test.
+- Not yet: dictionaries (infile/infix using a .dct), infile with in, byvariable(), automatic, value
+  labels.
