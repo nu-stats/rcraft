@@ -584,6 +584,12 @@ Each family is its own set of dialogs over a named CRAN package.
 
 - P7.1 Publication tables (`modelsummary`/`gt`): side-by-side models, stars,
   chosen statistics, notes, custom rows
+  (first part 2026-11-15: Model table, from a model's Model menu, in base R with no package: linear
+  and generalised linear models side by side, each coefficient with stars and its standard error,
+  statistic or p-value below, observations, R-squared, AIC, BIC and log-likelihood, a note line;
+  a data frame, so Results shows it as a grid that copies into Word or Excel. Verified against the
+  table built by hand. modelsummary and gt are installed for the export of P7.2; not yet: custom
+  rows, other model classes)
 - P7.2 Export to docx, xlsx, HTML, LaTeX and Markdown; one document built up
   across a session
 - P7.3 Script Editor: run selection, outline, find and replace

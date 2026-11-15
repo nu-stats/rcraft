@@ -800,3 +800,69 @@ fn diagnostic_plots_draw_the_residuals_worked_out_by_hand() {
         ),
     );
 }
+
+/// Model table (P7.1): a linear and a logistic model side by side, every cell
+/// against the table built by hand from the models worked out in plain R
+/// (least squares, Newton-Raphson; stars from the p-values computed by hand;
+/// observations, R-squared, AIC and BIC from their formulas); then t
+/// statistics with two decimals and the table kept under a name.
+#[test]
+fn the_model_table_is_the_one_built_by_hand() {
+    use rcraft_catalog::report::MODEL_TABLE;
+    let Some(mut e) = started() else { return };
+    kept(
+        &mut e,
+        &MODEL_TABLE,
+        "m1",
+        &[("others", "g1")],
+        &["stars", "n", "r2", "ic"],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            &format!(
+                "{BY_HAND}; fmt <- function(x) formatC(x, format = 'f', digits = 3); \
+                 st <- function(p) ifelse(p < 0.001, '***', ifelse(p < 0.01, '**', ifelse(p < 0.05, '*', ''))); \
+                 s1 <- sqrt(diag(f1$rss / (n - 2) * solve(crossprod(X1)))); \
+                 p1 <- 2 * pt(-abs(f1$b / s1), n - 2); \
+                 sg <- sqrt(diag(solve(t(G) %*% (p * (1 - p) * G)))); pg <- 2 * pnorm(-abs(b / sg)); \
+                 cell <- function(b, s, q) c(paste0(fmt(b), st(q)), paste0('(', fmt(s), ')')); \
+                 r2 <- 1 - f1$rss / tss; ll <- llf(f1); dg <- dev(p); \
+                 want <- data.frame( \
+                   term = c('(Intercept)', '', 'x', '', 'z', '', 'Observations', 'R-squared', \
+                     'Adjusted R-squared', 'AIC', 'BIC'), \
+                   m1 = c(cell(f1$b[1], s1[1], p1[1]), cell(f1$b[2], s1[2], p1[2]), '', '', '11', \
+                     fmt(r2), fmt(1 - (1 - r2) * (n - 1) / (n - 2)), fmt(-2 * ll + 2 * 3), \
+                     fmt(-2 * ll + log(n) * 3)), \
+                   g1 = c(cell(b[1], sg[1], pg[1]), '', '', cell(b[2], sg[2], pg[2]), '12', '', '', \
+                     fmt(dg + 2 * 2), fmt(dg + log(12) * 2)), \
+                   check.names = FALSE)"
+            ),
+            &[
+                ("shape", "identical(dim(res), dim(want)) && identical(names(res), names(want))"),
+                ("cells", "identical(unname(as.matrix(res)), unname(as.matrix(want)))"),
+            ],
+        ),
+    );
+
+    kept(
+        &mut e,
+        &MODEL_TABLE,
+        "m2",
+        &[("paren", "statistic"), ("digits", "2"), ("save", "tab")],
+        &["stars"],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            &format!(
+                "{BY_HAND}; s2 <- sqrt(diag(f2$rss / (n - 3) * solve(crossprod(X2)))); \
+                 t2 <- formatC(f2$b / s2, format = 'f', digits = 2)"
+            ),
+            &[
+                ("kept", "identical(tab, res)"),
+                ("t", "identical(res$m2[c(2, 4, 6)], paste0('(', t2, ')'))"),
+            ],
+        ),
+    );
+}

@@ -358,7 +358,9 @@ fn clean_examples(lines: &[&str]) -> String {
 }
 
 /// R code that searches the installed packages' help for `words`: see
-/// [`parse_search`].
+/// [`parse_search`]. R puts the hits in the window's order before it cuts the
+/// list, so an exact topic is not lost when a word matches hundreds of pages
+/// (`lm` matched over 500 with a few more packages installed).
 pub fn search_code(words: &str) -> String {
     format!(
         "local({{\n\
@@ -379,6 +381,10 @@ pub fn search_code(words: &str) -> String {
            all <- do.call(rbind, found)\n\
            k <- keyof(all)\n\
            all <- all[!duplicated(k) & k %in% keep, , drop = FALSE]\n\
+           q <- tolower(paste(words, collapse = \" \")); t <- tolower(all[, \"Topic\"])\n\
+           best <- ifelse(t == q, 0L, ifelse(startsWith(t, q), 1L, ifelse(grepl(q, t, fixed = TRUE), 2L, \
+         ifelse(all[, \"Package\"] %in% c(\"base\", \"stats\", \"utils\", \"graphics\", \"methods\", \"datasets\"), 3L, 4L))))\n\
+           all <- all[order(best), , drop = FALSE]\n\
            for (i in seq_len(min(nrow(all), {max}))) cat(\"@@HIT\\t\", clean(all[i, \"Package\"]), \"\\t\", clean(all[i, \"Topic\"]), \"\\t\", clean(all[i, \"Title\"]), \"\\n\", sep = \"\")\n\
          }}\n\
          cat(\"@@DONE\\n\")\n\

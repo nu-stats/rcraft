@@ -426,6 +426,14 @@ pub fn object_list(
                             ui.close_menu();
                         }
                     }
+                    // Reports (P7.1): the model in a table with others
+                    ui.separator();
+                    for spec in rcraft_catalog::report::MODEL_REPORTS {
+                        if ui.button(format!("{}…", spec.entry)).clicked() {
+                            out.push(ObjectClick::Dialog(spec, item.name.clone()));
+                            ui.close_menu();
+                        }
+                    }
                 });
             }
         });

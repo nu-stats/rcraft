@@ -4972,3 +4972,29 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   and removal were checked already.
 - 117 entries: 115 verified, 2 planned ("Model table", "RCraft manual").
 
+## P7.1 first part: Model table, 2026-11-15
+
+- A model's Model menu in the Objects pane has **Model table** (`catalog::report::MODEL_TABLE`). In base
+  R, needing no package: this model and others named, side by side; each coefficient with stars (p <
+  0.05, 0.01, 0.001) and, below it, its standard error, t or z statistic or p-value; then observations,
+  R-squared and adjusted R-squared (linear models), AIC, BIC and log-likelihood as chosen; a note line
+  says what is in parentheses. The value is a data frame, so Results shows a grid that copies into
+  Word or Excel, and it can be kept under a name. Linear and generalised linear models; others are
+  refused by name.
+- Verified: a linear and a logistic model side by side, every cell against the table built by hand
+  (least squares, Newton-Raphson, stars from p-values computed by hand, the fit rows from their
+  formulas); t statistics to two decimals and the kept table. 117 entries: 116 verified, 1 planned.
+- modelsummary 2.3.0 and gt 0.11.1 are installed in the R 4.4 library (the user's yes, from the pinned
+  snapshot) for P7.2's export; nothing uses them yet, so CI does not install them yet.
+- Installing them showed a bug in Search help: R cut the hits to 500 in its own order before the window
+  ranked them, so `lm` (over 500 pages with the new packages) lost `stats::lm`. R now orders the hits
+  as the window does (the exact topic, topics starting with or holding the words, the base packages)
+  before the cut.
+- The Stata corpus line that once failed in a full run (2026-11-14, `made.do` line 63, `quietly
+  summarize v if dup == 0`, whose R errored or printed nothing) did not come back in seven full runs.
+  It is not a file clash: no two corpus do-files write the same file, `tempfile` is refused in the
+  corpus runner, `preserve` keeps the data in R's memory, and the menu checks only read corpus.csv.
+  Each corpus thread runs many do-files in one R session, in an order that changes run to run, so
+  something an earlier file leaves in the session is the likeliest cause; if it recurs, run made.do
+  after the file that ran before it in that thread.
+
