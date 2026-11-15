@@ -18,6 +18,7 @@ pub mod look;
 mod package_window;
 mod packages;
 mod project;
+mod properties;
 mod result_table;
 mod script_file;
 mod script_tools;

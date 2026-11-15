@@ -5099,3 +5099,15 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Phase 7 is done (P7.1 to P7.5). The build had two compiler crashes at four jobs this round (`ring`,
   then a corrupt `statatr` object); cleaning the crate and building at two jobs cleared them.
 
+## P8.1 done: the Properties pane, 2026-11-15
+
+- The left panel had Variables, Objects and History; **Properties** now sits between Variables and
+  History (`ui-egui/src/properties.rs`). With no variable picked it shows the data frame: its name, rows,
+  variables, how many have a label, and missing cells. A click on a variable (which still puts its name
+  in the Command line) shows that variable: label, type, R class, values, missing (with the share),
+  distinct values; for numbers the smallest, largest and mean; for a factor its levels (in order if
+  ordered); value labels. A "data frame" button goes back. Choosing another data frame shows its own.
+- Worked out from the table the window already has, with no question to R. Checked: the figures for
+  numbers, factors and text by hand; and against R's own mean, distinct count, missing count, minimum
+  and maximum on a real data frame. Drawn in the app: the pane on a data frame.
+

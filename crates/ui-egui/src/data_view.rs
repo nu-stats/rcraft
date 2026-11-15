@@ -247,6 +247,8 @@ fn header_hint(col: &Column) -> String {
 pub enum VariableClick {
     /// Put the variable's name in the Command line.
     Insert(String),
+    /// Show this variable in Properties (its name as it is).
+    Pick(String),
 }
 
 /// One line per variable: name, kind, missing count; the label on hover.
@@ -290,6 +292,7 @@ pub fn variable_list(
         let response = response.on_hover_text(variable_hint(col));
         if response.clicked() {
             out.push(VariableClick::Insert(rcraft_rcodegen::r_name(&col.name)));
+            out.push(VariableClick::Pick(col.name.clone()));
         }
         if let Data::Factor {
             levels,

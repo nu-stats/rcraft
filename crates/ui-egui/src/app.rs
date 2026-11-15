@@ -275,6 +275,8 @@ enum Action {
     ReplaceAll,
     /// Put the cursor at the start of this line of the script (the outline).
     GoToLine(usize),
+    /// Show this variable in Properties, or the data frame with none (P8.1).
+    PickVariable(Option<String>),
     /// File > Save session as... (P7.4): an R script, Quarto or R Markdown.
     SaveSessionAs,
     /// Write the session to this file, the kind by its ending.
@@ -365,6 +367,8 @@ pub struct App {
     script_ask: Option<ScriptAsk>,
     /// The Script Editor's find and replace bar (P7.3).
     find: FindBar,
+    /// The variable Properties shows (P8.1); the data frame with none.
+    picked_variable: Option<String>,
 }
 
 /// The Script Editor's find and replace bar.
@@ -445,6 +449,7 @@ impl App {
             script_file: ScriptFile::unnamed(SCRIPT_START),
             script_ask: None,
             find: FindBar::default(),
+            picked_variable: None,
         }
     }
 
@@ -880,6 +885,7 @@ impl App {
                 self.perform(ctx, Action::SetCommand(command));
             }
             Action::SelectDataset(choice) => {
+                self.picked_variable = None;
                 if let EngineState::Ready(engine) = &mut self.engine {
                     if let Some(old) = &self.dataset {
                         engine.unwatch(old);
@@ -1357,12 +1363,54 @@ impl App {
                 }
                 self.start_folder = Some(folder);
             }
+            Action::PickVariable(name) => self.picked_variable = name,
             Action::GoToLine(line) => {
                 let at = script_tools::line_start(&self.script, line);
                 select_in_editor(ctx, at, at);
             }
             Action::Quit => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
         }
+    }
+
+    /// Properties (P8.1): the variable picked in Variables, or the data frame
+    /// shown, as name and value pairs.
+    fn properties_pane(&self, ui: &mut egui::Ui, pal: &Palette, out: &mut Vec<Action>) {
+        let Some(name) = self.dataset.as_deref() else {
+            return;
+        };
+        let Some(table) = self.engine().and_then(|e| e.table(name)) else {
+            return;
+        };
+        let column = self
+            .picked_variable
+            .as_deref()
+            .and_then(|v| table.columns.iter().find(|c| c.name == v));
+        let rows = match column {
+            Some(col) => crate::properties::of_column(col),
+            None => crate::properties::of_table(name, table),
+        };
+        ui.separator();
+        ui.horizontal(|ui| {
+            pane_title(ui, pal, "Properties");
+            if column.is_some()
+                && ui
+                    .small_button("data frame")
+                    .on_hover_text("Show the data frame's properties")
+                    .clicked()
+            {
+                out.push(Action::PickVariable(None));
+            }
+        });
+        egui::Grid::new("properties")
+            .num_columns(2)
+            .spacing([8.0, 2.0])
+            .show(ui, |ui| {
+                for (key, value) in rows {
+                    ui.label(RichText::new(key).small().color(pal.dim));
+                    ui.add(egui::Label::new(RichText::new(value).small()).wrap());
+                    ui.end_row();
+                }
+            });
     }
 
     /// The find bar above the Script Editor.
@@ -2450,8 +2498,11 @@ Click to choose another folder"
                     let mut clicks = Vec::new();
                     data_view::variable_list(ui, pal, table, self.type_filter, &mut clicks);
                     data_view::conversion_report(ui, pal, table);
-                    for VariableClick::Insert(name) in clicks {
-                        out.push(Action::Insert(name));
+                    for click in clicks {
+                        out.push(match click {
+                            VariableClick::Insert(name) => Action::Insert(name),
+                            VariableClick::Pick(name) => Action::PickVariable(Some(name)),
+                        });
                     }
                 } else if let Some(why) = self
                     .dataset
@@ -2468,6 +2519,7 @@ Click to choose another folder"
                     );
                 }
             });
+        self.properties_pane(ui, pal, out);
         ui.separator();
         let count = self.engine().map_or(0, |e| e.history().len());
         pane_title(ui, pal, &format!("History  ({count})"));
@@ -5276,5 +5328,90 @@ mod tests {
             fresh.message
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// P8.1: Properties for a real data frame and a picked variable agree with
+    /// what R says of them; another data frame shows its own again.
+    #[test]
+    fn properties_agree_with_r() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings = false;
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                "d <- data.frame(x = c(2.5, NA, 4, 4, 10), g = factor(c('a', 'b', 'a', NA, 'c'))); \
+                 attr(d$x, 'label') <- 'A measure'"
+                    .into(),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| {
+            a.dataset.as_deref() == Some("d") && a.engine().is_some_and(|e| e.table("d").is_some())
+        }));
+        let Some(table) = app.engine().and_then(|e| e.table("d")).cloned() else {
+            panic!("no table d");
+        };
+        let whole = crate::properties::of_table("d", &table);
+        let get = |p: &[(String, String)], k: &str| {
+            p.iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.clone())
+                .unwrap_or_default()
+        };
+        assert_eq!(get(&whole, "Rows"), "5");
+        assert_eq!(get(&whole, "Missing cells"), "2 of 10 (20%)");
+        app.perform(&ctx, Action::PickVariable(Some("x".into())));
+        assert_eq!(app.picked_variable.as_deref(), Some("x"));
+        let col = table.columns.iter().find(|c| c.name == "x").cloned();
+        let p = col
+            .as_ref()
+            .map(crate::properties::of_column)
+            .unwrap_or_default();
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                "cat(mean(d$x, na.rm = TRUE), length(unique(na.omit(d$x))), sum(is.na(d$x)), \
+                 min(d$x, na.rm = TRUE), max(d$x, na.rm = TRUE), sep = '|')"
+                    .into(),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let r = newest_text(&app);
+        let r: Vec<&str> = r.trim().split('|').collect();
+        assert_eq!(
+            vec![
+                get(&p, "Mean"),
+                get(&p, "Distinct"),
+                get(&p, "Missing")
+                    .split(' ')
+                    .next()
+                    .unwrap_or("")
+                    .to_string(),
+                get(&p, "Smallest"),
+                get(&p, "Largest"),
+            ],
+            r,
+            "{p:?}"
+        );
+        assert_eq!(get(&p, "Label"), "A measure");
+        let g = table
+            .columns
+            .iter()
+            .find(|c| c.name == "g")
+            .map(crate::properties::of_column);
+        assert_eq!(
+            g.as_ref().map(|p| get(p, "Levels")),
+            Some("3: a, b, c".to_string())
+        );
+        // another data frame: its own properties
+        app.perform(&ctx, Action::SelectDataset(Some("d".into())));
+        assert_eq!(app.picked_variable, None);
     }
 }

@@ -620,6 +620,9 @@ Each family is its own set of dialogs over a named CRAN package.
 
 - P8.1 Pane layout: Command, Results, History, Variables, Objects,
   Properties, Graph, Script
+  (done 2026-11-15: Properties joined the others, under Variables: the data frame shown, or the
+  variable picked, its label, type, class, values, missing, distinct values, range and mean, levels or
+  value labels. P8.1 is done)
 - P8.2 Installers: Windows MSI and portable zip (signed), macOS universal DMG
   (signed and notarised), Linux AppImage, deb, rpm, tar.gz
 - P8.3 Example datasets that RCraft may redistribute, with attribution
