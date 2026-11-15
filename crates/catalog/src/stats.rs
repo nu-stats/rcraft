@@ -126,7 +126,7 @@ pub const FREQUENCY: Spec = Spec {
             id: "missing",
             label: "Count missing values as a category",
             default: true,
-            hint: "",
+            hint: "Missing values get a row of their own; left unticked they are not counted.",
         },
     ],
     needs: &[],
@@ -395,7 +395,8 @@ pub const NORMALITY: Spec = Spec {
         label: "Variables",
         kinds: NUMBERS,
         min: 1,
-        hint: "A small p-value says the values are unlikely to be normal.",
+        hint: "A small p-value is evidence that the values are not normal; a large one does \
+               not show that they are.",
     }],
     needs: &[],
     styles: BASE,

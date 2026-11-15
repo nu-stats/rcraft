@@ -204,7 +204,7 @@ pub const ONE_WAY: Spec = Spec {
             id: "tukey",
             label: "Tukey comparisons of every pair of groups",
             default: true,
-            hint: "",
+            hint: "Compares each pair of groups' means, with intervals and p-values adjusted for making many comparisons (Tukey's honest significant differences).",
         },
         save("anova"),
     ],
@@ -238,8 +238,8 @@ pub const ONE_WAY: Spec = Spec {
 pub const FACTORIAL: Spec = Spec {
     entry: "Factorial ANOVA",
     menu: "Statistics > Linear models > Factorial ANOVA",
-    about: "Compare the mean of a number variable across the groups of two or more variables, \
-            with their interactions if you want them. R's sequential (type I) sums of squares: \
+    about: "Compare the mean of a number variable across the groups of one or more variables, \
+            with their interactions if you want them. R's sequential (Type I) sums of squares: \
             with unequal group sizes the order of the variables matters.",
     widgets: &[
         OUTCOME,
@@ -248,7 +248,7 @@ pub const FACTORIAL: Spec = Spec {
             label: "Grouping variables",
             kinds: GROUPS,
             min: 1,
-            hint: "One or more; each is a factor of the design.",
+            hint: "Each is a factor of the design.",
         },
         Widget::Choice {
             id: "interactions",
@@ -270,7 +270,7 @@ pub const FACTORIAL: Spec = Spec {
             id: "tukey",
             label: "Tukey comparisons within each variable",
             default: false,
-            hint: "",
+            hint: "For each grouping variable, compares each pair of its groups' means, adjusted for making many comparisons (Tukey's honest significant differences).",
         },
         save("anova"),
     ],

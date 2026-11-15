@@ -667,3 +667,56 @@ fn count_ordinal_and_multinomial_models_maximise_their_likelihoods() {
     );
     holds(&mut e, &check);
 }
+
+/// A text outcome goes into the logistic model as a factor (the first in
+/// alphabetical order is no), and a number outcome that is not 0 and 1 is
+/// refused in words rather than with glm()'s own message.
+#[test]
+fn a_text_outcome_fits_and_numbers_other_than_0_and_1_are_refused() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let (o, text) = run(
+        &mut e,
+        Source::Typed,
+        "t <- data.frame(x = 1:10, said = c('no', 'no', 'yes', 'no', 'yes', 'yes', 'no', 'yes', 'yes', 'no'), \
+         coded = c(1, 1, 2, 1, 2, 2, 1, 2, 2, 1))",
+    );
+    assert_eq!(o, Outcome::Ok, "{text}");
+    let ctx = Context {
+        dataset: "t".into(),
+        frames: Vec::new(),
+        columns: [
+            ("x", VarKind::Number),
+            ("said", VarKind::Text),
+            ("coded", VarKind::Number),
+        ]
+        .into_iter()
+        .map(|(name, kind)| ColumnInfo {
+            name: name.into(),
+            kind,
+        })
+        .collect(),
+    };
+    let fit = |e: &mut Engine, y: &str, save: &str| {
+        let mut values = LOGISTIC.defaults(&ctx);
+        values.set_text("y", y);
+        values.set_list("x", vec!["x".into()]);
+        values.set_text("save", save);
+        let code = LOGISTIC
+            .generate(&ctx, &values, Style::Base)
+            .unwrap_or_default();
+        run(e, Source::Menu(LOGISTIC.menu.into()), &code)
+    };
+    let (o, text) = fit(&mut e, "said", "ts");
+    assert_eq!(o, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        "isTRUE(all.equal(coef(ts), coef(glm(factor(said) ~ x, family = binomial, data = t))))",
+    );
+    let (o, text) = fit(&mut e, "coded", "tc");
+    assert_eq!(o, Outcome::Error, "{text}");
+    assert!(
+        text.contains("a number outcome must be 0 (no) and 1 (yes)"),
+        "{text}"
+    );
+}

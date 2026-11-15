@@ -156,7 +156,8 @@ pub const LINEAR_MIXED: Spec = Spec {
     about: "A linear model for rows nested in groups (pupils in schools, visits in patients): \
             each group gets a random intercept, and optionally random slopes and a nested level \
             (classes within schools), as Stata's mixed. It fits with lme4::lmer, by maximum \
-            likelihood as Stata does unless REML is chosen, to the maximum's precision, and \
+            likelihood as Stata does unless REML is chosen, with tight convergence settings to \
+            match Stata's results, and \
             prints the summary and Wald intervals for the coefficients.",
     widgets: &[
         Widget::Variable {
@@ -285,7 +286,8 @@ pub const GENERALIZED_MIXED: Spec = Spec {
     about: "A logistic model of a 0/1 outcome, or a Poisson model of counts, for rows nested in \
             groups, each group with a random intercept, as Stata's melogit and mepoisson. It \
             fits with lme4::glmer by 7-point adaptive Gauss-Hermite quadrature (Stata's default \
-            number of points), to the maximum's precision, and prints the summary and the odds \
+            number of points), with tight convergence settings to match Stata's results, and prints \
+            the summary and the odds \
             or rate ratios with Wald intervals.",
     widgets: &[
         Widget::Variable {

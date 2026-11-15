@@ -371,7 +371,7 @@ pub const EXPORT_TABLE: Spec = Spec {
     entry: "Export table",
     menu: "Objects > Export table",
     about: "Write this data frame (a Model table, say) to a file as a formatted table: a web page \
-            (.html), a Word document (.docx, or .rtf), LaTeX (.tex), an Excel workbook (.xlsx) \
+            (.html), a Word document (.docx), rich text (.rtf), LaTeX (.tex), an Excel workbook (.xlsx) \
             or Markdown (.md), chosen by the file name's ending. A Model table's note goes \
             below it.",
     widgets: &[
@@ -467,7 +467,7 @@ pub const ADD_PLOT: Spec = Spec {
             label: "Plot",
             default: TextDefault::Empty,
             rule: TextRule::Any,
-            hint: "Empty for the newest plot, or its name in the Graph tab.",
+            hint: "The plot's file name in the Graph tab. Empty: the newest plot.",
         },
         PART_TITLE,
         Widget::Text {

@@ -49,7 +49,9 @@ const ALTERNATIVE: Widget = Widget::Choice {
     label: "Alternative",
     options: ALTERNATIVES,
     default: "two.sided",
-    hint: "",
+    hint: "Smaller or larger compares the mean or proportion with the value tested against, \
+           the first group (in the order of its levels) with the second, or the first variable \
+           with the second.",
 };
 
 const CONFIDENCE: Widget = Widget::Choice {
@@ -106,7 +108,7 @@ pub const ONE_T: Spec = Spec {
         outcome("Variable"),
         Widget::Text {
             id: "mu",
-            label: "Mean under the null",
+            label: "Value to test against",
             default: TextDefault::Fixed("0"),
             rule: TextRule::Number,
             hint: "The value the mean is compared with.",
@@ -197,7 +199,7 @@ const fn pair_widgets(second: &'static str) -> [Widget; 2] {
             label: second,
             kinds: NUMBERS,
             required: true,
-            hint: "Row i of the first is paired with row i of the second.",
+            hint: "Each row's two values are paired.",
         },
     ]
 }
@@ -245,10 +247,10 @@ const OUTCOME_ANY: Widget = Widget::Variable {
 
 const P0: Widget = Widget::Text {
     id: "p0",
-    label: "Proportion under the null",
+    label: "Value to test against",
     default: TextDefault::Fixed("0.5"),
     rule: TextRule::Number,
-    hint: "",
+    hint: "The share the test compares with, between 0 and 1: 0.5 asks whether successes and failures are equally likely.",
 };
 
 fn p0_check(a: &Args) -> Vec<Problem> {
@@ -345,7 +347,8 @@ pub const BINOMIAL: Spec = Spec {
 pub const FISHER: Spec = Spec {
     entry: "Fisher's exact test",
     menu: "Statistics > Tests and intervals > Fisher's exact test",
-    about: "Exact test of whether two categorical variables are independent, for small counts. \
+    about: "Exact test of whether two categorical variables are independent: valid at any size, \
+            and the one to use when counts are small. \
             Missing values are left out.",
     widgets: &[
         Widget::Variable {
@@ -581,8 +584,8 @@ pub const KAPPA: Spec = Spec {
     entry: "Agreement (kappa)",
     menu: "Statistics > Tests and intervals > Agreement (kappa)",
     about: "How well two raters, or two ways of measuring, agree on the same rows: Cohen's \
-            kappa, which corrects the share of rows they agree on for the agreement chance \
-            alone would give.",
+            kappa, which corrects the share of rows they agree on for the agreement that \
+            chance alone would give.",
     widgets: &[
         Widget::Variable {
             id: "a",
@@ -674,7 +677,7 @@ const FLEISS_R: &str = r#"(function(r) {
 pub const FLEISS: Spec = Spec {
     entry: "Agreement of several raters (Fleiss' kappa)",
     menu: "Statistics > Tests and intervals > Agreement of several raters",
-    about: "How well three or more raters agree on the same rows: Fleiss' kappa, with the \
+    about: "How well two or more raters agree on the same rows: Fleiss' kappa, with the \
             kappa of each category. One column for each rater; every rater uses the same \
             categories.",
     widgets: &[Widget::Variables {

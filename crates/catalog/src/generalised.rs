@@ -110,8 +110,9 @@ pub const LOGISTIC: Spec = Spec {
     entry: "Logistic model",
     menu: "Statistics > Generalised models > Logistic model",
     about: "Model a yes/no outcome from one or more predictors. The outcome must have exactly \
-            two different values; for a factor or text, the first level counts as no and the \
-            other as yes. Rows missing any variable used are left out.",
+            two different values: a number outcome must be 0 (no) and 1 (yes); for a factor the \
+            first level counts as no, and for text the first in alphabetical order. Rows missing \
+            any variable used are left out.",
     widgets: &[
         Widget::Variable {
             id: "y",
@@ -149,12 +150,29 @@ pub const LOGISTIC: Spec = Spec {
         let (data, model) = (a.data(), a.name("save"));
         let outcome = a.var_string("y").unwrap_or_default();
         let link = a.choice("link");
+        let kind = a.ctx.column(a.var_text("y")).map(|c| c.kind);
+        // glm() takes 0/1 numbers or a factor: text goes in as a factor (first
+        // in alphabetical order is no), and other numbers are refused in words
+        let number_check = if kind == Some(VarKind::Number) {
+            format!(
+                "stopifnot(\"a number outcome must be 0 (no) and 1 (yes)\" = \
+                 all(stats::na.omit({data}[[{outcome}]]) %in% c(0, 1)))\n"
+            )
+        } else {
+            String::new()
+        };
+        let y = a.var("y").unwrap_or_default();
+        let lhs = if kind == Some(VarKind::Text) {
+            format!("factor({y})")
+        } else {
+            y
+        };
         let mut code = format!(
             "stopifnot(\"the outcome must have exactly two different values\" = \
              length(unique(stats::na.omit({data}[[{outcome}]]))) == 2)\n\
-             {model} <- stats::glm({} ~ {}, family = stats::binomial(link = {}), data = {data})\n\
+             {number_check}\
+             {model} <- stats::glm({lhs} ~ {}, family = stats::binomial(link = {}), data = {data})\n\
              print(summary({model}))",
-            a.var("y").unwrap_or_default(),
             rhs(a),
             r_string(link),
         );
@@ -266,7 +284,8 @@ pub const NEGATIVE_BINOMIAL: Spec = Spec {
     menu: "Statistics > Generalised models > Negative binomial model",
     about: "Model a count outcome that varies more than a Poisson model allows. It fits with \
             MASS::glm.nb, which estimates the extra spread (theta) along with the \
-            coefficients. The counts must be whole numbers of zero or more.",
+            coefficients. The counts must be whole numbers of zero or more. Rows missing any \
+            variable used are left out.",
     widgets: &[
         Widget::Variable {
             id: "y",

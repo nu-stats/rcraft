@@ -19,7 +19,7 @@ const CM_PER_INCH: f64 = 2.54;
 pub const EXPORT_PLOT: Spec = Spec {
     entry: "Export plot",
     menu: "Graphs > Export plot",
-    about: "Save a plot as a picture file: PNG, or SVG or PDF, which stay sharp at any size. \
+    about: "Save a plot as a picture file: PNG, SVG or PDF (SVG and PDF stay sharp at any size). \
             The plot is drawn again at the size you give, not scaled from the Graph tab.",
     widgets: &[
         Widget::Text {

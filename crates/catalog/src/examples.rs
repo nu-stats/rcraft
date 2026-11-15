@@ -95,9 +95,9 @@ pub const EXAMPLES: &[Opt] = &[
 pub const EXAMPLE_DATA: Spec = Spec {
     entry: "Example data",
     menu: "File > Example data",
-    about: "Copy a data frame to practise on into the workspace, under its own name. They come \
-            with R itself (its datasets package); R's help page on each (type ?mtcars, say) says \
-            where it is from.",
+    about: "Copy a data frame to practise on into the workspace, under its own name. These data \
+            frames come with every R (its datasets package), and R's help page on each (type \
+            ?mtcars, say) says where it is from.",
     widgets: &[Widget::Choice {
         id: "result",
         label: "Data",

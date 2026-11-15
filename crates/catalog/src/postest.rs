@@ -183,8 +183,9 @@ pub const PREDICTED: Spec = Spec {
     entry: "Predicted values and residuals",
     menu: "Objects > Model > Predicted values and residuals",
     about: "Add the model's predicted values and residuals to a data frame as new variables. \
-            Use the data frame the model was fitted to. Rows the model left out for missing \
-            values get missing in the new variables. A name already in the data frame is replaced.",
+            Use the data frame the model was fitted to. Rows the model left out get missing \
+            residuals; a row with a missing outcome but all its predictors still gets a predicted \
+            value. A name already in the data frame is replaced.",
     widgets: &[
         Widget::Text {
             id: "data",
@@ -255,7 +256,7 @@ pub const DIAGNOSTICS: Spec = Spec {
     entry: "Model diagnostics",
     menu: "Objects > Model > Diagnostics",
     about: "Checks on a linear model: whether the residuals look normal, whether their spread \
-            changes with the predicted value (a Koenker version of the Breusch-Pagan test), and \
+            changes with the predicted value (Koenker's version of the Breusch-Pagan test), and \
             which rows pull the fit hardest (Cook's distance and leverage). For a generalised \
             model only the influence part is shown.",
     widgets: &[],
@@ -365,7 +366,8 @@ pub const ROBUST: Spec = Spec {
             label: "Cluster by",
             default: TextDefault::Empty,
             rule: TextRule::Any,
-            hint: "Optional: a variable whose groups may be correlated inside. Needs the data \
+            hint: "Optional: a variable whose groups hold rows that may be correlated with each \
+                   other. Needs the data \
                    frame below. Rows the model left out are matched by row name.",
         },
         Widget::Text {
@@ -615,15 +617,15 @@ pub const SUMS_OF_SQUARES: Spec = Spec {
     entry: "Sums of squares (Type II/III)",
     menu: "Objects > Model > Sums of squares (Type II/III)",
     about: "The analysis-of-variance table of a linear model with Type II or Type III sums of \
-            squares, which do not depend on the order the terms were typed in (the Linear \
-            model dialog's own table does). The model itself is not changed.",
+            squares, which do not depend on the order the terms were typed in (the ANOVA \
+            dialogs' sequential table does). The model itself is not changed.",
     widgets: &[Widget::Choice {
         id: "type",
         label: "Sums of squares",
         options: SS_TYPES,
         default: "2",
-        hint: "With no interactions in the model the two give the same tests; they differ \
-               when there are interactions, most when group sizes are unequal.",
+        hint: "The two give the same tests unless the model has interactions and the \
+               group sizes are unequal.",
     }],
     needs: &[],
     styles: BASE,
@@ -736,7 +738,7 @@ pub const CONTRASTS: Spec = Spec {
             label: "Comparisons",
             default: TextDefault::Empty,
             rule: TextRule::Any,
-            hint: "Levels with weights that add up to zero, a comparison per group, groups \
+            hint: "Levels with weights that add up to zero, one comparison per part, parts \
                    separated by semicolons. For example: Treated = 1, Control = -1; \
                    Treated = 1, Low = -0.5, Control = -0.5. Level names must not contain \
                    commas, semicolons or equals signs.",

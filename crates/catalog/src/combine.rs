@@ -609,7 +609,7 @@ pub const SAMPLE: Spec = Spec {
             label: "Size",
             default: TextDefault::Fixed("100"),
             rule: TextRule::Number,
-            hint: "More rows than there are keeps them all.",
+            hint: "Asking for more rows than there are keeps them all.",
         },
         Widget::Text {
             id: "seed",

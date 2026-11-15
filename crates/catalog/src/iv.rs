@@ -105,7 +105,7 @@ const IV_ERRORS: &[Opt] = &[
     },
     Opt {
         value: "hetero",
-        label: "Robust to heteroskedasticity",
+        label: "Robust (the spread of the errors may vary)",
     },
 ];
 
@@ -199,14 +199,15 @@ pub const IV_REGRESSION: Spec = Spec {
             default: true,
             hint:
                 "On: Stata's ivregress with the small option (and xtivreg, fe): degrees-of-freedom \
-                   adjustments and t tests. Off: ivregress's default large-sample robust and \
-                   clustered errors (conventional errors still divide by N - 1, not N).",
+                   adjustments and t tests. Off: ivregress's default, z tests and robust or \
+                   clustered errors without the small-sample factors; the conventional errors \
+                   then differ a little from Stata's, as R divides by N - 1 where Stata divides by N.",
         },
         Widget::Check {
             id: "first",
             label: "Show the first stage",
             default: false,
-            hint: "",
+            hint: "Also prints the regression of each endogenous variable on the instruments and the other predictors, to judge how strong the instruments are.",
         },
         Widget::Choice {
             id: "conf",

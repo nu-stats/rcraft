@@ -198,7 +198,7 @@ pub const SURVEY_MEANS: Spec = Spec {
     entry: "Survey means and totals",
     menu: "Statistics > Survey data > Means and totals",
     about: "Population means or totals estimated from a survey sample, with standard errors \
-            from the design (Taylor linearization), overall or for each group, with \
+            from the design (Taylor linearisation), overall or for each group, with \
             survey::svymean, survey::svytotal and survey::svyby. Rows with a missing value in \
             any variable chosen are left out of all of them, as Stata's svy: mean does.",
     widgets: &[
@@ -414,7 +414,8 @@ pub const SURVEY_REGRESSION: Spec = Spec {
             label: "Save the model as",
             default: TextDefault::Fixed("model"),
             rule: TextRule::Name,
-            hint: "The fitted model stays in R's workspace under this name.",
+            hint: "The fitted model stays in R's workspace under this name; a name already in \
+                   use is replaced.",
         },
     ],
     needs: &["survey"],

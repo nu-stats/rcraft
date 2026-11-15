@@ -295,6 +295,52 @@ mod tests {
         );
     }
 
+    /// Writes every dialog's help page to `RCRAFT_HELP_PAGES` (a file), for
+    /// reading them all through (P8.4). Does nothing without it.
+    #[test]
+    fn help_pages_can_be_written_out_for_review() {
+        let Ok(path) = std::env::var("RCRAFT_HELP_PAGES") else {
+            return;
+        };
+        let mut out = String::new();
+        for spec in all_specs() {
+            let p = rcraft_rcodegen::dialog_help::for_spec(spec);
+            out.push_str(&format!(
+                "=== {} [{}]
+{}
+",
+                p.title, p.menu, p.about
+            ));
+            for o in &p.options {
+                out.push_str(&format!(
+                    "  - {}: {}
+",
+                    o.label, o.text
+                ));
+            }
+            if !p.needs.is_empty() {
+                out.push_str(&format!(
+                    "  needs: {}
+",
+                    p.needs.join(", ")
+                ));
+            }
+            for n in &p.notes {
+                out.push_str(&format!(
+                    "  note: {n}
+"
+                ));
+            }
+            out.push_str(&format!(
+                "  example: {}
+
+",
+                p.example.as_deref().unwrap_or("(none)")
+            ));
+        }
+        assert!(std::fs::write(path, out).is_ok());
+    }
+
     #[test]
     fn names_are_unique() {
         let mut names: Vec<&str> = ENTRIES.iter().map(|e| e.name).collect();

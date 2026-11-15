@@ -5121,3 +5121,27 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Checked in R 4.4.3: every example's code makes a data frame equal to R's, with the rows and variables
   its description gives. 125 entries: 124 verified, 1 planned.
 
+## P8.4: every dialog's help page reviewed, 2026-11-15
+
+- All 107 dialog help pages were written out (`RCRAFT_HELP_PAGES=file cargo test -p rcraft-catalog
+  help_pages`) and read through by a second reader, each point then checked against the code before it
+  was changed.
+- Wrong or misleading statements fixed: an optional variable box said "or none for all" on six dialogs
+  where empty does not mean all (now "optional"; the two that use every variable say so in their own
+  hint); Predicted values said rows the model left out get no prediction (a row missing only its outcome
+  does get one); Sums of squares named the wrong dialog for the order-dependent table and said Type II
+  and III differ with interactions alone (only with interactions and unequal groups); a fixed-effects
+  hint stated fixest's own default; the Normality test's reading of a p-value; Fisher's test "for small
+  counts"; Fleiss' kappa "three or more raters" (two or more); Factorial ANOVA "two or more variables"
+  (one or more); Recode "the labels" (the variable's label); Convert type "R says how many" (R warns).
+- A bug found by it: the Logistic model offered text outcomes, which glm() refuses ("y values must be 0
+  <= y <= 1"), as it does numbers coded 1 and 2. A text outcome now goes in as a factor (first in
+  alphabetical order is no), and a number outcome that is not 0 and 1 is refused in plain words.
+  Checked in R 4.4.3.
+- Words: "under the null" became "Value to test against"; the direction of one-sided tests is said;
+  "to the maximum's precision", "Row i of", "correlated inside", "heteroskedasticity" and others in plain
+  words; typos and spelling (linearisation, Type I, Koenker's) fixed. Thirteen options that needed a
+  sentence got one (regular expressions, proportional hazards, the first stage, Tukey comparisons...);
+  29 self-evident ones (Width, Number of observations) are left without.
+- The manual is RCraft's own manuals, still down the road.
+

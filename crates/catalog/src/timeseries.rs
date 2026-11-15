@@ -135,8 +135,8 @@ pub const ARIMA: Spec = Spec {
     about: "An autoregressive integrated moving-average model of one series, fitted by exact \
             maximum likelihood (the Kalman filter) as Stata's arima: AR and MA orders, the number \
             of differences, and a constant (the mean, or with differences the mean change, as \
-            Stata's _cons). It fits with stats::arima on the differenced series, to the maximum's \
-            precision, prints the estimates with their intervals, and forecasts the series' \
+            Stata's _cons). It fits with stats::arima on the differenced series, with tight \
+            convergence settings to match Stata's results, prints the estimates with their intervals, and forecasts the series' \
             levels with standard errors if asked.",
     widgets: &[
         Widget::Variable {
@@ -311,7 +311,7 @@ pub const AUTOCORRELATIONS: Spec = Spec {
             id: "draw",
             label: "Draw the correlograms",
             default: true,
-            hint: "",
+            hint: "Also draws the autocorrelations and partial autocorrelations, one spike per lag, with dashed bounds beyond which a correlation is unlikely to be chance.",
         },
     ],
     needs: &[],

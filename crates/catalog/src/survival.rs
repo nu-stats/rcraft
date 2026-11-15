@@ -318,7 +318,7 @@ pub const COX: Spec = Spec {
             id: "zph",
             label: "Test proportional hazards",
             default: true,
-            hint: "",
+            hint: "Tests, for each term and overall, whether its effect changes over time (scaled Schoenfeld residuals); a small p-value says the hazards may not be proportional.",
         },
         save("cox"),
     ],

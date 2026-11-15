@@ -631,6 +631,8 @@ Each family is its own set of dialogs over a named CRAN package.
   page on each gives its source, and the descriptions are RCraft's own. P8.3 is done)
 - P8.4 Help polish: see Phase 2A; here only the final review of every
   dialog's help page and the manual
+  (dialogs' pages reviewed 2026-11-15: every page read through, the wrong or unclear statements
+  fixed, a sentence added where an option needed one; the manual waits for RCraft's own manuals)
 - P8.5 Browser build, if feasible
 
 ## Phase 9: Extensibility

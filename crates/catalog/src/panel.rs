@@ -83,7 +83,7 @@ const ERRORS: &[Opt] = &[
     },
     Opt {
         value: "hetero",
-        label: "Robust to heteroskedasticity",
+        label: "Robust (the spread of the errors may vary)",
     },
     Opt {
         value: "twoway",
@@ -96,8 +96,8 @@ const ERROR_CHOICE: Widget = Widget::Choice {
     label: "Standard errors",
     options: ERRORS,
     default: "cluster",
-    hint: "fixest's own default is clustered by the first fixed effect. A variable under \
-           Cluster by takes the place of this choice.",
+    hint: "The first choice clusters by the first fixed effect. A variable under Cluster by \
+           takes the place of this choice.",
 };
 
 const CLUSTER: Widget = Widget::Variable {

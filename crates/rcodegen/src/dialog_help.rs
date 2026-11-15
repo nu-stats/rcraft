@@ -385,7 +385,7 @@ fn options_of(spec: &Spec) -> Vec<OptionHelp> {
                 } else if min == 1 {
                     "one or more".to_string()
                 } else {
-                    "any number, or none for all".to_string()
+                    "any number; optional".to_string()
                 };
                 OptionHelp {
                     label: label.to_string(),

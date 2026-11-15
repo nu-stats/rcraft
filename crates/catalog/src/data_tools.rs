@@ -246,7 +246,7 @@ pub const RECODE: Spec = Spec {
     entry: "Recode",
     menu: "Data > Recode variable",
     about: "Change some values of a variable into others. The first rule that fits a value is \
-            used; the labels of the variable are kept.",
+            used; the variable's label is kept.",
     widgets: &[
         var(&[VarKind::Number, VarKind::Text, VarKind::Factor], ""),
         Widget::Text {
@@ -272,7 +272,8 @@ pub const RECODE: Spec = Spec {
                 },
             ],
             default: "keep",
-            hint: "A variable that gets text for some values becomes text.",
+            hint: "What happens to values no rule covers. If any rule gives text, the variable \
+                   becomes text.",
         },
         INTO,
         RESULT,
@@ -332,7 +333,7 @@ pub const CONVERT_TYPE: Spec = Spec {
     entry: "Convert type",
     menu: "Data > Convert type",
     about: "Change a variable into a number, text or a factor. Text that is not a number \
-            becomes missing, and R says how many.",
+            becomes missing, and R warns that it did.",
     widgets: &[
         var(
             &[
@@ -621,13 +622,13 @@ pub const FIND_REPLACE: Spec = Spec {
             id: "pattern",
             label: "Treat the text to find as a pattern (regular expression)",
             default: false,
-            hint: "",
+            hint: "Then . matches any character and [0-9] any digit, for example; left unticked, the text is found exactly as typed.",
         },
         Widget::Check {
             id: "ignore",
             label: "Ignore capital letters",
             default: false,
-            hint: "",
+            hint: "Ticked, \"Yes\" also finds \"yes\" and \"YES\".",
         },
         INTO,
         RESULT,
@@ -689,7 +690,7 @@ pub const EXTRACT_TEXT: Spec = Spec {
             label: "From character",
             default: TextDefault::Fixed("1"),
             rule: TextRule::Any,
-            hint: "",
+            hint: "The position of the first character to keep: 1 is the first.",
         },
         Widget::Text {
             id: "to",

@@ -24,7 +24,7 @@ const TITLE: Widget = Widget::Text {
     label: "Title",
     default: TextDefault::Empty,
     rule: TextRule::Any,
-    hint: "Optional. Left empty, the plot is titled with its variables.",
+    hint: "Optional. If left empty, the title names the variables.",
 };
 
 const fn number_var(label: &'static str, required: bool, hint: &'static str) -> Widget {
@@ -42,7 +42,7 @@ const GROUP: Widget = Widget::Variable {
     label: "Colour or split by",
     kinds: GROUPS,
     required: false,
-    hint: "Optional: one group per colour or box.",
+    hint: "Optional: one group per colour.",
 };
 
 /// The title in R, or `fallback` when none was typed.
@@ -314,7 +314,7 @@ pub const SCATTER: Spec = Spec {
             id: "smooth",
             label: "Add a smooth curve (lowess)",
             default: false,
-            hint: "",
+            hint: "A curve that follows the points without assuming a straight line, drawn dashed.",
         },
         TITLE,
     ],
@@ -387,7 +387,7 @@ pub const LINE_PLOT: Spec = Spec {
             id: "points",
             label: "Mark each row with a point",
             default: false,
-            hint: "",
+            hint: "Draws a point at each value as well as the line.",
         },
         TITLE,
     ],
