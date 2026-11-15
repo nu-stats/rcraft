@@ -335,3 +335,34 @@ hi = lo + 0.84 and + 1.37 (296 results), and lo = 0.313, 0.347, 0.431, 0.469 wit
   evidence here is that one value fits each end over a whole run of n and across positions.
 - Next: probe lo finely across a 0.5 block (several widths) at fixed n to map which coarse value each
   end starts from, and read the n at which each value takes over.
+
+## 2026-11-15, ninth pass: one 0.5 block, lo by 0.01
+
+- Probe 10 (`%21x` through scalars, 561 runs): step 0.1, lo 12.50 to 13.00 by 0.01, width 2.62 at
+  n 30, 34, 38, 42, 46, 50 and width 2.06 at n 24, 28, 32, 36, 40.
+- Starts on the 0.5 grid are not the general form: many ends have none (e.g. every top for lo 12.61 to
+  12.79 at width 2.62). Starts at the exact decimal of a label (what a %18.0g local gives back) cover
+  more, but not all either. The clearest view is each end's offset in ulps from the decimal label,
+  marked where it is also the product L·d.
+- Width 2.06 (22 labels) is ruled by whether each label is inside or outside the data:
+  - both labels outside (bottom 0.1 to 0.4 step below lo, top 0.1 to 0.4 above hi; and 0.7/0.7): both
+    ends are the product L·d and U·d at every n (25 positions);
+  - bottom label inside (lo 0.01–0.02 below it): r(min) is the decimal label, or 1 ulp above it, at
+    n 24 and 28, then 1 ulp lower from n 32 (labels 126, 128 … lo 12.58, 12.88) or 36 (127, 129, 130);
+    the top stays as it was;
+  - top label inside (gap −0.1, −0.2): r(min) leaves the product and drops 1 ulp from the same n,
+    32 or 36, and r(max) moves too.
+  So below n 32 an end's form follows from its own side (outside: product; inside: decimal); from
+  n 32 or 36 an inside label on either side moves the bottom one step further.
+- Width 2.62 (27–28 labels) moves even with both labels outside, at an n set by the label block: L 125
+  and 126 never (to n 50), 127 at 46, 128 at 42, 129 at 34 (top) and 42 (bottom), with steps of −1 and
+  −2 ulps after. A lo 0.01 below its label behaves unlike one 0.02 below: 12.99, 12.89, 12.79, 12.69
+  stay at the decimal label to n 50, while 12.98, 12.88, 12.78, 12.68 drop at n 38 or 42.
+- Reading: this is what a search that moves ends one step at a time would leave. An end the cost puts
+  inside the data is reached by a step inward (decimal, or a short walk). For n well above the label
+  count the search first extends outward and then comes back, each move rounded. The positions where
+  that happens shift with the rounding of the comparisons. The earlier hypothesis in "The likely
+  mechanism" (moves kept in locals) fits these maps better than a fixed start rule.
+- Next: simulate that search (extend while labels < about n, trim where the cost falls, each move
+  through a %18.0g local, result computed at return) with StatCraft's costs, and fit it to probes 8–10
+  map by map, starting with width 2.06.
