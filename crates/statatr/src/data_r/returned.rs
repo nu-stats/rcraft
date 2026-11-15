@@ -1052,6 +1052,11 @@ const TEXT_NAMES: &[&str] = &[
     "small",
     "footnote",
     "method",
+    // power's
+    "type",
+    "direction",
+    "test",
+    "effect",
     "ties",
     "t0",
     "est_cmd",
@@ -1808,6 +1813,9 @@ fn r_not_kept(cmd: &str, name: &str) -> Option<&'static str> {
         ("describe", "changed") => Some(
             "it says whether the data changed since they were last saved, which R does not follow",
         ),
+        ("power", "init" | "iter" | "deltax" | "function") => Some(
+            "it is a detail of Stata's own search for the answer (its start, rounds, last step and remainder), which R's search does not share",
+        ),
         _ => None,
     }
 }
@@ -2258,6 +2266,10 @@ impl Session {
                 } else if cmd == "describe" {
                     out.caveat(
                         "Stata also lists r(changed) and r(width) after describe, which RCraft does not keep",
+                    );
+                } else if cmd == "power" {
+                    out.caveat(
+                        "where power searched for the answer, Stata also lists r(init), r(iter), r(deltax) and r(function), its own search's, which RCraft does not keep",
                     );
                 }
             }

@@ -157,6 +157,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("post", &["postfile"]),
     ("postclose", &["postfile"]),
     ("postfile", &["postfile"]),
+    ("power", &["power"]),
     ("prais", &["arpanel"]),
     ("predict", &["regress"]),
     ("preserve", &["made"]),

@@ -169,6 +169,7 @@ pub const COMMANDS: &[&str] = &[
     "postclose",
     "postfile",
     "postutil",
+    "power",
     "prais",
     "predict",
     "preserve",
@@ -387,6 +388,29 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("kwallis", &["by("]),
     ("pdslasso", &["robust"]),
     ("postfile", &["every(", "replace"]),
+    (
+        "power",
+        &[
+            "alpha(",
+            "continuity",
+            "corr(",
+            "direction(",
+            "effect(",
+            "knownsd",
+            "knownsds",
+            "n(",
+            "n1(",
+            "n2(",
+            "nratio(",
+            "onesided",
+            "power(",
+            "sd(",
+            "sd1(",
+            "sd2(",
+            "sddiff(",
+            "test(",
+        ],
+    ),
     ("prtest", &["by(", "level("]),
     ("marginsplot", &["noci", "title(", "xtitle(", "ytitle("]),
     ("medeff", &["mediate(", "seed(", "sims(", "treat("]),
@@ -882,6 +906,16 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
 const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("duplicates", &["drop", "report", "tag"]),
     ("survwgt", &["rake"]),
+    (
+        "power",
+        &[
+            "onemean",
+            "oneproportion",
+            "pairedmeans",
+            "twomeans",
+            "twoproportions",
+        ],
+    ),
     ("ereturn", &["list"]),
     ("estadd", &["local", "scalar"]),
     (
@@ -1655,6 +1689,13 @@ gettoken a b : s, {o}"
             "import" => format!("import delimited f.csv, {o}"),
             "insheet" => format!("insheet using f.csv, {o}"),
             "postfile" => format!("postfile h z using f, {o}"),
+            "power" if matches!(name, "continuity" | "effect" | "test") => {
+                format!("power twoproportions 0.3 0.5, {o}")
+            }
+            "power" if matches!(name, "sddiff" | "corr" | "knownsd") => {
+                format!("power pairedmeans 0 0.5, {o}")
+            }
+            "power" => format!("power twomeans 0 0.5, {o}"),
             "file" => format!("file open h using f.txt, write {o}"),
             "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),

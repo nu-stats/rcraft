@@ -1085,3 +1085,41 @@ fn the_rank_tests_print_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+/// power in Stata 19's layout, line for line from Stata's own output
+/// (plan/stata/power.md): a searched sample size, a power, the paired form's
+/// two columns, a total that does not split, and a target value.
+#[test]
+fn power_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power onemean 0 0.5\npower pairedmeans 0 0.5, sd(1) corr(0.5)\n\
+         power twoproportions 0.3 0.5, nratio(1.5) continuity\npower twomeans 0 0.5, n(101)\n\
+         power oneproportion 0.5, n(80) power(0.8)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Performing iteration ...",
+        "Estimated sample size for a one-sample mean test",
+        "H0: m = m0  versus  Ha: m != m0",
+        "        delta =    0.5000",
+        "            N =        34",
+        "Paired t test assuming sd1 = sd2 = sd",
+        "        delta =    0.5000           sd =    1.0000",
+        "           d0 =    0.0000         corr =    0.5000",
+        "         sd_d =    1.0000",
+        "Pearson's chi-squared test",
+        "        delta =    0.2000  (difference)",
+        "           N2 =       131",
+        "        N2/N1 =    1.5057",
+        "Actual sample sizes:",
+        "  N per group =        50",
+        "        power =    0.6969",
+        "H0: p = p0  versus  Ha: p != p0; pa > p0",
+        "Estimated effect size and target proportion:",
+        "           pa =    0.6543",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

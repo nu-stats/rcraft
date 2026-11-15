@@ -2271,6 +2271,35 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "power",
+        about: "Power and sample size (power onemean 0 0.5, power twoproportions 0.3 0.5, n(150))",
+        points: &[
+            p(
+                "In R",
+                "stata_power works out the sample size, the power, or (with one value, n() and \
+                 power()) the target value for onemean, twomeans, pairedmeans, oneproportion and \
+                 twoproportions, from the [PSS] manual's power functions: the noncentral t (or z \
+                 with knownsd), Satterthwaite's t for unequal sds, the score or Wald test of a \
+                 proportion, the pooled test of two with Fleiss's continuity correction. Sample \
+                 sizes are the smallest whole numbers reaching the power (the second group \
+                 nratio() times the first, rounded up); a total that does not split is cut to \
+                 Stata's actual sample sizes. Stata 19's printout and r(), but for its search's \
+                 own r(init), r(iter), r(deltax) and r(function).",
+            ),
+            p(
+                "Digits",
+                "R's noncentral t and its root finding agree with Stata's to about 1e-12; what is \
+                 printed is the same.",
+            ),
+            p(
+                "Not yet",
+                "Lists of values (Stata's table and graph), the other methods (oneslope, \
+                 rsquared, twocorrelations, ...), test(lrchi2), test(fisher), test(binomial), \
+                 n1() or n2() alone, and the other options are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "ranksum",
         about: "Wilcoxon rank-sum (Mann-Whitney) test (ranksum x, by(g))",
         points: &[
