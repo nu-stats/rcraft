@@ -238,6 +238,107 @@ stata_spearman <- function(d, vars, show = TRUE) {
     cat(sprintf("%12s |", stata_tab_abbrev(vars[i], 12)), paste0(cells, collapse = ""), " \n", sep = "")
   }
   rr
+}
+# Kendall's tau of two variables: the score S over pairs, tau-a S/n0, tau-b with the ties taken out,
+# the variance of S corrected for ties, the two-sided p continuity corrected
+stata_ktau_pair <- function(x, y) {
+  x15 <- signif(x, 15); y15 <- signif(y, 15)
+  n <- length(x)
+  S <- 0
+  if (n > 1) for (i in seq_len(n - 1)) {
+    j <- (i + 1):n
+    S <- S + sum(sign(x15[i] - x15[j]) * sign(y15[i] - y15[j]))
+  }
+  n0 <- n * (n - 1) / 2
+  # the ties for tau-b and the variance: equal values exactly
+  tx <- tabulate(match(x, unique(x))); ty <- tabulate(match(y, unique(y)))
+  t1 <- sum(tx * (tx - 1) / 2); u1 <- sum(ty * (ty - 1) / 2)
+  v <- (n * (n - 1) * (2 * n + 5) - sum(tx * (tx - 1) * (2 * tx + 5)) - sum(ty * (ty - 1) * (2 * ty + 5))) / 18 +
+    sum(tx * (tx - 1) * (tx - 2)) * sum(ty * (ty - 1) * (ty - 2)) / (9 * n * (n - 1) * (n - 2)) +
+    sum(tx * (tx - 1)) * sum(ty * (ty - 1)) / (2 * n * (n - 1))
+  se <- sqrt(v)
+  p <- 2 * stats::pnorm(-max(abs(S) - 1, 0) / se)
+  fin <- function(z) if (is.finite(z)) z else NA_real_
+  c(N = n, tau_a = fin(S / n0), tau_b = fin(S / sqrt((n0 - t1) * (n0 - u1))), score = S, se_score = fin(se),
+    p = fin(min(1, p)), ties = (t1 + u1) > 0)
+}
+stata_ktau <- function(d, vars, stats = "taua", pw = FALSE, adjust = "none", print = NA, star = NA,
+                       matrix = FALSE, show = TRUE) {
+  # the score compares values to 15 significant digits (one bit apart: tied; 1e-12 apart: not), the ties
+  # for tau-b and the variance are exact equality, as Stata 19 counts them
+  X <- lapply(vars, function(v) stata_num(d[[v]]))
+  k <- length(vars)
+  if (!pw) {
+    ok <- Reduce(`&`, lapply(X, function(x) !is.na(x)))
+    X <- lapply(X, function(x) x[ok])
+  }
+  pair <- function(i, j) {
+    ok <- !is.na(X[[i]]) & !is.na(X[[j]])
+    stata_ktau_pair(X[[i]][ok], X[[j]][ok])
+  }
+  if (k == 2 && !matrix) {
+    o <- pair(2, 1)
+    rr <- as.list(o[c("N", "tau_a", "tau_b", "score", "se_score", "p")])
+    if (!show) return(rr)
+    f <- function(v, w) if (is.na(v)) sprintf(paste0("%", w, "s"), ".") else sprintf(paste0("%", w, ".4f"), v)
+    cat("\n  Number of obs = ", sprintf("%7.0f", o[["N"]]), "\n", sep = "")
+    cat("Kendall's tau-a = ", f(o[["tau_a"]], 12), "\n", sep = "")
+    cat("Kendall's tau-b = ", f(o[["tau_b"]], 12), "\n", sep = "")
+    cat("Kendall's score = ", sprintf("%7.0f", o[["score"]]), "\n", sep = "")
+    cat("    SE of score = ", sprintf("%11.3f", o[["se_score"]]), if (o[["ties"]] == 1) "   (corrected for ties)", "\n\n", sep = "")
+    cat("Test of H0: ", vars[1], " and ", vars[2], " are independent\n", sep = "")
+    cat("     Prob > |z| = ", f(o[["p"]], 12), "  (continuity corrected)\n", sep = "")
+    return(invisible(rr))
+  }
+  m <- function() matrix(NA_real_, k, k, dimnames = list(vars, vars))
+  M <- list(Nobs = m(), Tau_a = m(), Tau_b = m(), Score = m(), Se_Score = m(), P = m())
+  for (i in seq_len(k)) for (j in seq_len(i)) {
+    o <- pair(i, j)
+    vals <- c(o[["N"]], o[["tau_a"]], o[["tau_b"]], o[["score"]], o[["se_score"]], if (i == j) NA else o[["p"]])
+    for (s in seq_along(M)) M[[s]][i, j] <- M[[s]][j, i] <- vals[s]
+  }
+  np <- k * (k - 1) / 2
+  if (adjust == "bonferroni") M$P[] <- pmin(1, M$P * np)
+  if (adjust == "sidak") M$P[] <- pmin(1, 1 - (1 - M$P)^np)
+  rr <- list(N = M$Nobs[k, k - 1], tau_a = M$Tau_a[k, k - 1], tau_b = M$Tau_b[k, k - 1], score = M$Score[k, k - 1],
+             se_score = M$Se_Score[k, k - 1], p = M$P[k, k - 1])
+  rr <- c(rr, M)
+  if (!show) return(rr)
+  order <- c("taua", "taub", "score", "se", "obs", "p")
+  st <- order[order %in% stats]
+  src <- list(taua = "Tau_a", taub = "Tau_b", score = "Score", se = "Se_Score", obs = "Nobs", p = "P")
+  key <- c(taua = "tau_a", taub = "tau_b", score = "score", se = "se of score", obs = "Number of obs", p = "p-value")
+  cat("\n")
+  if (!"obs" %in% st) {
+    nn <- M$Nobs[lower.tri(M$Nobs, diag = TRUE)]
+    if (length(unique(nn)) > 1) cat("note: number of observations varies.\n\n") else cat("Number of observations = ", nn[1], "\n\n", sep = "")
+  }
+  if (!identical(st, "taua")) {
+    cat("+-----------------+\n|  Key            |\n|-----------------|\n")
+    for (s in st) cat(sprintf("|   %-13s |", key[[s]]), "\n", sep = "")
+    cat("+-----------------+\n\n")
+  }
+  cat("             |", paste0(" ", formatC(stata_tab_abbrev(vars, 8), width = 10), collapse = ""), "\n", sep = "")
+  cat(strrep("-", 13), "+", strrep("-", 11 * k), "\n", sep = "")
+  cell <- function(s, i, j) {
+    v <- M[[src[[s]]]][i, j]
+    if (is.na(v)) return(sprintf("%10s", "."))
+    sprintf(if (s == "obs") "%10.0f" else "%10.4f", v)
+  }
+  for (i in seq_len(k)) {
+    for (s in seq_along(st)) {
+      cells <- vapply(seq_len(i), function(j) {
+        p <- M$P[i, j]
+        if (!is.na(print) && !is.na(p) && p > print) return(strrep(" ", 11))
+        mark <- if (s == 1 && !is.na(star) && !is.na(p) && p <= star) "*" else " "
+        paste0(cell(st[s], i, j), mark)
+      }, "")
+      lab <- if (s == 1) stata_tab_abbrev(vars[i], 12) else ""
+      cat(sprintf("%12s | ", lab), paste0(cells, collapse = ""), "\n", sep = "")
+    }
+    if (length(st) > 1) cat("             |\n")
+  }
+  invisible(rr)
 }"##;
 
 const R_RANKSUM: &[&str] = &[
@@ -275,6 +376,10 @@ const R_SIGNRANK: &[&str] = &[
 const R_SIGNTEST: &[&str] = &["N", "N_pos", "N_neg", "N_tie", "p", "p_l", "p_u"];
 const R_KWALLIS: &[&str] = &["df", "chi2", "p", "chi2_adj", "p_adj"];
 const R_SPEARMAN: &[&str] = &["N", "rho", "p", "p_l", "p_u"];
+const R_KTAU: &[&str] = &[
+    "N", "tau_a", "tau_b", "score", "se_score", "p", "Nobs", "Tau_a", "Tau_b", "Score", "Se_Score",
+    "P",
+];
 
 impl Session {
     /// `ranksum`, `signrank`, `signtest`, `kwallis` and `spearman`.
@@ -288,6 +393,9 @@ impl Session {
         self.no_by(c, cmd)?;
         if c.parts.weight.is_some() {
             return Err(no(format!("{cmd} with weights is not translated yet")));
+        }
+        if cmd == "ktau" {
+            return self.ktau(c, opts, out);
         }
         let known: &[(&str, usize)] = match cmd {
             "ranksum" | "kwallis" => &[("by", 2)],
@@ -414,6 +522,107 @@ impl Session {
         } else {
             self.r_new = Some((names, cmd.into()));
         }
+        Ok(())
+    }
+
+    /// `ktau varlist [if] [in] [, stats(...) print(#) star(#) bonferroni sidak pw matrix]`.
+    fn ktau(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
+        let known: &[(&str, usize)] = &[
+            ("stats", 2),
+            ("print", 2),
+            ("star", 2),
+            ("bonferroni", 3),
+            ("sidak", 3),
+            ("pw", 2),
+            ("matrix", 3),
+        ];
+        if let Some(o) = opts
+            .0
+            .iter()
+            .find(|o| !known.iter().any(|(f, m)| o.is(f, *m)))
+        {
+            let paren = if o.arg.is_some() { "()" } else { "" };
+            out.line(format!(
+                "stop({}, call. = FALSE)",
+                r_text(&format!(
+                    "option {}{paren} not allowed (Stata: r(198))",
+                    o.name
+                ))
+            ));
+            return Ok(());
+        }
+        let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
+        if let Some(v) = vars.iter().find(|v| !is_name(v)) {
+            return Err(no(format!(
+                "ktau {v}: the variables written out are translated"
+            )));
+        }
+        if vars.len() < 2 {
+            out.line(format!(
+                "stop({}, call. = FALSE)",
+                r_text("too few variables specified (Stata: r(102))")
+            ));
+            return Ok(());
+        }
+        let mut args = String::new();
+        if let Some(s) = opts.arg("stats", 2) {
+            let mut st = Vec::new();
+            for w in s.split_whitespace() {
+                if !matches!(w, "taua" | "taub" | "score" | "se" | "obs" | "p") {
+                    return Err(no(format!("ktau, stats({w}) is not translated yet")));
+                }
+                st.push(r_text(w));
+            }
+            if !st.is_empty() {
+                args.push_str(&format!(", stats = c({})", st.join(", ")));
+            }
+        }
+        for (o, m) in [("print", 2), ("star", 2)] {
+            if let Some(v) = opts.arg(o, m) {
+                let x: f64 = v
+                    .trim()
+                    .parse()
+                    .ok()
+                    .filter(|x: &f64| (0.0..=1.0).contains(x))
+                    .ok_or_else(|| {
+                        no(format!("ktau, {o}({v}): a level from 0 to 1 is translated"))
+                    })?;
+                args.push_str(&format!(", {o} = {}", r_number(x)));
+            }
+        }
+        if opts.has("bonferroni", 3) && opts.has("sidak", 3) {
+            return Err(no("ktau: bonferroni and sidak together are not translated"));
+        }
+        if opts.has("bonferroni", 3) {
+            args.push_str(", adjust = \"bonferroni\"");
+        }
+        if opts.has("sidak", 3) {
+            args.push_str(", adjust = \"sidak\"");
+        }
+        if opts.has("pw", 2) {
+            args.push_str(", pw = TRUE");
+        }
+        if opts.has("matrix", 3) {
+            args.push_str(", matrix = TRUE");
+        }
+        if self.quiet(c) {
+            args.push_str(", show = FALSE");
+        }
+        let rows = self.rows_for(c, out)?;
+        for h in [
+            "stata_ranktests",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+        ] {
+            self.helpers.insert(h);
+        }
+        let q: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+        out.line(format!(
+            "stata_r <- stata_ktau({rows}, c({}){args})",
+            q.join(", ")
+        ));
+        self.r_new = Some((R_KTAU, "ktau".into()));
         Ok(())
     }
 }

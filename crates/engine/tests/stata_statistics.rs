@@ -1232,3 +1232,29 @@ fn the_stratified_epidemiological_tables_print_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn ktau_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 40\ngenerate double x1 = mod(_n * 37, 101) / 7\n\
+         generate double x2 = mod(_n * 13, 17) / 3\ngenerate double x3 = mod(_n * 11, 23) / 4\n\
+         ktau x1 x2\nktau x1 x2 x3\nktau x1 x2 x3, stats(taub se score)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "  Number of obs =      40",
+        "Kendall's tau-a =       0.0474",
+        "Kendall's score =      37",
+        "    SE of score =      85.637   (corrected for ties)",
+        "     Prob > |z| =       0.6742  (continuity corrected)",
+        "Number of observations = 40",
+        "          x2 |     0.0474     0.9628",
+        "|   se of score   |",
+        "             |   780.0000",
+        "          x3 |    -0.0402    -0.0978     1.0000",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

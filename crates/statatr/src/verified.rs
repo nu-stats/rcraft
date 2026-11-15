@@ -121,6 +121,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("isid", &["survwgt"]),
     ("isvar", &["isvar"]),
     ("ivregress", &["panel"]),
+    ("ktau", &["ktau"]),
     ("kwallis", &["ranktests"]),
     ("label", &["aware", "labels2"]),
     ("levelsof", &["aware", "extended_missing_groups"]),

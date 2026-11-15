@@ -137,6 +137,7 @@ pub const COMMANDS: &[&str] = &[
     "ivregress",
     "kdensity",
     "keep",
+    "ktau",
     "kwallis",
     "label",
     "levelsof",
@@ -394,6 +395,18 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("pca", &["components(", "covariance"]),
     ("ranksum", &["by("]),
     ("kwallis", &["by("]),
+    (
+        "ktau",
+        &[
+            "bonferroni",
+            "matrix",
+            "print(",
+            "pw",
+            "sidak",
+            "star(",
+            "stats(",
+        ],
+    ),
     ("pdslasso", &["robust"]),
     ("postfile", &["every(", "replace"]),
     (
@@ -1740,6 +1753,9 @@ gettoken a b : s, {o}"
             "cci" | "iri" => format!("{cmd} 1 2 3 4, {o}"),
             "ir" => format!("ir y x t, {o}"),
             "tabodds" => format!("tabodds y x, {o}"),
+            "ktau" if name == "stats" => "ktau x y z, stats(taua p)".to_string(),
+            "ktau" if matches!(name, "print" | "star") => format!("ktau x y z, {name}(.05)"),
+            "ktau" => format!("ktau x y z, {o}"),
             "power" if matches!(name, "continuity" | "effect" | "test") => {
                 format!("power twoproportions 0.3 0.5, {o}")
             }

@@ -2543,7 +2543,9 @@ impl Session {
             "sdtest" => self.sdtest(c, &opts, out),
             "table" => self.table(c, &opts, out),
             "pca" => self.pca(c, &opts, out),
-            "ranksum" | "signrank" | "signtest" | "kwallis" | "spearman" => self.rank_test(c, &opts, out),
+            "ranksum" | "signrank" | "signtest" | "kwallis" | "spearman" | "ktau" => {
+                self.rank_test(c, &opts, out)
+            }
             "power" => self.power(c, &opts, out),
             "cs" | "csi" | "cc" | "cci" | "ir" | "iri" => self.epitab(c, &opts, out),
             "mvtest" => self.mvtest(c, &opts, out),

@@ -205,6 +205,7 @@ const VARLIST: &[&str] = &[
     "spearman",
     "ranksum",
     "kwallis",
+    "ktau",
     "centile",
     "prtest",
     "rreg",
