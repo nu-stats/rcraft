@@ -103,7 +103,9 @@ Tasks:
   answer in Results; installed runs R; Tab completes. Not in the Script pane. P1A.9 is done)
 - P1A.10 "Package needed" prompt: when a menu entry or command needs a
   package that is not installed, offer to install it, with the same
-  confirmation as P1A.5
+  confirmation as P1A.5 (dialogs: done earlier through `Spec::needs`; typed commands done
+  2026-11-14: an error, warning or message naming a missing, too old or pre-R-4.0 package gets
+  Install and Install and run again under it in Results)
 - Providers (Bioconductor, r-universe, GitHub, local): done in Packages > Other sources and `rc
   install ..., provider(...)`, with trust labels and an extra tick for unreviewed code; not yet
   checked against the real services

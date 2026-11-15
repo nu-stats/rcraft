@@ -275,6 +275,149 @@ pub fn installed_versions(list: &[Installed]) -> HashMap<String, String> {
     map
 }
 
+/// Why a command wants a package installed (P1A.10).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Need {
+    /// It is not installed.
+    Missing,
+    /// The installed version is older than another package needs.
+    Newer,
+    /// It was installed for an older R and must be installed again.
+    Reinstall,
+}
+
+/// The package R's message (an error, a warning or a message) says must be
+/// installed, and why: `there is no package called 'x'` (`library(x)`,
+/// `x::f()`, a dependency), `package 'x' required by 'y' could not be found`,
+/// the "Package x is required / needed" of packages that check first, an
+/// installed version too old for another package, and a package built before
+/// R 4.0.0. `None` for any other message.
+pub fn package_to_install(message: &str) -> Option<(String, Need)> {
+    let text = message
+        .replace(['\u{2018}', '\u{2019}', '\u{201c}', '\u{201d}'], "'")
+        .replace('"', "'");
+    // the name R quoted right after `start` (anywhere in the text)
+    let quoted_after = |start: &str| -> Option<String> {
+        let mut rest = text.as_str();
+        while let Some(at) = rest.find(start) {
+            rest = rest.get(at + start.len()..)?;
+            let name: String = rest.chars().take_while(|&c| c != '\'').collect();
+            if is_package_name(&name) && rest.get(name.len()..)?.starts_with('\'') {
+                return Some(name);
+            }
+        }
+        None
+    };
+    let lower = text.to_lowercase();
+    if let Some(name) = quoted_after("there is no package called '") {
+        return Some((name, Need::Missing));
+    }
+    if let Some(name) = quoted_after("package '") {
+        if text.contains(&format!("package '{name}' required by '"))
+            && text.contains("could not be found")
+        {
+            return Some((name, Need::Missing));
+        }
+        if text.contains(&format!("package '{name}' was installed before R")) {
+            return Some((name, Need::Reinstall));
+        }
+    }
+    if let Some(name) = quoted_after("namespace '") {
+        if text.contains("is being loaded, but >=") && text.contains("is required") {
+            return Some((name, Need::Newer));
+        }
+    }
+    // packages that check for another first: rlang's "The package 'x' is
+    // required", and the common "Package 'x' needed for this function to work"
+    if lower.contains("is required") || lower.contains("needed for this function") {
+        let lowered_start = lower.find("package '")?;
+        let rest = text.get(lowered_start + "package '".len()..)?;
+        let name: String = rest.chars().take_while(|&c| c != '\'').collect();
+        let after = rest.get(name.len()..)?;
+        let tail = after.get(..after.len().min(40))?.to_lowercase();
+        if is_package_name(&name)
+            && after.starts_with('\'')
+            && (tail.contains("is required") || tail.contains("needed for this function"))
+        {
+            return Some((name, Need::Missing));
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod need_tests {
+    use super::*;
+
+    fn one(message: &str) -> Option<(String, Need)> {
+        package_to_install(message)
+    }
+
+    #[test]
+    fn missing_packages_are_named() {
+        let missing = |s: &str| Some((s.to_string(), Need::Missing));
+        // recorded from R 4.4.3: library(), pkg::f(), loadNamespace(), require()'s warning
+        assert_eq!(
+            one("there is no package called 'zzpkgq'"),
+            missing("zzpkgq")
+        );
+        assert_eq!(
+            one("there is no package called \u{2018}zz.pkg2\u{2019}"),
+            missing("zz.pkg2")
+        );
+        // requireNamespace()'s message
+        assert_eq!(
+            one("Failed with error:  'there is no package called \u{2018}sf\u{2019}'"),
+            missing("sf")
+        );
+        // a dependency
+        assert_eq!(
+            one("package \u{2018}vctrs\u{2019} required by \u{2018}dplyr\u{2019} could not be found"),
+            missing("vctrs")
+        );
+        // packages that check first
+        assert_eq!(one("The package \"ragg\" is required."), missing("ragg"));
+        assert_eq!(
+            one("Package \"MASS\" needed for this function to work. Please install it."),
+            missing("MASS")
+        );
+        assert_eq!(
+            one("\u{2139} The package `ggrepel` is required"),
+            None,
+            "backticks are not R's quotes for a package"
+        );
+    }
+
+    #[test]
+    fn old_versions_are_named() {
+        assert_eq!(
+            one("namespace \u{2018}rlang\u{2019} 1.0.6 is being loaded, but >= 1.1.0 is required"),
+            Some(("rlang".to_string(), Need::Newer))
+        );
+        assert_eq!(
+            one("package \u{2018}foo\u{2019} was installed before R 4.0.0: please re-install it"),
+            Some(("foo".to_string(), Need::Reinstall))
+        );
+    }
+
+    #[test]
+    fn other_messages_name_nothing() {
+        for m in [
+            "",
+            "object 'x' not found",
+            "there is no package called ''",
+            "there is no package called 'a b'",
+            "there is no package called 'x; system(\"rm\")'",
+            "package 'stats' is not in use",
+            "argument \"x\" is missing, with no default",
+            "a value is required",
+            "package 'x' required by 'y'",
+        ] {
+            assert_eq!(one(m), None, "{m}");
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

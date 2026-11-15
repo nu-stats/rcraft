@@ -4,10 +4,13 @@ use std::sync::mpsc::{channel, Receiver, TryRecvError};
 use std::time::Duration;
 
 use eframe::egui::{self, Align, Key, Layout, Modifiers, RichText, TextStyle};
-use rcraft_engine::{Engine, History, Item, Outcome, PackageIndexService, QueryId, Recall, Source};
+use rcraft_engine::{
+    CommandId, Engine, History, Item, Outcome, PackageIndexService, QueryId, Recall, Source,
+};
 use rcraft_rcodegen::dialog::Spec;
 use rcraft_rcodegen::dialog_help;
 use rcraft_rcodegen::help::{self, HelpCommand};
+use rcraft_rcodegen::packages::{package_to_install, Need};
 use rcraft_rcodegen::rc::{self, Rc};
 use rcraft_rcodegen::tab;
 use rcraft_rdata::display::LabelView;
@@ -128,6 +131,12 @@ impl SessionUi {
 /// so drawing never needs the engine mutably.
 enum Action {
     Submit(Source, String),
+    /// P1A.10: install a package a command said it needs, from an offer in
+    /// Results; then, if given, run that command again.
+    InstallNeeded {
+        package: String,
+        rerun: Option<(Source, String)>,
+    },
     /// Stata, typed or from the Script, translated after the lines before it
     /// and run (P2B.7).
     SubmitStata(Source, String),
@@ -247,6 +256,8 @@ pub struct App {
     /// A completion asked of R and not yet answered (an answer is used only
     /// if the line is unchanged).
     tab_pending: Option<TabAsk>,
+    /// Installs offered in Results for commands that needed a package.
+    offers: InstallOffers,
     /// Whether choices (the working folder) are kept between runs. Pictures and
     /// tests turn it off, so they never touch the user's own settings.
     keep_settings: bool,
@@ -304,6 +315,7 @@ impl App {
             help_window: HelpWindow::default(),
             completions: Vec::new(),
             tab_pending: None,
+            offers: InstallOffers::default(),
             keep_settings: true,
             stata: StataMode::default(),
             dofile: DoFileWindow::default(),
@@ -648,6 +660,18 @@ impl App {
                     }
                 }
             }
+            Action::InstallNeeded { package, rerun } => {
+                if let EngineState::Ready(engine) = &mut self.engine {
+                    let code = offer_install_code(&package, engine.library().as_deref());
+                    match engine.submit(Source::Menu("Packages > Install".into()), &code) {
+                        Ok(id) => {
+                            self.message = None;
+                            self.offers.running = Some((id, package, rerun));
+                        }
+                        Err(e) => self.message = Some(e.to_string()),
+                    }
+                }
+            }
             Action::SubmitStata(source, text) => {
                 let mut offer = Vec::new();
                 if let EngineState::Ready(engine) = &mut self.engine {
@@ -925,6 +949,32 @@ impl App {
         self.stata.complete(line, &variables, folder.as_deref())
     }
 
+    /// An install started from an offer in Results has ended: if it worked,
+    /// note it and run the command again when that was asked for.
+    fn follow_offered_install(&mut self) {
+        let Some((id, package, rerun)) = self.offers.running.clone() else {
+            return;
+        };
+        let EngineState::Ready(engine) = &mut self.engine else {
+            self.offers.running = None;
+            return;
+        };
+        match engine.history().get(id).and_then(|h| h.outcome) {
+            None => {}
+            Some(Outcome::Ok) => {
+                self.offers.running = None;
+                self.offers.done.push((package, id));
+                if let Some((source, code)) = rerun {
+                    if let Err(e) = engine.submit(source, &code) {
+                        self.message = Some(e.to_string());
+                    }
+                }
+            }
+            // R's messages in Results say why
+            Some(_) => self.offers.running = None,
+        }
+    }
+
     #[cfg(test)]
     fn complete_rc(&mut self) -> Option<String> {
         let line = self.command.clone();
@@ -1106,6 +1156,7 @@ impl App {
     /// offscreen picture (`headless.rs`) both call this.
     pub fn ui(&mut self, ctx: &egui::Context) {
         self.poll(ctx);
+        self.follow_offered_install();
         // the dialogs' file choosers open in the folder R is working in
         let folder = self
             .engine()
@@ -2005,7 +2056,11 @@ Click to choose another folder"
                         .color(pal.dim),
                     );
                 }
-                EngineState::Ready(engine) => results_list(ui, pal, engine, self.stata.on, out),
+                EngineState::Ready(engine) => {
+                    let cran =
+                        |name: &str| self.package_index.index().map(|ix| ix.get(name).is_some());
+                    results_list(ui, pal, engine, self.stata.on, &self.offers, &cran, out)
+                }
             });
     }
 
@@ -2306,6 +2361,8 @@ fn results_list(
     pal: &Palette,
     engine: &Engine,
     stata: bool,
+    offers: &InstallOffers,
+    on_cran: &dyn Fn(&str) -> Option<bool>,
     out: &mut Vec<Action>,
 ) {
     for block in engine.results().blocks() {
@@ -2363,8 +2420,164 @@ fn results_list(
                 }
             }
         }
+        if block.outcome.is_some() {
+            if let Some((package, need)) = needed_package(&block.items) {
+                let entry = engine.history().get(block.command);
+                // an offer's own install never offers another
+                let from_install =
+                    entry.is_some_and(|e| e.source == Source::Menu("Packages > Install".into()));
+                if !from_install {
+                    // a Stata block's code is not R to run again as it is
+                    let rerun = entry
+                        .filter(|_| !as_stata)
+                        .map(|e| (e.source.clone(), e.code.clone()));
+                    let offer = Offer {
+                        command: block.command,
+                        package: &package,
+                        need,
+                        rerun,
+                    };
+                    install_offer(ui, pal, &offer, engine.is_busy(), offers, on_cran, out);
+                }
+            }
+        }
         ui.add_space(6.0);
     }
+}
+
+/// P1A.10: installs offered in Results.
+#[derive(Default)]
+struct InstallOffers {
+    /// The install started from an offer: its command, the package, and the
+    /// command to run again once it has worked.
+    running: Option<OfferedInstall>,
+    /// Packages installed from an offer, with the install's command.
+    done: Vec<(String, CommandId)>,
+}
+
+/// An install started from an offer: its command, the package, and the
+/// command (with where it came from) to run again once it has worked.
+type OfferedInstall = (CommandId, String, Option<(Source, String)>);
+
+/// One command's offer.
+struct Offer<'a> {
+    command: CommandId,
+    package: &'a str,
+    need: Need,
+    rerun: Option<(Source, String)>,
+}
+
+/// The package a command's output says must be installed, if any: in its
+/// error, a warning (`require()`), or a message (`requireNamespace()`).
+fn needed_package(items: &[Item]) -> Option<(String, Need)> {
+    items.iter().find_map(|item| match item {
+        Item::Error { message, .. } | Item::Warning(message) => package_to_install(message),
+        Item::Text {
+            stream: Stream::Stderr,
+            text,
+            ..
+        } => package_to_install(text),
+        _ => None,
+    })
+}
+
+/// R code an offer runs: the install into RCraft's library, then a check
+/// that the package now loads (install.packages only warns when it fails).
+fn offer_install_code(package: &str, library: Option<&str>) -> String {
+    let install = crate::packages::install_code(&[package], library);
+    format!(
+        "{install}\nif (!requireNamespace({name}, quietly = TRUE)) \
+         stop({why}, call. = FALSE)",
+        name = rcraft_rcodegen::r_string(package),
+        why = rcraft_rcodegen::r_string(&format!(
+            "The package {package} could not be installed; R's messages above say why."
+        )),
+    )
+}
+
+/// Says what a command needs and offers to install it, with or without
+/// running the command again.
+fn install_offer(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    offer: &Offer,
+    busy: bool,
+    offers: &InstallOffers,
+    on_cran: &dyn Fn(&str) -> Option<bool>,
+    out: &mut Vec<Action>,
+) {
+    let package = offer.package;
+    let what = match offer.need {
+        Need::Missing => format!("The R package {package} is not installed."),
+        Need::Newer => format!("This needs a newer version of the R package {package}."),
+        Need::Reinstall => format!(
+            "The R package {package} was installed for an older R and must be installed again."
+        ),
+    };
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.label(RichText::new(what).color(pal.warning));
+        let installed = offers
+            .done
+            .iter()
+            .any(|(p, at)| p == package && *at > offer.command);
+        if installed {
+            ui.label(RichText::new(format!("{package} has been installed since.")).color(pal.dim));
+            return;
+        }
+        if offers
+            .running
+            .as_ref()
+            .is_some_and(|(_, p, _)| p == package)
+        {
+            ui.label(RichText::new(format!("Installing {package}…")).color(pal.dim));
+            return;
+        }
+        if on_cran(package) == Some(false) {
+            ui.label(
+                RichText::new(format!(
+                    "{package} is not on CRAN. Packages > Other sources installs from \
+                     Bioconductor, r-universe, GitHub or a file."
+                ))
+                .small()
+                .color(pal.dim),
+            );
+            return;
+        }
+        ui.label(
+            RichText::new(
+                "RCraft can install it from CRAN (with the packages it needs) into RCraft's own \
+                 library. The install runs as a command, so it shows here and in the log.",
+            )
+            .small()
+            .color(pal.dim),
+        );
+        let free = !busy && offers.running.is_none();
+        ui.horizontal(|ui| {
+            if let Some(rerun) = &offer.rerun {
+                if ui
+                    .add_enabled(
+                        free,
+                        egui::Button::new(format!("Install {package} and run again")),
+                    )
+                    .clicked()
+                {
+                    out.push(Action::InstallNeeded {
+                        package: package.to_string(),
+                        rerun: Some(rerun.clone()),
+                    });
+                }
+            }
+            if ui
+                .add_enabled(free, egui::Button::new(format!("Install {package}")))
+                .clicked()
+            {
+                out.push(Action::InstallNeeded {
+                    package: package.to_string(),
+                    rerun: None,
+                });
+            }
+        });
+    });
 }
 
 /// A Stata-mode command in Results: its Stata, its R, its notes.
@@ -3738,6 +3951,91 @@ mod tests {
         assert_eq!(split_at_char("abc", 0), s("", "abc"));
         assert_eq!(split_at_char("abc", 99), s("abc", ""));
         assert_eq!(split_at_char("", 0), s("", ""));
+    }
+
+    /// Starts `code` and gives its command, without waiting for it.
+    fn submit_now(app: &mut App, code: &str) -> CommandId {
+        match &mut app.engine {
+            EngineState::Ready(e) => e.submit(Source::Typed, code).unwrap_or_default(),
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn a_missing_package_is_offered_and_the_command_runs_again_after() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let submit = |app: &mut App, code: &str| {
+            app.perform(&ctx, Action::Submit(Source::Typed, code.into()));
+            assert!(frames_until(app, &ctx, |a| a.is_settled()), "{code}");
+        };
+        let last_block = |app: &App| {
+            app.engine()
+                .and_then(|e| e.results().blocks().last().cloned())
+                .map(|b| b.items)
+                .unwrap_or_default()
+        };
+        // library(), pkg::f() and require() all say which package
+        for code in ["library(zzpkgq)", "zzpkgq::f()", "require(zzpkgq)"] {
+            submit(&mut app, code);
+            assert_eq!(
+                needed_package(&last_block(&app)),
+                Some(("zzpkgq".to_string(), Need::Missing)),
+                "{code}: {:?}",
+                last_block(&app)
+            );
+        }
+        submit(&mut app, "stop('nothing to do with packages')");
+        assert_eq!(needed_package(&last_block(&app)), None);
+
+        // the offer's install code is R that parses
+        let code = offer_install_code("zzpkgq", Some("C:/lib"));
+        submit(
+            &mut app,
+            &format!(
+                "invisible(parse(text = {}))",
+                rcraft_rcodegen::r_string(&code)
+            ),
+        );
+        let outcome = app
+            .engine()
+            .and_then(|e| e.history().entries().last().and_then(|h| h.outcome));
+        assert_eq!(outcome, Some(Outcome::Ok), "{code}");
+
+        // an install that worked: noted, and the command runs again
+        let id = submit_now(&mut app, "invisible(1)");
+        app.offers.running = Some((
+            id,
+            "zzpkgq".into(),
+            Some((Source::Typed, "ran_again <- TRUE".into())),
+        ));
+        assert!(frames_until(&mut app, &ctx, |a| a.offers.running.is_none()
+            && a.is_settled()));
+        assert_eq!(app.offers.done, vec![("zzpkgq".to_string(), id)]);
+        let last = app
+            .engine()
+            .and_then(|e| e.history().entries().last().map(|h| h.code.clone()));
+        assert_eq!(last.as_deref(), Some("ran_again <- TRUE"));
+
+        // one that failed: nothing noted, nothing run again
+        let id = submit_now(&mut app, "stop('no')");
+        app.offers.running = Some((
+            id,
+            "other".into(),
+            Some((Source::Typed, "not_run <- TRUE".into())),
+        ));
+        assert!(frames_until(&mut app, &ctx, |a| a.offers.running.is_none()
+            && a.is_settled()));
+        assert_eq!(app.offers.done.len(), 1);
+        let last = app
+            .engine()
+            .and_then(|e| e.history().entries().last().map(|h| h.code.clone()));
+        assert_eq!(last.as_deref(), Some("stop('no')"));
     }
 
     #[test]
