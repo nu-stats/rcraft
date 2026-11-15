@@ -68,3 +68,14 @@ results printed with `%21x`) and Stata's own arithmetic on typed numbers. Only w
   the grid of a candidate step tried before the final one, then are trimmed with the final d.
 - Next: find which candidate step gives each end (and L0, U0 from lo, hi, n), then build _natscale
   from that and check all 4,915 probe results and these 4,420 bit for bit.
+- Starting grids (scratchpad nat/h7.R, h8.R): some candidate grid j·s (s = 1, 2 or 5 × 10^k, nearest or
+  Stata's) explains both ends of 4,414 of the 4,420 cases, but no one grid explains all: Stata's 0.05
+  (5 × 0.1 × 0.1) fits every case whose step is 0.2 and most others.
+- Ruled out (h9.R, h10.R): going out e steps and back e steps (fits 2,898 of 4,420); e from simple
+  formulas of n, the label count and hi/d (n - labels, half of it, n - U, ...: at most 3,314 bottoms and
+  2,667 tops).
+- A clue: 0 to 1.03 (step 0.1) and 0 to 2.06 (step 0.2) are the same problem in steps (10.3 steps, 12
+  labels), yet the residue starts at n = 15 for one and n = 14 for the other. So a rounded quantity
+  (hi / d, range / n, or a cost compared with n) decides where the wider set starts, and its rounding
+  differs between the two. Next: sweep hi/d near 10.3 at several scales (0.103, 1.03, 10.3, 2.06,
+  5.15) and n, and look at the scoring rule's comparisons (StatCraft's costs) at those n.
