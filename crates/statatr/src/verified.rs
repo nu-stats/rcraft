@@ -138,6 +138,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("merge", &["extended_missing_groups", "merge", "savedfloat"]),
     ("mkmat", &["matrices"]),
     ("mlogit", &["collinear", "likelihood"]),
+    ("mvtest", &["mvtest"]),
     ("nbreg", &["collinear"]),
     ("newey", &["arpanel"]),
     ("nl", &["nl"]),

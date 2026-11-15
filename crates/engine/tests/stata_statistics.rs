@@ -1162,3 +1162,40 @@ fn the_epidemiological_tables_print_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn mvtest_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 60\ngenerate double x1 = mod(_n * 37, 101) / 7\n\
+         generate double x2 = mod(_n * 13, 17) / 3 + x1 / 4\n\
+         generate double x3 = mod(_n * 11, 23) / 4 - x2 / 5\ngenerate int g = 1 + mod(_n, 3)\n\
+         mvtest means x1 x2 x3\nmvtest means x1 x2 x3, by(g)\nmvtest covariances x1 x2 x3, by(g)\n\
+         mvtest correlations x1 x2 x3\nmvtest normality x1 x2 x3, stats(all) bivariate univariate\n\
+         capture noisily mvtest bogus x1\ndisplay _rc\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "          Hotelling T2 =     74.00",
+        "     Hotelling F(2,58) =     36.37",
+        "              Prob > F =    0.0000",
+        "              Wilks' lambda |    0.9872     6.0     110.0      0.12   0.9940 e",
+        "         Roy's largest root |    0.0114     3.0      56.0      0.21   0.8876 u",
+        "                            e = exact, a = approximate, u = upper bound on F",
+        "      Modified LR chi2 =  6.919132",
+        "     Box F(12,15745.2) =      0.53      Prob > F =  0.8952",
+        "          Box chi2(12) =      6.39   Prob > chi2 =  0.8950",
+        "        Lawley chi2(2) =     24.86",
+        "              x1 |     0.9920         0.0001          12.82       0.0016",
+        "    x1            x2           |      7.81     4     0.0987",
+        "                  x3           |     10.53     4     0.0324",
+        "    Mardia mSkewness =  .2200014    chi2(10) =    2.368   Prob>chi2 =  0.9927",
+        "    Henze-Zirkler    =  .7646136     chi2(1) =    0.442   Prob>chi2 =  0.5060",
+        "    Doornik-Hansen                   chi2(6) =   12.802   Prob>chi2 =  0.0463",
+        "unknown subcommand of mvtest: bogus",
+        "198",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

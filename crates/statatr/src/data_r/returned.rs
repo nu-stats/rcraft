@@ -1085,6 +1085,7 @@ const TEXT_NAMES: &[&str] = &[
     "marginsnotok",
     "marginsdefault",
     "chi2type",
+    "Ftype",
     "eqnames",
     "dispers",
     "ivar",
@@ -1133,6 +1134,11 @@ const MATRIX_NAMES: &[&str] = &[
     "b",
     "V",
     "C",
+    "stat_m",
+    "M",
+    "U_dh",
+    "Btest",
+    "Utest",
     "Nobs",
     "R",
     "sig",
@@ -2063,6 +2069,18 @@ impl Session {
             // a bare name: a scalar only if it is one (else the variable)
             "scalar?" => self.scalar_value(name, true),
             _ => Err(no(format!("{which}() is not translated"))),
+        }
+    }
+
+    /// Why `matrix list` cannot show this matrix a command left as Stata does.
+    pub(super) fn matrix_list_refused(&self, which: &str, name: &str) -> Option<String> {
+        match &self.r_ret {
+            // mvtest normality, bivariate: its rows are pairs, eq:name
+            Returned::Kept { cmd, .. } if which == "r" && cmd == "mvtest" && name == "Btest" => Some(
+                "matrix list r(Btest) after mvtest is not translated yet: its rows are named by pairs of variables (eq:name), which matrix list does not show as Stata does"
+                    .into(),
+            ),
+            _ => None,
         }
     }
 

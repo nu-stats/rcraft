@@ -156,6 +156,7 @@ pub const COMMANDS: &[&str] = &[
     "merge",
     "mkmat",
     "mlogit",
+    "mvtest",
     "nbreg",
     "newey",
     "nl",
@@ -418,6 +419,22 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("prtest", &["by(", "level("]),
+    (
+        "mvtest",
+        &[
+            "bivariate",
+            "by(",
+            "compound",
+            "diagonal",
+            "equal",
+            "lr",
+            "missing",
+            "spherical",
+            "stats(",
+            "univariate",
+            "zero",
+        ],
+    ),
     ("cs", &["exact", "level("]),
     ("csi", &["exact", "level("]),
     ("cc", &["level(", "tb", "woolf"]),
@@ -918,6 +935,10 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
 const SUBCOMMANDS: &[(&str, &[&str])] = &[
     ("duplicates", &["drop", "report", "tag"]),
     ("survwgt", &["rake"]),
+    (
+        "mvtest",
+        &["correlations", "covariances", "means", "normality"],
+    ),
     (
         "power",
         &[
@@ -1613,6 +1634,7 @@ mod tests {
             "nquantiles" => "4",
             "means" => "J(1,2,0)",
             "cov" => "I(2)",
+            "stats" => "all",
             "case" => "g",
             "alternatives" => "t",
             _ => "x",
@@ -1715,6 +1737,12 @@ gettoken a b : s, {o}"
                 format!("power pairedmeans 0 0.5, {o}")
             }
             "power" => format!("power twomeans 0 0.5, {o}"),
+            "mvtest" if matches!(name, "lr" | "missing") => format!("mvtest means x y, by(g) {o}"),
+            "mvtest" if matches!(name, "by" | "equal" | "zero") => format!("mvtest means x y, {o}"),
+            "mvtest" if matches!(name, "stats" | "univariate" | "bivariate") => {
+                format!("mvtest normality x y, {o}")
+            }
+            "mvtest" => format!("mvtest covariances x y, {o}"),
             "file" => format!("file open h using f.txt, write {o}"),
             "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),

@@ -361,6 +361,9 @@ impl Session {
                     )))
                 }
             };
+            if let Some(why) = self.matrix_list_refused(which, name) {
+                return Err(no(why));
+            }
             (
                 self.returned_matrix(which, name)?,
                 format!("{which}({name})"),

@@ -61,6 +61,7 @@ mod mexpr;
 mod ml;
 mod model;
 mod more;
+mod mvtest;
 mod natscale;
 mod nl;
 mod nlcom;
@@ -1259,6 +1260,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ranktests" => ranktests::RANKTESTS_HELPER,
         "stata_power" => power::POWER_HELPER,
         "stata_epitab" => epitab::EPITAB_HELPER,
+        "stata_mvtest" => mvtest::MVTEST_HELPER,
         "stata_factor" => factor::FACTOR_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
         "stata_replay" => estat::REPLAY_HELPER,
@@ -2544,6 +2546,7 @@ impl Session {
             "ranksum" | "signrank" | "signtest" | "kwallis" | "spearman" => self.rank_test(c, &opts, out),
             "power" => self.power(c, &opts, out),
             "cs" | "csi" | "cc" | "cci" | "ir" | "iri" => self.epitab(c, &opts, out),
+            "mvtest" => self.mvtest(c, &opts, out),
             "factor" => self.factor(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
