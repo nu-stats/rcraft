@@ -1123,3 +1123,42 @@ fn power_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+/// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
+/// on the same data (plan/stata/epitab.md); replace keeps the case variable's
+/// label, which then names ir's row.
+#[test]
+fn the_epidemiological_tables_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 60\ngenerate id = _n\ngenerate exposed = mod(id, 3)\n\
+         generate case = mod(id, 4) == 0\ngenerate pt = 10 + mod(id, 7)\n\
+         label variable case \"Disease\"\nlabel variable pt \"Person-years\"\n\
+         cs case exposed\nreplace exposed = exposed > 0\nreplace case = . in 1/3\n\
+         ir case exposed pt\ncsi 10 30 90 70\ncci 15 40 60 50, woolf\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "                 |        exposed         |",
+        "                 |   Exposed   Unexposed  |      Total",
+        "           Cases |        10           5  |         15",
+        " Risk difference |                0       |   -.2324231    .2324231",
+        " Attr. frac. ex. |                0       |    -1.53373     .605325",
+        "                               chi2(1) =     0.00  Pr>chi2 = 1.0000",
+        "Incidence-rate comparison",
+        "         Disease |        10           5  |         15",
+        "    Person-years |       492         250  |        742",
+        " Inc. rate ratio |          1.01626       |    .3164937    3.789276 (exact)",
+        "  Adj Pr(Exposed Disease <= 10) = 0.5003 (lower one-sided)",
+        "              Two-sided p-value = 0.9994",
+        " Prev. frac. ex. |         .6666667       |    .3551839    .8276856",
+        " Prev. frac. pop |         .3333333       |",
+        "                                                         Proportion",
+        "           Cases |        15          40  |         55       0.2727",
+        "      Odds ratio |            .3125       |    .1548526    .6306399 (Woolf)",
+        "                 +-------------------------------------------------",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

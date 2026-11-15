@@ -2271,6 +2271,83 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "cs",
+        about: "Risk table of a cohort study (cs case exposed, csi 20 15 80 120)",
+        points: &[
+            p(
+                "In R",
+                "stata_epi prints Stata 19's table: cases and noncases of the exposed and the \
+                 unexposed (a nonzero value counts as one; the exposure's label heads the \
+                 columns), the risks, the risk difference with its Wald interval, the risk ratio \
+                 with its log interval, the attributable fraction among the exposed and in the \
+                 population (prevented fractions when the ratio is below 1), Pearson's chi2, or \
+                 with exact Fisher's one- and two-sided p; r() as Stata's.",
+            ),
+            p(
+                "Not yet",
+                "or (its Cornfield interval comes from Stata's own search, which R's root of \
+                 Cornfield's equation matches only to about 5 digits), by(), rd, binomial(), \
+                 istandard, estandard, weights and the other options are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "csi",
+        about: "cs from the four counts typed in (csi #a #b #c #d)",
+        points: &[p(
+            "In R",
+            "As cs's, from the exposed and unexposed cases and noncases.",
+        )],
+    },
+    Guide {
+        command: "cc",
+        about: "Odds table of a case-control study (cc case exposed, woolf)",
+        points: &[
+            p(
+                "In R",
+                "With woolf or tb: stata_epi prints Stata 19's table of cases and controls with \
+                 the proportion exposed, the odds ratio with Woolf's interval or the test-based \
+                 one (on the Mantel-Haenszel chi2, (N - 1)/N Pearson's, as Stata 19 takes it), \
+                 the attributable or prevented fractions and Pearson's chi2; r() as Stata's.",
+            ),
+            p(
+                "Not yet",
+                "cc without woolf or tb: its default exact interval of the odds ratio comes from \
+                 Stata's own search, which stops short of the exact bound (by about 1e-4), so it \
+                 is refused, as are cornfield, exact, by(), bd, tarone and weights.",
+            ),
+        ],
+    },
+    Guide {
+        command: "cci",
+        about: "cc from the four counts typed in (cci #a #b #c #d, woolf)",
+        points: &[p(
+            "In R",
+            "As cc's, from the exposed and unexposed cases and controls; woolf or tb is needed, \
+             as for cc.",
+        )],
+    },
+    Guide {
+        command: "ir",
+        about: "Incidence-rate table (ir case exposed time, iri 20 15 2000 3500)",
+        points: &[p(
+            "In R",
+            "stata_epi prints Stata 19's table: cases and person-time of the exposed and the \
+             unexposed (rows named by the variables' labels), the rates, the rate difference \
+             with its Wald interval, the rate ratio with the exact interval (R's poisson.test, \
+             the same as Stata's), the attributable or prevented fractions, and the mid-p and \
+             exact tests; r() as Stata's. by(), ird, tb and the other options are refused.",
+        )],
+    },
+    Guide {
+        command: "iri",
+        about: "ir from the counts typed in (iri #a #b #t1 #t0)",
+        points: &[p(
+            "In R",
+            "As ir's, from the exposed and unexposed cases and person-time.",
+        )],
+    },
+    Guide {
         command: "power",
         about: "Power and sample size (power onemean 0 0.5, power twoproportions 0.3 0.5, n(150))",
         points: &[

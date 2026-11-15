@@ -40,6 +40,7 @@ mod coefplot;
 mod contract;
 mod dates;
 mod eclass;
+mod epitab;
 mod estat;
 mod estpost;
 mod esttab;
@@ -831,6 +832,11 @@ stata_changes$n <- 0
 stata_changes$m <- 0
 stata_chg <- function(old, new) {
   new <- rep_len(new, length(old))
+  # the variable keeps its label and display format, as Stata's replace keeps them
+  for (a in c("label", "format.stata")) {
+    v <- attr(old, a, exact = TRUE)
+    if (!is.null(v) && is.null(attr(new, a, exact = TRUE))) attr(new, a) <- v
+  }
   if (is.character(old) || is.character(new)) {
     o <- ifelse(is.na(old), "", as.character(old))
     v <- ifelse(is.na(new), "", as.character(new))
@@ -1203,6 +1209,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_pca" => pca::PCA_HELPER,
         "stata_ranktests" => ranktests::RANKTESTS_HELPER,
         "stata_power" => power::POWER_HELPER,
+        "stata_epitab" => epitab::EPITAB_HELPER,
         "stata_factor" => factor::FACTOR_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
         "stata_replay" => estat::REPLAY_HELPER,
@@ -2469,6 +2476,7 @@ impl Session {
             "pca" => self.pca(c, &opts, out),
             "ranksum" | "signrank" | "signtest" | "kwallis" | "spearman" => self.rank_test(c, &opts, out),
             "power" => self.power(c, &opts, out),
+            "cs" | "csi" | "cc" | "cci" | "ir" | "iri" => self.epitab(c, &opts, out),
             "factor" => self.factor(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
