@@ -246,6 +246,16 @@ impl Translator {
         Translator::default()
     }
 
+    /// A dry run: the data in memory when the do-file starts is the caller's
+    /// (a do-file run from another one) or the session's, which only the run
+    /// knows; lines that need it before a `use`, `import` or `clear` wait for it.
+    pub fn start_data_unknown(&mut self) {
+        self.s.data_lost = Some(format!(
+            "the data in memory when the do-file starts (its caller's, when another do-file runs it) is {}",
+            crate::dofile::KNOWN_WHEN_RUN
+        ));
+    }
+
     /// The next command.
     pub fn command(&mut self, c: &Command) -> Line {
         let result = self.s.command(c);
@@ -1795,6 +1805,10 @@ impl Session {
         // in a program: what it returns is no longer known
         if let Some(p) = self.programs.last_mut() {
             p.refused = true;
+            // refused for good, not only waiting for a value the run gives
+            if !reason.contains(crate::dofile::KNOWN_WHEN_RUN) {
+                p.hard = true;
+            }
         }
         // a matrix the line names may have changed: no longer known (before
         // the return below, since a matrix lost earlier can look like an error)
@@ -1914,10 +1928,18 @@ impl Session {
         }
         if REPLACE_DATA.contains(&full.as_str()) && self.data.is_some() {
             self.data = None;
-            self.data_lost = Some(format!(
-                "the data in memory is not known here: a line before it that changes the data was not translated ({})",
-                stata.trim()
-            ));
+            // (the reason kept when only the run can tell)
+            self.data_lost = Some(if reason.contains(crate::dofile::KNOWN_WHEN_RUN) {
+                format!(
+                    "the data in memory is not known here: a line before it that changes the data waits for the run ({}: {reason})",
+                    stata.trim()
+                )
+            } else {
+                format!(
+                    "the data in memory is not known here: a line before it that changes the data was not translated ({})",
+                    stata.trim()
+                )
+            });
         }
     }
 
@@ -2188,7 +2210,7 @@ impl Session {
         if let Some(why) = self.uses_lost(c) {
             // Stata has the variable and runs the line: a model there
             // replaces e() (and r()), so neither is R's any more
-            self.track_returned(c, false, None);
+            self.track_returned(c, false, why.contains(crate::dofile::KNOWN_WHEN_RUN), None);
             self.lose_estimates(c, &why);
             return Err(no(why));
         }
@@ -2264,7 +2286,11 @@ impl Session {
         }
         // who holds e() and r() now
         let r_left = self.r_new.take();
-        self.track_returned(c, done.is_ok(), r_left);
+        let later = done
+            .as_ref()
+            .err()
+            .is_some_and(|e| e.reason.contains(crate::dofile::KNOWN_WHEN_RUN));
+        self.track_returned(c, done.is_ok(), later, r_left);
         if let Err(e) = &done {
             self.lose_estimates(c, &e.reason);
         }
@@ -3721,29 +3747,70 @@ impl Session {
     fn describe(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let d = self.data()?;
         let opts = Opts(&c.options);
-        if !c.parts.main.trim().is_empty()
-            || c.using.is_some()
-            || opts.other(&[("short", 1)]).is_some()
-        {
-            return Err(no(
-                "describe of chosen variables, a file or with options other than short is not \
-                 translated yet",
-            ));
+        if c.using.is_some() {
+            return Err(no("describe using a file is not translated yet"));
         }
-        // Stata's r(), quietly or not
-        out.line(format!("stata_r <- list(k = ncol({d}), N = nrow({d}))"));
-        self.r_new = Some((returned::R_DESCRIBE, "describe".into()));
+        if let Some(o) = opts.other(&[("short", 1), ("simple", 2), ("varlist", 7)]) {
+            return Err(no(format!(
+                "describe with the option {o} is not translated yet"
+            )));
+        }
+        let main = c.parts.main.trim();
+        // the variables chosen (all without a varlist), in the data's order; a name not
+        // there stops as Stata's does (probe 2026-11-15: r(k) stays the data's count)
+        let chosen = if main.is_empty() {
+            format!("names({d})")
+        } else {
+            for v in main.split_whitespace().filter(|v| is_name(v)) {
+                out.line(format!(
+                    "if (!{} %in% names({d})) stop(\"variable {v} not found (Stata: r(111))\", call. = FALSE)",
+                    r_text(v)
+                ));
+            }
+            out.package("dplyr");
+            format!("names(dplyr::select({d}, {}))", select(main)?)
+        };
+        out.line(format!("stata_described <- {chosen}"));
+        // Stata's r(), quietly or not; r(varlist) with varlist
+        let varlist = opts.has("varlist", 7);
+        out.line(format!(
+            "stata_r <- list(k = ncol({d}), N = nrow({d}){})",
+            if varlist {
+                ", varlist = paste(stata_described, collapse = \" \")"
+            } else {
+                ""
+            }
+        ));
+        self.r_new = Some((
+            if varlist {
+                returned::R_DESCRIBE_VARLIST
+            } else {
+                returned::R_DESCRIBE
+            },
+            "describe".into(),
+        ));
         if self.quiet(c) {
+            out.line("rm(stata_described)");
             return Ok(());
         }
-        if !opts.has("short", 1) {
+        if opts.has("simple", 2) {
+            // the names two spaces apart, as Stata 19 prints them
+            out.line("cat(paste(stata_described, collapse = \"  \"), \"\\n\", sep = \"\")");
+            out.line("rm(stata_described)");
+            return Ok(());
+        }
+        // short leaves the table out only for the whole data (with a varlist Stata shows it)
+        if !opts.has("short", 1) || !main.is_empty() {
             out.line(format!(
-                "print(data.frame(variable = names({d}), type = vapply({d}, \\(v) class(v)[1], \"\"), label = vapply({d}, \\(v) {{ l <- attr(v, \"label\", exact = TRUE); if (is.null(l)) \"\" else l }}, \"\")), row.names = FALSE)"
+                "print(data.frame(variable = stata_described, type = vapply({d}[stata_described], \\(v) class(v)[1], \"\"), label = vapply({d}[stata_described], \\(v) {{ l <- attr(v, \"label\", exact = TRUE); if (is.null(l)) \"\" else l }}, \"\")), row.names = FALSE)"
             ));
         }
-        out.line(format!(
-            "cat(\"observations:\", nrow({d}), \" variables:\", ncol({d}), \"\\n\")"
-        ));
+        if main.is_empty() {
+            out.line(format!(
+                "cat(\"observations:\", nrow({d}), \" variables:\", ncol({d}), \"\\n\")"
+            ));
+        }
+        out.line("rm(stata_described)");
         out.caveat("printed in R's layout, not Stata's");
         Ok(())
     }

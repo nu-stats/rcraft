@@ -2899,7 +2899,7 @@ impl Session {
         if vars.is_empty() {
             return Err(no("format needs the variables (Stata: varlist required)"));
         }
-        if !super::returned::valid_format(fmt) || *fmt == "%21x" {
+        if !super::returned::valid_format(fmt) {
             return Err(no(format!(
                 "format {fmt} is not a format RCraft has yet (Stata: invalid %format)"
             )));

@@ -1013,3 +1013,27 @@ fn set_memory_is_noted_as_ignored_as_stata_19_does() {
         "{bad}"
     );
 }
+
+/// A dry run does not know the data a do-file starts with (its caller's, when another
+/// do-file runs it): lines that need it wait for the run, until a `clear` or `use`.
+#[test]
+fn a_dry_run_waits_for_the_data_a_do_file_starts_with() {
+    let d = run("generate z = 1\nclear\ngenerate w = 1\n");
+    assert_eq!(d.origins[0].what, What::Later, "{:?}", shown(&d));
+    let s = shown(&d);
+    assert!(
+        s.last().is_some_and(|l| l.contains("no data is in memory")),
+        "{s:?}"
+    );
+}
+
+/// A program whose lines only wait for the run leaves what it returns waiting too,
+/// not refused (probe 348's loops).
+#[test]
+fn a_program_waiting_for_the_run_leaves_r_waiting() {
+    let d = run(
+        "program define p, rclass\n  summarize x\n  return scalar m = r(mean)\nend\np\ndisplay r(m)\n",
+    );
+    let s = shown(&d);
+    assert_eq!(d.origins.last().map(|o| o.what), Some(What::Later), "{s:?}");
+}

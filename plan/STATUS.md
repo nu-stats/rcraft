@@ -4779,3 +4779,25 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   (`poisson_and_nbreg_print_statas_iteration_logs`).
 - **Not done:** the log with weights, an offset or exposure, or noconstant (Stata's start there is not
   known; the table prints without the log).
+
+## The source-line shares: dry runs, programs, %21x, describe, 2026-11-15
+
+- **What a dry run cannot know is no longer counted as refused.** A dry run of one do-file did not know
+  the data it starts with, which is its caller's when another do-file runs it (TZEN38's
+  Remove_stopwords, AXYMDI and SI3BGA parts): its lines were "no data is in memory". They now wait for
+  the run until a `clear`, `use` or `import` (`Translator::start_data_unknown`, dry runs only; a real run
+  is unchanged). Likewise a program whose lines only wait for the run now leaves r() and e() waiting, not
+  refused, and so does a line that changes the data or replaces e()/r() while waiting (probe 348's
+  xtregar loops: 5,512 run lines). These move lines from "not" to "known only when run"; nothing new is
+  translated by them, and the packages' translated count stays 3,715.
+- **Translated:** `format varlist %21x` (and `%-21x`): the format is kept with the variable like any
+  other (RCraft's list prints in R's layout); it unblocks the `list` lines of about 50 probes.
+  `describe varlist` (names, ranges, patterns), `simple` (the names two spaces apart, as Stata 19) and
+  `varlist` (r(varlist)); r(k) stays the data's count, a missing name stops with r(111); with a varlist,
+  `short` still lists them, as Stata does (probe DS, every value as Stata 19).
+- **many_dofiles:** `RCRAFT_COVERAGE_SOURCE` writes one row per refused source line (file, line, text,
+  reason), to rank what to do by source lines.
+- **Shares, each source line once:** packages 84.5% -> 94.9% (200 not, 1,272 known only when run; by run
+  lines 98.6%); probes 69.3% -> 69.8%. What is left in the probes: `_natscale`'s residue (probe 226's
+  sweeps, 1,509 source lines, declined since 2026-11-04), then a long tail of commands not translated
+  (lasso 161, xtdpdsys 77, stepwise 70, lassoknots 52, arima 50, mixed 48, gsem 46, ...).

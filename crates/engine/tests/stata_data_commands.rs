@@ -544,3 +544,41 @@ display "n " m1[1] " " m2[1] " " m3[1] " " m2[2] " " m3[2]
         assert!(text.contains(want), "{want}\n--\n{text}");
     }
 }
+
+/// describe of chosen variables, simple and varlist, as Stata 19 (2026-11-15): r(k) stays
+/// the data's count, r(varlist) with varlist, the names two spaces apart with simple.
+#[test]
+fn describe_of_chosen_variables_as_stata_19() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let dofile = r#"clear
+set obs 3
+generate x = 1
+generate y = 2
+generate str3 s = "a"
+describe x s, simple
+display "k " r(k) " " r(N)
+describe y*
+describe, varlist
+display "v " r(varlist)
+capture describe nosuch
+display "rc " _rc
+"#;
+    let t = translate(&read(dofile));
+    let not: Vec<String> = t
+        .lines
+        .iter()
+        .filter_map(|l| {
+            l.result
+                .as_ref()
+                .err()
+                .map(|e| format!("{} -> {}", l.stata, e.reason))
+        })
+        .collect();
+    assert!(not.is_empty(), "not translated: {}", not.join("; "));
+    let (ran, text) = run(&mut e, &t.script());
+    assert_eq!(ran, Outcome::Ok, "{text}");
+    for want in ["x  s\n", "k 3 3", "v x y s", "rc 111"] {
+        assert!(text.contains(want), "{want}\n--\n{text}");
+    }
+}

@@ -1636,7 +1636,7 @@ impl Session {
         self.dispatch(&inner, &mut body)?;
         let eclass = self.e_new;
         let r_left = self.r_new.take();
-        self.track_returned(&inner, true, r_left);
+        self.track_returned(&inner, true, false, r_left);
         // the statistics: _b, name=exp or exp (named _bs_1, ...)
         let mut names: Vec<String> = Vec::new();
         let mut exps: Vec<String> = Vec::new();

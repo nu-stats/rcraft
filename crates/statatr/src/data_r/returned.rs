@@ -1764,6 +1764,7 @@ pub(super) const R_FRE: &[&str] = &[
 pub(super) const R_TAB2: &[&str] = &["N", "r", "c", "chi2", "p", "chi2_lr", "p_lr"];
 pub(super) const R_CORRELATE: &[&str] = &["sum_w", "N", "rho", "cov_12", "Var_2", "Var_1"];
 pub(super) const R_DESCRIBE: &[&str] = &["k", "N"];
+pub(super) const R_DESCRIBE_VARLIST: &[&str] = &["k", "N", "varlist"];
 pub(super) const R_TTEST: &[&str] = &[
     "N_1",
     "N_2",
@@ -1828,6 +1829,7 @@ impl Session {
         &mut self,
         c: &Command,
         ok: bool,
+        later: bool,
         r_left: Option<(&'static [&'static str], String)>,
     ) {
         let name = c.name.as_str();
@@ -1858,15 +1860,27 @@ impl Session {
             _ => {
                 self.r_ret = Returned::Lost(if ok {
                     format!("{name} replaces r() in Stata with results RCraft does not keep yet")
+                } else if later {
+                    format!(
+                        "{name}, which waits for values {}, replaces r() in Stata",
+                        crate::dofile::KNOWN_WHEN_RUN
+                    )
                 } else {
                     format!("{name}, which was not translated, replaces r() in Stata")
                 })
             }
         }
         if !ok && !leaves_e_alone(c) {
-            self.e_ret = Returned::Lost(format!(
-                "{name} was not translated, and if it is an estimation command it replaced e() in Stata"
-            ));
+            self.e_ret = Returned::Lost(if later {
+                format!(
+                    "{name} waits for values {}, and if it is an estimation command it replaced e() in Stata",
+                    crate::dofile::KNOWN_WHEN_RUN
+                )
+            } else {
+                format!(
+                    "{name} was not translated, and if it is an estimation command it replaced e() in Stata"
+                )
+            });
         }
     }
 
@@ -2725,17 +2739,36 @@ impl Session {
         if run.refused {
             if let Some(outer) = self.programs.last_mut() {
                 outer.refused = true;
+                outer.hard |= run.hard;
             }
+            // only waiting (a dry run) for values the run gives: so is what it returns
+            let why = if run.hard {
+                "a line of the program {} was not translated, so".to_string()
+            } else {
+                format!(
+                    "a line of the program {{}} needs values {}, and so",
+                    crate::dofile::KNOWN_WHEN_RUN
+                )
+            };
+            let why = why.replace("{}", &run.name);
             if run.class == "rclass" {
                 self.r_ret = Returned::Lost(format!(
-                    "a line of the program {} was not translated, so what it returns is not known",
-                    run.name
+                    "{why} what it returns is {}",
+                    if run.hard {
+                        "not known"
+                    } else {
+                        crate::dofile::KNOWN_WHEN_RUN
+                    }
                 ));
             }
             if run.class == "eclass" {
                 self.e_ret = Returned::Lost(format!(
-                    "a line of the program {} was not translated, so the e() it sets is not known",
-                    run.name
+                    "{why} the e() it sets is {}",
+                    if run.hard {
+                        "not known"
+                    } else {
+                        crate::dofile::KNOWN_WHEN_RUN
+                    }
                 ));
             }
             return Ok(());
@@ -2840,6 +2873,9 @@ pub(super) struct ProgramRun {
     pub(super) names: Vec<String>,
     pub(super) texts: Vec<String>,
     pub(super) refused: bool,
+    /// A line refused for good (not one waiting, in a dry run, for a value only the
+    /// run gives).
+    pub(super) hard: bool,
 }
 
 /// A date or time display format Stata takes (`%td`, `%-tcHH:MM:SS.sss`,

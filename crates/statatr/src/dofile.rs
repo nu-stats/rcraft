@@ -2888,6 +2888,7 @@ impl Run<'_> {
 /// when it runs is left unknown (P2C.1).
 pub fn dry_run(text: &str, files: &dyn Files, opts: Options) -> DoFile {
     let mut run = Run::new(text, files, opts);
+    run.t.start_data_unknown();
     loop {
         match run.next_event() {
             Event::Line => {}

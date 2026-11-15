@@ -76,6 +76,9 @@ fn the_share_translated_per_tier() {
     // each source line once (a line in a loop or a program runs many times)
     let mut distinct: std::collections::BTreeMap<(String, usize, usize), u8> =
         std::collections::BTreeMap::new();
+    // each source line refused in some run of it: its text and first reason
+    let mut source_refused: std::collections::BTreeMap<(String, usize, usize), String> =
+        std::collections::BTreeMap::new();
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap_or_default();
         let name = f
@@ -102,6 +105,9 @@ fn the_share_translated_per_tier() {
                 .or_insert(0);
             *slot = (*slot).max(rank);
             if let (rcraft_statatr::dofile::Status::Not, Err(e)) = (st, &line.result) {
+                source_refused
+                    .entry((name.clone(), origin.file, origin.span.line))
+                    .or_insert_with(|| format!("{}	{}", line.stata.trim(), e.reason));
                 refused.push_str(&format!("{name}\t{}\t{}\n", line.stata.trim(), e.reason));
             }
         }
@@ -109,6 +115,19 @@ fn the_share_translated_per_tier() {
     }
     if let Ok(out) = std::env::var("RCRAFT_COVERAGE_LINES") {
         std::fs::write(&out, &refused).unwrap_or_else(|e| panic!("{out}: {e}"));
+    }
+    // one row per source line refused somewhere: file, line, text, reason
+    if let Ok(out) = std::env::var("RCRAFT_COVERAGE_SOURCE") {
+        let rows: String = source_refused
+            .iter()
+            .map(|((f, _, l), t)| {
+                format!(
+                    "{f}	{l}	{t}
+"
+                )
+            })
+            .collect();
+        std::fs::write(&out, rows).unwrap_or_else(|e| panic!("{out}: {e}"));
     }
     let total = c.total();
     let (dt, dl, dn) = distinct.values().fold((0, 0, 0), |(t, l, n), r| match r {
