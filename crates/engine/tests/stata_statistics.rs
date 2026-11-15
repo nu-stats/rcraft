@@ -1199,3 +1199,36 @@ fn mvtest_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn the_stratified_epidemiological_tables_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 400\ngenerate id = _n\ngenerate byte age = 1 + mod(id * 7, 3)\n\
+         generate byte exposed = mod(id * 13, 10) < 4\n\
+         generate byte case = mod(id * 37 + 11 * age, 23) < 3 + 5 * exposed + age\n\
+         generate double pt = 50 + mod(id * 29, 450)\ngenerate byte dose = mod(id * 11, 4)\n\
+         cs case exposed, by(age)\ncc case exposed, by(age) tb\nir case exposed pt, by(age)\n\
+         tabodds case dose\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "             age |  Risk ratio    [95% conf. interval]   M\u{2013}H weight",
+        "               1 |    2.636095     1.460382   4.758341     5.082707",
+        "           Crude |         2.1     1.551358   2.842671",
+        "    M\u{2013}H combined |    2.098553     1.551099   2.839228",
+        "Test of homogeneity (M\u{2013}H)      chi2(2) =    0.856  Pr>chi2 = 0.6517",
+        "               1 |   3.835897      1.744069   8.436656     2.932331 (tb)",
+        "    M\u{2013}H combined |   2.961914      1.916229   4.578229              (tb)",
+        "                                Mantel\u{2013}Haenszel chi2(1) =     23.88",
+        "Stratified incidence-rate analysis",
+        "               2 |   1.794585      .9246482   3.559075     7.485147 (exact)",
+        "Test of homogeneity (M\u{2013}H): chi2(2) = 1.17          Pr>chi2 = 0.5567",
+        "          0 |         30           70    0.42857        0.27943   0.65731",
+        "Test of homogeneity (equal odds): chi2(3)  =     0.67",
+        "Score test for trend of odds:     chi2(1)  =     0.24",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

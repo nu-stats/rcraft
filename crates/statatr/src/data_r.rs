@@ -2547,6 +2547,7 @@ impl Session {
             "power" => self.power(c, &opts, out),
             "cs" | "csi" | "cc" | "cci" | "ir" | "iri" => self.epitab(c, &opts, out),
             "mvtest" => self.mvtest(c, &opts, out),
+            "tabodds" => self.tabodds(c, &opts, out),
             "factor" => self.factor(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),

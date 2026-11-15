@@ -31,3 +31,32 @@ line against RCraft's output, `return list` included: identical but for r() digi
 
 Found here: `replace` dropped a variable's label (ir then named its row by the variable's name). The change
 counter now carries the label and the display format over, as Stata does.
+
+## by(), and tabodds (2026-11-15)
+
+Observed on Stata 19 SE with made-up data (probes `r19/e1.do`, `r19/e2.do`, `r19/t1.do` in the session scratchpad and
+StatCraft's probe 314, set line by line against RCraft's output, `return list` included: identical but for r() digits
+past the 14th); corpus `epitab_by.do`.
+
+- Strata: rows with the stratifying variable missing are left out; each stratum named by its value label (cut to 16),
+  else its value; the variable's name heads the column.
+- cs, by(): each stratum's risk ratio with the log interval and the Mantel–Haenszel weight b·n₁/N; the crude ratio;
+  the M–H combined ratio Σ(a·n₀/N)/Σ(b·n₁/N) with Greenland and Robins's (1985) variance; the test of homogeneity
+  Σ(log RRᵢ − log RR_MH)²/vᵢ. Stata keeps that chi2 as a float, from the strata's ratios and variances as floats:
+  float(Σ(log(float RRᵢ) − log RR_MH)²/float vᵢ) is Stata's to the last digit for cs, cc and ir. istandard: the
+  exposed as the standard, Σa/Σ(n₁·b/n₀), the variance Σn₁p₁q₁/O² + Σn₁²p₀q₀/n₀/E², the weights n₁, no test. or
+  woolf: Woolf's intervals, the combined odds ratio Σ(ad/N)/Σ(bc/N) with Robins, Breslow and Greenland's interval,
+  the M–H test (Σ(a − E))²/ΣV. afp is the crude one.
+- cc, by() with woolf or tb: as cs's or woolf, the crude row tagged; tb's intervals on each table's (N − 1)/N
+  Pearson chi2, the combined one's on the M–H chi2. r(chi2_p) is the homogeneity chi2.
+- ir, by(): each stratum's exact interval (poisson.test), the M–H rate ratio Σ(a·t₀/T)/Σ(b·t₁/T) with Greenland and
+  Robins's variance, the pooled (inverse-variance on log IRR) one in r(), the test of homogeneity printed
+  `chi2(k) = %-12.2f`.
+- tabodds: cases, controls, odds and Woolf's interval of each level (labels abbreviated to 9); the test of equal
+  odds, (N − 1)/N the k × 2 Pearson chi2; the score test for trend on the levels' values. R's printf on Windows rounds
+  0.66500000000000004 (the double of .665) down at two places, Stata up: the tests' lines are rounded from the
+  double's exact digits.
+- Refused: cc's exact intervals with by() too; cs, by() or without woolf (Cornfield); estandard, ustandard();
+  tabodds, or and base() and mhodds: their odds ratios' intervals are wider than Woolf's (mhodds case exposed: 1.874
+  to 4.661 where Woolf's is 1.901 to 4.594), by a factor that differs case by case and was not worked out; mhodds's
+  trend form (exp(U/V) ± z/√V) matches but is told from the binary form only by the data.

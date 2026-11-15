@@ -230,6 +230,7 @@ pub const COMMANDS: &[&str] = &[
     "tab2",
     "table",
     "tabm",
+    "tabodds",
     "tabstat",
     "tabulate",
     "tempfile",
@@ -435,11 +436,15 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "zero",
         ],
     ),
-    ("cs", &["exact", "level("]),
+    (
+        "cs",
+        &["by(", "exact", "istandard", "level(", "or", "woolf"],
+    ),
     ("csi", &["exact", "level("]),
-    ("cc", &["level(", "tb", "woolf"]),
+    ("cc", &["by(", "level(", "tb", "woolf"]),
     ("cci", &["level(", "tb", "woolf"]),
-    ("ir", &["level("]),
+    ("ir", &["by(", "level("]),
+    ("tabodds", &["level("]),
     ("iri", &["level("]),
     ("marginsplot", &["noci", "title(", "xtitle(", "ytitle("]),
     ("medeff", &["mediate(", "seed(", "sims(", "treat("]),
@@ -1447,7 +1452,7 @@ mod tests {
         );
         assert_eq!(
             options("ta", VARS),
-            names(&["tab1", "tab2", "table", "tabm", "tabstat", "tabulate"])
+            names(&["tab1", "tab2", "table", "tabm", "tabodds", "tabstat", "tabulate"])
         );
         assert_eq!(options("q", VARS), names(&["quietly"]));
         assert_eq!(options("quietly regr", VARS), names(&["regress"]));
@@ -1723,13 +1728,18 @@ gettoken a b : s, {o}"
             "import" => format!("import delimited f.csv, {o}"),
             "insheet" => format!("insheet using f.csv, {o}"),
             "postfile" => format!("postfile h z using f, {o}"),
+            "cs" if name == "or" => format!("cs y x, by(g) woolf {o}"),
+            "cs" if name == "woolf" => format!("cs y x, by(g) or {o}"),
+            "cs" if name == "istandard" => format!("cs y x, by(g) {o}"),
             "cs" => format!("cs y x, {o}"),
             "cc" if name == "level" => format!("cc y x, woolf {o}"),
+            "cc" if name == "by" => format!("cc y x, woolf {o}"),
             "cc" => format!("cc y x, {o}"),
             "csi" => format!("csi 1 2 3 4, {o}"),
             "cci" if name == "level" => format!("cci 1 2 3 4, woolf {o}"),
             "cci" | "iri" => format!("{cmd} 1 2 3 4, {o}"),
             "ir" => format!("ir y x t, {o}"),
+            "tabodds" => format!("tabodds y x, {o}"),
             "power" if matches!(name, "continuity" | "effect" | "test") => {
                 format!("power twoproportions 0.3 0.5, {o}")
             }
