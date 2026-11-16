@@ -99,7 +99,15 @@ stata_list_returned <- function(x, p) {
   }
   if (length(txt)) {
     cat("\nmacros:\n")
-    for (n in txt) cat(key(n), " : \"", x[[n]], "\"\n", sep = "")
+    # a macro too long for the line is cut with ".." (Stata 19: lines of 254
+    # characters at linesize 255, of linesize - 2 below it)
+    ls <- if (exists("stata_linesize")) stata_linesize else 80
+    mx <- if (ls >= 255) 254 else ls - 2
+    for (n in txt) {
+      v <- x[[n]]
+      if (nchar(key(n)) + 5 + nchar(v) > mx) v <- paste0(substr(v, 1, max(mx - nchar(key(n)) - 7, 0)), "..")
+      cat(key(n), " : \"", v, "\"\n", sep = "")
+    }
   }
   if (length(mat)) {
     cat("\nmatrices:\n")
@@ -1196,7 +1204,7 @@ pub(super) struct StoredFit {
 }
 
 /// The R objects a fit leaves, which `estimates store` keeps together.
-const FIT_OBJECTS: &str = "c(\"stata_estimates\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_e\", \"stata_esample\", \"stata_data\", \"stata_cluster\", \"stata_levels\", \"stata_base\", \"stata_rows\")";
+const FIT_OBJECTS: &str = "c(\"stata_estimates\", \"stata_lasso\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_e\", \"stata_esample\", \"stata_data\", \"stata_cluster\", \"stata_levels\", \"stata_base\", \"stata_rows\")";
 
 impl StoredFit {
     pub(super) fn estimates(&self) -> Option<&super::model::Estimates> {
@@ -1205,6 +1213,20 @@ impl StoredFit {
 
     pub(super) fn robust_or_weighted(&self) -> bool {
         self.fit_robust || self.fit_cluster || self.weighted_fit
+    }
+
+    /// Whether these are the results of a lasso translated here.
+    pub(super) fn is_lasso(&self) -> bool {
+        matches!(&self.e_ret, Returned::Program { cmd, .. } if cmd == "lasso")
+    }
+
+    /// Why the results stored are known only when the do-file runs (the
+    /// model line before the store waited for the run), if they are.
+    pub(super) fn later(&self) -> Option<&str> {
+        match &self.e_ret {
+            Returned::Lost(why) if why.contains(crate::dofile::KNOWN_WHEN_RUN) => Some(why),
+            _ => None,
+        }
     }
 
     pub(super) fn changed_since(&self) -> bool {
@@ -1722,6 +1744,9 @@ const LEAVE_E_ALONE: &[&str] = &[
 /// Commands that read the model Stata holds and leave it there, unless they
 /// are told to `post` their own results.
 const READ_THE_MODEL: &[&str] = &[
+    "lassoknots",
+    "lassocoef",
+    "lassoinfo",
     "testparm",
     "testnl",
     "nlcom",

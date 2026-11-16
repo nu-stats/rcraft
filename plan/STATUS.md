@@ -5148,3 +5148,27 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   29 self-evident ones (Width, Number of observations) are left without.
 - The manual is RCraft's own manuals, still down the road.
 
+
+## P2C.12: lasso linear, lassoselect, lassoknots, lassocoef, lassoinfo, 2026-11-15
+
+- **Translated** (`statatr::data_r::lasso`, R helper `stata_lasso_*`): `lasso linear` with selection
+  none, BIC (and postselection), cross-validation (folds, serule, alllambdas, gridminok, stopok,
+  strict), adaptive and plugin; grid(), stop(), rseed(), noconstant, penaltywt(), always-in variables,
+  if/in; lassoselect, lassoknots, lassocoef (stored names too), lassoinfo, predict (penalized,
+  postselection); the log, the tables, e() with e(rngstate), e(sample), and Stata's errors (r(100),
+  r(198), r(430) with e() still posted, r(2000)). The rules are StatCraft's decoding, ported to R.
+- **Found here** (`plan/stata/lasso.md`): Stata's descent stops at a coordinate-descent sweep, not at
+  the optimum; the rule found (relative change in the variable's own units under 1e-7) gives the
+  probes' L1/L2/R-squared to 1e-15 where the optimum fails the 8-digit check. On other data Stata
+  stops one sweep earlier at the path's end (8th digit), and looser `tolerance()` is refused. e() over
+  every adaptive step; e(rngstate) taken before RCraft's read-ahead; ereturn list cuts long macros
+  with `..` (all commands); lassoknots' `ID|` with one column.
+- **Checked:** StatCraft's lasso probes run on R: 49 of 49 compared lines match Stata 19 to 8 digits
+  (25 probes), and the 276 result lines of the loop probes 500-504 are Stata's to the character.
+  Corpus `lasso.do`: 31 results recorded from Stata 19; lasso and lassoselect Verified.
+- **Shares:** probes (511 do-files of the corpus, each source line once, dry run) 71.6% -> 72.3%
+  (20,272 -> 20,281 translated, 8,035 -> 7,770 not; most lasso lines name `x1-x10`, which only the run
+  expands, so the dry run counts them as known only when run: 548 -> 804). In the run itself every line
+  of probes 380-385, 470, 471 and 500-502 translates.
+- **Not yet:** lasso logit/probit/poisson/cox, elasticnet, sqrtlasso, the inference commands, cvplot,
+  factor variables, weights, cluster(), tolerance() other than 1e-7; StatCraft has rules for most.

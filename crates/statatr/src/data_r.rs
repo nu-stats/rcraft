@@ -53,6 +53,7 @@ mod fre;
 mod glm;
 mod graph;
 mod iv;
+mod lasso;
 mod margins;
 mod matrices;
 mod meanest;
@@ -533,6 +534,7 @@ const NAME_TABLES: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "lasso",
     "glm",
     "svy",
     "asclogit",
@@ -1138,6 +1140,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_sktest" => sktest::SKTEST_HELPER,
         "stata_testparm" => testparm::TESTPARM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
+        "stata_lasso" => lasso::LASSO_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
         "stata_cm" => cm::CM_HELPER,
         "stata_rreg" => rreg::RREG_HELPER,
@@ -2560,6 +2563,10 @@ impl Session {
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),
+            "lasso" => self.lasso(c, &opts, out),
+            "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" => {
+                self.lasso_after(c, &opts, out)
+            }
             "cmset" => self.cmset(c, &opts, out),
             "cmclogit" => self.cmclogit(c, &opts, out),
             "rreg" => self.rreg(c, &opts, out),

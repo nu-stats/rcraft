@@ -124,6 +124,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("ktau", &["ktau"]),
     ("kwallis", &["ranktests"]),
     ("label", &["aware", "labels2"]),
+    ("lasso", &["lasso"]),
+    ("lassoselect", &["lasso"]),
     ("levelsof", &["aware", "extended_missing_groups"]),
     (
         "lincom",

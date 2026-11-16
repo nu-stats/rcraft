@@ -339,6 +339,15 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "predict")?;
+        if matches!(&self.e_ret, super::returned::Returned::Program { cmd, .. } if cmd == "lasso") {
+            return self.lasso_predict(c, opts, out);
+        }
+        // a model line that waits for the run (a dry run): so does predict
+        if let super::returned::Returned::Lost(why) = &self.e_ret {
+            if self.estimates.is_none() && why.contains(crate::dofile::KNOWN_WHEN_RUN) {
+                return Err(no(format!("predict: {why}")));
+            }
+        }
         let est = self.estimates_for("predict")?;
         let fit = est.fit;
         let name = fit.name();

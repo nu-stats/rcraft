@@ -2395,6 +2395,38 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "lasso",
+        about: "Lasso for a linear outcome (lasso linear) and lassoselect, lassoknots, lassocoef, lassoinfo, predict",
+        points: &[
+            p(
+                "In R",
+                "stata_lasso_run standardises the predictors (divisor N), centres the outcome and \
+                 solves the lasso along Stata's grid by cyclic coordinate descent with Stata's \
+                 stopping rule, then selects lambda as Stata 19 does: none, BIC, \
+                 cross-validation (folds from Stata's own random numbers, rseed()), the one-s.e. \
+                 rule, adaptive steps or the plug-in penalty, with the deviance stop() and the \
+                 'minimum found' rule. The log, the table, e() (e(rngstate) included) and \
+                 e(sample) are Stata's; lassoknots, lassocoef, lassoinfo and lassoselect print \
+                 Stata's tables, and predict gives the penalized or postselection prediction.",
+            ),
+            p(
+                "Differs",
+                "Stata's descent stops short of the optimum; RCraft follows its rule, which \
+                 reproduces the probes to about 1e-15, but on some data the L1 and L2 norms at \
+                 the path's end differ in the 8th digit, and the plug-in penalty's fit agrees to \
+                 about 2e-9. The standardised constant Stata prints as -1.39e-17 (rounding) is 0 \
+                 here.",
+            ),
+            p(
+                "Not yet",
+                "lasso logit, probit, poisson and cox, elasticnet, sqrtlasso, the inference \
+                 commands (dsregress, poregress, xporegress, ...), cvplot, factor variables, \
+                 weights, cluster(), offset(), tolerance() other than the default and \
+                 dtolerance() are refused; test, lincom and margins after lasso too.",
+            ),
+        ],
+    },
+    Guide {
         command: "pdslasso",
         about: "Post-double-selection lasso (pdslasso, SSC, with lassopack's rigorous lasso)",
         points: &[
@@ -3404,6 +3436,7 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
     let full = full(command);
     let page = match full.as_str() {
         "probit" => "logit",
+        "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" => "lasso",
         "oprobit" => "ologit",
         "tsfill" => "tsset",
         "tab1" | "tab2" => "tabulate",

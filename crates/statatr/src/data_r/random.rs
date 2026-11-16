@@ -107,6 +107,8 @@ stata_rng_words <- function(n) {
   done <- 0L
   while (done < n) {
     if (s$i >= 312L) {
+      # the array before the twist, for e(rngstate) when words drawn ahead come from it
+      s$prev <- s$w
       s$w <- stata_rng_twist(s$w)
       s$i <- 0L
     }
