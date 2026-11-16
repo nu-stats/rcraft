@@ -786,3 +786,15 @@ Scripts `base5866.R`, `split.R`, `clampb.R`, `topJ.R`, `topN.R`, `padp.R`, `ttre
   0: whether the label-count set reproduces Stata depends on the arithmetic at that scale. The centred
   padded set is likely standing in for a different computation.
 - Scoreboard unchanged at 7,365.
+
+## 2026-11-16: Lewart's SCALE2 with its own step, padded ends walked by Stata's step
+
+After the literature study (`plan/stata/natscale-literature.md`; best rule `lit_rule7781.R`, **7,781**,
+verified here) found that Lewart's padding with Stata's step forced cannot get N from n: SCALE2 run as
+written (its own step for N = n + k, Stata's 10^k, no clamp), its padded ends walked by Stata's step to
+Stata's labels when they lie on Stata's grid (`lw_own.R`). Its step equals Stata's in 12,317–14,228
+cases. Both ends: 3,837 (N = n − 1), 4,862 (n), **5,333 (n + 1)**, 5,228 (n + 2), 4,817 (n + 3); DEL
+2e-5 or 2e-12 makes no difference. With N = n + 1 it gets 1,707 cases the 7,781 rule misses, so the two
+are partial views of the same unknown padding choice; neither is the rule. Scoreboard stays at 7,781.
+Papers still wanted (not reachable here): remarks or certifications of CACM Algorithm 463; Dixon &
+Kronmal (1965); the journal texts of AS 168, AS 21 and AS 44; Talbot, Lin & Hanrahan (2010).
