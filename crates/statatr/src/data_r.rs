@@ -61,6 +61,7 @@ mod matrices;
 mod meanest;
 mod medeff;
 mod mexpr;
+mod mhodds;
 mod ml;
 mod model;
 mod more;
@@ -493,6 +494,7 @@ const WEIGHTED: &[&str] = &[
     "ci",
     "kap",
     "icc",
+    "mhodds",
     "tetrachoric",
     "sktest",
     "oneway",
@@ -1276,6 +1278,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_factor" => factor::FACTOR_HELPER,
         "stata_rotate" => rotate::ROTATE_HELPER,
         "stata_kap" => kap::KAP_HELPER,
+        "stata_mhodds" => mhodds::MHODDS_HELPER,
         "stata_icc" => icc::ICC_HELPER,
         "stata_tetrachoric" => tetrachoric::TETRACHORIC_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
@@ -2585,6 +2588,7 @@ impl Session {
             "rotate" => self.rotate(c, &opts, out),
             "kap" => self.kap(c, &opts, out),
             "icc" => self.icc(c, &opts, out),
+            "mhodds" => self.mhodds(c, &opts, out),
             "tetrachoric" => self.tetrachoric(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),

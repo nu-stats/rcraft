@@ -1165,6 +1165,7 @@ const MATRIX_NAMES: &[&str] = &[
     "Utest",
     "Nobs",
     "Rho",
+    "strata_table",
     "Se_Rho",
     "R",
     "sig",

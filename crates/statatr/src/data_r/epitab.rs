@@ -669,8 +669,8 @@ impl Session {
         if c.parts.weight.is_some() {
             return Err(no("tabodds with weights is not translated yet"));
         }
-        // or: Stata 19's intervals of the odds ratios are wider than Woolf's (as
-        // mhodds's are), by a factor not worked out yet
+        // or: Stata 19's intervals of the odds ratios are wider than Woolf's, by a
+        // factor not checked yet (mhodds's are Mantel and Haenszel's, plan/stata/mhodds.md)
         if opts.has("or", 2) {
             return Err(no(
                 "tabodds, or is not translated yet: Stata 19's intervals of the odds ratios are wider than Woolf's by a factor not worked out yet",

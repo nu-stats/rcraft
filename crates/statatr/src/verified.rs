@@ -142,6 +142,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("mean", &["meanest"]),
     ("medeff", &["medeff"]),
     ("merge", &["extended_missing_groups", "merge", "savedfloat"]),
+    ("mhodds", &["mhodds"]),
     ("mkmat", &["matrices"]),
     ("mlogit", &["collinear", "likelihood"]),
     ("mvtest", &["mvtest"]),

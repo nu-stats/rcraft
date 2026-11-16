@@ -1412,3 +1412,44 @@ fn icc_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn mhodds_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 300\ngenerate byte agegrp = 1 + mod(_n, 3)\n\
+         generate byte sex = mod(floor(_n / 3), 2)\n\
+         generate byte smoke = mod(_n * 7, 10) < 3 + agegrp\n\
+         generate byte dose = 1 + mod(_n * 11, 4)\n\
+         generate byte case = mod(_n * 13 + 5 * smoke + 3 * dose + agegrp, 17) < 6\n\
+         mhodds case smoke agegrp\nmhodds case dose\nmhodds case smoke sex, by(agegrp)\n\
+         mhodds case smoke, by(agegrp sex)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Mantel\u{2013}Haenszel estimate of the odds ratio comparing smoke==1 vs.",
+        "  smoke==0",
+        "  controlling for agegrp",
+        "     Odds ratio    chi2(1)        P>chi2        [95% conf. interval]",
+        "       1.144168       0.29        0.5876         0.702979   1.862247",
+        "Score test for trend of odds with dose",
+        "       0.925559       0.50        0.4783         0.747386   1.146208",
+        "Note: The Odds ratio estimate is an approximation to the odds ratio",
+        "      for a one-unit increase in dose.",
+        "Mantel\u{2013}Haenszel estimate of the odds ratio comparing smoke==1 vs. smoke==0",
+        "   agegrp | Odds ratio        chi2(1)         P>chi2       [95% conf. interval]",
+        "        1 |   1.256410           0.27         0.6032         0.53034    2.97653",
+        "        3 |   1.000000           0.00         1.0000         0.42796    2.33669",
+        "Mantel\u{2013}Haenszel estimate controlling for sex and agegrp",
+        "       1.145889       0.30        0.5867         0.701086   1.872895",
+        "Approximate test of homogeneity of odds ratios: chi2(2)   =     0.15",
+        "                                                Pr>chi2   =   0.9254",
+        "   agegrp       sex | Odds ratio     chi2(1)      P>chi2   [95% conf. interval]",
+        "--------------------+----------------------------------------------------------",
+        "        2         1 |   0.928571        0.01      0.9040     0.27853    3.09571",
+        "Approximate test of homogeneity of odds ratios: chi2(5)   =     0.63",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

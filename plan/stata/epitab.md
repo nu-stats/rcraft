@@ -57,6 +57,6 @@ past the 14th); corpus `epitab_by.do`.
   0.66500000000000004 (the double of .665) down at two places, Stata up: the tests' lines are rounded from the
   double's exact digits.
 - Refused: cc's exact intervals with by() too; cs, by() or without woolf (Cornfield); estandard, ustandard();
-  tabodds, or and base() and mhodds: their odds ratios' intervals are wider than Woolf's (mhodds case exposed: 1.874
-  to 4.661 where Woolf's is 1.901 to 4.594), by a factor that differs case by case and was not worked out; mhodds's
-  trend form (exp(U/V) ± z/√V) matches but is told from the binary form only by the data.
+  tabodds, or and base(): their odds ratios' intervals are wider than Woolf's (mhodds case exposed: 1.874
+  to 4.661 where Woolf's is 1.901 to 4.594), by a factor that differs case by case. mhodds is now translated (`plan/stata/mhodds.md`): its interval is
+  Mantel and Haenszel's exp(ln OR ± z√(ΣV/(R·S))); tabodds, or likely uses the same but was not checked.
