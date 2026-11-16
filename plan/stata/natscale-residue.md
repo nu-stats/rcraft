@@ -766,3 +766,23 @@ Scripts `base5866.R`, `split.R`, `clampb.R`, `topJ.R`, `topN.R`, `padp.R`, `ttre
   label-count set. **7,365 both ends** (bottoms 10,292, tops 9,936), up from 5,866. "Near 0" cutoffs
   of other shapes (|U| < 30, < 1.5·n, |L|, |U| < 20) give 6,530–6,555 for tops alone, so the exact
   form of that condition is open. The 12 is the first round count where padding shows at lo = 0.
+
+## 2026-11-16: what "near zero" is not (probes 20 and 21)
+
+- Walks with each stored step through Stata's exact `%18.0g` text (the emulation that matched the graph
+  400/400), last step live or not, in place of plain double walks in the 7,365 rule: at most 4,910.
+  The walk is plain double arithmetic.
+- Probe 20 (435 runs): lo = K, hi = K + 0.85 for K from −10 to 500, n 8–22. Padding shows for K from
+  −3 to 1 (n 12–16 at K 0; most n at K 0.1, −1, −2); K = 3 is definitely unpadded at n 9–16 (only the
+  label count fits); beyond about 4 nothing shows. Allowed walk starts look absolute (top starts 12+,
+  15–17, 18–22, 23+ whatever U is; at K = −2 a top start of +1.8 to +2.2; at K = 3 a bottom start
+  of −5.0). But walks from a symmetric ±T (T the round number at or above f·max(|lo|, |hi|), Nelder
+  or 1-2-5 numbers, f 1 to 1.5) fit at most 2,495 both ends of the 14,633 cases with |labels| ≤ 400,
+  against 7,080 for the 7,365 rule on the same cases. A walk lands on only a few doubles near the label,
+  so many starts fit by chance and single-case start sets are weak evidence.
+- Probe 21 (480 runs): the same family at scales 1, 0.1 and 0.01 (steps 0.1, 0.01, 0.001; same label
+  indices). At step 0.01 every negative K down to L = −100 needs padding, and positive K up to 1.5; at
+  step 0.001 some families fit no count at all. So the near-zero cutoff is not a distance in steps from
+  0: whether the label-count set reproduces Stata depends on the arithmetic at that scale. The centred
+  padded set is likely standing in for a different computation.
+- Scoreboard unchanged at 7,365.
