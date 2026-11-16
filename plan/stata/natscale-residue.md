@@ -515,3 +515,22 @@ algorithm for scaling graphs" (1976). None is copied here; they are used as mode
   simple formula (multiples of n or U − L rounded up, nice values of n·d with 1-2-5, 1-2-2.5-5 or
   Nelder's steps) is in the fitting set for more than 1,384 of the 2,884. Next: treat R as chosen by a
   cost over centred spans (the ulp flips say a tied comparison picks it), fitted to these sets.
+
+## 2026-11-15: the span R across positions (probes 9 and 10)
+
+For each run of probes 9 and 10 (step 0.1, lo 12.50 to 13.11), the spans R/d for which the centred
+model reproduces both ends:
+
+- Width 2.06 (U − L = 21): with both labels outside the data (lo 0.01–0.04 above a label, hi 0.06–0.09
+  below one), R/d = 21 exactly at every n from 21 to 40: no padding at all, even at n = 40. Padding comes
+  only with a label inside: top inside (12.55, 12.65, 12.85, 13.05: R/d 22–26 up to n 28, then 32–36,
+  12.65 exactly 22 then exactly 32 from n 29); bottom inside (12.68, 12.69: 26–30, then exactly 34 from
+  n 32; 12.78: 27–31, then 37–41; 12.88: 28–30, then 43–45; 13.09: 41, then 42–44).
+- Width 2.62 (U − L = 27): R/d = 27 at every n for lo 12.51–12.57 and 12.61–12.67; padding from n 46
+  for 12.71–12.77, n 42 for 12.81–12.87, n 34 for 12.91–12.97 (27 → 37–43 → 44–46 → 47–51) and n 30 for
+  13.01–13.11. So with both labels outside, padding depends on where the labels sit, not only on n.
+- Some runs fit no span (12.58 and 12.59 at width 2.06; 12.75, 12.76, 12.98, 12.99 at higher n): all
+  with a label inside the data, so the inside-label path is not yet modelled right.
+- Padded sets read from exact spans, e.g. 12.65–14.71: [12.6, 14.8] (23 labels) for n ≤ 28, then
+  [12.1, 15.3] (33 labels) from n 29; 12.68–14.74: [12.0, 15.4] (35 labels) from n 32. The counts exceed
+  n, so the span is not "n marks" as in Nelder.
