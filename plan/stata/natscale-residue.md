@@ -615,3 +615,16 @@ First n with a bottom residue (the walk from below 0), lo = 0, by runs of hi:
   scale (12, 15, 20, 25 ...), and the padded set as that count plus four. Away from 0 (probe 15) the
   onset instead follows width/step and needs an end label just inside the data, so the two regimes
   differ in what triggers the padding. Scoreboard unchanged at 4,891 (no rule yet to score).
+
+## 2026-11-16: fractional n, and the padded count at the onsets
+
+- `_natscale` accepts a fractional n (rc 0). Probe 17 (1,414 runs, n by 0.01 across each onset for 14
+  ranges: lo 0 with hi 0.78 to 1.75, lo 5.01 with hi 6.21 and 6.51, step 0.1 and 0.05): every change
+  of result falls between n k.49 and k.50 (11.49/11.50, 14.49/14.50, 17.49/17.50, 19.49/19.50). So n is
+  rounded to the nearest integer before use; fractional n adds no information.
+- Read as a centred Nelder-style scale with N marks and Stata's step (span = d·(N − 1)), the padded
+  count at lo = 0 is the smallest N whose step rounds up to d (N = 16 for hi 1.45, 12 for 1.05,
+  10 for 0.85, the label count itself) until the onset, and then jumps to N2 = 24, 19, 16 (onset 20,
+  15, 12) and stays there. N2 is the onset plus 4 in all three bands; the valid N for step 0.1 run to
+  29, 21 and 17, so N2 is not the largest valid N either.
+- Scoreboard unchanged at 4,891.
