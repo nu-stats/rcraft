@@ -561,3 +561,19 @@ n 40–43 of 12.91–15.53 has a pair with both ends on the 0.5 grid ([12, 16.5]
 [−1.5, 2] at n 22–24 only. So the padding is not "the enclosing labels of a coarser step". Also
 checked by hand: Heckbert's loose labels with ntick = n (range = nicenum(hi − lo), step =
 nicenum(range/(n − 1)), rounded) change step at n 35 for this range, not at 34, 40 and 44.
+
+## 2026-11-16: padded sets read exactly; Nelder's own scale tried
+
+- Of 6,000 sampled cases, 272 have exactly one (bottom start, top start) pair that reproduces both ends;
+  135 of them are padded. The padded label count M is often the same across n and across ranges:
+  lo 0 to 0.05 with hi 0.69–0.85 and step 0.05 all give [−0.2, 0.95]; lo 0 to 0.05 with hi 1.43–1.59
+  and step 0.1 all give [−0.4, 1.9]; both are 24 labels for every n from 20 to 28 (the same problem
+  scaled by 2). Elsewhere M is the label count plus 1 or 2 (lo −2.5, hi −2.045, step 0.05: 12 labels
+  for n 9 to 18).
+- In the lo = 0 sweep with step 0.1 the padding starts at n 12, 15 and 20 for hi up to 0.9, 1.2 and 1.5
+  (bands at multiples of 3 steps), and the smallest padded count that fits at the start is 16, 19 and 24:
+  four more than the n where it starts. Read as sets: [−0.3, 1.2], [−0.3, 1.5], [−0.4, 1.9].
+- Nelder's AS 96 run as written (his steps 1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6, 8; N = n − 1, n or n + 1;
+  bias 1e-4; his zero rules on or off), each end then walked by Stata's step to Stata's label: at most
+  1,389 of 15,244 both ends (bottoms 6,373, tops 2,515), below the plain product's 4,850. With Stata's
+  1-2-5 steps instead: 2,576. So the padded set is centred like Nelder's, but not his scale.
