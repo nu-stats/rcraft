@@ -596,3 +596,22 @@ n 8 to 30. The centred-span model fits both ends in 3,790; padding is forced (no
 - Once padding starts, the padded count stays put as n grows, and at the start it is about four more
   than that n: lo 0 (16, 19, 24 from n 12, 15, 20), lo 5.01 hi 6.21 (19–20 from n 15), hi 6.51 (22 at
   n 18, then 23). What fixes it there is the open question.
+
+## 2026-11-16: the lo = 0 onsets over the whole sweep
+
+First n with a bottom residue (the walk from below 0), lo = 0, by runs of hi:
+
+- Step 0.1: none while the top label sits inside the data (hi 0.81–0.82, 0.91–0.92, 1.00–1.02, …,
+  1.70–1.72); otherwise n 12 for hi 0.76–0.90 (top label 0.8 or 0.9), 15 for 0.93–1.20 (1.0 to 1.3),
+  20 for 1.23–1.79 (1.3 to 1.9), none from 1.80 to 2.53 within n ≤ 30.
+- Step 0.05: 15 (hi 0.515–0.60), 20 (0.62–0.89), 25 (1.11), 27 (1.17–1.20); none where the top label is
+  inside.
+- Step 0.2: 12 (1.65–1.99), 15 (2.05–2.38), 20 (2.47–3.04), 25 (3.07–3.22), with single-hi exceptions
+  (14 at 1.46 and 2.06, 17 at 2.97, 21 at 1.50).
+- So at lo = 0 the onset is a staircase of round counts (12, 15, 20, 25) that rises with the top label,
+  not with hi itself, and only when the top label is outside or on the data. In units of n·d the
+  onsets are 1.2, 1.5, 2.0 (step 0.1), 0.75, 1.0, 1.25 (step 0.05), 2.4, 3.0, 4.0, 5.0 (step 0.2).
+  Taken with the padded counts (16, 19, 24 = onset + 4), the onset n reads as a count on a round
+  scale (12, 15, 20, 25 ...), and the padded set as that count plus four. Away from 0 (probe 15) the
+  onset instead follows width/step and needs an end label just inside the data, so the two regimes
+  differ in what triggers the padding. Scoreboard unchanged at 4,891 (no rule yet to score).
