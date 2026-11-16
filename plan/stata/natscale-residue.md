@@ -577,3 +577,22 @@ nicenum(range/(n − 1)), rounded) change step at n 35 for this range, not at 34
   bias 1e-4; his zero rules on or off), each end then walked by Stata's step to Stata's label: at most
   1,389 of 15,244 both ends (bottoms 6,373, tops 2,515), below the plain product's 4,850. With Stata's
   1-2-5 steps instead: 2,576. So the padded set is centred like Nelder's, but not his scale.
+
+## 2026-11-16: the bands away from 0 (probe 15)
+
+Probe 15 (`%21x` through scalars, 3,933 runs): lo 0.51, 1.01, 5.01; widths 0.51 to 2.19 by 0.03;
+n 8 to 30. The centred-span model fits both ends in 3,790; padding is forced (no fit without it) in
+1,856.
+
+- The lo = 0 bands (padding from n 12, 15, 20 for hi up to 0.9, 1.2, 1.5) are in value, not in steps:
+  at lo 0 their edges sit at multiples of 0.3 for steps 0.05 (0.6, 0.9), 0.1 (0.9, 1.2, 1.5) and 0.2
+  (about 2.1). Away from 0 they do not hold. With lo 5.01 and step 0.1 the first padded n follows the
+  width: 8 up to width 0.8, then 9, 10, … 19 for widths 0.90 to 1.92, about width/step.
+- Away from 0 the padding goes with the top label sitting inside the data. lo 5.01, step 0.1: hi 6.21
+  (top label 6.2, 0.1 step inside) pads, R/d 14–15 for n 12–14 and 18–19 from n 15; hi 6.24 (0.4 step
+  inside) only reaches out to the next label (R/d = U − L + 1 = 13) at every n; hi 6.27 (top outside)
+  never pads (R/d = 13 = U − L). hi 6.51 (0.1 inside): R/d 16–18 for n 15–17, 21 at n 18, 22 from
+  n 19 to 29. So an end just inside the data is what lets the padding grow.
+- Once padding starts, the padded count stays put as n grows, and at the start it is about four more
+  than that n: lo 0 (16, 19, 24 from n 12, 15, 20), lo 5.01 hi 6.21 (19–20 from n 15), hi 6.51 (22 at
+  n 18, then 23). What fixes it there is the open question.
