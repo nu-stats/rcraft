@@ -66,9 +66,67 @@ rounds, the tables and e(). Ported to R here, and checked again on those probes'
 
 ## Not yet
 
-`lasso logit/probit/poisson/cox`, `elasticnet`, `sqrtlasso`, `dsregress` and the other inference
-commands, `cvplot`, factor variables (`i.fold`), weights, `cluster()`, `offset()`, `tolerance()`
-other than the default, `dtolerance()`; test, lincom and margins after lasso. StatCraft has the rules
-for most of these (logit/probit/Poisson, elasticnet, sqrtlasso and the inference commands): the next
-lasso step is to port them the same way, starting with `lasso logit` (probe 474) and `elasticnet`
-(472, 505), then `sqrtlasso` (473, 506, 507, 597).
+`lasso cox`, `sqrtlasso`, `dsregress` and the other inference commands, `cvplot`, factor variables
+(`i.fold`), weights, `cluster()`, `offset()` for the linear lasso, `tolerance()` other than the
+default, `dtolerance()`; test, lincom and margins after lasso. (lasso logit, probit, poisson and
+elasticnet linear: below, 2026-11-16.) StatCraft has the rules for sqrtlasso (473, 506, 507, 597)
+and the inference commands (475, 480): the next lasso step.
+
+# lasso logit, probit, poisson and elasticnet linear (2026-11-16)
+
+Translated: `lasso logit|probit|poisson` with every selection `lasso linear` has, always-in
+variables, `penaltywt()`, `noconstant` (not with cross-validation), `offset()` and, for Poisson,
+`exposure()`; `elasticnet linear` with `alphas()` (`alpha()`), `selection(none | bic | cv[,
+folds() serule stopok strict gridminok])`, the grid, `stop()`, `rseed()`, always-in variables,
+`penaltywt()`, `noconstant`; lassoselect, lassoknots, lassocoef, lassoinfo and predict after both.
+StatCraft's rules (its probes 472, 474, 481, 598) ported again and checked on Stata 19 here.
+
+## Found here
+
+- **The first lambda is 1e-10 above lambda_max**, for every model, linear included: after
+  `lassoselect id = 1`, e(lambda_sel) is lambda_max + 1e-10, and so is e(lambda_serule) or
+  e(lambda_bic) when ID 1 is chosen, while e(lambda_gmax) is lambda_max (Poisson showed 5e-10 once;
+  RCraft adds 1e-10). With several elasticnet alphas e(lambda_gmax) is the shared grid's first
+  lambda with the 1e-10 in it.
+- **e(properties)** stays after lassoselect when the results had a selection before (it is not
+  there after `selection(none)`), right after e(sel_criterion).
+- **The CV search for logit, probit and Poisson ends by the linear rule** (0.1% above the running
+  minimum three times in a row; probe 474's logit and probit runs), not after five rises
+  (StatCraft's fit). elasticnet's BIC search ends by the linear BIC rule too (1% twice), not 10
+  lambdas past the minimum.
+- **GLM noconstant** fits the centred predictors without a constant (Stata's log likelihood to
+  2e-10); which constant Stata's held-out and predicted values then use is not known, so
+  cross-validation and predict with it are refused.
+- **offset(), exposure()**: e(offset) or e(exposure) comes between e(allvars) and e(depvar) (after
+  e(depvar) after lassoselect). Errors: `outcome must be 0 or 1` r(2000), `variable y must be
+  greater than or equal to zero` r(459), `option exposure() must be greater than zero` r(459),
+  `option exposure() not allowed with model logit` r(198).
+- **Stata's GLM descent is not decoded.** With `tolerance(1e-12)` Stata's coefficients equal the
+  optimum RCraft solves to (to about 1e-11), so the difference at the default is only where its
+  descent stops. Tried and failed at tolerance(.5), (.1), (.01) and (1e-3) (logit and Poisson,
+  grid(6)): IRLS with the inner sweeps to the linear rule and the outer step stopped by the same
+  rule, by the first inner sweep, by the deviance, or after one step; one sweep per IRLS step;
+  the constant updated first, last, by weighted centring or by Newton to convergence; coordinate
+  Newton steps with the weights renewed per coordinate or per sweep; glmnet's curvature-weighted
+  change; the 1/4 bound for logit; reverse order. None comes within 1e-2 at tolerance(.5). So: the
+  selected models' log likelihood, BIC and CV error agree to 8 digits in the probes and the
+  corpus; at small lambdas coefficients differ by up to about 1e-7 relative (path-end L1 and L2
+  norms 1e-8 to 8e-8, Poisson's e(L2_max) in probe 474 1.14e-8), extreme predicted probabilities
+  by 4e-7. The corpus `lasso_glm.do` compares at 1e-6 for that.
+- **elasticnet**: each alpha (largest first) is a lasso path of `alpha |b| + (1 - alpha) b^2 / 2`
+  (the coordinate update divided by 1 + lambda (1 - alpha), Stata's descent rule otherwise: probe
+  472's coefficients to 1e-15) on the shared grid (StatCraft's augmented grid), with the same folds;
+  each alpha's search ends by its own rule (probe 472: 44, 44, 44 and 48, 48, 53 lambdas; the
+  corpus 45, 44, 43 and 50, 49, 51 — not "as many as the first alpha"). The selected alpha and
+  lambda have the smallest BIC or CV error over all alphas; the one-s.e. rule works within the
+  winning alpha. e(n_lambda) and e(lambda_last) are the winning alpha's, the nonzero, deviance
+  ratio, L1 and L2 extremes are over every alpha's lambdas (probe 472: e(k_nonzero_max) 7 where the
+  winning alpha has 5). Several alphas: no deviance stop (e(stop) 0). Duplicate alphas count once.
+
+## Not yet (these two)
+
+GLM noconstant with cross-validation, predict after offset()/exposure()/noconstant, lassoknots
+display() after a GLM (its headings), elasticnet logit/probit/poisson, alpha 0 (ridge: probes 503,
+505), several alphas with selection(none), alllambdas and BIC postselection with elasticnet,
+lassoknots after lassoselect for elasticnet, lassoselect lambda = # with several alphas, lassoinfo
+after elasticnet selection(none), a CV function without a minimum with elasticnet.

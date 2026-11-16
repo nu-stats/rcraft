@@ -5172,3 +5172,27 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   of probes 380-385, 470, 471 and 500-502 translates.
 - **Not yet:** lasso logit/probit/poisson/cox, elasticnet, sqrtlasso, the inference commands, cvplot,
   factor variables, weights, cluster(), tolerance() other than 1e-7; StatCraft has rules for most.
+
+## P2C.12: lasso logit, probit, poisson and elasticnet linear, 2026-11-16
+
+- **Translated** (`statatr::data_r::lasso`): `lasso logit|probit|poisson` with every selection of
+  the linear lasso (plug-in: logit's homoskedastic penalty, the heteroskedastic rounds otherwise),
+  always-in variables, penaltywt(), noconstant (not with cross-validation), offset(), exposure();
+  `elasticnet linear` with alphas(), selection none/bic/cv (serule, stopok, strict, gridminok), the
+  shared grid and folds; the tables (deviance ratio and CV mean deviance; elasticnet's alpha blocks),
+  lassoknots, lassoselect, lassocoef, lassoinfo, predict (Pr(y), the number of events, xb), e() and
+  Stata's errors. StatCraft's rules, ported to R and checked again.
+- **Found here** (`plan/stata/lasso.md`): the first lambda is 1e-10 above lambda_max for every lasso
+  (linear included); e(properties) survives lassoselect after a selection; the GLM CV search and
+  elasticnet's BIC search end by the linear rules (not StatCraft's five rises / ten lambdas); each
+  elasticnet alpha stops by its own rule; e()'s path extremes are over every alpha. Stata's GLM descent
+  is not decoded (a dozen schemes tried at loose tolerances): RCraft solves to the optimum, which is
+  Stata's at tolerance(1e-12), so fits at small lambdas differ by about 1e-7.
+- **Checked:** StatCraft's lasso probes on R: 61 of 62 compared lines match Stata 19 to 8 digits (25
+  probes; the other is Poisson's e(L2_max) at 1.14e-8). Corpus `lasso_glm.do` (32 results; at 1e-6
+  for the small-lambda fits) and `elasticnet.do` (18 results, at 1e-7) recorded from Stata 19;
+  elasticnet Verified. The linear `lasso.do` still passes.
+- **Shares:** probes (511 do-files, each source line once, dry run) 72.3% -> 72.6% (translated
+  20,281 -> 20,281, not 7,770 -> 7,652, known only when run 804 -> 922; the lasso lines name x1-x10).
+- **Not yet:** lasso cox, elasticnet logit/probit/poisson, alpha 0, several alphas with
+  selection(none) or without a CV minimum, sqrtlasso, the inference commands, cvplot.

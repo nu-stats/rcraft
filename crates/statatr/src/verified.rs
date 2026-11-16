@@ -58,6 +58,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
             "extended_missing_groups",
         ],
     ),
+    ("elasticnet", &["elasticnet"]),
     ("erase", &["replication"]),
     ("ereturn", &["eclass"]),
     ("estadd", &["estout"]),
@@ -126,8 +127,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("ktau", &["ktau"]),
     ("kwallis", &["ranktests"]),
     ("label", &["aware", "labels2"]),
-    ("lasso", &["lasso"]),
-    ("lassoselect", &["lasso"]),
+    ("lasso", &["lasso", "lasso_glm"]),
+    ("lassoselect", &["elasticnet", "lasso", "lasso_glm"]),
     ("levelsof", &["aware", "extended_missing_groups"]),
     (
         "lincom",

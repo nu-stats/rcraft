@@ -241,6 +241,7 @@ const MODELS: &[&str] = &[
     "dfgls",
     "dfuller",
     "didregress",
+    "elasticnet",
     "fracreg",
     "gsem",
     "heckman",

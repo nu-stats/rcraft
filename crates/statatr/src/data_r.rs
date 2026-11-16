@@ -540,6 +540,7 @@ const NAME_TABLES: &[&str] = &[
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
     "lasso",
+    "elasticnet",
     "glm",
     "svy",
     "asclogit",
@@ -2574,7 +2575,7 @@ impl Session {
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),
-            "lasso" => self.lasso(c, &opts, out),
+            "lasso" | "elasticnet" => self.lasso(c, &opts, out),
             "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" => {
                 self.lasso_after(c, &opts, out)
             }

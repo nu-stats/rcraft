@@ -197,6 +197,7 @@ pub const MAX_ROUNDS: usize = 100_000;
 /// models): there a pattern, a range or `_all` is made the data's names.
 const VARLIST: &[&str] = &[
     "lasso",
+    "elasticnet",
     "glm",
     "revrs",
     "tabm",
@@ -1546,7 +1547,7 @@ impl<'f> Run<'f> {
                 let main = c.parts.main.clone();
                 // robreg m y x, ivregress gmm y (x = z): the estimator first, not a variable
                 let (lead, list) = match c.name.as_str() {
-                    "robreg" | "ivregress" | "lasso" => {
+                    "robreg" | "ivregress" | "lasso" | "elasticnet" => {
                         match main.trim_start().split_once(char::is_whitespace) {
                             Some((a, b)) => (format!("{a} "), b.to_string()),
                             None => (main.clone(), String::new()),

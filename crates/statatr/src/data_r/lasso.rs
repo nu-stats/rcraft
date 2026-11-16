@@ -1,5 +1,5 @@
-//! `lasso linear` and what follows it (`lassoselect`, `lassoknots`,
-//! `lassocoef`, `lassoinfo`, `predict`), as Stata 19 runs them.
+//! `lasso linear|logit|probit|poisson`, `elasticnet linear` and what follows them
+//! (`lassoselect`, `lassoknots`, `lassocoef`, `lassoinfo`, `predict`), as Stata 19 runs them.
 //!
 //! The rules are StatCraft's decoding of Stata's (our own project, its
 //! `plan/stata/lasso.md`, probes 380-385 and 470-504), checked again here on
@@ -20,7 +20,7 @@ use super::*;
 
 pub(super) const LASSO_HELPER: &str = r###"# the standardised problem of rows `rows` of y and the columns of X: each
 # predictor to mean 0 and variance 1 (divisor N), the outcome centred
-stata_lasso_design <- function(y, X, rows = seq_along(y), tol = 1e-7) {
+stata_lasso_design <- function(y, X, rows = seq_along(y), tol = 1e-7, fam = "linear", off = NULL, noconstant = FALSE) {
   y <- y[rows]; X <- X[rows, , drop = FALSE]
   n <- length(y); p <- ncol(X)
   ybar <- sum(y) / n; yc <- y - ybar; yvar <- sum(yc^2) / n
@@ -30,8 +30,111 @@ stata_lasso_design <- function(y, X, rows = seq_along(y), tol = 1e-7) {
   sds[!is.finite(sds) | sds <= 0] <- 0
   Z <- Xc
   for (j in seq_len(p)) Z[, j] <- if (sds[j] > 0) Xc[, j] / sds[j] else 0
-  list(n = n, p = p, means = means, sds = sds, ybar = ybar, yvar = yvar, z = Z, yc = yc,
-       xtx = crossprod(Z) / n, xty = as.numeric(crossprod(Z, yc)) / n, tol = tol)
+  D <- list(n = n, p = p, means = means, sds = sds, ybar = ybar, yvar = yvar, z = Z, yc = yc,
+            xtx = crossprod(Z) / n, xty = as.numeric(crossprod(Z, yc)) / n, tol = tol, fam = fam)
+  if (fam != "linear") {
+    # logit, probit, Poisson: the outcome as it is, the offset, the constant
+    # alone; noconstant fits the centred predictors without one (probe 474)
+    D$y <- y; D$off <- if (is.null(off)) numeric(n) else off[rows]
+    D$intercept <- !noconstant
+    null <- stata_lasso_gnull(fam, y, D$off)
+    D$c0 <- if (noconstant) 0 else null
+    D$d0 <- stata_lasso_gdev(fam, D$off + null, y)
+  }
+  D
+}
+stata_lasso_mu <- function(fam, eta) switch(fam, logit = stats::plogis(eta), probit = stats::pnorm(eta), poisson = exp(pmin(eta, 700)))
+# the IRLS weight w, the working residual r and the score residual s (the
+# score of b_j is the sum of z_ij s_i)
+stata_lasso_irls <- function(fam, eta, y) {
+  mu <- stata_lasso_mu(fam, eta)
+  switch(fam,
+    logit = { v <- pmax(mu * (1 - mu), 1e-300); list(w = v, s = y - mu, r = (y - mu) / v) },
+    probit = { v <- pmax(mu * (1 - mu), 1e-300); dm <- pmax(stats::dnorm(eta), 1e-300); list(w = dm^2 / v, s = dm * (y - mu) / v, r = (y - mu) / dm) },
+    poisson = { m <- pmax(mu, 1e-300); list(w = m, s = y - mu, r = (y - mu) / m) })
+}
+stata_lasso_gll <- function(fam, eta, y) switch(fam,
+  logit = sum(y * eta - ifelse(eta > 0, eta + log1p(exp(-eta)), log1p(exp(eta)))),
+  probit = sum(y * stats::pnorm(eta, log.p = TRUE) + (1 - y) * stats::pnorm(eta, lower.tail = FALSE, log.p = TRUE)),
+  poisson = sum(y * eta - exp(pmin(eta, 700)) - lgamma(y + 1)))
+stata_lasso_gdev <- function(fam, eta, y) {
+  if (fam != "poisson") return(-2 * stata_lasso_gll(fam, eta, y))
+  mu <- exp(pmin(eta, 700))
+  2 * sum(ifelse(y > 0, y * log(y / mu), 0) - (y - mu))
+}
+# the constant alone (Newton steps), with the offset
+stata_lasso_gnull <- function(fam, y, off) {
+  cons <- switch(fam, logit = stats::qlogis(mean(y)), probit = stats::qnorm(mean(y)), poisson = log(mean(y)))
+  if (!is.finite(cons)) cons <- 0
+  if (any(off != 0)) for (it in 1:200) {
+    q <- stata_lasso_irls(fam, off + cons, y)
+    st <- sum(q$w * q$r) / sum(q$w)
+    cons <- cons + st
+    if (abs(st) < 1e-15 * max(abs(cons), 1)) break
+  }
+  cons
+}
+stata_lasso_cons <- function(D, b) { a <- attr(b, "cons"); if (is.null(a)) D$c0 else a }
+stata_lasso_eta <- function(D, b, cons = stata_lasso_cons(D, b)) {
+  a <- which(b != 0)
+  D$off + cons + (if (length(a)) as.numeric(D$z[, a, drop = FALSE] %*% b[a]) else 0)
+}
+# the penalised GLM at lambda from the start b (the constant in attr "cons"):
+# Newton (IRLS) steps, each a weighted least-squares lasso solved by
+# coordinate descent, to convergence. Stata stops its descent earlier (its
+# coefficients are within about 1e-7 of these, and equal to them to about
+# 1e-11 at tolerance(1e-12)); its exact test is not decoded
+stata_lasso_gsolve <- function(D, lam, w, b) {
+  ok <- which(D$sds > 0 & is.finite(w))
+  cons <- stata_lasso_cons(D, b)
+  b <- as.numeric(b); n <- D$n; y <- D$y; fam <- D$fam
+  pen <- ifelse(is.finite(w), w, 0) * lam
+  obj <- function(bb, cc) -stata_lasso_gll(fam, stata_lasso_eta(D, bb, cc), y) / n + sum(pen[ok] * abs(bb[ok]))
+  cur <- obj(b, cons)
+  if (length(ok) || D$intercept) for (outer in 1:200) {
+    eta <- stata_lasso_eta(D, b, cons)
+    q <- stata_lasso_irls(fam, eta, y)
+    W <- q$w; r <- eta - D$off + q$r
+    Zo <- D$z[, ok, drop = FALSE]
+    G <- crossprod(Zo * W, Zo) / n; gc <- colSums(Zo * W) / n; sw <- sum(W) / n
+    cz <- as.numeric(crossprod(Zo, W * r)) / n; cr <- sum(W * r) / n
+    be <- b[ok]; cc <- if (D$intercept) cons else 0
+    for (it in 1:100000) {
+      mx <- 0
+      if (D$intercept && sw > 0) { nc <- (cr - sum(gc * be)) / sw; mx <- abs(nc - cc) / max(abs(nc), 1); cc <- nc }
+      for (k in seq_along(ok)) {
+        old <- be[k]; g <- G[k, k]
+        num <- cz[k] - sum(G[k, ] * be) + g * old - gc[k] * cc
+        t <- pen[ok[k]]
+        nb <- if (g <= 0) 0 else if (num > t) (num - t) / g else if (num < -t) (num + t) / g else 0
+        if (nb != old) { be[k] <- nb; ch <- abs(nb - old) / max(abs(nb), 1); if (ch > mx) mx <- ch }
+      }
+      if (mx < 1e-14) break
+    }
+    nb <- b; nb[ok] <- be
+    # step halving when the Newton step overshoots
+    new <- obj(nb, cc); step <- 1
+    while (new > cur + 1e-15 * abs(cur) && step > 1e-10) {
+      step <- step / 2
+      tb <- b + step * (nb - b); tc <- cons + step * (cc - cons)
+      new <- obj(tb, tc)
+      if (new <= cur + 1e-15 * abs(cur)) { nb <- tb; cc <- tc }
+    }
+    moved <- max(c(abs(nb - b), abs(cc - cons)) / pmax(abs(c(nb, cc)), 1))
+    b <- nb; cons <- cc; cur <- new
+    if (moved < 1e-13) break
+  }
+  attr(b, "cons") <- cons
+  b
+}
+stata_lasso_glmax <- function(D, w) {
+  b <- numeric(D$p); attr(b, "cons") <- D$c0
+  if (any(D$sds > 0 & w == 0)) b <- stata_lasso_gsolve(D, 1e300, ifelse(w == 0, 0, Inf), b)
+  q <- stata_lasso_irls(D$fam, stata_lasso_eta(D, b), D$y)
+  g <- as.numeric(crossprod(D$z, q$s)) / D$n
+  pen <- D$sds > 0 & is.finite(w) & w > 0
+  if (!any(pen)) return(0)
+  max(abs(g[pen]) / w[pen])
 }
 # the residual sum of squares over N at standardised coefficients b
 stata_lasso_mse <- function(D, b) {
@@ -40,10 +143,14 @@ stata_lasso_mse <- function(D, b) {
   ba <- b[a]
   max(D$yvar - 2 * sum(ba * D$xty[a]) + sum(ba * (D$xtx[a, a, drop = FALSE] %*% ba)), 0)
 }
-stata_lasso_devratio <- function(D, b) if (D$yvar > 0) 1 - stata_lasso_mse(D, b) / D$yvar else 0
+stata_lasso_devratio <- function(D, b) {
+  # the constant alone is the null model: its ratio is 0 exactly (probe 474)
+  if (D$fam != "linear") return(if (D$intercept && !any(b != 0)) 0 else if (D$d0 > 0) 1 - stata_lasso_gdev(D$fam, stata_lasso_eta(D, b), D$y) / D$d0 else 0)
+  if (D$yvar > 0) 1 - stata_lasso_mse(D, b) / D$yvar else 0
+}
 stata_lasso_unstd <- function(D, b) {
-  v <- ifelse(D$sds > 0, b / ifelse(D$sds > 0, D$sds, 1), 0)
-  c(v, D$ybar - sum(v * D$means))
+  v <- ifelse(D$sds > 0, as.numeric(b) / ifelse(D$sds > 0, D$sds, 1), 0)
+  c(v, (if (D$fam == "linear") D$ybar else stata_lasso_cons(D, b)) - sum(v * D$means))
 }
 # the lasso at lambda from the start b, as Stata 19 solves it: cyclic
 # coordinate descent over every predictor in order, warm started, until in a
@@ -53,16 +160,18 @@ stata_lasso_unstd <- function(D, b) {
 # R-squared and log likelihood to about 1e-15 (probes 380, 381, 470), also
 # with tolerance(1e-3)
 stata_lasso_solve <- function(D, lam, w, b, tol = D$tol) {
+  if (D$fam != "linear") return(stata_lasso_gsolve(D, lam, w, b))
   ok <- which(D$sds > 0 & is.finite(w))
-  xtx <- D$xtx; xty <- D$xty; sds <- D$sds
+  xtx <- D$xtx; xty <- D$xty; sds <- D$sds; al <- if (is.null(D$alpha)) 1 else D$alpha
   if (!length(ok)) return(b)
   for (it in 1:100000) {
     mx <- 0
     for (j in ok) {
       old <- b[j]
       r <- xty[j] - sum(xtx[j, ] * b) + old
-      t <- lam * w[j]
-      nb <- if (r > t) r - t else if (r < -t) r + t else 0
+      # the elastic net: penalty alpha |b| + (1 - alpha) b^2 / 2 (probe 472)
+      t <- lam * w[j] * al
+      nb <- (if (r > t) r - t else if (r < -t) r + t else 0) / (1 + lam * w[j] * (1 - al))
       if (nb != old) {
         b[j] <- nb
         ch <- abs(nb - old) / max(abs(nb), sds[j])
@@ -82,18 +191,26 @@ stata_lasso_grid <- function(lmax, n, ratio, lmin = NULL) {
   g
 }
 stata_lasso_lmax <- function(D, w) {
+  if (D$fam != "linear") return(stata_lasso_glmax(D, w))
   b <- numeric(D$p)
   if (any(D$sds > 0 & w == 0)) b <- stata_lasso_solve(D, 1e300, w, b)
   a <- which(b != 0)
   g <- D$xty - (if (length(a)) as.numeric(D$xtx[, a, drop = FALSE] %*% b[a]) else 0)
   pen <- D$sds > 0 & is.finite(w) & w > 0
   if (!any(pen)) return(0)
-  max(abs(g[pen]) / w[pen])
+  # the elastic net's lambda_max is the lasso's over alpha (probe 472)
+  max(abs(g[pen]) / w[pen]) / (if (is.null(D$alpha)) 1 else max(D$alpha, 1e-3))
 }
 # least squares on the selected predictors: the mean squared residual and the
 # standardised coefficients
 stata_lasso_post <- function(D, b) {
   a <- which(b != 0)
+  if (D$fam != "linear") {
+    # the unpenalised fit on the selected predictors
+    s <- numeric(D$p); attr(s, "cons") <- D$c0
+    f <- stata_lasso_gsolve(D, 0, ifelse(seq_len(D$p) %in% a, 0, Inf), s)
+    return(list(b = f, ll = stata_lasso_gll(D$fam, stata_lasso_eta(D, f), D$y)))
+  }
   out <- numeric(D$p)
   if (!length(a)) return(list(mse = D$yvar, b = out))
   ba <- tryCatch(solve(D$xtx[a, a, drop = FALSE], D$xty[a]), error = function(e) qr.solve(D$xtx[a, a, drop = FALSE], D$xty[a]))
@@ -102,9 +219,13 @@ stata_lasso_post <- function(D, b) {
 }
 stata_lasso_rec <- function(D, id, lam, b, dfc, postsel = FALSE, cvm = NA_real_, se = NA_real_) {
   nz <- sum(b != 0)
-  mse <- if (postsel) { m <- stata_lasso_post(D, b)$mse; if (nz == 0) D$yvar + D$ybar^2 else m } else stata_lasso_mse(D, b)
   n <- D$n
-  ll <- -0.5 * n * (log(2 * pi) + 1 + log(mse))
+  if (D$fam != "linear") {
+    ll <- if (postsel) stata_lasso_post(D, b)$ll else stata_lasso_gll(D$fam, stata_lasso_eta(D, b), D$y)
+  } else {
+    mse <- if (postsel) { m <- stata_lasso_post(D, b)$mse; if (nz == 0) D$yvar + D$ybar^2 else m } else stata_lasso_mse(D, b)
+    ll <- -0.5 * n * (log(2 * pi) + 1 + log(mse))
+  }
   o <- stata_lasso_unstd(D, b)[seq_len(D$p)]
   list(id = id, lambda = lam, b = b, devratio = stata_lasso_devratio(D, b), nonzero = nz, cvm = cvm, se = se,
        ll = ll, bic = -2 * ll + (nz + dfc) * log(n), l1 = sum(abs(o)), l2 = sum(o^2))
@@ -154,16 +275,17 @@ stata_lasso_folds <- function(n, k) {
   fold[ord] <- pmin(f, k - 1)
   fold
 }
-stata_lasso_cv_setup <- function(y, X, fold, k, noconstant, tol = 1e-7) {
+stata_lasso_cv_setup <- function(y, X, fold, k, noconstant, tol = 1e-7, fam = "linear", off = NULL, alpha = NULL) {
   ds <- list(); tests <- list()
   for (f in 0:(k - 1)) {
     tr <- which(fold != f); te <- which(fold == f)
-    ds[[f + 1]] <- stata_lasso_design(y, X, tr, tol = tol)
+    ds[[f + 1]] <- stata_lasso_design(y, X, tr, tol = tol, fam = fam, off = off, noconstant = noconstant)
+    ds[[f + 1]]$alpha <- alpha
     tests[[f + 1]] <- te
   }
   s <- new.env()
   s$ds <- ds; s$tests <- tests; s$starts <- lapply(ds, function(d) numeric(d$p))
-  s$y <- y; s$X <- X; s$noconstant <- noconstant
+  s$y <- y; s$X <- X; s$noconstant <- noconstant; s$fam <- fam; s$off <- if (is.null(off)) numeric(length(y)) else off
   s
 }
 stata_lasso_cv_eval <- function(s, lam, w) {
@@ -173,11 +295,13 @@ stata_lasso_cv_eval <- function(s, lam, w) {
     b <- stata_lasso_solve(d, lam, w, s$starts[[f]])
     s$starts[[f]] <- b
     o <- stata_lasso_unstd(d, b)
-    cons <- if (s$noconstant) 0 else o[d$p + 1]
+    # with noconstant the GLM keeps its centring constant (it is in the fit)
+    cons <- if (s$noconstant && s$fam == "linear") 0 else o[d$p + 1]
     te <- s$tests[[f]]
     a <- which(o[seq_len(d$p)] != 0)
     fit <- cons + (if (length(a)) as.numeric(s$X[te, a, drop = FALSE] %*% o[a]) else 0)
-    e2 <- sum((s$y[te] - fit)^2)
+    # the held-out deviance for logit, probit and Poisson (probe 474)
+    e2 <- if (s$fam == "linear") sum((s$y[te] - fit)^2) else stata_lasso_gdev(s$fam, s$off[te] + fit, s$y[te])
     sse <- sse + e2; nt <- nt + length(te)
     mses[f] <- e2 / max(length(te), 1)
   }
@@ -220,25 +344,73 @@ stata_lasso_plugin <- function(D, y, X, base, hetero, bw) {
   }
   list(lambda = last$lambda, b = last$b, log = log)
 }
+# the plug-in penalty of logit, probit and Poisson (the public manual's
+# algorithm, as StatCraft decoded it on its probes 474, 481, 598): logit's
+# homoskedastic penalty is one fit with loadings 1; otherwise the first
+# loadings are the root mean square of the score contributions of an
+# unpenalised fit on the five predictors most correlated with the outcome,
+# then each round fits the lasso from the constant alone, refits the selected
+# predictors without penalty and takes the loadings from that fit (all 1 when
+# nothing was selected), until the selected set repeats (at most 15 rounds)
+stata_lasso_gplugin <- function(D, lam, homo, bw) {
+  p <- D$p; n <- D$n
+  alw <- bw == 0
+  loads <- function(set) {
+    f <- stata_lasso_post(D, ifelse(set | alw, 1, 0))$b
+    s <- stata_lasso_irls(D$fam, stata_lasso_eta(D, f), D$y)$s
+    sqrt(colSums(D$z^2 * s^2) / n)
+  }
+  if (homo) { prev <- rep(FALSE, p); load <- rep(1, p) } else {
+    pen <- which(bw > 0 & D$sds > 0)
+    top <- utils::head(pen[order(-abs(D$xty[pen]), pen)], 5)
+    prev <- seq_len(p) %in% top
+    load <- loads(prev)
+  }
+  log <- list(); last <- NULL
+  for (it in seq_len(if (homo) 1 else 15)) {
+    w <- ifelse(alw, 0, ifelse(D$sds > 0 & load > 0, load * bw, Inf))
+    b <- stata_lasso_gsolve(D, lam, w, numeric(p))
+    log[[it]] <- c(lam, sum(b != 0))
+    set <- b != 0 & !alw
+    last <- b
+    if (homo || identical(as.logical(set), as.logical(prev))) break
+    load <- if (any(set)) loads(set) else rep(1, p)
+    prev <- set
+  }
+  list(lambda = lam, b = last, log = log)
+}
 stata_lasso_stop <- function(msg, rc = 198) stop(msg, " (Stata: r(", rc, "))", call. = FALSE)
-# lasso linear: the fit, its log and table, e(), e(sample)
+# lasso linear, logit, probit, poisson: the fit, its log and table, e(), e(sample)
 stata_lasso_run <- function(src, nall, y, always, others, sel = "cv", folds = 10, serule = FALSE,
                             alllambdas = FALSE, gridminok = FALSE, stopok = FALSE, strict = FALSE,
-                            steps = 2, power = NULL, hetero = TRUE, cc = 1.1, gamma = NULL,
+                            steps = 2, power = NULL, hetero = NULL, cc = 1.1, gamma = NULL,
                             postsel = FALSE, grid = 100, ratio = NULL, lmin = NULL, stop = 1e-5,
                             nolog = FALSE, rseed = NULL, noconstant = FALSE, penaltywt = NULL, tolerance = 1e-7,
-                            cmdline = "", show = TRUE) {
+                            fam = "linear", offset = NULL, exposure = NULL, cmdline = "", show = TRUE,
+                            alpha = NULL, lams_given = NULL, minlam = 0, fold_given = NULL, inner = "", shownotes = show) {
   say <- show && !nolog
   vars <- c(always, others)
-  for (v in c(y, vars)) if (!v %in% names(src)) stata_lasso_stop(paste0("variable ", v, " not found"), 111)
+  for (v in c(y, vars, offset, exposure)) if (!v %in% names(src)) stata_lasso_stop(paste0("variable ", v, " not found"), 111)
   num <- function(v) { u <- unclass(src[[v]]); attributes(u) <- NULL; as.numeric(u) }
   yall <- num(y)
   Xall <- matrix(unlist(lapply(vars, num)), nrow = nrow(src), ncol = length(vars), dimnames = list(NULL, vars))
-  used <- !is.na(yall) & stats::complete.cases(Xall)
+  oall <- if (!is.null(offset)) num(offset) else if (!is.null(exposure)) num(exposure) else NULL
+  used <- !is.na(yall) & stats::complete.cases(Xall) & (if (is.null(oall)) TRUE else !is.na(oall))
   n <- sum(used)
   if (n == 0) stata_lasso_stop("no observations", 2000)
-  if (sel %in% c("cv", "adaptive") && n < folds) stata_lasso_stop("the number of observations is less than the cross-validation folds")
   yv <- yall[used]; X <- Xall[used, , drop = FALSE]
+  # the outcome's checks (probe 474)
+  if (fam %in% c("logit", "probit") && any(yv != 0 & yv != 1)) stata_lasso_stop("outcome must be 0 or 1", 2000)
+  if (fam == "poisson" && any(yv < 0)) stata_lasso_stop(paste0("variable ", y, " must be greater than or equal to zero"), 459)
+  off <- NULL
+  if (!is.null(oall)) {
+    off <- oall[used]
+    if (!is.null(exposure)) {
+      if (any(off <= 0)) stata_lasso_stop("option exposure() must be greater than zero", 459)
+      off <- log(off)
+    }
+  }
+  if (sel %in% c("cv", "adaptive") && n < folds) stata_lasso_stop("the number of observations is less than the cross-validation folds")
   if (!is.null(penaltywt)) {
     if (length(penaltywt) != length(others)) stata_lasso_stop("option penaltywt() is not conformable with indepvars dimension")
     if (any(penaltywt < 0)) stata_lasso_stop("option penaltywt() contains at least one negative value")
@@ -248,39 +420,48 @@ stata_lasso_run <- function(src, nall, y, always, others, sel = "cv", folds = 10
   kept <- integer(0); notes <- 0
   for (j in seq_along(vars)) {
     if (D0$sds[j] <= 0) {
-      if (show) cat("note: ", vars[j], " omitted because it is constant.\n", sep = "")
+      if (shownotes) cat("note: ", vars[j], " omitted because it is constant.\n", sep = "")
       notes <- notes + 1; next
     }
     tw <- which(vapply(kept, function(k) abs(sum(D0$z[, j] * D0$z[, k]) / D0$n) > 1 - 1e-10, TRUE))
     if (length(tw)) {
-      if (show) cat("note: ", vars[kept[tw[1]]], " omitted because of collinearity with another variable.\n", sep = "")
+      if (shownotes) cat("note: ", vars[kept[tw[1]]], " omitted because of collinearity with another variable.\n", sep = "")
       notes <- notes + 1
       kept <- kept[-tw[1]]
     }
     kept <- c(kept, j)
   }
-  skip <- notes > 0
+  skip <- notes > 0 && shownotes
   blank <- function() { if (skip) skip <<- FALSE else if (say) cat("\n") }
   isalways <- kept <= length(always)
   bw <- ifelse(isalways, 0, if (is.null(penaltywt)) 1 else penaltywt[pmax(kept - length(always), 1)])
   X <- X[, kept, drop = FALSE]; vars <- vars[kept]
-  D <- stata_lasso_design(yv, X, tol = tolerance)
+  D <- stata_lasso_design(yv, X, tol = tolerance, fam = fam, off = off, noconstant = noconstant)
+  D$alpha <- alpha
   p <- D$p
-  if (!is.null(rseed)) stata_set_seed(rseed)
-  rng <- stata_lasso_rngstate()
   if (is.null(ratio)) ratio <- if (n > p) 1e-4 else 1e-2
   fin <- bw[is.finite(bw)]
   w <- if (length(fin)) bw / (sum(fin) / length(fin)) else bw
+  # elasticnet asks each alpha's lambda_max first, then runs each alpha on
+  # the shared grid and folds (stata_lasso_enet)
+  if (inner == "lmax") return(list(lmax = stata_lasso_lmax(D, w), n = n, p = p, ratio = ratio))
+  if (is.null(fold_given)) {
+    if (!is.null(rseed)) stata_set_seed(rseed)
+  }
+  rng <- stata_lasso_rngstate()
   npen <- sum(bw > 0)
   dfc <- if (noconstant) 0 else 1
   nzw <- function(w) nchar(as.character(max(sum(is.finite(w)), 1)))
   recs <- list(); sel_i <- NA; id_cv <- NA; id_se <- NA; gmax <- 0; gmin <- 0; ptype <- "heteroskedastic"
   stepsdone <- 1; gridmin <- FALSE; stopsel <- FALSE; failed <- FALSE
-  fold <- if (sel %in% c("cv", "adaptive")) stata_lasso_folds(n, folds) else NULL
+  fold <- if (!is.null(fold_given)) fold_given else if (sel %in% c("cv", "adaptive")) stata_lasso_folds(n, folds) else NULL
   if (sel %in% c("none", "bic")) {
     lmax <- stata_lasso_lmax(D, w)
-    lams <- stata_lasso_grid(lmax, grid, ratio, lmin)
+    lams <- if (is.null(lams_given)) stata_lasso_grid(lmax, grid, ratio, lmin) else lams_given
     gmax <- lams[1]; gmin <- lams[length(lams)]
+    # the first lambda is kept 1e-10 above lambda_max (Stata 19: e(lambda_sel)
+    # at ID 1, e(lambda_serule) = 1e-10 more than e(lambda_gmax))
+    lams[1] <- lams[1] + 1e-10
     if (say) { blank(); cat("Evaluating up to ", length(lams), " lambdas in grid ...\n", sep = "") }
     find <- stata_lasso_finder(0.01, 2)
     b <- numeric(p); hit <- FALSE; found <- FALSE
@@ -309,11 +490,14 @@ stata_lasso_run <- function(src, nall, y, always, others, sel = "cv", folds = 10
     } else if (hit && say) cat("... change in deviance stopping tolerance reached\n")
   } else if (sel == "plugin") {
     if (say) { blank(); cat("Computing plugin lambda ...\n") }
-    ptype <- if (hetero) "heteroskedastic" else "homoskedastic"
+    # logit is homoskedastic unless told otherwise; probit and Poisson only
+    # know the heteroskedastic penalty (StatCraft's probes 474 and 481)
+    homo <- if (fam == "linear") isFALSE(hetero) else fam == "logit" && !isTRUE(hetero)
+    ptype <- if (homo) "homoskedastic" else "heteroskedastic"
     g <- if (is.null(gamma)) 0.1 / log(max(n, max(npen, 1))) else gamma
-    base <- cc / sqrt(n) * stats::qnorm(1 - g / (2 * max(npen, 1)))
+    base <- if (fam == "logit" && homo) cc / (2 * sqrt(n)) * stats::qnorm(1 - g / n) else cc / sqrt(n) * stats::qnorm(1 - g / (2 * max(npen, 1)))
     pw <- ifelse(isalways, 0, 1)
-    pf <- stata_lasso_plugin(D, yv, X, base, hetero, pw)
+    pf <- if (fam == "linear") stata_lasso_plugin(D, yv, X, base, !homo, pw) else stata_lasso_gplugin(D, base, homo, pw)
     if (say) for (i in seq_along(pf$log)) cat(sprintf("Iteration %d:     lambda = %s   no. of nonzero coef. = %*d\n", i, stata_lasso_g8(pf$log[[i]][1]), nzw(pw), as.integer(pf$log[[i]][2])))
     recs[[1]] <- stata_lasso_rec(D, 1, pf$lambda, pf$b, dfc)
     gmax <- gmin <- pf$lambda; sel_i <- 1
@@ -332,9 +516,12 @@ stata_lasso_run <- function(src, nall, y, always, others, sel = "cv", folds = 10
         }
       }
       lmax <- stata_lasso_lmax(D, w)
-      lams <- stata_lasso_grid(lmax, grid, ratio, lmin)
+      lams <- if (is.null(lams_given)) stata_lasso_grid(lmax, grid, ratio, lmin) else lams_given
       gmax <- lams[1]; gmin <- lams[length(lams)]
-      cvs <- stata_lasso_cv_setup(yv, X, fold, folds, noconstant, tolerance)
+      # the first lambda is kept 1e-10 above lambda_max (Stata 19: e(lambda_sel)
+      # at ID 1, e(lambda_serule) = 1e-10 more than e(lambda_gmax))
+      lams[1] <- lams[1] + 1e-10
+      cvs <- stata_lasso_cv_setup(yv, X, fold, folds, noconstant, tolerance, fam, off, alpha)
       lamuse <- lams; tolhit <- FALSE
       full <- alllambdas || (sel == "adaptive" && step > 1)
       if (full) {
@@ -368,7 +555,7 @@ stata_lasso_run <- function(src, nall, y, always, others, sel = "cv", folds = 10
             if (tolhit) break
           }
           dv <- r$devratio
-          if (mf) { found <- TRUE; break }
+          if (mf && k >= minlam) { found <- TRUE; break }
         }
       }
       if (full && say) {
@@ -422,13 +609,97 @@ stata_lasso_run <- function(src, nall, y, always, others, sel = "cv", folds = 10
               id_cv = id_cv, id_se = id_se, serule = serule, n_fold = folds, steps = stepsdone,
               power = if (sel == "adaptive") power else NULL, ptype = ptype, stop = stop, cmdline = cmdline,
               rngstate = rng, D = D, noconstant = noconstant, gridmin = gridmin, stopsel = stopsel,
-              allrecs = if (sel %in% c("cv", "adaptive")) allrecs else recs)
+              allrecs = if (sel %in% c("cv", "adaptive")) allrecs else recs,
+              fam = fam, offset = offset, exposure = exposure)
+  if (inner == "fit") { fit$used <- used; fit$failed <- failed; fit$fold <- fold; return(fit) }
   stata_lasso <<- fit
   stata_e <<- stata_lasso_e(fit)
   stata_esample <<- seq_len(nall) %in% src$stata_row[used]
   if (show) stata_lasso_table(fit)
   # no lambda selected: e() is posted all the same (Stata 19), then r(430)
   if (failed) { stata_fit_failed <<- FALSE; stop(" (Stata: r(430))", call. = FALSE) }
+  invisible(NULL)
+}
+# the grid several alphas share (crossgrid(augmented), probe 472): the grid of
+# the largest alpha, with in front of it, for each smaller alpha from the top,
+# its lambda_max and further points at the grid's step while they stay above
+# the next alpha's lambda_max (at most n of them). lmax: largest alpha first
+stata_lasso_augmented <- function(lmax, n, ratio, lmin = NULL) {
+  base <- stata_lasso_grid(lmax[1], n, ratio, lmin)
+  if (n <= 1 || length(lmax) < 2) return(base)
+  step <- (base[length(base)] / lmax[1])^(1 / (n - 1))
+  out <- numeric(0)
+  for (i in length(lmax):2) {
+    v <- lmax[i]; cnt <- 0
+    while (v > lmax[i - 1] && step < 1 && cnt < n) { cnt <- cnt + 1; out <- c(out, v); v <- v * step }
+  }
+  c(out, base)
+}
+# elasticnet linear: each alpha (largest first) is a lasso path on the shared
+# grid with the same folds; the selected alpha and lambda are the smallest BIC
+# or CV mean error over all of them; e()'s path extremes are over every alpha,
+# e(n_lambda) and e(lambda_last) the selected alpha's (probe 472)
+stata_lasso_enet <- function(src, nall, y, always, others, alphas, alpha_text, sel = "cv", show = TRUE,
+                             nolog = FALSE, stop = 1e-5, grid = 100, ratio = NULL, lmin = NULL, rseed = NULL,
+                             folds = 10, serule = FALSE, cmdline = "", ...) {
+  keep <- !duplicated(alphas)
+  alphas <- alphas[keep]; alpha_text <- alpha_text[keep]
+  o <- order(-alphas); alphas <- alphas[o]; alpha_text <- alpha_text[o]
+  k <- length(alphas)
+  say <- show && !nolog
+  run <- function(...) stata_lasso_run(src, nall, y, always, others, sel = sel, nolog = nolog, grid = grid,
+                                       ratio = ratio, lmin = lmin, folds = folds, serule = serule, cmdline = cmdline, ...)
+  lm <- vapply(alphas, function(a) run(alpha = a, inner = "lmax", show = FALSE, ...)$lmax, 0)
+  first <- run(alpha = alphas[1], inner = "lmax", show = FALSE, ...)
+  shared <- if (k > 1) stata_lasso_augmented(lm, grid, first$ratio, lmin) else NULL
+  # no deviance tolerance with several alphas (e(stop) is 0)
+  st <- if (k > 1) 0 else stop
+  fits <- list(); fold <- NULL; minlam <- 0
+  if (!is.null(rseed)) stata_set_seed(rseed)
+  for (i in seq_len(k)) {
+    if (k > 1 && say) cat("\nalpha ", i, " of ", k, ": alpha = ", alpha_text[i], "\n", sep = "")
+    f <- run(alpha = alphas[i], inner = "fit", show = show, shownotes = show && i == 1, stop = st, lams_given = shared,
+             fold_given = fold, minlam = minlam, rseed = NULL, ...)
+    if (sel == "cv") fold <- f$fold
+    fits[[i]] <- f
+  }
+  # several alphas without a minimum of the CV function: not decoded (probe 505)
+  failed1 <- k == 1 && isTRUE(fits[[1]]$failed)
+  if (!failed1 && any(vapply(fits, function(f) isTRUE(f$failed), TRUE))) stata_lasso_stop("elasticnet with several alphas and no minimum of the CV function is not translated yet", 198)
+  # one list of every alpha's lambdas, the IDs running on
+  recs <- list(); grp <- integer(0); base <- 0
+  for (i in seq_len(k)) {
+    for (r in fits[[i]]$recs) { r$id <- r$id - fits[[i]]$recs[[1]]$id + 1 + base; r$alpha <- alphas[i]; recs[[length(recs) + 1]] <- r; grp <- c(grp, i) }
+    base <- base + length(fits[[i]]$recs)
+  }
+  win <- 1; seli <- NA; id_cv <- NA; id_se <- NA
+  if (sel == "bic") {
+    seli <- which.min(vapply(recs, function(r) r$bic, 0)); win <- grp[seli]
+  } else if (sel == "cv") {
+    cvm <- vapply(recs, function(r) r$cvm, 0)
+    best <- which.min(cvm); win <- grp[best]; id_cv <- recs[[best]]$id
+    g <- which(grp == win)
+    lim <- cvm[best] + recs[[best]]$se
+    id_se <- recs[[g[which(cvm[g] <= lim)[1]]]]$id
+    seli <- which(vapply(recs, function(r) r$id, 0) == (if (serule) id_se else id_cv))
+    if (failed1) seli <- NA
+  }
+  fit <- fits[[win]]
+  fit$recs <- recs; fit$grp <- grp; fit$alphas <- alphas; fit$enet <- TRUE
+  fit$sel <- seli; fit$id_cv <- id_cv; fit$id_se <- id_se; fit$stop <- st
+  # e()'s nonzero, deviance-ratio, L1 and L2 extremes are over every alpha's lambdas,
+  # e(n_lambda) and e(lambda_last) the selected alpha's (probe 472)
+  fit$allrecs <- recs; fit$winrecs <- recs[grp == win]; fit$n_lambda <- sum(grp == win)
+  # with several alphas e(lambda_gmax) is the shared grid's first lambda, 1e-10 above
+  # the smallest alpha's lambda_max (with one, lambda_max itself)
+  fit$gmax <- if (k > 1) shared[1] + 1e-10 else fits[[1]]$gmax; fit$gmin <- fits[[1]]$gmin; fit$rngstate <- fits[[1]]$rngstate
+  fit$cmdline <- cmdline
+  stata_lasso <<- fit
+  stata_e <<- stata_lasso_e(fit)
+  stata_esample <<- seq_len(nall) %in% src$stata_row[fit$used]
+  if (show) stata_lasso_table(fit)
+  # one alpha and no minimum: e() is posted all the same, then r(430) (probe 505)
+  if (failed1) { stata_fit_failed <<- FALSE; stop(" (Stata: r(430))", call. = FALSE) }
   invisible(NULL)
 }
 stata_lasso_names <- function(fit, b) c(fit$vars[b != 0], if (!fit$noconstant) "_cons")
@@ -439,11 +710,14 @@ stata_lasso_e <- function(fit) {
   user <- fit$user
   s <- list()
   if (user) {
-    s$ID_sel <- r$id; s$lambda_sel <- r$lambda; s$alpha_sel <- 1; s$ll_sel <- r$ll; s$k_nonzero_sel <- r$nonzero
+    s$ID_sel <- r$id; s$lambda_sel <- r$lambda; s$alpha_sel <- if (is.null(r$alpha)) 1 else r$alpha; s$ll_sel <- r$ll; s$k_nonzero_sel <- r$nonzero
     s$stop <- fit$stop
   }
   s$N <- fit$n; s$k_allvars <- length(fit$vars); s$n_lambda <- fit$n_lambda
-  s$lambda_last <- recs[[length(recs)]]$lambda; s$lambda_gmax <- fit$gmax; s$lambda_gmin <- fit$gmin
+  enet <- isTRUE(fit$enet)
+  if (enet && !user) s$alpha_sel <- if (is.null(r)) NA_real_ else r$alpha
+  lastr <- if (enet) fit$winrecs else recs
+  s$lambda_last <- lastr[[length(lastr)]]$lambda; s$lambda_gmax <- fit$gmax; s$lambda_gmin <- fit$gmin
   all <- if (is.null(fit$allrecs)) recs else fit$allrecs
   col <- function(f) vapply(all, f, 0)
   s$k_nonzero_min <- min(col(function(r) r$nonzero)); s$k_nonzero_max <- max(col(function(r) r$nonzero))
@@ -457,11 +731,13 @@ stata_lasso_e <- function(fit) {
       a <- byid(fit$id_se); cvr <- byid(fit$id_cv)
       if (!is.null(a) && !is.null(cvr)) {
         s$k_nonzero_serule <- a$nonzero; s$k_nonzero_cv <- cvr$nonzero; s$ID_serule <- a$id; s$ID_cv <- cvr$id
-        s$lambda_serule <- a$lambda; s$lambda_cv <- cvr$lambda; s$cvm_serule <- a$cvm; s$cvm_min <- cvr$cvm
+        s$lambda_serule <- a$lambda; if (enet) s$alpha_cv <- cvr$alpha
+        s$lambda_cv <- cvr$lambda; s$cvm_serule <- a$cvm; s$cvm_min <- cvr$cvm
         s$n_fold <- fit$n_fold
       }
     } else if (fit$kind == "bic" && !is.null(r)) {
-      s$bic_min <- r$bic; s$k_nonzero_bic <- r$nonzero; s$ID_bic <- r$id; s$lambda_bic <- r$lambda
+      s$bic_min <- r$bic; s$k_nonzero_bic <- r$nonzero; s$ID_bic <- r$id; if (enet) s$alpha_bic <- r$alpha
+      s$lambda_bic <- r$lambda
     }
     s$stop <- fit$stop
     s$ID_sel <- if (is.null(r)) NA_real_ else r$id
@@ -484,23 +760,34 @@ stata_lasso_e <- function(fit) {
     pick <- function(v, cons) c(v[a], if (!fit$noconstant) cons)
     mk <- function(v, row) matrix(v, 1, length(nm), dimnames = list(row, nm))
     mats$b <- mk(pick(o, o[D$p + 1]), "y1")
-    mats$b_standardized <- mk(pick(r$b, 0), "r1")
+    # the GLM's standardised constant is the linear predictor at the means (probe 474)
+    mats$b_standardized <- mk(pick(r$b, if (D$fam == "linear") 0 else stata_lasso_cons(D, r$b)), "r1")
     mats$b_postselection <- mk(pick(po, po[D$p + 1]), "r1")
   } else {
     m$sel_criterion <- "not sel."
   }
   alw <- fit$vars[fit$always]
+  model <- if (is.null(fit$fam)) "linear" else fit$fam
+  offs <- function(m) {
+    if (!is.null(fit$offset)) m$offset <- fit$offset
+    if (!is.null(fit$exposure)) m$exposure <- fit$exposure
+    m
+  }
   if (user) {
-    m$rngstate <- fit$rngstate; m$depvar <- fit$depvar; m$allvars <- paste(fit$vars, collapse = " ")
+    # results selected before lassoselect keep e(properties) (Stata 19)
+    if (!is.na(fit$orig_sel)) m$properties <- "b"
+    m$rngstate <- fit$rngstate; m$depvar <- fit$depvar; m <- offs(m); m$allvars <- paste(fit$vars, collapse = " ")
     if (length(alw)) m$alwaysvars <- paste(alw, collapse = " ")
-    m$model <- "linear"; m$title <- "Lasso"; m$marginsnotok <- "_ALL"; m$predict <- "lasso_p"; m$cmd <- "lasso"
+    m$model <- model; m$title <- if (enet) "Elastic net" else "Lasso"; if (enet) m$crossgrid <- "augmented"
+    m$marginsnotok <- "_ALL"; m$predict <- if (enet) "elasticnet_p" else "lasso_p"; m$cmd <- if (enet) "elasticnet" else "lasso"
     m$cmdline <- fit$cmdline
   } else {
-    m$cmdline <- fit$cmdline; m$cmd <- "lasso"; m$predict <- "lasso_p"; m$marginsnotok <- "_ALL"
+    m$cmdline <- fit$cmdline; m$cmd <- if (enet) "elasticnet" else "lasso"; m$predict <- if (enet) "elasticnet_p" else "lasso_p"; m$marginsnotok <- "_ALL"
     if (fit$kind == "plugin") m$plugin_type <- fit$ptype
-    m$lasso_selection <- fit$kind; m$title <- "Lasso"; m$model <- "linear"
+    m$lasso_selection <- fit$kind; if (enet) m$crossgrid <- "augmented"
+    m$title <- if (enet) "Elastic net" else "Lasso"; m$model <- model
     if (length(alw)) m$alwaysvars <- paste(alw, collapse = " ")
-    m$allvars <- paste(fit$vars, collapse = " "); m$depvar <- fit$depvar; m$rngstate <- fit$rngstate
+    m$allvars <- paste(fit$vars, collapse = " "); m <- offs(m); m$depvar <- fit$depvar; m$rngstate <- fit$rngstate
     if (!is.null(r)) m$properties <- "b"
   }
   e <- c(s, m, mats)
@@ -510,36 +797,47 @@ stata_lasso_e <- function(fit) {
 stata_lasso_header <- function(fit) {
   cat("\n")
   ad <- fit$kind == "adaptive"
-  lw <- if (ad) 43 else 44; lab <- if (ad) 19 else 18
+  lw <- if (isTRUE(fit$enet)) 49 else if (ad) 43 else 44; lab <- if (ad) 19 else 18
   right <- function(l, v) paste0(formatC(l, width = -lab), "= ", formatC(v, width = 10))
   method <- switch(fit$kind, none = "None", cv = if (fit$serule) "Cross-validation one s.e. rule" else "Cross-validation",
                    adaptive = if (!is.null(fit$power)) "Adaptive power" else "Adaptive",
                    plugin = paste("Plugin", fit$ptype), bic = "Bayesian information criterion")
-  cat(formatC("Lasso linear model", width = -lw), right("No. of obs", fit$n), "\n", sep = "")
+  cat(formatC(stata_lasso_title(fit), width = -lw), right("No. of obs", fit$n), "\n", sep = "")
   cat(strrep(" ", lw), right("No. of covariates", length(fit$vars)), "\n", sep = "")
   third <- switch(fit$kind, cv = right("No. of CV folds", fit$n_fold), adaptive = right("No. of lasso steps", fit$steps), NULL)
   sl <- paste0("Selection: ", method)
   if (is.null(third)) cat(sl, "\n", sep = "") else cat(formatC(sl, width = -lw), third, "\n", sep = "")
   if (ad && !is.null(fit$power)) cat(strrep(" ", lw), right("Power", stata_fmt(fit$power, "%9.3f", trim = TRUE)), "\n", sep = "")
 }
+stata_lasso_title <- function(fit) {
+  f <- fit$D$fam
+  if (isTRUE(fit$enet)) return(paste("Elastic net", f, "model"))
+  paste("Lasso", switch(f, poisson = "Poisson", f), "model")
+}
+# the out-of-sample R-squared, or for a GLM the deviance ratio against the
+# deviance per observation of the constant alone
+stata_lasso_oos <- function(D, cvm) if (D$fam == "linear") 1 - cvm / D$yvar else 1 - cvm / (D$d0 / D$n)
 stata_lasso_note <- function(fit, knots = FALSE) {
   if (is.na(fit$sel)) return("Note: No lambda selected. lassoselect can be used to select lambda.")
   by <- switch(fit$kind, cv = if (fit$serule) "cross-validation one s.e. rule" else "cross-validation",
                adaptive = "cross-validation in final adaptive step", bic = "Bayesian information criterion",
                plugin = if (knots) paste0("plugin assuming ", fit$ptype, " errors") else paste0("plugin formula assuming ", fit$ptype, " errors"),
                none = "lassoselect")
-  paste0("* lambda selected by ", by, ".")
+  paste0(if (isTRUE(fit$enet)) "* alpha and lambda selected by " else "* lambda selected by ", by, ".")
 }
 stata_lasso_table <- function(fit) {
+  if (isTRUE(fit$enet)) return(stata_lasso_etable(fit))
   stata_lasso_header(fit)
   cat("\n")
   if (fit$kind == "adaptive") cat("Final adaptive step results\n")
   cv <- fit$kind %in% c("cv", "adaptive")
   rule <- strrep("-", 74)
   cat(rule, "\n", sep = "")
-  cat("         |                                No. of", if (cv) "      Out-of-      CV mean", "\n", sep = "")
-  cat("         |                               nonzero", if (cv) "       sample   prediction" else "    In-sample", "\n", sep = "")
-  cat("      ID |     Description      lambda     coef.", if (cv) "    R-squared        error" else "    R-squared          BIC", "\n", sep = "")
+  glm <- fit$D$fam != "linear"
+  # logit, probit and Poisson: deviance ratios and the CV mean deviance (probe 474)
+  cat("         |                                No. of", if (cv && glm) "      Out-of-" else if (cv) "      Out-of-      CV mean", "\n", sep = "")
+  cat("         |                               nonzero", if (cv && glm) "       sample      CV mean" else if (cv) "       sample   prediction" else "    In-sample", "\n", sep = "")
+  cat("      ID |     Description      lambda     coef.", if (cv && glm) "   dev. ratio     deviance" else if (cv) "    R-squared        error" else if (glm) "   dev. ratio          BIC" else "    R-squared          BIC", "\n", sep = "")
   cat("---------+", strrep("-", 64), "\n", sep = "")
   n <- length(fit$recs); s <- fit$sel
   shown <- integer(0); lab <- character(0)
@@ -554,13 +852,49 @@ stata_lasso_table <- function(fit) {
   for (k in o) {
     r <- fit$recs[[shown[k]]]
     id <- if (!is.na(s) && s == shown[k]) paste0("* ", r$id) else as.character(r$id)
-    if (cv) { r2 <- 1 - r$cvm / fit$D$yvar; last <- r$cvm } else { r2 <- r$devratio; last <- r$bic }
+    if (cv) { r2 <- stata_lasso_oos(fit$D, r$cvm); last <- r$cvm } else { r2 <- r$devratio; last <- r$bic }
     cat(sprintf("%8s |%16s%12s%10d%13s%13s\n", id, lab[k], stata_lasso_g8(r$lambda), as.integer(r$nonzero),
                 stata_fmt(r2, "%9.4f", trim = TRUE), stata_lasso_g8(last)))
   }
   cat(rule, "\n", sep = "")
   cat(stata_lasso_note(fit), "\n", sep = "")
   stata_lasso_stopnotes(fit, 74)
+}
+# elasticnet's table: a block per alpha, first and last lambda of each, and
+# the lambdas around the selected one in its alpha's block (probe 472)
+stata_lasso_etable <- function(fit) {
+  stata_lasso_header(fit)
+  cat("\n")
+  cv <- fit$kind == "cv"
+  rule <- strrep("-", 79); mid <- paste0(strrep("-", 15), "+", strrep("-", 63))
+  cat(rule, "\n", sep = "")
+  cat("               |                               No. of", if (cv) "      Out-of-      CV mean", "\n", sep = "")
+  cat("               |                              nonzero", if (cv) "       sample   prediction" else "    In-sample", "\n", sep = "")
+  cat("alpha       ID |     Description      lambda    coef.", if (cv) "    R-squared        error" else "    R-squared          BIC", "\n", sep = "")
+  cat(mid, "\n", sep = "")
+  s <- fit$sel
+  for (g in seq_along(fit$alphas)) {
+    idx <- which(fit$grp == g)
+    if (g > 1) cat(mid, "\n", sep = "")
+    cat(sprintf("%-15s|\n", stata_fmt(fit$alphas[g], "%5.3f", trim = TRUE)))
+    shown <- integer(0); lab <- character(0)
+    add <- function(i, l) if (!i %in% shown) { shown <<- c(shown, i); lab <<- c(lab, l) }
+    here <- !is.na(s) && s %in% idx
+    if (here) add(s, "selected lambda")
+    add(idx[1], "first lambda")
+    add(idx[length(idx)], "last lambda")
+    if (here) { if (s > idx[1]) add(s - 1, "lambda before"); if (s < idx[length(idx)]) add(s + 1, "lambda after") }
+    for (k in order(shown)) {
+      r <- fit$recs[[shown[k]]]
+      id <- if (here && s == shown[k]) paste0("* ", r$id) else as.character(r$id)
+      if (cv) { r2 <- stata_lasso_oos(fit$D, r$cvm); last <- r$cvm } else { r2 <- r$devratio; last <- r$bic }
+      cat(sprintf("%14s |%16s%12s%9d%13s%13s\n", id, lab[k], stata_lasso_g8(r$lambda), as.integer(r$nonzero),
+                  stata_fmt(r2, "%9.4f", trim = TRUE), stata_lasso_g8(last)))
+    }
+  }
+  cat(rule, "\n", sep = "")
+  cat(stata_lasso_note(fit), "\n", sep = "")
+  stata_lasso_stopnotes(fit, 79)
 }
 stata_lasso_stopnotes <- function(fit, width) {
   note <- function(a, b) { w <- paste(a, b); if (nchar(w) <= width) cat(w, "\n", sep = "") else cat(a, "\n      ", b, "\n", sep = "") }
@@ -571,7 +905,7 @@ stata_lasso_stopnotes <- function(fit, width) {
   }
 }
 stata_lasso_active <- function() {
-  if (!exists("stata_lasso") || !identical(stata_e$cmd, "lasso")) stata_lasso_stop("last estimates not found", 301)
+  if (!exists("stata_lasso") || !isTRUE(stata_e$cmd %in% c("lasso", "elasticnet"))) stata_lasso_stop("last estimates not found", 301)
   stata_lasso
 }
 # lassoselect id = # | lambda = #
@@ -588,7 +922,10 @@ stata_lasso_select <- function(what, value) {
   }
   if (!fit$user) fit$orig_sel <- fit$sel
   fit$sel <- i; fit$user <- TRUE
-  cat("ID = ", ids[i], "  lambda = ", stata_fmt(lams[i], "%9.0g", trim = TRUE), " selected\n", sep = "")
+  al <- if (is.null(fit$recs[[i]]$alpha)) "" else paste0("  alpha = ", stata_fmt(fit$recs[[i]]$alpha, "%5.3f", trim = TRUE))
+  cat("ID = ", ids[i], al, "  lambda = ", stata_fmt(lams[i], "%9.0g", trim = TRUE), " selected\n", sep = "")
+  # an elastic net's e(n_lambda) and e(lambda_last) are the selected alpha's
+  if (isTRUE(fit$enet)) { fit$winrecs <- fit$recs[fit$grp == fit$grp[i]]; fit$n_lambda <- length(fit$winrecs) }
   nm <- stata_e[["_estimates_name"]]
   stata_lasso <<- fit
   e <- stata_lasso_e(fit)
@@ -608,17 +945,21 @@ stata_lasso_knots <- function(cols = NULL, all = FALSE) {
   wv <- "vars" %in% cols
   numc <- setdiff(cols, "vars")
   width <- function(k) switch(k, nonzero = , bic = , l1 = , l2 = 11, cvm = , r2 = if (wv) 10 else 11, osr2 = 12)
-  title <- function(k) switch(k, nonzero = c("No. of", "nonzero", "coef."), cvm = c("CV mean", "pred.", "error"),
-                              osr2 = c("Out-of-", "sample", "R-squared"), bic = c("", "", "BIC"), r2 = c("", "In-sample", "R-squared"),
+  glm <- fit$D$fam != "linear"
+  # a GLM's headings: In-sample deviance ratio, CV mean deviance (probe 474)
+  title <- function(k) switch(k, nonzero = c("No. of", "nonzero", "coef."), cvm = if (glm) c("", "CV mean", "deviance") else c("CV mean", "pred.", "error"),
+                              osr2 = c("Out-of-", "sample", "R-squared"), bic = c("", "", "BIC"), r2 = if (glm) c("In-sample", "deviance", "ratio") else c("", "In-sample", "R-squared"),
                               l1 = c("Relative", "L1", "length"), l2 = c("Relative", "L2", "length"))
   l1m <- max(vapply(fit$recs, function(r) r$l1, 0)); l2m <- max(vapply(fit$recs, function(r) r$l2, 0))
   value <- function(k, r) switch(k, nonzero = as.character(r$nonzero), cvm = stata_lasso_g8(r$cvm),
-                                 osr2 = stata_fmt(1 - r$cvm / fit$D$yvar, "%9.4f", trim = TRUE), bic = stata_lasso_g8(r$bic),
+                                 osr2 = stata_fmt(stata_lasso_oos(fit$D, r$cvm), "%9.4f", trim = TRUE), bic = stata_lasso_g8(r$bic),
                                  r2 = stata_fmt(r$devratio, "%9.4f", trim = TRUE), l1 = stata_fmt(r$l1 / l1m, "%9.4f", trim = TRUE),
                                  l2 = stata_fmt(r$l2 / l2m, "%9.4f", trim = TRUE))
   ls <- max(if (exists("stata_linesize")) stata_linesize else 80, 40)
   numw <- 9 + sum(vapply(numc, width, 0))
-  idw <- 6
+  enet <- isTRUE(fit$enet)
+  # elasticnet: an alpha column and a block per alpha (probe 472)
+  idw <- if (enet) 11 else 6
   left <- idw + 2 + numw
   total <- if (wv) ls else left
   area <- max(ls - (left + 2), 0)
@@ -630,7 +971,7 @@ stata_lasso_knots <- function(cols = NULL, all = FALSE) {
   for (line in 1:3) {
     if (line == 1 && !wv && !top) next
     # with one column besides lambda, ID meets the bar (probe 501); else a space between
-    s <- if (line < 3) paste0(strrep(" ", idw), " |", strrep(" ", 9)) else if (wv || length(numc) > 1) paste0(formatC("ID", width = idw), " |   lambda") else paste0(formatC("ID", width = idw + 1), "|   lambda")
+    s <- if (line < 3) paste0(strrep(" ", idw), " |", strrep(" ", 9)) else if (enet) paste0("alpha", formatC("ID", width = idw - 5), " |   lambda") else if (wv || length(numc) > 1) paste0(formatC("ID", width = idw), " |   lambda") else paste0(formatC("ID", width = idw + 1), "|   lambda")
     for (k in numc) s <- paste0(s, formatC(title(k)[line], width = width(k)))
     if (wv) {
       s <- paste0(s, " |")
@@ -643,14 +984,22 @@ stata_lasso_knots <- function(cols = NULL, all = FALSE) {
   if (wv) sep <- paste0(sep, "-+", strrep("-", area))
   cat(sep, "\n", sep = "")
   n <- length(fit$recs); prev <- rep(FALSE, length(fit$vars))
+  grp <- if (enet) fit$grp else rep(1L, n)
   for (i in seq_len(n)) {
     r <- fit$recs[[i]]
+    if (enet && (i == 1 || grp[i] != grp[i - 1])) {
+      if (i > 1) cat(sep, "\n", sep = "")
+      al <- formatC(stata_fmt(fit$alphas[grp[i]], "%5.3f", trim = TRUE), width = -idw)
+      cat(al, " |", if (wv) paste0(strrep(" ", numw), " |"), "\n", sep = "")
+      prev <- rep(FALSE, length(fit$vars))
+    }
     now <- r$b != 0
     added <- fit$vars[now & !prev]; removed <- fit$vars[!now & prev]
     prev <- now
     changed <- length(added) || length(removed)
     marked <- (!is.na(fit$sel) && fit$sel == i) || (!is.na(fit$orig_sel) && fit$orig_sel == i)
-    islast <- i == n && n > 1
+    gi <- which(grp == grp[i])
+    islast <- i == gi[length(gi)] && length(gi) > 1
     if (!(all || changed || marked || islast)) next
     mark <- if (fit$user && !is.na(fit$sel) && fit$sel == i) "+" else if (marked) "*" else ""
     id <- formatC(if (nzchar(mark)) paste(mark, r$id) else as.character(r$id), width = idw)
@@ -682,7 +1031,7 @@ stata_lasso_knots <- function(cols = NULL, all = FALSE) {
 # the e() of estimates named in lassocoef or lassoinfo: stored ones, or the active ones
 stata_lasso_named <- function(names) {
   act <- function() {
-    if (!exists("stata_e") || !identical(stata_e$cmd, "lasso")) stata_lasso_stop("last estimates not found", 301)
+    if (!exists("stata_e") || !isTRUE(stata_e$cmd %in% c("lasso", "elasticnet"))) stata_lasso_stop("last estimates not found", 301)
     nm <- stata_e[["_estimates_name"]]
     list(name = if (is.null(nm)) "active" else nm, e = stata_e)
   }
@@ -736,20 +1085,29 @@ stata_lasso_info <- function(names = character(0)) {
     method <- e$lasso_selection; crit <- e$sel_criterion
     lam <- if (is.null(e$lambda_sel) || is.na(e$lambda_sel)) "" else stata_lasso_g8(e$lambda_sel)
     nsel <- if (is.null(e$k_nonzero_sel) || is.na(e$k_nonzero_sel)) "" else as.character(e$k_nonzero_sel)
-    cat("\n    Estimate: ", nm, "\n     Command: lasso\n", sep = "")
-    if (!method %in% c("plugin", "none")) {
+    cat("\n    Estimate: ", nm, "\n     Command: ", e$cmd, "\n", sep = "")
+    if (identical(e$cmd, "elasticnet")) {
+      # an alpha column (probe 472)
+      al <- if (is.null(e$alpha_sel) || is.na(e$alpha_sel)) "" else stata_fmt(e$alpha_sel, "%5.3f", trim = TRUE)
+      cat(strrep("-", 75), "\n            |                                                        No. of\n",
+          "  Dependent |           Selection  Selection                       selected\n",
+          "   variable |    Model     method  criterion     alpha    lambda  variables\n",
+          "------------+", strrep("-", 62), "\n", sep = "")
+      cat(sprintf("%11s |%9s%11s%11s%10s%10s%11s\n", e$depvar, e$model, method, crit, al, lam, nsel))
+      cat(strrep("-", 75), "\n", sep = "")
+    } else if (!method %in% c("plugin", "none")) {
       cat(strrep("-", 65), "\n            |                                              No. of\n",
           "  Dependent |           Selection  Selection             selected\n",
           "   variable |    Model     method  criterion    lambda  variables\n",
           "------------+", strrep("-", 52), "\n", sep = "")
-      cat(sprintf("%11s |%9s%11s%11s%10s%11s\n", e$depvar, "linear", method, crit, lam, nsel))
+      cat(sprintf("%11s |%9s%11s%11s%10s%11s\n", e$depvar, e$model, method, crit, lam, nsel))
       cat(strrep("-", 65), "\n", sep = "")
     } else {
       cat(strrep("-", 54), "\n            |                                   No. of\n",
           "  Dependent |           Selection             selected\n",
           "   variable |    Model     method    lambda  variables\n",
           "------------+", strrep("-", 41), "\n", sep = "")
-      cat(sprintf("%11s |%9s%11s%10s%11s\n", e$depvar, "linear", method, lam, nsel))
+      cat(sprintf("%11s |%9s%11s%10s%11s\n", e$depvar, e$model, method, lam, nsel))
       cat(strrep("-", 54), "\n", sep = "")
     }
   }
@@ -757,20 +1115,26 @@ stata_lasso_info <- function(names = character(0)) {
 }
 # predict after lasso: the linear prediction with the penalized or the
 # postselection coefficients, and Stata's note on what it assumed
-stata_lasso_predict <- function(d, post = FALSE, xb = FALSE, penalized = FALSE, show = TRUE) {
-  if (!exists("stata_e") || !identical(stata_e$cmd, "lasso")) stata_lasso_stop("last estimates not found", 301)
+stata_lasso_predict <- function(d, post = FALSE, xb = FALSE, penalized = FALSE, show = TRUE, pr = FALSE, nev = FALSE) {
+  if (!exists("stata_e") || !isTRUE(stata_e$cmd %in% c("lasso", "elasticnet"))) stata_lasso_stop("last estimates not found", 301)
   kind <- if (post) "postselection" else "penalized"
+  model <- if (is.null(stata_e$model)) "linear" else stata_e$model
+  # logit and probit predict Pr(y), Poisson the number of events, by default (probe 474)
+  mean <- if (model == "linear") NULL else if (model == "poisson") "n" else "pr"
+  what <- if (xb || is.null(mean)) "xb" else mean
+  given <- xb || pr || nev
+  words <- c(xb = "linear prediction", pr = paste0("Pr(", stata_e$depvar, ")"), n = "predicted number of events")
   if (show) {
-    if (!xb && !(post || penalized)) cat("(options xb penalized assumed; linear prediction with ", kind, " coefficients)\n", sep = "")
-    else if (!xb) cat("(option xb assumed; linear prediction with ", kind, " coefficients)\n", sep = "")
-    else if (!(post || penalized)) cat("(option penalized assumed; linear prediction with ", kind, " coefficients)\n", sep = "")
+    assumed <- c(if (!given) what, if (!(post || penalized)) "penalized")
+    if (length(assumed)) cat(if (length(assumed) > 1) "(options " else "(option ", paste(assumed, collapse = " "), " assumed; ",
+                             words[[what]], " with ", kind, " coefficients)\n", sep = "")
   }
   b <- stata_e[[if (post) "b_postselection" else "b"]]
   if (is.null(b)) stata_lasso_stop("last estimates not found", 301)
   nm <- colnames(b)
   eta <- if ("_cons" %in% nm) rep(b[1, "_cons"], nrow(d)) else rep(0, nrow(d))
   for (v in setdiff(nm, "_cons")) { x <- unclass(d[[v]]); attributes(x) <- NULL; eta <- eta + as.numeric(x) * b[1, v] }
-  eta
+  if (what == "xb") eta else stata_lasso_mu(model, eta)
 }
 "###;
 
@@ -793,6 +1157,9 @@ const LASSO_TEXTS: &[&str] = &[
     "depvar",
     "rngstate",
     "properties",
+    "crossgrid",
+    "offset",
+    "exposure",
 ];
 
 /// Stata's message for `lassoselect` without `id = #` or `lambda = #`.
@@ -875,12 +1242,12 @@ impl Session {
         Ok(())
     }
 
-    fn lasso_options(&self, opts: &Opts) -> Result<Parsed, Untranslated> {
+    fn lasso_options(&self, opts: &Opts, enet: bool) -> Result<Parsed, Untranslated> {
         let mut args: Vec<String> = Vec::new();
         let stata = |m: &str| Ok(Parsed::Stata(m.to_string(), 198));
         // alpha() is elasticnet's (Stata: alphas(#) not allowed)
         for o in opts.0 {
-            if o.is("alphas", 5) {
+            if o.is("alphas", 5) && !enet {
                 return stata(&format!("option alphas({}) not allowed", o.arg().trim()));
             }
         }
@@ -897,12 +1264,15 @@ impl Session {
             ("noconstant", 3),
             ("tolerance", 3),
             ("penaltywt", 4),
+            // logit, probit and Poisson's (lasso() checks them)
+            ("offset", 3),
+            ("exposure", 3),
+            // elasticnet's (lasso() reads them)
+            ("alphas", if enet { 5 } else { 99 }),
         ]) {
             // lasso's other options in its manual entry: not translated yet;
             // any other word is Stata's r(198) (probe 384)
             let known = [
-                ("offset", 3),
-                ("exposure", 3),
                 ("cluster", 2),
                 ("cvtolerance", 5),
                 ("bictolerance", 6),
@@ -947,6 +1317,12 @@ impl Session {
                     "option selection() invalid\n    Only one of cv, adaptive, none, plugin, or bic is allowed.",
                 );
             };
+            // elasticnet's own words (probe 472)
+            if enet && matches!(kind, "adaptive" | "plugin") {
+                return stata(
+                    "option selection() invalid\n    Only one of cv, none or bic is allowed.",
+                );
+            }
             for (name, arg) in sub_options(&tail) {
                 let n = name.as_str();
                 let a = arg.clone().unwrap_or_default();
@@ -1115,20 +1491,23 @@ impl Session {
         opts: &Opts,
         out: &mut Out,
     ) -> Result<(), Untranslated> {
-        self.no_by(c, "lasso")?;
+        let enet = c.name == "elasticnet";
+        let cmd = c.name.as_str();
+        self.no_by(c, cmd)?;
         if c.parts.weight.is_some() {
-            return Err(no("lasso with weights is not translated yet"));
+            return Err(no(format!("{cmd} with weights is not translated yet")));
         }
         let main = c.parts.main.trim().to_string();
         let (model, rest) = first_word(&main);
+        if enet && matches!(model, "logit" | "probit" | "poisson") {
+            return Err(no(format!(
+                "elasticnet {model} is not translated yet (elasticnet linear is)"
+            )));
+        }
         match model {
-            "linear" => {}
-            "logit" | "probit" | "poisson" | "cox" => {
-                return Err(no(format!(
-                    "lasso {model} is not translated yet (lasso linear is)"
-                )))
-            }
-            "" => return Err(no("lasso without a model and variables")),
+            "linear" | "logit" | "probit" | "poisson" => {}
+            "cox" => return Err(no("lasso cox is not translated yet")),
+            "" => return Err(no(format!("{cmd} without a model and variables"))),
             _ => {
                 return self.lasso_error(
                     out,
@@ -1159,6 +1538,11 @@ impl Session {
         // Stata's words with r(100) when nothing follows the model, r(198)
         // with a dependent variable alone (probes 383 and 384, lasso.do)
         let required = "dependent variable depvar and independent variables othervars required\n    The full syntax is\n        lasso linear depvar [(alwaysvars)] othervars [, ...]\n    Also see lasso.";
+        if (model != "linear" || enet) && (others.len() < 2 || others.len() + always.len() < 2) {
+            return Err(no(format!(
+                "{cmd} {model} without a dependent and an independent variable (Stata's words for it are not known)"
+            )));
+        }
         if others.is_empty() && always.is_empty() {
             return self.lasso_error(out, required, 100);
         }
@@ -1188,10 +1572,130 @@ impl Session {
                 "lasso with always-in variables only is not translated yet",
             ));
         }
-        let args = match self.lasso_options(opts)? {
+        let mut args = match self.lasso_options(opts, enet)? {
             Parsed::Stata(msg, rc) => return self.lasso_error(out, &msg, rc),
             Parsed::Args(a) => a,
         };
+        // the model, offset() and exposure() (probe 474); marks for what follows
+        let mut marks: Vec<String> = vec![format!("={model}")];
+        let offset = opts.arg("offset", 3).map(|s| s.trim().to_string());
+        let exposure = opts.arg("exposure", 3).map(|s| s.trim().to_string());
+        if model == "linear" && (offset.is_some() || exposure.is_some()) {
+            return Err(no(
+                "lasso linear with offset() or exposure() is not translated yet",
+            ));
+        }
+        if exposure.is_some() && model != "poisson" {
+            return self.lasso_error(
+                out,
+                &format!("option exposure() not allowed with model {model}"),
+                198,
+            );
+        }
+        if offset.is_some() && exposure.is_some() {
+            return Err(no(
+                "lasso poisson with both offset() and exposure() is not translated",
+            ));
+        }
+        for (name, v) in [("offset", &offset), ("exposure", &exposure)] {
+            if let Some(v) = v {
+                if !is_name(v) {
+                    return Err(no(format!(
+                        "lasso, {name}({v}): a variable name is translated"
+                    )));
+                }
+                args.push(format!("{name} = {}", r_text(v)));
+                marks.push(name.to_string());
+                marks.push("=offset".into());
+            }
+        }
+        if model != "linear" {
+            args.push(format!("fam = {}", r_text(model)));
+            if opts.has("noconstant", 3) {
+                // the fit is Stata's (centred predictors, no constant), but which
+                // constant its held-out and predicted values use is not known
+                if args
+                    .iter()
+                    .any(|a| a == "sel = \"cv\"" || a == "sel = \"adaptive\"")
+                {
+                    return Err(no(format!(
+                        "lasso {model}, noconstant with cross-validation is not translated (the constant of Stata's held-out predictions is not known)"
+                    )));
+                }
+                marks.push("=noconstant".into());
+            }
+        }
+        // elasticnet's alphas: largest first, as typed in its log (probe 472)
+        let mut fun = "stata_lasso_run";
+        if enet {
+            let (vals, texts): (Vec<f64>, Vec<String>) = match opts.arg("alphas", 5) {
+                None => (
+                    vec![1.0, 0.75, 0.5],
+                    vec!["1".into(), "0.75".into(), "0.5".into()],
+                ),
+                Some(a) => {
+                    let words: Vec<&str> = a.split_whitespace().collect();
+                    let nums: Option<Vec<f64>> = words.iter().map(|w| number(w)).collect();
+                    match nums {
+                        Some(v) if !v.is_empty() && v.iter().all(|x| (0.0..=1.0).contains(x)) => {
+                            (v, words.iter().map(|w| w.to_string()).collect())
+                        }
+                        Some(v) if !v.is_empty() => {
+                            return self.lasso_error(out, "invalid alphas()\n    option alphas() must be either a matrix or numlist consisting of numbers between 0 and 1", 198)
+                        }
+                        _ => {
+                            return Err(no(format!(
+                                "elasticnet, alphas({a}): a list of numbers is translated"
+                            )))
+                        }
+                    }
+                }
+            };
+            if vals.contains(&0.0) {
+                return Err(no(
+                    "elasticnet with alpha 0 (ridge) is not translated yet (its grid and stopping differ)",
+                ));
+            }
+            let mut distinct = vals.clone();
+            distinct.sort_by(f64::total_cmp);
+            distinct.dedup();
+            let multi = distinct.len() > 1;
+            let none = args.iter().any(|a| a == "sel = \"none\"");
+            if multi && none {
+                return Err(no(
+                    "elasticnet with several alphas and selection(none) is not translated yet (which alpha's statistics e() holds is not known)",
+                ));
+            }
+            if let Some(a) = args
+                .iter()
+                .find(|a| a.starts_with("alllambdas") || a.starts_with("postsel"))
+            {
+                return Err(no(format!(
+                    "elasticnet with {} is not translated yet",
+                    a.split(' ').next().unwrap_or(a)
+                )));
+            }
+            args.push(format!(
+                "alphas = c({}), alpha_text = c({})",
+                vals.iter()
+                    .map(|v| r_number(*v))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                texts
+                    .iter()
+                    .map(|t| r_text(t))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+            marks.push("=enet".into());
+            if none {
+                marks.push("=none".into());
+            }
+            if multi {
+                marks.push("=multi".into());
+            }
+            fun = "stata_lasso_enet";
+        }
         let rows = self.rows_for(c, out)?;
         let d = self.data()?;
         out.package("dplyr");
@@ -1205,7 +1709,7 @@ impl Session {
             )
         };
         out.line(format!(
-            "stata_lasso_run(local({{ {d} <- dplyr::mutate({d}, stata_row = seq_len(nrow({d}))); {rows} }}), nrow({d}), {}, {}, {}, {}, cmdline = {}, show = {})",
+            "{fun}(local({{ {d} <- dplyr::mutate({d}, stata_row = seq_len(nrow({d}))); {rows} }}), nrow({d}), {}, {}, {}, {}, cmdline = {}, show = {})",
             r_text(dep),
             if always.is_empty() { "character(0)".to_string() } else { list(&always) },
             list(&others),
@@ -1224,7 +1728,11 @@ impl Session {
         self.fit_ts = None;
         self.e_ret = Returned::Program {
             cmd: "lasso".into(),
-            texts: LASSO_TEXTS.iter().map(|s| s.to_string()).collect(),
+            texts: LASSO_TEXTS
+                .iter()
+                .map(|s| s.to_string())
+                .chain(marks)
+                .collect(),
         };
         Ok(())
     }
@@ -1232,6 +1740,26 @@ impl Session {
     /// Whether the active results are a lasso's this do-file translated.
     fn lasso_active(&self) -> bool {
         matches!(&self.e_ret, Returned::Program { cmd, .. } if cmd == "lasso")
+    }
+
+    /// The active lasso's model (`linear`, `logit`, `probit`, `poisson`) and
+    /// whether it has an offset or no constant: the `=` marks lasso() keeps
+    /// among its e() texts (no e() name starts with `=`).
+    fn lasso_mark(&self, mark: &str) -> bool {
+        matches!(&self.e_ret, Returned::Program { cmd, texts } if cmd == "lasso" && texts.iter().any(|t| t == mark))
+    }
+
+    fn lasso_marks(&self) -> (String, bool, bool) {
+        let texts: &[String] = match &self.e_ret {
+            Returned::Program { cmd, texts } if cmd == "lasso" => texts,
+            _ => &[],
+        };
+        let has = |m: &str| texts.iter().any(|t| t == m);
+        let model = ["logit", "probit", "poisson"]
+            .into_iter()
+            .find(|m| has(&format!("={m}")))
+            .unwrap_or("linear");
+        (model.to_string(), has("=offset"), has("=noconstant"))
     }
 
     fn lasso_need(&self, what: &str) -> Result<(), Untranslated> {
@@ -1322,17 +1850,24 @@ impl Session {
                 let Some((what, v)) = parsed else {
                     return self.lasso_error(out, SELECT_SYNTAX, 198);
                 };
+                if what == "lambda" && self.lasso_mark("=multi") {
+                    return Err(no(
+                        "lassoselect lambda = # after elasticnet with several alphas is not translated (Stata also asks for the alpha)",
+                    ));
+                }
                 let call = format!("stata_lasso_select({}, {})", r_text(&what), r_number(v));
                 out.line(if show {
                     call
                 } else {
                     format!("invisible(utils::capture.output({call}))")
                 });
-                self.e_ret = Returned::Program {
-                    cmd: "lasso".into(),
-                    texts: LASSO_TEXTS.iter().map(|s| s.to_string()).collect(),
-                };
+                // e() is the same lasso's (its model marks kept)
                 self.e_text.clear();
+                if self.lasso_mark("=enet") {
+                    if let Returned::Program { texts, .. } = &mut self.e_ret {
+                        texts.push("=selected".into());
+                    }
+                }
                 Ok(())
             }
             "lassoknots" => {
@@ -1340,12 +1875,27 @@ impl Session {
                 if !c.parts.main.trim().is_empty() {
                     return Err(no("lassoknots with a name or for() is not translated yet"));
                 }
+                if self.lasso_mark("=enet")
+                    && (self.lasso_mark("=selected")
+                        || opts.has("display", 3)
+                        || opts.has("alllambdas", 3))
+                {
+                    return Err(no(
+                        "lassoknots after elasticnet with lassoselect, display() or alllambdas is not translated yet (Stata's table for it is not known)",
+                    ));
+                }
                 if let Some(o) = opts.other(&[("display", 3), ("alllambdas", 3)]) {
                     return Err(no(format!(
                         "lassoknots with the option {o} is not translated yet"
                     )));
                 }
                 let mut cols: Vec<&str> = Vec::new();
+                let glm = self.lasso_marks().0 != "linear";
+                if glm && opts.has("display", 3) {
+                    return Err(no(
+                        "lassoknots, display() after lasso logit, probit or poisson is not translated yet (its columns' headings are not known)",
+                    ));
+                }
                 if let Some(d) = opts.arg("display", 3) {
                     for w in d.split_whitespace() {
                         let k = match w {
@@ -1457,6 +2007,14 @@ impl Session {
                 if !c.options.is_empty() {
                     return Err(no("lassoinfo with options is not translated yet"));
                 }
+                if c.parts.main.trim().is_empty()
+                    && self.lasso_mark("=enet")
+                    && self.lasso_mark("=none")
+                {
+                    return Err(no(
+                        "lassoinfo after elasticnet, selection(none) is not translated yet (Stata's table for it is not known)",
+                    ));
+                }
                 if show {
                     out.line(format!("stata_lasso_info({names})"));
                 }
@@ -1476,10 +2034,31 @@ impl Session {
         if opts.has("residuals", 1) {
             return self.lasso_error(out, "option residuals not allowed", 198);
         }
-        if let Some(o) = opts.other(&[("xb", 2), ("penalized", 3), ("postselection", 4)]) {
+        let (model, offset, nocons) = self.lasso_marks();
+        // pr after logit and probit, n after Poisson (probe 474)
+        let mean: &[(&str, usize)] = match model.as_str() {
+            "logit" | "probit" => &[("pr", 2)],
+            "poisson" => &[("n", 1)],
+            _ => &[],
+        };
+        let known: Vec<(&str, usize)> = [("xb", 2), ("penalized", 3), ("postselection", 4)]
+            .into_iter()
+            .chain(mean.iter().copied())
+            .collect();
+        if let Some(o) = opts.other(&known) {
             return Err(no(format!(
-                "predict after lasso with the option {o} is not translated yet"
+                "predict after lasso {model} with the option {o} is not translated yet"
             )));
+        }
+        if offset || nocons {
+            return Err(no(format!(
+                "predict after lasso {model} with offset(), exposure() or noconstant is not translated yet (whether Stata's prediction uses them is not known)"
+            )));
+        }
+        if opts.has("xb", 2) && mean.iter().any(|(m, k)| opts.has(m, *k)) {
+            return Err(no(
+                "predict after lasso with xb and pr or n together is not translated",
+            ));
         }
         let mut words: Vec<&str> = c.parts.main.split_whitespace().collect();
         let ty = match words.first() {
@@ -1511,11 +2090,13 @@ impl Session {
             r_text(w)
         ));
         out.line(format!(
-            "stata_lasso_p <- stata_lasso_predict({base}, post = {}, xb = {}, penalized = {}, show = {})",
+            "stata_lasso_p <- stata_lasso_predict({base}, post = {}, xb = {}, penalized = {}, show = {}, pr = {}, nev = {})",
             super::stats::r_logical(opts.has("postselection", 4)),
             super::stats::r_logical(opts.has("xb", 2)),
             super::stats::r_logical(opts.has("penalized", 3)),
-            super::stats::r_logical(!self.quiet(c))
+            super::stats::r_logical(!self.quiet(c)),
+            super::stats::r_logical(model != "poisson" && opts.has("pr", 2)),
+            super::stats::r_logical(model == "poisson" && opts.has("n", 1))
         ));
         let v = stored("stata_lasso_p", st, &mut self.helpers, out);
         let v = match self.condition(c, out)? {
@@ -1639,13 +2220,13 @@ lasso linear y x1 x2, tolerance(2)");
     #[test]
     fn what_lasso_does_not_match_yet_is_refused() {
         let out = r("use d
-lasso logit y x1 x2
+lasso logit y x1 x2, selection(cv) noconstant
 lasso linear y i.g x1
 lasso linear y x1 x2, tolerance(1e-3)
 lasso linear y x1 x2, cluster(g)
 lasso linear y x1 x2 [pw = w]");
         assert!(
-            out[1].contains("NOT: lasso logit is not translated yet"),
+            out[1].contains("NOT: lasso logit, noconstant with cross-validation"),
             "{out:?}"
         );
         assert!(
@@ -1745,6 +2326,97 @@ lassoinfo b1 b2");
             out[5].contains("NOT: lassoinfo b2: no results are stored under that name"),
             "{out:?}"
         );
+    }
+
+    #[test]
+    fn logit_probit_and_poisson_lassos_name_their_model() {
+        let out = r("use d
+lasso logit yb x1 x2, selection(bic) offset(x3)
+predict p, pr
+lasso poisson yc x1 x2, selection(cv) exposure(ex)
+predict n
+lasso logit yb x1 x2, exposure(ex)
+lasso probit yb x1 x2
+predict q, xb");
+        assert!(
+            out[1].contains("fam = \"logit\"") && out[1].contains("offset = \"x3\""),
+            "{out:?}"
+        );
+        // offset(): whether Stata's prediction uses it is not known
+        assert!(
+            out[2].contains("NOT: predict after lasso logit with offset()"),
+            "{out:?}"
+        );
+        assert!(
+            out[3].contains("fam = \"poisson\"") && out[3].contains("exposure = \"ex\""),
+            "{out:?}"
+        );
+        assert!(
+            out[4].contains("NOT: predict after lasso poisson with offset()"),
+            "{out:?}"
+        );
+        assert!(
+            out[5].contains("option exposure() not allowed with model logit (Stata: r(198))"),
+            "{out:?}"
+        );
+        assert!(out[6].contains("fam = \"probit\""), "{out:?}");
+        assert!(
+            out[7].contains("stata_lasso_predict(") && out[7].contains("xb = TRUE"),
+            "{out:?}"
+        );
+        // pr is logit's and probit's, n Poisson's
+        let out = r("use d\nlasso logit yb x1 x2\npredict n1, n\npredict p1, pr");
+        assert!(
+            out[2].contains("NOT: predict after lasso logit with the option n"),
+            "{out:?}"
+        );
+        assert!(out[3].contains("pr = TRUE"), "{out:?}");
+    }
+
+    #[test]
+    fn elasticnet_runs_its_alphas_largest_first() {
+        let out = r("use d
+elasticnet linear y x1 x2 x3, alpha(.5 1) selection(cv) rseed(1)
+lassoselect lambda = .1
+elasticnet linear y x1 x2 x3, alpha(1.5)
+elasticnet linear y x1 x2 x3, selection(adaptive)
+elasticnet linear y x1 x2 x3, alpha(0 .5)
+elasticnet linear y x1 x2 x3, alpha(.5 1) selection(none)
+elasticnet logit yb x1 x2");
+        assert!(
+            out[1].contains("stata_lasso_enet(")
+                && out[1].contains("alphas = c(0.5, 1), alpha_text = c(\".5\", \"1\")"),
+            "{out:?}"
+        );
+        assert!(
+            out[2].contains("NOT: lassoselect lambda = # after elasticnet"),
+            "{out:?}"
+        );
+        assert!(
+            out[3].contains("invalid alphas()") && out[3].contains("r(198)"),
+            "{out:?}"
+        );
+        assert!(
+            out[4].contains("Only one of cv, none or bic is allowed.") && out[4].contains("r(198)"),
+            "{out:?}"
+        );
+        assert!(out[5].contains("NOT: elasticnet with alpha 0"), "{out:?}");
+        assert!(
+            out[6].contains("NOT: elasticnet with several alphas and selection(none)"),
+            "{out:?}"
+        );
+        assert!(
+            out[7].contains("NOT: elasticnet logit is not translated yet"),
+            "{out:?}"
+        );
+        // the default alphas, as Stata's log writes them
+        let out = r("use d\nelasticnet linear y x1 x2 x3\nlassoknots\nlassoinfo");
+        assert!(
+            out[1].contains("alphas = c(1, 0.75, 0.5), alpha_text = c(\"1\", \"0.75\", \"0.5\")"),
+            "{out:?}"
+        );
+        assert!(out[2].contains("stata_lasso_knots("), "{out:?}");
+        assert!(out[3].contains("stata_lasso_info("), "{out:?}");
     }
 
     #[test]

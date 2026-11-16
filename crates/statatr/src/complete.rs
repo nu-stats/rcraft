@@ -98,6 +98,7 @@ pub const COMMANDS: &[&str] = &[
     "drop",
     "duplicates",
     "egen",
+    "elasticnet",
     "encode",
     "erase",
     "ereturn",
@@ -327,6 +328,19 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("duplicates", &["force", "generate("]),
     ("egen", &["by(", "missing"]),
+    (
+        "elasticnet",
+        &[
+            "alphas(",
+            "grid(",
+            "noconstant",
+            "nolog",
+            "penaltywt(",
+            "rseed(",
+            "selection(",
+            "stop(",
+        ],
+    ),
     ("encode", &["generate("]),
     (
         "estat",
@@ -593,10 +607,12 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     (
         "lasso",
         &[
+            "exposure(",
             "grid(",
             "noconstant",
             "nolog",
-            "penaltywt(",
+            "nolog",
+            "offset(",
             "rseed(",
             "selection(",
             "stop(",
