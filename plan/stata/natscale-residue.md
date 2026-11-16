@@ -628,3 +628,21 @@ First n with a bottom residue (the walk from below 0), lo = 0, by runs of hi:
   15, 12) and stays there. N2 is the onset plus 4 in all three bands; the valid N for step 0.1 run to
   29, 21 and 17, so N2 is not the largest valid N either.
 - Scoreboard unchanged at 4,891.
+
+## 2026-11-16: a search over the mark count N: n + 4, capped
+
+Treating the padded set as a centred scale of N marks with Stata's step (span d·(N − 1)):
+
+- lo 0, hi 1.45, step 0.1: N from 16 to 29 all round up to step 0.1. Before the onset the bits do not
+  pin N to the label count: n 15–19 allow any N from 16 to 23; n 20–28 allow only 24. So N = n + 4
+  fits every n here, capped at 24. A cost over N cannot give this (at n 20 it would have to prefer 24
+  marks to 20, with more outside and further from n).
+- On 3,000 sampled cases some N fits both ends in 2,883; N = n + c fits 1,013 (c 0), 1,279 (1), 1,332
+  (2), 1,335 (3), 1,311 (4), 1,025 (5). Where n + 4 misses, the fitting set lies below it in 1,062
+  (a cap), above it in 75, and n + 4 falls in a gap of it in 435.
+- Per range and step (1,481 groups of the sample), a cap C with N = min(n + 4, C) fits every n in
+  1,303 groups, and binds in 1,239. The caps vary: C = the label count (no padding) for several ranges
+  (lo −1.03, hi −0.982 and lo −2.5, hi −2.452, step 0.005), 16 for 10.3 steps from 0 (lo 0 with hi
+  0.0515 at step 0.005 and hi 0.206 at step 0.02, the same problem), 24 for lo 0, hi 1.45. Not a fixed
+  share of the range or of the label count, and not a fixed outside distance. Next: what sets the cap.
+- Scoreboard unchanged at 4,891 (no rule for the cap yet).
