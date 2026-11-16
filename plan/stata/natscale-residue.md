@@ -798,3 +798,17 @@ cases. Both ends: 3,837 (N = n − 1), 4,862 (n), **5,333 (n + 1)**, 5,228 (n + 
 are partial views of the same unknown padding choice; neither is the rule. Scoreboard stays at 7,781.
 Papers still wanted (not reachable here): remarks or certifications of CACM Algorithm 463; Dixon &
 Kronmal (1965); the journal texts of AS 168, AS 21 and AS 44; Talbot, Lin & Hanrahan (2010).
+
+## 2026-11-16: Dixon & Kronmal (1965), JACM 12(2), read (user's PDF)
+
+- Their scale is the centred padded set used here: for S intervals and step s, a = [((B + A)/2 −
+  S·s/2)/s]·s with [·] the floor, and b = a + s·S as a sum (the top-as-a-sum form). They step s up
+  through a user's set of round numbers until b ≥ B, and suggest S = [10·log10(items)] for histograms.
+- With D&K's exact floor (three orders of the arithmetic, all equal here), Stata's step and their ends
+  walked to Stata's labels (`dk.R`, `dk2.R`): some S fits both ends in 13,516 cases, against 14,589 for
+  the rounded centring used so far (J = floor(½(1 + (lo + hi − R)/d)), i.e. the nearest index); either
+  form fits 14,868. In the 7,781 rule their padded ends score 6,947 and their padded bottom alone
+  7,335. So Stata centres the span as D&K do, but rounds to the nearest index rather than flooring.
+- Their count rule (S from the number of data items) cannot be `_natscale`'s, which never sees the data
+  count. They cite Giamno (1964), "A mathematical method for the automatic scaling of a function",
+  JACM 11, 79–83, not yet read. Scoreboard stays at 7,781.
