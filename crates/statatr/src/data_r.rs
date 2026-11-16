@@ -103,6 +103,7 @@ mod tabpct;
 mod tabstat;
 mod tabsum;
 mod testparm;
+mod tetrachoric;
 mod ts;
 mod tsreg;
 mod weights;
@@ -490,6 +491,7 @@ const WEIGHTED: &[&str] = &[
     "summarize",
     "ci",
     "kap",
+    "tetrachoric",
     "sktest",
     "oneway",
     "tabstat",
@@ -1271,6 +1273,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_factor" => factor::FACTOR_HELPER,
         "stata_rotate" => rotate::ROTATE_HELPER,
         "stata_kap" => kap::KAP_HELPER,
+        "stata_tetrachoric" => tetrachoric::TETRACHORIC_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
         "stata_replay" => estat::REPLAY_HELPER,
         "stata_tab_mats" => tabsum::TAB_MATS_HELPER,
@@ -2563,6 +2566,7 @@ impl Session {
             "factor" => self.factor(c, &opts, out),
             "rotate" => self.rotate(c, &opts, out),
             "kap" => self.kap(c, &opts, out),
+            "tetrachoric" => self.tetrachoric(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),

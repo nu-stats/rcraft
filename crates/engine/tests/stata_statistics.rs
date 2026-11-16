@@ -1351,3 +1351,31 @@ fn kap_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn tetrachoric_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 120\ngenerate byte b1 = mod(_n * 7, 11) < 5\n\
+         generate byte b3 = (mod(_n * 13, 17) + 2 * b1) > 9\n\
+         generate byte b4 = mod(_n * 5, 9) < 4\n\
+         tetrachoric b1 b3\ntetrachoric b1 b3 b4, stats(rho se p) star(.05)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "   Number of obs =          120",
+        " Tetrachoric rho =       0.2278",
+        "       Std error =       0.1386",
+        "Test of H0: b1 and b3 are independent",
+        " 2-sided exact P =       0.1419",
+        "(obs=120)",
+        "|   2-sided exact P |",
+        "             |       b1       b3       b4",
+        "          b4 |  -0.0453  -0.0093   1.0000",
+        "             |   0.1442   0.1441   0.0000",
+        "             |   0.8538   1.0000",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

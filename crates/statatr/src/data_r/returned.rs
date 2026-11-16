@@ -1162,6 +1162,8 @@ const MATRIX_NAMES: &[&str] = &[
     "Btest",
     "Utest",
     "Nobs",
+    "Rho",
+    "Se_Rho",
     "R",
     "sig",
     "beta",

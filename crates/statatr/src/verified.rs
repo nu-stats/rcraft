@@ -252,6 +252,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ),
     ("testnl", &["testnl"]),
     ("testparm", &["mlogit_tests", "testparm", "testparm_models"]),
+    ("tetrachoric", &["tetrachoric"]),
     ("tokenize", &["made"]),
     ("total", &["meanest"]),
     ("tsset", &["timeseries"]),

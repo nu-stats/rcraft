@@ -247,6 +247,7 @@ pub const COMMANDS: &[&str] = &[
     "test",
     "testnl",
     "testparm",
+    "tetrachoric",
     "tokenize",
     "tostring",
     "total",
@@ -418,6 +419,21 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("kap", &["absolute", "tab", "wgt("]),
+    (
+        "tetrachoric",
+        &[
+            "bonferroni",
+            "edwards",
+            "matrix",
+            "notable",
+            "posdef",
+            "print(",
+            "pw",
+            "sidak",
+            "star(",
+            "stats(",
+        ],
+    ),
     ("ranksum", &["by("]),
     ("kwallis", &["by("]),
     (
@@ -1803,6 +1819,11 @@ gettoken a b : s, {o}"
             "rotate" => format!("factor x y z\nrotate, {o}"),
             "kap" if name == "wgt" => "kap x y, wgt(w)".to_string(),
             "kap" => format!("kap x y, {o}"),
+            "tetrachoric" if name == "stats" => "tetrachoric x y z, stats(rho p)".to_string(),
+            "tetrachoric" if matches!(name, "print" | "star") => {
+                format!("tetrachoric x y z, {name}(.05)")
+            }
+            "tetrachoric" => format!("tetrachoric x y z, {o}"),
             "power" if matches!(name, "continuity" | "effect" | "test") => {
                 format!("power twoproportions 0.3 0.5, {o}")
             }
