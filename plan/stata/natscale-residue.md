@@ -488,3 +488,30 @@ e is how far each end walks in (product start (L − e)·d, then live steps).
 - With step 0.05 (n 53–60 at 12.91–15.53) the levels are 1–3, 3–5, 5–7 instead.
 - Next: fit a loop that adds one label at a time to whichever side is cheaper, with the comparison in
   floating point, to these staircases and the probe 13 grid.
+
+## 2026-11-15: the published algorithms, and a centred span that fits
+
+Read (the user downloaded the papers): Heckbert, "Nice numbers for graph labels" (Graphics Gems, 1990);
+Lewart, CACM Algorithm 463, SCALE1/SCALE2 (1973); Nelder, Applied Statistics AS 96, "A simple
+algorithm for scaling graphs" (1976). None is copied here; they are used as models to test.
+
+- Heckbert: step = nicenum(range/(ntick − 1)), labels floor(min/d)·d to ceil(max/d)·d, ticks made by
+  adding d in a loop. Lewart SCALE1: step 1/2/5 × 10^k from the geometric means √2, √10, √50, a
+  tolerance DEL on the floors, ends as products, then clamped to the data if round-off put them inside
+  (the same idea as Stata's on-label clamp). Both always enclose the data, which `_natscale` does not
+  (Statalist: 39.6–145.3 with n 5 gives 40 to 140 by 20).
+- Nelder AS 96 does what `_natscale` does: exactly N marks, centred on the data, lowest mark
+  STEP·floor(½(1 + (min + max − RANGE)/STEP) − bias), highest = lowest + RANGE, so the end marks may sit
+  inside the data. Its steps (1, 1.2, 1.6, 2, 2.5, 3, 4, 5, 6, 8) are not Stata's (1, 2, 5).
+- Tested: bottom start d·floor(½(1 + (lo + hi − R)/d)), top start = that + R (a sum, not a product),
+  each walked in by d to Stata's labels, for some span R. It reproduces both ends of 12.91–15.53 at
+  every n from 26 to 60 and of the ulp-shifted points (the flips are R changing), and of −1.03–0.202 at
+  all but n 19–21. On 3,000 sampled sweep cases some span fits both ends in 2,884 (96%), against 943 and
+  963 with the targets moved one ulp; on the 1,858 cases that are not the plain product it fits 1,742
+  (94%) against 540 and 578. So the ends are a centred, padded label set over a span R, trimmed back
+  to the labels by live steps.
+- What sets R is open. It is a step function of n (12.91–15.53, step 0.1: R/d about 27–30 for n 26–33,
+  37–43 for 34–39, 44–46 for 40–43, 47–51 for 44–52) and R/d is usually within a few of n, but no
+  simple formula (multiples of n or U − L rounded up, nice values of n·d with 1-2-5, 1-2-2.5-5 or
+  Nelder's steps) is in the fitting set for more than 1,384 of the 2,884. Next: treat R as chosen by a
+  cost over centred spans (the ulp flips say a tied comparison picks it), fitted to these sets.
