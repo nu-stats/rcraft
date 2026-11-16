@@ -678,3 +678,19 @@ Its note that `_natscale` "reads its arguments as text" (`10.0` against `10`) wa
 (probe 18): `10`/`10.0`/`20.0`, `0`/`0.0`, `12.910`/`12.91`, `1.4500000000000000`/`1.45` give the same
 bits. The one pair that differed, `15.53` against `15.530000000000001`, is two different doubles one
 ulp apart, which is the ulp sensitivity already seen in probe 13.
+
+## 2026-11-16: graph twoway's axis labels are %18.0g of _natscale's r()
+
+- Probe 19: 400 sampled swept cases with a non-exact step (d < 1, d ≠ 0.5), each run through
+  `_natscale lo hi n` and through `twoway scatter y x, xlabel(#n) nodraw` with x = lo, hi as doubles,
+  then reading `.g.xaxis1.major.min`, `.max`, `.delta` and `.g.plotregion1.xscale.curmin`, `.curmax`
+  with `%21x`. `_natscale`'s side reproduced the pooled data in 400 of 400.
+- The graph picks the same labels in all 400, but its bits differ from r() (same min in 216, same max
+  in 196). Stata's `%18.0g` text applied to r() gives the graph's min, max and delta in 400 of 400
+  each: up to 16 digits with the leading zero dropped and a sign slot kept, so 0.1 + ulp → 0.1,
+  2.7755575615628914e-17 → 2.77555756156e-17, 280.25000000000006 → 280.2500000000001. The graph's
+  scale range is the data range widened to the labels (398 and 397 of 400).
+- So the graph is downstream of the same r() and carries no second view of the padded count. What it
+  does give: matching a twoway axis needs r() only up to `%18.0g`. Over the 15,244 cases, L·d and U·d
+  after `%18.0g` match Stata's r() after `%18.0g` at both ends in 9,133 (bottoms 12,125, tops 11,096),
+  against 4,891 bit for bit; `%18.0g` erases the residue completely in 7,970.
