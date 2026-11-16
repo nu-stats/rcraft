@@ -823,3 +823,14 @@ as written 718, walked to Stata's labels 2,349 (m = n), 2,658 (m = n + 1), some 
 from the units 10–80 and that the start may be a multiple of STEP/K, with K raised while a failure
 could only come from data covering at least 70% (COVER) of the next larger STEP's scale. The user also
 supplied AS 21, AS 44 and Talbot et al. (2010); they went to the literature session to implement.
+
+## 2026-11-16: Giammo (1964), JACM 11, 79–83, read (user's PDF)
+
+The method Dixon & Kronmal improved on: the smallest round step s = ρ·10^k (k from logs, one more if
+needed) with I·s ≥ M − m*, origin m* = floor(m/s)·s at or below the data minimum, plot top m* + I·s; no
+centring, no padding (`giammo.R`). As written (1-2-5, I = n − 1 or n): both ends 293–562. Its ends
+walked to Stata's labels: at most 2,900 (Stata's 10^k, I = n). Its top with Stata's step (L·d + I·d,
+walked down) in place of the 7,781 rule's unpadded top: 6,048 (I = n − 1), 5,885 (I = n). Its bottom
+is the benchmark's L·d. Nothing to take; scoreboard stays at 7,781. Of the methods traced back
+(Giammo 1964 → Dixon & Kronmal 1965 → Lewart 1973 → Nelder 1976 → Stirling 1981), Lewart's arithmetic
+and Dixon & Kronmal's centring remain the closest.
