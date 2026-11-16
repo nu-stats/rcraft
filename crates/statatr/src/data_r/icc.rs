@@ -93,11 +93,13 @@ pub(super) const ICC_HELPER: &str = r##"stata_icc <- function(d, depvar, target,
   if (!is.null(rater)) R$rater <- rater
   R$type <- type
   if (!show) return(R)
-  # %w.df as Stata rounds: from the double's exact digits, a 5 rounding up
+  # %w.df as Stata rounds: from the double's exact digits, an exact tie to even (88.125 to 88.12)
   fk <- function(v, d) {
     s <- sprintf("%.45f", abs(v))
     cut <- regexpr(".", s, fixed = TRUE) + d
-    up <- substr(substring(s, cut + 1), 1, 1) >= "5"
+    rest <- substring(s, cut + 1); nx <- substr(rest, 1, 1)
+    pd <- substr(s, cut, cut); if (pd == ".") pd <- substr(s, cut - 1, cut - 1)
+    up <- nx > "5" || (nx == "5" && (grepl("[1-9]", substring(rest, 2)) || pd %in% c("1", "3", "5", "7", "9")))
     qq <- as.numeric(substr(s, 1, cut)) + if (up) 10^-d else 0
     sprintf(paste0("%.", d, "f"), if (v < 0) -qq else qq)
   }

@@ -495,6 +495,7 @@ const WEIGHTED: &[&str] = &[
     "kap",
     "icc",
     "mhodds",
+    "tabodds",
     "tetrachoric",
     "sktest",
     "oneway",

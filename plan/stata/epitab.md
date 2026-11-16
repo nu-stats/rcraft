@@ -56,7 +56,15 @@ past the 14th); corpus `epitab_by.do`.
   odds, (N − 1)/N the k × 2 Pearson chi2; the score test for trend on the levels' values. R's printf on Windows rounds
   0.66500000000000004 (the double of .665) down at two places, Stata up: the tests' lines are rounded from the
   double's exact digits.
+- tabodds, or (2026-11-16): each level against the base() level (its place, 1 to k, not its value) as mhodds,
+  compare(level, base) gives it: the Mantel–Haenszel odds ratio, chi2 (U²/V) and exp(ln OR ± z√(V/(R·S)));
+  table `%12s |` `%12.6f %11.2f %13.4f %14.6f %11.6f`, the base row `1.000000` with `.` (a missing p in 12, the
+  lower bound in 15), the name abbreviated to 12, labels to 9; the tests below and r() unchanged. Errors: `option
+  base() invalid; must be between 1 and k` (checked first), `option base() only valid with option or` (r(198)),
+  `'1.5' found where integer expected` / `error in option base()` (r(7)); fweights count, aweights, iweights and
+  pweights `... not allowed` (r(101)).
+- Stata's %w.df rounds the double's exact digits with an exact tie to even (88.125 → 88.12, 0.125 → 0.12,
+  0.75 → 0.8, 1.4453125 → 1.445312); kap's 88.13 is a double above 88.125, which Stata gets by adding the
+  weighted cells one by one along the rows (R's sum() keeps long doubles and lands on 88.125).
 - Refused: cc's exact intervals with by() too; cs, by() or without woolf (Cornfield); estandard, ustandard();
-  tabodds, or and base(): their odds ratios' intervals are wider than Woolf's (mhodds case exposed: 1.874
-  to 4.661 where Woolf's is 1.901 to 4.594), by a factor that differs case by case. mhodds is now translated (`plan/stata/mhodds.md`): its interval is
-  Mantel and Haenszel's exp(ln OR ± z√(ΣV/(R·S))); tabodds, or likely uses the same but was not checked.
+  tabodds's adjust(), binomial() and the graphs.

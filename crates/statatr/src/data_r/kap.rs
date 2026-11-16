@@ -18,11 +18,13 @@ pub(super) const KAP_HELPER: &str = r##"stata_kap <- function(d, vars, wt = NULL
   M <- sapply(vars, num)
   if (!is.matrix(M)) M <- matrix(M, ncol = length(vars))
   bad <- function(x) any(!is.finite(x))
-  # %w.df as Stata rounds: from the double's exact digits, a 5 rounding up (88.125 to 88.13)
+  # %w.df as Stata rounds: from the double's exact digits, an exact tie to even (88.125 to 88.12)
   fk <- function(v, w, d) {
     s <- sprintf("%.45f", abs(v))
     cut <- regexpr(".", s, fixed = TRUE) + d
-    up <- substr(substring(s, cut + 1), 1, 1) >= "5"
+    rest <- substring(s, cut + 1); nx <- substr(rest, 1, 1)
+    pd <- substr(s, cut, cut); if (pd == ".") pd <- substr(s, cut - 1, cut - 1)
+    up <- nx > "5" || (nx == "5" && (grepl("[1-9]", substring(rest, 2)) || pd %in% c("1", "3", "5", "7", "9")))
     q <- as.numeric(substr(s, 1, cut)) + if (up) 10^-d else 0
     sprintf(paste0("%", w, ".", d, "f"), if (v < 0) -q else q)
   }
@@ -47,7 +49,9 @@ pub(super) const KAP_HELPER: &str = r##"stata_kap <- function(d, vars, wt = NULL
     W <- if (is.null(wt)) diag(k) else if (k < 2) matrix(1, 1, 1)
          else if (wt == "w") 1 - abs(outer(pos, pos, "-")) / span else 1 - (outer(pos, pos, "-") / span)^2
     pr <- rowSums(P); pc <- colSums(P)
-    po <- sum(W * P); pe <- sum(W * outer(pr, pc))
+    # summed cell by cell along the rows in doubles, as Stata does (its last digit: R's sum() keeps long doubles)
+    rsum <- function(M) Reduce(`+`, as.vector(t(M)))
+    po <- rsum(W * P); pe <- rsum(W * outer(pr, pc))
     kappa <- (po - pe) / (1 - pe)
     # unweighted, Stata 19 works from the counts (its last digit)
     if (is.null(wt)) {

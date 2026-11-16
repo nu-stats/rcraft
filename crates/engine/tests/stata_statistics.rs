@@ -1453,3 +1453,29 @@ fn mhodds_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn tabodds_or_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 300\ngenerate byte dose = 1 + mod(_n * 11, 4)\n\
+         generate byte case = mod(_n * 13 + 3 * dose, 17) < 6\n\
+         generate byte w = 1 + mod(_n, 3)\n\
+         tabodds case dose, or base(3)\ntabodds case dose [fw=w], or\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "        dose |  Odds ratio       chi2       P>chi2     [95% conf. interval]",
+        "-------------+-------------------------------------------------------------",
+        "           1 |    0.841661       0.26       0.6124      0.431667   1.641065",
+        "           3 |    1.000000          .           .              .          .",
+        "           4 |    0.746450       0.72       0.3946      0.379784   1.467120",
+        "Test of homogeneity (equal odds): chi2(3)  =     0.82",
+        "           2 |    0.942824       0.06       0.8086      0.585476   1.518283",
+        "Test of homogeneity (equal odds): chi2(3)  =     1.55",
+        "                                  Pr>chi2  =   0.7596",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

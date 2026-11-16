@@ -358,18 +358,27 @@ stata_epi_by <- function(kind, d, case, expo, by, time = NULL, level = 95, ci = 
   invisible(r)
 }
 # tabodds: the odds of each level of the exposure with Woolf's interval, the test of equal odds ((N - 1)/N
-# Pearson's) and the score test for trend
-stata_tabodds <- function(d, case, expo, level = 95, show = TRUE) {
+# Pearson's) and the score test for trend; or: each level's Mantel-Haenszel odds ratio against the base()
+# level (its chi2 and the interval on V/(R*S), as mhodds, compare() gives them)
+stata_tabodds <- function(d, case, expo, level = 95, or = FALSE, base = NULL, fw = NULL, show = TRUE) {
   y <- stata_epi_num(d[[case]])
   s <- d[[expo]]
   x <- stata_epi_num(s)
-  ok <- !is.na(y) & !is.na(x)
+  w <- if (is.null(fw)) rep(1, length(y)) else stata_epi_num(d[[fw]])
+  ok <- !is.na(y) & !is.na(x) & !is.na(w)
+  if (any(w[ok] < 0 | w[ok] != round(w[ok]))) stop("tabodds: frequency weights that are negative or not whole are not translated", call. = FALSE)
+  ok <- ok & w > 0
   y <- y[ok] != 0
   x <- x[ok]
+  w <- w[ok]
   lv <- sort(unique(x))
   k <- length(lv)
-  a <- vapply(lv, function(l) sum(y & x == l), 1)
-  n <- vapply(lv, function(l) sum(x == l), 1)
+  if (!is.null(base)) {
+    if (base < 1 || base > k) stop("option base() invalid; must be between 1 and ", k, " (Stata: r(198))", call. = FALSE)
+    if (!or) stop("option base() only valid with option or (Stata: r(198))", call. = FALSE)
+  } else base <- 1
+  a <- vapply(lv, function(l) sum(w[y & x == l]), 1)
+  n <- vapply(lv, function(l) sum(w[x == l]), 1)
   cc <- n - a
   N <- sum(n); A <- sum(a)
   z <- stats::qnorm(1 - (100 - level) / 200)
@@ -383,6 +392,7 @@ stata_tabodds <- function(d, case, expo, level = 95, show = TRUE) {
   if (!show) return(r)
   lab <- vapply(stata_epi_vlab(s, lv, 1e6), function(v) stata_tab_abbrev(v, 9), "")
   lvl <- stata_fmt(level, "%9.0g", trim = TRUE)
+  if (!or) {
   cat("\n", strrep("-", 74), "\n", sprintf("%10s  |      Cases     Controls       Odds      [%s%% conf. interval]", stata_tab_abbrev(expo, 9), lvl), "\n", sep = "")
   cat(strrep("-", 12), "+", strrep("-", 61), "\n", sep = "")
   for (i in seq_len(k)) {
@@ -391,6 +401,39 @@ stata_tabodds <- function(d, case, expo, level = 95, show = TRUE) {
     cat(sprintf("%11s |%11.0f%13.0f%11.5f%15.5f%10.5f", lab[i], a[i], cc[i], od, exp(log(od) - z * se), exp(log(od) + z * se)), "\n", sep = "")
   }
   cat(strrep("-", 74), "\n", sep = "")
+  } else {
+    # %w.df as Stata rounds: from the double's exact digits, an exact tie to even (88.125 to 88.12)
+    fk <- function(v, dg) {
+      if (is.na(v)) return(".")
+      s <- sprintf("%.45f", abs(v))
+      cut <- regexpr(".", s, fixed = TRUE) + dg
+      rest <- substring(s, cut + 1); nx <- substr(rest, 1, 1)
+      pd <- substr(s, cut, cut); if (pd == ".") pd <- substr(s, cut - 1, cut - 1)
+      up <- nx > "5" || (nx == "5" && (grepl("[1-9]", substring(rest, 2)) || pd %in% c("1", "3", "5", "7", "9")))
+      q <- as.numeric(substr(s, 1, cut)) + if (up) 10^-dg else 0
+      sprintf(paste0("%.", dg, "f"), if (v < 0) -q else q)
+    }
+    cat("\n", strrep("-", 75), "\n", sprintf("%12s |  Odds ratio       chi2       P>chi2     [%s%% conf. interval]", stata_tab_abbrev(expo, 12), lvl), "\n", sep = "")
+    cat(strrep("-", 13), "+", strrep("-", 61), "\n", sep = "")
+    for (i in seq_len(k)) {
+      if (i == base) {
+        cat(sprintf("%12s |%12s%11s%12s%15s%11s", lab[i], "1.000000", ".", ".", ".", "."), "\n", sep = "")
+        next
+      }
+      # the level against the base: a, b its cases and controls, c, dd the base's
+      ca <- a[i]; cb <- cc[i]; c0 <- a[base]; d0 <- cc[base]; nn <- ca + cb + c0 + d0
+      R <- ca * d0 / nn; S <- cb * c0 / nn
+      Vk <- if (min(ca + cb, c0 + d0, ca + c0, cb + d0) > 0) (ca + cb) * (c0 + d0) * (ca + c0) * (cb + d0) / (nn^2 * (nn - 1)) else 0
+      Uk <- ca - (ca + cb) * (ca + c0) / nn
+      chi <- if (Vk > 0) Uk^2 / Vk else NA_real_
+      p <- if (is.na(chi)) NA_real_ else stats::pchisq(chi, 1, lower.tail = FALSE)
+      o <- if (S > 0) R / S else NA_real_
+      ci <- if (S > 0 && R > 0) exp(log(o) + c(-1, 1) * z * sqrt(Vk / (R * S))) else c(NA_real_, NA_real_)
+      cat(sprintf(if (is.na(p)) "%12s |%12s%11s%12s%15s%11s" else "%12s |%12s%11s%13s%14s%11s", lab[i], fk(o, 6), fk(chi, 2),
+                  fk(p, 4), fk(ci[1], 6), fk(ci[2], 6)), "\n", sep = "")
+    }
+    cat(strrep("-", 75), "\n", sep = "")
+  }
   # rounded from the double's exact digits: R's printf on Windows rounds 0.66500000000000004 (the double
   # of .665, a little above it) down at two places, as if from 17 digits; Stata rounds it up
   fx <- function(v, d) {
@@ -666,17 +709,36 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "tabodds")?;
-        if c.parts.weight.is_some() {
-            return Err(no("tabodds with weights is not translated yet"));
+        use crate::lang::syntax::WeightKind;
+        let stop = |msg: &str, rc: u32| {
+            format!(
+                "stop({}, call. = FALSE)",
+                r_text(&format!("{msg} (Stata: r({rc}))"))
+            )
+        };
+        let mut extra = String::new();
+        if let Some(w) = &c.parts.weight {
+            let kind = match w.kind {
+                WeightKind::Frequency => None,
+                WeightKind::Analytic => Some("aweights"),
+                WeightKind::Importance => Some("iweights"),
+                WeightKind::Sampling => Some("pweights"),
+                WeightKind::Unspecified => {
+                    return Err(no("tabodds [weight = ...] is not translated"))
+                }
+            };
+            if let Some(k) = kind {
+                out.line(stop(&format!("{k} not allowed"), 101));
+                return Ok(());
+            }
+            if !is_name(w.exp.trim()) {
+                return Err(no(
+                    "tabodds with a frequency weight other than a variable is not translated",
+                ));
+            }
+            extra.push_str(&format!(", fw = {}", r_text(w.exp.trim())));
         }
-        // or: Stata 19's intervals of the odds ratios are wider than Woolf's, by a
-        // factor not checked yet (mhodds's are Mantel and Haenszel's, plan/stata/mhodds.md)
-        if opts.has("or", 2) {
-            return Err(no(
-                "tabodds, or is not translated yet: Stata 19's intervals of the odds ratios are wider than Woolf's by a factor not worked out yet",
-            ));
-        }
-        if let Some(o) = opts.other(&[("level", 1)]) {
+        if let Some(o) = opts.other(&[("level", 1), ("or", 2), ("base", 4)]) {
             return Err(no(format!(
                 "tabodds with the option {o} is not translated yet"
             )));
@@ -692,7 +754,6 @@ impl Session {
                 "tabodds: the case and exposure variable names written out are translated",
             ));
         }
-        let mut extra = String::new();
         if let Some(l) = opts.arg("level", 1) {
             let v: f64 = l
                 .trim()
@@ -704,6 +765,26 @@ impl Session {
                 )));
             }
             extra.push_str(&format!(", level = {}", r_number(v)));
+        }
+        if opts.has("or", 2) {
+            extra.push_str(", or = TRUE");
+        }
+        if let Some(b) = opts.arg("base", 4) {
+            // the level's place among the exposure's values, 1 to k
+            let b = b.trim();
+            let Ok(v) = b.parse::<i64>() else {
+                if b.parse::<f64>().is_ok() {
+                    out.line(stop(
+                        &format!("'{b}' found where integer expected\nerror in option base()"),
+                        7,
+                    ));
+                    return Ok(());
+                }
+                return Err(no(format!(
+                    "tabodds, base({b}): a whole number is translated"
+                )));
+            };
+            extra.push_str(&format!(", base = {v}"));
         }
         if self.quiet(c) {
             extra.push_str(", show = FALSE");

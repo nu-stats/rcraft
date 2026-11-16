@@ -236,7 +236,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("tab1", &["extended_missing_commands"]),
     ("tab2", &["extended_missing_commands"]),
     ("tabm", &["tabm"]),
-    ("tabodds", &["epitab_by"]),
+    ("tabodds", &["epitab_by", "tabodds_or"]),
     ("tabstat", &["tabstat"]),
     (
         "tabulate",

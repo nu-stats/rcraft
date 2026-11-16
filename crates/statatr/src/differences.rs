@@ -2669,14 +2669,14 @@ pub const GUIDES: &[Guide] = &[
                 "stata_tabodds prints Stata 19's table of cases, controls and odds with Woolf's \
                  interval for each level (named by its value label, abbreviated to 9), the test \
                  of equal odds ((N - 1)/N Pearson's chi2) and the score test for trend on the \
-                 levels' values; r() as Stata's.",
+                 levels' values; r() as Stata's. or gives each level's Mantel-Haenszel odds \
+                 ratio against base()'s level (its place, 1 to k), with its chi2 and the interval \
+                 on V/(R*S), as mhodds does; frequency weights count.",
             ),
             p(
                 "Not yet",
-                "or and base(): Stata 19's intervals of the odds ratios are wider than Woolf's \
-                 by a factor not checked yet (mhodds's use Mantel and Haenszel's variance), so \
-                 they are refused, as are \
-                 adjust(), binomial(), the graphs and weights.",
+                "adjust(), binomial() and the graphs. r() can differ from Stata's in the last \
+                 digit or two.",
             ),
         ],
     },

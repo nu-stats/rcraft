@@ -104,12 +104,14 @@ pub(super) const MHODDS_HELPER: &str = r##"stata_mhodds <- function(d, case, exp
     if (length(notes_by) > 1) refuse("by() with both of Stata's notes")
   }
   if (!show) return(R)
-  # %w.df as Stata rounds: from the double's exact digits, a 5 rounding up
+  # %w.df as Stata rounds: from the double's exact digits, an exact tie to even (88.125 to 88.12)
   fk <- function(v, dg) {
     if (is.na(v)) return(".")
     s <- sprintf("%.45f", abs(v))
     cut <- regexpr(".", s, fixed = TRUE) + dg
-    up <- substr(substring(s, cut + 1), 1, 1) >= "5"
+    rest <- substring(s, cut + 1); nx <- substr(rest, 1, 1)
+    pd <- substr(s, cut, cut); if (pd == ".") pd <- substr(s, cut - 1, cut - 1)
+    up <- nx > "5" || (nx == "5" && (grepl("[1-9]", substring(rest, 2)) || pd %in% c("1", "3", "5", "7", "9")))
     q <- as.numeric(substr(s, 1, cut)) + if (up) 10^-dg else 0
     sprintf(paste0("%.", dg, "f"), if (v < 0) -q else q)
   }

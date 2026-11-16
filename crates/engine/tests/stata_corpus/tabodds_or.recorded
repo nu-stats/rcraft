@@ -1,0 +1,9 @@
+* Stata 19.0's results for tabodds_or.do, recorded by cargo xtask stata-record
+@ or       .82142857142857151      .011734693877551241 3
+@ base       .82142857142857151        .9137364706757618
+@ weights       1.5505250305250307      .093616605616604939       .67065921758095848
+@ weights or       1.5505250305250307      .093616605616604939
+@ rc base without or 198
+@ rc base out of range 198
+@ rc base not whole 7
+@ rc aweights 101
