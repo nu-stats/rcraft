@@ -136,3 +136,17 @@ Alone, with Stata's step and no padding, it scores 6,047. Inside the current rul
 bottom lift the scoreboard from 7,365 to **7,781**. That is still far from bit for bit everywhere, so
 declining non-exact steps stays right. The open question is unchanged: which N (padding) Stata uses.
 No paper read chooses N the way `_natscale` seems to.
+
+## Is the "near zero" padding condition a published rule? (`lit_zero.R`, `lit_on5866.R`)
+
+- Against 5,866 (`ctr.R`'s rule): Lewart's unpadded top in place of the centred label-count top gives
+  5,960; Lewart unpadded alone (benchmark bottom) 6,047.
+- The only published rule that depends on where zero sits is Nelder's AS 96 zero rule. It sets the lowest
+  mark to 0 when the data are non-negative and the scale's span reaches down to 0, and mirrors this for
+  non-positive data. Put in place of the fitted max(|L|, |U|) < 2·c(n) inside the 7,781 rule (labels
+  straddling 0, or 0 within the span; span c(n) + k or n + k steps, k 3 to 8): at most 7,735 with the
+  c(n) ≥ 12 gate, and 7,052–7,185 without it. So the gate at 12 is needed, and the zero rule does no
+  better than the fitted condition.
+- None of the papers read starts anything at a mark count of 12. The nearest coincidence is AS 168's
+  unit list, which starts at 12 within its decade (12, 15, …, 100), the same as c(n) ≥ 12 ⇔ n ≥ 12.
+  The condition stays fitted, not explained.
