@@ -23,8 +23,11 @@ was read. No new Stata probe was needed. The scripts are `lit_*.R` in the shared
   Hanrahan (2010), "extended": the originals were not reachable (StatLib 404 for 21 and 44, ACM 403,
   and vis.stanford.edu's certificate chain is untrusted here, so it was not bypassed). They were run
   through CRAN `labeling` 0.4.3 (Talbot's MIT-licensed implementations of these methods, already in the
-  user's R library) as black boxes, with their help pages as the description.
-- Dixon & Kronmal (1965), JACM: not reachable (ACM 403, no free description found). Not scored.
+  user's R library) as black boxes, with their help pages as the description. Later the user supplied
+  the AS 21, AS 44 and Talbot et al. PDFs, and each was then written in R from its paper (the last
+  section).
+- Dixon & Kronmal (1965), JACM: not reachable at first. The user later supplied it, and the parent session
+  scored it, with AS 168's journal text and Giammo (1964), in `natscale-residue.md`.
 
 ## Scores (both ends, bit for bit, of 15,244; 5,563 was the best when this table was made)
 
@@ -150,3 +153,50 @@ No paper read chooses N the way `_natscale` seems to.
 - None of the papers read starts anything at a mark count of 12. The nearest coincidence is AS 168's
   unit list, which starts at 12 within its decade (12, 15, …, 100), the same as c(n) ≥ 12 ⇔ n ≥ 12.
   The condition stays fitted, not explained.
+
+## From the papers themselves: AS 21, AS 44, Talbot et al. (`lit_paper.R`)
+
+The user supplied the three papers. Each was written in R from its text and listing, and checked on
+the papers' own examples: AS 21 gives 0 to 2 by 0.5 for 0.37–1.92 (4 intervals) and −28 to −4 by 4 for
+−25.6 to −5.51 (6). Extended gives 8 to 14 by 2 for 8.1–14.1 (m 4), as the package does. m marks means
+m − 1 intervals. Each was run with Fortran-style 10.**K (exact powers, dividing) and with Stata's 10^k
+(a product of tenths). The scores compare against 7,781.
+
+| Method (own R) | Step bits = Stata's d (m = n) | As written | Walked, m = n | Best m in n − 1..n + 1 | Some m |
+|---|---|---|---|---|---|
+| Thayer & Storer AS 21, 10.**K / Stata's 10^k | 1,065 / 4,694 | 162 / 195 | 1,241 / 1,206 | 1,313 / 1,296 | 2,186 / 2,280 |
+| Sparks AS 44, 10.**K / Stata's 10^k | 1,058 / 3,856 | 530 / 577 | 1,780 / 2,258 | 1,915 / 2,512 | 3,739 / 4,683 |
+| Talbot et al. extended, paper weights, 10.**K / Stata's 10^k | 1,462 / 4,565 | 2,019 / 2,579 | 3,396 / 4,215 | 3,503 / 4,215 | 3,938 / 4,948 |
+| extended, Stata's 10^k, Q = 1, 5, 2 | 5,416 | 2,617 | 4,267 | 4,332 | 4,844 |
+| extended, Stata's 10^k, `labeling`'s weights | 5,295 | 2,496 | 4,560 | 4,560 | 5,319 |
+| Wilkinson as Talbot et al. describe it, 10.**K / Stata's 10^k | 1,185 / 5,733 | 2,086 / 2,482 | 3,575 / 4,483 | 3,575 / 4,483 | 3,752 / 4,793 |
+
+Verdicts: none comes near 7,781, or the 4,891 benchmark. The best is extended at 4,560 walked.
+
+- **AS 21:** the minimum is truncated at the digit where the range lies in (1, 10]. The interval is the
+  next whole digit up, with 7 and 9 skipped and 1.1–1.5 taken as 1.5, so its steps are 1.5, 2, 3, 4,
+  5, 6, 8, 10. A second pass carries one more digit when coverage is below 0.8. The labels are made by
+  adding the interval to the minimum. That accumulated top is its weakest part (tops at most 1,882).
+- **AS 44:** Thayer–Storer with Lauckner's (1971) correction: steps 1.5, 2, 3, …, 10, with 7 and 9
+  allowed. The second pass ends after one try. The labels are products XMIN + k·XSTEP.
+- **The `labeling::sparks` hang is the port's, not the paper's.** My own AS 44 terminates on every
+  case. The port divides where the paper multiplies: its ratio is (dmax − dmin) × (fm·fstep) where the
+  paper has RATIO = (FMAX − FMIN)/(FM·FSTEP). For small ranges that ratio never passes 0.8. The port
+  also has no "stop after the second pass" exit, so it loops forever. It reruns the second pass
+  without resetting the range and minimum, and its last label is fstep·(m − 1) instead of
+  XMIN + FM·XSTEP (hence 0 to 4.5 for 0 to 0.9). The earlier Sparks row (0 and 482, on 4,053 cases) is
+  therefore the port's, not AS 44's; the row above replaces it.
+- **Talbot et al.:** the paper's weights are 0.2 simplicity, 0.25 coverage, 0.5 density and 0.05
+  legibility; `labeling`'s default swaps the first two. With Stata's 10^k the swap scores a little
+  better (4,560 against 4,215). Its labels are lmin = start·lstep/j and lmax = lmin + (k − 1)·lstep, a
+  sum like Lewart's. With Stata's step and labels that form is L·d + (U − L)·d, which was already scored
+  (5,562 with the benchmark bottom, `lit_lewart4.R`), below Lewart's MI·d + NP·d top (6,047).
+- **Wilkinson:** built from Talbot et al.'s description (the book's Q = 1, 5, 2, 2.5, 3; loose
+  labelings; simplicity, coverage with a 0.8 floor, and granularity summed). It differs from
+  `labeling::wilkinson`, which follows Wilkinson's Java implementation (8.1–14.1, m 4: mine 7.5 to 15 by
+  2.5, the package 8 to 15 by 1).
+- The related-work section names Thayer & Storer, Sparks, Nelder, Stirling and Heckbert. It does not
+  cite Lewart or Dixon & Kronmal, and none of the methods it covers chooses a padded mark count.
+- AS 168 from the journal text (divisor reset fixed) and Dixon & Kronmal are in `natscale-residue.md`
+  (parent session): AS 168 walks to 2,349 at m = n and 2,658 at n + 1; Dixon & Kronmal's centring with
+  a floor fits some S in 13,516, against 14,589 for the rounded centring. Neither beats 7,781.
