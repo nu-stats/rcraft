@@ -743,3 +743,26 @@ Scripts `map0.R`, `cls.R`, `ctr.R`, `tabS.R` in `natscale-work/`.
   c(n) + 4 − cnt other than 4 score 5,427–5,781.
 - A parallel session (`plan/stata/natscale-literature.md`) is scoring published scaling algorithms
   (AS 21, 44, 96, 168, CACM 463, Dixon–Kronmal, Heckbert, Talbot et al.) on the same scoreboard.
+
+## 2026-11-16: padding when the labels are near zero; scoreboard 7,365
+
+Scripts `base5866.R`, `split.R`, `clampb.R`, `topJ.R`, `topN.R`, `padp.R`, `ttree.R`, `trig.R`,
+`btrig.R`, `unify.R`, `rule7365.R` in `natscale-work/`.
+
+- The 5,866 rule's misses: 1,615 bottom only, 3,750 top only, 4,013 both. Of the bottom misses, 3,033
+  are on-label bottoms (lo on a label), where Stata gives a walked value, not lo: that is the lo = 0
+  padding. Choosing per case between the two top candidates (unpadded and `c(n) + 4` centred) would give
+  11,525 tops; the rule had 7,481.
+- No single top start wins: (L + c(n))·d, L·d + c(n)·d, L·d + (n − 1)·d and others each get
+  6,500–7,300 tops, each with about 3,000 the rule misses. A fixed pad below L (walk up p steps, top
+  c(n) + p steps above) gives at most 4,244 both.
+- A shallow tree choosing among five top candidates splits first on |U| (the top label's index): large
+  |U| (≥ 24) is mostly unpadded; small |U| with the top label outside and n ≥ 12 is mostly padded.
+  Depth 8 (68 leaves) reaches 10,841 of 12,716 decidable cases.
+- Rule found (thresholds fitted, not yet explained): padding when c(n) ≥ 12 and the labels are near 0.
+  Bottom from the data-centred `c(n) + 4` set walked up (no on-label clamp) when also
+  max(|L|, |U|) < 2·c(n), else the benchmark; top from the label-centred `c(n) + 4` set when
+  |U| < 2·c(n) and the top label is outside the data by at least 0.02 step, else the centred
+  label-count set. **7,365 both ends** (bottoms 10,292, tops 9,936), up from 5,866. "Near 0" cutoffs
+  of other shapes (|U| < 30, < 1.5·n, |L|, |U| < 20) give 6,530–6,555 for tops alone, so the exact
+  form of that condition is open. The 12 is the first round count where padding shows at lo = 0.
