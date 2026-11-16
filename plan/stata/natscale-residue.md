@@ -719,3 +719,27 @@ fits 14,589).
   8,004, and with N = cnt where the top label is inside, 8,440; those tops pair badly with any bottom
   tried (at most 5,485 both).
 - Still far from bit for bit everywhere, so `natscale.rs` keeps declining non-exact steps.
+
+## 2026-11-16: the padding trigger; scoreboard 5,866
+
+Scripts `map0.R`, `cls.R`, `ctr.R`, `tabS.R` in `natscale-work/`.
+
+- Map at lo = 0 (step 0.1, top label outside or on the data): families with top label U = 10, 11,
+  13, 14, 16, 17 are padded at every n; U = 9, 12, 15 pad only from n 12, 15, 20; U = 8 never within
+  n ≤ 14. Steps 0.05 and 0.2 show the same three-label period. A result whose bits the unpadded set
+  also gives cannot say whether padding happened, so "unpadded" is only certain where the label count
+  is the sole fitting N.
+- Where `c(n) + 4` misses in padded cases, the nearest fitting N is mostly one off (878 at −1, 808 at
+  +1). Centring variants (data midpoint with floor, round or ceil; label midpoint; padding split low or
+  high) change the score by at most a few cases, so the off-by-one is not the centring's rounding.
+- Ceiling for a two-candidate trigger: choosing per case between the unpadded set (centred top, benchmark
+  bottom) and the padded `c(n) + 4` set would give 8,560 both ends; adding counts up to cnt + 6, 10,269.
+- At lo = 0 the unpadded set wins where `c(n) + 4` is below the label count (U 19 at c 15, U 24 at 20,
+  U 29 at 25) and for low tops (U 6–9 with c up to 10–12); the padded set wins elsewhere, with a few
+  mixed cells (U 15 and U 18 at c 20).
+- Rule found: top from the centred `c(n) + 4` set when c(n) ≤ the label count, else from the centred
+  label-count set; bottom as the benchmark (L·d, (L − 1)·d + d for an inside label, the on-label clamp).
+  **5,866 both ends** (bottoms 9,616, tops 7,481), up from 5,563. Thresholds on the excess
+  c(n) + 4 − cnt other than 4 score 5,427–5,781.
+- A parallel session (`plan/stata/natscale-literature.md`) is scoring published scaling algorithms
+  (AS 21, 44, 96, 168, CACM 463, Dixon–Kronmal, Heckbert, Talbot et al.) on the same scoreboard.
