@@ -66,11 +66,11 @@ rounds, the tables and e(). Ported to R here, and checked again on those probes'
 
 ## Not yet
 
-`lasso cox`, `sqrtlasso`, `dsregress` and the other inference commands, `cvplot`, factor variables
+`lasso cox`, `dsregress` and the other inference commands, `cvplot`, factor variables
 (`i.fold`), weights, `cluster()`, `offset()` for the linear lasso, `tolerance()` other than the
 default, `dtolerance()`; test, lincom and margins after lasso. (lasso logit, probit, poisson and
-elasticnet linear: below, 2026-11-16.) StatCraft has the rules for sqrtlasso (473, 506, 507, 597)
-and the inference commands (475, 480): the next lasso step.
+elasticnet linear and sqrtlasso: below, 2026-11-16.) StatCraft has the rules for
+the inference commands (475, 480): the next lasso step.
 
 # lasso logit, probit, poisson and elasticnet linear (2026-11-16)
 
@@ -130,3 +130,34 @@ display() after a GLM (its headings), elasticnet logit/probit/poisson, alpha 0 (
 505), several alphas with selection(none), alllambdas and BIC postselection with elasticnet,
 lassoknots after lassoselect for elasticnet, lassoselect lambda = # with several alphas, lassoinfo
 after elasticnet selection(none), a CV function without a minimum with elasticnet.
+
+# sqrtlasso (2026-11-16)
+
+Translated: `sqrtlasso depvar [(alwaysvars)] othervars` with selection none, bic, cv and plugin
+(heteroskedastic, homoskedastic), the grid, stop(), rseed(), noconstant, penaltywt(), always-in
+variables; lassoselect, lassoknots, lassocoef, lassoinfo (`sq linear`), predict. Stata's errors:
+`selection(adaptive)` ("Only one of cv, none, plugin, or bic is allowed.") and `lasso sqrt`
+("only one of linear, logit, probit, poisson, or cox is allowed"), both r(198).
+
+## Found here
+
+- **Stata's solver.** Not the lasso at penalty lambda sigma / N iterated to sigma's fixed point
+  (StatCraft's; that is the exact optimum, 1.5e-8 off at probe 473's path end): cyclic coordinate
+  descent on the square-root objective itself, each coefficient set to its exact minimiser
+  b = a - sign(a) t sqrt((q - a^2) / (1 - t^2)) when |a| > t sqrt(q), a = z_j'(r + z_j b_j)/N,
+  q the mean squared partial residual, t = lambda w_j / N, stopped by the linear lasso's rule
+  (tolerance() relative change in the variable's own units). Probe 473's path end: L1 to 6e-14,
+  L2 to 1e-13, deviance ratio to 1e-15.
+- **StatCraft's entry rule is that sweep.** A zero coefficient is tested against the q kept from
+  the last nonzero coefficient before it in the sweep (that one's partial residual), or the sweep's
+  own at its start. That is StatCraft's "root mean squared error with the nearest earlier active
+  predictor left out": with it every CV error of probe 473 is Stata's, and the grid lines of
+  probes 506, 507 (735 and 606 lines) and 597 are Stata's to the character.
+- **Plug-in rounds start from the last round's fit**, as the linear lasso's do (probe 473's
+  e(L2_max) to 1e-15; from zero it is 1.2e-8 off).
+- **A syntax error keeps e()**: after `capture lasso sqrt ...` Stata's e() is still the sqrtlasso
+  before it (probe 473's predict); RCraft keeps e() after every lasso line that only stops with
+  Stata's own error.
+- Probes 473, 506, 507, 597 on R: 5 of 5 compared lines to 8 digits. Corpus `sqrtlasso.do`: 17
+  results, at 1e-7 (at the path's end coefficients and norms differ by up to 4e-8, as for the
+  linear lasso).

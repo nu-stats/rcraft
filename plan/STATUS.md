@@ -5200,3 +5200,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   estimates restore, ...) now clears the failed-fit flag once R has run it; before, a model R had
   stopped in made a later nl's _b[] and e() stop (in one do-file, and across the corpus's shared R
   sessions, which broke nl.do after lasso_glm.do).
+
+## P2C.12: sqrtlasso, and e() after a failed post, 2026-11-16
+
+- **Translated:** `sqrtlasso` (none, bic, cv, plugin both kinds; always-in variables, penaltywt(),
+  noconstant) and what follows it. Found: Stata's solver is coordinate descent with the exact
+  square-root coordinate minimiser and a stale mean square for zero coefficients (StatCraft's entry
+  rule); plug-in rounds warm-started. Probes 473/506/507/597: 5 of 5 compared lines to 8 digits,
+  the entry probes' grid lines to the character; corpus `sqrtlasso.do` (17 results, at 1e-7). All lasso
+  probes: 65 of 66 compared lines to 8 digits. Probe share (dry run) 72.6% -> 72.7% (20,281 -> 20,298
+  translated, 7,652 -> 7,606 not, 922 -> 951 known only when run).
+- **e() kept and lost:** a lasso line that only stops with Stata's syntax error keeps e(); a command
+  outside the models that posts e() and then stops in R for a reason not Stata's own marks e() as
+  not known (`stata_post_failed`), so later reads stop instead of showing older results.

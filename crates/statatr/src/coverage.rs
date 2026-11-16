@@ -276,6 +276,7 @@ const MODELS: &[&str] = &[
     "sem",
     "simulate",
     "slogit",
+    "sqrtlasso",
     "statsby",
     "stcox",
     "stcurve",

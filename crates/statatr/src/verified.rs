@@ -128,7 +128,10 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("kwallis", &["ranktests"]),
     ("label", &["aware", "labels2"]),
     ("lasso", &["lasso", "lasso_glm"]),
-    ("lassoselect", &["elasticnet", "lasso", "lasso_glm"]),
+    (
+        "lassoselect",
+        &["elasticnet", "lasso", "lasso_glm", "sqrtlasso"],
+    ),
     ("levelsof", &["aware", "extended_missing_groups"]),
     (
         "lincom",
@@ -215,6 +218,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("sktest", &["sktest"]),
     ("sort", &["data", "extended_missing_commands"]),
     ("split", &["strings"]),
+    ("sqrtlasso", &["sqrtlasso"]),
     ("stcox", &["likelihood"]),
     ("stset", &["likelihood"]),
     ("suest", &["suest"]),

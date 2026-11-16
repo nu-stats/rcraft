@@ -227,6 +227,7 @@ pub const COMMANDS: &[&str] = &[
     "sort",
     "spearman",
     "split",
+    "sqrtlasso",
     "ssc",
     "stcox",
     "stset",
@@ -826,6 +827,18 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("scatter", &["by(", "legend(", "nodraw", "sort"]),
     ("sort", &["stable"]),
     ("split", &["generate(", "limit(", "notrim", "parse("]),
+    (
+        "sqrtlasso",
+        &[
+            "grid(",
+            "noconstant",
+            "nolog",
+            "penaltywt(",
+            "rseed(",
+            "selection(",
+            "stop(",
+        ],
+    ),
     (
         "stcox",
         &[

@@ -198,6 +198,7 @@ pub const MAX_ROUNDS: usize = 100_000;
 const VARLIST: &[&str] = &[
     "lasso",
     "elasticnet",
+    "sqrtlasso",
     "glm",
     "revrs",
     "tabm",

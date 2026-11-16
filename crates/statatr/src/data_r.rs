@@ -545,6 +545,7 @@ const NAME_TABLES: &[&str] = &[
 const MODELS: &[&str] = &[
     "lasso",
     "elasticnet",
+    "sqrtlasso",
     "glm",
     "svy",
     "asclogit",
@@ -1101,6 +1102,14 @@ const CAPTURED_HELPER: &str = r#"stata_captured <- function(e, noisily) {
   }
   if (noisily) cat(m, "\n", sep = "")
   rc
+}
+# a command that posts e() outside the models stopped in R: unless the error
+# is Stata's own (RCraft's words with "(Stata: r(#))", after which Stata keeps
+# the earlier results), Stata posted results R does not have, so what reads
+# e() or _b[] next stops
+stata_post_failed <- function(e) {
+  while (inherits(e$parent, "condition")) e <- e$parent
+  if (!grepl(" \\(Stata: r\\([0-9]+\\)\\)$", conditionMessage(e))) stata_fit_failed <<- TRUE
 }"#;
 
 /// `assert` on the rows it covers: `ok` is TRUE where the expression holds.
@@ -1438,6 +1447,9 @@ struct Session {
     r_new: Option<(&'static [&'static str], String)>,
     /// This command left e() (`keep_e`).
     e_new: bool,
+    /// This line stops with Stata's own error before it fits (lasso's syntax
+    /// errors): Stata keeps the results it had, so e() stays as it was.
+    e_kept: bool,
     helpers: BTreeSet<&'static str>,
     /// The packages `ssc install` asked for, in order.
     ssc: Vec<String>,
@@ -2310,6 +2322,7 @@ impl Session {
         self.esample_new = false;
         self.r_new = None;
         self.e_new = false;
+        self.e_kept = false;
         // what e() held before this line, to tell whether the line posted new results
         let e_before = self.e_ret.clone();
         if MODELS.contains(&c.name.as_str()) {
@@ -2352,7 +2365,7 @@ impl Session {
         if let Err(e) = &done {
             self.lose_estimates(c, &e.reason);
         }
-        if done.is_ok() && MODELS.contains(&c.name.as_str()) && !self.e_new {
+        if done.is_ok() && MODELS.contains(&c.name.as_str()) && !self.e_new && !self.e_kept {
             self.e_ret =
                 returned::Returned::Lost(format!("e() after {} is not kept in R yet", c.name));
         }
@@ -2460,8 +2473,14 @@ impl Session {
             // nl, suest, margins, post, estimates restore, ... posted new results:
             // once R has run them, a model that failed before them no longer
             // stands for e() (they keep the last results until then: margins
-            // and nlcom, post read them)
+            // and nlcom, post read them); if R stops in them for a reason that is
+            // not Stata's own error, what reads e() afterwards stops too
             out.code.push("stata_fit_failed <- FALSE".to_string());
+            let body = out.code.join("\n");
+            out.code = vec![format!(
+                "withCallingHandlers({{\n{body}\n}}, error = stata_post_failed)"
+            )];
+            self.helpers.insert("stata_captured");
         }
         // tables cut long names to be unique among the data's variables, as Stata's do:
         // the names the line sees
@@ -2595,7 +2614,7 @@ impl Session {
             "anovaplot" => self.anovaplot(c, &opts, out),
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),
-            "lasso" | "elasticnet" => self.lasso(c, &opts, out),
+            "lasso" | "elasticnet" | "sqrtlasso" => self.lasso(c, &opts, out),
             "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" => {
                 self.lasso_after(c, &opts, out)
             }
@@ -4747,8 +4766,11 @@ capture logit y x
 nl (y = {a = 1} * exp({b = 0.1} * x))
 display _b[/a]");
         assert!(out[1].contains("stata_fit_failed <- TRUE"), "{out:?}");
+        // nl's results clear the flag once R has run it; if R stops in nl for
+        // a reason that is not Stata's own error, the flag goes up instead
         assert!(
-            out[2].trim_end().ends_with("stata_fit_failed <- FALSE"),
+            out[2].starts_with("withCallingHandlers(")
+                && out[2].contains("stata_fit_failed <- FALSE\n}, error = stata_post_failed)"),
             "{out:?}"
         );
         // nl keeps no rm(): nothing before it is taken away

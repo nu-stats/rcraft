@@ -2485,7 +2485,7 @@ pub const GUIDES: &[Guide] = &[
     },
     Guide {
         command: "lasso",
-        about: "Lasso for linear, logit, probit and Poisson outcomes, elasticnet linear, and lassoselect, lassoknots, lassocoef, lassoinfo, predict",
+        about: "Lasso for linear, logit, probit and Poisson outcomes, elasticnet linear, sqrtlasso, and lassoselect, lassoknots, lassocoef, lassoinfo, predict",
         points: &[
             p(
                 "In R",
@@ -2496,7 +2496,8 @@ pub const GUIDES: &[Guide] = &[
                  cross-validation (folds from Stata's own random numbers, rseed()), the one-s.e. \
                  rule, adaptive steps or the plug-in penalty, with the deviance stop() and the \
                  'minimum found' rule. elasticnet runs each alpha on Stata's shared grid with the \
-                 same folds and picks the alpha and lambda with the smallest BIC or CV error. The \
+                 same folds and picks the alpha and lambda with the smallest BIC or CV error; \
+                 sqrtlasso solves the square-root lasso by Stata's own coordinate rule. The \
                  log, the table, e() (e(rngstate) included) and e(sample) are Stata's; \
                  lassoknots, lassocoef, lassoinfo and lassoselect print Stata's tables, and \
                  predict gives the penalized or postselection prediction (Pr(y) or the number of \
@@ -2504,8 +2505,8 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Differs",
-                "Stata's descent stops short of the optimum; for the linear lasso and elasticnet \
-                 RCraft follows its rule, which reproduces the probes to about 1e-15, but on \
+                "Stata's descent stops short of the optimum; for the linear lasso, elasticnet and \
+                 sqrtlasso RCraft follows its rule, which reproduces the probes to about 1e-15, but on \
                  some data the L1 and L2 norms at the path's end differ in the 8th digit, and the \
                  plug-in penalty's fit agrees to about 2e-9. For logit, probit and Poisson \
                  Stata's test is not decoded: RCraft solves to the optimum (Stata's own results \
@@ -2516,7 +2517,7 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Not yet",
                 "lasso cox, elasticnet logit, probit and poisson, elasticnet with alpha 0 \
-                 (ridge) or several alphas and selection(none), sqrtlasso, the inference \
+                 (ridge) or several alphas and selection(none), the inference \
                  commands (dsregress, poregress, xporegress, ...), cvplot, factor variables, \
                  weights, cluster(), tolerance() other than the default and dtolerance() are \
                  refused; so are noconstant with cross-validation and predict after offset(), \
@@ -3536,7 +3537,9 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
     let full = full(command);
     let page = match full.as_str() {
         "probit" => "logit",
-        "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" | "elasticnet" => "lasso",
+        "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" | "elasticnet" | "sqrtlasso" => {
+            "lasso"
+        }
         "oprobit" => "ologit",
         "tsfill" => "tsset",
         "tab1" | "tab2" => "tabulate",
