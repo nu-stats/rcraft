@@ -1323,3 +1323,31 @@ fn rotate_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn kap_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 80\ngenerate int r1 = 1 + mod(_n * 7, 3)\ngenerate int r2 = r1\n\
+         replace r2 = 1 + mod(r2, 3) if mod(_n, 6) == 0\n\
+         replace r2 = 1 + mod(r2 + 1, 3) if mod(_n, 11) == 0\ngenerate int r3 = r1\n\
+         replace r3 = 1 + mod(r3, 3) if mod(_n, 5) == 0\n\
+         kap r1 r2, tab\nkap r1 r2, wgt(w)\nkap r1 r2 r3\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "        r1 |         1          2          3 |     Total",
+        "         1 |        13         12          1 |        26",
+        "Agreement   agreement     Kappa   Std. err.         Z      Prob>Z",
+        "  77.50%      33.52%     0.6616     0.0764       8.66      0.0000",
+        "Ratings weighted by:",
+        "   0.5000   1.0000   0.5000",
+        "  88.13%      58.52%     0.7137     0.0828       8.62      0.0000",
+        "There are 3 raters per subject:",
+        "               2 |    0.5803       8.99    0.0000",
+        "        combined |    0.6027      13.15    0.0000",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

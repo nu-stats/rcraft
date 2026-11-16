@@ -135,6 +135,7 @@ pub const COMMANDS: &[&str] = &[
     "isid",
     "isvar",
     "ivregress",
+    "kap",
     "kdensity",
     "keep",
     "ktau",
@@ -416,6 +417,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "varimax",
         ],
     ),
+    ("kap", &["absolute", "tab", "wgt("]),
     ("ranksum", &["by("]),
     ("kwallis", &["by("]),
     (
@@ -1799,6 +1801,8 @@ gettoken a b : s, {o}"
             "rotate" if name == "blanks" => "factor x y z\nrotate, blanks(.3)".to_string(),
             "rotate" if name == "oblique" => "factor x y z\nrotate, oblique promax".to_string(),
             "rotate" => format!("factor x y z\nrotate, {o}"),
+            "kap" if name == "wgt" => "kap x y, wgt(w)".to_string(),
+            "kap" => format!("kap x y, {o}"),
             "power" if matches!(name, "continuity" | "effect" | "test") => {
                 format!("power twoproportions 0.3 0.5, {o}")
             }
