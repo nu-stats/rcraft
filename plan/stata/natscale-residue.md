@@ -666,3 +666,15 @@ Treating the padded set as a centred scale of N marks with Stata's step (span dÂ
   labels `graph twoway` draws for the same ranges as a second view; a score comparison between two
   candidate counts that flips at n 12, 15, 20, 25.
 - Scoreboard unchanged at 4,891.
+
+## 2026-11-16: what StatCraft has
+
+StatCraft (`C:\pinokio\api\statcraft`, `crates/graph/src/scale.rs`, `plan/stata/graph.md`, commit 0967751)
+has the label rule RCraft already uses (the 0.67/0.33/0.12 score) and probes 224â€“227. It matched r()
+to 1e-15 and accepted the last-bit residue ("Stata's carry the residue of its arithmetic"); it never
+decoded the bits. Its notes list the same open edges: exact ties at n = 4 broken by last-bit
+rounding, n = 2, `_natscale 5.12 14.99 5` (5 to 15 by 5) and `.0515 2.688 5` (0 to 3 by 1).
+Its note that `_natscale` "reads its arguments as text" (`10.0` against `10`) was checked here
+(probe 18): `10`/`10.0`/`20.0`, `0`/`0.0`, `12.910`/`12.91`, `1.4500000000000000`/`1.45` give the same
+bits. The one pair that differed, `15.53` against `15.530000000000001`, is two different doubles one
+ulp apart, which is the ulp sensitivity already seen in probe 13.
