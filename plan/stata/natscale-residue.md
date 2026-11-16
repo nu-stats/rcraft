@@ -812,3 +812,14 @@ Kronmal (1965); the journal texts of AS 168, AS 21 and AS 44; Talbot, Lin & Hanr
 - Their count rule (S from the number of data items) cannot be `_natscale`'s, which never sees the data
   count. They cite Giamno (1964), "A mathematical method for the automatic scaling of a function",
   JACM 11, 79–83, not yet read. Scoreboard stays at 7,781.
+
+## 2026-11-16: AS 168's journal text (user's PDF)
+
+The listing matches the StatLib one used in the literature study, but that study's R had one slip:
+after moving to the next unit (I = I + 1, GOTO 45) the listing falls through `AJ = 0.0`, so the divisor
+search restarts at 1; the R carried AJ over. Fixed (`lit_others_fix.R`), AS 168 with Stata's 10^k:
+as written 718, walked to Stata's labels 2,349 (m = n), 2,658 (m = n + 1), some m 5,543 (before: 683,
+2,268, 2,577, 5,415). Still far below 7,781. The text adds that STEP has at most two significant digits
+from the units 10–80 and that the start may be a multiple of STEP/K, with K raised while a failure
+could only come from data covering at least 70% (COVER) of the next larger STEP's scale. The user also
+supplied AS 21, AS 44 and Talbot et al. (2010); they went to the literature session to implement.
