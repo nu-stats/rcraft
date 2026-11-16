@@ -534,3 +534,20 @@ model reproduces both ends:
 - Padded sets read from exact spans, e.g. 12.65–14.71: [12.6, 14.8] (23 labels) for n ≤ 28, then
   [12.1, 15.3] (33 labels) from n 29; 12.68–14.74: [12.0, 15.4] (35 labels) from n 32. The counts exceed
   n, so the span is not "n marks" as in Nelder.
+
+## 2026-11-15: padding split around the labels; what does not pick it
+
+- The runs the data-centred span missed (all with a label inside the data, or at high n) have
+  consistent (bottom start, top span) pairs whose start is one index above the centred floor. A second
+  form, the padding p split around the labels (bottom start L − ⌈p/2⌉ or L − ⌊p/2⌋, top start = bottom
+  start + (U − L + p)·d as a sum, both walked in), fits both ends in 2,862 (ceiling) or 2,840 (floor) of
+  the same 3,000 sampled cases, against 984 and 901 with targets moved one ulp. Either split, or the
+  data-centred span: 2,915 of 3,000 (97%).
+- The padded label count M = cnt + p is usually near n (narrow sets: M − n from −2 to +4 in most), but
+  often p = 0 where n is far above cnt. No rule in n alone: p = max(n + c − cnt, 0) for c from −2 to 3
+  is in the fitting set for at most 1,338 of 2,862, and with "or p = 0" at most 2,117.
+- A cost over symmetric padded sets ((0.67·inside + wo·outside)/range or /span + wn·|M − n|/n, argmin
+  over p) picks a fitting p in at most 1,351 of 2,862 for any wo in 0.1–1 and wn in 0.05–5. So the
+  padding is not that cost's choice either.
+- Next: read p exactly on a family where only p varies (fixed lo, hi; n swept finely; several steps)
+  and look at which candidate steps' label sets the padded ends coincide with.
