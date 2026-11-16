@@ -694,3 +694,28 @@ ulp apart, which is the ulp sensitivity already seen in probe 13.
   does give: matching a twoway axis needs r() only up to `%18.0g`. Over the 15,244 cases, L·d and U·d
   after `%18.0g` match Stata's r() after `%18.0g` at both ends in 9,133 (bottoms 12,125, tops 11,096),
   against 4,891 bit for bit; `%18.0g` erases the residue completely in 7,970.
+
+## 2026-11-16: two candidate counts, and a new best on the scoreboard (5,563)
+
+Fitting mark counts N (centred scale, Stata's step) computed for all 15,244 cases (`Sall.R`; some N
+fits 14,589).
+
+- At lo = 0 the count is a staircase in n, not n + 4: step 0.1, hi 0.85 gives N = 10 (the labels) for
+  n 9–11, then 16–22 from n 12; hi 0.62 at step 0.05 steps at n 14, 20, 24 and 26. Read end by end,
+  the top walk's start index at lo = 0 does not depend on hi: 15–17 for every family at n 15–19,
+  18–22 at n 20–24 (step 0.1). So the top start follows a round count c(n) and N ≈ c(n) + 4, with
+  c(n) the largest of 1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8 × 10^k not above n. The later step (to N ≈ 30)
+  moves with hi (n 24 at hi 1.36, 26 at 1.46) and is not monotone in n at hi 1.36 (28–33 at n 24,
+  24–27 at n 25, 28–33 at n 26).
+- N = c(n) + 4 is in the fitting set for 6,908 of 14,589 (n + 4: 6,483; with 1-2-5 counts: 5,332);
+  "c(n) + 4 or the label count" for 10,963. The two candidates are the unpadded labels (A) and the
+  padded c(n) + 4 set (B). A linear score in StatCraft's form (outside distance over the range, count
+  distance over n, inside distance) picks the fitting one in at most 4,157 of the 8,397 cases where only
+  one fits, below "always B" (4,342). A decision tree on gaps, n and the label count needs dozens of
+  leaves. So no score flip between the two counts was found.
+- On the scoreboard (bit for bit, both ends): the centred scale with N = the label count gives 5,519
+  (bottoms 9,475, tops 6,955). Its top with the benchmark bottom (L·d, (L − 1)·d + d for an inside
+  label, the on-label clamp) gives **5,563**, up from 4,891. Tops alone: N = max(cnt, c(n) + 4) gives
+  8,004, and with N = cnt where the top label is inside, 8,440; those tops pair badly with any bottom
+  tried (at most 5,485 both).
+- Still far from bit for bit everywhere, so `natscale.rs` keeps declining non-exact steps.
