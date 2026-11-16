@@ -834,3 +834,14 @@ walked down) in place of the 7,781 rule's unpadded top: 6,048 (I = n − 1), 5,8
 is the benchmark's L·d. Nothing to take; scoreboard stays at 7,781. Of the methods traced back
 (Giammo 1964 → Dixon & Kronmal 1965 → Lewart 1973 → Nelder 1976 → Stirling 1981), Lewart's arithmetic
 and Dixon & Kronmal's centring remain the closest.
+
+## 2026-11-16: CALGO's source for Algorithm 463 checked
+
+Downloaded with the user's OK from calgo.acm.org (`463.zip`, 8.3 KB; Fortran SCALE1–3, ACM software
+licence; read only, not run). CALGO lists no remarks or certifications for 463. Line by line, `scale2`
+in `lit_lewart.R` matches it: the truncate-then-step-down for negatives, the DEL gates on both ends, the
+second pass up the units 1, 2, 5, 10, 20, NX = (N − NP)/2, XMINP − NX·DIST, then XMAXP = XMINP +
+N·DIST as a sum, then clamping to the data. Fortran's `10.**NAL` for negative NAL is 1/10^|NAL|, which
+is the nearest double (the `P10` variant), not Stata's product of tenths. No discrepancy, so no rescore;
+the scoreboard stays at 7,781. (SCALE3, the log scale, has a typo `XMAXP = DISTL + REAL(M2)`, irrelevant
+here.)
