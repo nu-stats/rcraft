@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12): made-up data; Stata 19's results are in icc.recorded
 * commands: icc
-* (one-way and two-way random-effects and two-way mixed-effects intraclass correlations, absolute agreement and consistency, McGraw and Wong's intervals and F tests, testvalue(), level(); Stata's errors)
+* (one-way and two-way random-effects and two-way mixed-effects intraclass correlations, absolute agreement and consistency, McGraw and Wong's intervals and F tests, testvalue(), level(); targets left out; Stata's errors)
 * tolerance: 1e-9
 version 19
 clear
@@ -34,3 +34,23 @@ capture icc score target judge, consistency absolute
 display "@ rc both " _rc
 capture icc score target, consistency
 display "@ rc oneway consistency " _rc
+quietly icc score target, absolute
+display "@ oneway absolute " %24.17g r(icc_i) " `r(type)'"
+capture icc score target judge [fw=judge]
+display "@ rc weights " _rc
+capture icc score target, mixed
+display "@ rc oneway mixed " _rc
+replace score = . in 9
+quietly icc score target judge
+display "@ omitted two " r(N_target) " " %24.17g r(icc_avg)
+quietly icc score target
+display "@ omitted two oneway " r(N_target) " " %24.17g r(icc_i)
+capture icc score target judge if target == 1
+display "@ rc insufficient targets " _rc
+capture icc score target judge if judge == 2
+display "@ rc insufficient raters " _rc
+capture icc score target if score > 100
+display "@ rc no observations " _rc
+replace judge = 2 in 1
+capture icc score target judge
+display "@ rc repeated " _rc

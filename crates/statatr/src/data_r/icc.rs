@@ -17,30 +17,32 @@ pub(super) const ICC_HELPER: &str = r##"stata_icc <- function(d, depvar, target,
   ok <- !is.na(y) & !is.na(tg) & (if (is.null(rt)) TRUE else !is.na(rt))
   y <- y[ok]; tg <- tg[ok]; if (!is.null(rt)) rt <- rt[ok]
   refuse <- function(why) stop("icc: ", why, ", where Stata 19's output is not matched; not translated", call. = FALSE)
+  err <- function(msg, rc) stop(msg, " (Stata: r(", rc, "))", call. = FALSE)
+  if (!length(y)) err("no observations", 2000)
   if (is.null(type)) type <- if (mixed) "consistency" else "absolute"
   deftype <- identical(type, if (mixed) "consistency" else "absolute")
-  omitted <- 0
   if (is.null(rt)) {
     cnt <- table(tg)
     k <- max(cnt)
     drop <- names(cnt)[cnt < k]
-    omitted <- length(drop)
     keep <- !(as.character(tg) %in% drop)
     y <- y[keep]; tg <- tg[keep]
     why <- "because of unbalanced data"
   } else {
-    if (any(table(tg, rt) > 1)) refuse("a target rated more than once by a rater")
+    if (any(table(tg, rt) > 1)) err("multiple observations per target and rater not allowed", 498)
     raters <- unique(rt); k <- length(raters)
     full <- tapply(rt, tg, function(r) length(unique(r)) == k)
     drop <- names(full)[!full]
-    omitted <- length(drop)
     keep <- !(as.character(tg) %in% drop)
     y <- y[keep]; tg <- tg[keep]; rt <- rt[keep]
     why <- "because not rated by all raters"
   }
-  if (omitted > 1) refuse("more than one target omitted (the message's plural was not seen)")
+  omitted <- length(drop)
+  if (show && omitted) cat("(", omitted, if (omitted == 1) " target" else " targets", " omitted from computation ", why, ")\n", sep = "")
   tt <- factor(tg); n <- nlevels(tt)
-  if (n < 2 || k < 2) refuse("fewer than two targets or raters")
+  if (!n) err("no observations", 2000)
+  if (n < 2) err("insufficient number of targets", 2001)
+  if (k < 2) err("insufficient number of raters (observations per target)", 2001)
   gm <- mean(y); mt <- tapply(y, tt, mean)
   MSR <- k * sum((mt - gm)^2) / (n - 1)
   q <- (1 + level / 100) / 2
@@ -100,7 +102,6 @@ pub(super) const ICC_HELPER: &str = r##"stata_icc <- function(d, depvar, target,
     sprintf(paste0("%.", d, "f"), if (v < 0) -qq else qq)
   }
   g <- function(v) stata_fmt(v, fmt, trim = TRUE)
-  if (omitted == 1) cat("(1 target omitted from computation ", why, ")\n", sep = "")
   cat("\nIntraclass correlations\n", mtitle, "\n", if (type == "absolute") "Absolute agreement" else "Consistency of agreement", "\n\n", sep = "")
   cat("Random effects: ", formatC(target, width = -17), "Number of targets =", sprintf("%10s", n), "\n", sep = "")
   if (is.null(rater)) cat(strrep(" ", 33), "Number of raters  =", sprintf("%10s", k), "\n", sep = "")
@@ -165,7 +166,8 @@ impl Session {
             )
         };
         if c.parts.weight.is_some() {
-            return Err(no("icc with weights is not translated"));
+            out.line(stop("weights not allowed", 101));
+            return Ok(());
         }
         let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
         if let Some(v) = vars.iter().find(|v| !is_name(v)) {
@@ -200,17 +202,19 @@ impl Session {
             ));
             return Ok(());
         }
+        if vars.len() == 2 && mixed {
+            out.line(stop(
+                "you must specify the rater variable with mixed-effects models",
+                198,
+            ));
+            return Ok(());
+        }
         if vars.len() == 2 && cons {
             out.line(stop(
                 "consistency is not allowed with one-way random-effects models",
                 198,
             ));
             return Ok(());
-        }
-        if vars.len() == 2 && (mixed || abs) {
-            return Err(no(
-                "icc, mixed or absolute with one-way models is not translated",
-            ));
         }
         let mut args = String::new();
         if mixed {

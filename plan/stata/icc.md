@@ -22,7 +22,15 @@ every line identical to RCraft's, r() bounds and p-values apart past the 13th di
 - r(): N_target, N_rater, icc_i, icc_i_F, _df1, _df2, _p, _lb, _ub, the same for icc_avg, testvalue, level, model,
   depvar, target, rater (two-way), type. Stata's F tail with fractional df is about 1e-6 of itself off R's far in
   the tail (p 1.1578738e-11 against 1.1578745e-11); the bounds' last digits follow its F quantiles.
-- Errors: `No target variable specified`, `only one of consistency or absolute may be specified`, `consistency is
-  not allowed with one-way random-effects models` (each r(198)).
-- Refused: a rater rating a target more than once, more than one target left out (the plural not seen), weights,
-  mixed or absolute with one-way.
+- More than one target left out: `(2 targets omitted from computation because ...)`. One-way takes k as the
+  largest number of ratings a target has, so with one target rated twice as often all the others go.
+- One-way `absolute` is the default and prints the same; `mixed` (with or without a type) without a rater is an
+  error. A rating with a missing score is dropped before the repeated-rating check.
+- Errors, in Stata's order of checks: weights `weights not allowed` r(101); `No target variable specified`,
+  `only one of consistency or absolute may be specified`, `you must specify the rater variable with
+  mixed-effects models`, `consistency is not allowed with one-way random-effects models` (each r(198)); no
+  observations left (before or after targets are left out) `no observations` r(2000); `multiple observations
+  per target and rater not allowed` r(498); after the omitted message, one target `insufficient number of
+  targets` and one rater `insufficient number of raters (observations per target)` (r(2001), targets checked
+  first).
+- Two targets give Stata's numbers too, an average bound above the upper one included (4.025153, .9984704).

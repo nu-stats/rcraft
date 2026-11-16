@@ -11,3 +11,12 @@
 @ rc no target 198
 @ rc both 198
 @ rc oneway consistency 198
+@ oneway absolute       .72695196641115523 absolute
+@ rc weights 101
+@ rc oneway mixed 198
+@ omitted two 10       .94444273405894519
+@ omitted two oneway 10        .7368793617384044
+@ rc insufficient targets 2001
+@ rc insufficient raters 2001
+@ rc no observations 2000
+@ rc repeated 498

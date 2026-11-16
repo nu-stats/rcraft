@@ -1387,7 +1387,8 @@ fn icc_prints_statas_layout() {
         "clear\nset obs 72\ngenerate int target = 1 + mod(_n - 1, 12)\n\
          generate int judge = 1 + floor((_n - 1) / 12)\n\
          generate double score = 10 + target / 3 + judge / 5 + mod(_n * 37, 23) / 11\n\
-         icc score target judge\nicc score target, testvalue(.2)\n",
+         icc score target judge\nicc score target, testvalue(.2)\n\
+         replace score = . in 5\nreplace score = . in 9\nicc score target judge\n",
     );
     let text = ok(&mut e, &code);
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
@@ -1405,6 +1406,8 @@ fn icc_prints_statas_layout() {
         "                                 Number of raters  =         6",
         "  ICC(1)=0.20: F(11.0, 60.0) = 6.03           Prob > F = 0.000",
         "  ICC(k)=0.20: F(11.0, 60.0) = 12.05          Prob > F = 0.000",
+        "(2 targets omitted from computation because not rated by all raters)",
+        "Random effects: target           Number of targets =        10",
     ] {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
