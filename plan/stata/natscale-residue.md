@@ -551,3 +551,13 @@ model reproduces both ends:
   padding is not that cost's choice either.
 - Next: read p exactly on a family where only p varies (fixed lo, hi; n swept finely; several steps)
   and look at which candidate steps' label sets the padded ends coincide with.
+
+## 2026-11-16: padded ends against coarser grids
+
+Every (bottom start, top start) pair that reproduces both ends was listed per n for 12.91–15.53 and
+−1.03–0.202 (probe 14, step 0.1). The padded ends do not sit on one coarser candidate's labels: only
+n 40–43 of 12.91–15.53 has a pair with both ends on the 0.5 grid ([12, 16.5]); n 34–39 allow
+[12.1–12.5, 16.1–16.4] (no [12.5, 16]); n 44–52 allow [11.7–12, 16.6–16.9] (no 17); −1.03–0.202 has
+[−1.5, 2] at n 22–24 only. So the padding is not "the enclosing labels of a coarser step". Also
+checked by hand: Heckbert's loose labels with ntick = n (range = nicenum(hi − lo), step =
+nicenum(range/(n − 1)), rounded) change step at n 35 for this range, not at 34, 40 and 44.
