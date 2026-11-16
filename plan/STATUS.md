@@ -5196,3 +5196,7 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   20,281 -> 20,281, not 7,770 -> 7,652, known only when run 804 -> 922; the lasso lines name x1-x10).
 - **Not yet:** lasso cox, elasticnet logit/probit/poisson, alpha 0, several alphas with
   selection(none) or without a CV minimum, sqrtlasso, the inference commands, cvplot.
+- **Fixed after it:** a command outside the models list that posts new e() (nl, suest, margins, post,
+  estimates restore, ...) now clears the failed-fit flag once R has run it; before, a model R had
+  stopped in made a later nl's _b[] and e() stop (in one do-file, and across the corpus's shared R
+  sessions, which broke nl.do after lasso_glm.do).

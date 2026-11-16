@@ -89,5 +89,3 @@ display "@ err_exposure " _rc
 generate double exneg = ex - 1
 capture lasso poisson yc x1-x8, exposure(exneg)
 display "@ err_exposure0 " _rc
-* end on a fit that works (what a failed model leaves must not reach the next file in the same R session)
-quietly lasso logit yb x1-x8, selection(bic)

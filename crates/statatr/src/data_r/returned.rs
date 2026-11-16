@@ -1575,7 +1575,7 @@ impl Session {
 }
 
 /// Who left the values `e()` or `r()` would read.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub(super) enum Returned {
     /// Nothing yet in this do-file (R may hold an earlier run's values).
     #[default]

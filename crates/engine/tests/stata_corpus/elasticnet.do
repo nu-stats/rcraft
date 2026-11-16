@@ -51,5 +51,3 @@ capture elasticnet linear y x1-x8, alpha(1.5)
 display "@ err_alpha " _rc
 capture elasticnet linear y x1-x8, selection(adaptive) alpha(.5)
 display "@ err_selection " _rc
-* end on a fit that works (what a failed model leaves must not reach the next file in the same R session)
-quietly elasticnet linear y x1-x8, selection(bic) alpha(.5)

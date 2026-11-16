@@ -2305,6 +2305,8 @@ impl Session {
         self.esample_new = false;
         self.r_new = None;
         self.e_new = false;
+        // what e() held before this line, to tell whether the line posted new results
+        let e_before = self.e_ret.clone();
         if MODELS.contains(&c.name.as_str()) {
             self.svy_fit = false;
         }
@@ -2442,6 +2444,18 @@ impl Session {
                 "rm(list = intersect(c(\"stata_e\", \"stata_b\", \"stata_vcov\", \"stata_df\", \"stata_estimates\"), ls(sorted = FALSE)))\nstata_fit_failed <- TRUE"
                     .to_string(),
             );
+            out.code.push("stata_fit_failed <- FALSE".to_string());
+        } else if !out.code.is_empty()
+            && self.e_ret != e_before
+            && matches!(
+                self.e_ret,
+                returned::Returned::Kept { .. } | returned::Returned::Program { .. }
+            )
+        {
+            // nl, suest, margins, post, estimates restore, ... posted new results:
+            // once R has run them, a model that failed before them no longer
+            // stands for e() (they keep the last results until then: margins
+            // and nlcom, post read them)
             out.code.push("stata_fit_failed <- FALSE".to_string());
         }
         // tables cut long names to be unique among the data's variables, as Stata's do:
@@ -4716,6 +4730,26 @@ sort a");
                 Err(e) => format!("NOT: {}", e.reason),
             })
             .collect()
+    }
+
+    #[test]
+    fn results_posted_outside_the_models_clear_a_failed_fit() {
+        // a model R stopped in leaves stata_fit_failed TRUE; nl's results
+        // replace it, so what reads e() or _b[] after nl must not stop
+        let out = r("use d
+capture logit y x
+nl (y = {a = 1} * exp({b = 0.1} * x))
+display _b[/a]");
+        assert!(out[1].contains("stata_fit_failed <- TRUE"), "{out:?}");
+        assert!(
+            out[2].trim_end().ends_with("stata_fit_failed <- FALSE"),
+            "{out:?}"
+        );
+        // nl keeps no rm(): nothing before it is taken away
+        assert!(!out[2].contains("rm(list = intersect("), "{out:?}");
+        // a line that leaves e() as it was does not touch the flag
+        let out = r("use d\nlogit y x\nsummarize x");
+        assert!(!out[2].contains("stata_fit_failed"), "{out:?}");
     }
 
     #[test]
