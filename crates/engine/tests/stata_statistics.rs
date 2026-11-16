@@ -1379,3 +1379,33 @@ fn tetrachoric_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn icc_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 72\ngenerate int target = 1 + mod(_n - 1, 12)\n\
+         generate int judge = 1 + floor((_n - 1) / 12)\n\
+         generate double score = 10 + target / 3 + judge / 5 + mod(_n * 37, 23) / 11\n\
+         icc score target judge\nicc score target, testvalue(.2)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Two-way random-effects model",
+        "Absolute agreement",
+        "Random effects: target           Number of targets =        12",
+        "Random effects: judge            Number of raters  =         6",
+        "                 score |        ICC       [95% conf. interval]",
+        "            Individual |    .703946       .4888697    .8826017",
+        "               Average |   .9344974       .8516032    .9783118",
+        "  ICC=0.00: F(11.0, 55.0) = 18.83             Prob > F = 0.000",
+        "Note: ICCs estimate correlations between individual measurements",
+        "One-way random-effects model",
+        "                                 Number of raters  =         6",
+        "  ICC(1)=0.20: F(11.0, 60.0) = 6.03           Prob > F = 0.000",
+        "  ICC(k)=0.20: F(11.0, 60.0) = 12.05          Prob > F = 0.000",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

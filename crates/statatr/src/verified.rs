@@ -92,6 +92,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("gettoken", &["made"]),
     ("global", &["control"]),
     ("gsort", &["data", "extended_missing_commands"]),
+    ("icc", &["icc"]),
     (
         "import",
         &[

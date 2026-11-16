@@ -126,6 +126,7 @@ pub const COMMANDS: &[&str] = &[
     "grstyle",
     "gsort",
     "histogram",
+    "icc",
     "import",
     "include",
     "input",
@@ -419,6 +420,17 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("kap", &["absolute", "tab", "wgt("]),
+    (
+        "icc",
+        &[
+            "absolute",
+            "consistency",
+            "format(",
+            "level(",
+            "mixed",
+            "testvalue(",
+        ],
+    ),
     (
         "tetrachoric",
         &[
@@ -1819,6 +1831,10 @@ gettoken a b : s, {o}"
             "rotate" => format!("factor x y z\nrotate, {o}"),
             "kap" if name == "wgt" => "kap x y, wgt(w)".to_string(),
             "kap" => format!("kap x y, {o}"),
+            "icc" if name == "testvalue" => "icc y g t, testvalue(.2)".to_string(),
+            "icc" if name == "level" => "icc y g t, level(90)".to_string(),
+            "icc" if name == "format" => "icc y g t, format(%9.4f)".to_string(),
+            "icc" => format!("icc y g t, {o}"),
             "tetrachoric" if name == "stats" => "tetrachoric x y z, stats(rho p)".to_string(),
             "tetrachoric" if matches!(name, "print" | "star") => {
                 format!("tetrachoric x y z, {name}(.05)")

@@ -2415,6 +2415,28 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "icc",
+        about: "Intraclass correlations (icc y target [rater], mixed, consistency, absolute, testvalue(#))",
+        points: &[
+            p(
+                "In R",
+                "stata_icc gives the one-way and two-way random-effects and two-way mixed-effects \
+                 ICCs (individual and average) from the ANOVA mean squares, absolute agreement or \
+                 consistency, with McGraw and Wong's confidence intervals (Satterthwaite's df for \
+                 absolute agreement) and F tests of testvalue(), level() and format(), Stata 19's \
+                 table, note and r(); a target not rated by all raters (or, one-way, with fewer \
+                 ratings) is left out as Stata does, with its message, and Stata's errors.",
+            ),
+            p(
+                "Not yet",
+                "A target rated more than once by a rater, more than one target left out, weights, \
+                 and mixed or absolute with one-way models are not translated. r()'s bounds and \
+                 p-values can differ from Stata's past the 13th digit (Stata's F tail with \
+                 fractional df far out by about 1e-6 of itself).",
+            ),
+        ],
+    },
+    Guide {
         command: "rotate",
         about: "Rotating factor's or pca's loadings (rotate, varimax, quartimax, equamax, promax(#), normalize, blanks(#))",
         points: &[
