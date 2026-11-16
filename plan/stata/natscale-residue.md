@@ -646,3 +646,23 @@ Treating the padded set as a centred scale of N marks with Stata's step (span d�
   0.0515 at step 0.005 and hi 0.206 at step 0.02, the same problem), 24 for lo 0, hi 1.45. Not a fixed
   share of the range or of the label count, and not a fixed outside distance. Next: what sets the cap.
 - Scoreboard unchanged at 4,891 (no rule for the cap yet).
+
+## 2026-11-16: the cap, and the angles suggested by the top session
+
+- hi − lo alone does not decide the result: probes 9 and 10 hold the width fixed (2.06, 2.62) and move
+  lo by 0.01; whether and how much the ends are padded changes with the position (see the 2026-11-15
+  span map). So lo and hi matter separately.
+- The cap on N = min(n + 4, cap), read where it is pinned exactly (271 groups): no single outside limit
+  explains it. At the cap the padded ends sit up to 8 steps outside the data in some groups and 0 in
+  others, and one more mark adds a step on either side, with no common threshold in steps, in shares of
+  the range, or in shares of the padded span (e.g. lo 0, hi 1.45: 24 allowed with 0.17 and 0.20 of the
+  span outside, 25 refused at 0.21 and 0.20; lo 0, hi 0.0515, step 0.005: 16 allowed at 0.13 and 0.18,
+  17 refused at 0.19 and 0.17).
+- 24 is the most common pinned cap (lo 0 with hi 0.52–0.89 at step 0.05 and 1.43–1.88 at step 0.1,
+  lo −1.03 with hi −0.02 and −0.205, lo 0.27 and 0.3 with hi 1.43–1.57, lo 3.13 with hi 5.39 where 24 is
+  the label count). A fixed cap fits few cases: N = min(n + 4, 24) is in the fitting set for 1,253 of
+  2,883 (23: 1,038; 25: 1,191; 30: 1,292); with "or the label count", 2,113.
+- Not yet tried: values kept in shorter display formats (%9.0g, %10.0g, %12.0g) at some step; the axis
+  labels `graph twoway` draws for the same ranges as a second view; a score comparison between two
+  candidate counts that flips at n 12, 15, 20, 25.
+- Scoreboard unchanged at 4,891.
