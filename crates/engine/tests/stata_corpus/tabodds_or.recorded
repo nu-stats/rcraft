@@ -7,3 +7,8 @@
 @ rc base out of range 198
 @ rc base not whole 7
 @ rc aweights 101
+@ adjust      .011660777385159011       .91400752786450123
+@ adjust weights      .029075524362300115        .8646047718632125
+@ rc binomial weights 198
+@ binomial       .82142857142857151      .011734693877551241       .84433503372730034
+@ binomial adjust      .011660777385159011

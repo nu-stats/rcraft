@@ -1479,3 +1479,32 @@ fn tabodds_or_prints_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn tabodds_adjust_and_binomial_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 300\ngenerate byte dose = 1 + mod(_n * 11, 4)\n\
+         generate byte case = mod(_n * 13 + 3 * dose, 17) < 6\n\
+         generate byte w = 1 + mod(_n, 3)\ngenerate byte agegrp = 1 + mod(_n, 3)\n\
+         generate byte sex = mod(floor(_n / 3), 2)\n\
+         tabodds case dose [fw=w], adjust(agegrp sex) base(2)\ngenerate byte trials = 1\n\
+         collapse (sum) case (sum) trials, by(dose agegrp)\ntabodds case dose, binomial(trials)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Mantel\u{2013}Haenszel odds ratios adjusted for agegrp and sex",
+        "           1 |           .          .           .              .          .",
+        "           2 |    1.000000          .           .              .          .",
+        "           4 |    0.913495       0.13       0.7139      0.563059   1.482033",
+        "Score test for trend of odds: chi2(1)  =    0.03",
+        "                              Pr>chi2  =  0.8646",
+        "          1 |         26           49    0.53061        0.32980   0.85370",
+        "          4 |         24           51    0.47059        0.28969   0.76444",
+        "Test of homogeneity (equal odds): chi2(3)  =     0.82",
+        "                                  Pr>chi2  =   0.9137",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}

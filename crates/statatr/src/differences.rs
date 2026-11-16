@@ -2672,12 +2672,14 @@ pub const GUIDES: &[Guide] = &[
                  of equal odds ((N - 1)/N Pearson's chi2) and the score test for trend on the \
                  levels' values; r() as Stata's. or gives each level's Mantel-Haenszel odds \
                  ratio against base()'s level (its place, 1 to k), with its chi2 and the interval \
-                 on V/(R*S), as mhodds does; frequency weights count.",
+                 on V/(R*S), as mhodds does; frequency weights count. adjust() gives the same \
+                 across the adjusting variables' strata with the stratified score test for trend; \
+                 binomial(n) reads case as the cases of n trials on each record.",
             ),
             p(
                 "Not yet",
-                "adjust(), binomial() and the graphs. r() can differ from Stata's in the last \
-                 digit or two.",
+                "The graphs (a later step), and binomial() counts that are missing, negative, not \
+                 whole or above the trials. r() can differ from Stata's in the last digit or two.",
             ),
         ],
     },

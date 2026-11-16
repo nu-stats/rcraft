@@ -66,5 +66,14 @@ past the 14th); corpus `epitab_by.do`.
 - Stata's %w.df rounds the double's exact digits with an exact tie to even (88.125 → 88.12, 0.125 → 0.12,
   0.75 → 0.8, 1.4453125 → 1.445312); kap's 88.13 is a double above 88.125, which Stata gets by adding the
   weighted cells one by one along the rows (R's sum() keeps long doubles and lands on 88.125).
+- tabodds, adjust(varlist) (2026-11-16): implies or; `Mantel–Haenszel odds ratios adjusted for a, b and c` (no
+  Oxford comma, never wrapped) above the same table, each level against the base across the strata as mhodds,
+  compare() with the controls gives it; then only `Score test for trend of odds: chi2(1)  =` `%8.2f` and 30
+  spaces `Pr>chi2  =` `%8.4f` (mhodds's stratified trend test); r() chi2_tr and p_trend alone. A missing value in
+  an adjusting variable drops the record. A level never sharing a stratum with the base prints all `.`.
+- tabodds, binomial(n): case is the cases of n trials on each record (controls n − case); weights with it:
+  `error with option binomial()` / `    weights are not allowed with binomial frequency records` (r(198)).
+  Stata takes nonsense counts as they come (cases above n give negative controls, a missing n counts the
+  cases only); those are refused here.
 - Refused: cc's exact intervals with by() too; cs, by() or without woolf (Cornfield); estandard, ustandard();
-  tabodds's adjust(), binomial() and the graphs.
+  tabodds's graphs (graph lane); binomial() counts that are missing, negative, not whole or above the trials.
