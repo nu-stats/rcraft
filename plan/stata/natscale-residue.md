@@ -845,3 +845,22 @@ N·DIST as a sum, then clamping to the data. Fortran's `10.**NAL` for negative N
 is the nearest double (the `P10` variant), not Stata's product of tenths. No discrepancy, so no rescore;
 the scoreboard stays at 7,781. (SCALE3, the log scale, has a typo `XMAXP = DISTL + REAL(M2)`, irrelevant
 here.)
+
+## 2026-11-16: what the probe score needs is the zero label, not the bits
+
+- The probe comparison (`crates/engine/tests/stata_probes.rs`, `same_number`) is to 8 significant digits;
+  `%21x` is read back to the double first. STATUS (P2C.12) recorded that the 113 differing `_natscale`
+  lines were all cases where Stata's r(min) is 2^-55, not 0.
+- Over the 15,244 swept cases (`tol8.R`): bit for bit, the plain L·d, U·d gets 4,741, the benchmark
+  4,891, the 7,781 rule 7,781. **To 8 digits: 13,218, 13,218 and 13,524, and every miss has a label at 0**
+  (1,943 bottoms, 83 tops). With no label at 0 (9,128 cases), every rule tried matches to 8 digits. As
+  `%18.0g` text (what a later macro use of r() sees): 9,133, 9,168, 10,659.
+- At a zero bottom label (6,033 cases) Stata gives exact 0 in 4,090 and a residue in 1,943, with few
+  values: 2^-55 (398 unclamped), 2^-56 (165), 2^-54 (31), −2^-54 (27), −3·2^-56 (19). Each is the
+  value of a walk up from k steps below 0, and k only matters in bands (`zero.R`, `zband.R`): k 0–2 give
+  0, k 3–5 one residue, k 7–8 another. A depth-4 tree picks the band in 5,329 of 6,033 (cross-validated
+  error 0.365 of the root's): residue when c(n) ≥ U + 3, the top label is outside the data and
+  9 ≤ U ≤ 18; otherwise mostly 0. The 7,781 rule gets 4,377 of the 6,033.
+- So for the probes the question is only when a zero label carries a residue and which one; the
+  translator's current gate (step 1 or more, or 0.5) is stricter than the probe test. Relaxing it to
+  "8 digits, a label at 0 declined" (the gate before 4af4a35) is a decision for the user.
