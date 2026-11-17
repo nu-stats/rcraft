@@ -1124,6 +1124,50 @@ fn power_prints_statas_layout() {
     }
 }
 
+/// power's variance, correlation and paired-proportion methods in Stata 19's
+/// layout, line for line from Stata's own output (plan/stata/power.md): the
+/// sd scale's names, a closed-form sample size whose groups miss nratio(),
+/// a searched target's side, and the discordant proportions worked out from
+/// their sum.
+#[test]
+fn power_variances_correlations_and_paired_proportions_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power onevariance 2, sd n(30) power(0.9)\npower twovariances 1 2, nratio(1.3)\n\
+         power twocorrelations 0.2 0.5, nratio(1.3) onesided\npower onecorrelation 0.2, n(50) power(0.8)\n\
+         power pairedproportions, n(100) prdiscordant(0.3) power(0.8)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Estimated target standard deviation for a one-sample standard-deviation test",
+        "Chi-squared test",
+        "H0: s = s0  versus  Ha: s != s0; sa > s0",
+        "        delta =    1.5208",
+        "           sa =    3.0417",
+        "Estimated sample sizes for a two-sample variances test",
+        "F test",
+        "           N1 =        59",
+        "           N2 =        77",
+        "        N2/N1 =    1.3051",
+        "Fisher's z test",
+        "H0: r2 = r1  versus  Ha: r2 > r1",
+        "            N =       217",
+        "Estimated target correlation for a one-sample correlation test",
+        "H0: r = r0  versus  Ha: r != r0; ra > r0",
+        "           ra =    0.5451",
+        "Large-sample McNemar's test",
+        "H0: p21 = p12  versus  Ha: p21 != p12; p21 > p12",
+        "    p12 + p21 =    0.3000",
+        "Estimated effect size and discordant proportions:",
+        "        delta =    0.1516  (difference)",
+        "          p12 =    0.0742",
+        "          p21 =    0.2258",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
 /// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
 /// on the same data (plan/stata/epitab.md); replace keeps the case variable's
 /// label, which then names ir's row.

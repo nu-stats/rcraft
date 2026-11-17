@@ -2761,25 +2761,36 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "In R",
                 "stata_power works out the sample size, the power, or (with one value, n() and \
-                 power()) the target value for onemean, twomeans, pairedmeans, oneproportion and \
-                 twoproportions, from the [PSS] manual's power functions: the noncentral t (or z \
+                 power()) the target value for onemean, twomeans, pairedmeans, oneproportion, \
+                 twoproportions, onevariance, twovariances, onecorrelation, twocorrelations and \
+                 pairedproportions, from the [PSS] manual's power functions: the noncentral t (or z \
                  with knownsd), Satterthwaite's t for unequal sds, the score or Wald test of a \
-                 proportion, the pooled test of two with Fleiss's continuity correction. Sample \
-                 sizes are the smallest whole numbers reaching the power (the second group \
-                 nratio() times the first, rounded up); a total that does not split is cut to \
-                 Stata's actual sample sizes. Stata 19's printout and r(), but for its search's \
-                 own r(init), r(iter), r(deltax) and r(function).",
+                 proportion, the pooled test of two with Fleiss's continuity correction, the \
+                 chi-squared test of a variance, the F test of two, Fisher's z test of correlations \
+                 and the large-sample McNemar test. Sample sizes are the smallest whole numbers \
+                 reaching the power (the second group nratio() times the first, rounded up); a \
+                 total that does not split is cut to Stata's actual sample sizes. Stata 19's \
+                 printout and r(), but for its search's own r(init), r(iter), r(deltax) and \
+                 r(function).",
+            ),
+            p(
+                "As Stata",
+                "Two variances are tested with F on n1 - 1 and n2 - 1 degrees of freedom, scaled by \
+                 v2/v1, as Stata 19 does. One-sided, pairedproportions' power is the upper tail even \
+                 when p21 is below p12 (its sample size uses the size of the difference), as in \
+                 Stata 19.",
             ),
             p(
                 "Digits",
-                "R's noncentral t and its root finding agree with Stata's to about 1e-12; what is \
-                 printed is the same.",
+                "R's noncentral t, chi-squared and F and its root finding agree with Stata's to \
+                 about 1e-12; what is printed is the same.",
             ),
             p(
                 "Not yet",
-                "Lists of values (Stata's table and graph), the other methods (oneslope, \
-                 rsquared, twocorrelations, ...), test(lrchi2), test(fisher), test(binomial), \
-                 n1() or n2() alone, and the other options are refused.",
+                "Lists of values (Stata's table and graph), the other methods (oneway, twoway, \
+                 oneslope, rsquared, cox, logrank, ...), test(lrchi2), test(fisher), \
+                 test(binomial), n1() or n2() alone, pairedproportions' corr(), diff() and ratio() \
+                 forms, and the other options are refused.",
             ),
         ],
     },

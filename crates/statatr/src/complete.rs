@@ -499,6 +499,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "nratio(",
             "onesided",
             "power(",
+            "prdiscordant(",
             "sd(",
             "sd1(",
             "sd2(",
@@ -1069,11 +1070,16 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
     (
         "power",
         &[
+            "onecorrelation",
             "onemean",
             "oneproportion",
+            "onevariance",
             "pairedmeans",
+            "pairedproportions",
+            "twocorrelations",
             "twomeans",
             "twoproportions",
+            "twovariances",
         ],
     ),
     ("ereturn", &["list"]),
@@ -1891,6 +1897,9 @@ gettoken a b : s, {o}"
                 format!("tetrachoric x y z, {name}(.05)")
             }
             "tetrachoric" => format!("tetrachoric x y z, {o}"),
+            "power" if name == "prdiscordant" => {
+                "power pairedproportions, n(100) prdiscordant(0.3) power(0.8)".to_string()
+            }
             "power" if matches!(name, "continuity" | "effect" | "test") => {
                 format!("power twoproportions 0.3 0.5, {o}")
             }

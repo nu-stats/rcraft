@@ -1123,6 +1123,7 @@ const TEXT_NAMES: &[&str] = &[
     "direction",
     "test",
     "effect",
+    "scale",
     "ties",
     "t0",
     "est_cmd",

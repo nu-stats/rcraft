@@ -1,20 +1,26 @@
-//! `power onemean | twomeans | pairedmeans | oneproportion | twoproportions`:
-//! the sample size, the power or the target value, as Stata 19 works them out
-//! and prints them (`plan/stata/power.md`). The power functions are the
-//! [PSS] manual's: t (noncentral t) or z tests of means, Satterthwaite's t
-//! for unequal standard deviations, the score or Wald test of one proportion,
-//! Pearson's chi-squared (the pooled z) test of two with Fleiss's continuity
-//! correction. Sample sizes are the smallest whole numbers reaching the
-//! power (the second group's from the first's, rounded up, times nratio()),
-//! the target values R's root of the power function.
+//! `power onemean | twomeans | pairedmeans | oneproportion | twoproportions |
+//! onevariance | twovariances | onecorrelation | twocorrelations |
+//! pairedproportions`: the sample size, the power or the target value, as
+//! Stata 19 works them out and prints them (`plan/stata/power.md`). The power
+//! functions are the [PSS] manual's: t (noncentral t) or z tests of means,
+//! Satterthwaite's t for unequal standard deviations, the score or Wald test
+//! of one proportion, Pearson's chi-squared (the pooled z) test of two with
+//! Fleiss's continuity correction, the chi-squared test of a variance, the F
+//! test of two, Fisher's z test of correlations and the large-sample McNemar
+//! test. Sample sizes are the smallest whole numbers reaching the power (the
+//! second group's from the first's, rounded up, times nratio()), the target
+//! values R's root of the power function or Stata's closed forms.
 
 use super::*;
 
 pub(super) const POWER_HELPER: &str = r##"
-stata_power <- function(method, v1, v2 = NULL, alpha = 0.05, power = NULL, n = NULL, n1 = NULL, n2 = NULL,
+stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL, n = NULL, n1 = NULL, n2 = NULL,
                         nratio = NULL, onesided = FALSE, direction = "upper", sd = NULL, sd1 = NULL, sd2 = NULL,
                         known = FALSE, sddiff = NULL, corr = NULL, test = "score", continuity = FALSE,
-                        effect = "diff", show = TRUE) {
+                        effect = "diff", scale = "variance", prdiscordant = NULL, show = TRUE) {
+  if (method %in% c("onevariance", "twovariances", "onecorrelation", "twocorrelations", "pairedproportions"))
+    return(stata_power_g(method, v1, v2, alpha, power, n, n1, n2, nratio, onesided, direction, scale, effect,
+                         prdiscordant, show))
   two <- method %in% c("twomeans", "twoproportions")
   props <- method %in% c("oneproportion", "twoproportions")
   stop_r <- function(m) stop(m, call. = FALSE)
@@ -258,6 +264,204 @@ stata_power <- function(method, v1, v2 = NULL, alpha = 0.05, power = NULL, n = N
   cat("\n")
   invisible(r)
 }
+
+# power onevariance | twovariances | onecorrelation | twocorrelations | pairedproportions (Stata 19): the
+# chi-squared test of a variance, the F test of two (on n1 - 1 and n2 - 1 df, as Stata), Fisher's z test of
+# one or two correlations, the large-sample McNemar test of discordant proportions
+stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesided, direction, scale, effect,
+                          prdisc, show) {
+  stop_r <- function(m) stop(m, call. = FALSE)
+  two <- method %in% c("twovariances", "twocorrelations")
+  pp <- method == "pairedproportions"
+  sdsc <- scale == "standard deviation"
+  # p12 + p21 given: the discordant proportions are what is worked out
+  pdm <- pp && !is.null(prdisc)
+  find <- if (is.null(v2)) "effect" else if (is.null(power) && (!is.null(n) || !is.null(n1))) "power" else "n"
+  if (find == "effect" && (is.null(power) || (is.null(n) && is.null(n1)))) stop_r("power: the target needs n() and power() (Stata: r(198))")
+  target <- if (is.null(power)) 0.8 else power
+  if (is.null(nratio)) nratio <- if (!is.null(n1) && !is.null(n2)) n2 / n1 else 1
+  side <- if (onesided) 1 else 2
+  a2 <- alpha / side
+  zc <- stats::qnorm(1 - a2)
+  # the power at group sizes a (and b) for the alternative's value x
+  pw <- function(a, b, x) suppressWarnings(pw0(a, b, x))
+  pw0 <- function(a, b, x) {
+    tails <- function(up, lo, ge) if (!onesided) up + lo else if (ge) up else lo
+    if (method %in% c("onevariance", "twovariances")) {
+      r <- if (sdsc) (x / v1)^2 else x / v1
+      if (method == "onevariance") {
+        d <- a - 1
+        return(tails(stats::pchisq(stats::qchisq(1 - a2, d) / r, d, lower.tail = FALSE),
+                     stats::pchisq(stats::qchisq(a2, d) / r, d), r >= 1))
+      }
+      d1 <- a - 1
+      d2 <- b - 1
+      return(tails(stats::pf(stats::qf(1 - a2, d1, d2) / r, d1, d2, lower.tail = FALSE),
+                   stats::pf(stats::qf(a2, d1, d2) / r, d1, d2), r >= 1))
+    }
+    if (!pp) {
+      se <- if (two) sqrt(1 / (a - 3) + 1 / (b - 3)) else 1 / sqrt(a - 3)
+      l <- (atanh(x) - atanh(v1)) / se
+      return(tails(stats::pnorm(l - zc), stats::pnorm(-l - zc), l >= 0))
+    }
+    p12 <- if (pdm) prdisc - x else v1
+    pd <- p12 + x
+    d <- x - p12
+    s <- sqrt(pd - d^2)
+    # one-sided, the power alone takes the upper tail whatever the sign of p21 - p12 (Stata 19)
+    tails(stats::pnorm((d * sqrt(a) - zc * sqrt(pd)) / s), stats::pnorm((-d * sqrt(a) - zc * sqrt(pd)) / s), d >= 0 || find == "power")
+  }
+  # the smallest group each test is defined for
+  least <- switch(method, onevariance = 2, twovariances = 2, onecorrelation = 4, twocorrelations = 4, pairedproportions = 1)
+  actual <- FALSE
+  sizes <- function() {
+    if (!two) return(c(n, NA))
+    if (!is.null(n1) && !is.null(n2)) return(c(n1, n2))
+    a <- n / (1 + nratio)
+    if (abs(a - round(a)) < 1e-8 && abs(nratio * round(a) - (n - round(a))) < 1e-8) return(c(round(a), n - round(a)))
+    actual <<- TRUE
+    a <- floor(a + 1e-9)
+    c(a, floor(nratio * a + 1e-9))
+  }
+  # Stata works the answer out without a search for these one-sided forms
+  closed <- onesided && (if (find == "n") method %in% c("onecorrelation", "twocorrelations", "pairedproportions") else !pp)
+  iterated <- FALSE
+  tol <- 1e-13
+  if (find == "power") {
+    g <- sizes()
+    if (min(g, na.rm = TRUE) < least) stop_r(sprintf("power %s: the groups need at least %d observations (Stata prints a missing power)", method, least))
+    x2 <- v2
+    pv <- pw(g[1], g[2], x2)
+    N <- if (!two) g[1] else if (actual) n else sum(g)
+  } else if (find == "n") {
+    x2 <- v2
+    f <- function(a) pw(a, nratio * a, x2) - target
+    lo <- if (two) max(least, least / nratio) else least
+    a <- if (f(lo) >= 0) lo else stats::uniroot(f, c(lo, lo + 10), extendInt = "upX", tol = tol)$root
+    A <- ceiling(a - 1e-9)
+    g <- if (two) c(A, ceiling(nratio * A - 1e-9)) else c(A, NA)
+    N <- sum(g, na.rm = TRUE)
+    pv <- target
+    iterated <- !closed
+  } else {
+    g <- sizes()
+    if (min(g, na.rm = TRUE) < least) stop_r(sprintf("power %s: the groups need at least %d observations", method, least))
+    N <- if (!two) g[1] else if (actual) n else sum(g)
+    a <- g[1]
+    b <- g[2]
+    up <- direction != "lower"
+    f <- function(x) pw(a, b, x) - target
+    zb <- stats::qnorm(target)
+    if (closed && method == "onevariance") {
+      d <- a - 1
+      r <- if (up) stats::qchisq(1 - alpha, d) / stats::qchisq(1 - target, d) else stats::qchisq(alpha, d) / stats::qchisq(target, d)
+      x2 <- if (sdsc) v1 * sqrt(r) else v1 * r
+    } else if (closed && method == "twovariances") {
+      r <- if (up) stats::qf(1 - alpha, a - 1, b - 1) / stats::qf(1 - target, a - 1, b - 1) else
+        stats::qf(alpha, a - 1, b - 1) / stats::qf(target, a - 1, b - 1)
+      x2 <- if (sdsc) v1 * sqrt(r) else v1 * r
+    } else if (closed) {
+      se <- if (two) sqrt(1 / (a - 3) + 1 / (b - 3)) else 1 / sqrt(a - 3)
+      x2 <- tanh(atanh(v1) + (if (up) 1 else -1) * (stats::qnorm(1 - alpha) + zb) * se)
+    } else if (pp) {
+      e <- 1e-12
+      ends <- if (up) c(prdisc / 2 + e, prdisc - e) else c(e, prdisc / 2 - e)
+      if (f(ends[if (up) 2 else 1]) < 0) stop_r("power pairedproportions: no discordant proportions with that sum reach the power at this n()")
+      x2 <- stats::uniroot(f, ends, tol = 1e-15)$root
+    } else {
+      # searched on the log scale (variances) or Fisher's z (correlations)
+      to <- if (method %in% c("onevariance", "twovariances")) function(t) v1 * exp(t) else function(t) tanh(atanh(v1) + t)
+      h <- function(t) f(to(t))
+      t <- if (up) stats::uniroot(h, c(1e-10, 1), extendInt = "upX", tol = tol)$root else
+        stats::uniroot(h, c(-1, -1e-10), extendInt = "downX", tol = tol)$root
+      x2 <- to(t)
+    }
+    if (pdm) v1 <- prdisc - x2
+    pv <- target
+    iterated <- !closed
+  }
+  delta <- if (method %in% c("onevariance", "twovariances")) x2 / v1 else if (pp && effect == "ratio") x2 / v1 else x2 - v1
+  # r() in the order of Stata 19's return list for this form
+  nm <- switch(method, onevariance = if (sdsc) c("s0", "sa") else c("v0", "va"),
+               twovariances = if (sdsc) c("s1", "s2") else c("v1", "v2"), onecorrelation = c("r0", "ra"),
+               twocorrelations = c("r1", "r2"), pairedproportions = c("p12", "p21"))
+  P <- stats::setNames(list(v1, x2), nm)
+  it <- if (iterated) list(converged = 1, maxiter = 500, tolerance = 1e-12, ftolerance = 1e-12) else list()
+  head <- list(power = pv, beta = 1 - pv, alpha = alpha)
+  os <- list(onesided = as.numeric(onesided))
+  if (!two) {
+    tail <- switch(method,
+      onevariance = if (find == "n") c(P[1], list(delta = delta, ratio = delta), P[2]) else c(P, list(delta = delta, ratio = delta)),
+      onecorrelation = if (find == "n" && iterated) c(P[1], list(delta = delta), P[2]) else c(P, list(delta = delta)),
+      pairedproportions = c(list(delta = delta), P, if (pdm) list(prdiscordant = prdisc)))
+    r <- c(head, list(N = N), if (find == "n") list(nfractional = 0), os, it, tail)
+  } else {
+    NN <- c(list(N = N), if (actual) list(N_a = sum(g)))
+    na <- g[2] / g[1]
+    tail <- if (!iterated) c(NN, list(N1 = g[1], N2 = g[2], nratio = nratio), if (find == "n" && abs(na - nratio) > 1e-12) list(nratio_a = na), P)
+      else if (find == "n") c(list(N = N), rev(P), if (abs(na - nratio) > 1e-12) list(nratio_a = na), list(nratio = nratio, N2 = g[2], N1 = g[1]))
+      else c(NN, list(N1 = g[1]), rev(P), list(nratio = nratio, N2 = g[2]))
+    r <- c(head, list(delta = delta, nfractional = 0), os, it, tail)
+  }
+  dl <- if (find == "effect") list(direction = if (direction == "lower") "lower" else "upper")
+  r <- c(r, switch(method,
+    onevariance = c(list(type = "test", method = method), dl, list(scale = scale)),
+    twovariances = c(list(scale = scale, type = "test", method = method), dl),
+    pairedproportions = c(list(effect = effect, type = "test", method = method), dl),
+    c(list(type = "test", method = method), dl)))
+  if (!show) return(invisible(r))
+  # the printout
+  unit <- if (sdsc) "standard deviation" else "variance"
+  title <- switch(method, onevariance = if (sdsc) "one-sample standard-deviation test" else "one-sample variance test",
+                  twovariances = if (sdsc) "two-sample standard-deviations test" else "two-sample variances test",
+                  onecorrelation = "one-sample correlation test", twocorrelations = "two-sample correlations test",
+                  pairedproportions = "two-sample paired-proportions test")
+  what <- if (find == "power") "power" else if (find == "n") (if (two) "sample sizes" else "sample size") else
+    switch(method, onevariance = paste("target", unit), twovariances = paste("experimental-group", unit),
+           onecorrelation = "target correlation", twocorrelations = "experimental-group correlation",
+           pairedproportions = "discordant proportions")
+  testline <- switch(method, onevariance = "Chi-squared test", twovariances = "F test",
+                     pairedproportions = "Large-sample McNemar's test", "Fisher's z test")
+  sym <- switch(method, onevariance = c(substr(nm[1], 1, 1), nm), onecorrelation = c("r", nm), c(nm[2], nm))
+  rel <- if (!onesided) "!=" else if (x2 >= v1) ">" else "<"
+  h0 <- sprintf("H0: %s = %s  versus  Ha: %s %s %s", sym[1], sym[2], sym[1], rel, sym[2])
+  # the target's side: always after one sample, after two (and paired proportions) only when two-sided
+  if (find == "effect" && (!onesided || !(two || pp))) h0 <- paste0(h0, "; ", sym[3], if (direction == "lower") " < " else " > ", sym[2])
+  num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
+  int <- function(k, v) sprintf("%13s = %9.0f", k, v)
+  eff <- if (pp) paste0("  (", if (effect == "ratio") "ratio" else "difference", ")") else ""
+  sizes_lines <- function(tot = N) {
+    if (!two) return(int("N", tot))
+    c(int("N", tot), if (g[1] == g[2]) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
+  }
+  given_n <- if (!two) int("N", N) else if (actual) c(int("N", N), if (nratio != 1) num("N2/N1", nratio)) else
+    c(sizes_lines(), if (g[1] != g[2]) num("N2/N1", g[2] / g[1]))
+  given <- c(num("alpha", alpha), if (find != "power") num("power", target), if (find != "n") given_n,
+             if (find != "effect") num("delta", delta, eff))
+  vals <- c(if (pdm) num("p12 + p21", prdisc) else c(num(nm[1], v1), if (find != "effect") num(nm[2], x2)),
+            if (two && find == "n" && nratio != 1) num("N2/N1", nratio))
+  cat("\n")
+  if (iterated) cat("Performing iteration ...\n\n")
+  cat("Estimated ", what, " for a ", title, "\n", testline, "\n", h0, "\n\nStudy parameters:\n\n", sep = "")
+  cat(c(given, vals), sep = "\n")
+  if (actual) {
+    cat("\nActual sample sizes:\n\n")
+    cat(sizes_lines(sum(g)), sep = "\n")
+  }
+  if (find == "power") {
+    cat("\nEstimated power:\n\n", num("power", pv), "\n", sep = "")
+  } else if (find == "n") {
+    cat("\nEstimated ", what, ":\n\n", sep = "")
+    cat(sizes_lines(), sep = "\n")
+    if (two && g[1] != g[2] && abs(g[2] / g[1] - nratio) > 1e-12) cat(num("N2/N1", g[2] / g[1]), "\n", sep = "")
+  } else {
+    cat("\nEstimated effect size and ", what, ":\n\n", sep = "")
+    cat(num("delta", delta, eff), "\n", sep = "")
+    cat(if (pp) c(num("p12", v1), num("p21", x2)) else num(nm[2], x2), sep = "\n")
+  }
+  cat("\n")
+  invisible(r)
+}
 "##;
 
 /// The r() power leaves (Stata 19), but its search's own r(init), r(iter),
@@ -301,11 +505,38 @@ const R_POWER: &[&str] = &[
     "p1",
     "p2",
     "continuity",
+    "v0",
+    "va",
+    "s0",
+    "sa",
+    "v1",
+    "v2",
+    "s1",
+    "s2",
+    "ratio",
+    "r0",
+    "ra",
+    "r1",
+    "r2",
+    "p12",
+    "p21",
+    "prdiscordant",
     "type",
     "method",
     "direction",
     "test",
     "effect",
+    "scale",
+];
+
+/// The methods from onevariance on: Stata's sd flag (not sd()), and
+/// values that are not means.
+const LATER: &[&str] = &[
+    "onevariance",
+    "twovariances",
+    "onecorrelation",
+    "twocorrelations",
+    "pairedproportions",
 ];
 
 /// The methods translated, and the options each takes beyond alpha(),
@@ -341,6 +572,14 @@ const METHODS: &[(&str, &[(&str, usize)])] = &[
             ("test", 4),
         ],
     ),
+    ("onevariance", &[("sd", 2)]),
+    (
+        "twovariances",
+        &[("sd", 2), ("n1", 2), ("n2", 2), ("nratio", 6)],
+    ),
+    ("onecorrelation", &[]),
+    ("twocorrelations", &[("n1", 2), ("n2", 2), ("nratio", 6)]),
+    ("pairedproportions", &[("effect", 6), ("prdiscordant", 12)]),
 ];
 
 /// One number of the line: a value, or an option's.
@@ -403,6 +642,7 @@ const NUMBERS: &[(&str, usize, Range)] = &[
     ("sd2", 3, Range::Positive),
     ("sddiff", 6, Range::Positive),
     ("corr", 4, Range::Corr),
+    ("prdiscordant", 12, Range::Prob),
 ];
 
 impl Session {
@@ -420,9 +660,11 @@ impl Session {
         let (method, rest) = first_word(main);
         let Some((method, extra)) = METHODS.iter().find(|(m, _)| *m == method) else {
             return Err(no(format!(
-                "power {method} is not translated yet (onemean, twomeans, pairedmeans, oneproportion and twoproportions are)"
+                "power {method} is not translated yet (onemean, twomeans, pairedmeans, oneproportion, twoproportions, \
+                 onevariance, twovariances, onecorrelation, twocorrelations and pairedproportions are)"
             )));
         };
+        let later = LATER.contains(method);
         let mut known: Vec<(&str, usize)> = vec![
             ("alpha", 5),
             ("power", 5),
@@ -442,13 +684,27 @@ impl Session {
             )));
         }
         let values: Vec<&str> = rest.split_whitespace().collect();
-        if values.is_empty() || values.len() > 2 {
+        // pairedproportions with prdiscordant(): the discordant proportions are worked out
+        let paired_sum = *method == "pairedproportions" && opts.has("prdiscordant", 12);
+        if paired_sum && !values.is_empty() {
+            return Err(no(
+                "power pairedproportions with prdiscordant() and values is not translated yet",
+            ));
+        }
+        if !paired_sum && (values.is_empty() || values.len() > 2) {
             return Err(no(format!(
                 "power {method} takes one or two values (Stata: r(198))"
             )));
         }
+        if *method == "pairedproportions" && values.len() == 1 {
+            return Err(no(
+                "power pairedproportions: the discordant proportions are worked out from prdiscordant(), n() and power() (Stata: r(198))",
+            ));
+        }
         let props = method.contains("proportion");
+        let corrs = method.contains("correlation");
         let mut args = vec![r_text(method)];
+        let mut given = Vec::new();
         for (i, v) in values.iter().enumerate() {
             let x = number("the value", v)?;
             if props && !(x > 0.0 && x < 1.0) {
@@ -456,14 +712,48 @@ impl Session {
                     "power {method}: {v} must be between 0 and 1 (Stata: r(198))"
                 )));
             }
+            if corrs && !(x > -1.0 && x < 1.0) {
+                return Err(no(format!(
+                    "power {method}: {v} must be between -1 and 1 (Stata: r(198))"
+                )));
+            }
+            if method.contains("variance") && x <= 0.0 {
+                return Err(no(format!(
+                    "power {method}: {v} must be above 0 (Stata: r(198))"
+                )));
+            }
+            given.push(x);
             args.push(if i == 0 {
                 r_number(x)
             } else {
                 format!("v2 = {}", r_number(x))
             });
         }
+        if later {
+            if let [a, b] = given[..] {
+                if a == b {
+                    return Err(no(format!(
+                        "power {method}: the two values must differ (Stata: r(198))"
+                    )));
+                }
+                if *method == "pairedproportions" && a + b > 1.0 {
+                    return Err(no(
+                        "power pairedproportions: p12 + p21 must not pass 1 (Stata: r(198))",
+                    ));
+                }
+            }
+            // Stata's sd is a flag here: the values are standard deviations
+            if let Some(s) = opts.arg("sd", 2) {
+                if !s.trim().is_empty() {
+                    return Err(no(format!(
+                        "power {method}: sd takes no value here (Stata: r(198))"
+                    )));
+                }
+                args.push("scale = \"standard deviation\"".into());
+            }
+        }
         for &(name, min, range) in NUMBERS {
-            if !known.iter().any(|(k, _)| *k == name) {
+            if !known.iter().any(|(k, _)| *k == name) || (later && name == "sd") {
                 continue;
             }
             if let Some(t) = opts.arg(name, min) {
@@ -500,10 +790,33 @@ impl Session {
                 "power twomeans: sd() with sd1() or sd2() is not translated yet",
             ));
         }
-        if values.len() == 1 && !(opts.has("power", 5) && (has_n || n1)) {
+        if values.len() < 2 && !(opts.has("power", 5) && (has_n || n1)) {
             return Err(no(format!(
                 "power {method} {rest}: the target value needs n() and power() (Stata: r(198))"
             )));
+        }
+        // the smallest group each later test is defined for (Stata prints a missing power below it)
+        let least = match *method {
+            "onevariance" | "twovariances" => 2.0,
+            "onecorrelation" | "twocorrelations" => 4.0,
+            _ => 1.0,
+        };
+        let two = method.starts_with("two");
+        for (name, min, per) in [
+            ("n", 1, if two { 2.0 } else { 1.0 }),
+            ("n1", 2, 1.0),
+            ("n2", 2, 1.0),
+        ] {
+            if let Some(x) = opts
+                .arg(name, min)
+                .and_then(|t| t.trim().parse::<f64>().ok())
+            {
+                if later && x < least * per {
+                    return Err(no(format!(
+                        "power {method}: {name}({x}) is too small for the test (Stata prints a missing power)"
+                    )));
+                }
+            }
         }
         if opts.has("onesided", 8) {
             args.push("onesided = TRUE".into());
@@ -538,9 +851,13 @@ impl Session {
         }
         if let Some(e) = opts.arg("effect", 6) {
             let e = e.trim().to_lowercase();
-            if !matches!(e.as_str(), "diff" | "ratio" | "oratio") {
+            let fits = match *method {
+                "pairedproportions" => matches!(e.as_str(), "diff" | "ratio"),
+                _ => matches!(e.as_str(), "diff" | "ratio" | "oratio"),
+            };
+            if !fits {
                 return Err(no(format!(
-                    "power twoproportions, effect({e}) is not translated yet"
+                    "power {method}, effect({e}) is not translated yet"
                 )));
             }
             args.push(format!("effect = {}", r_text(&e)));
