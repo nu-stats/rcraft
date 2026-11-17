@@ -497,12 +497,15 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "corr(",
             "direction(",
             "effect(",
+            "grweights(",
             "knownsd",
             "knownsds",
             "n(",
             "n1(",
             "n2(",
+            "ngroups(",
             "notable",
+            "npergroup(",
             "nratio(",
             "onesided",
             "power(",
@@ -513,6 +516,8 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "sddiff(",
             "table",
             "test(",
+            "varerror(",
+            "varmeans(",
         ],
     ),
     ("prtest", &["by(", "level("]),
@@ -1129,6 +1134,7 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
             "onemean",
             "oneproportion",
             "onevariance",
+            "oneway",
             "pairedmeans",
             "pairedproportions",
             "twocorrelations",
@@ -1953,6 +1959,12 @@ gettoken a b : s, {o}"
             }
             "tetrachoric" => format!("tetrachoric x y z, {o}"),
             "power" if name == "notable" => "power twomeans 0 0.5, n(50 100) notable".to_string(),
+            "power" if matches!(name, "grweights" | "npergroup" | "varerror") => {
+                format!("power oneway 1 2 3, {o}")
+            }
+            "power" if matches!(name, "ngroups" | "varmeans") => {
+                "power oneway, ngroups(3) varmeans(0.5)".to_string()
+            }
             "power" if name == "prdiscordant" => {
                 "power pairedproportions, n(100) prdiscordant(0.3) power(0.8)".to_string()
             }

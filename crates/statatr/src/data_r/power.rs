@@ -474,6 +474,98 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
   invisible(r)
 }
 
+# power oneway (Stata 19): the F test of a group effect, noncentrality N * Var_m / Var_e on k - 1 and
+# N - k df. The noncentral F is summed here (Poisson weights of regularized betas): R's own pf() with a
+# noncentrality agrees with Stata's only to about 1e-9
+stata_power_oneway <- function(means = NULL, ngroups = NULL, varmeans = NULL, varerror = 1, alpha = 0.05,
+                               power = NULL, n = NULL, npergroup = NULL, ns = NULL, grweights = NULL, show = TRUE) {
+  stop_r <- function(m) stop(m, call. = FALSE)
+  k <- if (is.null(means)) ngroups else length(means)
+  w <- if (!is.null(ns)) ns else if (!is.null(grweights)) grweights else rep(1, k)
+  w <- w / sum(w)
+  vm <- if (!is.null(means)) sum(w * (means - sum(w * means))^2) else varmeans
+  find <- if (is.null(power) && (!is.null(n) || !is.null(npergroup) || !is.null(ns))) "power" else
+    if (!is.null(vm)) "n" else "effect"
+  target <- if (is.null(power)) 0.8 else power
+  tails <- function(N, v) {
+    d1 <- k - 1
+    d2 <- N - k
+    f <- stats::qf(1 - alpha, d1, d2)
+    x <- d1 * f / (d1 * f + d2)
+    h <- N * v / varerror / 2
+    j <- 0:ceiling(h + 40 * sqrt(h) + 60)
+    p <- stats::dpois(j, h)
+    c(up = sum(p * stats::pbeta(x, d1 / 2 + j, d2 / 2, lower.tail = FALSE)),
+      lo = sum(p * stats::pbeta(x, d1 / 2 + j, d2 / 2)))
+  }
+  pw <- function(N, v) tails(N, v)[["up"]]
+  balanced <- is.null(ns) && is.null(grweights)
+  actual <- FALSE
+  iterated <- FALSE
+  if (find == "n") {
+    lo <- k + 1
+    f <- function(N) pw(N, vm) - target
+    Na <- if (f(lo) >= 0) lo else stats::uniroot(f, c(lo, lo + 10), extendInt = "upX", tol = 1e-13)$root
+    g <- if (balanced) rep(ceiling(Na / k - 1e-9), k) else ceiling(Na * w - 1e-9)
+    N <- sum(g)
+    # Stata says it searches when it has the means or weights (not with varmeans() alone)
+    iterated <- !is.null(means) || !is.null(grweights)
+    pv <- target
+    bv <- 1 - target
+  } else {
+    g <- if (!is.null(ns)) ns else if (!is.null(npergroup)) rep(npergroup, k) else rep(floor(n / k + 1e-9), k)
+    N <- if (!is.null(n)) n else sum(g)
+    actual <- !is.null(n) && sum(g) != n
+    Na <- sum(g)
+    if (find == "power") {
+      t2 <- tails(Na, vm)
+      pv <- t2[["up"]]
+      bv <- 1 - pv
+    } else {
+      vm <- stats::uniroot(function(v) pw(Na, v) - target, c(1e-10, 1) * varerror, extendInt = "upX", tol = 1e-15)$root
+      iterated <- TRUE
+      pv <- target
+      bv <- 1 - target
+    }
+  }
+  if (min(g) < 1 || sum(g) <= k) stop_r("power oneway: too few observations for the F test")
+  delta <- sqrt(vm / varerror)
+  sz <- if (balanced) list(balanced = 1, N_per_group = g[1]) else
+    c(if (!is.null(grweights)) stats::setNames(as.list(grweights), paste0("grwgt", seq_len(k))), list(balanced = 0),
+      stats::setNames(as.list(g), paste0("N", seq_len(k))))
+  r <- c(list(Var_m = vm, Var_e = varerror), sz, list(N_avg = sum(g) / k, N_g = k, N_a = Na),
+         if (!is.null(means)) stats::setNames(as.list(means), paste0("m", seq_len(k))),
+         list(power = pv, beta = bv, alpha = alpha, delta = delta),
+         if (iterated) list(converged = 1, maxiter = 500, tolerance = 1e-12, ftolerance = 1e-12),
+         list(onesided = 0, nfractional = 0, N = N, type = "test", method = "oneway"))
+  if (!show) return(invisible(r))
+  num <- function(k, v) sprintf("%13s = %9.4f", k, v)
+  int <- function(k, v) sprintf("%13s = %9.0f", k, v)
+  sizes <- function(tot) c(int("N", tot), if (balanced) int("N per group", g[1]) else
+    c(num("Average N", sum(g) / k), int(paste0("N", seq_len(k)), g)))
+  what <- switch(find, power = "power", n = "sample size", effect = "between-group variance")
+  cat("\n")
+  if (iterated) cat("Performing iteration ...\n\n")
+  cat("Estimated ", what, " for one-way ANOVA\nF test for group effect\nH0: delta = 0  versus  Ha: delta != 0\n\n",
+      "Study parameters:\n\n", sep = "")
+  given <- c(num("alpha", alpha), if (find != "power") num("power", target),
+             if (find != "n") (if (actual) int("N", N) else sizes(N)), if (find != "effect") num("delta", delta),
+             int("N_g", k), if (!is.null(means)) num(paste0("m", seq_len(k)), means),
+             if (find != "effect") num("Var_m", vm), num("Var_e", varerror))
+  cat(given, sep = "\n")
+  if (actual) {
+    cat("\nActual sample sizes:\n\n")
+    cat(sizes(sum(g)), sep = "\n")
+  }
+  if (find == "power") cat("\nEstimated power:\n\n", num("power", pv), "\n", sep = "")
+  else if (find == "n") {
+    cat("\nEstimated sample sizes:\n\n")
+    cat(sizes(N), sep = "\n")
+  } else cat("\nEstimated effect size and between-group variance:\n\n", num("delta", delta), "\n", num("Var_m", vm), "\n", sep = "")
+  cat("\n")
+  invisible(r)
+}
+
 # power with lists of values (Stata 19): every combination, nested values > alpha > power > n > n1 > n2 >
 # nratio > the method's own numbers (the last varies fastest), each worked out as one power line and
 # printed as Stata's table; r() is the last row's with the table's own (columns, labels, widths,
@@ -661,6 +753,92 @@ const METHODS: &[(&str, &[(&str, usize)])] = &[
 
 /// The r() owner after a power table: `return list` is refused after it.
 pub(super) const POWER_TABLE: &str = "power, table";
+/// The r() owner after power oneway: `return list` is refused after it.
+pub(super) const POWER_ONEWAY: &str = "power oneway";
+
+/// The r() power oneway leaves (Stata 19), for up to 20 groups.
+const R_ONEWAY: &[&str] = &[
+    "Var_m",
+    "Var_e",
+    "balanced",
+    "N_per_group",
+    "N_avg",
+    "N_g",
+    "N_a",
+    "power",
+    "beta",
+    "alpha",
+    "delta",
+    "converged",
+    "maxiter",
+    "tolerance",
+    "ftolerance",
+    "onesided",
+    "nfractional",
+    "N",
+    "type",
+    "method",
+    "m1",
+    "m2",
+    "m3",
+    "m4",
+    "m5",
+    "m6",
+    "m7",
+    "m8",
+    "m9",
+    "m10",
+    "m11",
+    "m12",
+    "m13",
+    "m14",
+    "m15",
+    "m16",
+    "m17",
+    "m18",
+    "m19",
+    "m20",
+    "N1",
+    "N2",
+    "N3",
+    "N4",
+    "N5",
+    "N6",
+    "N7",
+    "N8",
+    "N9",
+    "N10",
+    "N11",
+    "N12",
+    "N13",
+    "N14",
+    "N15",
+    "N16",
+    "N17",
+    "N18",
+    "N19",
+    "N20",
+    "grwgt1",
+    "grwgt2",
+    "grwgt3",
+    "grwgt4",
+    "grwgt5",
+    "grwgt6",
+    "grwgt7",
+    "grwgt8",
+    "grwgt9",
+    "grwgt10",
+    "grwgt11",
+    "grwgt12",
+    "grwgt13",
+    "grwgt14",
+    "grwgt15",
+    "grwgt16",
+    "grwgt17",
+    "grwgt18",
+    "grwgt19",
+    "grwgt20",
+];
 
 /// A Stata numlist as power reads one: numbers, `a(d)b` and `a/b`.
 fn numlist(what: &str, text: &str) -> Result<Vec<f64>, Untranslated> {
@@ -808,6 +986,9 @@ impl Session {
         }
         let main = c.parts.main.trim();
         let (method, rest) = first_word(main);
+        if method == "oneway" {
+            return self.power_oneway(c, rest, opts, out);
+        }
         let Some((method, extra)) = METHODS.iter().find(|(m, _)| *m == method) else {
             return Err(no(format!(
                 "power {method} is not translated yet (onemean, twomeans, pairedmeans, oneproportion, twoproportions, \
@@ -1066,6 +1247,168 @@ impl Session {
             ));
             self.r_new = Some((R_POWER, "power".into()));
         }
+        Ok(())
+    }
+
+    /// `power oneway m1 m2 ... [, ngroups() varmeans() varerror() n() npergroup() n#() grweights()
+    /// alpha() power()]`: the F test of a group effect, as Stata 19 prints it.
+    fn power_oneway(
+        &mut self,
+        c: &Command,
+        rest: &str,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let groups: Vec<String> = (1..=20).map(|i| format!("n{i}")).collect();
+        let mut known: Vec<(&str, usize)> = vec![
+            ("alpha", 5),
+            ("power", 5),
+            ("n", 1),
+            ("npergroup", 9),
+            ("ngroups", 7),
+            ("varmeans", 8),
+            ("varerror", 8),
+            ("grweights", 9),
+        ];
+        known.extend(groups.iter().map(|g| (g.as_str(), g.len())));
+        if let Some(o) = opts.other(&known) {
+            return Err(no(format!(
+                "power oneway with the option {o} is not translated yet"
+            )));
+        }
+        if rest.contains('(') {
+            return Err(no(
+                "power oneway: lists of values (Stata's table) are not translated yet for oneway",
+            ));
+        }
+        let one = |name: &str, min: usize, range: Range| -> Result<Option<f64>, Untranslated> {
+            let Some(t) = opts.arg(name, min) else {
+                return Ok(None);
+            };
+            match numlist(&format!("{name}()"), &t)?[..] {
+                [x] if range.holds(x) => Ok(Some(x)),
+                [x] => Err(no(format!(
+                    "power oneway: {name}({x}) {} (Stata: r(198))",
+                    range.why()
+                ))),
+                _ => Err(no(format!(
+                    "power oneway: a list in {name}() (Stata's table) is not translated yet for oneway"
+                ))),
+            }
+        };
+        let means = if rest.trim().is_empty() {
+            Vec::new()
+        } else {
+            numlist("the means", rest)?
+        };
+        let ngroups = one("ngroups", 7, Range::Whole)?;
+        let k = if means.is_empty() {
+            ngroups.ok_or_else(|| {
+                no("power oneway needs the group means or ngroups() (Stata: r(198))")
+            })?
+        } else {
+            if ngroups.is_some() || opts.has("varmeans", 8) {
+                return Err(no(
+                    "power oneway: the means with ngroups() or varmeans() is not translated yet",
+                ));
+            }
+            means.len() as f64
+        };
+        if !(2.0..=20.0).contains(&k) {
+            return Err(no(format!(
+                "power oneway with {k} groups is not translated (2 to 20 are)"
+            )));
+        }
+        let k = k as usize;
+        let mut args: Vec<String> = Vec::new();
+        if !means.is_empty() {
+            args.push(format!("means = {}", r_vector(&means)));
+        } else {
+            args.push(format!("ngroups = {k}"));
+        }
+        let varmeans = one("varmeans", 8, Range::Positive)?;
+        for (name, min, range) in [
+            ("varmeans", 8, Range::Positive),
+            ("varerror", 8, Range::Positive),
+            ("alpha", 5, Range::Prob),
+            ("power", 5, Range::Prob),
+            ("n", 1, Range::Whole),
+            ("npergroup", 9, Range::Whole),
+        ] {
+            if let Some(x) = one(name, min, range)? {
+                args.push(format!("{name} = {}", r_number(x)));
+            }
+        }
+        let given: Vec<&String> = groups.iter().filter(|g| opts.has(g, g.len())).collect();
+        let sizes_given = !given.is_empty();
+        if sizes_given {
+            if given.len() != k || groups.iter().take(k).any(|g| !opts.has(g, g.len())) {
+                return Err(no(format!(
+                    "power oneway: give n1() to n{k}(), one for each group (Stata: r(198))"
+                )));
+            }
+            let mut ns = Vec::new();
+            for g in groups.iter().take(k) {
+                ns.push(one(g, g.len(), Range::Whole)?.unwrap_or(1.0));
+            }
+            args.push(format!("ns = {}", r_vector(&ns)));
+        }
+        let has_n = opts.has("n", 1) || opts.has("npergroup", 9);
+        if [opts.has("n", 1), opts.has("npergroup", 9), sizes_given]
+            .iter()
+            .filter(|b| **b)
+            .count()
+            > 1
+        {
+            return Err(no(
+                "power oneway: give one of n(), npergroup() and n#() (Stata: r(198))",
+            ));
+        }
+        if let Some(t) = opts.arg("grweights", 9) {
+            if has_n || sizes_given {
+                return Err(no(
+                    "power oneway: grweights() with n() or npergroup() is not translated yet",
+                ));
+            }
+            let w = numlist("grweights()", &t)?;
+            if w.len() != k || w.iter().any(|x| *x <= 0.0) {
+                return Err(no(format!(
+                    "power oneway: grweights() needs {k} weights above 0 (Stata: r(198))"
+                )));
+            }
+            args.push(format!("grweights = {}", r_vector(&w)));
+        }
+        let effect = means.is_empty() && varmeans.is_none();
+        if effect && !(has_n && opts.has("power", 5)) {
+            return Err(no(
+                "power oneway: the between-group variance needs n() (or npergroup()) and power() (Stata: r(198))",
+            ));
+        }
+        let n_given = opts
+            .arg("n", 1)
+            .and_then(|t| t.trim().parse::<f64>().ok())
+            .map(|n| n / k as f64)
+            .or(opts
+                .arg("npergroup", 9)
+                .and_then(|t| t.trim().parse::<f64>().ok()));
+        if n_given.is_some_and(|per| per < 1.0)
+            || (has_n && n_given.is_some_and(|per| per * (k as f64) <= k as f64))
+        {
+            return Err(no(
+                "power oneway: too few observations for the F test (Stata: r(198))",
+            ));
+        }
+        if self.quiet(c) {
+            args.push("show = FALSE".into());
+        }
+        for h in ["stata_power", "stata_returned"] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_r <- stata_power_oneway({})",
+            args.join(", ")
+        ));
+        self.r_new = Some((R_ONEWAY, POWER_ONEWAY.into()));
         Ok(())
     }
 }

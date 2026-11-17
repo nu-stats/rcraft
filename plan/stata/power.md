@@ -102,3 +102,31 @@ A total that does not split at nratio() (found on the way, true of the single fo
 nratio)⌋, N2 = ⌊n·nratio/(1 + nratio)⌋ (n(50) nratio(2): 16 and 33, not 2·16), "Actual sample sizes"
 adds `N2/N1` when the groups miss nratio(), and r(nratio_a) is kept in every two-sample form whose groups
 miss nratio(): after r(nratio) where Stata does not search, before it where it does.
+
+## oneway (2026-11-17)
+
+Observed on Stata 19 SE with no data (probes o1, o2 and the oneway lines of c2: 25 power oneway lines,
+every printed line identical to RCraft's; r() values equal to 12 digits or more); corpus `power4.do`.
+
+- `power oneway m1 ... mk` or `ngroups(k) varmeans(Var_m)`, with varerror() (1), n(), npergroup(),
+  n1() to nk(), grweights() (sample size only), alpha(), power(). Var_m = the means' variance about
+  their weighted mean, the weights summing to 1 (weights: n#(), grweights(), else equal); delta =
+  √(Var_m/Var_e).
+- The F test on k − 1 and N − k df with noncentrality N·Var_m/Var_e. R's pf() with ncp agrees with
+  Stata's only to about 1e-9, so the noncentral F is summed (Poisson weights of pbeta) to full
+  precision; r(beta) is 1 − r(power), as Stata's (it shows at 1e-14).
+- Sample size: r(N_a) is the fractional total where the power is reached; balanced groups get
+  ⌈N_a/k⌉ each, weighted ones ⌈N_a·w_i/Σw⌉ (grweights(1 2 1): 22.55 gives 6, 12, 6). "Performing
+  iteration ..." is printed when the means or grweights() are given, not with varmeans() alone (though
+  N_a is fractional there too); the between-group variance (n() or npergroup() and power(), no means) is
+  searched.
+- n() that does not split into k groups: ⌊n/k⌋ each, "Actual sample sizes", r(N) the total given and
+  r(N_a) the groups'. Unequal groups print `    Average N =` (%9.4f) and N1 ... Nk.
+- r(): Var_m Var_e [grwgt#] balanced, N_per_group or N1 ... Nk, N_avg N_g N_a [m#] power beta alpha
+  delta [search constants] onesided nfractional N; macros type method. Stata's `return list` puts power,
+  beta, alpha, delta, onesided, nfractional, N in an order that changes with the number of groups and the
+  form (with 5 means: delta onesided nfractional N alpha beta power), like a hash table's: RCraft keeps
+  every value but refuses `return list` after power oneway.
+- Reading r(beta) after any power line had been refused as regress's matrix e(beta); fixed.
+- Refused: lists of values (Stata's table) for oneway, more than 20 groups, grweights() with n() or
+  npergroup(), contrasts and the other options.

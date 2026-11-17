@@ -1926,7 +1926,10 @@ fn r_not_kept(cmd: &str, name: &str) -> Option<&'static str> {
         ("describe", "changed") => Some(
             "it says whether the data changed since they were last saved, which R does not follow",
         ),
-        ("power" | super::power::POWER_TABLE, "init" | "iter" | "deltax" | "function") => Some(
+        (
+            "power" | super::power::POWER_TABLE | super::power::POWER_ONEWAY,
+            "init" | "iter" | "deltax" | "function",
+        ) => Some(
             "it is a detail of Stata's own search for the answer (its start, rounds, last step and remainder), which R's search does not share",
         ),
         _ => None,
@@ -2083,7 +2086,9 @@ impl Session {
                     Returned::Kept { cmd, model, names } => {
                         // tabstat, save: its matrices and groups' names, as many as groups
                         let tabstat = which == "r" && cmd == "tabstat";
-                        if MATRIX_NAMES.contains(&name)
+                        // power's r(beta) is its number (1 - power), not regress's e(beta)
+                        let power_beta = which == "r" && cmd.starts_with("power") && name == "beta";
+                        if (MATRIX_NAMES.contains(&name) && !power_beta)
                             || (tabstat && super::tabstat::tabstat_matrix(name))
                         {
                             return Err(no(format!(
@@ -2405,6 +2410,11 @@ impl Session {
             Returned::Kept { cmd, .. } if which == "r" && cmd == super::power::POWER_TABLE => {
                 return Err(no(
                     "return list after power with lists of values: Stata 19 lists the table's r(separator) and r(divider) in an order RCraft does not follow (each r() can still be read)",
+                ));
+            }
+            Returned::Kept { cmd, .. } if which == "r" && cmd == super::power::POWER_ONEWAY => {
+                return Err(no(
+                    "return list after power oneway: Stata 19 lists its r() in an order that changes with the number of groups, which RCraft does not follow (each r() can still be read)",
                 ));
             }
             Returned::Kept { cmd, model, .. } => {

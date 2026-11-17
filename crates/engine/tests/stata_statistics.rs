@@ -1200,6 +1200,39 @@ fn power_lists_print_statas_table() {
     }
 }
 
+/// power oneway in Stata 19's layout, line for line from Stata's own output
+/// (plan/stata/power.md): a searched sample size from the means, unequal
+/// groups' average, and the between-group variance.
+#[test]
+fn power_oneway_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power oneway 1 2 3\npower oneway 1 2 3, n1(10) n2(20) n3(30)\n\
+         power oneway, n(60) ngroups(4) power(0.8)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Performing iteration ...",
+        "Estimated sample size for one-way ANOVA",
+        "F test for group effect",
+        "H0: delta = 0  versus  Ha: delta != 0",
+        "          N_g =         3",
+        "        Var_m =    0.6667",
+        "Estimated sample sizes:",
+        "            N =        18",
+        "  N per group =         6",
+        "    Average N =   20.0000",
+        "           N3 =        30",
+        "        power =    0.9995",
+        "Estimated effect size and between-group variance:",
+        "        delta =    0.4415",
+        "        Var_m =    0.1949",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
 /// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
 /// on the same data (plan/stata/epitab.md); replace keeps the case variable's
 /// label, which then names ir's row.

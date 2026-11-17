@@ -2822,12 +2822,13 @@ pub const GUIDES: &[Guide] = &[
                 "In R",
                 "stata_power works out the sample size, the power, or (with one value, n() and \
                  power()) the target value for onemean, twomeans, pairedmeans, oneproportion, \
-                 twoproportions, onevariance, twovariances, onecorrelation, twocorrelations and \
-                 pairedproportions, from the [PSS] manual's power functions: the noncentral t (or z \
-                 with knownsd), Satterthwaite's t for unequal sds, the score or Wald test of a \
-                 proportion, the pooled test of two with Fleiss's continuity correction, the \
-                 chi-squared test of a variance, the F test of two, Fisher's z test of correlations \
-                 and the large-sample McNemar test. Sample sizes are the smallest whole numbers \
+                 twoproportions, onevariance, twovariances, onecorrelation, twocorrelations, \
+                 pairedproportions and oneway, from the [PSS] manual's power functions: the \
+                 noncentral t (or z with knownsd), Satterthwaite's t for unequal sds, the score or \
+                 Wald test of a proportion, the pooled test of two with Fleiss's continuity \
+                 correction, the chi-squared test of a variance, the F test of two, Fisher's z test \
+                 of correlations, the large-sample McNemar test and the F test of a group effect \
+                 (its noncentral F summed to full precision; R's pf() agrees to about 1e-9). Sample sizes are the smallest whole numbers \
                  reaching the power (the second group nratio() times the first, rounded up); a \
                  total that does not split is cut to Stata's actual sample sizes. Stata 19's \
                  printout and r(), but for its search's own r(init), r(iter), r(deltax) and \
@@ -2847,8 +2848,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "Graphs, parallel, table() with columns, the other methods (oneway, twoway, \
-                 oneslope, rsquared, cox, logrank, ...), test(lrchi2), test(fisher), \
+                "Graphs, parallel, table() with columns, return list after power oneway (Stata \
+                 lists its r() in an order that changes with the number of groups), oneway's \
+                 lists and contrasts, the other methods (twoway, repeated, oneslope, rsquared, cox, \
+                 logrank, ...), test(lrchi2), test(fisher), \
                  test(binomial), n1() or n2() alone, pairedproportions' corr(), diff() and ratio() \
                  forms, and the other options are refused.",
             ),
