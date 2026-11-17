@@ -130,3 +130,40 @@ every printed line identical to RCraft's; r() values equal to 12 digits or more)
 - Reading r(beta) after any power line had been refused as regress's matrix e(beta); fixed.
 - Refused: lists of values (Stata's table) for oneway, more than 20 groups, grweights() with n() or
   npergroup(), contrasts and the other options.
+
+## logrank and cox (2026-11-17)
+
+Observed on Stata 19 SE with no data (probes s1 to s5: about 45 lines with return list or every r()
+displayed, set against RCraft's: every printed line identical, r() to 12 digits or more); corpus
+`power5.do`.
+
+- `power logrank [s1 [s2]]`, hratio() (s2 = s1^hratio; with s1 and s2, hratio = ln s2 / ln s1),
+  schoenfeld, n(), n1() n2(), nratio(), onesided, direction(): the number of events E by Freedman's
+  method, (z_α + z_β)²(1 + R·HR)²/(R(1 − HR)²), or Schoenfeld's, (z_α + z_β)²(1 + R)²/(R·ln²HR); the
+  probability of an event Pr_E = 1 − (N1·s1 + N2·s2)/N (1 without s1: no censoring; r(Pr_w) = 0).
+- `power cox [b1]`, hratio() (b1 = ln hratio), sd() (0.5), r2(), eventprob() (1): Hsieh and Lavori,
+  E = (z_α + z_β)²/(sd²(1 − R2)·b1²).
+- Power: Stata's is the one tail on the effect's side, Φ(effect·√E − z) (both tails would give 0.4291 for
+  0.4290 at n(300)), with E = N·Pr_E as it is (n(200) with Pr_E 0.4201: 84.02); r(E) is that rounded up.
+- Sample size: E = ⌈E_frac⌉ (with no censoring E is the N below); N_frac = E_frac/Pr_E; logrank's
+  groups ⌈N_frac/(1 + R)⌉ and ⌈R·N_frac/(1 + R)⌉ (293 from 292.12 at nratio(1.5) is 117 and 176), with
+  N2/N1 printed under them when they miss nratio(), and r(nratio_a); cox's N = ⌈N_frac⌉ (eventprob(0.4):
+  E 121, N 301).
+- Targets (n() and power(), no effect): direction() lower by default (HR < 1, b1 < 0). Closed forms but
+  logrank with s1 (s2 and Pr_E follow the hazard ratio: searched, "Performing iteration ..."). With a total
+  that does not split, the target is worked out from the total given (n(401) nratio(1.5): groups 160 and
+  240, E from 401·Pr_E) but r(E) from the groups.
+- Printout: "Estimated sample sizes for two-sample comparison of survivor functions" / "Estimated sample
+  size for Cox PH regression"; tests "Log-rank test, Freedman method" (Schoenfeld method), "Wald test"; H0
+  `HR = 1`, `ln(HR) = 0`, `beta1 = 0`, the target's side only two-sided; blocks "Censoring:" (sample
+  size) or "Number of events and censoring:" with E, s1, s2, Pr_E; delta labelled (hazard ratio), (log
+  hazard-ratio), (coefficient); Schoenfeld's target ends with `   ln(hratio) =`.
+- Every power method prints whole numbers %9.0fc (`N =     3,142`): fixed for all of them.
+- r(): logrank power beta alpha delta nfractional onesided [search] N [N_a] N1 N2 nratio [nratio_a]
+  hratio E, then s1 Pr_w Pr_E s2 (sample size) or s1 s2 Pr_w Pr_E, or Pr_E Pr_w without s1; the searched
+  target N [N_a] N1 Pr_w Pr_E s2 s1 E hratio nratio N2. cox power beta alpha delta N [nfractional]
+  onesided E [hratio] b1 sd R2 Pr_E Pr_w. Macros type method [direction] test effect (logrank: Freedman
+  hratio, Schoenfeld lnhratio), effect coefficient (cox).
+- Not followed: after cox with b1 given or worked out, Stata keeps r(hratio) = exp(b1) hidden from
+  `return list`; RCraft has no r(hratio) then. Refused: lists, wdprob(), simulation and the other
+  options, n1() or n2() alone.

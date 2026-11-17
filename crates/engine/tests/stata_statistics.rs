@@ -1233,6 +1233,43 @@ fn power_oneway_prints_statas_layout() {
     }
 }
 
+/// power logrank and power cox in Stata 19's layout, line for line from
+/// Stata's own output (plan/stata/power.md): events and sample sizes with
+/// censoring, unequal groups whose ratio misses nratio(), a searched hazard
+/// ratio, Schoenfeld's log hazard-ratio, a Cox coefficient, and %9.0fc.
+#[test]
+fn power_logrank_and_cox_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power logrank 0.5 0.4, nratio(3)\npower logrank 0.5, n(300) power(0.8)\n\
+         power logrank, schoenfeld n(300) power(0.8)\npower cox, hratio(0.6) eventprob(0.4)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Estimated sample sizes for two-sample comparison of survivor functions",
+        "Log-rank test, Freedman method",
+        "Censoring:",
+        "         Pr_E =    0.5750",
+        "Estimated number of events and sample sizes:",
+        "            E =       623",
+        "            N =     1,083",
+        "        N2/N1 =    2.9963",
+        "Performing iteration ...",
+        "H0: HR = 1  versus  Ha: HR != 1; HR < 1",
+        "Number of events and censoring:",
+        "        delta =    0.6006  (hazard ratio)",
+        "Estimated log hazard-ratio for two-sample comparison of survivor functions",
+        "   ln(hratio) =   -0.3235",
+        "Estimated sample size for Cox PH regression",
+        "Wald test",
+        "        delta =   -0.5108  (coefficient)",
+        "            N =       301",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
 /// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
 /// on the same data (plan/stata/epitab.md); replace keeps the case variable's
 /// label, which then names ir's row.

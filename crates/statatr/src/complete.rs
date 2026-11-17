@@ -500,7 +500,9 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "corr(",
             "direction(",
             "effect(",
+            "eventprob(",
             "grweights(",
+            "hratio(",
             "knownsd",
             "knownsds",
             "n(",
@@ -513,6 +515,8 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "onesided",
             "power(",
             "prdiscordant(",
+            "r2(",
+            "schoenfeld",
             "sd(",
             "sd1(",
             "sd2(",
@@ -1133,6 +1137,8 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
     (
         "power",
         &[
+            "cox",
+            "logrank",
             "onecorrelation",
             "onemean",
             "oneproportion",
@@ -1962,6 +1968,8 @@ gettoken a b : s, {o}"
             }
             "tetrachoric" => format!("tetrachoric x y z, {o}"),
             "power" if name == "notable" => "power twomeans 0 0.5, n(50 100) notable".to_string(),
+            "power" if matches!(name, "hratio" | "schoenfeld") => format!("power logrank 0.5, {o}"),
+            "power" if matches!(name, "eventprob" | "r2") => format!("power cox, hratio(0.6) {o}"),
             "power" if matches!(name, "grweights" | "npergroup" | "varerror") => {
                 format!("power oneway 1 2 3, {o}")
             }

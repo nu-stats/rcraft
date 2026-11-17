@@ -223,7 +223,7 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
   attr(r, "stata_find") <- find
   if (!show) return(invisible(r))
   num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
-  int <- function(k, v) sprintf("%13s = %9.0f", k, v)
+  int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
   eff <- if (method == "twoproportions") paste0("  (", switch(effect, diff = "difference", ratio = "ratio", oratio = "odds ratio"), ")") else ""
   sizes_lines <- function(tot = N) {
     if (!two) return(int("N", tot))
@@ -438,7 +438,7 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
   attr(r, "stata_find") <- find
   if (!show) return(invisible(r))
   num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
-  int <- function(k, v) sprintf("%13s = %9.0f", k, v)
+  int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
   eff <- if (pp) paste0("  (", if (effect == "ratio") "ratio" else "difference", ")") else ""
   sizes_lines <- function(tot = N) {
     if (!two) return(int("N", tot))
@@ -540,7 +540,7 @@ stata_power_oneway <- function(means = NULL, ngroups = NULL, varmeans = NULL, va
          list(onesided = 0, nfractional = 0, N = N, type = "test", method = "oneway"))
   if (!show) return(invisible(r))
   num <- function(k, v) sprintf("%13s = %9.4f", k, v)
-  int <- function(k, v) sprintf("%13s = %9.0f", k, v)
+  int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
   sizes <- function(tot) c(int("N", tot), if (balanced) int("N per group", g[1]) else
     c(num("Average N", sum(g) / k), int(paste0("N", seq_len(k)), g)))
   what <- switch(find, power = "power", n = "sample size", effect = "between-group variance")
@@ -566,6 +566,170 @@ stata_power_oneway <- function(means = NULL, ngroups = NULL, varmeans = NULL, va
   invisible(r)
 }
 
+
+# power logrank and power cox (Stata 19): the number of events E for the log-rank test (Freedman's
+# method, or Schoenfeld's) and the Wald test of a Cox coefficient (Hsieh and Lavori), the sample size
+# from the events and the probability of an event. Stata's power is the one tail on the effect's side,
+# with E = N * Pr_E as it is; r(E) and the sizes are rounded up
+stata_power_surv <- function(method, s1 = NULL, s2 = NULL, hratio = NULL, b1 = NULL, sd = 0.5, r2 = NULL,
+                             eventprob = 1, schoenfeld = FALSE, alpha = 0.05, power = NULL, n = NULL, n1 = NULL,
+                             n2 = NULL, nratio = NULL, onesided = FALSE, direction = "lower", show = TRUE) {
+  stop_r <- function(m) stop(m, call. = FALSE)
+  lr <- method == "logrank"
+  up <- direction == "upper"
+  if (lr && !is.null(s1) && !is.null(s2)) hratio <- log(s2) / log(s1)
+  if (!lr && !is.null(hratio)) b1 <- log(hratio)
+  find <- if (lr && is.null(hratio) || !lr && is.null(b1)) "effect" else
+    if (is.null(power) && (!is.null(n) || !is.null(n1))) "power" else "n"
+  target <- if (is.null(power)) 0.8 else power
+  if (is.null(nratio)) nratio <- if (!is.null(n1) && !is.null(n2)) n2 / n1 else 1
+  side <- if (onesided) 1 else 2
+  zc <- stats::qnorm(1 - alpha / side)
+  zz <- zc + stats::qnorm(target)
+  r2v <- if (is.null(r2)) 0 else r2
+  # the probability of an event: no censoring without s1 (logrank), eventprob() (cox)
+  pr_e <- function(hr, a, b) if (!lr) eventprob else if (is.null(s1)) 1 else 1 - (a * s1 + b * s1^hr) / (a + b)
+  # the standardized effect for E events at hazard ratio hr (cox: coefficient b)
+  eff <- function(E, x, R) {
+    if (!lr) return(sqrt(E * sd^2 * (1 - r2v)) * abs(x))
+    if (schoenfeld) sqrt(E * R) * abs(log(x)) / (1 + R) else sqrt(E * R) * abs(1 - x) / (1 + R * x)
+  }
+  pw <- function(E, x, R) stats::pnorm(eff(E, x, R) - zc)
+  actual <- FALSE
+  if (find == "n") {
+    x <- if (lr) hratio else b1
+    R <- nratio
+    Ef <- if (!lr) zz^2 / (sd^2 * (1 - r2v) * b1^2) else if (schoenfeld) zz^2 * (1 + R)^2 / (R * log(hratio)^2) else
+      zz^2 * (1 + R * hratio)^2 / (R * (1 - hratio)^2)
+    P <- pr_e(hratio, 1, R)
+    Nf <- Ef / P
+    g <- if (lr) c(ceiling(Nf / (1 + R) - 1e-9), ceiling(R * Nf / (1 + R) - 1e-9)) else c(ceiling(Nf - 1e-9), NA)
+    N <- sum(g, na.rm = TRUE)
+    # with no censoring every subject is an event: E is the rounded-up N (Stata 19)
+    E <- if (P == 1) N else ceiling(Ef - 1e-9)
+    pv <- target
+    iterated <- FALSE
+  } else {
+    g <- if (!lr) c(n, NA) else if (!is.null(n1)) c(n1, n2) else {
+      a <- n / (1 + nratio)
+      if (abs(a - round(a)) < 1e-8) c(round(a), n - round(a)) else {
+        actual <- TRUE
+        c(floor(a + 1e-9), floor(n * nratio / (1 + nratio) + 1e-9))
+      }
+    }
+    Ng <- sum(g, na.rm = TRUE)
+    N <- if (lr && !is.null(n1)) Ng else n
+    R <- if (lr) g[2] / g[1] else 1
+    # the target is worked out from the total given (Stata 19: n(401) nratio(1.5), groups 160 and 240)
+    Nt <- if (is.null(n)) Ng else n
+    iterated <- FALSE
+    if (find == "power") {
+      x <- if (lr) hratio else b1
+      P <- pr_e(hratio, g[1], g[2])
+      pv <- pw(Ng * P, x, R)
+    } else {
+      pv <- target
+      if (lr && !is.null(s1)) {
+        f <- function(h) pw(Nt * pr_e(h, g[1], g[2]), h, R) - target
+        e <- 1e-10
+        hratio <- if (up) stats::uniroot(f, c(1 + e, 2), extendInt = "upX", tol = 1e-14)$root else
+          stats::uniroot(f, c(e, 1 - e), tol = 1e-14)$root
+        iterated <- TRUE
+        x <- hratio
+      } else {
+        P <- pr_e(1, g[1], g[2])
+        c0 <- zz / sqrt(Nt * P * (if (lr) R else 1))
+        if (!lr) {
+          b1 <- (if (up) 1 else -1) * zz / sqrt(Nt * P * sd^2 * (1 - r2v))
+          x <- b1
+        } else if (schoenfeld) {
+          hratio <- exp((if (up) 1 else -1) * c0 * (1 + R))
+          x <- hratio
+        } else {
+          hratio <- if (up) (1 + c0) / (1 - c0 * R) else (1 - c0) / (1 + c0 * R)
+          x <- hratio
+        }
+      }
+      P <- pr_e(hratio, g[1], g[2])
+    }
+    E <- ceiling(Ng * P - 1e-9)
+  }
+  delta <- if (!lr) b1 else if (schoenfeld) log(hratio) else hratio
+  s2v <- if (lr && !is.null(s1)) s1^hratio
+  # r() in the order of Stata 19's return list for this form
+  head <- list(power = pv, beta = 1 - pv, alpha = alpha, delta = delta)
+  os <- list(onesided = as.numeric(onesided))
+  it <- if (iterated) list(converged = 1, maxiter = 500, tolerance = 1e-12, ftolerance = 1e-12) else list()
+  if (lr) {
+    nra <- if (abs(g[2] / g[1] - nratio) > 1e-12) list(nratio_a = g[2] / g[1])
+    NN <- c(list(N = N), if (actual) list(N_a = sum(g)))
+    cens <- if (is.null(s1)) list(Pr_E = P, Pr_w = 0) else if (find == "n") list(s1 = s1, Pr_w = 0, Pr_E = P, s2 = s2v) else
+      list(s1 = s1, s2 = s2v, Pr_w = 0, Pr_E = P)
+    tail <- if (iterated) c(NN, list(N1 = g[1], Pr_w = 0, Pr_E = P, s2 = s2v, s1 = s1, E = E, hratio = hratio, nratio = R, N2 = g[2]))
+      else c(NN, list(N1 = g[1], N2 = g[2], nratio = R), if (find == "n") nra, list(hratio = hratio, E = E), cens)
+    r <- c(head, list(nfractional = 0), os, it, tail)
+  } else {
+    r <- c(head, list(N = N), if (find == "n") list(nfractional = 0), os, list(E = E),
+           if (!is.null(hratio) && find != "effect") list(hratio = hratio), list(b1 = b1, sd = sd, R2 = r2v, Pr_E = P, Pr_w = 0))
+  }
+  dl <- if (find == "effect") list(direction = if (up) "upper" else "lower")
+  r <- c(r, list(type = "test", method = method), dl,
+         if (lr) list(test = if (schoenfeld) "Schoenfeld" else "Freedman", effect = if (schoenfeld) "lnhratio" else "hratio")
+         else list(effect = "coefficient"))
+  # the printout
+  title <- if (lr) "two-sample comparison of survivor functions" else "Cox PH regression"
+  what <- if (find == "power") "power" else if (find == "n") (if (lr) "sample sizes" else "sample size") else
+    if (lr) (if (schoenfeld) "log hazard-ratio" else "hazard ratio") else "target coefficient"
+  testline <- if (!lr) "Wald test" else if (schoenfeld) "Log-rank test, Schoenfeld method" else "Log-rank test, Freedman method"
+  sym <- if (!lr) c("beta1", "0") else if (schoenfeld) c("ln(HR)", "0") else c("HR", "1")
+  above <- if (find == "effect") up else if (lr) hratio > 1 else b1 > 0
+  rel <- if (!onesided) "!=" else if (above) ">" else "<"
+  h0 <- sprintf("H0: %s = %s  versus  Ha: %s %s %s", sym[1], sym[2], sym[1], rel, sym[2])
+  # the target's side, only when two-sided (Stata 19)
+  if (find == "effect" && !onesided) h0 <- paste0(h0, "; ", sym[1], if (up) " > " else " < ", sym[2])
+  attr(r, "stata_head") <- c(paste0("Estimated ", what, " for ", if (lr) "" else "", title), testline, h0)
+  attr(r, "stata_find") <- find
+  if (!show) return(invisible(r))
+  num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
+  int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
+  ex <- if (!lr) "  (coefficient)" else if (schoenfeld) "  (log hazard-ratio)" else "  (hazard ratio)"
+  sizes_lines <- function(tot) {
+    if (!lr) return(int("N", tot))
+    c(int("N", tot), if (g[1] == g[2]) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
+  }
+  given_n <- if (!lr) int("N", N) else if (actual) c(int("N", N), if (nratio != 1) num("N2/N1", nratio)) else
+    c(sizes_lines(N), if (g[1] != g[2]) num("N2/N1", g[2] / g[1]))
+  study <- c(num("alpha", alpha), if (find != "power") num("power", target), if (find != "n") given_n,
+             if (find != "effect") c(num("delta", delta, ex), if (lr || !is.null(hratio)) num("hratio", hratio) else num("b1", b1)),
+             if (!lr) c(num("sd", sd), if (!is.null(r2)) num("R2", r2)),
+             if (lr && find == "n" && nratio != 1) num("N2/N1", nratio))
+  cens_lines <- c(if (lr && !is.null(s1)) c(num("s1", s1), num("s2", s2v)), num("Pr_E", P))
+  cat("\n")
+  if (iterated) cat("Performing iteration ...\n\n")
+  cat("Estimated ", what, " for ", title, "\n", testline, "\n", h0, "\n\nStudy parameters:\n\n", sep = "")
+  cat(study, sep = "\n")
+  if (actual) {
+    cat("\nActual sample sizes:\n\n")
+    cat(sizes_lines(sum(g)), sep = "\n")
+  }
+  if (find == "n") {
+    cat("\nCensoring:\n\n")
+    cat(cens_lines, sep = "\n")
+    cat("\nEstimated number of events and ", what, ":\n\n", int("E", E), "\n", sep = "")
+    cat(sizes_lines(N), sep = "\n")
+    if (lr && g[1] != g[2] && abs(g[2] / g[1] - nratio) > 1e-12) cat(num("N2/N1", g[2] / g[1]), "\n", sep = "")
+  } else {
+    cat("\nNumber of events and censoring:\n\n", int("E", E), "\n", sep = "")
+    cat(cens_lines, sep = "\n")
+    if (find == "power") cat("\nEstimated power:\n\n", num("power", pv), "\n", sep = "") else {
+      cat("\nEstimated effect size and ", what, ":\n\n", num("delta", delta, ex), "\n", sep = "")
+      cat(if (!lr) num("b1", b1) else if (schoenfeld) num("ln(hratio)", log(hratio)) else num("hratio", hratio), "
+", sep = "")
+    }
+  }
+  cat("\n")
+  invisible(r)
+}
 # power with lists of values (Stata 19): every combination, nested values > alpha > power > n > n1 > n2 >
 # nratio > the method's own numbers (the last varies fastest), each worked out as one power line and
 # printed as Stata's table; r() is the last row's with the table's own (columns, labels, widths,
@@ -696,6 +860,12 @@ const R_POWER: &[&str] = &[
     "widths",
     "formats",
     "pss_table",
+    "hratio",
+    "E",
+    "Pr_E",
+    "Pr_w",
+    "b1",
+    "R2",
 ];
 
 /// The methods from onevariance on: Stata's sd flag (not sd()), and
@@ -986,13 +1156,16 @@ impl Session {
         }
         let main = c.parts.main.trim();
         let (method, rest) = first_word(main);
+        if matches!(method, "logrank" | "cox") {
+            return self.power_survival(c, method, rest, opts, out);
+        }
         if method == "oneway" {
             return self.power_oneway(c, rest, opts, out);
         }
         let Some((method, extra)) = METHODS.iter().find(|(m, _)| *m == method) else {
             return Err(no(format!(
                 "power {method} is not translated yet (onemean, twomeans, pairedmeans, oneproportion, twoproportions, \
-                 onevariance, twovariances, onecorrelation, twocorrelations and pairedproportions are)"
+                 onevariance, twovariances, onecorrelation, twocorrelations, pairedproportions, oneway, logrank and cox are)"
             )));
         };
         let later = LATER.contains(method);
@@ -1409,6 +1582,177 @@ impl Session {
             args.join(", ")
         ));
         self.r_new = Some((R_ONEWAY, POWER_ONEWAY.into()));
+        Ok(())
+    }
+
+    /// `power logrank [s1 [s2]]` and `power cox [b1]`: the log-rank test of two survivor functions
+    /// and the Wald test of a Cox coefficient, as Stata 19 prints them.
+    fn power_survival(
+        &mut self,
+        c: &Command,
+        method: &str,
+        rest: &str,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let lr = method == "logrank";
+        let mut known: Vec<(&str, usize)> = vec![
+            ("alpha", 5),
+            ("power", 5),
+            ("n", 1),
+            ("onesided", 8),
+            ("direction", 9),
+            ("hratio", 6),
+        ];
+        if lr {
+            known.extend_from_slice(&[("n1", 2), ("n2", 2), ("nratio", 6), ("schoenfeld", 10)]);
+        } else {
+            known.extend_from_slice(&[("sd", 2), ("r2", 2), ("eventprob", 9)]);
+        }
+        if let Some(o) = opts.other(&known) {
+            return Err(no(format!(
+                "power {method} with the option {o} is not translated yet"
+            )));
+        }
+        if rest.contains('(') {
+            return Err(no(format!(
+                "power {method}: lists of values (Stata's table) are not translated yet for {method}"
+            )));
+        }
+        let values = if rest.trim().is_empty() {
+            Vec::new()
+        } else {
+            numlist("the value", rest)?
+        };
+        if values.len() > if lr { 2 } else { 1 } {
+            return Err(no(format!(
+                "power {method}: too many values (Stata: r(198))"
+            )));
+        }
+        let one = |name: &str, min: usize| -> Result<Option<f64>, Untranslated> {
+            let Some(t) = opts.arg(name, min) else {
+                return Ok(None);
+            };
+            match numlist(&format!("{name}()"), &t)?[..] {
+                [x] => Ok(Some(x)),
+                _ => Err(no(format!(
+                    "power {method}: a list in {name}() (Stata's table) is not translated yet for {method}"
+                ))),
+            }
+        };
+        let bad = |what: String| no(format!("power {method}: {what} (Stata: r(198))"));
+        let mut args = vec![r_text(method)];
+        if lr {
+            for (i, x) in values.iter().enumerate() {
+                if !(*x > 0.0 && *x < 1.0) {
+                    return Err(bad(format!("{x} must be between 0 and 1")));
+                }
+                args.push(format!(
+                    "{} = {}",
+                    if i == 0 { "s1" } else { "s2" },
+                    r_number(*x)
+                ));
+            }
+            if let [a, b] = values[..] {
+                if a == b {
+                    return Err(bad("the two survival probabilities must differ".into()));
+                }
+            }
+        } else if let Some(b) = values.first() {
+            if *b == 0.0 {
+                return Err(bad("the coefficient must not be 0".into()));
+            }
+            args.push(format!("b1 = {}", r_number(*b)));
+        }
+        let hratio = one("hratio", 6)?;
+        if let Some(h) = hratio {
+            if h <= 0.0 || h.is_nan() || h == 1.0 {
+                return Err(bad(format!("hratio({h}) must be above 0 and not 1")));
+            }
+            if values.len() == if lr { 2 } else { 1 } {
+                return Err(bad("hratio() with the values given".into()));
+            }
+            args.push(format!("hratio = {}", r_number(h)));
+        }
+        let effect = hratio.is_none() && values.len() < if lr { 2 } else { 1 };
+        let ranges: &[(&str, usize, Range)] = &[
+            ("alpha", 5, Range::Prob),
+            ("power", 5, Range::Prob),
+            ("n", 1, Range::Whole),
+            ("n1", 2, Range::Whole),
+            ("n2", 2, Range::Whole),
+            ("nratio", 6, Range::Positive),
+            ("sd", 2, Range::Positive),
+        ];
+        for &(name, min, range) in ranges {
+            if !known.iter().any(|(k, _)| *k == name) {
+                continue;
+            }
+            if let Some(x) = one(name, min)? {
+                if !range.holds(x) {
+                    return Err(bad(format!("{name}({x}) {}", range.why())));
+                }
+                args.push(format!("{name} = {}", r_number(x)));
+            }
+        }
+        if !lr {
+            if let Some(x) = one("r2", 2)? {
+                if !(0.0..1.0).contains(&x) {
+                    return Err(bad(format!("r2({x}) must be at least 0 and below 1")));
+                }
+                args.push(format!("r2 = {}", r_number(x)));
+            }
+            if let Some(x) = one("eventprob", 9)? {
+                if !(x > 0.0 && x <= 1.0) {
+                    return Err(bad(format!("eventprob({x}) must be above 0 and at most 1")));
+                }
+                args.push(format!("eventprob = {}", r_number(x)));
+            }
+        }
+        let has_n = opts.has("n", 1);
+        let (n1, n2) = (opts.has("n1", 2), opts.has("n2", 2));
+        if n1 != n2 {
+            return Err(no(format!(
+                "power {method}: n1() or n2() alone is not translated yet; give both"
+            )));
+        }
+        if n1 && (has_n || opts.has("nratio", 6)) {
+            return Err(no(format!(
+                "power {method}: n() or nratio() with n1() and n2() is not translated yet"
+            )));
+        }
+        if effect && !(opts.has("power", 5) && (has_n || n1)) {
+            return Err(bad(format!(
+                "the {} needs n() and power()",
+                if lr { "hazard ratio" } else { "coefficient" }
+            )));
+        }
+        if !effect && opts.has("power", 5) && (has_n || n1) {
+            return Err(bad(
+                "power() and n() are not both given with the effect".into()
+            ));
+        }
+        if opts.has("schoenfeld", 10) {
+            args.push("schoenfeld = TRUE".into());
+        }
+        if opts.has("onesided", 8) {
+            args.push("onesided = TRUE".into());
+        }
+        if let Some(d) = opts.arg("direction", 9) {
+            let d = d.trim().to_lowercase();
+            if !matches!(d.as_str(), "upper" | "lower") {
+                return Err(bad(format!("direction({d}) is upper or lower")));
+            }
+            args.push(format!("direction = {}", r_text(&d)));
+        }
+        if self.quiet(c) {
+            args.push("show = FALSE".into());
+        }
+        for h in ["stata_power", "stata_returned"] {
+            self.helpers.insert(h);
+        }
+        out.line(format!("stata_r <- stata_power_surv({})", args.join(", ")));
+        self.r_new = Some((R_POWER, "power".into()));
         Ok(())
     }
 }
