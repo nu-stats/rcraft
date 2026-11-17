@@ -2886,7 +2886,8 @@ pub const GUIDES: &[Guide] = &[
                  after cox given b1 or worked out (Stata keeps it hidden from return list), the \
                  other methods (twoway, repeated, oneslope, rsquared, exponential, mcc, cmh, trend, \
                  ...), test(lrchi2), test(fisher), \
-                 test(binomial), n1() or n2() alone, pairedproportions' corr(), diff() and ratio() \
+                 test(binomial), one group's size that leaves the other not whole, \
+                 pairedproportions' corr(), diff() and ratio() \
                  forms, and the other options are refused.",
             ),
             p(

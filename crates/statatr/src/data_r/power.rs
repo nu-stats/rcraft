@@ -227,7 +227,7 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
   eff <- if (method == "twoproportions") paste0("  (", switch(effect, diff = "difference", ratio = "ratio", oratio = "odds ratio"), ")") else ""
   sizes_lines <- function(tot = N) {
     if (!two) return(int("N", tot))
-    c(int("N", tot), if (g[1] == g[2]) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
+    c(int("N", tot), if (g[1] == g[2] && is.null(n1)) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
   }
   given_n <- if (!two) int("N", N) else if (actual) c(int("N", N), if (nratio != 1) num("N2/N1", nratio)) else
     c(sizes_lines(), if (g[1] != g[2]) num("N2/N1", g[2] / g[1]))
@@ -442,7 +442,7 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
   eff <- if (pp) paste0("  (", if (effect == "ratio") "ratio" else "difference", ")") else ""
   sizes_lines <- function(tot = N) {
     if (!two) return(int("N", tot))
-    c(int("N", tot), if (g[1] == g[2]) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
+    c(int("N", tot), if (g[1] == g[2] && is.null(n1)) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
   }
   given_n <- if (!two) int("N", N) else if (actual) c(int("N", N), if (nratio != 1) num("N2/N1", nratio)) else
     c(sizes_lines(), if (g[1] != g[2]) num("N2/N1", g[2] / g[1]))
@@ -588,7 +588,15 @@ stata_power_surv <- function(method, s1 = NULL, s2 = NULL, hratio = NULL, b1 = N
   zz <- zc + stats::qnorm(target)
   r2v <- if (is.null(r2)) 0 else r2
   # the probability of an event: no censoring without s1 (logrank), eventprob() (cox)
-  pr_e <- function(hr, a, b) if (!lr) eventprob else if (is.null(s1)) 1 else 1 - (a * s1 + b * s1^hr) / (a + b)
+  s2_given <- s2
+  pr_e <- function(hr, a, b) {
+    if (!lr) return(eventprob)
+    if (is.null(s1)) return(1)
+    # in the ratio of the groups, as Stata 19 works it (its doubles: n1(100) n2(100) with 0.5 and 0.4 gives
+    # 0.55000000000000004, so E is 111)
+    R <- b / a
+    1 - (s1 + R * (if (!is.null(s2_given)) s2_given else s1^hr)) / (1 + R)
+  }
   # the standardized effect for E events at hazard ratio hr (cox: coefficient b)
   eff <- function(E, x, R) {
     if (!lr) return(sqrt(E * sd^2 * (1 - r2v)) * abs(x))
@@ -652,10 +660,11 @@ stata_power_surv <- function(method, s1 = NULL, s2 = NULL, hratio = NULL, b1 = N
       }
       P <- pr_e(hratio, g[1], g[2])
     }
-    E <- ceiling(Ng * P - 1e-9)
+    # rounded up as the double it is (Stata 19: 200 * 0.55 is 110.00000000000001, so 111)
+    E <- ceiling(Ng * P)
   }
   delta <- if (!lr) b1 else if (schoenfeld) log(hratio) else hratio
-  s2v <- if (lr && !is.null(s1)) s1^hratio
+  s2v <- if (lr && !is.null(s2_given)) s2_given else if (lr && !is.null(s1)) s1^hratio
   # r() in the order of Stata 19's return list for this form
   head <- list(power = pv, beta = 1 - pv, alpha = alpha, delta = delta)
   os <- list(onesided = as.numeric(onesided))
@@ -695,7 +704,7 @@ stata_power_surv <- function(method, s1 = NULL, s2 = NULL, hratio = NULL, b1 = N
   ex <- if (!lr) "  (coefficient)" else if (schoenfeld) "  (log hazard-ratio)" else "  (hazard ratio)"
   sizes_lines <- function(tot) {
     if (!lr) return(int("N", tot))
-    c(int("N", tot), if (g[1] == g[2]) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
+    c(int("N", tot), if (g[1] == g[2] && is.null(n1)) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
   }
   given_n <- if (!lr) int("N", N) else if (actual) c(int("N", N), if (nratio != 1) num("N2/N1", nratio)) else
     c(sizes_lines(N), if (g[1] != g[2]) num("N2/N1", g[2] / g[1]))
@@ -1304,17 +1313,7 @@ impl Session {
             args.push("scale = \"standard deviation\"".into());
         }
         let has_n = opts.has("n", 1);
-        let (n1, n2) = (opts.has("n1", 2), opts.has("n2", 2));
-        if n1 != n2 {
-            return Err(no(format!(
-                "power {method}: n1() or n2() alone is not translated yet; give both"
-            )));
-        }
-        if n1 && (has_n || opts.has("nratio", 6)) {
-            return Err(no(format!(
-                "power {method}: n() or nratio() with n1() and n2() is not translated yet"
-            )));
-        }
+        let n1 = split_groups(method, opts, &mut args, &lists)?;
         if opts.has("sddiff", 6) && opts.has("corr", 4) {
             return Err(no(
                 "power pairedmeans: sddiff() with corr() is not translated yet",
@@ -1710,17 +1709,7 @@ impl Session {
             }
         }
         let has_n = opts.has("n", 1);
-        let (n1, n2) = (opts.has("n1", 2), opts.has("n2", 2));
-        if n1 != n2 {
-            return Err(no(format!(
-                "power {method}: n1() or n2() alone is not translated yet; give both"
-            )));
-        }
-        if n1 && (has_n || opts.has("nratio", 6)) {
-            return Err(no(format!(
-                "power {method}: n() or nratio() with n1() and n2() is not translated yet"
-            )));
-        }
+        let n1 = split_groups(method, opts, &mut args, &[])?;
         if effect && !(opts.has("power", 5) && (has_n || n1)) {
             return Err(bad(format!(
                 "the {} needs n() and power()",
@@ -1755,4 +1744,65 @@ impl Session {
         self.r_new = Some((R_POWER, "power".into()));
         Ok(())
     }
+}
+
+/// n1() or n2() alone (with nratio()), or n() with one of them: both groups,
+/// as Stata 19 works them out (n1(40) nratio(2): 40 and 80; n(100) n2(70): 30
+/// and 70), passed to R as n1 and n2. Whether the groups were given.
+fn split_groups(
+    method: &str,
+    opts: &Opts,
+    args: &mut Vec<String>,
+    lists: &[String],
+) -> Result<bool, Untranslated> {
+    let (has_n, n1, n2, ratio) = (
+        opts.has("n", 1),
+        opts.has("n1", 2),
+        opts.has("n2", 2),
+        opts.has("nratio", 6),
+    );
+    if !n1 && !n2 {
+        return Ok(false);
+    }
+    if n1 && n2 && (has_n || ratio) {
+        return Err(no(format!(
+            "power {method}: n() or nratio() with n1() and n2() cannot be given together (Stata: r(198))"
+        )));
+    }
+    if n1 && n2 {
+        return Ok(true);
+    }
+    if has_n && ratio {
+        return Err(no(format!(
+            "power {method}: n() and nratio() with n1() or n2() is not translated yet"
+        )));
+    }
+    let sizes = ["n = ", "n1 = ", "n2 = ", "nratio = "];
+    if lists.iter().any(|l| sizes.iter().any(|s| l.starts_with(s))) {
+        return Err(no(format!(
+            "power {method}: lists in n(), n1(), n2() or nratio() with one group's size are not translated yet"
+        )));
+    }
+    let get = |name: &str, min: usize| {
+        opts.arg(name, min)
+            .and_then(|t| t.trim().parse::<f64>().ok())
+    };
+    let r = get("nratio", 6).unwrap_or(1.0);
+    let (a, b) = match (get("n", 1), get("n1", 2), get("n2", 2)) {
+        (Some(n), Some(a), _) if has_n => (a, n - a),
+        (Some(n), _, Some(b)) if has_n => (n - b, b),
+        (_, Some(a), _) => (a, a * r),
+        (_, _, Some(b)) => (b / r, b),
+        _ => return Err(no(format!("power {method}: n1() or n2() needs a number"))),
+    };
+    let whole = |x: f64| x >= 1.0 && (x - x.round()).abs() < 1e-9;
+    if !whole(a) || !whole(b) {
+        return Err(no(format!(
+            "power {method}: groups of {a} and {b} are not whole numbers (Stata's actual sample sizes from one group's size are not translated yet)"
+        )));
+    }
+    args.retain(|x| !sizes.iter().any(|s| x.starts_with(s)));
+    args.push(format!("n1 = {}", r_number(a.round())));
+    args.push(format!("n2 = {}", r_number(b.round())));
+    Ok(true)
 }

@@ -167,3 +167,19 @@ displayed, set against RCraft's: every printed line identical, r() to 12 digits 
 - Not followed: after cox with b1 given or worked out, Stata keeps r(hratio) = exp(b1) hidden from
   `return list`; RCraft has no r(hratio) then. Refused: lists, wdprob(), simulation and the other
   options, n1() or n2() alone.
+
+## One group's size (2026-11-17)
+
+Observed on Stata 19 SE (probes m1, m2); corpus `power6.do`.
+
+- n1() alone: N2 = nratio·N1 (nratio 1 by default); n2() alone: N1 = N2/nratio; n() with n1() or n2():
+  the other group is the rest (r(nratio) their ratio). Every two-sample method, power and target forms.
+- Whenever n1() or n2() is given Stata lists `N1 =` and `N2 =`, even equal (never `N per group`): fixed
+  for n1() n2() given together too.
+- n(), n1() and n2() together, or nratio() with both, are Stata errors (r(198)): refused. Refused too: n()
+  with nratio() and one group, lists in these options, and a group that is not whole (n2(41)
+  nratio(2): Stata prints only N2 and N2/N1 among the study parameters, then actual sample sizes 20 and
+  41; not followed yet).
+- logrank's Pr_E is 1 − (s1 + R·s2)/(1 + R), R = N2/N1, in that order: Stata's doubles then give
+  0.55000000000000004 for 0.5 and 0.4, and E = ⌈200 × that⌉ is 111 (110.00000000000001), not 110. E is
+  rounded up with no tolerance.
