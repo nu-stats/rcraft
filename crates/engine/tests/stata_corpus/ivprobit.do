@@ -47,3 +47,29 @@ capture ivprobit y x (y1 = x)
 display "@ err_onlyexog " _rc
 capture ivprobit y x (x = z1)
 display "@ err_dropendog " _rc
+* an instrument collinear with another instrument: the later one is dropped, with a note; the fit is
+* the model without it, and e(b) keeps a 0 column o.z3
+generate double z3 = 2 * z1
+quietly ivprobit y x (y1 = z1 z2 z3)
+display "@ coll " %20.0g el(e(b), 1, 1) " " %20.0g el(e(b), 1, 7) " " %20.0g el(e(b), 1, 9) " " %20.0g el(e(b), 1, 10) " " %20.0g e(ll) " " e(rank) " " e(k) " " e(df_m)
+display "@ coll_v " %20.0g el(e(V), 1, 1) " " %20.0g el(e(V), 7, 7) " " %20.0g el(e(V), 9, 9) " " %20.0g el(e(V), 10, 10) " " %20.0g e(chi2) " " %20.0g e(chi2_exog) " " e(ic)
+display "@ coll_g " colsof(e(V)) " " colsof(e(gradient)) " " %20.0g el(e(gradient), 1, 7)
+display "@ coll_m [" e(exog) "] [" e(insts) "]"
+predict double c1
+predict double c2, pr
+predict double c3, stdp
+summarize c1, meanonly
+display "@ coll_xb " %20.0g r(mean)
+summarize c2, meanonly
+display "@ coll_pr " %20.0g r(mean)
+summarize c3, meanonly
+display "@ coll_stdp " %20.0g r(mean)
+quietly ivprobit y x (y1 = z3 z1 z2), vce(robust)
+display "@ coll_first_z3 " %20.0g el(e(b), 1, 5) " " %20.0g el(e(b), 1, 6) " " %20.0g el(e(V), 1, 1) " " e(rank) " " e(k)
+quietly ivprobit y x (y1 = z1 z2 z3), twostep
+display "@ coll_two " %20.0g el(e(b), 1, 1) " " %20.0g el(e(V), 1, 1) " " %20.0g e(chi2) " " e(rank) " [" e(exog) "] [" e(insts) "]"
+capture predict double c4, pr
+display "@ err_pr_twostep " _rc
+predict double c5
+summarize c5, meanonly
+display "@ two_xb " %20.0g r(mean)

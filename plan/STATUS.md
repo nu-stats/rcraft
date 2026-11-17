@@ -5324,6 +5324,7 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   line; corpus `ivprobit.do` (15 results, 1e-7) recorded from Stata 19.
 - **Shares** with ivprobit (on top of main at 67e9408): probes 75.9% (21,084 translated, 6,699 not);
   packages 94.9% (unchanged).
+
 ## P8.5: the browser build studied, 2026-11-17
 
 - `plan/P8.5-browser-feasibility.md`: RCraft can run in a browser as a reduced edition, with R from
@@ -5336,3 +5337,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `rpkg`, `rcodegen`, `catalog`, `statatr`, `rgraph`, `report` and `rhost` pass `cargo check --target
   wasm32-unknown-unknown`; nothing else changes. `engine` and `ui-egui` do not build for it yet.
 - Not done: the build itself; a CI check that the shared crates keep building for wasm.
+
+
+## P2C.12: ivprobit's two gaps closed, 2026-11-17
+
+- **Fixed:** `predict, pr` after `twostep` stops with Stata's r(198) message instead of an R error; an
+  instrument collinear with the other instruments is left out with Stata's note and a 0 `o.` entry in
+  e(b), e(V) and e(gradient) (e(insts) is now set too); other collinearity, `first` with an omitted
+  instrument, a variable listed twice and predict's asf/fix() are refused (at run time or translation),
+  never an R error.
+- **Checked:** Stata 19 on made-up data, in corpus `ivprobit.do` (now 26 results, 1e-7).

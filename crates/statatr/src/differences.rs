@@ -900,7 +900,9 @@ pub const GUIDES: &[Guide] = &[
                 "The variance comes from differences of the analytic gradient, as StatCraft's \
                  does: it agrees with Stata's to about 1e-9. Weights, several endogenous \
                  variables, factor variables, twostep with first or vce(), iterate() below the \
-                 default, and test, margins or estat afterwards are not translated.",
+                 default, and test, margins or estat afterwards are not translated. An instrument \
+                 collinear with the other instruments is left out with Stata's note, as Stata \
+                 does; any other collinearity stops the line when it runs, saying so.",
             ),
         ],
     },

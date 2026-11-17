@@ -210,20 +210,40 @@ stata_ivprobit <- function(d, sel, y, endog, exog, insts, vce = "oim", cluster =
   yv <- M[rows, 1]; ev <- M[rows, 2]
   X <- cbind(M[rows, exog, drop = FALSE], 1); Z <- cbind(M[rows, red, drop = FALSE], 1)
   kx <- ncol(X)
-  dn <- c(endog, exog, "_cons"); rn <- c(red, "_cons")
+  # an instrument collinear with the other instruments: Stata drops the later one of the set, says
+  # so, and fits without it (a 0 column o.name stays in e(b) and e(V)); any other collinearity
+  # (a regressor dropped, an instrument collinear with a regressor) is refused
+  zn <- c(red, "_cons"); omit <- character(0)
+  qz <- qr(Z)
+  if (qz$rank < ncol(Z)) {
+    gone <- zn[setdiff(seq_len(ncol(Z)), qz$pivot[seq_len(qz$rank)])]
+    extra <- setdiff(insts, exog)
+    qi <- qr(M[rows, extra, drop = FALSE])
+    alone <- extra[setdiff(seq_along(extra), qi$pivot[seq_len(qi$rank)])]
+    if (!all(gone %in% extra) || !setequal(gone, alone))
+      stop("ivprobit with collinear regressors, or an instrument collinear with a regressor, is not translated (Stata's omitted-variable rows are not matched)", call. = FALSE)
+    if (first) stop("ivprobit, first with an omitted instrument is not translated", call. = FALSE)
+    omit <- gone
+  }
+  Zf <- Z[, !(zn %in% omit), drop = FALSE]
+  redn <- ifelse(red %in% omit, paste0("o.", red), red)
+  dn <- c(endog, exog, "_cons"); rn <- c(redn, "_cons")
+  say_omitted <- function() if (show && length(omit)) cat(sprintf("note: %s omitted because of collinearity.\n", omit), sep = "")
   if (twostep) {
     if (show) cat("Checking reduced-form model...\n")
-    f <- stata_iv_twostep(yv, ev, X, Z)
+    say_omitted()
+    f <- stata_iv_twostep(yv, ev, X, Zf)
     e <- list(N = n, chi2_exog = f$chi2_exog, df_exog = 1, p_exog = stats::pchisq(f$chi2_exog, 1, lower.tail = FALSE),
               chi2 = f$chi2, df_m = kx, p = stats::pchisq(f$chi2, kx, lower.tail = FALSE), rank = kx + 1, N_cds = 0, N_cdf = 0,
               cmdline = cmdline, cmd = "ivprobit", marginsprop = "nochainrule",
               marginsok = "asf fixedasf Pr XB default STRuctural fix(passthru) base(passthru) TARGet(passthru)",
               predict = "ivprobit_p", estat_cmd = "ivprobit_estat", footnote = "ivprobit_footnote", chi2type = "Wald",
-              vce = "twostep", depvar = paste(y, endog), exog = paste(red, collapse = " "), endog = endog, method = "twostep",
+              vce = "twostep", depvar = paste(y, endog), exog = paste(redn, collapse = " "), insts = paste(redn, collapse = " "), endog = endog, method = "twostep",
               properties = "b V", b = matrix(f$b, 1, kx + 1, dimnames = list(endog, dn)),
               V = matrix((f$V + t(f$V)) / 2, kx + 1, kx + 1, dimnames = list(dn, dn)), rules = matrix(0, 2, 4))
   } else {
-    f <- stata_ivprobit_fit(yv, ev, X, Z, maxit)
+    say_omitted()
+    f <- stata_ivprobit_fit(yv, ev, X, Zf, maxit)
     A <- solve(f$negH); G <- NULL
     V <- if (vce == "oim") A else {
       S <- f$scores
@@ -241,7 +261,12 @@ stata_ivprobit <- function(d, sel, y, endog, exog, insts, vce = "oim", cluster =
       cat("\nFitting full model:\n"); lg(f$log, lab); cat("\n")
     } else if (show) cat("\n")
     cn <- c(paste0(y, ":", dn), paste0(endog, ":", rn), "/:athrho2_1", "/:lnsigma2")
-    e <- list(rank = np, N = n, ic = length(f$log) - 1, k = np, k_eq = 4, k_dv = 2, converged = as.numeric(f$converged), rc = 0)
+    # e(b), e(V) and e(gradient) carry a 0 for each omitted instrument; e(rank) counts the fitted ones
+    nf <- length(cn); pos <- seq_len(np)
+    if (length(omit)) pos <- c(seq_len(kx + 1), kx + 1 + which(!(zn %in% omit)), nf - 1, nf)
+    spread <- function(m) { out <- matrix(0, nf, nf); out[pos, pos] <- m; out }
+    bF <- numeric(nf); bF[pos] <- f$b; gF <- numeric(nf); gF[pos] <- f$g
+    e <- list(rank = np, N = n, ic = length(f$log) - 1, k = nf, k_eq = 4, k_dv = 2, converged = as.numeric(f$converged), rc = 0)
     if (!is.null(G)) e$N_clust <- G
     e <- c(e, list(ll = f$ll, chi2_exog = chi2x, p_exog = stats::pchisq(chi2x, 1, lower.tail = FALSE), endog_ct = 1, chi2 = chi2,
                    df_m = kx, p = stats::pchisq(chi2, kx, lower.tail = FALSE), k_eq_model = 1, N_cds = 0, N_cdf = 0,
@@ -249,17 +274,17 @@ stata_ivprobit <- function(d, sel, y, endog, exog, insts, vce = "oim", cluster =
                    marginsok = "asf fixedasf Pr XB default STRuctural fix(passthru) base(passthru) TARGet(passthru)",
                    predict = "ivprobit_p", estat_cmd = "ivprobit_estat", footnote = "ivprobit_footnote", chi2type = "Wald",
                    method = "ml", title = "Probit model with endogenous regressors", depvar = paste(y, endog), endog = endog,
-                   exog = paste(red, collapse = " "), deriv_useminbound = "off", opt = "moptimize",
+                   exog = paste(redn, collapse = " "), insts = paste(redn, collapse = " "), deriv_useminbound = "off", opt = "moptimize",
                    vce = if (!is.null(cluster)) "cluster" else if (robust) "robust" else "oim"))
     if (robust) e$vcetype <- "Robust"
     if (!is.null(cluster)) e$clustvar <- cluster
     e <- c(e, list(user = "ivfprobit_eval()", ml_method = "lf1", technique = "nr", which = "max", properties = "b V"))
     rho <- tanh(f$b[np - 1]); sg <- exp(f$b[np])
     ilog <- numeric(20); m <- min(20, length(f$log)); ilog[1:m] <- f$log[1:m]
-    e <- c(e, list(b = matrix(f$b, 1, np, dimnames = list("y1", cn)), V = matrix(V, np, np, dimnames = list(cn, cn)),
+    e <- c(e, list(b = matrix(bF, 1, nf, dimnames = list("y1", cn)), V = matrix(spread(V), nf, nf, dimnames = list(cn, cn)),
                    rules = matrix(0, 1, 4), Sigma = matrix(c(1, rho * sg, rho * sg, sg^2), 2, 2, dimnames = list(paste0("e.", c(y, endog)), paste0("e.", c(y, endog)))),
-                   ilog = matrix(ilog, 1, 20, dimnames = list("r1", paste0("c", 1:20))), gradient = matrix(f$g, 1, np, dimnames = list("r1", cn))))
-    if (robust) e$V_modelbased <- matrix((A + t(A)) / 2, np, np, dimnames = list(cn, cn))
+                   ilog = matrix(ilog, 1, 20, dimnames = list("r1", paste0("c", 1:20))), gradient = matrix(gF, 1, nf, dimnames = list("r1", cn))))
+    if (robust) e$V_modelbased <- matrix(spread((A + t(A)) / 2), nf, nf, dimnames = list(cn, cn))
   }
   attr(e, "stata_sample") <- TRUE
   stata_e <<- e
@@ -272,8 +297,11 @@ stata_iv_predict <- function(d, stat = "xb") {
   e <- stata_e; b <- e$b; nm <- colnames(b); V <- e$V
   num <- function(v) { u <- unclass(d[[v]]); attributes(u) <- NULL; as.numeric(u) }
   dep <- strsplit(e$depvar, " ")[[1]][1]
-  pick <- function(eq) { j <- which(startsWith(nm, paste0(eq, ":"))); list(j = j, v = sub("^[^:]*:", "", nm[j])) }
+  # the 0 columns of omitted instruments (o.name) add nothing
+  pick <- function(eq) { j <- which(startsWith(nm, paste0(eq, ":")) & !grepl(":o\\.", nm)); list(j = j, v = sub("^[^:]*:", "", nm[j])) }
   design <- function(p) sapply(p$v, function(v) if (v == "_cons") rep(1, nrow(d)) else num(v))
+  if (stat == "pr" && identical(e$method, "twostep"))
+    stop("probabilities and average structural function not available with two-step estimator (Stata: r(198))", call. = FALSE)
   if (identical(e$method, "twostep")) { p <- list(j = seq_along(nm), v = nm) } else p <- pick(dep)
   Xd <- matrix(design(p), nrow(d)); xb <- as.numeric(Xd %*% b[1, p$j])
   if (stat == "xb") return(xb)
@@ -390,6 +418,15 @@ impl Session {
         };
         let endog: Vec<&str> = endog.split_whitespace().collect();
         let inst: Vec<&str> = inst.split_whitespace().collect();
+        let repeats = |v: &[&str]| {
+            let mut seen = std::collections::HashSet::new();
+            v.iter().any(|w| !seen.insert(*w))
+        };
+        if repeats(exog) || repeats(&inst) {
+            return Err(no(
+                "ivprobit with a variable listed twice is not translated (Stata's omitted-variable notes differ)",
+            ));
+        }
         if inst.is_empty() {
             return self.iv_fail(
                 out,
@@ -540,6 +577,10 @@ impl Session {
                 chosen.push("pr");
             } else if o.is("stdp", 3) {
                 chosen.push("stdp");
+            } else if o.is("asf", 3) || o.is("fix", 3) {
+                return Err(no(
+                    "predict's asf and fix() after ivprobit are not translated",
+                ));
             } else {
                 return self.iv_fail(out, &format!("option {} not allowed", o.name), 198);
             }
@@ -627,6 +668,7 @@ const IV_TEXTS: &[&str] = &[
     "depvar",
     "endog",
     "exog",
+    "insts",
     "deriv_useminbound",
     "opt",
     "vce",
@@ -675,6 +717,32 @@ ivprobit y x (y1 = z1 z2), twostep");
             "{out:?}"
         );
         assert!(out[4].contains("twostep = TRUE"), "{out:?}");
+    }
+
+    #[test]
+    fn repeats_and_predict_options_stata_answers_differently_are_refused() {
+        let out = r("use d
+ivprobit y x (y1 = z1 z2 z2)
+ivprobit y x x (y1 = z1 z2)
+ivprobit y x (y1 = z1 z2)
+predict p, asf
+predict q, pr fix(x)");
+        assert!(
+            out[1].starts_with("NOT: ivprobit with a variable listed twice"),
+            "{out:?}"
+        );
+        assert!(
+            out[2].starts_with("NOT: ivprobit with a variable listed twice"),
+            "{out:?}"
+        );
+        assert!(
+            out[4].starts_with("NOT: predict's asf and fix()"),
+            "{out:?}"
+        );
+        assert!(
+            out[5].starts_with("NOT: predict's asf and fix()"),
+            "{out:?}"
+        );
     }
 
     #[test]
