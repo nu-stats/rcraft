@@ -1274,6 +1274,36 @@ fn power_logrank_and_cox_print_statas_layout() {
     }
 }
 
+/// power oneslope, rsquared and pcorr in Stata 19's layout, line for line
+/// from Stata's own output (plan/stata/power.md): sdy() working out sderror,
+/// a subset of coefficients' R2, and a partial correlation's target.
+#[test]
+fn power_regression_methods_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power oneslope 0 0.5, sdy(1.2)\npower rsquared 0.2 0.3, n(80) ncontrol(2) ntested(2)\n\
+         power pcorr, n(50) power(0.8) ncontrol(1)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Estimated sample size for a linear regression slope test",
+        "      sderror =    1.0909",
+        "          sdy =    1.2000",
+        "            N =        40",
+        "F test for R2 testing subset of coefficients",
+        "H0: R2_F = R2_R  versus  Ha: R2_F != R2_R",
+        "      R2_diff =    0.1000",
+        "     ncontrol =         2",
+        "        power =    0.8518",
+        "Estimated squared partial correlation for multiple linear regression",
+        "Estimated effect size and squared partial correlation:",
+        "       rho2_p =    0.1406",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
 /// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
 /// on the same data (plan/stata/epitab.md); replace keeps the case variable's
 /// label, which then names ir's row.

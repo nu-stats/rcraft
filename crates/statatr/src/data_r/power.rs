@@ -746,6 +746,136 @@ stata_power_surv <- function(method, s1 = NULL, s2 = NULL, hratio = NULL, b1 = N
   cat("\n")
   invisible(r)
 }
+
+# power oneslope, rsquared and pcorr (Stata 19): the t test of a regression slope (df N - 2, noncentrality
+# sqrt(N) * delta with delta = (ba - b0) * sdx / sderror), and the F test of R2 (all coefficients, a subset
+# of them) or a partial correlation on ntested and N - ncontrol - ntested - 1 df with noncentrality
+# N * f2 (summed to full precision, as oneway's)
+stata_power_reg <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL, n = NULL,
+                            onesided = FALSE, direction = "upper", sdx = 1, sderror = NULL, sdy = NULL,
+                            ncontrol = 0, ntested = 1, show = TRUE) {
+  stop_r <- function(m) stop(m, call. = FALSE)
+  slope <- method == "oneslope"
+  # rsquared with two values (or one, ncontrol() and the R2 searched): a subset of the coefficients
+  subset <- method == "rsquared" && (!is.null(v2) || ncontrol > 0)
+  given <- if (slope || subset) v2 else v1
+  find <- if (is.null(given)) "effect" else if (is.null(power) && !is.null(n)) "power" else "n"
+  target <- if (is.null(power)) 0.8 else power
+  up <- direction != "lower"
+  # the F tests' noncentral F, summed (R's pf() with ncp agrees with Stata's only to about 1e-9)
+  ncf <- function(N, f2) {
+    d2 <- N - ncontrol - ntested - 1
+    f <- stats::qf(1 - alpha, ntested, d2)
+    x <- ntested * f / (ntested * f + d2)
+    h <- N * f2 / 2
+    j <- 0:ceiling(h + 40 * sqrt(h) + 60)
+    sum(stats::dpois(j, h) * stats::pbeta(x, ntested / 2 + j, d2 / 2, lower.tail = FALSE))
+  }
+  side <- if (onesided) 1 else 2
+  tpow <- function(N, d) {
+    l <- sqrt(N) * d
+    df <- N - 2
+    if (abs(l) > 1000) return(NA_real_)
+    cut <- stats::qt(1 - alpha / side, df)
+    up_t <- 1 - suppressWarnings(stats::pt(cut, df, l))
+    lo_t <- suppressWarnings(stats::pt(-cut, df, l))
+    min(1, if (!onesided) up_t + lo_t else if (d >= 0) up_t else lo_t)
+  }
+  # the effect size: oneslope's delta, the F tests' f2
+  b0 <- if (slope) v1 else 0
+  sde <- function(ba) if (!is.null(sdy)) sqrt(sdy^2 - ba^2 * sdx^2) else if (is.null(sderror)) 1 else sderror
+  eff <- function(x) if (slope) (x - b0) * sdx / sde(x) else if (subset) (x - v1) / (1 - x) else x / (1 - x)
+  pw <- function(N, d) if (slope) tpow(N, d) else ncf(N, d)
+  lo <- if (slope) 3 else ncontrol + ntested + 2
+  if (find == "power") {
+    if (n < lo) stop_r(sprintf("power %s: n() is too small for the test", method))
+    x <- given
+    delta <- eff(x)
+    pv <- pw(n, delta)
+    N <- n
+  } else if (find == "n") {
+    x <- given
+    delta <- eff(x)
+    f <- function(N) pw(N, delta) - target
+    a <- if (f(lo) >= 0) lo else stats::uniroot(f, c(lo, lo + 10), extendInt = "upX", tol = 1e-12)$root
+    N <- ceiling(a - 1e-9)
+    pv <- target
+  } else {
+    if (n < lo) stop_r(sprintf("power %s: n() is too small for the test", method))
+    N <- n
+    f <- function(d) pw(N, d) - target
+    delta <- if (slope && !up) stats::uniroot(f, c(-1, -1e-10), extendInt = "downX", tol = 1e-14)$root else
+      stats::uniroot(f, c(1e-10, 1), extendInt = "upX", tol = 1e-14)$root
+    # back from the effect size to the slope or the R2
+    if (slope && !is.null(sdy) && b0 != 0) stop_r("power oneslope: the target slope with sdy() and b0 other than 0 is not translated yet")
+    x <- if (slope) {
+      if (is.null(sdy)) b0 + delta * sde(0) / sdx else b0 + sign(delta) * sqrt(delta^2 * sdy^2 / (sdx^2 * (1 + delta^2)))
+    } else if (subset) (delta + v1) / (1 + delta) else delta / (1 + delta)
+    pv <- target
+  }
+  iterated <- find != "power"
+  it <- if (iterated) list(converged = 1, maxiter = 500, tolerance = 1e-12, ftolerance = 1e-12) else list()
+  head <- c(list(power = pv, beta = 1 - pv, alpha = alpha, N = N), if (find == "n") list(nfractional = 0))
+  if (slope) {
+    se <- sde(x)
+    sy <- sqrt(x^2 * sdx^2 + se^2)
+    co <- x * sdx / sy
+    tail <- switch(find,
+      n = list(b0 = b0, delta = delta, corr = co, sdy = sy, sderror = se, sdx = sdx, diff = x - b0, ba = x),
+      power = list(b0 = b0, ba = x, diff = x - b0, sdx = sdx, sderror = se, sdy = sy, corr = co, delta = delta),
+      effect = list(b0 = b0, ba = x, delta = delta, corr = co, sdy = sy, sderror = se, sdx = sdx, diff = x - b0))
+    r <- c(head, list(onesided = as.numeric(onesided)), it, tail)
+  } else if (method == "pcorr") {
+    r <- c(head, it, list(ncontrol = ncontrol, rho2_p = x, ntested = ntested, delta = delta))
+  } else if (subset) {
+    tail <- switch(find,
+      n = list(ncontrol = ncontrol, R2_R = v1, R2_F = x, delta = delta, ntested = ntested, R2_diff = x - v1),
+      power = list(ncontrol = ncontrol, R2_R = v1, R2_F = x, R2_diff = x - v1, ntested = ntested, delta = delta),
+      effect = list(ncontrol = ncontrol, R2_R = v1, R2_F = x, R2_diff = x - v1, delta = delta, ntested = ntested))
+    r <- c(head, it, tail)
+  } else {
+    r <- c(head, it, list(R2_T = x, ntested = ntested, delta = delta))
+  }
+  r <- c(r, list(type = "test", method = method), if (slope && find == "effect") list(direction = if (up) "upper" else "lower"))
+  title <- if (slope) "a linear regression slope test" else "multiple linear regression"
+  what <- if (find == "power") "power" else if (find == "n") "sample size" else
+    if (slope) "target slope" else if (method == "pcorr") "squared partial correlation" else "R-squared"
+  testline <- if (slope) "t test" else if (method == "pcorr") "F test for partial correlation" else
+    if (subset) "F test for R2 testing subset of coefficients" else "F test for R2 testing all coefficients"
+  # oneslope one-sided says "b > b0" whatever the slope's sign (Stata 19)
+  h0 <- if (slope) paste0("H0: b = b0  versus  Ha: b ", if (onesided) ">" else "!=", " b0",
+                          if (find == "effect") paste0("; ba ", if (up) ">" else "<", " b0") else "")
+    else if (method == "pcorr") "H0: rho2_p = 0  versus  Ha: rho2_p != 0"
+    else if (subset) "H0: R2_F = R2_R  versus  Ha: R2_F != R2_R" else "H0: R2_T = 0  versus  Ha: R2_T != 0"
+  attr(r, "stata_head") <- c(paste0("Estimated ", what, " for ", title), testline, h0)
+  attr(r, "stata_find") <- find
+  if (!show) return(invisible(r))
+  num <- function(k, v) if (is.na(v)) sprintf("%13s = %9s", k, ".") else sprintf("%13s = %9.4f", k, v)
+  int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
+  study <- c(num("alpha", alpha), if (find != "power") num("power", target), if (find != "n") int("N", N),
+             if (find != "effect") num("delta", delta))
+  study <- c(study, if (slope) c(num("b0", b0), if (find != "effect") num("ba", x), num("sdx", sdx),
+                                 num("sderror", if (find == "effect" && !is.null(sdy)) sde(x) else sde(x)),
+                                 if (!is.null(sdy)) num("sdy", sdy))
+    else if (method == "pcorr") c(if (find != "effect") num("rho2_p", x), int("ncontrol", ncontrol), int("ntested", ntested))
+    else if (subset) c(num("R2_R", v1), if (find != "effect") c(num("R2_F", x), num("R2_diff", x - v1)),
+                       int("ncontrol", ncontrol), int("ntested", ntested))
+    else c(if (find != "effect") num("R2_T", x), int("ntested", ntested)))
+  cat("\n")
+  if (iterated) cat("Performing iteration ...\n\n")
+  cat(attr(r, "stata_head"), sep = "\n")
+  cat("\nStudy parameters:\n\n")
+  cat(study, sep = "\n")
+  if (find == "power") cat("\nEstimated power:\n\n", num("power", pv), "\n", sep = "")
+  else if (find == "n") cat("\nEstimated sample size:\n\n", int("N", N), "\n", sep = "")
+  else {
+    cat("\nEstimated effect size and ", what, ":\n\n", num("delta", delta), "\n", sep = "")
+    cat(if (slope) num("ba", x) else if (method == "pcorr") num("rho2_p", x) else if (subset) c(num("R2_diff", x - v1), num("R2_F", x))
+        else num("R2_T", x), sep = "\n")
+  }
+  cat("\n")
+  invisible(r)
+}
 # power with lists of values (Stata 19): every combination, nested values > alpha > power > n > n1 > n2 >
 # nratio > the method's own numbers (the last varies fastest), each worked out as one power line and
 # printed as Stata's table; r() is the last row's with the table's own (columns, labels, widths,
@@ -883,6 +1013,18 @@ const R_POWER: &[&str] = &[
     "Pr_w",
     "b1",
     "R2",
+    "b0",
+    "ba",
+    "sdx",
+    "sderror",
+    "sdy",
+    "R2_T",
+    "R2_R",
+    "R2_F",
+    "R2_diff",
+    "ntested",
+    "ncontrol",
+    "rho2_p",
 ];
 
 /// The methods from onevariance on: Stata's sd flag (not sd()), and
@@ -1173,6 +1315,9 @@ impl Session {
         }
         let main = c.parts.main.trim();
         let (method, rest) = first_word(main);
+        if matches!(method, "oneslope" | "rsquared" | "pcorr") {
+            return self.power_regression(c, method, rest, opts, out);
+        }
         if matches!(method, "logrank" | "cox") {
             return self.power_survival(c, method, rest, opts, out);
         }
@@ -1182,7 +1327,8 @@ impl Session {
         let Some((method, extra)) = METHODS.iter().find(|(m, _)| *m == method) else {
             return Err(no(format!(
                 "power {method} is not translated yet (onemean, twomeans, pairedmeans, oneproportion, twoproportions, \
-                 onevariance, twovariances, onecorrelation, twocorrelations, pairedproportions, oneway, logrank and cox are)"
+                 onevariance, twovariances, onecorrelation, twocorrelations, pairedproportions, oneway, logrank, cox, \
+                 oneslope, rsquared and pcorr are)"
             )));
         };
         let later = LATER.contains(method);
@@ -1749,6 +1895,160 @@ impl Session {
             self.helpers.insert(h);
         }
         out.line(format!("stata_r <- stata_power_surv({})", args.join(", ")));
+        self.r_new = Some((R_POWER, "power".into()));
+        Ok(())
+    }
+
+    /// `power oneslope b0 [ba]`, `power rsquared [R2_R] [R2_F]` and `power pcorr [rho2_p]`, as
+    /// Stata 19 prints them.
+    fn power_regression(
+        &mut self,
+        c: &Command,
+        method: &str,
+        rest: &str,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let slope = method == "oneslope";
+        let mut known: Vec<(&str, usize)> = vec![("alpha", 5), ("power", 5), ("n", 1)];
+        if slope {
+            known.extend_from_slice(&[
+                ("onesided", 8),
+                ("direction", 9),
+                ("sdx", 3),
+                ("sderror", 7),
+                ("sdy", 3),
+            ]);
+        } else {
+            known.extend_from_slice(&[("ncontrol", 8), ("ntested", 7)]);
+        }
+        if let Some(o) = opts.other(&known) {
+            return Err(no(format!(
+                "power {method} with the option {o} is not translated yet"
+            )));
+        }
+        if rest.contains('(') {
+            return Err(no(format!(
+                "power {method}: lists of values (Stata's table) are not translated yet for {method}"
+            )));
+        }
+        let bad = |what: String| no(format!("power {method}: {what} (Stata: r(198))"));
+        let values = if rest.trim().is_empty() {
+            Vec::new()
+        } else {
+            numlist("the value", rest)?
+        };
+        let one = |name: &str, min: usize| -> Result<Option<f64>, Untranslated> {
+            let Some(t) = opts.arg(name, min) else {
+                return Ok(None);
+            };
+            match numlist(&format!("{name}()"), &t)?[..] {
+                [x] => Ok(Some(x)),
+                _ => Err(no(format!(
+                    "power {method}: a list in {name}() (Stata's table) is not translated yet for {method}"
+                ))),
+            }
+        };
+        let mut args = vec![r_text(method)];
+        let most = if method == "pcorr" { 1 } else { 2 };
+        if values.len() > most || (slope && values.is_empty()) {
+            return Err(bad("the wrong number of values".into()));
+        }
+        if !slope {
+            for x in &values {
+                if !(*x > 0.0 && *x < 1.0) {
+                    return Err(bad(format!("{x} must be between 0 and 1")));
+                }
+            }
+        }
+        if let [a, b] = values[..] {
+            if a == b || (!slope && b <= a) {
+                return Err(bad(format!(
+                    "{b} must {} {a}",
+                    if slope { "differ from" } else { "be above" }
+                )));
+            }
+        }
+        for (i, x) in values.iter().enumerate() {
+            args.push(format!(
+                "{} = {}",
+                if i == 0 { "v1" } else { "v2" },
+                r_number(*x)
+            ));
+        }
+        let ranges: &[(&str, usize, Range)] = &[
+            ("alpha", 5, Range::Prob),
+            ("power", 5, Range::Prob),
+            ("n", 1, Range::Whole),
+            ("sdx", 3, Range::Positive),
+            ("sderror", 7, Range::Positive),
+            ("sdy", 3, Range::Positive),
+            ("ncontrol", 8, Range::Whole),
+            ("ntested", 7, Range::Whole),
+        ];
+        for &(name, min, range) in ranges {
+            if !known.iter().any(|(k, _)| *k == name) {
+                continue;
+            }
+            if let Some(x) = one(name, min)? {
+                if !range.holds(x) {
+                    return Err(bad(format!("{name}({x}) {}", range.why())));
+                }
+                args.push(format!("{name} = {}", r_number(x)));
+            }
+        }
+        if opts.has("sderror", 7) && opts.has("sdy", 3) {
+            return Err(bad("sderror() and sdy() are not both given".into()));
+        }
+        let ncontrol = opts.has("ncontrol", 8);
+        if method == "pcorr" && !ncontrol {
+            return Err(no("power pcorr without ncontrol() is not translated yet"));
+        }
+        // what is worked out: the effect needs n() and power(); rsquared with one value and
+        // ncontrol() is the reduced model's R2, so it can only be the target
+        let effect = if slope {
+            values.len() == 1
+        } else if method == "rsquared" && ncontrol {
+            values.len() < 2
+        } else {
+            values.is_empty()
+        };
+        let (has_n, has_power) = (opts.has("n", 1), opts.has("power", 5));
+        if effect && !(has_n && has_power) {
+            return Err(bad(format!(
+                "the effect needs n() and power(){}",
+                if method == "rsquared" && ncontrol && values.len() == 1 {
+                    ", or give the full model's R2 too"
+                } else {
+                    ""
+                }
+            )));
+        }
+        if method == "rsquared" && ncontrol && values.is_empty() {
+            return Err(bad("the reduced model's R2 is needed".into()));
+        }
+        if !effect && has_n && has_power {
+            return Err(bad(
+                "power() and n() are not both given with the effect".into()
+            ));
+        }
+        if opts.has("onesided", 8) {
+            args.push("onesided = TRUE".into());
+        }
+        if let Some(d) = opts.arg("direction", 9) {
+            let d = d.trim().to_lowercase();
+            if !matches!(d.as_str(), "upper" | "lower") {
+                return Err(bad(format!("direction({d}) is upper or lower")));
+            }
+            args.push(format!("direction = {}", r_text(&d)));
+        }
+        if self.quiet(c) {
+            args.push("show = FALSE".into());
+        }
+        for h in ["stata_power", "stata_returned"] {
+            self.helpers.insert(h);
+        }
+        out.line(format!("stata_r <- stata_power_reg({})", args.join(", ")));
         self.r_new = Some((R_POWER, "power".into()));
         Ok(())
     }

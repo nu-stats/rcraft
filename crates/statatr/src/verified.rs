@@ -183,7 +183,9 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("postfile", &["postfile"]),
     (
         "power",
-        &["power", "power2", "power3", "power4", "power5", "power6"],
+        &[
+            "power", "power2", "power3", "power4", "power5", "power6", "power7",
+        ],
     ),
     ("prais", &["arpanel"]),
     ("predict", &["regress"]),

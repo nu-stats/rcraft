@@ -511,10 +511,12 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "n(",
             "n1(",
             "n2(",
+            "ncontrol(",
             "ngroups(",
             "notable",
             "npergroup(",
             "nratio(",
+            "ntested(",
             "onesided",
             "power(",
             "prdiscordant(",
@@ -524,6 +526,9 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "sd1(",
             "sd2(",
             "sddiff(",
+            "sderror(",
+            "sdx(",
+            "sdy(",
             "table",
             "test(",
             "varerror(",
@@ -1166,10 +1171,13 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
             "onecorrelation",
             "onemean",
             "oneproportion",
+            "oneslope",
             "onevariance",
             "oneway",
             "pairedmeans",
             "pairedproportions",
+            "pcorr",
+            "rsquared",
             "twocorrelations",
             "twomeans",
             "twoproportions",
@@ -1995,6 +2003,12 @@ gettoken a b : s, {o}"
             }
             "tetrachoric" => format!("tetrachoric x y z, {o}"),
             "power" if name == "notable" => "power twomeans 0 0.5, n(50 100) notable".to_string(),
+            "power" if matches!(name, "sdx" | "sderror" | "sdy") => {
+                format!("power oneslope 0 0.5, {o}")
+            }
+            "power" if matches!(name, "ncontrol" | "ntested") => {
+                format!("power pcorr 0.3, ncontrol(2) {o}")
+            }
             "power" if matches!(name, "hratio" | "schoenfeld") => format!("power logrank 0.5, {o}"),
             "power" if matches!(name, "eventprob" | "r2") => format!("power cox, hratio(0.6) {o}"),
             "power" if matches!(name, "grweights" | "npergroup" | "varerror") => {

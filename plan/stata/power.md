@@ -195,3 +195,27 @@ Observed on Stata 19 SE (probes m1, m2); corpus `power6.do`.
   see the specific error." under it; one mean (and paired means) show the power as "." with no error
   and no warning. RCraft does the same. And where R's noncentral t passes 1 at large n (1 + 5e-12),
   the power is 1, as Stata's.
+
+## oneslope, rsquared and pcorr (2026-11-17)
+
+Observed on Stata 19 SE with no data (probes r1, r2: 23 lines with return list, every printed line
+identical to RCraft's, r() to 12 digits or more); corpus `power7.do`.
+
+- `power oneslope b0 [ba]`, sdx() (1), sderror() (1) or sdy(): the t test on N − 2 df, noncentrality
+  √N·delta, delta = (ba − b0)·sdx/sderror. With sdy(), sderror = √(sdy² − ba²·sdx²). r(corr) =
+  ba·sdx/sdy, r(sdy) = √(ba²·sdx² + sderror²). Searched always ("Performing iteration ..."); the target
+  slope's side is added always ("; ba > b0"). One-sided, Stata's H0 line says `Ha: b > b0` whatever the
+  slope's sign (`0 -0.3, onesided`: N 71 from the lower tail, printed `b > b0`): copied.
+- `power rsquared R2_T [, ntested()]` (all coefficients), `power rsquared R2_R R2_F, ncontrol()
+  ntested()` (a subset), `power pcorr rho2_p, ncontrol() ntested()`: the F test on ntested and N −
+  ncontrol − ntested − 1 df, noncentrality N·f², f² = R2_T/(1 − R2_T), (R2_F − R2_R)/(1 − R2_F) or
+  rho2/(1 − rho2), the noncentral F summed to full precision as oneway's. Targets: R2_T, R2_F (with R2_R
+  and ncontrol()), rho2_p, searched. No onesided, no r(onesided).
+- r(): power beta alpha N [nfractional] [search constants], then oneslope b0 delta corr sdy sderror sdx diff
+  ba (sample size) / b0 ba diff sdx sderror sdy corr delta (power) / b0 ba delta corr sdy sderror sdx diff
+  (target); rsquared R2_T ntested delta; subset ncontrol R2_R R2_F delta ntested R2_diff (sample size) /
+  ncontrol R2_R R2_F R2_diff ntested delta (power) / ncontrol R2_R R2_F R2_diff delta ntested (target);
+  pcorr ncontrol rho2_p ntested delta.
+- Refused: lists, pcorr without ncontrol(), sderror() with sdy(), oneslope's target with sdy() and b0
+  other than 0; Stata's errors (rsquared with one value and ncontrol() but no target, a target with no
+  R2_R) as r(198).

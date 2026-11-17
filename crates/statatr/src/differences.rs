@@ -2919,7 +2919,7 @@ pub const GUIDES: &[Guide] = &[
                 "stata_power works out the sample size, the power, or (with one value, n() and \
                  power()) the target value for onemean, twomeans, pairedmeans, oneproportion, \
                  twoproportions, onevariance, twovariances, onecorrelation, twocorrelations, \
-                 pairedproportions, oneway, logrank and cox, from the [PSS] manual's power \
+                 pairedproportions, oneway, logrank, cox, oneslope, rsquared and pcorr, from the [PSS] manual's power \
                  functions (logrank: Freedman's or Schoenfeld's events; cox: Hsieh and Lavori's): the \
                  noncentral t (or z with knownsd), Satterthwaite's t for unequal sds, the score or \
                  Wald test of a proportion, the pooled test of two with Fleiss's continuity \
@@ -2948,7 +2948,7 @@ pub const GUIDES: &[Guide] = &[
                 "Graphs, parallel, table() with columns, return list after power oneway (Stata \
                  lists its r() in an order that changes with the number of groups), oneway's \
                  lists and contrasts, logrank's and cox's lists, wdprob() and simulation, the \
-                 other methods (twoway, repeated, oneslope, rsquared, exponential, mcc, cmh, trend, \
+                 other methods (twoway, repeated, exponential, mcc, cmh, trend, \
                  ...), test(lrchi2), test(fisher), \
                  test(binomial), one group's size that leaves the other not whole, \
                  pairedproportions' corr(), diff() and ratio() \
