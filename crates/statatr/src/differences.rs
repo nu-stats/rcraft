@@ -2809,10 +2809,19 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "Lists of values (Stata's table and graph), the other methods (oneway, twoway, \
+                "Graphs, parallel, table() with columns, the other methods (oneway, twoway, \
                  oneslope, rsquared, cox, logrank, ...), test(lrchi2), test(fisher), \
                  test(binomial), n1() or n2() alone, pairedproportions' corr(), diff() and ratio() \
                  forms, and the other options are refused.",
+            ),
+            p(
+                "Tables",
+                "Lists of values print Stata's table, each row worked out as its own power line, in \
+                 Stata's order; r() is the last row's, with r(columns), r(labels), r(widths), \
+                 r(formats) and r(pss_table). return list after a table is refused: Stata lists \
+                 the table's r(separator) and r(divider) in an order RCraft does not follow. Where \
+                 Stata's own computation fails (its t test at millions of observations) it prints \
+                 a missing power; R works it out.",
             ),
         ],
     },

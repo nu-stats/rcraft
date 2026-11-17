@@ -98,7 +98,8 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
     if (abs(a - round(a)) < 1e-8 && abs(nratio * round(a) - (n - round(a))) < 1e-8) return(c(round(a), n - round(a)))
     actual <<- TRUE
     a <- floor(a + 1e-9)
-    c(a, floor(nratio * a + 1e-9))
+    # the second group from the total (Stata 19: n(50) nratio(2) is 16 and 33)
+    c(a, floor(n * nratio / (1 + nratio) + 1e-9))
   }
   tol <- 1e-12
   iterated <- TRUE
@@ -154,6 +155,8 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
   os <- list(onesided = as.numeric(onesided))
   # the total given, then (when it did not split) the total of the groups
   NN <- c(list(N = N), if (actual) list(N_a = sum(g)))
+  # the groups' own ratio, when it misses nratio() (a rounded sample size, a total that does not split)
+  nra <- if (two && abs(g[2] / g[1] - nratio) > 1e-12) list(nratio_a = g[2] / g[1])
   ks <- if (method == "twomeans") (if (known) list(knownsds = 1) else list(knownsds = 0, unequal = as.numeric(unequal))) else list()
   r <- switch(method,
     onemean = {
@@ -181,22 +184,20 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
       sdl <- if (unequal) list(sd1 = sd1, sd2 = sd2) else list(sd = s, sd1 = sd1, sd2 = sd2)
       sdr <- if (unequal) list(sd2 = sd2, sd1 = sd1) else list(sd2 = sd2, sd1 = sd1, sd = s)
       ksr <- rev(ks)
-      tail <- if (!iterated) c(NN, list(N1 = g[1], N2 = g[2], nratio = nratio, m1 = v1, m2 = x2, diff = diff), sdl, ks)
-        else if (find == "n") c(list(N = N), ksr, sdr, list(diff = diff, m2 = x2, m1 = v1, nratio = nratio, N2 = g[2], N1 = g[1]))
-        else c(NN, list(N1 = g[1]), ksr, sdr, list(diff = diff, m2 = x2, m1 = v1, nratio = nratio, N2 = g[2]))
+      tail <- if (!iterated) c(NN, list(N1 = g[1], N2 = g[2], nratio = nratio), nra, list(m1 = v1, m2 = x2, diff = diff), sdl, ks)
+        else if (find == "n") c(list(N = N), ksr, sdr, list(diff = diff, m2 = x2, m1 = v1), nra, list(nratio = nratio, N2 = g[2], N1 = g[1]))
+        else c(NN, list(N1 = g[1]), ksr, sdr, list(diff = diff, m2 = x2, m1 = v1), nra, list(nratio = nratio, N2 = g[2]))
       c(head, list(delta = delta), nf, os, it, tail)
     },
     twoproportions = {
-      na <- g[2] / g[1]
-      tail <- if (!iterated) c(NN, list(N1 = g[1], N2 = g[2], nratio = nratio, p1 = v1, p2 = x2, continuity = as.numeric(continuity)))
-        else if (find == "n") c(list(N = N, continuity = as.numeric(continuity), p2 = x2, p1 = v1),
-                                if (abs(na - nratio) > 1e-12) list(nratio_a = na), list(nratio = nratio, N2 = g[2], N1 = g[1]))
-        else c(NN, list(N1 = g[1], continuity = as.numeric(continuity), p2 = x2, p1 = v1, nratio = nratio, N2 = g[2]))
+      tail <- if (!iterated) c(NN, list(N1 = g[1], N2 = g[2], nratio = nratio), nra, list(p1 = v1, p2 = x2, continuity = as.numeric(continuity)))
+        else if (find == "n") c(list(N = N, continuity = as.numeric(continuity), p2 = x2, p1 = v1), nra,
+                                list(nratio = nratio, N2 = g[2], N1 = g[1]))
+        else c(NN, list(N1 = g[1], continuity = as.numeric(continuity), p2 = x2, p1 = v1), nra, list(nratio = nratio, N2 = g[2]))
       c(head, list(delta = delta), nf, os, it, tail)
     })
   r <- c(r, list(type = "test", method = method), if (find == "effect") list(direction = if (direction == "lower") "lower" else "upper"),
          if (method == "oneproportion") list(test = test), if (method == "twoproportions") list(test = "chi2", effect = effect))
-  if (!show) return(r)
   # the printout
   title <- switch(method, onemean = "one-sample mean test", pairedmeans = "two-sample paired-means test",
                   twomeans = "two-sample means test", oneproportion = "one-sample proportion test",
@@ -217,6 +218,10 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
   h0 <- sprintf("H0: %s = %s  versus  Ha: %s %s %s", sym[1], sym[2], sym[1], rel, sym[2])
   # the target's side: always after one sample, after two only when two-sided (Stata 19)
   if (find == "effect" && (!onesided || !two)) h0 <- paste0(h0, "; ", sym[3], if (direction == "lower") " < " else " > ", sym[2])
+  # the head of the printout, for a table of several (stata_power_table)
+  attr(r, "stata_head") <- c(paste0("Estimated ", what, " for a ", title), testline, h0)
+  attr(r, "stata_find") <- find
+  if (!show) return(invisible(r))
   num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
   int <- function(k, v) sprintf("%13s = %9.0f", k, v)
   eff <- if (method == "twoproportions") paste0("  (", switch(effect, diff = "difference", ratio = "ratio", oratio = "odds ratio"), ")") else ""
@@ -248,6 +253,7 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
   if (actual) {
     cat("\nActual sample sizes:\n\n")
     cat(sizes_lines(sum(g)), sep = "\n")
+    if (g[1] != g[2] && abs(g[2] / g[1] - nratio) > 1e-12) cat(num("N2/N1", g[2] / g[1]), "\n", sep = "")
   }
   if (find == "power") {
     cat("\nEstimated power:\n\n", num("power", pv), "\n", sep = "")
@@ -321,7 +327,8 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
     if (abs(a - round(a)) < 1e-8 && abs(nratio * round(a) - (n - round(a))) < 1e-8) return(c(round(a), n - round(a)))
     actual <<- TRUE
     a <- floor(a + 1e-9)
-    c(a, floor(nratio * a + 1e-9))
+    # the second group from the total (Stata 19: n(50) nratio(2) is 16 and 33)
+    c(a, floor(n * nratio / (1 + nratio) + 1e-9))
   }
   # Stata works the answer out without a search for these one-sided forms
   closed <- onesided && (if (find == "n") method %in% c("onecorrelation", "twocorrelations", "pairedproportions") else !pp)
@@ -398,9 +405,9 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
   } else {
     NN <- c(list(N = N), if (actual) list(N_a = sum(g)))
     na <- g[2] / g[1]
-    tail <- if (!iterated) c(NN, list(N1 = g[1], N2 = g[2], nratio = nratio), if (find == "n" && abs(na - nratio) > 1e-12) list(nratio_a = na), P)
+    tail <- if (!iterated) c(NN, list(N1 = g[1], N2 = g[2], nratio = nratio), if (abs(na - nratio) > 1e-12) list(nratio_a = na), P)
       else if (find == "n") c(list(N = N), rev(P), if (abs(na - nratio) > 1e-12) list(nratio_a = na), list(nratio = nratio, N2 = g[2], N1 = g[1]))
-      else c(NN, list(N1 = g[1]), rev(P), list(nratio = nratio, N2 = g[2]))
+      else c(NN, list(N1 = g[1]), rev(P), if (abs(na - nratio) > 1e-12) list(nratio_a = na), list(nratio = nratio, N2 = g[2]))
     r <- c(head, list(delta = delta, nfractional = 0), os, it, tail)
   }
   dl <- if (find == "effect") list(direction = if (direction == "lower") "lower" else "upper")
@@ -409,7 +416,6 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
     twovariances = c(list(scale = scale, type = "test", method = method), dl),
     pairedproportions = c(list(effect = effect, type = "test", method = method), dl),
     c(list(type = "test", method = method), dl)))
-  if (!show) return(invisible(r))
   # the printout
   unit <- if (sdsc) "standard deviation" else "variance"
   title <- switch(method, onevariance = if (sdsc) "one-sample standard-deviation test" else "one-sample variance test",
@@ -427,6 +433,10 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
   h0 <- sprintf("H0: %s = %s  versus  Ha: %s %s %s", sym[1], sym[2], sym[1], rel, sym[2])
   # the target's side: always after one sample, after two (and paired proportions) only when two-sided
   if (find == "effect" && (!onesided || !(two || pp))) h0 <- paste0(h0, "; ", sym[3], if (direction == "lower") " < " else " > ", sym[2])
+  # the head of the printout, for a table of several (stata_power_table)
+  attr(r, "stata_head") <- c(paste0("Estimated ", what, " for a ", title), testline, h0)
+  attr(r, "stata_find") <- find
+  if (!show) return(invisible(r))
   num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
   int <- function(k, v) sprintf("%13s = %9.0f", k, v)
   eff <- if (pp) paste0("  (", if (effect == "ratio") "ratio" else "difference", ")") else ""
@@ -447,6 +457,7 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
   if (actual) {
     cat("\nActual sample sizes:\n\n")
     cat(sizes_lines(sum(g)), sep = "\n")
+    if (g[1] != g[2] && abs(g[2] / g[1] - nratio) > 1e-12) cat(num("N2/N1", g[2] / g[1]), "\n", sep = "")
   }
   if (find == "power") {
     cat("\nEstimated power:\n\n", num("power", pv), "\n", sep = "")
@@ -458,6 +469,65 @@ stata_power_g <- function(method, v1, v2, alpha, power, n, n1, n2, nratio, onesi
     cat("\nEstimated effect size and ", what, ":\n\n", sep = "")
     cat(num("delta", delta, eff), "\n", sep = "")
     cat(if (pp) c(num("p12", v1), num("p21", x2)) else num(nm[2], x2), sep = "\n")
+  }
+  cat("\n")
+  invisible(r)
+}
+
+# power with lists of values (Stata 19): every combination, nested values > alpha > power > n > n1 > n2 >
+# nratio > the method's own numbers (the last varies fastest), each worked out as one power line and
+# printed as Stata's table; r() is the last row's with the table's own (columns, labels, widths,
+# formats and r(pss_table))
+stata_power_table <- function(method, lists, fixed = list(), notable = FALSE, show = TRUE) {
+  stop_r <- function(m) stop(m, call. = FALSE)
+  order <- c("v1", "v2", "alpha", "power", "n", "n1", "n2", "nratio", "sd", "sd1", "sd2", "sddiff", "corr",
+             "prdiscordant")
+  lists <- lists[intersect(order, names(lists))]
+  if (prod(lengths(lists)) > 10000) stop_r("power: the lists make more than 10,000 rows")
+  rows <- if (length(lists)) rev(expand.grid(rev(lists), KEEP.OUT.ATTRS = FALSE)) else data.frame(row.names = 1L)
+  rs <- lapply(seq_len(nrow(rows)), function(i)
+    do.call(stata_power, c(list(method), fixed, as.list(rows[i, , drop = FALSE]), list(show = FALSE))))
+  r <- rs[[length(rs)]]
+  two <- method %in% c("twomeans", "twoproportions", "twovariances", "twocorrelations")
+  sdsc <- identical(r$scale, "standard deviation")
+  params <- switch(method,
+    onemean = c("m0", "ma", "sd"),
+    twomeans = if (is.null(r$sd)) c("m1", "m2", "sd1", "sd2") else c("m1", "m2", "sd"),
+    pairedmeans = c("d0", "da", "ma1", "ma2", "sd_d", if (!is.null(r$corr)) c("sd", "corr")),
+    oneproportion = c("p0", "pa"), twoproportions = c("p1", "p2"),
+    onevariance = if (sdsc) c("s0", "sa") else c("v0", "va"),
+    twovariances = if (sdsc) c("s1", "s2") else c("v1", "v2"),
+    onecorrelation = c("r0", "ra"), twocorrelations = c("r1", "r2"),
+    pairedproportions = c("p12", "p21", if (!is.null(r$prdiscordant)) "prdiscordant"))
+  cols <- c("alpha", "power", "N", if (two) c("N1", "N2"),
+            if ("nratio" %in% names(lists) || !is.null(fixed$nratio)) "nratio", "delta", params)
+  labs <- ifelse(cols == "nratio", "N2/N1", cols)
+  widths <- pmax(8L, nchar(labs) + 1L)
+  fmts <- ifelse(cols %in% c("N", "N1", "N2"), "%7.0gc", "%7.4g")
+  val <- function(x, k) if (is.null(x[[k]])) NA_real_ else as.numeric(x[[k]])
+  tab <- matrix(unlist(lapply(rs, function(x) vapply(cols, function(k) val(x, k), 0))), ncol = length(cols),
+                byrow = TRUE, dimnames = list(paste0("r", seq_along(rs)), cols))
+  # the table's own scalars (where Stata's return list puts them is not followed: RCraft refuses it)
+  sc <- which(vapply(r, function(v) is.numeric(v) && !is.matrix(v), TRUE))
+  r <- append(r, list(separator = 0, divider = 0), after = max(sc))
+  q <- function(s) paste0("\"", s, "\"", collapse = " ")
+  at <- max(match(c("method", "direction"), names(r), nomatch = 0))
+  r <- append(r, list(columns = paste(cols, collapse = " "), labels = q(labs), widths = paste(widths, collapse = " "),
+                      formats = q(fmts)), after = at)
+  r$pss_table <- tab
+  if (!show) return(invisible(r))
+  cat("\n")
+  if (any(vapply(rs, function(x) !is.null(x$converged), TRUE))) cat("Performing iteration ...\n\n")
+  cat(paste0(attr(rs[[1]], "stata_head"), "\n"), sep = "")
+  if (!notable) {
+    rule <- paste0("  +", strrep("-", sum(widths) + 1), "+")
+    line <- function(cells) paste0("  |", paste0(" ", cells, collapse = ""), " |")
+    cell <- function(x, f, w) sprintf("%*s", w - 1L, stata_fmt(x, f, trim = TRUE))
+    cat("\n", rule, "\n", line(sprintf("%*s", widths - 1L, labs)), "\n",
+        paste0("  |", strrep("-", sum(widths) + 1), "|"), "\n", sep = "")
+    for (i in seq_len(nrow(tab))) cat(line(mapply(cell, tab[i, ], fmts, widths)), "\n", sep = "")
+    cat(rule, "\n", sep = "")
+    if (any(vapply(rs, function(x) !is.null(x$N_a), TRUE))) cat("   Note: N1 and N2 have been rounded down.\n")
   }
   cat("\n")
   invisible(r)
@@ -527,6 +597,13 @@ const R_POWER: &[&str] = &[
     "test",
     "effect",
     "scale",
+    "separator",
+    "divider",
+    "columns",
+    "labels",
+    "widths",
+    "formats",
+    "pss_table",
 ];
 
 /// The methods from onevariance on: Stata's sd flag (not sd()), and
@@ -582,18 +659,91 @@ const METHODS: &[(&str, &[(&str, usize)])] = &[
     ("pairedproportions", &[("effect", 6), ("prdiscordant", 12)]),
 ];
 
-/// One number of the line: a value, or an option's.
-fn number(what: &str, text: &str) -> Result<f64, Untranslated> {
-    let t = text.trim();
-    if t.split_whitespace().count() > 1 || t.contains('(') {
-        return Err(no(format!(
-            "power: {what} {t}: a list of values (Stata's table of results) is not translated yet"
-        )));
+/// The r() owner after a power table: `return list` is refused after it.
+pub(super) const POWER_TABLE: &str = "power, table";
+
+/// A Stata numlist as power reads one: numbers, `a(d)b` and `a/b`.
+fn numlist(what: &str, text: &str) -> Result<Vec<f64>, Untranslated> {
+    let bad = || no(format!("power: {what} {} needs numbers", text.trim()));
+    let mut out = Vec::new();
+    for tok in text.split_whitespace() {
+        let mut range = |a: f64, d: f64, b: f64| -> Result<(), Untranslated> {
+            let steps = (b - a) / d;
+            if d == 0.0 || !steps.is_finite() || steps < -1e-9 || steps > 10_000.0 {
+                return Err(bad());
+            }
+            let n = (steps + 1e-9).floor() as usize;
+            out.extend((0..=n).map(|i| a + d * i as f64));
+            Ok(())
+        };
+        let num = |s: &str| s.trim().parse::<f64>().ok().filter(|v| v.is_finite());
+        if let Some((a, rest)) = tok.split_once('(') {
+            let (d, b) = rest.split_once(')').ok_or_else(bad)?;
+            let (Some(a), Some(d), Some(b)) = (num(a), num(d), num(b)) else {
+                return Err(bad());
+            };
+            range(a, d, b)?;
+        } else if let Some((a, b)) = tok.split_once('/') {
+            let (Some(a), Some(b)) = (num(a), num(b)) else {
+                return Err(bad());
+            };
+            range(a, if b >= a { 1.0 } else { -1.0 }, b)?;
+        } else {
+            out.push(num(tok).ok_or_else(bad)?);
+        }
     }
-    t.parse::<f64>()
-        .ok()
-        .filter(|v| v.is_finite())
-        .ok_or_else(|| no(format!("power: {what} {t} needs a number")))
+    if out.is_empty() || out.len() > 10_000 {
+        return Err(bad());
+    }
+    Ok(out)
+}
+
+/// The values after the method: numbers or lists in parentheses.
+fn value_words(rest: &str) -> Result<Vec<String>, Untranslated> {
+    let mut words = Vec::new();
+    let mut cur = String::new();
+    let mut depth = 0usize;
+    for ch in rest.chars() {
+        match ch {
+            '(' => {
+                depth += 1;
+                cur.push(ch);
+            }
+            ')' => {
+                depth = depth
+                    .checked_sub(1)
+                    .ok_or_else(|| no(format!("power: unbalanced parentheses in {rest}")))?;
+                cur.push(ch);
+            }
+            c if c.is_whitespace() && depth == 0 => {
+                if !cur.is_empty() {
+                    words.push(std::mem::take(&mut cur));
+                }
+            }
+            c => cur.push(c),
+        }
+    }
+    if depth != 0 {
+        return Err(no(format!("power: unbalanced parentheses in {rest}")));
+    }
+    if !cur.is_empty() {
+        words.push(cur);
+    }
+    Ok(words)
+}
+
+fn r_vector(xs: &[f64]) -> String {
+    if let [x] = xs {
+        r_number(*x)
+    } else {
+        format!(
+            "c({})",
+            xs.iter()
+                .map(|x| r_number(*x))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    }
 }
 
 /// What an option's number must be.
@@ -671,6 +821,8 @@ impl Session {
             ("n", 1),
             ("onesided", 8),
             ("direction", 9),
+            ("table", 5),
+            ("notable", 7),
         ];
         known.extend_from_slice(extra);
         if let Some(o) = opts.other(&known) {
@@ -678,68 +830,79 @@ impl Session {
                 "power {method} with the option {o} is not translated yet"
             )));
         }
-        if rest.contains('(') {
-            return Err(no(format!(
-                "power {method} {rest}: a list of values (Stata's table of results) is not translated yet"
-            )));
-        }
-        let values: Vec<&str> = rest.split_whitespace().collect();
+        let words = value_words(rest)?;
         // pairedproportions with prdiscordant(): the discordant proportions are worked out
         let paired_sum = *method == "pairedproportions" && opts.has("prdiscordant", 12);
-        if paired_sum && !values.is_empty() {
+        if paired_sum && !words.is_empty() {
             return Err(no(
                 "power pairedproportions with prdiscordant() and values is not translated yet",
             ));
         }
-        if !paired_sum && (values.is_empty() || values.len() > 2) {
+        if !paired_sum && (words.is_empty() || words.len() > 2) {
             return Err(no(format!(
                 "power {method} takes one or two values (Stata: r(198))"
             )));
         }
-        if *method == "pairedproportions" && values.len() == 1 {
+        if *method == "pairedproportions" && words.len() == 1 {
             return Err(no(
                 "power pairedproportions: the discordant proportions are worked out from prdiscordant(), n() and power() (Stata: r(198))",
             ));
         }
         let props = method.contains("proportion");
         let corrs = method.contains("correlation");
-        let mut args = vec![r_text(method)];
-        let mut given = Vec::new();
-        for (i, v) in values.iter().enumerate() {
-            let x = number("the value", v)?;
-            if props && !(x > 0.0 && x < 1.0) {
-                return Err(no(format!(
-                    "power {method}: {v} must be between 0 and 1 (Stata: r(198))"
-                )));
-            }
-            if corrs && !(x > -1.0 && x < 1.0) {
-                return Err(no(format!(
-                    "power {method}: {v} must be between -1 and 1 (Stata: r(198))"
-                )));
-            }
-            if method.contains("variance") && x <= 0.0 {
-                return Err(no(format!(
-                    "power {method}: {v} must be above 0 (Stata: r(198))"
-                )));
-            }
-            given.push(x);
-            args.push(if i == 0 {
-                r_number(x)
+        // what stays fixed, and the lists of several values (Stata's table)
+        let mut args: Vec<String> = Vec::new();
+        let mut lists: Vec<String> = Vec::new();
+        let mut put = |name: &str, xs: &[f64]| {
+            if xs.len() > 1 {
+                lists.push(format!("{name} = {}", r_vector(xs)));
             } else {
-                format!("v2 = {}", r_number(x))
-            });
-        }
-        if later {
-            if let [a, b] = given[..] {
-                if a == b {
+                args.push(format!("{name} = {}", r_vector(xs)));
+            }
+        };
+        let mut given = Vec::new();
+        let mut scale_sd = false;
+        for (i, w) in words.iter().enumerate() {
+            let inner = w
+                .strip_prefix('(')
+                .and_then(|s| s.strip_suffix(')'))
+                .unwrap_or(w);
+            let xs = numlist("the value", inner)?;
+            for &x in &xs {
+                if props && !(x > 0.0 && x < 1.0) {
                     return Err(no(format!(
-                        "power {method}: the two values must differ (Stata: r(198))"
+                        "power {method}: {x} must be between 0 and 1 (Stata: r(198))"
                     )));
                 }
-                if *method == "pairedproportions" && a + b > 1.0 {
-                    return Err(no(
-                        "power pairedproportions: p12 + p21 must not pass 1 (Stata: r(198))",
-                    ));
+                if corrs && !(x > -1.0 && x < 1.0) {
+                    return Err(no(format!(
+                        "power {method}: {x} must be between -1 and 1 (Stata: r(198))"
+                    )));
+                }
+                if method.contains("variance") && x <= 0.0 {
+                    return Err(no(format!(
+                        "power {method}: {x} must be above 0 (Stata: r(198))"
+                    )));
+                }
+            }
+            put(if i == 0 { "v1" } else { "v2" }, &xs);
+            given.push(xs);
+        }
+        if later {
+            if let [a, b] = &given[..] {
+                for x in a {
+                    for y in b {
+                        if x == y {
+                            return Err(no(format!(
+                                "power {method}: the two values must differ (Stata: r(198))"
+                            )));
+                        }
+                        if *method == "pairedproportions" && x + y > 1.0 {
+                            return Err(no(
+                                "power pairedproportions: p12 + p21 must not pass 1 (Stata: r(198))",
+                            ));
+                        }
+                    }
                 }
             }
             // Stata's sd is a flag here: the values are standard deviations
@@ -749,24 +912,42 @@ impl Session {
                         "power {method}: sd takes no value here (Stata: r(198))"
                     )));
                 }
-                args.push("scale = \"standard deviation\"".into());
+                scale_sd = true;
             }
         }
+        // the smallest group each later test is defined for (Stata prints a missing power below it)
+        let least = match *method {
+            "onevariance" | "twovariances" => 2.0,
+            "onecorrelation" | "twocorrelations" => 4.0,
+            _ => 1.0,
+        };
+        let two = method.starts_with("two");
         for &(name, min, range) in NUMBERS {
             if !known.iter().any(|(k, _)| *k == name) || (later && name == "sd") {
                 continue;
             }
             if let Some(t) = opts.arg(name, min) {
-                let x = number(&format!("{name}()"), &t)?;
-                if !range.holds(x) {
-                    return Err(no(format!(
-                        "power {method}: {name}({}) {} (Stata: r(198))",
-                        t.trim(),
-                        range.why()
-                    )));
+                let xs = numlist(&format!("{name}()"), &t)?;
+                for &x in &xs {
+                    if !range.holds(x) {
+                        return Err(no(format!(
+                            "power {method}: {name}({}) {} (Stata: r(198))",
+                            t.trim(),
+                            range.why()
+                        )));
+                    }
+                    let per = if two && name == "n" { 2.0 } else { 1.0 };
+                    if later && matches!(name, "n" | "n1" | "n2") && x < least * per {
+                        return Err(no(format!(
+                            "power {method}: {name}({x}) is too small for the test (Stata prints a missing power)"
+                        )));
+                    }
                 }
-                args.push(format!("{name} = {}", r_number(x)));
+                put(name, &xs);
             }
+        }
+        if scale_sd {
+            args.push("scale = \"standard deviation\"".into());
         }
         let has_n = opts.has("n", 1);
         let (n1, n2) = (opts.has("n1", 2), opts.has("n2", 2));
@@ -790,33 +971,15 @@ impl Session {
                 "power twomeans: sd() with sd1() or sd2() is not translated yet",
             ));
         }
-        if values.len() < 2 && !(opts.has("power", 5) && (has_n || n1)) {
+        if words.len() == 2 && opts.has("power", 5) && (has_n || n1) {
+            return Err(no(format!(
+                "power {method}: with two values, power() and n() are not both given (Stata: r(198))"
+            )));
+        }
+        if words.len() < 2 && !(opts.has("power", 5) && (has_n || n1)) {
             return Err(no(format!(
                 "power {method} {rest}: the target value needs n() and power() (Stata: r(198))"
             )));
-        }
-        // the smallest group each later test is defined for (Stata prints a missing power below it)
-        let least = match *method {
-            "onevariance" | "twovariances" => 2.0,
-            "onecorrelation" | "twocorrelations" => 4.0,
-            _ => 1.0,
-        };
-        let two = method.starts_with("two");
-        for (name, min, per) in [
-            ("n", 1, if two { 2.0 } else { 1.0 }),
-            ("n1", 2, 1.0),
-            ("n2", 2, 1.0),
-        ] {
-            if let Some(x) = opts
-                .arg(name, min)
-                .and_then(|t| t.trim().parse::<f64>().ok())
-            {
-                if later && x < least * per {
-                    return Err(no(format!(
-                        "power {method}: {name}({x}) is too small for the test (Stata prints a missing power)"
-                    )));
-                }
-            }
         }
         if opts.has("onesided", 8) {
             args.push("onesided = TRUE".into());
@@ -862,14 +1025,47 @@ impl Session {
             }
             args.push(format!("effect = {}", r_text(&e)));
         }
-        if self.quiet(c) {
-            args.push("show = FALSE".into());
+        // Stata's table: lists of values, or table asked for
+        let table = match opts.arg("table", 5) {
+            Some(t) if !t.trim().is_empty() => {
+                return Err(no(format!(
+                    "power {method}, table() with columns is not translated yet"
+                )))
+            }
+            Some(_) => true,
+            None => !lists.is_empty(),
+        };
+        let notable = opts.has("notable", 7);
+        if notable && !table {
+            return Err(no(format!(
+                "power {method}, notable without lists of values is not translated yet"
+            )));
         }
-        for h in ["stata_power", "stata_returned"] {
+        let quiet = self.quiet(c);
+        for h in ["stata_power", "stata_returned", "stata_fmt"] {
             self.helpers.insert(h);
         }
-        out.line(format!("stata_r <- stata_power({})", args.join(", ")));
-        self.r_new = Some((R_POWER, "power".into()));
+        let method_r = r_text(method);
+        if table {
+            out.line(format!(
+                "stata_r <- stata_power_table({method_r}, lists = list({}), fixed = list({}){}{})",
+                lists.join(", "),
+                args.join(", "),
+                if notable { ", notable = TRUE" } else { "" },
+                if quiet { ", show = FALSE" } else { "" }
+            ));
+            // where Stata's return list puts a table's own r() is not followed
+            self.r_new = Some((R_POWER, POWER_TABLE.into()));
+        } else {
+            if quiet {
+                args.push("show = FALSE".into());
+            }
+            out.line(format!(
+                "stata_r <- stata_power({method_r}, {})",
+                args.join(", ")
+            ));
+            self.r_new = Some((R_POWER, "power".into()));
+        }
         Ok(())
     }
 }

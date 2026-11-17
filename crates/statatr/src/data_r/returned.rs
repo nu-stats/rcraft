@@ -347,9 +347,9 @@ stata_fmt <- function(x, fmt = "%10.0g", trim = FALSE) {
     budget <- w - 1
     ed <- max(2, w - 4 - exp_width(ax))
     if (d > 0) ed <- min(max(d, 2), ed)
-    fixed <- function(ax) {
+    fixed <- function(ax, cm = comma) {
       intdig <- if (ax >= 1) nchar(sprintf("%.0f", floor(ax))) else 0
-      ints <- intdig + if (comma && intdig > 3) (intdig - 1) %/% 3 else 0
+      ints <- intdig + if (cm && intdig > 3) (intdig - 1) %/% 3 else 0
       if (ints + 1 > budget) return(NULL)
       dec <- budget - ints - 1
       z <- if (ax < 1) -floor(log10(ax)) - 1 else 0
@@ -359,14 +359,16 @@ stata_fmt <- function(x, fmt = "%10.0g", trim = FALSE) {
       s <- rnd("f", dec, ax)
       # rounding up may have added a digit in front
       if (nchar(sub("\\..*$", "", sub("^0", "", s))) > intdig) {
-        return(if (ax < 1) fixed(1) else fixed(10^intdig))
+        return(if (ax < 1) fixed(1, cm) else fixed(10^intdig, cm))
       }
       if (grepl(".", s, fixed = TRUE)) s <- sub("\\.$", "", sub("0+$", "", s))
       s <- sub("^0\\.", ".", s)
-      if (comma) s <- commas(s)
+      if (cm) s <- commas(s)
       s
     }
     f <- fixed(ax)
+    # commas that do not fit are left out before e notation (Stata 19: %7.0gc of 50000 is 50000)
+    if (is.null(f) && comma) f <- fixed(ax, FALSE)
     if (is.null(f)) paste0(sgn, e_str(ax, ed)) else if (x < 0) paste0("-", f) else f
   } else if (type == "f") {
     # an exact half to even, as C does; a value near a half on its side (see rnd)
@@ -1124,6 +1126,10 @@ const TEXT_NAMES: &[&str] = &[
     "test",
     "effect",
     "scale",
+    "columns",
+    "labels",
+    "widths",
+    "formats",
     "ties",
     "t0",
     "est_cmd",
@@ -1152,6 +1158,7 @@ const TEXT_NAMES: &[&str] = &[
 
 /// The matrices among them.
 const MATRIX_NAMES: &[&str] = &[
+    "pss_table",
     "b",
     "V",
     "C",
@@ -1919,7 +1926,7 @@ fn r_not_kept(cmd: &str, name: &str) -> Option<&'static str> {
         ("describe", "changed") => Some(
             "it says whether the data changed since they were last saved, which R does not follow",
         ),
-        ("power", "init" | "iter" | "deltax" | "function") => Some(
+        ("power" | super::power::POWER_TABLE, "init" | "iter" | "deltax" | "function") => Some(
             "it is a detail of Stata's own search for the answer (its start, rounds, last step and remainder), which R's search does not share",
         ),
         _ => None,
@@ -2395,6 +2402,11 @@ impl Session {
             }
             Returned::Lost(why) => return Err(no(format!("{} list: {why}", c.name))),
             Returned::Program { .. } => {}
+            Returned::Kept { cmd, .. } if which == "r" && cmd == super::power::POWER_TABLE => {
+                return Err(no(
+                    "return list after power with lists of values: Stata 19 lists the table's r(separator) and r(divider) in an order RCraft does not follow (each r() can still be read)",
+                ));
+            }
             Returned::Kept { cmd, model, .. } => {
                 if which == "e" && (cmd == "factor" || cmd == "pca") {
                     out.caveat(format!(

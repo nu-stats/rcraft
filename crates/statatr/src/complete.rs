@@ -499,6 +499,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "n(",
             "n1(",
             "n2(",
+            "notable",
             "nratio(",
             "onesided",
             "power(",
@@ -507,6 +508,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "sd1(",
             "sd2(",
             "sddiff(",
+            "table",
             "test(",
         ],
     ),
@@ -1947,6 +1949,7 @@ gettoken a b : s, {o}"
                 format!("tetrachoric x y z, {name}(.05)")
             }
             "tetrachoric" => format!("tetrachoric x y z, {o}"),
+            "power" if name == "notable" => "power twomeans 0 0.5, n(50 100) notable".to_string(),
             "power" if name == "prdiscordant" => {
                 "power pairedproportions, n(100) prdiscordant(0.3) power(0.8)".to_string()
             }

@@ -1168,6 +1168,38 @@ fn power_variances_correlations_and_paired_proportions_print_statas_layout() {
     }
 }
 
+/// power's table for lists of values in Stata 19's layout, line for line from
+/// Stata's own output (plan/stata/power.md): every combination in Stata's
+/// order, the N2/N1 column with nratio(), totals that do not split (with the
+/// note under the table), a wide column, and %7.0gc dropping commas that do
+/// not fit.
+#[test]
+fn power_lists_print_statas_table() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power twomeans 0 0.5, n(50 100) nratio(1 2)\n\
+         power pairedproportions, n(100 200) prdiscordant(0.3) power(0.8)\n\
+         power twomeans 0 0.2, n(100000)  table\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "  +---------------------------------------------------------------------------------+",
+        "  |   alpha   power       N      N1      N2   N2/N1   delta      m1      m2      sd |",
+        "  |---------------------------------------------------------------------------------|",
+        "  |     .05   .4101      50      25      25       1      .5       0      .5       1 |",
+        "  |     .05   .3625      50      16      33       2      .5       0      .5       1 |",
+        "  |     .05   .6413     100      33      66       2      .5       0      .5       1 |",
+        "   Note: N1 and N2 have been rounded down.",
+        "H0: p21 = p12  versus  Ha: p21 != p12; p21 > p12",
+        "  |   alpha   power       N   delta     p12     p21 prdiscordant |",
+        "  |     .05      .8     100   .1516  .07418   .2258           .3 |",
+        "  |     .05       1 1.0e+05   50000   50000      .2       0      .2       1 |",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
 /// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
 /// on the same data (plan/stata/epitab.md); replace keeps the case variable's
 /// label, which then names ir's row.

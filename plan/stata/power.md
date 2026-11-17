@@ -71,3 +71,34 @@ more); corpus `power2.do`.
   n1(60) alone gives N2 = N1 and prints N1 and N2, not "N per group").
 - After a power line that fails in Stata, `return list` shows the earlier r() in reverse order; RCraft
   refuses the failed line, so that is not followed.
+
+## Lists of values: Stata's table (2026-11-16)
+
+Observed on Stata 19 SE with no data (probes t1 to t4, f1 to f3: about 45 tables set line by line against
+RCraft's, every line identical but Stata's failed computations below); corpus `power3.do`.
+
+- Any option or value given as a list (`(0.4 0.5)`, `(0.4(0.1)0.6)`, `n(10(10)30)`), or `table`, prints a
+  table instead of the study parameters: the head lines ("Performing iteration ..." when a row searched),
+  then `  +---+` rules around `|` rows, each column 8 wide (or its label + 1: `prdiscordant` is 13),
+  numbers `%7.4g`, N, N1 and N2 `%7.0gc` (whose commas are left out when they do not fit: 50000 in 7 is
+  `50000`, a stata_fmt fix that holds for every %gc).
+- Rows: every combination, outer to inner: the values (first, then second) > alpha > power > n > n1 > n2 >
+  nratio > the method's own numbers (sd > corr, sd1 > sd2); the last varies fastest.
+- Columns: alpha power N [N1 N2] [N2/N1 when nratio() is given, even 1] delta, then onemean m0 ma sd;
+  twomeans m1 m2 sd (sd1 sd2 when unequal); pairedmeans d0 da ma1 ma2 sd_d [sd corr]; oneproportion p0
+  pa; twoproportions p1 p2; onevariance v0 va (s0 sa); twovariances v1 v2 (s1 s2); correlations r0 ra,
+  r1 r2; pairedproportions p12 p21 [prdiscordant].
+- `   Note: N1 and N2 have been rounded down.` under the table when a total did not split.
+- r(): the last row's, with r(separator) = r(divider) = 0, macros r(columns) (nratio for N2/N1),
+  r(labels) (each quoted), r(widths), r(formats) after method/direction, and the matrix r(pss_table)
+  (rows r1, r2, ...). Where separator and divider fall in `return list` varies even between one-sample
+  forms (after alpha for onemean's power, at the end for its sample size; split for knownsd one-sided):
+  RCraft refuses `return list` after a table, every r() can be read.
+- `notable` prints the head only; `parallel`, `table()` with columns and `graph` are refused.
+- At n(2000000) with a delta of 1.5 or more Stata's t test fails ("." and "Warning: Some of the
+  computations failed"); R works the power out (1). Not followed.
+
+A total that does not split at nratio() (found on the way, true of the single form too): N1 = ⌊n/(1 +
+nratio)⌋, N2 = ⌊n·nratio/(1 + nratio)⌋ (n(50) nratio(2): 16 and 33, not 2·16), "Actual sample sizes"
+adds `N2/N1` when the groups miss nratio(), and r(nratio_a) is kept in every two-sample form whose groups
+miss nratio(): after r(nratio) where Stata does not search, before it where it does.
