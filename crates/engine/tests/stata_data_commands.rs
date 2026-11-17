@@ -661,15 +661,19 @@ generate a_very_long_variable_name = _n
 label define gl 0 "zero" 1 "one" 2 "two and more"
 label values g gl
 replace x = . in 3
-list in 1/7, separator(3)
+list in 1/7, separator(3) abbreviate(8)
 list g x in 1/2, noobs
 list name x in 1/3, clean
 preserve
 generate byte dose = 1 + mod(_n, 4)
 collapse (mean) x (sum) a_very_long_variable_name, by(dose g)
 describe, simple
-list in 1/2, nolabel
+list in 1/2, nolabel abbreviate(8)
+list a_very_long_variable_name in 1/1
 restore
+set linesize 40
+list g x y name a_very_long_variable_name in 1/1, abbreviate(8)
+set linesize 255
 expand 2 in 1
 generate k = cond(_n <= 2, 0, 2.6)
 expand k in 1/4
@@ -705,6 +709,13 @@ expand k in 1/4
         "(2 noninteger counts rounded to integer)",
         "(2 zero counts ignored; observations not deleted)",
         "(4 observations created)",
+        // RCraft writes names out in full where Stata cuts them to 8
+        "     | a_very_long_variable_name |",
+        "  1. |                        12 |",
+        "  1. |   g |        x |         y |",
+        "     |----------------------------|",
+        "     |    name    |   a_very~e    |",
+        "     |   alpha    |          1    |",
     ] {
         assert!(lines.contains(&want), "{want:?}\n--\n{text}");
     }

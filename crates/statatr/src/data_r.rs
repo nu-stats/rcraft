@@ -993,33 +993,48 @@ const IMPORT_FLOAT_HELPER: &str = "stata_import_float <- function(d) {\n  for (n
 /// (missing left out, or `.` last with `missing`), text in compound quotes
 /// (`""` first with `missing`; `clean` without quotes); r(r) the number of
 /// values and r(N) the rows that count.
-/// `list`'s table as Stata 19 draws it: each column as wide as its widest
-/// value or its name (abbreviated to 8), every cell right-aligned, three
-/// spaces apart, a line every `sep` rows, the row's number (at least three
-/// digits) before the box; `noobs` drops the numbers, `clean` the box. A
-/// number in its display format (a set one, or its storage type's), a
-/// labelled value by its label. Where a numeric variable's format is not
-/// known and its values are not small whole numbers, or the table is wider
-/// than the line, R's layout is printed instead.
-const LIST_HELPER: &str = r#"stata_list <- function(d, defaults = character(0), label = TRUE, noobs = FALSE, clean = FALSE, sep = 5) {
+/// `list` as Stata 19 draws it. The table: each column as wide as its widest
+/// value or its name, every cell right-aligned, three spaces apart, a line
+/// every `sep` rows (or where a `sepby()` variable changes), the row's number
+/// (at least three digits) before the box; `noobs` drops the numbers, `clean`
+/// the box. Where the table is wider than the line, each row in a box of its
+/// own (`display`): the variables across as many lines as they need, each
+/// line after the first spread to the first one's width. A number in its
+/// display format (a set one, its storage type's, or else %9.0g for a float's
+/// values, %10.0g for a double's, %12.0g for whole numbers), a labelled value
+/// by its label. Names are written out in full (RCraft's choice; Stata cuts
+/// them to 8), or cut to `abbrev` as abbreviate() asks. A line longer than the
+/// linesize breaks as Stata breaks it, the rest after `> `.
+const LIST_HELPER: &str = r#"stata_list <- function(d, defaults = character(0), label = TRUE, noobs = FALSE, clean = FALSE, sep = 5,
+                       abbrev = NULL, table = FALSE, display = FALSE) {
   obs <- d$stata_obs_
   d$stata_obs_ <- NULL
+  sk <- d$stata_sep_
+  d$stata_sep_ <- NULL
   if (!nrow(d) || !ncol(d)) return(invisible())
   fallback <- function() print(as.data.frame(if (label) haven::as_factor(d) else haven::zap_labels(d)))
   miss <- function(z) { t <- tryCatch(haven::na_tag(z), error = function(e) NA_character_); if (is.na(t)) "." else paste0(".", t) }
-  cells <- list()
+  cells <- list(); left <- logical(0)
   for (v in names(d)) {
     x <- d[[v]]
-    if (is.character(x)) { cells[[v]] <- ifelse(is.na(x), "", x); next }
+    if (is.character(x)) {
+      f <- attr(x, "format.stata", exact = TRUE)
+      left[[v]] <- !is.null(f) && startsWith(f, "%-")
+      cells[[v]] <- ifelse(is.na(x), "", x)
+      next
+    }
     if (!is.numeric(x)) return(fallback())
     u <- unclass(x); attributes(u) <- NULL
     f <- attr(x, "format.stata", exact = TRUE)
     if (is.null(f) && v %in% names(defaults)) f <- defaults[[v]]
     if (is.null(f)) {
-      if (!all(is.na(u) | (u == round(u) & abs(u) < 1e6))) return(fallback())
-      f <- "%9.0g"
+      # not known: a float's values are floats (%9.0g), a double's not (%10.0g)
+      k <- u[!is.na(u)]
+      f <- if (all(k == round(k))) "%12.0g" else if (all(k == stata_float(k))) "%9.0g" else "%10.0g"
     }
-    if (!grepl("^%[0-9]+\\.[0-9]+[fg]$", f)) return(fallback())
+    # numbers (g, f, e, with commas) and dates and times; a left-justified one to the left
+    if (!grepl("^%-?0?[0-9]+(\\.[0-9]+)?[gfe]c?$", f) && !grepl("^%-?(t[cCdwmqhyg]|d)", f)) return(fallback())
+    left[[v]] <- startsWith(f, "%-")
     s <- vapply(u, function(z) if (is.na(z)) miss(z) else stata_fmt(z, f, trim = TRUE), "")
     vl <- attr(x, "labels", exact = TRUE)
     if (label && length(vl)) {
@@ -1031,32 +1046,93 @@ const LIST_HELPER: &str = r#"stata_list <- function(d, defaults = character(0), 
   vw <- vapply(cells, function(s) max(0, nchar(s)), 1)
   heads <- vapply(seq_along(cells), function(j) {
     v <- names(cells)[j]
-    stata_tab_abbrev(v, min(nchar(v), max(8, vw[j])), vars = character())
+    if (is.null(abbrev)) v else stata_tab_abbrev(v, min(nchar(v), max(abbrev, 5, vw[j])), vars = character())
   }, "")
   W <- pmax(vw, nchar(heads))
   pad <- function(s, w) paste0(strrep(" ", pmax(0, w - nchar(s))), s)
-  row_of <- function(i) vapply(seq_along(cells), function(j) pad(cells[[j]][i], W[j]), "")
+  # a cell in its column: to the right, or to the left with a left-justified format
+  al <- function(s, j) ifelse(left[j], paste0(s, strrep(" ", pmax(0, W[j] - nchar(s)))), pad(s, W[j]))
+  row_of <- function(i) vapply(seq_along(cells), function(j) al(cells[[j]][i], j), "")
+  hd <- vapply(seq_along(heads), function(j) al(heads[j], j), "")
   lw <- max(3, nchar(format(max(obs), scientific = FALSE))) + 1
   inner <- 2 + sum(W) + 3 * (length(W) - 1)
   ls <- if (exists("stata_linesize")) stata_linesize else 79
-  if ((if (noobs) 2 else lw + 1) + inner + 2 > ls) return(fallback())
+  # a line longer than the linesize, broken as Stata breaks it
+  out <- function(s) {
+    while (nchar(s) > ls) {
+      cat(substr(s, 1, ls), "\n", sep = "")
+      s <- paste0("> ", substring(s, ls + 1))
+    }
+    cat(s, "\n", sep = "")
+  }
   num <- function(i) paste0(pad(format(obs[i], scientific = FALSE), lw - 1), ".")
+  pre <- if (noobs) "  " else strrep(" ", lw + 1)
   if (clean) {
-    pre <- if (noobs) " " else strrep(" ", lw)
-    cat("\n", pre, paste0("   ", pad(heads, W), collapse = ""), "  \n", sep = "")
-    for (i in seq_along(obs)) cat(if (noobs) " " else num(i), paste0("   ", row_of(i), collapse = ""), "  \n", sep = "")
+    pc <- if (noobs) " " else strrep(" ", lw)
+    cat("\n")
+    out(paste0(pc, paste0("   ", hd, collapse = ""), "  "))
+    for (i in seq_along(obs)) out(paste0(if (noobs) " " else num(i), paste0("   ", row_of(i), collapse = ""), "  "))
     cat("\n")
     return(invisible())
   }
-  pre <- if (noobs) "  " else strrep(" ", lw + 1)
-  bar <- function(a, b) cat(pre, a, strrep("-", inner), b, "\n", sep = "")
+  if (display || (!table && nchar(pre) + inner + 2 > ls)) {
+    # each row in a box of its own: as many variables on a line as fit, the later
+    # lines spread to the first's width, the spare spaces split evenly, the last
+    # cells taking what is left over; + where two lines' columns meet
+    base <- W + 3
+    groups <- list(); cur <- integer(); s <- 0
+    room <- ls - nchar(pre) - 1
+    for (j in seq_along(W)) {
+      if (length(cur) && s + base[j] > room) { groups[[length(groups) + 1]] <- cur; cur <- j; s <- base[j] }
+      else { cur <- c(cur, j); s <- s + base[j] }
+    }
+    groups[[length(groups) + 1]] <- cur
+    T <- sum(base[groups[[1]]])
+    if (length(groups) > 1) {
+      rest <- unlist(groups[-1]); groups <- groups[1]; cur <- integer(); s <- 0
+      for (j in rest) {
+        if (base[j] > T) return(fallback())
+        if (length(cur) && s + base[j] > T) { groups[[length(groups) + 1]] <- cur; cur <- j; s <- base[j] }
+        else { cur <- c(cur, j); s <- s + base[j] }
+      }
+      groups[[length(groups) + 1]] <- cur
+    }
+    extras <- lapply(groups, function(g) {
+      slack <- T - sum(base[g]); n <- length(g)
+      e <- rep(slack %/% n, n)
+      r <- slack %% n
+      if (r > 0) e[(n - r + 1):n] <- e[(n - r + 1):n] + 1
+      e
+    })
+    line <- function(g, e, txt) paste0("|", paste0(strrep(" ", 1 + e %/% 2), vapply(seq_along(g), function(k) al(txt[k], g[k]), ""), strrep(" ", 1 + e - e %/% 2), "|", collapse = ""))
+    edges <- lapply(seq_along(groups), function(k) cumsum(base[groups[[k]]] + extras[[k]]))
+    for (i in seq_along(obs)) {
+      cat("\n")
+      out(paste0(pre, "+", strrep("-", T - 1), "+"))
+      for (k in seq_along(groups)) {
+        g <- groups[[k]]; e <- extras[[k]]
+        out(paste0(if (k == 1 && !noobs) paste0(num(i), " ") else pre, line(g, e, heads[g])))
+        out(paste0(pre, line(g, e, vapply(g, function(j) cells[[j]][i], ""))))
+        if (k < length(groups)) {
+          meet <- intersect(edges[[k]], edges[[k + 1]])
+          ch <- rep("-", T); ch[meet] <- "+"; ch[T] <- "|"
+          out(paste0(pre, "|", paste(ch, collapse = "")))
+        }
+      }
+      out(paste0(pre, "+", strrep("-", T - 1), "+"))
+    }
+    cat("\n")
+    return(invisible())
+  }
+  bar <- function(a, b) out(paste0(pre, a, strrep("-", inner), b))
   cat("\n")
   bar("+", "+")
-  cat(pre, "| ", paste(pad(heads, W), collapse = "   "), " |\n", sep = "")
+  out(paste0(pre, "| ", paste(hd, collapse = "   "), " |"))
   bar("|", "|")
   for (i in seq_along(obs)) {
-    if (sep > 0 && i > 1 && (i - 1) %% sep == 0) bar("|", "|")
-    cat(if (noobs) "  " else paste0(num(i), " "), "| ", paste(row_of(i), collapse = "   "), " |\n", sep = "")
+    brk <- if (!is.null(sk)) i > 1 && sk[i] != sk[i - 1] else sep > 0 && i > 1 && (i - 1) %% sep == 0
+    if (brk) bar("|", "|")
+    out(paste0(if (noobs) "  " else paste0(num(i), " "), "| ", paste(row_of(i), collapse = "   "), " |"))
   }
   bar("+", "+")
   cat("\n")
@@ -3924,76 +4000,109 @@ impl Session {
             ("abbreviate", 2),
             ("nolabel", 3),
             ("table", 3),
+            ("display", 4),
         ]) {
             return Err(no(format!(
                 "list with the option {o} is not translated yet"
             )));
         }
-        // Stata's table: plain, noobs, clean, separator(#), nolabel (Stata 19)
-        let table = opts
-            .other(&[("clean", 1), ("noobs", 3), ("separator", 3), ("nolabel", 3)])
-            .is_none();
-        let sep = match opts.arg("separator", 3) {
-            Some(s) => s.trim().parse::<u32>().ok(),
-            None => Some(5),
+        let stop = |msg: &str| {
+            format!(
+                "stop({}, call. = FALSE)",
+                r_text(&format!("{msg} (Stata: r(198))"))
+            )
         };
-        if let (true, Some(sep)) = (table, sep) {
-            let mut steps = vec![format!(
-                "dplyr::mutate({d}, stata_obs_ = dplyr::row_number())"
-            )];
-            if let Some(cond) = self.condition(c, out)? {
-                steps.push(format!("dplyr::filter({cond})"));
-            }
-            let main = c.parts.main.trim();
-            if !main.is_empty() {
-                steps.push(format!("dplyr::select({}, stata_obs_)", select(main)?));
-            }
-            // the display formats Stata gives the storage types generate made
-            let defaults: Vec<String> = self
-                .storage
-                .iter()
-                .filter_map(|(v, t)| {
-                    Some(format!("{} = {}", r_text(v), r_text(t.default_format()?)))
-                })
-                .collect();
-            let mut args = String::new();
-            if !defaults.is_empty() {
-                args.push_str(&format!(", defaults = c({})", defaults.join(", ")));
-            }
-            if opts.has("nolabel", 3) {
-                args.push_str(", label = FALSE");
-            }
-            if opts.has("noobs", 3) {
-                args.push_str(", noobs = TRUE");
-            }
-            if opts.has("clean", 1) {
-                args.push_str(", clean = TRUE");
-            }
-            if sep != 5 {
-                args.push_str(&format!(", sep = {sep}"));
-            }
-            for h in ["stata_list", "stata_fmt", "stata_tables"] {
-                self.helpers.insert(h);
-            }
-            out.package("dplyr");
-            out.package("haven");
-            out.line(format!("stata_list({}{args})", steps.join(" |> ")));
+        let sepby = opts.arg("sepby", 5);
+        if sepby.is_some() && opts.has("separator", 3) {
+            out.line(stop("options separator() and sepby() may not be combined"));
             return Ok(());
         }
-        let mut steps = vec![d.clone()];
+        let sep = match opts.arg("separator", 3) {
+            Some(s) => s.trim().parse::<u32>().map_err(|_| {
+                no(format!(
+                    "list, separator({s}): a whole number is translated"
+                ))
+            })?,
+            None => 5,
+        };
+        let abbrev = match opts.arg("abbreviate", 2) {
+            Some(a) => {
+                let v = a.trim().parse::<i64>().map_err(|_| {
+                    no(format!(
+                        "list, abbreviate({a}): a whole number is translated"
+                    ))
+                })?;
+                if !(1..=129).contains(&v) {
+                    out.line(stop("abbreviate() must be between 1 and 129"));
+                    return Ok(());
+                }
+                Some(v)
+            }
+            None => None,
+        };
+        let mut steps = vec![format!(
+            "dplyr::mutate({d}, stata_obs_ = dplyr::row_number())"
+        )];
+        if let Some(b) = &sepby {
+            let vars: Vec<&str> = b.split_whitespace().collect();
+            if vars.is_empty() || vars.iter().any(|v| !is_name(v)) {
+                return Err(no(
+                    "list, sepby(): the variable names written out are translated",
+                ));
+            }
+            // one key for the values of all of them: a line where it changes
+            steps.push(format!(
+                "dplyr::mutate(stata_sep_ = paste({}, sep = \"\\r\"))",
+                vars.iter()
+                    .map(|v| r_name(v))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
         if let Some(cond) = self.condition(c, out)? {
             steps.push(format!("dplyr::filter({cond})"));
         }
-        if !c.parts.main.trim().is_empty() {
-            steps.push(format!("dplyr::select({})", select(&c.parts.main)?));
+        let main = c.parts.main.trim();
+        if !main.is_empty() {
+            steps.push(format!(
+                "dplyr::select({}, stata_obs_{})",
+                select(main)?,
+                if sepby.is_some() { ", stata_sep_" } else { "" }
+            ));
         }
-        if !opts.has("nolabel", 3) {
-            out.package("haven");
-            steps.push("haven::as_factor()".into());
+        // the display formats Stata gives the storage types generate made
+        let defaults: Vec<String> = self
+            .storage
+            .iter()
+            .filter_map(|(v, t)| Some(format!("{} = {}", r_text(v), r_text(t.default_format()?))))
+            .collect();
+        let mut args = String::new();
+        if !defaults.is_empty() {
+            args.push_str(&format!(", defaults = c({})", defaults.join(", ")));
+        }
+        for (flag, name, min) in [
+            ("label = FALSE", "nolabel", 3),
+            ("noobs = TRUE", "noobs", 3),
+            ("clean = TRUE", "clean", 1),
+            ("table = TRUE", "table", 3),
+            ("display = TRUE", "display", 4),
+        ] {
+            if opts.has(name, min) {
+                args.push_str(&format!(", {flag}"));
+            }
+        }
+        if sep != 5 {
+            args.push_str(&format!(", sep = {sep}"));
+        }
+        if let Some(a) = abbrev {
+            args.push_str(&format!(", abbrev = {a}"));
+        }
+        for h in ["stata_list", "stata_fmt", "stata_tables", "stata_float"] {
+            self.helpers.insert(h);
         }
         out.package("dplyr");
-        out.line(format!("print(as.data.frame({}))", steps.join(" |> ")));
-        out.caveat("printed in R's layout, not Stata's table");
+        out.package("haven");
+        out.line(format!("stata_list({}{args})", steps.join(" |> ")));
         Ok(())
     }
 
