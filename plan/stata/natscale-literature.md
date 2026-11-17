@@ -200,3 +200,38 @@ Verdicts: none comes near 7,781, or the 4,891 benchmark. The best is extended at
 - AS 168 from the journal text (divisor reset fixed) and Dixon & Kronmal are in `natscale-residue.md`
   (parent session): AS 168 walks to 2,349 at m = n and 2,658 at n + 1; Dixon & Kronmal's centring with
   a floor fits some S in 13,516, against 14,589 for the rounded centring. Neither beats 7,781.
+
+## Probe 40: near-zero families against their exact mirrors (`lit_p40*.R`, `lit_centre.R`)
+
+Probe 40 (literature session; numbered 40 to stay clear of the parent's): 1,170 pairs, each range
+(lo, hi) and its mirror (−hi, −lo) typed as the same decimals with the sign flipped, so the mirrored
+inputs are exact negatives. lo from −2 to 1.2 by 0.05, widths 0.85, 1.45 and 0.62, n 10, 12, 14, 16,
+20, 24. Printed through `%21x`.
+
+- **The labels are symmetric; the ends' bits are not.** The mirror has the same step bits in 1,156 of
+  1,170 pairs, the same label count in 1,169, and mirrored labels (L′ = −U, U′ = −L) in 1,169. But both
+  ends are exact negatives in only 409. So the label choice is a symmetric rule, and the arithmetic
+  of the ends runs in one direction.
+- **The ends are built bottom up.** A centred span with the bottom as a product d·J and the top as
+  bottom + (N − 1)·d fits both ends for some N in 2,214 of 2,340. Its mirror (top a product, bottom =
+  top − span) fits 1,791. This is Lewart's and Dixon & Kronmal's order.
+- **The centring index rounds to nearest.** J = floor(½(1 + (lo + hi − R)/d)) and round((lo + hi −
+  R)/(2d)) both fit 2,214. Truncation toward zero (Fortran's `INT` without Lewart's correction) fits
+  2,010, losing mostly negative and straddling ranges. So the padding is not a truncation-toward-zero
+  slip.
+- **The padding itself is not mirror-symmetric.** In 53 pairs one side needs padding (the label count
+  is not in its fitting set) while the mirror fits only unpadded. Example: −0.15 to 0.70 (n 10–16,
+  step 0.1) pads to 16–19 marks; −0.70 to 0.15 does not. Ranges whose labels are all negative are
+  read as padded in 507 of 840 rows, all positive in 357 of 840, on a probe balanced by
+  construction. So what triggers the padding is a floating-point test that depends on direction (or
+  on bits), not a geometric cost of the labels, which would mirror. It is not the span's own residue:
+  whether L·d + (U − L)·d equals U·d is true on 25 padded sides and on 24 unpadded ones.
+- **Ends as centre ± half-span (no padding) are not the hidden computation.** The centre from the
+  label or data midpoint, as a product or a halved sum, with the ends ∓/± a product half-span, or
+  walked out from the centre: at most 4,221 alone and 6,387 inside the 7,781 rule's unpadded branches
+  (Lewart's unpadded: 6,047 and 7,781).
+- Scoreboard unchanged at 7,781.
+- Next probe: take a few of the 53 one-sided pairs (−0.15 to 0.70 against −0.70 to 0.15, n 12, step
+  0.1; −1.35 to −0.50 against 0.50 to 1.35, n 12) and move lo and hi by single ulps on each side, as
+  probe 13 did. If the padded side flips with ulps of lo but not of hi (or the other way round), that
+  names the input whose rounding decides it.
