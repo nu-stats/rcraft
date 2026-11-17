@@ -1203,6 +1203,7 @@ pub(super) struct StoredFit {
     e_ret: Returned,
     weighted_fit: bool,
     fit_fweight: bool,
+    fit_weight: Option<crate::lang::syntax::Weight>,
     plain_regress: bool,
     fit_robust: bool,
     fit_cluster: bool,
@@ -1431,6 +1432,7 @@ impl Session {
                 e_ret: self.e_ret.clone(),
                 weighted_fit: self.weighted_fit,
                 fit_fweight: self.fit_fweight,
+                fit_weight: self.fit_weight.clone(),
                 plain_regress: self.plain_regress,
                 fit_robust: self.fit_robust,
                 fit_cluster: self.fit_cluster,
@@ -1504,6 +1506,7 @@ impl Session {
         self.e_ret = f.e_ret;
         self.weighted_fit = f.weighted_fit;
         self.fit_fweight = f.fit_fweight;
+        self.fit_weight = f.fit_weight;
         self.plain_regress = f.plain_regress;
         self.fit_robust = f.fit_robust;
         self.fit_cluster = f.fit_cluster;

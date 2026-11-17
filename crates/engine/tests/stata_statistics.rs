@@ -1508,3 +1508,37 @@ fn tabodds_adjust_and_binomial_print_statas_layout() {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
 }
+
+#[test]
+fn lroc_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 60\ngenerate double x = mod(_n * 7, 13) / 4 - 1.5\n\
+         generate byte g = mod(_n, 3)\ngenerate byte w = 1 + mod(_n, 4)\n\
+         generate byte y = mod(_n * 11 + 3 * g, 7) < 2 + (x > 0) + g\n\
+         replace x = . in 5\n\
+         logit y x g\nlroc\nlroc if g == 1, nograph\n\
+         probit y x g\nlroc, nograph\n\
+         logit y x g [fw=w]\nlroc, nograph\n\
+         quietly lroc, nograph\ndisplay r(N)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Logistic model for y",
+        "Number of observations =       59",
+        "Area under ROC curve   =   0.6748",
+        "Number of observations =       20",
+        "Area under ROC curve   =   0.5505",
+        "Probit model for y",
+        "Number of observations =      148",
+        "Area under ROC curve   =   0.6455",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+    assert_eq!(
+        lines.iter().filter(|l| l.starts_with("Area under")).count(),
+        4,
+        "{text}"
+    );
+}

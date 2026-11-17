@@ -1,0 +1,29 @@
+* Stata 19.0's results for lroc.do, recorded by cargo xtask stata-record
+@ logit       .67476852261461318 59
+@ depvar       .67476852261461318 59
+@ if       .55050505362827373 20
+@ in       .71904762834310521 29
+@ one outcome                        0 27
+@ beta       .64120370079763234 59
+@ beta two        .5920138917863369 59
+@ lroc weights       .64715566638688693 148
+@ sample       .62589285582569987 48
+@ all       .67361111682839692 59
+@ in past the sample       .87755101584658335 14
+@ probit       .67476852261461318 59
+@ factor       .67476852261461318 59
+@ ties       .63468014135304518 60
+@ fit weights       .64550942488632268 148
+@ fit weights if       .65357142697487669 48
+@ rc fit pweights 101
+@ rc pweights 101
+@ rc aweights 101
+@ rc noninteger 401
+@ rc varlist 198
+@ rc too many 103
+@ rc beta depvar 198
+@ rc beta matrix 111
+@ rc all if 198
+@ rc no observations 2000
+@ rc regress 301
+@ beta after regress       .64120370079763234 59

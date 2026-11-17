@@ -361,6 +361,7 @@ impl Session {
         self.fit_robust = true;
         self.fit_cluster = cluster.is_some();
         self.weighted_fit = false;
+        self.fit_weight = None;
         self.esample = true;
         self.changed_since_fit = false;
         Ok(())

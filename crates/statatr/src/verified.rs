@@ -141,6 +141,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ),
     ("local", &["control"]),
     ("logit", &["collinear", "interactions", "likelihood"]),
+    ("lroc", &["lroc"]),
     ("margins", &["cmclogit", "regress"]),
     ("marginsplot", &["marginsplot"]),
     ("matrix", &["matfuncs", "matrices"]),

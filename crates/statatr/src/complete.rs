@@ -158,6 +158,7 @@ pub const COMMANDS: &[&str] = &[
     "log",
     "logit",
     "lowess",
+    "lroc",
     "macro",
     "margins",
     "marginsplot",
@@ -662,6 +663,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("lowess", &["bwidth(", "generate(", "nograph"]),
+    ("lroc", &["all", "beta(", "nograph"]),
     (
         "margins",
         &[
@@ -1872,6 +1874,11 @@ gettoken a b : s, {o}"
             "rotate" => format!("factor x y z\nrotate, {o}"),
             "kap" if name == "wgt" => "kap x y, wgt(w)".to_string(),
             "kap" => format!("kap x y, {o}"),
+            "lroc" if name == "beta" => {
+                "logit y x\nmatrix b = (1, 0)\nmatrix colnames b = x _cons\nlroc y, beta(b)"
+                    .to_string()
+            }
+            "lroc" => format!("logit y x\nlroc, {o}"),
             "mhodds" if name == "by" => "mhodds y x, by(g)".to_string(),
             "mhodds" if name == "compare" => "mhodds y x, compare(2,1)".to_string(),
             "mhodds" if name == "level" => "mhodds y x, level(90)".to_string(),

@@ -57,6 +57,7 @@ mod infer;
 mod iv;
 mod kap;
 mod lasso;
+mod lroc;
 mod margins;
 mod matrices;
 mod meanest;
@@ -496,6 +497,7 @@ const WEIGHTED: &[&str] = &[
     "kap",
     "icc",
     "mhodds",
+    "lroc",
     "tabodds",
     "tetrachoric",
     "sktest",
@@ -779,6 +781,7 @@ const LEAVE_DATA_ALONE: &[&str] = &[
     "test",
     "lincom",
     "estat",
+    "lroc",
     "margins",
     "predict",
     "generate",
@@ -1456,6 +1459,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_rotate" => rotate::ROTATE_HELPER,
         "stata_kap" => kap::KAP_HELPER,
         "stata_mhodds" => mhodds::MHODDS_HELPER,
+        "stata_lroc" => lroc::LROC_HELPER,
         "stata_icc" => icc::ICC_HELPER,
         "stata_tetrachoric" => tetrachoric::TETRACHORIC_HELPER,
         "stata_est_more" => estat::ESTIMATES_MORE_HELPER,
@@ -1563,6 +1567,8 @@ struct Session {
     weighted_fit: bool,
     /// And they were frequency weights.
     fit_fweight: bool,
+    /// The weight the model last fitted had, as written (lroc reads its variable).
+    fit_weight: Option<crate::lang::syntax::Weight>,
     /// The last regress was plain: no robust, clustered or weighted errors.
     plain_regress: bool,
     /// `stata_esample` holds the last model's e(sample) and the rows have not
@@ -2620,6 +2626,7 @@ impl Session {
         if MODELS.contains(&c.name.as_str()) {
             self.weighted_fit = c.parts.weight.is_some();
             self.fit_fweight = matches!(&c.parts.weight, Some(w) if w.kind == crate::lang::syntax::WeightKind::Frequency);
+            self.fit_weight = c.parts.weight.clone();
         }
         // a new fit: the last one's results go first, so that if R stops in this
         // one (a model RCraft declines when it sees the data), what reads e() or
@@ -2777,6 +2784,7 @@ impl Session {
             "kap" => self.kap(c, &opts, out),
             "icc" => self.icc(c, &opts, out),
             "mhodds" => self.mhodds(c, &opts, out),
+            "lroc" => self.lroc(c, &opts, out),
             "tetrachoric" => self.tetrachoric(c, &opts, out),
             "sdtesti" => self.sdtesti(c, &opts, out),
             "anovaplot" => self.anovaplot(c, &opts, out),
@@ -5648,7 +5656,7 @@ estat ic");
         // so do the commands that only read the model, unless they post
         let out = r("use s
 regress y x
-lroc
+lsens
 lincom x
 estimates store m1
 lincom x

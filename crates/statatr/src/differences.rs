@@ -2490,6 +2490,33 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "lroc",
+        about: "Area under the ROC curve after logit or probit (lroc [depvar], nograph all beta())",
+        points: &[
+            p(
+                "In R",
+                "stata_lroc sorts the predicted probabilities (a float, as predict makes them) and \
+                 sums the trapezoids under sensitivity against 1 - specificity, each point a float \
+                 as in Stata 19, so r(area) carries Stata's residue in its last digits. The rows \
+                 are e(sample), or those if and in choose (they replace it), or every row with \
+                 all; beta() scores a row vector of the data's variables and _cons. The fit's \
+                 frequency weights or lroc's own count; r(N) and r(area), and Stata's errors.",
+            ),
+            p(
+                "Graph",
+                "Stata draws the ROC curve unless nograph is given; RCraft prints the area and does \
+                 not draw the curve, so its graph options are not translated and graph export \
+                 after it is refused.",
+            ),
+            p(
+                "Not yet",
+                "lroc after logistic (not translated) or after models other than logit and probit \
+                 that Stata has not been seen to reject; beta() with factor variables or \
+                 equations, or after a weighted fit; weights after a fit with iweights.",
+            ),
+        ],
+    },
+    Guide {
         command: "rotate",
         about: "Rotating factor's or pca's loadings (rotate, varimax, quartimax, equamax, promax(#), normalize, blanks(#))",
         points: &[
