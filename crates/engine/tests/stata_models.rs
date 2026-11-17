@@ -1277,7 +1277,7 @@ fn the_descriptive_commands_agree_with_stata_19() {
         1e-12,
         "correlate, covariance",
     );
-    let tt = "res$statistic, res$parameter, res$p.value, res$stderr";
+    let tt = "res$t, res$df_t, res$p, res$se";
     for (cmd, stata) in [
         (
             "ttest x == 0.1",
@@ -1325,7 +1325,7 @@ fn the_descriptive_commands_agree_with_stata_19() {
             ],
         ),
     ] {
-        let got = rerun(&mut e, cmd, "print(stats::t.test(", tt);
+        let got = rerun(&mut e, cmd, "stata_r <- stata_ttest_r(", tt);
         near_stata(&got, &stata, 1e-12, cmd);
     }
 }
@@ -1344,17 +1344,32 @@ fn fresh() -> usize {
 fn ttest_intervals_at_other_levels_agree_with_stata_19() {
     let Some(mut e) = engine() else { return };
     let dir = fixture(&mut e);
-    for (cmd, lo, hi) in [
-        ("ttest y, by(g) level(90)", -2.754959, -0.6227649),
-        ("ttest x == 0.1, level(99)", -0.447099, 0.204149),
-        ("ttest x == w, level(80)", -0.2794166, 0.0766166),
+    for (cmd, lo, hi, ci) in [
+        (
+            "ttest y, by(g) level(90)",
+            -2.754959,
+            -0.6227649,
+            "res$lb_diff, res$ub_diff",
+        ),
+        (
+            "ttest x == 0.1, level(99)",
+            -0.447099,
+            0.204149,
+            "res$lb_1, res$ub_1",
+        ),
+        (
+            "ttest x == w, level(80)",
+            -0.2794166,
+            0.0766166,
+            "res$lb_diff, res$ub_diff",
+        ),
     ] {
         let code = script(&format!("use \"{dir}/models.dta\"\n{cmd}\n"));
         ok(&mut e, &code);
         let got = numbers(
             &mut e,
-            &format!("res <- {}", line_of(&code, "print(stats::t.test(")),
-            "res$conf.int[1], res$conf.int[2]",
+            &format!("res <- {}", line_of(&code, "stata_r <- stata_ttest_r(")),
+            ci,
         );
         near_stata(&got, &[lo, hi], 5e-7, cmd);
     }

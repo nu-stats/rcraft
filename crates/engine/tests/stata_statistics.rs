@@ -406,8 +406,12 @@ fn ttest_one_sample_two_sample_and_paired() {
         "use \"{dir}/study.dta\"\nttest x == 5.5\nttest x, by(g)\nttest x == y\nttest x, by(g) unequal\nttest x == 5.5, level(90)\n"
     ));
     let text = ok(&mut e, &code);
-    assert!(text.contains("t-test"), "{text}");
-    assert!(text.contains("90 percent"), "level(90): {text}");
+    assert!(text.contains("One-sample t test"), "{text}");
+    assert!(
+        text.contains("Two-sample t test with unequal variances"),
+        "{text}"
+    );
+    assert!(text.contains("[90% conf. interval]"), "level(90): {text}");
 
     // the mean of 1..10 is exactly the value tested, so t is 0
     let v = numbers(
@@ -438,11 +442,6 @@ fn ttest_one_sample_two_sample_and_paired() {
 
 #[test]
 fn the_statistics_commands_say_why_they_refuse_what_they_refuse() {
-    let welch = refusal("use \"d.dta\"\nttest x, by(g) welch\n");
-    assert!(
-        welch.contains("Welch") && welch.contains("Satterthwaite"),
-        "{welch}"
-    );
     assert!(
         refusal("use \"d.dta\"\nttest x\n").contains("needs == or by()"),
         "a bare ttest should say what is missing"
@@ -904,7 +903,12 @@ fn by_runs_each_group_in_turn_as_stata_19_does() {
     ] {
         assert!(text.contains(want), "{want} in {text}");
     }
-    assert_eq!(text.matches("t = -3, df = 3").count(), 2, "{text}");
+    assert_eq!(text.matches("t =  -3.0000").count(), 2, "{text}");
+    assert_eq!(
+        text.matches("Degrees of freedom =        3").count(),
+        2,
+        "{text}"
+    );
 
     // after a model, e() is the last group's: Stata 19's figures
     let code = script(&format!("{use_}bysort g: regress z x\n"));
@@ -1694,4 +1698,104 @@ fn lroc_prints_statas_layout() {
         5,
         "{text}"
     );
+}
+
+#[test]
+fn ttest_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 50\ngenerate byte g = _n > 20\n\
+         generate double a = mod(_n * 37, 23) / 7 + g * (1 + mod(_n * 13, 9) / 3)\n\
+         generate double b = a + mod(_n * 11, 5) / 4 - .4\n\
+         label define gg 0 \"control\" 1 \"treated group\"\nlabel values g gg\n\
+         ttest a, by(g) welch\nttest a == b\nttesti 25 1.5 .8 1\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Two-sample t test with unequal variances",
+        "   Group |     Obs        Mean    Std. err.   Std. dev.   [95% conf. interval]",
+        " control |      20    1.614286    .2119167    .9477204    1.170739    2.057833",
+        " treated |      30    3.895238    .2420083    1.325534    3.400275    4.390201",
+        "Combined |      50    2.982857    .2307507    1.631654    2.519146    3.446568",
+        "    diff |           -2.280952     .321678               -2.927125    -1.63478",
+        "    diff = mean(control) - mean(treated)                          t =  -7.0908",
+        "H0: diff = 0                             Welch's degrees of freedom =  49.8044",
+        "    Ha: diff < 0                 Ha: diff != 0                 Ha: diff > 0",
+        " Pr(T < t) = 0.0000         Pr(|T| > |t|) = 0.0000          Pr(T > t) = 1.0000",
+        "Paired t test",
+        "    diff |      50         -.1    .0505076    .3571429   -.2014989    .0014989",
+        "     mean(diff) = mean(a - b)                                     t =  -1.9799",
+        " H0: mean(diff) = 0                              Degrees of freedom =       49",
+        " Ha: mean(diff) < 0           Ha: mean(diff) != 0           Ha: mean(diff) > 0",
+        "       x |      25         1.5         .16          .8    1.169776    1.830224",
+        "    Ha: mean < 1                 Ha: mean != 1                 Ha: mean > 1",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
+#[test]
+fn summarize_detail_and_weights_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset obs 40\ngenerate double x = mod(_n * 37, 23) / 7 + _n / 10\n\
+         generate long big = _n * 12345\nlabel variable x \"A labelled variable\"\n\
+         generate w = 1 + mod(_n, 3)\nsummarize x, detail\nsummarize big, detail\n\
+         summarize x [aw=w]\nsummarize x [aw=w], detail\nsummarize x in 1/3, detail\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "                     A labelled variable",
+        "-------------------------------------------------------------",
+        "      Percentiles      Smallest",
+        " 1%     .6428571       .6428571",
+        "10%     1.692857       1.285714       Obs                  40",
+        "25%     2.521429       1.557143       Sum of wgt.          40",
+        "50%     3.621429                      Mean           3.621429",
+        "                        Largest       Std. dev.      1.488575",
+        "95%     6.142857       6.328571       Skewness      -1.15e-16",
+        "99%          6.6            6.6       Kurtosis       2.311125",
+        "90%     450592.5         469110       Variance       2.08e+10",
+        "95%     475282.5         481455       Skewness      -1.56e-16",
+        "    Variable |     Obs      Weight        Mean   Std. dev.       Min        Max",
+        "           x |      40          80    3.526607   1.485474   .6428571        6.6",
+        "25%     2.521429       1.557143       Sum of wgt.          80",
+        "25%     .9142857              .       Sum of wgt.           3",
+        "75%     3.014286              .",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
+#[test]
+fn correlate_prints_statas_matrix() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset linesize 80\nset obs 30\ngenerate double x = mod(_n * 37, 23) / 7 + _n / 10\n\
+         generate v1 = x * 1 + mod(_n * 1, 7)\ngenerate v2 = x * 2 + mod(_n * 2, 7)\n\
+         generate v3 = x * 3 + mod(_n * 3, 7)\ngenerate v4 = x * 4 + mod(_n * 4, 7)\n\
+         generate v5 = x * 5 + mod(_n * 5, 7)\ngenerate v6 = x * 6 + mod(_n * 6, 7)\n\
+         generate v7 = x * 7 + mod(_n * 7, 7)\ngenerate v8 = x * 8 + mod(_n * 8, 7)\n\
+         generate w = 100.5 + mod(_n, 3) * 1234.25\n\
+         correlate x v1-v8, means\ncorrelate x v1-v8, covariance\ncorrelate x v1 [aw=w]\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "    Variable |         Mean    Std. dev.          Min          Max",
+        "          v8 |     27.60476     10.18523     9.314285     47.51429",
+        "             |        x       v1       v2       v3       v4       v5       v6",
+        "-------------+---------------------------------------------------------------",
+        "          v8 |   0.9805   0.7152   0.8129   0.8782   0.9439   0.9467   0.9274",
+        "             |       v7       v8",
+        "          v8 |   0.9805   1.0000",
+        "          v6 |  8.94748  8.72383  17.9718  28.9025  36.8838  47.8146  57.0625",
+        "          v8 |  86.0832  103.739",
+        "(sum of wgt is 40,042.5)",
+        "          v1 |   0.5628   1.0000",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
 }

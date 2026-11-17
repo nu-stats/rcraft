@@ -110,6 +110,7 @@ mod testparm;
 mod tetrachoric;
 mod ts;
 mod tsreg;
+mod ttest;
 mod weights;
 mod winsor;
 mod xt;
@@ -1451,6 +1452,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ereturn" => returned::ERETURN_HELPER,
         "stata_eclass" => eclass::ECLASS_HELPER,
         "stata_ttest_r" => returned::TTEST_R_HELPER,
+        "stata_ttest_show" => ttest::TTEST_SHOW_HELPER,
         "stata_eb" => matrices::EB_HELPER,
         "stata_scalar" => scalars::SCALAR_HELPER,
         "stata_tables" => tables::TABLES_HELPER,
@@ -2897,6 +2899,7 @@ impl Session {
             "tab2" => self.tab2(c, &opts, out),
             "pwcorr" => self.pwcorr(c, &opts, out),
             "ttest" => self.ttest(c, &opts, out),
+            "ttesti" => self.ttesti(c, &opts, out),
             "regress" => self.regress(c, &opts, out),
             "logit" => self.ml(c, &opts, out, model::Fit::Logit),
             "probit" => self.ml(c, &opts, out, model::Fit::Probit),

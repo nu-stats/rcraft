@@ -267,6 +267,7 @@ pub const COMMANDS: &[&str] = &[
     "total",
     "tsset",
     "ttest",
+    "ttesti",
     "twoway",
     "unab",
     "use",
@@ -1028,7 +1029,8 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("tostring", &["generate(", "replace"]),
-    ("ttest", &["by(", "level(", "unequal", "unpaired"]),
+    ("ttest", &["by(", "level(", "unequal", "unpaired", "welch"]),
+    ("ttesti", &["level(", "unequal", "welch"]),
     ("twoway", &["by(", "legend(", "nodraw", "sort"]),
     ("use", &["clear", "nolabel"]),
     ("xpose", &["clear", "promote", "varname"]),
@@ -1657,7 +1659,10 @@ mod tests {
         assert_eq!(options("qui: reg", VARS), names(&["reghdfe", "regress"]));
         assert_eq!(options("by sex: summ", VARS), names(&["summarize"]));
         assert_eq!(options("bysort sex age: gen", VARS), names(&["generate"]));
-        assert_eq!(options("capture noisily tt", VARS), names(&["ttest"]));
+        assert_eq!(
+            options("capture noisily tt", VARS),
+            names(&["ttest", "ttesti"])
+        );
         // a subcommand
         assert_eq!(options("graph b", VARS), names(&["bar", "box"]));
         assert_eq!(options("import d", VARS), names(&["delimited"]));
@@ -2046,6 +2051,7 @@ gettoken a b : s, {o}"
             "stset" => format!("stset t, {o}"),
             "ttest" if name == "by" => format!("ttest y, {o}"),
             "ttest" => format!("ttest y == x, {o}"),
+            "ttesti" => format!("ttesti 20 1 1 30 2 2, {o}"),
             "reghdfe" if name == "absorb" || name == "noabsorb" => format!("reghdfe y x, {o}"),
             "reghdfe" => format!("reghdfe y x, absorb(g) {o}"),
             "outreg2" => format!("regress y x\noutreg2 using t.xls, tstat bdec(3) tdec(2) {o}"),

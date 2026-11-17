@@ -28,3 +28,12 @@ line against RCraft's output: identical); corpus `tabulate_pct.do`. Printed by
   counts table's. `missing` adds the "." column. r() is as without the percentages.
 - `nofreq chi2` with no percentage (2026-11-13, probe `tb/b2.do`): only the chi2 line, after a blank line, and
   r() whole (N r c chi2 p) — unlike `nofreq` alone.
+
+## On hold: aweights and iweights (2026-11-17)
+
+Still printed in R's layout; to be built later with more Stata 19 probes. Stata 19 prints the weighted counts
+from their float values with noise digits: one-way `7.510277742` and ` 41.6200006` in the 11-wide Freq. column
+(Total `23`, `127.460002`), two-way `2.6598147`, `4.850463`, `41.6200006` (overflowing to the bar) and
+`14.74` in the 10-wide cells; percentages as with counts. The width and digits rule needs probes over weight
+magnitudes, decimals, very large and tiny totals, and counts near whole numbers. chi2 with aweights is
+Stata's error `chi2 not allowed with aweights` (r(406)), translated.

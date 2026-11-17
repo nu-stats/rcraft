@@ -2607,7 +2607,7 @@ fn mentions_data(e: &str, scalar: &dyn Fn(&str) -> bool) -> bool {
 }
 
 /// `ttest`: Stata's r() of each of its four tests, in the order of its `return list`.
-pub(super) const TTEST_R_HELPER: &str = r#"stata_ttest_r <- function(x, g = NULL, y = NULL, mu = NULL, paired = FALSE, level = 95, equal = TRUE) {
+pub(super) const TTEST_R_HELPER: &str = r#"stata_ttest_r <- function(x, g = NULL, y = NULL, mu = NULL, paired = FALSE, level = 95, equal = TRUE, welch = FALSE) {
   # Stata's r() of ttest: one sample (mu), paired, two samples (y), or by(g)
   num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
   x <- num(x)
@@ -2648,7 +2648,8 @@ pub(super) const TTEST_R_HELPER: &str = r#"stata_ttest_r <- function(x, g = NULL
     x <- x[ok]
     g <- g[ok]
     lv <- sort(unique(g))
-    if (length(lv) != 2) stop("more than 2 groups found, only 2 allowed")
+    if (length(lv) > 2) stop("more than 2 groups found, only 2 allowed (Stata: r(420))", call. = FALSE)
+    if (length(lv) < 2) stop(length(lv), if (length(lv) == 1) " group" else " groups", " found, 2 required (Stata: r(420))", call. = FALSE)
     v1 <- x[g == lv[1]]
     v2 <- x[g == lv[2]]
   }
@@ -2656,14 +2657,15 @@ pub(super) const TTEST_R_HELPER: &str = r#"stata_ttest_r <- function(x, g = NULL
   b <- one(v2)
   all <- one(c(v1, v2))
   diff <- a$mu - b$mu
-  if (equal) {
+  if (equal && !welch) {
     df <- a$N + b$N - 2
     se <- sqrt(((a$N - 1) * a$sd^2 + (b$N - 1) * b$sd^2) / df * (1 / a$N + 1 / b$N))
   } else {
     s1 <- a$sd^2 / a$N
     s2 <- b$sd^2 / b$N
     se <- sqrt(s1 + s2)
-    df <- (s1 + s2)^2 / (s1^2 / (a$N - 1) + s2^2 / (b$N - 1))
+    # Welch's (1947), or Satterthwaite's
+    df <- if (welch) (s1 + s2)^2 / (s1^2 / (a$N + 1) + s2^2 / (b$N + 1)) - 2 else (s1 + s2)^2 / (s1^2 / (a$N - 1) + s2^2 / (b$N - 1))
   }
   h <- stats::qt(q, df) * se
   c(list(ub_diff = diff + h, lb_diff = diff - h, mu_diff = diff,

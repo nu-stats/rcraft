@@ -2,9 +2,8 @@
 //!
 //! `summarize`, `tabulate`, `correlate` and `ttest` so far. As everywhere in
 //! this crate, nothing is guessed: where R cannot do what Stata does, the
-//! command is not translated and says why. One refusal worth naming:
-//! `ttest, welch` uses Welch's degrees of freedom, which R's `t.test` does not
-//! offer (it uses Satterthwaite's, which is Stata's `unequal`).
+//! command is not translated and says why. ttest's table and Welch's degrees
+//! of freedom are in `ttest.rs`.
 //!
 //! RCraft's own menus have dialogs for these statistics (Summary statistics,
 //! Frequency table, Cross-tabulation, Correlation, the three t-tests). This is
@@ -92,7 +91,15 @@ pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, deta
     x <- a$x
     k <- length(x)
     m <- moments(x, a$w)
-    mom <- function(r) if (k > 0) sum(a$w * (x - m$mean)^r) / m$sum_w else NA_real_
+    # the moments as Stata adds them: in the data's order, one product at a time, in
+    # doubles (a skewness that is 0 but for rounding comes out as Stata's -1.15e-16)
+    x0 <- num(d[[n]]); ok0 <- !is.na(x0) & !is.na(w)
+    dv <- x0[ok0] - m$mean; w0 <- w[ok0]
+    mom <- function(r) {
+      if (k == 0) return(NA_real_)
+      p <- switch(r - 1, dv * dv, dv * dv * dv, dv * dv * dv * dv)
+      Reduce(`+`, w0 * p) / m$sum_w
+    }
     s <- data.frame(
       variable = n,
       obs = m$N,
@@ -125,12 +132,60 @@ pub(super) const SUMMARIZE_HELPER: &str = r#"stata_summarize <- function(d, deta
   out <- do.call(rbind, lapply(names(d), one))
   if (ret) assign("stata_r", rr, envir = env)
   if (!print) return(invisible(out))
-  if (table && !detail && !weighted) {
-    # Stata's table, as Stata 19 prints it
-    string <- vapply(out$variable, function(n) is.character(d[[n]]) || is.factor(d[[n]]), TRUE)
+  string <- vapply(out$variable, function(n) is.character(d[[n]]) || is.factor(d[[n]]), TRUE)
+  title_of <- function(n) { l <- attr(d[[n]], "label", exact = TRUE); if (is.null(l) || !nzchar(l)) n else substr(l, 1, 80) }
+  # detail's title as Stata 19 wraps it: words to lines of 50 at most (a longer word cut at 50)
+  wrap50 <- function(t) {
+    words <- unlist(lapply(strsplit(t, " ", fixed = TRUE)[[1]], function(w) if (nchar(w) > 50) substring(w, seq(1, nchar(w), 50), pmin(seq(50, nchar(w) + 49, 50), nchar(w))) else w))
+    out <- character(); line <- ""
+    for (w in words) {
+      if (!nzchar(line)) line <- w else if (nchar(line) + 1 + nchar(w) <= 50) line <- paste(line, w) else { out <- c(out, line); line <- w }
+    }
+    c(out, line)
+  }
+  long <- FALSE
+  if (table && !detail && (!weighted || wtype == "f")) {
+    # Stata's table, as Stata 19 prints it (fweights: Obs is the sum of the weights)
     stata_sum_print(out$variable, out$obs, out$mean, out$sd, out$min, out$max, string)
+  } else if (table && !detail && wtype %in% c("a", "i")) {
+    # aweights and iweights: a column of the weights' sum after Obs
+    rule <- paste0(strrep("-", 13), "+", strrep("-", 65), "\n")
+    cat("\n    Variable |     Obs      Weight        Mean   Std. dev.       Min        Max\n", rule, sep = "")
+    for (i in seq_len(nrow(out))) {
+      if (i > 1 && (i - 1) %% 5 == 0) cat(rule)
+      lab <- stata_tab_pad(stata_tab_abbrev(out$variable[i]), 12)
+      if (string[i] || out$obs[i] == 0) {
+        cat(lab, " |", stata_tab_pad(stata_tab_count(out$obs[i]), 8), stata_tab_pad(stata_tab_g(if (string[i]) 0 else out$sum_w[i]), 12), "\n", sep = "")
+        next
+      }
+      cat(lab, " |", stata_tab_pad(stata_tab_count(out$obs[i]), 8), stata_tab_pad(stata_tab_g(out$sum_w[i]), 12),
+          stata_tab_pad(stata_tab_g(out$mean[i]), 12), stata_tab_pad(stata_tab_g(out$sd[i]), 11),
+          stata_tab_pad(stata_tab_g(out$min[i]), 11), stata_tab_pad(stata_tab_g(out$max[i]), 11), "\n", sep = "")
+    }
   } else if (!detail) {
     print(out, row.names = FALSE)
+  } else if (table && !long) {
+    # summarize, detail as Stata 19 prints it: the title centred over the rule, the
+    # percentiles beside the four smallest and four largest values, the statistics on the right
+    g <- function(v) if (is.na(v)) "." else stata_fmt(v, "%9.0g", trim = TRUE)
+    st <- function(lab, v) paste0("       ", sprintf("%-12s%11s", lab, g(v)))
+    for (i in seq_len(nrow(out))) {
+      r <- out[i, ]
+      t <- wrap50(title_of(r$variable))
+      cat("\n", paste0(strrep(" ", (61 - nchar(t)) %/% 2), t, "\n"), strrep("-", 61), "\n", sep = "")
+      x <- if (string[i]) numeric(0) else vals(r$variable)$x
+      k <- length(x)
+      if (k == 0) { cat("no observations\n"); next }
+      sm <- c(utils::head(x, 4), rep(NA_real_, max(0, 4 - k)))
+      lg <- c(rep(NA_real_, max(0, 4 - k)), utils::tail(x, 4))
+      pc <- function(lab, p, v) sprintf("%3s%13s%15s", lab, g(p), if (missing(v)) "" else g(v))
+      cat("      Percentiles      Smallest\n")
+      cat(pc(" 1%", r$p1, sm[1]), "\n", pc(" 5%", r$p5, sm[2]), "\n", sep = "")
+      cat(pc("10%", r$p10, sm[3]), st("Obs", r$obs), "\n", pc("25%", r$p25, sm[4]), st("Sum of wgt.", if (weighted) r$sum_w else r$obs), "\n\n", sep = "")
+      cat(pc("50%", r$p50), st("Mean", r$mean), "\n", sprintf("%16s%15s", "", "Largest"), st("Std. dev.", r$sd), "\n", sep = "")
+      cat(pc("75%", r$p75, lg[1]), "\n", pc("90%", r$p90, lg[2]), st("Variance", r$variance), "\n", sep = "")
+      cat(pc("95%", r$p95, lg[3]), st("Skewness", r$skewness), "\n", pc("99%", r$p99, lg[4]), st("Kurtosis", r$kurtosis), "\n", sep = "")
+    }
   } else {
     for (i in seq_len(nrow(out))) {
       r <- out[i, ]
@@ -377,6 +432,8 @@ pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, cova
   ok <- stats::complete.cases(m)
   m <- m[ok, , drop = FALSE]
   if (!is.null(w)) w <- as.numeric(w[ok])
+  if (!nrow(m)) stop("no observations (Stata: r(2000))", call. = FALSE)
+  if (!is.null(w) && wtype == "a") cat("(sum of wgt is ", stata_fmt(sum(w), "%9.0gc", trim = TRUE), ")\n", sep = "")
   cat("(obs=", if (!is.null(w) && wtype == "f") sum(w) else nrow(m), ")\n", sep = "")
   if (nrow(m) < 2) {
     cat("too few rows are left once the ones with a missing value are dropped\n")
@@ -388,10 +445,31 @@ pub(super) const CORRELATE_HELPER: &str = r#"stata_correlate <- function(d, cova
     C <- stata_wcov(m, w, wtype)
     if (covariance) C else stats::cov2cor(C)
   }
-  print(round(r, 4))
   if (means) {
-    if (is.null(w)) stata_summarize(as.data.frame(m), table = FALSE) else stata_summarize(as.data.frame(m), w = w, wtype = wtype, table = FALSE)
+    # Stata 19's table of the means: no lines between its rows
+    s <- if (is.null(w)) stata_summarize(as.data.frame(m), print = FALSE) else stata_summarize(as.data.frame(m), w = w, wtype = wtype, print = FALSE)
+    g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
+    cat("\n    Variable |         Mean    Std. dev.          Min          Max\n", strrep("-", 13), "+", strrep("-", 52), "\n", sep = "")
+    for (i in seq_len(nrow(s)))
+      cat(sprintf("%12s |%13s%13s%13s%13s", stata_tab_abbrev(s$variable[i], 12), g(s$mean[i]), g(s$sd[i]), g(s$min[i]), g(s$max[i])), "\n", sep = "")
+    cat("\n")
   }
+  # Stata 19's matrix: as pwcorr's, %8.4f correlations or %8.0g covariances, seven columns to a block at 80
+  cell <- function(v) formatC(stata_fmt(v, if (covariance) "%8.0g" else "%8.4f", trim = TRUE), width = 8)
+  k <- ncol(r); nm <- colnames(m)
+  ls <- if (exists("stata_linesize")) stata_linesize else 80
+  per <- max(1, (ls - 15) %/% 9)
+  blocks <- split(seq_len(k), (seq_len(k) - 1) %/% per)
+  for (bi in seq_along(blocks)) {
+    cols <- blocks[[bi]]
+    cat("\n", strrep(" ", 13), "| ", paste(formatC(stata_tab_abbrev(nm[cols], 8), width = 8), collapse = " "), "\n",
+        strrep("-", 13), "+", strrep("-", 9 * length(cols)), "\n", sep = "")
+    for (i in cols[1]:k) {
+      js <- cols[cols <= i]
+      cat(formatC(stata_tab_abbrev(nm[i], 12), width = 12), " |", paste0(" ", vapply(js, function(j) cell(r[i, j]), ""), collapse = ""), "\n", sep = "")
+    }
+  }
+  cat("\n")
   # Stata's r(): the sum of analytic weights, the count, the first pair's
   # correlation (or with covariance the first two variances and their
   # covariance, 0 when there is one variable) and the matrix
@@ -434,6 +512,16 @@ impl Session {
             )));
         }
         let detail = opts.has("detail", 1);
+        // Stata's error for iweights with detail
+        if detail
+            && c.parts
+                .weight
+                .as_ref()
+                .is_some_and(|w| matches!(w.kind, crate::lang::syntax::WeightKind::Importance))
+        {
+            out.line("stop(\"iweights not allowed (Stata: r(101))\", call. = FALSE)");
+            return Ok(());
+        }
         let allowed: &[W] = if detail {
             &[W::F, W::A]
         } else {
@@ -475,9 +563,6 @@ impl Session {
         ));
         if self.quiet(c) {
             return Ok(());
-        }
-        if detail || w.is_some() {
-            out.caveat("printed in R's layout, not Stata's table");
         }
         if detail {
             out.caveat(
@@ -558,7 +643,10 @@ impl Session {
             }
         }
         let w = self.weight_of(c, &[W::F, W::A, W::I])?;
-        tab_chi2_weight(opts, &w)?;
+        if let Some(l) = tab_chi2_weight(opts, &w)? {
+            out.line(l);
+            return Ok(());
+        }
         let (src, _, wargs) = self.weighted_frame(c, out, &w)?;
         self.helpers.insert("stata_tab_values");
         self.helpers.insert("stata_tabulate");
@@ -683,7 +771,9 @@ impl Session {
         }
         let w = self.weight_of(c, &[W::F, W::A])?;
         let (_, src, wargs) = self.weighted_frame(c, out, &w)?;
-        self.helpers.insert("stata_correlate");
+        for h in ["stata_correlate", "stata_fmt", "stata_tables"] {
+            self.helpers.insert(h);
+        }
         if w.is_some() {
             self.helpers.insert("stata_wcov");
         }
@@ -704,12 +794,13 @@ impl Session {
         }
         out.line(call);
         out.caveat("a row with a missing value in any of the variables is dropped, as Stata does");
-        out.caveat("printed in R's layout, not Stata's table");
         Ok(())
     }
 
     // ---------------- ttest ----------------
 
+    /// `ttest` as Stata 19 prints it (`ttest.rs`): one sample, paired, two
+    /// samples (by() or unpaired), unequal (Satterthwaite) or welch.
     pub(super) fn ttest(
         &mut self,
         c: &Command,
@@ -717,38 +808,32 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "ttest")?;
-        if opts.has("welch", 5) {
-            return Err(no(
-                "ttest, welch asks for Welch's degrees of freedom; R's t.test offers only \
-                 Satterthwaite's, which is Stata's unequal",
-            ));
-        }
-        if let Some(o) = opts.other(&[("by", 2), ("unequal", 3), ("unpaired", 5), ("level", 3)]) {
+        if let Some(o) = opts.other(&[
+            ("by", 2),
+            ("unequal", 3),
+            ("unpaired", 5),
+            ("level", 3),
+            ("welch", 5),
+        ]) {
             return Err(no(format!(
                 "ttest with the option {o} is not translated yet"
             )));
         }
-        let level = match opts.arg("level", 3) {
-            Some(l) => {
-                let n: f64 = l
-                    .trim()
-                    .parse()
-                    .map_err(|_| no(format!("level({l}) is not a number")))?;
-                if !(0.0..100.0).contains(&n) {
-                    return Err(no(format!("level({l}) is not between 0 and 100")));
-                }
-                Some(n / 100.0)
-            }
-            None => None,
+        let stop = |msg: &str| {
+            format!(
+                "stop({}, call. = FALSE)",
+                r_text(&format!("{msg} (Stata: r(198))"))
+            )
         };
-        let equal = !opts.has("unequal", 3);
+        let level = ttest_level(opts)?;
+        let welch = opts.has("welch", 5);
+        let equal = !opts.has("unequal", 3) && !welch;
         let src = self.rows_for(c, out)?;
         let main = c.parts.main.trim().to_string();
         let group = opts.arg("by", 2);
-        let mut args: Vec<String> = Vec::new();
-        let mut two_sample = false;
-        // what stata_ttest_r() takes to leave Stata's r() of this test
+        // what stata_ttest_r() and stata_ttest_show() take
         let r_args;
+        let show;
         match main.split_once("==") {
             Some((left, right)) => {
                 let (left, right) = (left.trim(), right.trim());
@@ -759,17 +844,55 @@ impl Session {
                     return Err(no("ttest takes either == or by(), not both"));
                 }
                 let first = format!("{src}${}", r_name(left));
-                args.push(first.clone());
+                let paired_or_one = !(is_name(right) && opts.has("unpaired", 5));
+                // Stata's words for unequal and welch with one sample or pairs
+                if paired_or_one && (welch || opts.has("unequal", 3)) {
+                    let o = if opts.has("unequal", 3) {
+                        "unequal"
+                    } else {
+                        "welch"
+                    };
+                    out.line(stop(&format!(
+                        "{o} option invalid for one-sample or paired tests"
+                    )));
+                    return Ok(());
+                }
+                let rows = |names: &[&str]| {
+                    format!(
+                        "c({})",
+                        names
+                            .iter()
+                            .map(|n| format!("stata_tab_abbrev({}, 8)", r_text(n)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
+                let nm = |names: &[&str]| {
+                    format!(
+                        "c({})",
+                        names
+                            .iter()
+                            .map(|n| r_text(n))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
                 if is_name(right) {
                     let second = format!("{src}${}", r_name(right));
-                    args.push(second.clone());
                     if opts.has("unpaired", 5) {
-                        two_sample = true;
-                        args.push(format!("var.equal = {}", r_logical(equal)));
                         r_args = format!("{first}, y = {second}");
+                        show = format!(
+                            "\"two\", {}, nm = {}",
+                            rows(&[left, right]),
+                            nm(&[left, right])
+                        );
                     } else {
-                        args.push("paired = TRUE".into());
                         r_args = format!("{first}, y = {second}, paired = TRUE");
+                        show = format!(
+                            "\"paired\", {}, nm = {}",
+                            rows(&[left, right]),
+                            nm(&[left, right])
+                        );
                     }
                 } else {
                     let v: f64 = right
@@ -778,8 +901,13 @@ impl Session {
                     if opts.has("unpaired", 5) {
                         return Err(no("ttest var == number has nothing to unpair"));
                     }
-                    args.push(format!("mu = {}", r_number(v)));
                     r_args = format!("{first}, mu = {}", r_number(v));
+                    show = format!(
+                        "\"one\", {}, nm = {}, mu = {}",
+                        rows(&[left]),
+                        nm(&[left]),
+                        r_number(v)
+                    );
                 }
             }
             None => {
@@ -794,35 +922,124 @@ impl Session {
                 if !is_name(g) {
                     return Err(no(format!("by({g}) is not a variable name")));
                 }
-                two_sample = true;
                 r_args = format!("{src}${}, {src}${}", r_name(v), r_name(g));
-                args.push(format!("{} ~ {}", r_name(v), r_name(g)));
-                args.push(format!("data = {src}"));
-                args.push(format!("var.equal = {}", r_logical(equal)));
+                // the groups' names from the rows the test uses
+                show = format!(
+                    "\"two\", stata_ttest_groups({src}${g}[!is.na({src}${v})]), head = \"Group\"",
+                    g = r_name(g),
+                    v = r_name(v)
+                );
             }
         }
-        if let Some(l) = level {
-            args.push(format!("conf.level = {}", r_number(l)));
+        for h in [
+            "stata_ttest_r",
+            "stata_ttest_show",
+            "stata_fmt",
+            "stata_tables",
+        ] {
+            self.helpers.insert(h);
         }
-        // Stata's r() of the test, quietly or not
-        self.helpers.insert("stata_ttest_r");
         out.line(format!(
-            "stata_r <- stata_ttest_r({r_args}, level = {}, equal = {})",
+            "stata_r <- stata_ttest_r({r_args}, level = {}, equal = {}{})",
             r_number(super::returned::percent(level.unwrap_or(0.95))),
-            r_logical(equal)
+            r_logical(equal),
+            if welch { ", welch = TRUE" } else { "" }
         ));
         self.r_new = Some((super::returned::R_TTEST, "ttest".into()));
         if self.quiet(c) {
             return Ok(());
         }
-        out.line(format!("print(stats::t.test({}))", args.join(", ")));
-        out.caveat("R prints the two-sided p-value; Stata prints the one-sided ones beside it");
-        if two_sample && equal {
-            out.caveat(
-                "the groups are taken to have the same variance, as Stata does without unequal",
-            );
+        out.line(format!(
+            "stata_ttest_show(stata_r, {show}, equal = {}{})",
+            r_logical(equal),
+            if welch { ", welch = TRUE" } else { "" }
+        ));
+        Ok(())
+    }
+
+    /// `ttesti #obs #mean #sd #val` and `ttesti #obs1 #mean1 #sd1 #obs2 #mean2
+    /// #sd2`, with unequal, welch and level(), as Stata 19 prints them.
+    pub(super) fn ttesti(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "ttesti")?;
+        if let Some(o) = opts.other(&[("unequal", 3), ("level", 3), ("welch", 5)]) {
+            return Err(no(format!(
+                "ttesti with the option {o} is not translated yet"
+            )));
         }
-        out.caveat("printed in R's layout, not Stata's table");
+        let nums: Option<Vec<f64>> = c
+            .parts
+            .main
+            .split_whitespace()
+            .map(|w| w.parse().ok())
+            .collect();
+        let Some(nums) = nums else {
+            return Err(no("ttesti: the numbers written out are translated"));
+        };
+        let level = ttest_level(opts)?;
+        let welch = opts.has("welch", 5);
+        let equal = !opts.has("unequal", 3) && !welch;
+        let lv = r_number(super::returned::percent(level.unwrap_or(0.95)));
+        let (r_args, show) = match nums.as_slice() {
+            [n, m, s, v] => {
+                if welch || opts.has("unequal", 3) {
+                    let o = if opts.has("unequal", 3) {
+                        "unequal"
+                    } else {
+                        "welch"
+                    };
+                    out.line(format!(
+                        "stop({}, call. = FALSE)",
+                        r_text(&format!(
+                            "{o} option invalid for one-sample or paired tests (Stata: r(198))"
+                        ))
+                    ));
+                    return Ok(());
+                }
+                (
+                    format!(
+                        "{}, {}, {}, mu = {}",
+                        r_number(*n),
+                        r_number(*m),
+                        r_number(*s),
+                        r_number(*v)
+                    ),
+                    format!("\"one\", \"x\", head = \"\", mu = {}", r_number(*v)),
+                )
+            }
+            [n1, m1, s1, n2, m2, s2] => (
+                [n1, m1, s1, n2, m2, s2]
+                    .iter()
+                    .map(|v| r_number(**v))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                "\"two\", c(\"x\", \"y\"), head = \"\"".to_string(),
+            ),
+            _ => {
+                return Err(no(
+                    "ttesti takes four numbers (one sample) or six (two samples)",
+                ))
+            }
+        };
+        for h in ["stata_ttest_show", "stata_fmt"] {
+            self.helpers.insert(h);
+        }
+        let w = if welch { ", welch = TRUE" } else { "" };
+        out.line(format!(
+            "stata_r <- stata_ttesti_r({r_args}, level = {lv}, equal = {}{w})",
+            r_logical(equal)
+        ));
+        self.r_new = Some((super::returned::R_TTEST, "ttesti".into()));
+        if !self.quiet(c) {
+            out.line(format!(
+                "stata_ttest_show(stata_r, {show}, equal = {}{w})",
+                r_logical(equal)
+            ));
+        }
         Ok(())
     }
 
@@ -1064,7 +1281,10 @@ impl Session {
     ) -> Result<(), Untranslated> {
         self.no_by(c, "tab2")?;
         let w = self.weight_of(c, &[W::F, W::A, W::I])?;
-        tab_chi2_weight(opts, &w)?;
+        if let Some(l) = tab_chi2_weight(opts, &w)? {
+            out.line(l);
+            return Ok(());
+        }
         let known = [
             ("firstonly", 9),
             ("missing", 1),
@@ -1126,10 +1346,8 @@ impl Session {
         if opts.has("chi2", 4) {
             out.caveat("Pearson's chi-squared, with no continuity correction, as Stata does it");
         }
-        let percents = [("row", 3), ("column", 3), ("cell", 4)]
-            .iter()
-            .any(|(o, m)| opts.has(o, *m));
-        if percents || matches!(w, Some((W::A | W::I, _))) {
+        // percentages print in Stata's layout (stata_tab2_pct_print); weighted counts do not yet
+        if matches!(w, Some((W::A | W::I, _))) {
             out.caveat("printed in R's layout, not Stata's table");
         }
         Ok(())
@@ -1272,16 +1490,19 @@ pub(super) const BY_GROUPS_HELPER: &str = r#"stata_by_groups <- function(d, vars
   })
 }"#;
 
-/// Stata takes `chi2` only with frequency weights.
-fn tab_chi2_weight(opts: &Opts, w: &Weighting) -> Result<(), Untranslated> {
+/// Stata takes `chi2` only with frequency weights: with aweights its error (r(406),
+/// Stata 19), the R line that stops so; with iweights refused (its code not seen).
+fn tab_chi2_weight(opts: &Opts, w: &Weighting) -> Result<Option<String>, Untranslated> {
     match w {
-        Some((W::A, _)) if opts.has("chi2", 4) => Err(no("chi2 not allowed with aweights")),
+        Some((W::A, _)) if opts.has("chi2", 4) => Ok(Some(
+            "stop(\"chi2 not allowed with aweights (Stata: r(406))\", call. = FALSE)".into(),
+        )),
         Some((W::I, _)) if opts.has("chi2", 4) => Err(no("option chi2 not allowed")),
         // not seen in Stata with these weights
         Some((W::A | W::I, _)) if opts.has("lrchi2", 6) => Err(no(
             "tabulate, lrchi2 with analytic or importance weights is not translated yet",
         )),
-        _ => Ok(()),
+        _ => Ok(None),
     }
 }
 
@@ -1369,5 +1590,22 @@ impl Session {
         ));
         self.r_new = Some((R_PCTILE, "_pctile".into()));
         Ok(())
+    }
+}
+
+/// ttest's and ttesti's level(): a number from 0 to 100, as a fraction.
+fn ttest_level(opts: &Opts) -> Result<Option<f64>, Untranslated> {
+    match opts.arg("level", 3) {
+        Some(l) => {
+            let n: f64 = l
+                .trim()
+                .parse()
+                .map_err(|_| no(format!("level({l}) is not a number")))?;
+            if !(10.0..=99.99).contains(&n) {
+                return Err(no(format!("level({l}) is not between 10 and 99.99")));
+            }
+            Ok(Some(n / 100.0))
+        }
+        None => Ok(None),
     }
 }

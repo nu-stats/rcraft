@@ -659,12 +659,7 @@ fn likelihood_models_with_weights_agree_with_stata_19() {
 fn weights_stata_refuses_are_refused_in_its_words() {
     for (cmd, why) in [
         ("summarize z [pw=a]", "pweights not allowed"),
-        ("summarize z [iw=a], detail", "iweights not allowed"),
         ("tabulate g [pw=a]", "pweights not allowed"),
-        (
-            "tabulate g b [aw=a], chi2",
-            "chi2 not allowed with aweights",
-        ),
         ("tabulate g b [iw=a], chi2", "option chi2 not allowed"),
         ("correlate x z [pw=a]", "pweights not allowed"),
         ("correlate x z [iw=a]", "iweights not allowed"),
@@ -691,6 +686,11 @@ fn weights_stata_refuses_are_refused_in_its_words() {
             "may not use noninteger frequency weights",
         ),
         ("summarize x [aw=n]", "negative weights encountered"),
+        ("summarize x [iw=a], detail", "iweights not allowed"),
+        (
+            "tabulate g b [aw=a], chi2",
+            "chi2 not allowed with aweights",
+        ),
         (
             "regress z x [fw=a]",
             "may not use noninteger frequency weights",

@@ -404,7 +404,13 @@ pub const GUIDES: &[Guide] = &[
                 "Frequency weights count rows; analytic weights are scaled to sum to N; r() \
                  is Stata's (sum_w with analytic weights).",
             ),
-            LAYOUT_R,
+            p(
+                "As Stata 19",
+                "Stata's matrix, checked character for character: the names cut to 8 over the \
+                 columns and 12 beside the rows, %8.4f correlations or %8.0g covariances, seven \
+                 columns to a block at a linesize of 80; means' table above it; (sum of wgt is \
+                 ...) with analytic weights; no observations as Stata's r(2000).",
+            ),
         ],
     },
     Guide {
@@ -1982,8 +1988,12 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Printing",
-                "Stata's own table without detail or weights, checked character for character; \
-                 detail and weights keep R's layout. meanonly may be written mean, as in Stata.",
+                "Stata's own table, checked character for character: fweights count in Obs, \
+                 aweights and iweights add the Weight column; detail's block (the label wrapped \
+                 at 50 and centred, the percentiles beside the four smallest and largest values, \
+                 the moments added as Stata adds them, so a skewness that is 0 but for rounding \
+                 is Stata's too). iweights with detail is Stata's error. meanonly may be written \
+                 mean, as in Stata.",
             ),
         ],
     },
@@ -2107,21 +2117,33 @@ pub const GUIDES: &[Guide] = &[
     },
     Guide {
         command: "ttest",
-        about: "t tests: one sample, paired, two samples",
+        about: "t tests: one sample, paired, two samples (and ttesti from summary numbers)",
         points: &[
             p(
-                "Variances",
-                "Two groups are taken to have the same variance unless unequal, as Stata does; \
-                 R's t.test() assumes unequal variances by default (Welch). welch itself is \
-                 refused, since R offers only Satterthwaite's degrees of freedom.",
+                "As Stata 19",
+                "Stata's table and lines below it: one sample, paired, two samples by() (named \
+                 by their value labels, cut to 8) or unpaired; equal variances unless unequal \
+                 (Satterthwaite's degrees of freedom) or welch (Welch's); level(); the three \
+                 alternatives with their p-values; r() as Stata's. ttesti takes the counts, \
+                 means and standard deviations typed in. Stata's errors for unequal or welch \
+                 with one sample or pairs and for by() with other than two groups.",
             ),
             p(
-                "p-values",
-                "R prints the two-sided p-value; Stata prints the one-sided ones beside it. \
-                 r() holds all three.",
+                "Digits",
+                "r() can differ from Stata's in the 16th digit (R's mean and standard \
+                 deviation are worked out a little differently).",
             ),
-            LAYOUT_R,
         ],
+    },
+    Guide {
+        command: "ttesti",
+        about: "t tests from the counts, means and standard deviations typed in",
+        points: &[p(
+            "As Stata 19",
+            "ttesti #obs #mean #sd #val (one sample) and ttesti #obs1 #mean1 #sd1 #obs2 #mean2 \
+             #sd2 (two samples, with unequal or welch), with level(): ttest's table and lines, \
+             the two samples together as Combined, and r() as Stata's.",
+        )],
     },
     Guide {
         command: "type",
