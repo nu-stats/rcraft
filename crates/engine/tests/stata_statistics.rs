@@ -1629,7 +1629,9 @@ fn lroc_prints_statas_layout() {
          logit y x g\nlroc\nlroc if g == 1, nograph\n\
          probit y x g\nlroc, nograph\n\
          logit y x g [fw=w]\nlroc, nograph\n\
-         quietly lroc, nograph\ndisplay r(N)\n",
+         quietly lroc, nograph\ndisplay r(N)\n\
+         logit y x g\nlroc [w=w], nograph\ncapture noisily lroc, nograph title(hi)\n\
+         capture noisily lroc g, nograph\n",
     );
     let text = ok(&mut e, &code);
     let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
@@ -1642,12 +1644,17 @@ fn lroc_prints_statas_layout() {
         "Probit model for y",
         "Number of observations =      148",
         "Area under ROC curve   =   0.6455",
+        "(frequency weights assumed)",
+        "Area under ROC curve   =   0.6472",
+        "option title() not allowed",
+        "varlist not allowed (except with beta() option)",
+        "invalid syntax",
     ] {
         assert!(lines.contains(&want), "{want:?} in {text}");
     }
     assert_eq!(
         lines.iter().filter(|l| l.starts_with("Area under")).count(),
-        4,
+        5,
         "{text}"
     );
 }

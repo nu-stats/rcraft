@@ -229,6 +229,7 @@ const VARLIST: &[&str] = &[
     "ktau",
     "kap",
     "mhodds",
+    "lroc",
     "tetrachoric",
     "centile",
     "prtest",

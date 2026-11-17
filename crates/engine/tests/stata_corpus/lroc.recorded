@@ -27,3 +27,27 @@
 @ rc no observations 2000
 @ rc regress 301
 @ beta after regress       .64120370079763234 59
+@ beta factor       .67476852261461318 59
+@ beta omitted       .67476852261461318 59
+@ beta constant                       .5 60
+@ beta no constant       .64120370079763234 59
+@ rc beta missing 2000
+@ rc beta variable 111
+@ rc beta column 503
+@ rc beta string 2000
+@ rc beta too many 103
+@ abbreviated       .67476852261461318 59
+@ beta e(b)       .67476852261461318 59
+@ weight assumed       .64715566638688693 148
+@ rc negative 402
+@ rc by unsorted 5
+@ rc by 190
+@ rc nograph title 198
+@ title       .67476852261461318 59
+@ iweights       .64550942488632268 59
+@ beta after iweights       .64120370079763234 59
+@ iweights zero       .65508021363693947 58
+@ beta after fweights       .64120370079763234 59
+@ own weights after pweights       .64550942488632268 148
+@ rc mlogit 301
+@ rc poisson 301
