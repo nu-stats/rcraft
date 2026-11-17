@@ -843,8 +843,8 @@ in `lit_lewart.R` matches it: the truncate-then-step-down for negatives, the DEL
 second pass up the units 1, 2, 5, 10, 20, NX = (N − NP)/2, XMINP − NX·DIST, then XMAXP = XMINP +
 N·DIST as a sum, then clamping to the data. Fortran's `10.**NAL` for negative NAL is 1/10^|NAL|, which
 is the nearest double (the `P10` variant), not Stata's product of tenths. No discrepancy, so no rescore;
-the scoreboard stays at 7,781. (SCALE3, the log scale, has a typo `XMAXP = DISTL + REAL(M2)`, irrelevant
-here.)
+the scoreboard stays at 7,781. The source was read for the check only and deleted afterwards; no CALGO code is kept, since
+ACM's software licence restricts commercial use, and any translation is written from the paper and Stata's output.
 
 ## 2026-11-16: what the probe score needs is the zero label, not the bits
 
