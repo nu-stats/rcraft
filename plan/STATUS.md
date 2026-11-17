@@ -5347,3 +5347,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   instrument, a variable listed twice and predict's asf/fix() are refused (at run time or translation),
   never an R error.
 - **Checked:** Stata 19 on made-up data, in corpus `ivprobit.do` (now 26 results, 1e-7).
+
+## P2C.12: stepwise, 2026-11-17
+
+- **Translated** (`statatr::data_r::stepwise`, a `Prefix::Stepwise` in the reader): `stepwise [, pr() pe()
+  forward hierarchical lockterm1 lr]: regress|logit|probit|poisson depvar terms`, terms being variables or
+  parenthesised groups, with level() (and beta for regress). The search runs in R and prints Stata's trace;
+  the command is then translated as usual with the formula the search made, on the rows the full model
+  uses; e(cmdline) and e(stepwise); Stata's option errors with their return codes.
+- **Checked:** Stata 19 on 30 made-up datasets x 13 option sets for regress and 4 for logit and probit, and
+  poisson and grouped terms: all 4,117 trace and result lines agree, the regress tables and e() agree, the
+  likelihood models to the seventh digit; corpus `stepwise.do` (29 results, 1e-8) and `stepwise_glm.do` (10,
+  1e-6). Notes in `plan/stata/stepwise.md`.
+- **Refused, not guessed:** weights, factor variables, other options; when run: a collinear full model, a
+  search ending with no term, and a pr()+pe() search that could take the other kind of step.

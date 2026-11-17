@@ -971,10 +971,11 @@ impl Session {
         match fit {
             Fit::Logit | Fit::Probit => {
                 let link = if fit == Fit::Logit { "logit" } else { "probit" };
+                let formula = self.model_formula(&format!("as.numeric({dep} != 0)"), &right);
                 // the first fit only finds the rows and terms; stata_perfect
                 // applies Stata's check for perfect prediction and fits again
                 out.line(format!(
-                    "stata_estimates <- suppressWarnings(stats::glm(as.numeric({dep} != 0) ~ {right}, family = stats::binomial(link = \"{link}\"), data = {src}{weights}, {control}))"
+                    "stata_estimates <- suppressWarnings(stats::glm({formula}, family = stats::binomial(link = \"{link}\"), data = {src}{weights}, {control}))"
                 ));
                 self.helpers.insert("stata_perfect");
                 out.line(format!(
@@ -1002,8 +1003,9 @@ impl Session {
                 );
             }
             Fit::Poisson => {
+                let formula = self.model_formula(&dep, &right);
                 out.line(format!(
-                    "stata_estimates <- stats::glm({dep} ~ {right}, family = stats::poisson(), data = {src}{weights}, {control})"
+                    "stata_estimates <- stats::glm({formula}, family = stats::poisson(), data = {src}{weights}, {control})"
                 ));
                 self.helpers.insert("stata_collinear");
                 out.line("stata_estimates <- stata_collinear(stata_estimates)");
@@ -1277,7 +1279,8 @@ impl Session {
             // the iteration log: Stata's own Newton steps from its starting values
             // (stata_ml_iterations, line for line on probes); nbreg's in three stages
             let iterations = match fit {
-                _ if opts.has("nolog", 5) => "NULL",
+                // stepwise runs its final model without the log
+                _ if opts.has("nolog", 5) || self.sw.is_some() => "NULL",
                 Fit::Logit => "\"logit\"",
                 Fit::Probit => "\"probit\"",
                 Fit::Ologit => "\"ologit\"",

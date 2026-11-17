@@ -283,6 +283,7 @@ const MODELS: &[&str] = &[
     "statsby",
     "stcox",
     "stcurve",
+    "stepwise",
     "stir",
     "stptime",
     "streg",

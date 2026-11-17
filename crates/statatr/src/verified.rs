@@ -232,6 +232,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("split", &["strings"]),
     ("sqrtlasso", &["sqrtlasso"]),
     ("stcox", &["likelihood"]),
+    ("stepwise", &["stepwise", "stepwise_glm"]),
     ("stset", &["likelihood"]),
     ("suest", &["suest"]),
     (

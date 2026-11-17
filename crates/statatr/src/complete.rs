@@ -242,6 +242,7 @@ pub const COMMANDS: &[&str] = &[
     "sqrtlasso",
     "ssc",
     "stcox",
+    "stepwise",
     "stset",
     "suest",
     "summarize",

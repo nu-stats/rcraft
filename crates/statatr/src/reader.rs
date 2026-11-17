@@ -46,6 +46,12 @@ pub enum Prefix {
     /// `eststo [name]:` (the SSC estout package) stores the results the
     /// command leaves, under the name or est1, est2, ...
     Eststo(Option<String>),
+    /// `stepwise [, options]:` runs the command on the terms the search keeps;
+    /// the options as written.
+    Stepwise(String),
+    /// `nestreg [, options]:` runs the command on blocks of terms added in turn;
+    /// the options as written.
+    Nestreg(String),
     Capture,
     Quietly,
     Noisily,
@@ -429,6 +435,24 @@ fn take_prefixes(text: &str) -> Result<(Vec<Prefix>, String), String> {
                     break;
                 }
                 prefixes.push(Prefix::Eststo((!name.is_empty()).then(|| name.to_string())));
+                rest = after.get(colon + 1..).unwrap_or("").trim().to_string();
+            }
+            "stepwise" | "nestreg" => {
+                let Some(colon) = top_level(after, ':') else {
+                    break;
+                };
+                // only `, options` may stand between the word and the colon
+                let spec = after.get(..colon).unwrap_or("").trim();
+                let options = match spec.strip_prefix(',') {
+                    Some(o) => o.trim(),
+                    None if spec.is_empty() => "",
+                    None => break,
+                };
+                prefixes.push(if full == "stepwise" {
+                    Prefix::Stepwise(options.to_string())
+                } else {
+                    Prefix::Nestreg(options.to_string())
+                });
                 rest = after.get(colon + 1..).unwrap_or("").trim().to_string();
             }
             "capture" | "quietly" | "noisily" => {

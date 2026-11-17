@@ -344,9 +344,9 @@ impl Session {
             Some((_, v)) => format!(", weights = {}", r_name(v)),
             None => String::new(),
         };
+        let formula = self.model_formula(&r_name(&spec.dep), &right);
         out.line(format!(
-            "stata_estimates <- stats::lm({} ~ {right}, data = {src}{weights})",
-            r_name(&spec.dep)
+            "stata_estimates <- stats::lm({formula}, data = {src}{weights})"
         ));
         self.helpers.insert("stata_collinear");
         out.line("stata_estimates <- stata_collinear(stata_estimates, sweep = TRUE)");

@@ -99,6 +99,7 @@ mod sdtest;
 mod sktest;
 mod st;
 mod stats;
+mod stepwise;
 mod suest;
 mod survwgt;
 mod svy;
@@ -1443,6 +1444,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xtdpd" => xtdpd::XTDPD_HELPER,
         "stata_npregress" => npregress::NPREGRESS_HELPER,
         "stata_ivprobit" => ivprobit::IVPROBIT_HELPER,
+        "stata_stepwise" => stepwise::STEPWISE_HELPER,
         "stata_tsreg" => tsreg::TSREG_HELPER,
         "stata_xt_predict" => xt::XT_PREDICT_HELPER,
         "stata_xt_ic" => xt::XT_IC_HELPER,
@@ -1589,6 +1591,8 @@ struct Session {
     fit_weight: Option<crate::lang::syntax::Weight>,
     /// The last regress was plain: no robust, clustered or weighted errors.
     plain_regress: bool,
+    /// Set while the command under `stepwise:` is translated.
+    sw: Option<stepwise::Sw>,
     /// `stata_esample` holds the last model's e(sample) and the rows have not
     /// moved since, so `e(sample)` can be translated.
     esample: bool,
@@ -2725,6 +2729,19 @@ impl Session {
 
     fn dispatch(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let opts = Opts(&c.options);
+        if self.sw.is_none() && c.prefixes.iter().any(|p| matches!(p, Prefix::Stepwise(_))) {
+            return self.stepwise(c, out);
+        }
+        // run as a plain command it would give the wrong results
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::Nestreg(_))) {
+            return Err(no("nestreg is not translated yet"));
+        }
+        // the word with no colon after it: not a prefix the reader could take
+        if c.name == "stepwise" {
+            return Err(no(
+                "stepwise needs its command after a colon: stepwise, pr(#): regress y x1 x2",
+            ));
+        }
         match c.name.as_str() {
             // a model's name alone shows its last fit again (Stata 19)
             "regress" | "logit" | "probit" | "poisson"

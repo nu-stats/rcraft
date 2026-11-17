@@ -132,6 +132,8 @@ impl Session {
 
     /// `src` without the rows the weight leaves out.
     pub(super) fn weighted_rows(&mut self, src: String, w: &Weighting) -> String {
+        // under stepwise, the rows the full model uses
+        let src = self.sw_rows(src);
         match w {
             None => src,
             Some((k, v)) => {

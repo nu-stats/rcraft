@@ -444,7 +444,7 @@ stata_hex <- function(x) {
 /// What a model leaves in `e()`, built from what its translation left in R
 /// (`stata_estimates`, `stata_b`, `stata_vcov`, `stata_df`, `stata_cluster`).
 pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdline, depvar, vce = "oim", clustvar = NULL,
-                          wtype = NULL, wexp = NULL, title = TRUE, extra = list()) {
+                          wtype = NULL, wexp = NULL, title = TRUE, extra = list(), stepwise = FALSE) {
   fit <- stata_estimates
   b <- stata_b
   V <- stata_vcov
@@ -479,7 +479,11 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
   after <- list()
   put <- function(...) {
     a <- list(...)
-    for (n in names(a)) e[[n]] <<- a[[n]]
+    for (n in names(a)) {
+      e[[n]] <<- a[[n]]
+      # under stepwise, e(stepwise) follows e(cmdline)
+      if (n == "cmdline" && stepwise) e[["stepwise"]] <<- "stepwise"
+    }
   }
   weights <- function() if (!is.null(wtype)) put(wexp = wexp, wtype = wtype)
   robust_macros <- function() {
@@ -2210,7 +2214,11 @@ impl Session {
         self.helpers.insert("stata_returned");
         self.helpers.insert("stata_names");
         self.helpers.insert("stata_ml_header");
-        let cmdline = cmdline(c);
+        // under stepwise: its command line, and e(stepwise) after e(cmdline)
+        let (cmdline, args) = match self.sw_cmdline() {
+            Some(line) => (line, format!("{args}, stepwise = TRUE")),
+            None => (cmdline(c), args.to_string()),
+        };
         out.line(format!(
             "stata_e <- stata_ereturn({}, {}{args})",
             r_text(&c.name),
