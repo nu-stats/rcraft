@@ -844,7 +844,7 @@ fn the_model_table_is_the_one_built_by_hand() {
                      fmt(-2 * ll + log(n) * 3)), \
                    g1 = c(cell(b[1], sg[1], pg[1]), '', '', cell(b[2], sg[2], pg[2]), '12', '', '', \
                      fmt(dg + 2 * 2), fmt(dg + log(12) * 2)), \
-                   check.names = FALSE)"
+                   check.names = FALSE); names(want)[1] <- ' '"
             ),
             &[
                 ("shape", "identical(dim(res), dim(want)) && identical(names(res), names(want))"),
@@ -872,6 +872,64 @@ fn the_model_table_is_the_one_built_by_hand() {
                 ("t", "identical(res$m2[c(2, 4, 6)], paste0('(', t2, ')'))"),
             ],
         ),
+    );
+
+    // robust (HC1) standard errors written out as the sandwich, with 95%
+    // intervals from them: t for the linear model, normal for the logistic;
+    // the stars come from the robust p-values
+    kept(
+        &mut e,
+        &MODEL_TABLE,
+        "m1",
+        &[("others", "g1"), ("paren", "ci"), ("vcov", "HC1")],
+        &["stars"],
+    );
+    holds(
+        &mut e,
+        &pinned::all_of(
+            &format!(
+                "{BY_HAND}; fmt <- function(x) formatC(x, format = 'f', digits = 3); \
+                 st <- function(p) ifelse(p < 0.001, '***', ifelse(p < 0.01, '**', ifelse(p < 0.05, '*', ''))); \
+                 A1 <- solve(crossprod(X1)); \
+                 v1 <- A1 %*% t(X1) %*% (f1$r^2 * X1) %*% A1 * n / (n - 2); s1 <- sqrt(diag(v1)); \
+                 q1 <- 2 * pt(-abs(f1$b / s1), n - 2); \
+                 AG <- solve(t(G) %*% (p * (1 - p) * G)); \
+                 vg <- AG %*% t(G) %*% ((w - p)^2 * G) %*% AG * 12 / (12 - 2); sg <- sqrt(diag(vg)); \
+                 qg <- 2 * pnorm(-abs(b / sg)); \
+                 ci <- function(b, s, k) paste0('[', fmt(b - k * s), ', ', fmt(b + k * s), ']'); \
+                 k1 <- qt(0.975, n - 2); kg <- qnorm(0.975)"
+            ),
+            &[
+                ("names", "identical(names(res), c(' ', 'm1', 'g1'))"),
+                (
+                    "lm",
+                    "identical(res$m1[1:4], c(paste0(fmt(f1$b[1]), st(q1[1])), ci(f1$b[1], s1[1], k1), \
+                     paste0(fmt(f1$b[2]), st(q1[2])), ci(f1$b[2], s1[2], k1)))",
+                ),
+                (
+                    "glm",
+                    "identical(res$g1[c(1, 2, 5, 6)], c(paste0(fmt(b[1]), st(qg[1])), ci(b[1], sg[1], kg), \
+                     paste0(fmt(b[2]), st(qg[2])), ci(b[2], sg[2], kg)))",
+                ),
+                (
+                    "note",
+                    "identical(attr(res, 'note'), '95% confidence intervals from robust (HC1) standard errors, \
+                     in brackets; * p < 0.05, ** p < 0.01, *** p < 0.001')",
+                ),
+            ],
+        ),
+    );
+
+    // also added to the report: the same table as its newest part, with or
+    // without a name kept
+    run(&mut e, Source::Typed, "rcraft_report <- list()");
+    kept(&mut e, &MODEL_TABLE, "m1", &[], &["report"]);
+    kept(&mut e, &MODEL_TABLE, "m2", &[("save", "tab2")], &["report"]);
+    holds(
+        &mut e,
+        "length(rcraft_report) == 2, \
+         identical(rcraft_report[[2]]$value, res), identical(tab2, res), \
+         identical(rcraft_report[[1]]$kind, 'table'), identical(names(rcraft_report[[1]]$value), c(' ', 'm1'))",
     );
 }
 

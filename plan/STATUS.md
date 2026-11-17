@@ -1,12 +1,15 @@
 # Status
 
-Last updated: 2026-11-12.
+Last updated: 2026-11-17.
 
 **Where things are:** Phases 0 to 4 are built (Help, Stata mode and Run my do-file included), but
 P1.2 (a portable R download), P2A.6 and P2A.10 (RCraft's own manuals) and the leftovers
-`plan/AUDIT.md` lists; Phase 5 is built but P5.2 (the ggplot2 builder); Phases 6 to 9 are not
-started. `plan/AUDIT.md` (2026-11-12, with the 2026-10-29 audit kept below it) lists every phase
-against the code and what is left. The sections below are a dated log, oldest first.
+`plan/AUDIT.md` lists; Phase 5 is built but P5.2 (the ggplot2 builder); Phase 6 has first parts of
+P6.1 to P6.6 and P6.7 to P6.12 not started; Phase 7 is done; Phase 8 has P8.1 and P8.3 done, P8.4 in
+part, and P8.2 (installers) and P8.5 (browser build) not started; Phase 9 is not started.
+`plan/AUDIT.md` (2026-11-12, its summary brought up to date 2026-11-17, with the 2026-10-29 audit
+kept below it) lists every phase against the code and what is left. The sections below are a dated
+log, oldest first.
 
 ## Done
 
@@ -5282,3 +5285,19 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Not yet:** `qnorm`/`pnorm, grid`, `sts graph` and `stcurve` (they need `sts` and `streg`).
 - **Shares:** probes (520 do-files, each source line once, dry run) 73.7% -> 74.2% before avplot and
   screeplot (20,685 -> 20,757 translated, 7,390 -> 7,207 not); graph and table lines refused 71 -> 10.
+## Small wins after Phase 7, 2026-11-17
+
+- **Model table:** 95% confidence intervals in brackets (t for linear models, normal for generalised
+  linear ones), and robust standard errors (HC1 or HC3, through sandwich, which is asked for only
+  when chosen); the stars, statistics, p-values and intervals then come from them, and the note says
+  so. The terms' column has a blank header (a single space: gt and flextable refuse an empty name).
+  **Also add it to the report** puts the table in the session's report, kept under a name or not.
+  Checked in R 4.4.3 against the sandwich written out by hand for the linear and the logistic model.
+- **Closing asks first:** with a script not saved in any session, closing the window shows that
+  session and asks Save / Don't save / Cancel, one session at a time (the live one first).
+- **File > Open recent project:** the last projects opened or saved, by folder name, the path on
+  hover; a project that is gone is taken off the list. Kept in `recent-projects.txt` beside the list
+  of recent data files.
+- Stale records fixed: AUDIT's summary for Phases 6 to 8 and the P4.5 note (its residual plots are
+  Objects > Model > Diagnostic plots).
+- Not tried by hand: the close question and the recent menu in the running app.

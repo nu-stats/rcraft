@@ -16,6 +16,12 @@ pub fn recent_file(env: &Env) -> Option<PathBuf> {
     app_data_dir(env).map(|d| d.join("recent-files.txt"))
 }
 
+/// Where the list of recent projects (File > Open recent project) is kept;
+/// a list of its own, so data files do not push projects off it.
+pub fn recent_projects_file(env: &Env) -> Option<PathBuf> {
+    app_data_dir(env).map(|d| d.join("recent-projects.txt"))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Recent {
     paths: Vec<String>,

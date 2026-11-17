@@ -343,6 +343,8 @@ pub struct App {
     show_when_listed: Option<String>,
     /// Files imported lately, kept between runs.
     recent: Recent,
+    /// Projects opened or saved lately (File > Open recent project).
+    recent_projects: Recent,
     /// The CRAN package list, cached on this computer.
     package_index: PackageIndexService,
     packages_window: PackagesWindow,
@@ -392,6 +394,8 @@ enum ScriptAsk {
     Open(std::path::PathBuf),
     /// Open this project (its script replaces this one).
     Project(std::path::PathBuf),
+    /// Close RCraft (asked for each session whose script is not saved).
+    Quit,
 }
 
 impl App {
@@ -437,6 +441,14 @@ impl App {
             spec_dialog: SpecDialog::default(),
             show_when_listed: None,
             recent,
+            // tests keep theirs in memory, so they never touch the user's list
+            recent_projects: if cfg!(test) {
+                Recent::at(None)
+            } else {
+                Recent::at(rcraft_rhost::recent::recent_projects_file(
+                    &Env::from_process(),
+                ))
+            },
             package_index: PackageIndexService::for_machine(&Env::from_process()),
             packages_window: PackagesWindow::default(),
             help_window: HelpWindow::default(),
@@ -505,6 +517,30 @@ impl App {
 
     /// Makes session `to` the live one. A dialog open on the old session is
     /// closed: it was working on that session's data frames.
+    /// The first session, the live one first, whose script has changes that
+    /// are not saved.
+    fn unsaved_session(&self) -> Option<usize> {
+        if self.script_file.is_changed(&self.script) {
+            return Some(self.active);
+        }
+        self.sessions
+            .iter()
+            .enumerate()
+            .find(|(i, s)| *i != self.active && s.script_file.is_changed(&s.script))
+            .map(|(i, _)| i)
+    }
+
+    /// The window was asked to close: true when it must stay open, because a
+    /// script is not saved. That session is shown and asked about.
+    fn hold_close(&mut self) -> bool {
+        let Some(i) = self.unsaved_session() else {
+            return false;
+        };
+        self.switch_session(i);
+        self.script_ask = Some(ScriptAsk::Quit);
+        true
+    }
+
     fn switch_session(&mut self, to: usize) {
         if to == self.active || to >= self.sessions.len() {
             return;
@@ -1150,6 +1186,8 @@ impl App {
                 match waiting {
                     ScriptAsk::Open(path) => self.perform(ctx, Action::OpenScriptPath(path)),
                     ScriptAsk::Project(path) => self.perform(ctx, Action::OpenProjectPath(path)),
+                    // closing again asks about the next unsaved script, if any
+                    ScriptAsk::Quit => self.perform(ctx, Action::Quit),
                     ScriptAsk::Choose => {
                         if let Some(path) = self.choose_script() {
                             self.perform(ctx, Action::OpenScriptPath(path));
@@ -1318,6 +1356,7 @@ impl App {
                     self.message = Some(e);
                     return;
                 }
+                self.recent_projects.add(&file.display().to_string());
                 let code = project::save_code(&folder, &proj, self.package_index.mirror());
                 self.perform(
                     ctx,
@@ -1343,10 +1382,13 @@ impl App {
                 let proj = match project::Project::read(&path) {
                     Ok(p) => p,
                     Err(e) => {
+                        // gone or damaged: off the recent list
+                        self.recent_projects.forget(&path.display().to_string());
                         self.message = Some(e);
                         return;
                     }
                 };
+                self.recent_projects.add(&path.display().to_string());
                 let folder = path.parent().map(|p| p.to_path_buf()).unwrap_or_default();
                 let script = folder.join(&proj.script);
                 if script.exists() {
@@ -1502,6 +1544,12 @@ impl App {
             .title(&self.script)
             .trim_end_matches(" •")
             .to_string();
+        // closing with several sessions: say whose script it is
+        let name = if self.script_ask == Some(ScriptAsk::Quit) && self.sessions.len() > 1 {
+            format!("{name} in session {}", self.session_name)
+        } else {
+            name
+        };
         egui::Window::new("Save the script?")
             .collapsible(false)
             .resizable(false)
@@ -1755,6 +1803,9 @@ impl App {
     /// Draws one frame and carries out what was asked. The window and the
     /// offscreen picture (`headless.rs`) both call this.
     pub fn ui(&mut self, ctx: &egui::Context) {
+        if ctx.input(|i| i.viewport().close_requested()) && self.hold_close() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         self.poll(ctx);
         self.follow_offered_install();
         // the dialogs' file choosers open in the folder R is working in
@@ -2151,6 +2202,22 @@ impl App {
                     out.push(Action::OpenProject);
                     ui.close_menu();
                 }
+                ui.add_enabled_ui(!self.recent_projects.is_empty(), |ui| {
+                    ui.menu_button("Open recent project", |ui| {
+                        for path in self.recent_projects.paths().iter().take(8) {
+                            let p = std::path::Path::new(path);
+                            // the folder's name says which project; the full path on hover
+                            let label = p
+                                .parent()
+                                .and_then(|d| d.file_name())
+                                .map_or_else(|| path.clone(), |n| n.to_string_lossy().into_owned());
+                            if ui.button(label).on_hover_text(path.as_str()).clicked() {
+                                out.push(Action::OpenProjectPath(p.to_path_buf()));
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                });
                 if ui
                     .button("Save project…")
                     .on_hover_text(
@@ -5028,6 +5095,40 @@ mod tests {
     /// changes not saved are asked about before another script replaces them
     /// (Cancel keeps all, Don't save lets them go, Save writes them first);
     /// Save as gives the script a new file.
+    /// Closing the window with a script not saved asks first, session by
+    /// session (the live one first); Cancel keeps the window open, and once
+    /// each is saved or let go the window closes.
+    #[test]
+    fn closing_asks_about_each_unsaved_script() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings = false;
+        assert!(!app.hold_close(), "nothing typed: closes at once");
+
+        app.script.push_str("x <- 1\n");
+        let mut other = SessionUi::hollow();
+        other.name = "R 2".into();
+        other.script.push_str("y <- 2\n");
+        app.sessions.push(other);
+
+        assert!(app.hold_close());
+        assert_eq!(app.script_ask, Some(ScriptAsk::Quit));
+        assert_eq!(app.active, 0);
+        app.perform(&ctx, Action::ScriptAnswer(None));
+        assert_eq!(app.script_ask, None);
+        assert!(app.script.ends_with("x <- 1\n"), "Cancel keeps the script");
+
+        assert!(app.hold_close());
+        app.perform(&ctx, Action::ScriptAnswer(Some(false)));
+        // the next is the other session's, shown so it can be seen
+        assert!(app.hold_close());
+        assert_eq!(app.active, 1);
+        assert_eq!(app.session_name, "R 2");
+        assert!(app.script.ends_with("y <- 2\n"));
+        app.perform(&ctx, Action::ScriptAnswer(Some(false)));
+        assert!(!app.hold_close(), "both let go: closes");
+    }
+
     #[test]
     fn scripts_open_and_save_and_changes_are_not_lost_unasked() {
         let dir = std::env::temp_dir().join(format!("rcraft-scripts-{}", std::process::id()));
@@ -5306,6 +5407,9 @@ mod tests {
         fresh.perform(&ctx, Action::OpenProjectPath(folder.join("wages.rcraft")));
         assert!(frames_until(&mut fresh, &ctx, |a| a.is_settled()));
         assert_eq!(fresh.script, "fit <- lm(w ~ e, data = d)\nsummary(fit)\n");
+        // it heads File > Open recent project
+        let opened = folder.join("wages.rcraft").display().to_string();
+        assert_eq!(fresh.recent_projects.paths(), std::slice::from_ref(&opened));
         let wd = folder.display().to_string().replace('\\', "/");
         fresh.perform(
             &ctx,
@@ -5338,7 +5442,11 @@ mod tests {
             "{:?}",
             fresh.message
         );
+        // and is not remembered; a project that is gone is taken off the list
+        assert_eq!(fresh.recent_projects.paths(), std::slice::from_ref(&opened));
         let _ = std::fs::remove_dir_all(&dir);
+        fresh.perform(&ctx, Action::OpenProjectPath(folder.join("wages.rcraft")));
+        assert!(fresh.recent_projects.is_empty());
     }
 
     /// P8.1: Properties for a real data frame and a picked variable agree with

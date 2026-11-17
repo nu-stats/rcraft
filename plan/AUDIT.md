@@ -1,4 +1,4 @@
-# Roadmap audit, 2026-11-12
+# Roadmap audit, 2026-11-12 (summary brought up to date 2026-11-17)
 
 Each phase of `ROADMAP.md` checked against `main` at `365b49d` (CI green on Windows, macOS and
 Ubuntu), the roadmap's own done notes and `plan/STATUS.md`. The audit of 2026-10-29 is kept below
@@ -18,9 +18,9 @@ as it was; much of what it lists as not started has been built since (Phases 2A,
 | 3 Data | Done (the `.sas7bdat` catalogue files of P3.2 followed on 2026-11-13). |
 | 4 Statistics | Done (P4.1's grids in Results followed on 2026-11-14; its Q-Q plot is Graphs > Normal Q-Q plot). |
 | 5 Graphs | P5.1, P5.3, P5.4 done (zoom, Copy and the heatmap followed on 2026-11-14). **P5.2 (ggplot2 builder) not started.** |
-| 6 Depth modules | Not started. |
-| 7 Reporting | Not started; `crates/report` is still a one-line stub. |
-| 8 Interface, packaging | P8.1 in place; P8.2 to P8.5 not started. |
+| 6 Depth modules | P6.1 to P6.6 first parts (panel, multilevel, survival, survey, time series, instrumental variables and selection; 2026-11-12). **P6.7 to P6.12 not started.** |
+| 7 Reporting | Done (P7.1 to P7.5, 2026-11-15): Model table, Export table, the session's report, the session as a script or document, projects. The work is in `crates/catalog/src/report.rs` and the app; `crates/report` is still a one-line stub. |
+| 8 Interface, packaging | P8.1 and P8.3 done; P8.4 part (the dialogs' pages reviewed, the manual waits for RCraft's own); **P8.2 installers and P8.5 browser build not started.** |
 | 9 Extensibility | Not started. |
 
 ## Where the Stata translator stands
@@ -39,7 +39,8 @@ as it was; much of what it lists as not started has been built since (Phases 2A,
 Not started:
 
 - P1.2 portable R download; P2A.6 and P2A.10 RCraft's own manuals; P5.2 ggplot2 builder.
-- Phases 6 and 7 (`crates/report` and `crates/rgraph` are one-line stubs), P8.2 to P8.5, Phase 9.
+- P6.7 to P6.12, P8.2 and P8.5, Phase 9. (Phase 7 was done on 2026-11-15; `crates/report` and
+  `crates/rgraph` are still one-line stubs, the work being in `catalog` and the app.)
 
 Partly done, with what is missing:
 

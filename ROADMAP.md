@@ -492,8 +492,8 @@ skipped. It never gives a silent wrong answer.
   right-click menu on a fitted model, with fit statistics, comparison of models, predicted
   values and residuals added to a data frame, diagnostics, and robust standard errors (needs
   sandwich and lmtest), with clustered standard errors, tests of terms (each, or several
-  together) and average marginal effects (marginaleffects package). P4.5 is done apart from
-  residual plots, which come with Phase 5)
+  together) and average marginal effects (marginaleffects package); the residual plots followed with Phase 5
+  as Objects > Model > Diagnostic plots. P4.5 is done)
 
 ## Phase 5: Graphs
 
@@ -588,8 +588,9 @@ Each family is its own set of dialogs over a named CRAN package.
   and generalised linear models side by side, each coefficient with stars and its standard error,
   statistic or p-value below, observations, R-squared, AIC, BIC and log-likelihood, a note line;
   a data frame, so Results shows it as a grid that copies into Word or Excel. Verified against the
-  table built by hand. modelsummary and gt are installed for the export of P7.2; not yet: custom
-  rows, other model classes)
+  table built by hand. modelsummary and gt are installed for the export of P7.2. Added 2026-11-17:
+  95% intervals in brackets, robust (HC1, HC3) standard errors, a blank header over the terms and
+  "Also add it to the report". Not yet: custom rows, other model classes)
 - P7.2 Export to docx, xlsx, HTML, LaTeX and Markdown; one document built up
   across a session
   (first part 2026-11-15: Export table, for any data frame in the Objects pane (a Model table, say):

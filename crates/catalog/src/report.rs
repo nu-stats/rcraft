@@ -32,6 +32,26 @@ const PARENS: &[Opt] = &[
         value: "p",
         label: "p-values",
     },
+    Opt {
+        value: "ci",
+        label: "95% confidence intervals (in brackets)",
+    },
+];
+
+/// The standard errors the table is built on.
+const TABLE_SES: &[Opt] = &[
+    Opt {
+        value: "model",
+        label: "The model's own",
+    },
+    Opt {
+        value: "HC1",
+        label: "Robust, HC1 (the usual \"robust\" correction)",
+    },
+    Opt {
+        value: "HC3",
+        label: "Robust, HC3 (better in small samples)",
+    },
 ];
 
 /// Most decimal places offered.
@@ -70,13 +90,57 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
         .iter()
         .map(|n| format!("{} = {}", r_name(n), r_name(n)))
         .collect();
-    let (column, words) = match a.choice("paren") {
-        "statistic" => (3, "t or z statistics"),
-        "p" => (4, "p-values"),
-        _ => (2, "standard errors"),
+    let paren = a.choice("paren");
+    let words = match paren {
+        "statistic" => "t or z statistics",
+        "p" => "p-values",
+        "ci" => "95% confidence intervals",
+        _ => "standard errors",
+    };
+    let robust = match a.choice("vcov") {
+        kind @ ("HC1" | "HC3") => Some(kind),
+        _ => None,
+    };
+    let enclosed = if paren == "ci" {
+        "in brackets"
+    } else {
+        "in parentheses"
     };
     let stars = a.flag("stars");
-    let mut note = format!("{} in parentheses", capitalised(words));
+    let mut note = match (robust, paren) {
+        (None, _) => format!("{} {enclosed}", capitalised(words)),
+        (Some(kind), "se") => format!("Robust ({kind}) standard errors {enclosed}"),
+        (Some(kind), _) => format!(
+            "{} from robust ({kind}) standard errors, {enclosed}",
+            capitalised(words)
+        ),
+    };
+    // each model's estimates, standard errors, statistics and p-values
+    let (guard, errors) = match robust {
+        None => (
+            String::new(),
+            "se <- ct[, 2]\n    stat <- ct[, 3]\n    p <- ct[, 4]\n    ".to_string(),
+        ),
+        Some(kind) => (
+            "if (!requireNamespace(\"sandwich\", quietly = TRUE)) \
+             stop(\"robust standard errors need the sandwich package; install it from Packages\")\n  "
+                .to_string(),
+            format!(
+                "se <- sqrt(diag(sandwich::vcovHC(m, type = \"{kind}\")))[rownames(ct)]\n    \
+                 stat <- ct[, 1] / se\n    \
+                 p <- 2 * stats::pt(-abs(stat), df)\n    "
+            ),
+        ),
+    };
+    let below = match paren {
+        "statistic" => "paste0(\"(\", fmt(stat), \")\")",
+        "p" => "paste0(\"(\", fmt(p), \")\")",
+        "ci" => {
+            "paste0(\"[\", fmt(ct[, 1] - stats::qt(0.975, df) * se), \", \", \
+             fmt(ct[, 1] + stats::qt(0.975, df) * se), \"]\")"
+        }
+        _ => "paste0(\"(\", fmt(se), \")\")",
+    };
     if stars {
         note.push_str("; * p < 0.05, ** p < 0.01, *** p < 0.001");
     }
@@ -127,32 +191,49 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
          ok <- vapply(models, inherits, logical(1), \"lm\")\n  \
          if (!all(ok)) stop(\"the table takes linear and generalised linear models; not: \", \
          paste(names(models)[!ok], collapse = \", \"))\n  \
-         fmt <- function(x) formatC(x, format = \"f\", digits = digits)\n  \
+         {guard}fmt <- function(x) formatC(x, format = \"f\", digits = digits)\n  \
          terms <- unique(unlist(lapply(models, function(m) names(stats::coef(m)))))\n  \
          cells <- vapply(models, function(m) {{\n    \
          ct <- stats::coef(summary(m))\n    \
-         p <- ct[, 4]\n    \
+         df <- if (inherits(m, \"glm\")) Inf else stats::df.residual(m)\n    \
+         {errors}\
          out <- rep(\"\", 2 * length(terms))\n    \
          i <- match(rownames(ct), terms)\n    \
          out[2 * i - 1] <- paste0(fmt(ct[, 1]), {star})\n    \
-         out[2 * i] <- paste0(\"(\", fmt(ct[, {column}]), \")\")\n    \
+         out[2 * i] <- {below}\n    \
          out\n  \
          }}, character(2 * length(terms)))\n  \
          out <- data.frame(term = as.vector(rbind(terms, \"\")), \
          matrix(cells, ncol = length(models), dimnames = list(NULL, names(models))), \
          check.names = FALSE, row.names = NULL)\n\
          {foot}  \
+         names(out)[1] <- \" \"\n  \
          cat(\"{note}\\n\")\n  \
          attr(out, \"note\") <- \"{note}\"\n  \
          out\n}})(list({}), {})",
         list.join(", "),
         a.number("digits"),
     );
-    if a.name_text("save").is_empty() {
-        call
-    } else {
-        let save = a.name("save");
-        format!("{save} <- {call}\n{save}")
+    let to_report = |value: &str| {
+        add_part(&format!(
+            "list(kind = \"table\", title = \"\", value = {value})"
+        ))
+    };
+    match (a.name_text("save").is_empty(), a.flag("report")) {
+        (true, false) => call,
+        (true, true) => format!(
+            "local({{\n  tab <- {call}\n  {}\n  tab\n}})",
+            to_report("tab").replace('\n', "\n  ")
+        ),
+        (false, report) => {
+            let save = a.name("save");
+            let add = if report {
+                format!("\n{}", to_report(&save))
+            } else {
+                String::new()
+            };
+            format!("{save} <- {call}{add}\n{save}")
+        }
     }
 }
 
@@ -168,9 +249,10 @@ pub const MODEL_TABLE: Spec = Spec {
     entry: "Model table",
     menu: "Objects > Model > Model table",
     about: "Put this model and others side by side in one table: each coefficient with its \
-            stars and, below it, its standard error (or statistic or p-value), then the number \
-            of rows, R-squared, AIC and BIC. The table copies into Word or Excel from Results. \
-            For linear and generalised linear models.",
+            stars and, below it, its standard error (or statistic, p-value or 95% interval), \
+            the model's own or robust, then the number of rows, R-squared, AIC and BIC. The \
+            table copies into Word or Excel from Results, and can go into the report. For \
+            linear and generalised linear models.",
     widgets: &[
         Widget::Text {
             id: "others",
@@ -185,7 +267,16 @@ pub const MODEL_TABLE: Spec = Spec {
             label: "In parentheses",
             options: PARENS,
             default: "se",
-            hint: "",
+            hint: "Intervals use the t distribution for linear models and the normal for \
+                   generalised linear models.",
+        },
+        Widget::Choice {
+            id: "vcov",
+            label: "Standard errors",
+            options: TABLE_SES,
+            default: "model",
+            hint: "Robust ones need the sandwich package; the stars, statistics, p-values and \
+                   intervals are then worked out from them.",
         },
         Widget::Check {
             id: "stars",
@@ -230,6 +321,12 @@ pub const MODEL_TABLE: Spec = Spec {
             default: TextDefault::Empty,
             rule: TextRule::Any,
             hint: "Optional: a name for the table, so later commands can use it.",
+        },
+        Widget::Check {
+            id: "report",
+            label: "Also add it to the report",
+            default: false,
+            hint: "Reports > Save report writes the report as a Word document or a web page.",
         },
     ],
     needs: &[],
@@ -756,7 +853,10 @@ mod tests {
     fn one_model_or_several_with_the_choices_made() {
         let one = make("fit", &[], &[]).unwrap_or_default();
         assert!(one.ends_with("})(list(fit = fit), 3)"), "{one}");
-        assert!(one.contains("fmt(ct[, 2])"), "{one}");
+        assert!(
+            one.contains("se <- ct[, 2]") && one.contains("fmt(se)"),
+            "{one}"
+        );
         assert!(
             one.contains("Standard errors in parentheses; * p < 0.05"),
             "{one}"
@@ -790,7 +890,9 @@ mod tests {
             "{two}"
         );
         assert!(
-            two.contains("fmt(ct[, 4])") && two.contains("P-values in parentheses\\n"),
+            two.contains("p <- ct[, 4]")
+                && two.contains("fmt(p)")
+                && two.contains("P-values in parentheses\\n"),
             "{two}"
         );
         assert!(!two.contains("***") && !two.contains("AIC ="), "{two}");
