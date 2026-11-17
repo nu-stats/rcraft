@@ -139,6 +139,7 @@ pub const COMMANDS: &[&str] = &[
     "iri",
     "isid",
     "isvar",
+    "ivprobit",
     "ivregress",
     "kap",
     "kdensity",
@@ -889,6 +890,10 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("svyset", &["vce("]),
     ("survwgt", &["by(", "generate(", "maxrep(", "totvars("]),
     ("isid", &["missok"]),
+    (
+        "ivprobit",
+        &["first", "iterate(", "level(", "nolog", "twostep", "vce("],
+    ),
     (
         "contract",
         &[
@@ -2017,6 +2022,7 @@ gettoken a b : s, {o}"
             "file" => format!("file open h using f.txt, write {o}"),
             "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),
+            "ivprobit" => format!("ivprobit d y (x = w), {o}"),
             "label" => format!("label define l 1 \"a\", {o}"),
             // what predict can make depends on the model: hr after stcox, pr after
             // logit, outcome() after mlogit

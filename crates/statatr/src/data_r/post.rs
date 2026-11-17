@@ -339,6 +339,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "predict")?;
+        if self.ivprobit_active() {
+            return self.ivprobit_predict(c, opts, out);
+        }
         if self.xtdpd_active().is_some() {
             return self.xtdpd_predict(c, opts, out);
         }
@@ -959,6 +962,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "estat")?;
+        if self.ivprobit_active() {
+            return Err(no("estat after ivprobit is not translated yet"));
+        }
         if self.xtdpd_active().is_some() {
             return self.xtdpd_estat(c, opts, out);
         }

@@ -5314,3 +5314,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   75.3% (20,934 translated, 6,849 not); packages (46 do-files) 94.9% (3,715 translated, 200 not).
 - **Shares** with npregress: probes 75.3% -> 75.6% (20,934 -> 21,007 translated, 6,849 -> 6,776 not);
   packages 94.9% (unchanged).
+
+## P2C.12: ivprobit, 2026-11-17
+
+- **Translated** (`statatr::data_r::ivprobit`, R helper `stata_iv*` with a general ml engine
+  `stata_ml_max`): ivprobit with one endogenous regressor, oim/robust/cluster, first, level(), nolog,
+  twostep, replay, predict xb/pr/stdp; Stata's iteration logs, table, exogeneity test and e().
+- **Checked:** probes 450/451/596: 21 of 21 compared lines to 8 digits, the logs and tables line for
+  line; corpus `ivprobit.do` (15 results, 1e-7) recorded from Stata 19.
+- **Shares** with ivprobit (on top of main at 67e9408): probes 75.9% (21,084 translated, 6,699 not);
+  packages 94.9% (unchanged).
