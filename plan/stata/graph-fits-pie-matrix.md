@@ -34,3 +34,9 @@ printed output of `graph dir` and `esttab` (probes in the session scratchpad, `g
   column 12, each model 13 + 3 + 13 wide, no blank lines between the coefficients; with `se` or `label` as
   without `wide`. Recorded in the corpus as `esttab4.do`.
 - `kdensity x, nograph at(x) generate(d)`: one new variable, the density at each row's x.
+- `avplot x` after `regress`: the residuals of y on the other regressors (`e( y | X )`) against those of x
+  (`e( x | X )`), in the order of x's residuals, the line through 0 with x's coefficient as its slope, and
+  the note `coef = .81065199, se = .07891904, t = 10.27` (coefficient and standard error in `%10.0g`, t to
+  two decimals); after `vce(robust)` it reads `(robust) se = ` with the robust standard error.
+- `screeplot` after `pca` (or `factor`): e(Ev) against 1, 2, ..., titled `Eigenvalues` and `Number`, with
+  the title `Scree plot of eigenvalues after pca`.

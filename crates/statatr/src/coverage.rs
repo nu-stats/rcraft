@@ -330,6 +330,7 @@ const MODELS: &[&str] = &[
 const GRAPHS: &[&str] = &[
     "_natscale",
     "anovaplot",
+    "avplot",
     "connected",
     "graph",
     "grstyle",
@@ -341,6 +342,7 @@ const GRAPHS: &[&str] = &[
     "pnorm",
     "qnorm",
     "rvfplot",
+    "screeplot",
     "scatter",
     "twoway",
 ];

@@ -5268,3 +5268,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   for line; corpus `lasso_infer.do` re-recorded from Stata 19 with pologit (26 results, 1e-7).
 - **Not yet:** Stata's poisson starts near the optimum by a rule not decoded, so dspoisson and
   popoisson stay refused; xpologit, xpopoisson.
+
+## Graphs: lfitci, qfitci, area, qnorm, pnorm, rvfplot, avplot, screeplot, pie, matrix; esttab wide, 2026-11-17
+
+- **Translated** (each checked against Stata 19: the points it plots from its sersets, titles and fills
+  from SVG exports, its printed text; `plan/stata/graph-fits-pie-matrix.md`): `twoway lfitci` and
+  `qfitci` (t times the standard error of the mean prediction, or of a forecast with `stdf`, at
+  `level()`), `lfit` and `qfit` at Stata's 3 and 100 points with `n()` and `range()`, `twoway area` (to
+  `base()` or the axis bottom), `qnorm`, `pnorm`, `rvfplot`, `avplot` (with Stata's note), `screeplot`,
+  `graph pie`, `graph matrix [, half]`, `graph dir`, `graph display`, `graph drop` by name (graphs kept in
+  memory as Stata names them, an unnamed one as Graph), `esttab, wide` (corpus `esttab4.do`, Verified)
+  and `kdensity, at() generate()`.
+- **Not yet:** `qnorm`/`pnorm, grid`, `sts graph` and `stcurve` (they need `sts` and `streg`).
+- **Shares:** probes (520 do-files, each source line once, dry run) 73.7% -> 74.2% before avplot and
+  screeplot (20,685 -> 20,757 translated, 7,390 -> 7,207 not); graph and table lines refused 71 -> 10.

@@ -709,6 +709,110 @@ impl Session {
         )
     }
 
+    /// `avplot x` after `regress`: the residuals of y on the other regressors
+    /// against those of x, the line through 0 of slope x's coefficient, and
+    /// Stata 19's note `coef = .81065199, se = .07891904, t = 10.27` (`%10.0g`,
+    /// t to two decimals, `(robust) se` with a variance other than OLS's).
+    pub(super) fn avplot(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let x = match words.as_slice() {
+            [x] if is_name(x) => *x,
+            _ => return Err(no("avplot takes one regressor's name")),
+        };
+        if c.parts.if_exp.is_some() || c.parts.in_range.is_some() {
+            return Err(no("avplot takes no if or in"));
+        }
+        let est = self.estimates_for("avplot")?;
+        if est.fit != super::model::Fit::Regress {
+            return Err(no(format!(
+                "avplot after {} is not translated yet (after regress it is)",
+                est.fit.name()
+            )));
+        }
+        self.helpers.insert("stata_graph");
+        self.helpers.insert("stata_tab_values");
+        self.helpers.insert("stata_fmt");
+        out.line(format!(
+            "stata_av <- local({{ X <- stats::model.matrix(stata_estimates); j <- match({x}, colnames(X)); \
+             if (is.na(j)) stop(\"{xs} is not among the regressors (Stata: r(398))\", call. = FALSE); \
+             y <- stats::model.response(stats::model.frame(stata_estimates)); w <- stats::weights(stata_estimates); if (is.null(w)) w <- rep(1, length(y)); \
+             ey <- stats::lm.wfit(X[, -j, drop = FALSE], y, w)$residuals; ex <- stats::lm.wfit(X[, -j, drop = FALSE], X[, j], w)$residuals; \
+             b <- unname(stats::coef(stata_estimates)[j]); se <- sqrt(diag(as.matrix(stata_vcov)))[j]; \
+             robust <- !isTRUE(all.equal(unname(as.matrix(stata_vcov)), unname(as.matrix(stats::vcov(stata_estimates))))); \
+             o <- order(ex); list(points = data.frame(x = ex[o], y = ey[o]), b = b, \
+             note = paste0(\"coef = \", stata_fmt(b, \"%10.0g\", trim = TRUE), \", \", if (robust) \"(robust) \" else \"\", \"se = \", stata_fmt(se, \"%10.0g\", trim = TRUE), \", t = \", sprintf(\"%.2f\", b / se))) }})",
+            x = r_text(x),
+            xs = x
+        ));
+        let layers = vec![
+            "ggplot2::geom_point(data = stata_av$points, ggplot2::aes(x = x, y = y))".to_string(),
+            "ggplot2::geom_line(data = stata_av$points, ggplot2::aes(x = x, y = stata_av$b * x))"
+                .to_string(),
+            "ggplot2::labs(caption = stata_av$note)".to_string(),
+        ];
+        let dep = est.dep.clone();
+        self.draw(
+            c,
+            opts,
+            out,
+            &[],
+            &layers,
+            &r_text(&format!("e( {x} | X )")),
+            &r_text(&format!("e( {dep} | X )")),
+        )
+    }
+
+    /// `screeplot` after `pca` or `factor`: the eigenvalues against their
+    /// number, titled as Stata 19 titles it.
+    pub(super) fn screeplot(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if !c.parts.main.trim().is_empty() || c.parts.if_exp.is_some() || c.parts.in_range.is_some()
+        {
+            return Err(no("screeplot takes no varlist, if or in"));
+        }
+        let after = match &self.e_ret {
+            super::returned::Returned::Kept { cmd, .. } if cmd == "pca" || cmd == "factor" => {
+                cmd.clone()
+            }
+            _ => {
+                return Err(no(
+                    "screeplot is translated after pca or factor in this do-file",
+                ))
+            }
+        };
+        self.helpers.insert("stata_graph");
+        self.helpers.insert("stata_tab_values");
+        out.line(
+            "stata_scree <- data.frame(x = seq_along(stata_e$Ev), y = as.numeric(stata_e$Ev))",
+        );
+        let layers = vec![
+            "ggplot2::geom_point(data = stata_scree, ggplot2::aes(x = x, y = y))".to_string(),
+            "ggplot2::geom_line(data = stata_scree, ggplot2::aes(x = x, y = y))".to_string(),
+            format!(
+                "ggplot2::labs(title = {})",
+                r_text(&format!("Scree plot of eigenvalues after {after}"))
+            ),
+        ];
+        self.draw(
+            c,
+            opts,
+            out,
+            &[],
+            &layers,
+            &r_text("Number"),
+            &r_text("Eigenvalues"),
+        )
+    }
+
     // ---------------- lowess ----------------
 
     pub(super) fn lowess(

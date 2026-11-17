@@ -604,6 +604,56 @@ fn pie_slices_are_statas() {
     assert!(text.contains("a|b|c"), "{text}");
 }
 
+/// avplot and screeplot plot Stata 19's points (its sersets for StatCraft's
+/// probe 257's data) and print its note and title.
+#[test]
+fn avplot_and_screeplot_are_statas() {
+    let Some(mut e) = engine() else { return };
+    let data = "clear\nset seed 257\nset obs 40\ngenerate x1 = round(invnormal(runiform()) * 2 + 5, .01)\n\
+                generate x2 = round(invnormal(runiform()) + 1, .01)\n\
+                generate y = round(3 + 0.8 * x1 - 1.2 * x2 + invnormal(runiform()), .01)\n";
+    let code = script(&format!(
+        "{data}quietly regress y x1 x2\navplot x1, nodraw\n"
+    ));
+    ok(&mut e, &code);
+    let v = numbers(&mut e, "", "stata_av$points$x[1:3], stata_av$points$y[1:3]");
+    near_stata(
+        &v,
+        &[
+            -4.9550613, -4.8433478, -3.330918, -3.7278854, -2.8002252, -2.3617153,
+        ],
+        1e-6,
+        "avplot x1",
+    );
+    let text = ok(&mut e, "cat(stata_av$note)");
+    assert!(
+        text.contains("coef = .81065199, se = .07891904, t = 10.27"),
+        "{text}"
+    );
+    let code = script(&format!(
+        "{data}quietly regress y x1 x2, vce(robust)\navplot x2, nodraw\n"
+    ));
+    ok(&mut e, &code);
+    let text = ok(&mut e, "cat(stata_av$note)");
+    assert!(
+        text.contains("coef = -1.2233045, (robust) se = .11533034, t = -10.61"),
+        "{text}"
+    );
+    let code = script(&format!(
+        "{data}generate a1 = x1 + invnormal(runiform())\n\
+         generate a2 = x2 + invnormal(runiform())\ngenerate a3 = x1 - x2 + invnormal(runiform())\n\
+         quietly pca x1 x2 a1 a2 a3\nscreeplot, nodraw\n"
+    ));
+    ok(&mut e, &code);
+    let v = numbers(&mut e, "", "stata_scree$y");
+    near_stata(
+        &v,
+        &[2.6832174, 1.9545305, 0.17532288, 0.14090887, 0.04602038],
+        1e-6,
+        "screeplot after pca",
+    );
+}
+
 /// kdensity, at(x) generate(d): the density at each row's x (Stata 19 on
 /// StatCraft's probe 253's data: summarize d).
 #[test]
