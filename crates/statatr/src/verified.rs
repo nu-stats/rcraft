@@ -49,6 +49,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("display", &["fmtround"]),
     ("drawnorm", &["asclogit"]),
     ("drop", &["captured"]),
+    ("dslogit", &["lasso_infer"]),
+    ("dsregress", &["lasso_infer"]),
     ("duplicates", &["extended_missing_groups"]),
     (
         "egen",
@@ -171,6 +173,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("pca", &["pca"]),
     ("pdslasso", &["pdslasso"]),
     ("poisson", &["collinear", "likelihood"]),
+    ("poregress", &["lasso_infer"]),
     ("post", &["postfile"]),
     ("postclose", &["postfile"]),
     ("postfile", &["postfile"]),
@@ -269,6 +272,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("which", &["which"]),
     ("while", &["control"]),
     ("winsor", &["winsor"]),
+    ("xporegress", &["lasso_infer"]),
     ("xpose", &["made"]),
     ("xtile", &["xtile"]),
     (

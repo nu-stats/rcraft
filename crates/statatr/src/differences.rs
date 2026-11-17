@@ -2485,7 +2485,7 @@ pub const GUIDES: &[Guide] = &[
     },
     Guide {
         command: "lasso",
-        about: "Lasso for linear, logit, probit and Poisson outcomes, elasticnet linear, sqrtlasso, and lassoselect, lassoknots, lassocoef, lassoinfo, predict",
+        about: "Lasso for linear, logit, probit and Poisson outcomes, elasticnet linear, sqrtlasso, dsregress, poregress, xporegress, dslogit, and lassoselect, lassoknots, lassocoef, lassoinfo, predict",
         points: &[
             p(
                 "In R",
@@ -2497,7 +2497,10 @@ pub const GUIDES: &[Guide] = &[
                  rule, adaptive steps or the plug-in penalty, with the deviance stop() and the \
                  'minimum found' rule. elasticnet runs each alpha on Stata's shared grid with the \
                  same folds and picks the alpha and lambda with the smallest BIC or CV error; \
-                 sqrtlasso solves the square-root lasso by Stata's own coordinate rule. The \
+                 sqrtlasso solves the square-root lasso by Stata's own coordinate rule. \
+                 dsregress, poregress, xporegress and dslogit run those lassos for the outcome \
+                 and each variable of interest, then double selection, partialing out or \
+                 cross-fit (Stata's folds and resamples) with Stata's variances. The \
                  log, the table, e() (e(rngstate) included) and e(sample) are Stata's; \
                  lassoknots, lassocoef, lassoinfo and lassoselect print Stata's tables, and \
                  predict gives the penalized or postselection prediction (Pr(y) or the number of \
@@ -2517,8 +2520,10 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Not yet",
                 "lasso cox, elasticnet logit, probit and poisson, elasticnet with alpha 0 \
-                 (ridge) or several alphas and selection(none), the inference \
-                 commands (dsregress, poregress, xporegress, ...), cvplot, factor variables, \
+                 (ridge) or several alphas and selection(none), pologit, xpologit, dspoisson, \
+                 popoisson and xpopoisson, selection(cv) or lasso() inside xporegress, \
+                 poregress with vce(cluster), lassocoef after the inference commands, cvplot, \
+                 factor variables, \
                  weights, cluster(), tolerance() other than the default and dtolerance() are \
                  refused; so are noconstant with cross-validation and predict after offset(), \
                  exposure() or noconstant for logit, probit and Poisson, and test, lincom and \
@@ -3539,9 +3544,8 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
     let full = full(command);
     let page = match full.as_str() {
         "probit" => "logit",
-        "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" | "elasticnet" | "sqrtlasso" => {
-            "lasso"
-        }
+        "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" | "elasticnet" | "sqrtlasso"
+        | "dsregress" | "poregress" | "xporegress" | "dslogit" => "lasso",
         "oprobit" => "ologit",
         "tsfill" => "tsset",
         "tab1" | "tab2" => "tabulate",

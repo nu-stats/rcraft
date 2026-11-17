@@ -92,7 +92,12 @@ stata_list_returned <- function(x, p) {
   num <- names(x)[vapply(x, function(v) is.numeric(v) && !is.matrix(v), TRUE)]
   txt <- names(x)[vapply(x, is.character, TRUE)]
   mat <- names(x)[vapply(x, is.matrix, TRUE)]
-  key <- function(n) sprintf("%22s", paste0(p, "(", n, ")"))
+  # a name longer than 17 characters goes on in a second line, indented (Stata 19:
+  # e(lasso_depvars_uni / q) after dsregress, probe 475)
+  key <- function(n) {
+    if (nchar(n) <= 17) return(sprintf("%22s", paste0(p, "(", n, ")")))
+    paste0("  ", p, "(", substr(n, 1, 17), "\n", formatC(paste0("    ", substring(n, 18), ")"), width = -22))
+  }
   if (length(num)) {
     cat("\nscalars:\n")
     for (n in num) cat(key(n), " =  ", stata_fmt(x[[n]], "%18.0g", trim = TRUE), "\n", sep = "")

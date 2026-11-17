@@ -66,11 +66,10 @@ rounds, the tables and e(). Ported to R here, and checked again on those probes'
 
 ## Not yet
 
-`lasso cox`, `dsregress` and the other inference commands, `cvplot`, factor variables
-(`i.fold`), weights, `cluster()`, `offset()` for the linear lasso, `tolerance()` other than the
-default, `dtolerance()`; test, lincom and margins after lasso. (lasso logit, probit, poisson and
-elasticnet linear and sqrtlasso: below, 2026-11-16.) StatCraft has the rules for
-the inference commands (475, 480): the next lasso step.
+`lasso cox`, `cvplot`, factor variables (`i.fold`), weights, `cluster()`, `offset()` for the
+linear lasso, `tolerance()` other than the default, `dtolerance()`; test, lincom and margins after
+lasso. (lasso logit, probit, poisson, elasticnet linear, sqrtlasso and dsregress, poregress,
+xporegress, dslogit: below, 2026-11-16.)
 
 # lasso logit, probit, poisson and elasticnet linear (2026-11-16)
 
@@ -161,3 +160,52 @@ variables; lassoselect, lassoknots, lassocoef, lassoinfo (`sq linear`), predict.
 - Probes 473, 506, 507, 597 on R: 5 of 5 compared lines to 8 digits. Corpus `sqrtlasso.do`: 17
   results, at 1e-7 (at the path's end coefficients and norms differ by up to 4e-8, as for the
   linear lasso).
+
+# dsregress, poregress, xporegress, dslogit (2026-11-16)
+
+Translated: `dsregress`, `poregress`, `xporegress` and `dslogit depvar varsofinterest,
+controls([(always)] others)` with selection plugin (the default), cv, bic and adaptive,
+`lasso(varlist, selection(...))`, `sqrtlasso` (linear), `rseed()`, `vce(robust | ols | hc2 | hc3 |
+cluster v)` (not cluster for poregress; xporegress robust only, vce(ols) gives robust as in Stata),
+`level()`, `coeflegend`, `nolog`, `coef`/`or` (dslogit), `xfolds()` and `resample()`; the log, the
+table, e() in Stata's order, e(sample), `lassoinfo` (plug-in lassos), `predict` (xb only: "partial
+linear prediction"; other options are Stata's r(198)), Stata's errors (`option controls()
+required`, `varsofinterest required`, a variable in both, all r(198); `outcome must be 0 or 1`
+r(2000)). StatCraft's rules (its probes 475, 480), checked on Stata 19 here.
+
+## How
+
+Each lasso is the lasso RCraft already runs as Stata does (`stata_lasso_run`, inner): the outcome
+and each variable of interest on the controls, for `dslogit` the outcome by the logit lasso on the
+variables of interest and the controls (logit's homoskedastic plug-in by default). Double
+selection: least squares (logit for dslogit) of the outcome on the variables of interest and the
+union of the selected controls; partialing out: the outcome's residual on the variables' residuals,
+each from least squares on its own selected controls, no constant; cross-fit: folds from one
+`runiform()` per observation, rank r to fold r mod K, the held-out residuals pooled, the robust
+variance with the moment and score matrices averaged over folds, resamples averaged with the
+spread of their coefficients added.
+
+## Found here
+
+- With no `selection()` the lassos are the plug-in ones (not lasso's own default, cv).
+- `ereturn list` puts an e() name longer than 17 characters on two lines (`e(lasso_depvars_uni` /
+  `q)`), for every command.
+- The display options (`coeflegend`) are the commands' own: they print Stata's table.
+- `controls(x1-x10)`: the run makes the option's range the data's names, as it does for varlists.
+- `poregress, vce(cluster g)`: the variance is 1.8% off Stata's in lasso_infer.do while
+  dsregress's agrees (probe 475 and the corpus); refused.
+
+## Checked
+
+Probes 475 and 480 on R: 7 of 7 compared lines (ereturn list after dsregress, poregress,
+xporegress with and without resamples, dslogit) to 8 digits; every e(b) and e(V) printed with
+%21x to 2e-12; every coefficient table (robust, ols, hc3, cluster, level(), coeflegend, cv, bic,
+adaptive, lasso(), sqrtlasso, always-in controls, cross-fit with 2-10 folds and resamples, dslogit
+odds ratios) line for line. Corpus `lasso_infer.do`: 23 results at 1e-7 (all at 1e-8 but
+dslogit's variance, 1.4e-8 off).
+
+## Not yet
+
+pologit, xpologit, dspoisson, popoisson, xpopoisson (StatCraft did not reproduce them); cv or
+lasso() inside xporegress; xfolds(1); lassocoef and lassoinfo after cv lassos; test, lincom,
+margins after these commands.

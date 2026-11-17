@@ -53,6 +53,7 @@ mod fre;
 mod glm;
 mod graph;
 mod icc;
+mod infer;
 mod iv;
 mod kap;
 mod lasso;
@@ -543,6 +544,15 @@ const NAME_TABLES: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "dsregress",
+    "poregress",
+    "xporegress",
+    "dslogit",
+    "pologit",
+    "xpologit",
+    "dspoisson",
+    "popoisson",
+    "xpopoisson",
     "lasso",
     "elasticnet",
     "sqrtlasso",
@@ -1160,6 +1170,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_testparm" => testparm::TESTPARM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
         "stata_lasso" => lasso::LASSO_HELPER,
+        "stata_infer" => infer::INFER_HELPER,
         "stata_pdslasso" => pdslasso::PDSLASSO_HELPER,
         "stata_cm" => cm::CM_HELPER,
         "stata_rreg" => rreg::RREG_HELPER,
@@ -2615,9 +2626,12 @@ impl Session {
             "prtest" => self.prtest(c, &opts, out),
             "pdslasso" => self.pdslasso(c, &opts, out),
             "lasso" | "elasticnet" | "sqrtlasso" => self.lasso(c, &opts, out),
+            "lassoinfo" if self.infer_active().is_some() => self.infer_info(c, out),
             "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" => {
                 self.lasso_after(c, &opts, out)
             }
+            "dsregress" | "poregress" | "xporegress" | "dslogit" | "pologit" | "xpologit"
+            | "dspoisson" | "popoisson" | "xpopoisson" => self.infer(c, &opts, out),
             "cmset" => self.cmset(c, &opts, out),
             "cmclogit" => self.cmclogit(c, &opts, out),
             "rreg" => self.rreg(c, &opts, out),
@@ -4469,6 +4483,10 @@ impl Session {
     pub(super) fn restated(&self, c: &Command) -> Option<Command> {
         let margins = c.name == "margins";
         if !MODELS.contains(&c.name.as_str()) && !margins {
+            return None;
+        }
+        // the lasso inference commands print Stata's own table, coeflegend and all
+        if crate::dofile::INFER_COMMANDS.contains(&c.name.as_str()) {
             return None;
         }
         // margins after cmclogit prints Stata's own table, cformat() and all

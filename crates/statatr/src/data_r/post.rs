@@ -339,6 +339,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "predict")?;
+        if self.infer_active().is_some() {
+            return self.infer_predict(c, opts, out);
+        }
         if matches!(&self.e_ret, super::returned::Returned::Program { cmd, .. } if cmd == "lasso") {
             return self.lasso_predict(c, opts, out);
         }

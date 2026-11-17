@@ -5213,3 +5213,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **e() kept and lost:** a lasso line that only stops with Stata's syntax error keeps e(); a command
   outside the models that posts e() and then stops in R for a reason not Stata's own marks e() as
   not known (`stata_post_failed`), so later reads stop instead of showing older results.
+
+## P2C.12: dsregress, poregress, xporegress, dslogit, 2026-11-16
+
+- **Translated** (`statatr::data_r::infer`, R helper `stata_infer_*`): the four commands with the
+  plug-in, cv, bic and adaptive lassos, lasso(), sqrtlasso, always-in controls, Stata's variances
+  (robust, ols, hc2, hc3, cluster but not for poregress), cross-fit folds and resamples, lassoinfo,
+  predict (xb). Each lasso is RCraft's Stata-matched lasso run.
+- **Checked:** probes 475/480: 7 of 7 compared lines to 8 digits, every %21x e(b)/e(V) to 2e-12,
+  every table line for line; corpus `lasso_infer.do` (23 results, 1e-7). All lasso probes: 72 of 73
+  compared lines to 8 digits. Probe share (dry run) 72.7% -> 73.1% (20,298 -> 20,311 translated,
+  7,606 -> 7,482 not, 951 -> 1,062 known only when run).
+- **Also:** ereturn list wraps e() names over 17 characters as Stata does; controls(x1-x10) ranges
+  are expanded at run time.
+- **Not yet:** pologit, xpologit, dspoisson, popoisson, xpopoisson; cv inside xporegress.

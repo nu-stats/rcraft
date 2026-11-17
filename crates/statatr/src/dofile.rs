@@ -193,9 +193,26 @@ pub const MAX_LINES: usize = 200_000;
 /// Most times a loop goes round.
 pub const MAX_ROUNDS: usize = 100_000;
 
+/// The lasso inference commands: their controls() option is a varlist too.
+pub(crate) const INFER_COMMANDS: &[&str] = &[
+    "dsregress",
+    "poregress",
+    "xporegress",
+    "dslogit",
+    "pologit",
+    "xpologit",
+    "dspoisson",
+    "popoisson",
+    "xpopoisson",
+];
+
 /// The commands whose main part is a varlist (with factor variables for the
 /// models): there a pattern, a range or `_all` is made the data's names.
 const VARLIST: &[&str] = &[
+    "dsregress",
+    "poregress",
+    "xporegress",
+    "dslogit",
     "lasso",
     "elasticnet",
     "sqrtlasso",
@@ -1620,6 +1637,50 @@ impl<'f> Run<'f> {
                         },
                         // as written: the translator takes what it can
                         Ok(None) | Err(_) => {}
+                    }
+                }
+                // the lasso inference commands' controls([(always)] others): its
+                // ranges and patterns are the data's names too (probes 475, 480)
+                if INFER_COMMANDS.contains(&c.name.as_str()) {
+                    let at = c
+                        .options
+                        .iter()
+                        .position(|o| o.is("controls", 3) && o.arg.is_some());
+                    if let Some(i) = at {
+                        let arg = c.options.get(i).map(|o| o.arg()).unwrap_or_default();
+                        if varlist::needs_names(&arg) {
+                            match self.vars_now() {
+                                Err(Stop::Ask(need)) => return Flow::Ask(need),
+                                Ok(Some(vars)) => {
+                                    // (always) others: each part on its own
+                                    let parts: Option<String> = match (arg.find('('), arg.find(')'))
+                                    {
+                                        (Some(a), Some(b)) if a < b => {
+                                            let inner = arg.get(a + 1..b).unwrap_or("");
+                                            let outer = format!(
+                                                "{} {}",
+                                                arg.get(..a).unwrap_or(""),
+                                                arg.get(b + 1..).unwrap_or("")
+                                            );
+                                            match (
+                                                varlist::expand(inner, &vars),
+                                                varlist::expand(outer.trim(), &vars),
+                                            ) {
+                                                (Ok(x), Ok(y)) => Some(format!("({x}) {y}")),
+                                                _ => None,
+                                            }
+                                        }
+                                        (None, None) => varlist::expand(&arg, &vars).ok(),
+                                        _ => None,
+                                    };
+                                    if let (Some(m), Some(o)) = (parts, c.options.get_mut(i)) {
+                                        o.arg = Some(m.clone());
+                                        o.raw = Some(m);
+                                    }
+                                }
+                                Ok(None) | Err(_) => {}
+                            }
+                        }
                     }
                 }
                 // isvar (SSC): which names are variables, which only the data's
