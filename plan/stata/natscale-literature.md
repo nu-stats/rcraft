@@ -253,7 +253,7 @@ count is not in the centred model's fitting set.
   is computed from wherever the bottom starts (bottom-up, as probe 40 found). Here "padded or not" is
   which bottom start the top's sum began from.
 - **Off a label, at a half step, the padding alternates with single ulps of lo.** −1.35 to −0.50
-  (lo/d ≈ −13.5): over lo −30..+30 ulps the class runs P P P . . . . . P P P P . . P P P P P . P … in
+  (lo/d ≈ −13.5): over lo −30..+30 ulps the class runs . . P P P . . . . . P P P P . . P P P P P . P … in
   runs of 1 to 11 ulps. Unpadded runs fit a bottom start of index −14 (the label); padded ones fit −15
   to −17. This is the fingerprint of a comparison that is a tie in exact arithmetic.
 - **No single comparison reproduces it** (121 points, lo and hi axes). Not lo, lo/d or the gaps
