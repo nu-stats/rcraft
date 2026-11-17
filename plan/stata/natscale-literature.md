@@ -235,3 +235,34 @@ inputs are exact negatives. lo from −2 to 1.2 by 0.05, widths 0.85, 1.45 and 0
   0.1; −1.35 to −0.50 against 0.50 to 1.35, n 12) and move lo and hi by single ulps on each side, as
   probe 13 did. If the padded side flips with ulps of lo but not of hi (or the other way round), that
   names the input whose rounding decides it.
+
+## Probe 41: single ulps on the one-sided pairs (`lit_p41*.R`)
+
+Probe 41 (968 runs, inputs echoed through `%21x` and checked: 968 of 968 as intended). Eight ranges
+from probe 40's one-sided pairs (−0.15 to 0.70 and its mirror, n 12, step 0.1; −1.35 to −0.50 and
+mirror, n 12; −0.60 to 0.25 and mirror, n 20, step 0.05; −1.85 to −1.23 and mirror, n 14). In each, lo
+was moved by −30..30 ulps with hi fixed, then hi with lo fixed. "Padded" is read as before: the label
+count is not in the centred model's fitting set.
+
+- **Where an end sits on a label, the padding switches exactly at the label.** 0.50 to 1.35: lo one or
+  more ulps below 0.5 reads unpadded, lo at or above 0.5 reads padded. −1.85 to −1.23 (step 0.05): lo
+  below −1.85 ambiguous, at or above padded. −1.35 to −0.50: hi below −0.5 padded, at or above
+  unpadded. The labels and the step do not change across these switches.
+- **Moving the bottom across its label changes the top's bits.** 0.50 to 1.35: r(max) is 1.4 + 2 ulp
+  for lo just below 0.5 and 1.4 − 0 ulp (`…6666p+0`) from lo = 0.5 up, although hi is fixed. So the top
+  is computed from wherever the bottom starts (bottom-up, as probe 40 found). Here "padded or not" is
+  which bottom start the top's sum began from.
+- **Off a label, at a half step, the padding alternates with single ulps of lo.** −1.35 to −0.50
+  (lo/d ≈ −13.5): over lo −30..+30 ulps the class runs P P P . . . . . P P P P . . P P P P P . P … in
+  runs of 1 to 11 ulps. Unpadded runs fit a bottom start of index −14 (the label); padded ones fit −15
+  to −17. This is the fingerprint of a comparison that is a tie in exact arithmetic.
+- **No single comparison reproduces it** (121 points, lo and hi axes). Not lo, lo/d or the gaps
+  against a half step (at most 0.51 agreement). Not the midpoint against the label midpoint, the range
+  against a half-step count, or the bottom gap against the top gap (at most 0.76). Not pairs that are
+  equal in exact arithmetic but computed along different paths: ((hi − lo)/N)·N against hi − lo,
+  lo + N·((hi − lo)/N) against hi, hi − (hi − lo) against lo, (hi − lo)/d against hi/d − lo/d, and
+  midpoint forms (at most 0.69). So the decision comes out of a longer computation, likely a loop
+  whose accumulated values tie, not a single test on lo and hi.
+- Scoreboard unchanged at 7,781.
+- For the parent: the 61-point lo pattern of −1.35 to −0.50 (n 12) and the label switches above are
+  the targets. A candidate loop for the padding must reproduce them bit for bit (`P41.rds`).
