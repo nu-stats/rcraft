@@ -993,12 +993,92 @@ const IMPORT_FLOAT_HELPER: &str = "stata_import_float <- function(d) {\n  for (n
 /// (missing left out, or `.` last with `missing`), text in compound quotes
 /// (`""` first with `missing`; `clean` without quotes); r(r) the number of
 /// values and r(N) the rows that count.
+/// `list`'s table as Stata 19 draws it: each column as wide as its widest
+/// value or its name (abbreviated to 8), every cell right-aligned, three
+/// spaces apart, a line every `sep` rows, the row's number (at least three
+/// digits) before the box; `noobs` drops the numbers, `clean` the box. A
+/// number in its display format (a set one, or its storage type's), a
+/// labelled value by its label. Where a numeric variable's format is not
+/// known and its values are not small whole numbers, or the table is wider
+/// than the line, R's layout is printed instead.
+const LIST_HELPER: &str = r#"stata_list <- function(d, defaults = character(0), label = TRUE, noobs = FALSE, clean = FALSE, sep = 5) {
+  obs <- d$stata_obs_
+  d$stata_obs_ <- NULL
+  if (!nrow(d) || !ncol(d)) return(invisible())
+  fallback <- function() print(as.data.frame(if (label) haven::as_factor(d) else haven::zap_labels(d)))
+  miss <- function(z) { t <- tryCatch(haven::na_tag(z), error = function(e) NA_character_); if (is.na(t)) "." else paste0(".", t) }
+  cells <- list()
+  for (v in names(d)) {
+    x <- d[[v]]
+    if (is.character(x)) { cells[[v]] <- ifelse(is.na(x), "", x); next }
+    if (!is.numeric(x)) return(fallback())
+    u <- unclass(x); attributes(u) <- NULL
+    f <- attr(x, "format.stata", exact = TRUE)
+    if (is.null(f) && v %in% names(defaults)) f <- defaults[[v]]
+    if (is.null(f)) {
+      if (!all(is.na(u) | (u == round(u) & abs(u) < 1e6))) return(fallback())
+      f <- "%9.0g"
+    }
+    if (!grepl("^%[0-9]+\\.[0-9]+[fg]$", f)) return(fallback())
+    s <- vapply(u, function(z) if (is.na(z)) miss(z) else stata_fmt(z, f, trim = TRUE), "")
+    vl <- attr(x, "labels", exact = TRUE)
+    if (label && length(vl)) {
+      m <- match(u, as.numeric(unclass(vl)))
+      s[!is.na(m)] <- names(vl)[m[!is.na(m)]]
+    }
+    cells[[v]] <- s
+  }
+  vw <- vapply(cells, function(s) max(0, nchar(s)), 1)
+  heads <- vapply(seq_along(cells), function(j) {
+    v <- names(cells)[j]
+    stata_tab_abbrev(v, min(nchar(v), max(8, vw[j])), vars = character())
+  }, "")
+  W <- pmax(vw, nchar(heads))
+  pad <- function(s, w) paste0(strrep(" ", pmax(0, w - nchar(s))), s)
+  row_of <- function(i) vapply(seq_along(cells), function(j) pad(cells[[j]][i], W[j]), "")
+  lw <- max(3, nchar(format(max(obs), scientific = FALSE))) + 1
+  inner <- 2 + sum(W) + 3 * (length(W) - 1)
+  ls <- if (exists("stata_linesize")) stata_linesize else 79
+  if ((if (noobs) 2 else lw + 1) + inner + 2 > ls) return(fallback())
+  num <- function(i) paste0(pad(format(obs[i], scientific = FALSE), lw - 1), ".")
+  if (clean) {
+    pre <- if (noobs) " " else strrep(" ", lw)
+    cat("\n", pre, paste0("   ", pad(heads, W), collapse = ""), "  \n", sep = "")
+    for (i in seq_along(obs)) cat(if (noobs) " " else num(i), paste0("   ", row_of(i), collapse = ""), "  \n", sep = "")
+    cat("\n")
+    return(invisible())
+  }
+  pre <- if (noobs) "  " else strrep(" ", lw + 1)
+  bar <- function(a, b) cat(pre, a, strrep("-", inner), b, "\n", sep = "")
+  cat("\n")
+  bar("+", "+")
+  cat(pre, "| ", paste(pad(heads, W), collapse = "   "), " |\n", sep = "")
+  bar("|", "|")
+  for (i in seq_along(obs)) {
+    if (sep > 0 && i > 1 && (i - 1) %% sep == 0) bar("|", "|")
+    cat(if (noobs) "  " else paste0(num(i), " "), "| ", paste(row_of(i), collapse = "   "), " |\n", sep = "")
+  }
+  bar("+", "+")
+  cat("\n")
+  invisible()
+}"#;
+
 /// `expand`: each row's copies after all the rows, in order, as Stata 19 puts
 /// them; a count is rounded, and one below 1 or missing leaves the row once.
-const EXPAND_HELPER: &str = r#"stata_expand <- function(d, n, gen = NULL) {
+/// It says so as Stata 19 does: the noninteger, missing, negative and zero
+/// counts, then the observations created.
+const EXPAND_HELPER: &str = r#"stata_expand <- function(d, n, gen = NULL, show = TRUE) {
+  say <- function(k, one, many) if (k > 0) cat("(", format(k, big.mark = ",", scientific = FALSE), if (k == 1) one else many, ")\n", sep = "")
+  if (show) say(sum(!is.na(n) & n != floor(n)), " noninteger count rounded to integer", " noninteger counts rounded to integer")
   n <- floor(n + 0.5)
+  if (show) {
+    say(sum(is.na(n)), " missing count ignored; observation not deleted", " missing counts ignored; observations not deleted")
+    say(sum(!is.na(n) & n < 0), " negative count ignored; observation not deleted", " negative counts ignored; observations not deleted")
+    say(sum(!is.na(n) & n == 0), " zero count ignored; observation not deleted", " zero counts ignored; observations not deleted")
+  }
   n[is.na(n) | n < 1] <- 1
   extra <- rep(seq_len(nrow(d)), n - 1)
+  if (show) cat("(", format(length(extra), big.mark = ",", scientific = FALSE), if (length(extra) == 1) " observation created" else " observations created", ")\n", sep = "")
   out <- d[c(seq_len(nrow(d)), extra), , drop = FALSE]
   rownames(out) <- NULL
   if (!is.null(gen)) out[[gen]] <- c(rep(0, nrow(d)), rep(1, length(extra)))
@@ -1309,6 +1389,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_levelsof" => LEVELSOF_HELPER,
         "stata_set_obs" => SET_OBS_HELPER,
         "stata_expand" => EXPAND_HELPER,
+        "stata_list" => LIST_HELPER,
         "stata_matrix_list" => matrices::MATRIX_LIST_HELPER,
         "stata_matrix" => mexpr::MATRIX_HELPER,
         "stata_svmat" => matrices::SVMAT_HELPER,
@@ -3848,6 +3929,57 @@ impl Session {
                 "list with the option {o} is not translated yet"
             )));
         }
+        // Stata's table: plain, noobs, clean, separator(#), nolabel (Stata 19)
+        let table = opts
+            .other(&[("clean", 1), ("noobs", 3), ("separator", 3), ("nolabel", 3)])
+            .is_none();
+        let sep = match opts.arg("separator", 3) {
+            Some(s) => s.trim().parse::<u32>().ok(),
+            None => Some(5),
+        };
+        if let (true, Some(sep)) = (table, sep) {
+            let mut steps = vec![format!(
+                "dplyr::mutate({d}, stata_obs_ = dplyr::row_number())"
+            )];
+            if let Some(cond) = self.condition(c, out)? {
+                steps.push(format!("dplyr::filter({cond})"));
+            }
+            let main = c.parts.main.trim();
+            if !main.is_empty() {
+                steps.push(format!("dplyr::select({}, stata_obs_)", select(main)?));
+            }
+            // the display formats Stata gives the storage types generate made
+            let defaults: Vec<String> = self
+                .storage
+                .iter()
+                .filter_map(|(v, t)| {
+                    Some(format!("{} = {}", r_text(v), r_text(t.default_format()?)))
+                })
+                .collect();
+            let mut args = String::new();
+            if !defaults.is_empty() {
+                args.push_str(&format!(", defaults = c({})", defaults.join(", ")));
+            }
+            if opts.has("nolabel", 3) {
+                args.push_str(", label = FALSE");
+            }
+            if opts.has("noobs", 3) {
+                args.push_str(", noobs = TRUE");
+            }
+            if opts.has("clean", 1) {
+                args.push_str(", clean = TRUE");
+            }
+            if sep != 5 {
+                args.push_str(&format!(", sep = {sep}"));
+            }
+            for h in ["stata_list", "stata_fmt", "stata_tables"] {
+                self.helpers.insert(h);
+            }
+            out.package("dplyr");
+            out.package("haven");
+            out.line(format!("stata_list({}{args})", steps.join(" |> ")));
+            return Ok(());
+        }
         let mut steps = vec![d.clone()];
         if let Some(cond) = self.condition(c, out)? {
             steps.push(format!("dplyr::filter({cond})"));
@@ -3915,8 +4047,10 @@ impl Session {
             return Ok(());
         }
         if opts.has("simple", 2) {
-            // the names two spaces apart, as Stata 19 prints them
-            out.line("cat(paste(stata_described, collapse = \"  \"), \"\\n\", sep = \"\")");
+            // in columns as Stata 19 prints them: each name abbreviated to 12, the
+            // columns two wider than the longest, as many as the line holds, filled down
+            self.helpers.insert("stata_tables");
+            out.line("local({ v <- vapply(stata_described, function(s) stata_tab_abbrev(s, 12, vars = character()), \"\"); w <- max(nchar(v)) + 2; ls <- if (exists(\"stata_linesize\")) stata_linesize else 79; nr <- ceiling(length(v) / max(1, floor(ls / w))); for (i in seq_len(nr)) { s <- v[seq(i, length(v), by = nr)]; cat(sub(\" +$\", \"\", paste0(s, strrep(\" \", w - nchar(s)), collapse = \"\")), \"\\n\", sep = \"\") } })");
             out.line("rm(stata_described)");
             return Ok(());
         }
@@ -3997,8 +4131,9 @@ impl Session {
         };
         self.helpers.insert("stata_expand");
         out.package("dplyr");
+        let show = if self.quiet(c) { ", show = FALSE" } else { "" };
         out.line(format!(
-            "{d} <- stata_expand({d}, dplyr::transmute({d}, stata_n = {n})$stata_n{gen})"
+            "{d} <- stata_expand({d}, dplyr::transmute({d}, stata_n = {n})$stata_n{gen}{show})"
         ));
         Ok(())
     }
@@ -4567,6 +4702,19 @@ enum Storage {
     Float,
     Double,
     Str,
+}
+
+impl Storage {
+    /// The display format Stata gives a new numeric variable of this type.
+    fn default_format(self) -> Option<&'static str> {
+        match self {
+            Storage::Byte | Storage::Int => Some("%8.0g"),
+            Storage::Long => Some("%12.0g"),
+            Storage::Float => Some("%9.0g"),
+            Storage::Double => Some("%10.0g"),
+            Storage::Str => None,
+        }
+    }
 }
 
 fn storage(ty: &str) -> Option<Storage> {

@@ -643,3 +643,69 @@ fn infix_and_infile_read_as_stata_19() {
         assert!(text.contains(want), "{want:?}\n--\n{text}");
     }
 }
+
+/// list in Stata 19's table, collapse's variable order and formats, expand's notes and
+/// describe, simple in columns (2026-11-16, checked against Stata 19 line for line).
+#[test]
+fn list_collapse_and_expand_print_as_stata_19() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    let dofile = r#"clear
+set linesize 255
+set obs 12
+generate byte g = mod(_n, 3)
+generate x = _n / 7
+generate double y = _n * 1234.5678
+generate str8 name = cond(mod(_n, 2), "alpha", "be")
+generate a_very_long_variable_name = _n
+label define gl 0 "zero" 1 "one" 2 "two and more"
+label values g gl
+replace x = . in 3
+list in 1/7, separator(3)
+list g x in 1/2, noobs
+list name x in 1/3, clean
+preserve
+generate byte dose = 1 + mod(_n, 4)
+collapse (mean) x (sum) a_very_long_variable_name, by(dose g)
+describe, simple
+list in 1/2, nolabel
+restore
+expand 2 in 1
+generate k = cond(_n <= 2, 0, 2.6)
+expand k in 1/4
+"#;
+    let t = translate(&read(dofile));
+    let not: Vec<String> = t
+        .lines
+        .iter()
+        .filter_map(|l| {
+            l.result
+                .as_ref()
+                .err()
+                .map(|e| format!("{} -> {}", l.stata, e.reason))
+        })
+        .collect();
+    assert!(not.is_empty(), "not translated: {}", not.join("; "));
+    let (ran, text) = run(&mut e, &t.script());
+    assert_eq!(ran, Outcome::Ok, "{text}");
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "     +--------------------------------------------------------+",
+        "     |            g          x           y    name   a_very~e |",
+        "  1. |          one   .1428571   1234.5678   alpha          1 |",
+        "  3. |         zero          .   3703.7034   alpha          3 |",
+        "     |--------------------------------------------------------|",
+        "  1. | 0      1   1.714286         12 |",
+        "  5. | two and more   .7142857    6172.839   alpha          5 |",
+        "  |          one   .1428571 |",
+        "        name          x",
+        "  2.      be   .2857143",
+        "g             dose          x             a_very_lon~e",
+        "(1 observation created)",
+        "(2 noninteger counts rounded to integer)",
+        "(2 zero counts ignored; observations not deleted)",
+        "(4 observations created)",
+    ] {
+        assert!(lines.contains(&want), "{want:?}\n--\n{text}");
+    }
+}

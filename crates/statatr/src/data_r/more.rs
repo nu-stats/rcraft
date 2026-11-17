@@ -1390,6 +1390,7 @@ impl Session {
         self.need_helper("stata_stats");
         let mut stat = "mean".to_string();
         let mut targets: Vec<(String, String)> = Vec::new(); // new name -> R expression
+        let mut target_src: Vec<(String, String)> = Vec::new(); // new name -> source
         let mut sources = Vec::new();
         let mut percents = Vec::new();
         let mut count_note = false;
@@ -1475,6 +1476,8 @@ impl Session {
                             "structure({e}, label = {})",
                             r_text(&format!("({label}) {src}"))
                         );
+                        target_src.retain(|(n, _)| n != &new);
+                        target_src.push((new.clone(), src.clone()));
                         targets.retain(|(n, _)| n != &new);
                         targets.push((new.clone(), e));
                         sources.push(src);
@@ -1492,6 +1495,8 @@ impl Session {
                         "structure({e}, label = {})",
                         r_text(&format!("({stat}) {src}"))
                     );
+                    target_src.retain(|(n, _)| n != &new);
+                    target_src.push((new.clone(), src.clone()));
                     targets.retain(|(n, _)| n != &new);
                     targets.push((new.clone(), e));
                     sources.push(src);
@@ -1535,6 +1540,8 @@ impl Session {
                 r_text(&format!("({label}) {src}"))
             );
             // a later target of the same name replaces the earlier one
+            target_src.retain(|(n, _)| n != &new);
+            target_src.push((new.clone(), src.clone()));
             targets.retain(|(n, _)| n != &new);
             targets.push((new.clone(), expr));
             sources.push(src);
@@ -1569,7 +1576,42 @@ impl Session {
             ));
         }
         let by = opts.arg("by", 2).map(|b| select(&b)).transpose()?;
+        // each result keeps its source's display format, and the by() variables theirs
+        // (Stata 19): a set one, or the one its storage type was made with
+        let fmt_of = |s: &Session, v: &str| {
+            let def = s
+                .storage
+                .get(v)
+                .and_then(|t| t.default_format())
+                .map(r_text)
+                .unwrap_or_else(|| "NULL".into());
+            format!(
+                "{{ f <- attr({d}${}, \"format.stata\", exact = TRUE); if (is.null(f)) {def} else f }}",
+                r_name(v)
+            )
+        };
+        let mut fmts: Vec<String> = target_src
+            .iter()
+            .map(|(n, s)| format!("{} = {}", r_name(n), fmt_of(self, s)))
+            .collect();
+        let by_names: Vec<String> = opts
+            .arg("by", 2)
+            .map(|b| {
+                b.split_whitespace()
+                    .filter(|v| is_name(v))
+                    .map(String::from)
+                    .collect()
+            })
+            .unwrap_or_default();
+        for v in &by_names {
+            fmts.push(format!("{} = {}", r_name(v), fmt_of(self, v)));
+        }
+        out.line(format!("stata_cf <- list({})", fmts.join(", ")));
         if let Some(b) = &by {
+            // the by() variables come first in the data's order, not by()'s (Stata 19)
+            out.line(format!(
+                "stata_collapse_by <- intersect(names({d}), names(dplyr::select({d}, {b})))"
+            ));
             steps.push(self.group_by(b, out));
         }
         // each under a name of its own first: summarise reads a column it has
@@ -1597,8 +1639,21 @@ impl Session {
                 "dplyr::arrange(stata_sort_keys(dplyr::pick({b}))) |> dplyr::select(-stata_tag_k)"
             ));
         }
+        if by.is_some() {
+            steps.push(
+                "dplyr::select(dplyr::all_of(stata_collapse_by), dplyr::everything())".into(),
+            );
+        }
         steps.push("as.data.frame()".into());
         out.line(format!("{d} <- {d} |> {}", steps.join(" |> ")));
+        out.line(format!(
+            "stata_cf <- stata_cf[intersect(names(stata_cf), names({d}))]; {d}[names(stata_cf)] <- Map(function(x, f) {{ attr(x, \"format.stata\") <- f; x }}, {d}[names(stata_cf)], stata_cf)"
+        ));
+        out.line(if by.is_some() {
+            "rm(stata_cf, stata_collapse_by)"
+        } else {
+            "rm(stata_cf)"
+        });
         for p in &percents {
             out.line(format!("rm(collapse_total_{p})"));
         }
@@ -1606,7 +1661,8 @@ impl Session {
             "Stata stores means and the like of float variables as floats; R keeps full precision",
         );
         self.kinds.clear();
-        self.storage.clear();
+        // the by() variables keep their storage type; the results' are not tracked
+        self.storage.retain(|k, _| by_names.contains(k));
         Ok(())
     }
 

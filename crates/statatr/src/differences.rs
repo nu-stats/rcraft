@@ -360,6 +360,12 @@ pub const GUIDES: &[Guide] = &[
                  precision, so the 8th digit can differ.",
             ),
             p(
+                "Order and formats",
+                "As Stata 19: the by() variables come first in the data's order (not by()'s), \
+                 the rows sorted as by() names them, and each result keeps its source's display \
+                 format.",
+            ),
+            p(
                 "Weights",
                 "aweights and fweights as Stata 19 uses them: the mean weighted; aweights scaled \
                  to each group's rows, so (sum) is the weighted mean times the rows with a value \
@@ -419,7 +425,7 @@ pub const GUIDES: &[Guide] = &[
                 "Chosen variables",
                 "describe varlist (names, ranges, patterns) lists only those, in the data's order; \
                  r(k) stays the number of variables in the data, as in Stata. simple prints the \
-                 names two spaces apart, as Stata does; varlist leaves r(varlist). A name not in \
+                 names in columns down the page, as Stata does; varlist leaves r(varlist). A name not in \
                  the data stops with Stata's r(111). describe using a file is not translated yet.",
             ),
             LAYOUT_R,
@@ -528,6 +534,7 @@ pub const GUIDES: &[Guide] = &[
         about: "Copies rows",
         points: &[
             p("The new rows", "Each row's copies go after all the rows, in the rows' order, as Stata 19 puts them; a count is rounded, and one below 1 or missing leaves the row once."),
+            p("Notes", "expand says what Stata 19 says: the noninteger, missing, negative and zero counts and the observations created."),
             p("generate()", "The new variable is 0 for the rows there before and 1 for the copies; Stata also gives 0 and 1 value labels, which RCraft does not."),
         ],
     },
@@ -999,7 +1006,16 @@ pub const GUIDES: &[Guide] = &[
     Guide {
         command: "list",
         about: "Lists rows",
-        points: &[LAYOUT_R],
+        points: &[
+            p(
+                "As Stata 19",
+                "Stata's table: each column as wide as its widest value or its name \n                 (abbreviated to 8), every cell right-aligned, a line every five rows \n                 (separator(#)), the row numbers before the box; noobs, clean and nolabel as \n                 Stata's. Numbers in their display format (a set one, or the one their storage \n                 type was made with), labelled values by their label.",
+            ),
+            p(
+                "In R's layout",
+                "Where a numeric variable's display format is not known and its values are not \n                 small whole numbers, where the table is wider than the line, and with sepby(), \n                 abbreviate() or table, the rows print in R's layout.",
+            ),
+        ],
     },
     Guide {
         command: "logit",
