@@ -71,6 +71,7 @@ mod mvtest;
 mod natscale;
 mod nl;
 mod nlcom;
+mod npregress;
 mod oneway;
 mod outreg;
 mod outreg2;
@@ -548,6 +549,7 @@ const NAME_TABLES: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "npregress",
     "xtabond",
     "xtdpdsys",
     "xtdpd",
@@ -1437,6 +1439,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xtreg" => xt::XTREG_HELPER,
         "stata_xtregar" => xtregar::XTREGAR_HELPER,
         "stata_xtdpd" => xtdpd::XTDPD_HELPER,
+        "stata_npregress" => npregress::NPREGRESS_HELPER,
         "stata_tsreg" => tsreg::TSREG_HELPER,
         "stata_xt_predict" => xt::XT_PREDICT_HELPER,
         "stata_xt_ic" => xt::XT_IC_HELPER,
@@ -2921,6 +2924,7 @@ impl Session {
             "xtreg" => self.xtreg(c, &opts, out),
             "xtregar" => self.xtregar(c, &opts, out),
             "xtabond" | "xtdpdsys" | "xtdpd" => self.xtdpd(c, &opts, out),
+            "npregress" => self.npregress(c, &opts, out),
             "prais" | "newey" => self.tsreg(c, &opts, out),
             "ivregress" => self.ivregress(c, &opts, out),
             w if crate::lang::syntax::abbrev(w, "histogram", 4) => self.histogram(c, &opts, out),
@@ -4762,7 +4766,7 @@ impl Session {
         }
         // so do xtabond, xtdpdsys and xtdpd, which read their own varlist
         // (xtdpd's outcome L(0/#).y is the outcome and its lags)
-        if xtdpd::XTDPD_CMDS.contains(&c.name.as_str()) {
+        if xtdpd::XTDPD_CMDS.contains(&c.name.as_str()) || c.name == "npregress" {
             return None;
         }
         // margins after cmclogit prints Stata's own table, cformat() and all

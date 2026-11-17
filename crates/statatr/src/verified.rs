@@ -165,6 +165,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
             "xtregar_tests",
         ],
     ),
+    ("npregress", &["npregress"]),
     ("ologit", &["collinear", "likelihood"]),
     ("oneway", &["oneway"]),
     ("oprobit", &["collinear", "likelihood"]),

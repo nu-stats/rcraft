@@ -175,6 +175,7 @@ pub const COMMANDS: &[&str] = &[
     "newey",
     "nl",
     "nlcom",
+    "npregress",
     "noisily",
     "ologit",
     "oneway",
@@ -959,6 +960,22 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         &["cci", "centile(", "level(", "meansd", "normal"],
     ),
     ("nlcom", &["df(", "iterate(", "level(", "noheader", "post"]),
+    (
+        "npregress",
+        &[
+            "bwidth(",
+            "derivbwidth(",
+            "estimator(",
+            "from(",
+            "iterate(",
+            "kernel(",
+            "meanbwidth(",
+            "noderivatives",
+            "nolog",
+            "predict(",
+            "unidentsample(",
+        ],
+    ),
     (
         "cii",
         &[
@@ -2058,6 +2075,7 @@ gettoken a b : s, {o}"
             "xtile" => format!("xtile q = y, {o}"),
             "xpose" => format!("xpose, clear {o}"),
             "xtreg" => format!("xtset id t\nxtreg y x, {o}"),
+            "npregress" => format!("npregress kernel y x, {o}"),
             "xtset" => format!("xtset id t, {o}"),
             "tsset" => format!("tsset t, {o}"),
             _ => format!("{cmd} y, {o}"),

@@ -5301,3 +5301,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Stale records fixed: AUDIT's summary for Phases 6 to 8 and the P4.5 note (its residual plots are
   Objects > Model > Diagnostic plots).
 - Not tried by hand: the close question and the recent menu in the running app.
+
+## P2C.12: npregress kernel, 2026-11-17
+
+- **Translated** (`statatr::data_r::npregress`, R helper `stata_np*`, from StatCraft's decoding):
+  npregress kernel with one continuous covariate, every kernel, local-linear and local-constant, the
+  cross-validated mean and derivative bandwidths by Stata's Nelder-Mead search, given bandwidths,
+  iterate(), from(), predict() names, the identification rule, replay; Stata's table, notes and e().
+- **Checked:** probes 554/555: 27 of 27 compared lines to 8 digits, logs and tables line for line, the
+  bandwidths to about 1e-15; corpus `npregress.do` (17 results, 1e-9) recorded from Stata 19.
+- **Shares** after the pologit push (7d5bd3f): probes (511 do-files, each source line once, dry run)
+  75.3% (20,934 translated, 6,849 not); packages (46 do-files) 94.9% (3,715 translated, 200 not).
+- **Shares** with npregress: probes 75.3% -> 75.6% (20,934 -> 21,007 translated, 6,849 -> 6,776 not);
+  packages 94.9% (unchanged).
