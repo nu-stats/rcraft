@@ -113,6 +113,7 @@ mod tsreg;
 mod weights;
 mod winsor;
 mod xt;
+mod xtdpd;
 mod xtregar;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -546,6 +547,9 @@ const NAME_TABLES: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "xtabond",
+    "xtdpdsys",
+    "xtdpd",
     "dsregress",
     "poregress",
     "xporegress",
@@ -1426,6 +1430,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xtset" => xt::XTSET_HELPER,
         "stata_xtreg" => xt::XTREG_HELPER,
         "stata_xtregar" => xtregar::XTREGAR_HELPER,
+        "stata_xtdpd" => xtdpd::XTDPD_HELPER,
         "stata_tsreg" => tsreg::TSREG_HELPER,
         "stata_xt_predict" => xt::XT_PREDICT_HELPER,
         "stata_xt_ic" => xt::XT_IC_HELPER,
@@ -2907,6 +2912,7 @@ impl Session {
             "tsfill" => self.tsfill(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
             "xtregar" => self.xtregar(c, &opts, out),
+            "xtabond" | "xtdpdsys" | "xtdpd" => self.xtdpd(c, &opts, out),
             "prais" | "newey" => self.tsreg(c, &opts, out),
             "ivregress" => self.ivregress(c, &opts, out),
             w if crate::lang::syntax::abbrev(w, "histogram", 4) => self.histogram(c, &opts, out),
@@ -4739,6 +4745,11 @@ impl Session {
         }
         // the lasso inference commands print Stata's own table, coeflegend and all
         if crate::dofile::INFER_COMMANDS.contains(&c.name.as_str()) {
+            return None;
+        }
+        // so do xtabond, xtdpdsys and xtdpd, which read their own varlist
+        // (xtdpd's outcome L(0/#).y is the outcome and its lags)
+        if xtdpd::XTDPD_CMDS.contains(&c.name.as_str()) {
             return None;
         }
         // margins after cmclogit prints Stata's own table, cformat() and all

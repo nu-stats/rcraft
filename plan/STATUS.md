@@ -5238,3 +5238,20 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   (`plan/stata/natscale-residue.md`, `plan/stata/natscale-literature.md`).
 - **Shares:** probes (520 do-files, each source line once, dry run) 73.7% of the lines a dry run judges
   (20,685 translated, 7,390 not, 957 known only when run).
+
+## P2C.12: xtabond, xtdpdsys and xtdpd, 2026-11-16
+
+- **Translated** (`statatr::data_r::xtdpd`, R helper `stata_xtdpd*`, from StatCraft's decoding):
+  difference and system GMM with lags(), maxldep(), maxlags(), pre() and endogenous() (lagstruct()
+  too), inst(), noconstant, diffvars() without a constant, L#./D#. regressors; xtdpd's
+  L(#/#).y, dgmmiv() with lagrange(), lgmmiv(), div() (nodifference), liv(), hascons; one and two
+  steps, vce(robust) and Windmeijer's correction; replay; estat sargan, estat abond (artests(),
+  r(arm)), predict xb/e/difference. Stata's table, notes and e() (but e(datasignature)).
+- **Found** (Stata 19, `xtdpd.do`): the AR tests pair residuals by period, so gaps matter; a one-step
+  vce(gmm) fit with a level equation has none (e(artests) 0) for xtabond too; estat abond's refit
+  leaves e() as it was; diffvars() with a constant is accepted by Stata (refused here: not decoded).
+- **Checked:** probes 326 and 420-430: every line translated, 40 of 40 compared lines to 8 digits,
+  the tables, estat output and %21x e(b)/e(V) line for line (but 16th-digit e() scalars); corpus
+  `xtdpd.do` (27 results, 1e-7) recorded from Stata 19; the three commands Verified.
+- **Shares:** probes (511 do-files, each source line once, dry run) 73.1% -> 74.1% (translated
+  20,311 -> 20,588, not 7,482 -> 7,205, known only when run 1,062).

@@ -339,6 +339,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "predict")?;
+        if self.xtdpd_active().is_some() {
+            return self.xtdpd_predict(c, opts, out);
+        }
         if self.infer_active().is_some() {
             return self.infer_predict(c, opts, out);
         }
@@ -956,6 +959,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "estat")?;
+        if self.xtdpd_active().is_some() {
+            return self.xtdpd_estat(c, opts, out);
+        }
         {
             let (s, _) = first_word(&c.parts.main);
             if s.len() >= 4 && "bootstrap".starts_with(s) {

@@ -275,6 +275,9 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("winsor", &["winsor"]),
     ("xporegress", &["lasso_infer"]),
     ("xpose", &["made"]),
+    ("xtabond", &["xtdpd"]),
+    ("xtdpd", &["xtdpd"]),
+    ("xtdpdsys", &["xtdpd"]),
     ("xtile", &["xtile"]),
     (
         "xtreg",
