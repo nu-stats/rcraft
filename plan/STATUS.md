@@ -5324,3 +5324,15 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   line; corpus `ivprobit.do` (15 results, 1e-7) recorded from Stata 19.
 - **Shares** with ivprobit (on top of main at 67e9408): probes 75.9% (21,084 translated, 6,699 not);
   packages 94.9% (unchanged).
+## P8.5: the browser build studied, 2026-11-17
+
+- `plan/P8.5-browser-feasibility.md`: RCraft can run in a browser as a reduced edition, with R from
+  webR (R 4.6.0 compiled to WebAssembly, in a Web Worker), for about two weeks of work; best after
+  the installers. Checked in webR's own page: `png()` through Cairo, and `lm`, `fixest::feols` and
+  sandwich's HC1 giving the digits R 4.4.3 gives here; every package RCraft uses is in webR's
+  repository but arrow. webR's binaries are GPL-3; RCraft would talk to them only through webR's
+  console channel, its own text protocol unchanged.
+- `rpkg`'s network fetcher (ureq, rustls) is left out of wasm builds, so `core`, `rproto`, `rdata`,
+  `rpkg`, `rcodegen`, `catalog`, `statatr`, `rgraph`, `report` and `rhost` pass `cargo check --target
+  wasm32-unknown-unknown`; nothing else changes. `engine` and `ui-egui` do not build for it yet.
+- Not done: the build itself; a CI check that the shared crates keep building for wasm.

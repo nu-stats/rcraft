@@ -23,6 +23,7 @@ pub mod archive;
 pub mod cache;
 pub mod dcf;
 pub mod describe;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod http;
 pub mod index;
 pub mod lockfile;

@@ -635,6 +635,9 @@ Each family is its own set of dialogs over a named CRAN package.
   (dialogs' pages reviewed 2026-11-15: every page read through, the wrong or unclear statements
   fixed, a sentence added where an option needed one; the manual waits for RCraft's own manuals)
 - P8.5 Browser build, if feasible
+  (feasibility studied 2026-11-17, `plan/P8.5-browser-feasibility.md`: feasible as a reduced edition
+  through webR, about two weeks of work, best done after P8.2; the shared crates build for wasm now.
+  The build itself is not started)
 
 ## Phase 9: Extensibility
 
