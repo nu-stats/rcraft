@@ -5255,3 +5255,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `xtdpd.do` (27 results, 1e-7) recorded from Stata 19; the three commands Verified.
 - **Shares:** probes (511 do-files, each source line once, dry run) 73.1% -> 74.1% (translated
   20,311 -> 20,588, not 7,482 -> 7,205, known only when run 1,062).
+
+## P2C.12: pologit, and dslogit's logit where Stata's stops, 2026-11-17
+
+- **Decoded** (Stata 19, 80 made-up outcomes, `plan/stata/lasso.md`): Stata's logit steps (the Newton
+  step lengthened by 1/8, 1/4, ... while the log likelihood rises; ml's documented stop), pologit's
+  Newton stop (a step under 1e-3 in mreldif), and the weighted linear lasso's plug-in (loadings with
+  the weights, lambda from N): 80 of 80 selections and pologit's e(b) to 2.4e-10 (median 3e-16).
+- **Translated:** pologit with the plug-in lassos, vce(robust) and no always-in controls (the rest
+  refused), lassoinfo and predict after it; dslogit's logit now stops where Stata's does, so its
+  variance matches to 1e-16. Probe 480's pologit table, e(b)/e(V), ereturn list and lassoinfo line
+  for line; corpus `lasso_infer.do` re-recorded from Stata 19 with pologit (26 results, 1e-7).
+- **Not yet:** Stata's poisson starts near the optimum by a rule not decoded, so dspoisson and
+  popoisson stay refused; xpologit, xpopoisson.

@@ -174,6 +174,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("pca", &["pca"]),
     ("pdslasso", &["pdslasso"]),
     ("poisson", &["collinear", "likelihood"]),
+    ("pologit", &["lasso_infer"]),
     ("poregress", &["lasso_infer"]),
     ("post", &["postfile"]),
     ("postclose", &["postfile"]),

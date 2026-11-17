@@ -186,6 +186,7 @@ pub const COMMANDS: &[&str] = &[
     "pdslasso",
     "pnorm",
     "poisson",
+    "pologit",
     "poregress",
     "post",
     "postclose",

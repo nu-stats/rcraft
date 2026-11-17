@@ -206,11 +206,11 @@ dslogit's variance, 1.4e-8 off).
 
 ## Not yet
 
-pologit, xpologit, dspoisson, popoisson, xpopoisson (StatCraft did not reproduce them); cv or
+pologit with cv, lasso(), vce(cluster) or always-in controls; xpologit, dspoisson, popoisson, xpopoisson; cv or
 lasso() inside xporegress; xfolds(1); lassocoef and lassoinfo after cv lassos; test, lincom,
 margins after these commands.
 
-# pologit, popoisson: what is decoded so far (2026-11-17, not translated)
+# pologit, popoisson: the first decoding (2026-11-17; pologit is translated, see the next section)
 
 Observed on probe 480's data (exported from Stata 19 to the scratchpad only) with Stata's %21x:
 
@@ -240,3 +240,38 @@ Observed on probe 480's data (exported from Stata 19 to the scratchpad only) wit
 - **popoisson** with the same scheme (weights mu): one case exact (1e-14), two others 1.4e-8 and
   9e-8 off at the best iterate, so something before (4) also differs (perhaps where Stata's
   post-lasso Poisson fit stops). dspoisson was not checked yet.
+
+# pologit decoded: Stata's logit steps and pologit's Newton stop (2026-11-17)
+
+Observed with Stata 19 on 80 made-up binary outcomes over probe 480's regressors (exported to the
+scratchpad only), pologit with one variable of interest and controls(x1-x10), %21x:
+
+- **Stata's logit (ml) steps.** From b = 0 with the constant at logit(mean y), each iteration takes
+  the Newton direction and a step length t: the full step, then t + 1/8, + 1/4, + 1/2, ... while the
+  log likelihood rises; the last that rose is kept (`logit, iterate(1)` on 240 fits: t = 1 for
+  t* up to 1.062, 1.125 up to 1.245, 1.375 from 1.249 to 1.523; boundaries at 1.0625 and 1.25, the
+  midpoints of 1, 1.125, 1.375). It stops after an iteration when (mreldif(b) < 1e-6 or
+  reldif(ll) < 1e-7) and g'H^-1 g < 1e-5 at the new point, the documented ml defaults. Emulated,
+  `logit`'s coefficients match Stata's to 1e-13 or better in the seven cases checked (3 or 4
+  iterations, where the exact MLE is 3e-7 to 1.4e-5 away).
+- **pologit's step 2 is that logit.** With the emulated logit and (4) stopped at the first iterate
+  whose last step had mreldif < 1e-3 (stops seen up to 8.46e-4, go-ons from 1.20e-3), all 80
+  cases match Stata's e(b): median 3e-16, worst 2.4e-10. With the exact MLE in step 2, 29 of 80 are
+  more than 1e-10 off and 4 more than 1e-8; with a best-of-grid line search, 4 more than 1e-8.
+- dslogit now fits its logit the same way: its variance matches to 1e-16 (it was 1.4e-8 off). The
+  logit fits of other commands (logit itself, probit) may close the same way; not checked yet.
+- **The same pipeline, end to end** (the weighted plug-in decoded too, below) gives probe 480's
+  `pologit yb2 d1 d2` and `pologit yb2 d1` b and V to 1e-16 and 4e-12, and `dslogit yb2 d1 d2`
+  (logit by the same emulation, robust variance) to 1e-16 where RCraft's exact logit is 1.4e-8 off.
+- **The weighted linear lasso's plug-in** (each variable of interest in pologit, iweights
+  mu(1 - mu) from step 2): lambda from the unweighted formula (c / sqrt(N) Phi^-1(1 - gamma/2p),
+  identical in all 80 runs of `lasso linear d1 x1-x10 [iw = w], selection(plugin)`), loadings
+  sqrt(sum w z^2 e^2 / sum w) on the weighted standardisation, residuals from the weighted post-lasso
+  fit scaled by sqrt(N / (N - k)); started from the five predictors with the largest weighted
+  correlation; until the selected set repeats. 80 of 80 selections as Stata's; coefficients to
+  about 1e-8 (the descent's stopping, not decoded; only the selection is used).
+- **Poisson is not decoded yet**: Stata's `poisson` starts near the MLE (iteration 0's log
+  likelihood within 1e-6 of the end; slopes 5e-4 relative off, the constant 1.27e-3 off in two
+  fits) and takes one Newton step; IRLS from y + 0.1, y + 0.5, (y + mean)/2, mean or y + 1, and
+  Newton from the constant, give none of those starts. So dspoisson (1.3e-7 off) and popoisson
+  (1e-9 to 7e-8) stay refused.

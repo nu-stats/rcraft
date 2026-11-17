@@ -213,6 +213,7 @@ const VARLIST: &[&str] = &[
     "poregress",
     "xporegress",
     "dslogit",
+    "pologit",
     "lasso",
     "elasticnet",
     "sqrtlasso",

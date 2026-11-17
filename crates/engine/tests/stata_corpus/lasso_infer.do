@@ -1,9 +1,9 @@
 * RCraft's Stata corpus (P2C.12 continued): made-up data; Stata 19's results are in lasso_infer.recorded
-* commands: dsregress poregress xporegress dslogit
+* commands: dsregress poregress xporegress dslogit pologit
 * (double selection, partialing out and cross-fit for a linear outcome, double selection for a binary
 * one; the plug-in, cv, bic and adaptive lassos, lasso(), sqrtlasso, always-in controls; robust, ols,
 * hc3 and cluster variances; predict; Stata's errors)
-* (all at 1e-8 but dslogit's variance, 1.4e-8 off: where Stata's logit fit stops)
+* (all at 1e-8: logit as Stata's logit fits it, where it stops)
 * tolerance: 1e-7
 version 19
 set linesize 255
@@ -51,6 +51,14 @@ quietly dslogit yb d1, controls(x1-x8)
 display "@ dslogit " %20.0g el(e(b), 1, 1) " " %20.0g el(e(V), 1, 1) " " %20.0g e(chi2) " " e(k_controls_sel)
 quietly dslogit yb d1 d2, controls(x1-x8) vce(cluster g)
 display "@ dslogit2 " %20.0g el(e(b), 1, 2) " " %20.0g el(e(V), 2, 2)
+quietly pologit yb d1, controls(x1-x8)
+display "@ pologit " %20.0g el(e(b), 1, 1) " " %20.0g el(e(V), 1, 1) " " %20.0g e(chi2) " " e(k_controls_sel)
+quietly pologit yb d1 d2, controls(x1-x8)
+display "@ pologit2 " %20.0g el(e(b), 1, 1) " " %20.0g el(e(b), 1, 2) " " %20.0g el(e(V), 1, 2) " " %20.0g el(e(V), 2, 2)
+predict double pp
+summarize pp, meanonly
+display "@ pologit_predict " %20.0g r(mean)
+drop pp
 quietly dsregress y d1 d2, controls(x1-x8)
 predict double p1
 summarize p1, meanonly

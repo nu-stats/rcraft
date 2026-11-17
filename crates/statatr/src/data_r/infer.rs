@@ -45,20 +45,8 @@ stata_infer_resid <- function(y, C, sel) {
 # cluster or model-based variance
 stata_infer_logit <- function(y, X, vce = "robust", cl = NULL) {
   X <- cbind(X, 1); n <- length(y); k <- ncol(X)
-  b <- numeric(k)
-  ll <- function(b) { eta <- as.numeric(X %*% b); sum(y * eta - ifelse(eta > 0, eta + log1p(exp(-eta)), log1p(exp(eta)))) }
-  cur <- ll(b)
-  for (it in 1:200) {
-    mu <- stats::plogis(as.numeric(X %*% b)); w <- mu * (1 - mu)
-    H <- crossprod(X * w, X); g <- as.numeric(crossprod(X, y - mu))
-    st <- tryCatch(solve(H, g), error = function(e) NULL)
-    if (is.null(st)) stata_lasso_stop("collinear variables", 459)
-    t <- 1; ok <- FALSE
-    for (h in 1:40) { nb <- b + t * st; l2 <- ll(nb); if (is.finite(l2) && l2 >= cur - 1e-12) { ok <- TRUE; break }; t <- t / 2 }
-    if (!ok) break
-    d <- max(abs(nb - b)); b <- nb; cur <- l2
-    if (d < 1e-13) break
-  }
+  # where Stata's logit stops, not the exact optimum (dslogit's variance to 1e-16, probe 480)
+  b <- stata_infer_ml(y, X, "logit")
   mu <- stats::plogis(as.numeric(X %*% b)); w <- mu * (1 - mu)
   A <- solve(crossprod(X * w, X))
   if (vce == "ols") return(list(b = b, V = A))
@@ -94,6 +82,94 @@ stata_infer_lasso <- function(src, v, always, others, args) {
   if (is.na(f$sel)) stata_lasso_stop("lambda not selected", 430)
   r <- f$recs[[f$sel]]
   list(sel = f$vars[r$b != 0], lambda = r$lambda, k = sum(r$b != 0))
+}
+# logit or Poisson of y on X (a constant last) as Stata's ml fits it: from 0 with
+# the constant at the outcome's mean, Newton steps lengthened by 1/8, 1/4, 1/2,
+# ... while the log likelihood rises; done when (mreldif(b) < 1e-6 or
+# reldif(ll) < 1e-7) and g'H^-1g < 1e-5 (RCraft's corpus, plan/stata/lasso.md)
+stata_infer_ml <- function(y, X, fam = "logit", off = NULL) {
+  if (is.null(off)) off <- rep(0, length(y))
+  ll <- function(b) {
+    eta <- off + as.numeric(X %*% b)
+    if (fam == "logit") sum(y * eta - ifelse(eta > 0, eta + log1p(exp(-eta)), log1p(exp(eta)))) else sum(y * eta - exp(eta) - lgamma(y + 1))
+  }
+  mean_of <- function(b) { eta <- off + as.numeric(X %*% b); if (fam == "logit") stats::plogis(eta) else exp(eta) }
+  k <- ncol(X); b <- numeric(k)
+  b[k] <- if (fam == "logit") stats::qlogis(mean(y)) else log(mean(y) / mean(exp(off)))
+  cur <- ll(b)
+  for (it in 1:300) {
+    mu <- mean_of(b); w <- if (fam == "logit") mu * (1 - mu) else mu
+    H <- crossprod(X * w, X); g <- as.numeric(crossprod(X, y - mu))
+    st <- tryCatch(solve(H, g), error = function(e) NULL)
+    if (is.null(st)) stata_lasso_stop("collinear variables", 459)
+    nb <- b + st; l1 <- ll(nb)
+    if (!is.finite(l1) || l1 < cur) {
+      t <- 1
+      for (h in 1:40) { t <- t / 2; nb <- b + t * st; l1 <- ll(nb); if (is.finite(l1) && l1 >= cur) break }
+    } else {
+      t <- 1; inc <- 0.125
+      repeat {
+        l2 <- ll(b + (t + inc) * st)
+        if (!(is.finite(l2) && l2 > l1)) break
+        t <- t + inc; l1 <- l2; inc <- inc * 2
+        if (inc > 1024) break
+      }
+      nb <- b + t * st
+    }
+    mr <- max(abs(nb - b) / (abs(nb) + 1)); lr <- abs(l1 - cur) / (abs(cur) + 1)
+    b <- nb; cur <- l1
+    mu <- mean_of(b); w <- if (fam == "logit") mu * (1 - mu) else mu
+    H <- crossprod(X * w, X); g <- as.numeric(crossprod(X, y - mu))
+    nr <- tryCatch(sum(g * solve(H, g)), error = function(e) Inf)
+    if ((mr < 1e-6 || lr < 1e-7) && nr < 1e-5) break
+  }
+  b
+}
+# the weighted linear lasso's plug-in selection (pologit's and popoisson's lasso
+# of each variable of interest, iweights): means and standard deviations
+# weighted with divisor sum(w), lambda from the unweighted formula, loadings
+# sqrt(sum w z^2 e^2 / sum w), residuals scaled by sqrt(N / (N - k)); until the
+# selected set repeats
+stata_infer_wplugin <- function(v, C, always, w, cc = 1.1) {
+  n <- length(v); p <- ncol(C); sw <- sum(w)
+  pw <- ifelse(colnames(C) %in% always, 0, 1); npen <- sum(pw > 0)
+  if (p == 0) return(list(sel = character(0), lambda = NA_real_, k = 0))
+  m <- colSums(w * C) / sw; Cc <- sweep(C, 2, m); s <- sqrt(colSums(w * Cc^2) / sw)
+  Z <- sweep(Cc, 2, ifelse(s > 0, s, 1), "/")
+  vm <- sum(w * v) / sw; yc <- v - vm
+  G <- crossprod(Z * w, Z) / sw; c0 <- colSums(w * Z * yc) / sw
+  g <- 0.1 / log(max(n, max(npen, 1)))
+  lam <- cc / sqrt(n) * stats::qnorm(1 - g / (2 * max(npen, 1)))
+  post <- function(set) {
+    b <- numeric(p); if (!any(set)) return(b)
+    Zs <- Z[, set, drop = FALSE]; b[set] <- solve(crossprod(Zs * w, Zs), crossprod(Zs * w, yc)); b
+  }
+  cd <- function(psi, b) {
+    for (it in 1:100000) {
+      mx <- 0
+      for (j in seq_len(p)) {
+        old <- b[j]; r <- c0[j] - sum(G[j, ] * b) + G[j, j] * old; t <- lam * psi[j]
+        nb <- if (r > t) (r - t) / G[j, j] else if (r < -t) (r + t) / G[j, j] else 0
+        if (nb != old) { b[j] <- nb; if (abs(nb - old) > mx) mx <- abs(nb - old) }
+      }
+      if (mx < 1e-12) break
+    }
+    b
+  }
+  pen <- which(pw > 0)
+  top <- utils::head(pen[order(-abs(c0[pen]))], 5)
+  e <- yc - as.numeric(Z %*% post(seq_len(p) %in% c(top, which(pw == 0))))
+  prev <- NULL; b <- numeric(p)
+  for (it in 1:15) {
+    psi <- sqrt(colSums(w * Z^2 * e^2) / sw) * pw
+    psi <- ifelse(pw == 0, 0, ifelse(s > 0 & is.finite(psi) & psi > 0, psi, Inf))
+    b <- cd(psi, b)
+    set <- b != 0; nz <- sum(set)
+    same <- !is.null(prev) && identical(prev, set); prev <- set
+    e <- (yc - as.numeric(Z %*% post(set))) * sqrt(n / max(n - nz, 1))
+    if (same) break
+  }
+  list(sel = colnames(C)[b != 0], lambda = lam, k = sum(b != 0))
 }
 stata_infer_run <- function(src, nall, cmd, y, dvars, always, others, largs = list(), over = list(), label = "plugin",
                             vce = "robust", cluster = NULL, level = 95, nolog = FALSE, legend = FALSE, coef = FALSE,
@@ -134,7 +210,45 @@ stata_infer_run <- function(src, nall, cmd, y, dvars, always, others, largs = li
   vars <- c(y, dvars); k <- length(dvars)
   infos <- list(); counts <- lapply(vars, function(v) integer(0)); names(counts) <- vars
   union <- ctl %in% always
-  if (!xpo) {
+  if (!xpo && model == "logit" && po) {
+    if (say) cat("\n")
+    {
+      # pologit (plan/stata/lasso.md): the outcome's logit lasso; the logit of y on
+      # the variables of interest and its selection as Stata's logit fits it; each
+      # variable of interest's lasso weighted by mu(1 - mu), its weighted residual;
+      # then Newton on the orthogonal score, stopped after a step under 1e-3
+      if (say) cat(est(y))
+      infos[[y]] <- fit1(d, y)
+      ys <- ctl %in% infos[[y]]$sel
+      union <- union | ys
+      X2 <- cbind(D, C[, ys, drop = FALSE], 1)
+      b2 <- stata_infer_ml(yv, X2, "logit")
+      mu <- stats::plogis(as.numeric(X2 %*% b2)); w <- mu * (1 - mu)
+      s <- as.numeric(X2[, -seq_len(k), drop = FALSE] %*% b2[-seq_len(k)])
+      Dt <- matrix(0, n, k)
+      for (j in seq_len(k)) {
+        v <- dvars[j]
+        if (say) cat(est(v))
+        f <- stata_infer_wplugin(D[, j], C, always, w)
+        infos[[v]] <- f
+        sj <- ctl %in% f$sel
+        union <- union | sj
+        Xj <- cbind(C[, sj, drop = FALSE], 1)
+        Dt[, j] <- D[, j] - as.numeric(Xj %*% stats::lm.wfit(Xj, D[, j], w)$coefficients)
+      }
+      a <- b2[seq_len(k)]
+      for (it in 1:300) {
+        m <- stats::plogis(s + as.numeric(D %*% a))
+        st <- tryCatch(solve(crossprod(Dt * (m * (1 - m)), D), crossprod(Dt, yv - m)), error = function(e) NULL)
+        if (is.null(st)) stata_lasso_stop("collinear variables", 459)
+        na <- a + as.numeric(st); r <- max(abs(na - a) / (abs(na) + 1)); a <- na
+        if (r < 1e-3) break
+      }
+      m <- stats::plogis(s + as.numeric(D %*% a))
+      Ji <- solve(crossprod(Dt * (m * (1 - m)), D) / n)
+      b <- a; V <- Ji %*% (crossprod(Dt * (yv - m)) / n) %*% t(Ji) / n
+    }
+  } else if (!xpo) {
     if (say) cat("\n")
     for (v in vars) {
       if (say) cat(est(v))
@@ -305,7 +419,8 @@ const INFER_TEXTS: &[&str] = &[
 ];
 
 /// The commands translated here.
-pub(super) const INFER_TRANSLATED: &[&str] = &["dsregress", "poregress", "xporegress", "dslogit"];
+pub(super) const INFER_TRANSLATED: &[&str] =
+    &["dsregress", "poregress", "xporegress", "dslogit", "pologit"];
 
 /// A list of plain names, or why it is not one (a range the run makes names).
 fn names_of(text: &str, what: &str) -> Result<Vec<String>, Untranslated> {
@@ -397,7 +512,7 @@ impl Session {
         let cmd = c.name.as_str();
         if !INFER_TRANSLATED.contains(&cmd) {
             return Err(no(format!(
-                "{cmd} is not translated yet (dsregress, poregress, xporegress and dslogit are)"
+                "{cmd} is not translated yet (dsregress, poregress, xporegress, dslogit and pologit are)"
             )));
         }
         self.no_by(c, cmd)?;
@@ -558,6 +673,18 @@ impl Session {
             return Err(no(format!(
                 "{cmd} with always-in controls only is not translated"
             )));
+        }
+        // pologit's weighted lassos are decoded for the plug-in penalty (plan/stata/lasso.md)
+        if cmd == "pologit"
+            && (label != "plugin"
+                || !overs.is_empty()
+                || sqrt
+                || vce != "robust"
+                || !always.is_empty())
+        {
+            return Err(no(
+                "pologit is translated with the plug-in lassos, vce(robust) and no always-in controls",
+            ));
         }
         if label == "plugin" && !largs.iter().any(|a| a.starts_with("sel ")) {
             largs.push("sel = \"plugin\"".into());
@@ -753,7 +880,7 @@ dsregress y d1, controls(d1 x1)
 xporegress y d1, controls(x1 x2) resample(0)
 xporegress y d1, controls(x1 x2) selection(cv)
 poregress y d1, controls(x1 x2) vce(cluster g)
-pologit yb d1, controls(x1 x2)
+dspoisson yb d1, controls(x1 x2)
 dsregress y d1, controls(x1 x2)
 predict r, residuals");
         assert!(
@@ -778,7 +905,7 @@ predict r, residuals");
         );
         assert!(out[6].contains("NOT: poregress, vce(cluster g)"), "{out:?}");
         assert!(
-            out[7].contains("NOT: pologit is not translated yet"),
+            out[7].contains("NOT: dspoisson is not translated yet"),
             "{out:?}"
         );
         assert!(

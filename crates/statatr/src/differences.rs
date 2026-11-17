@@ -2638,7 +2638,8 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Not yet",
                 "lasso cox, elasticnet logit, probit and poisson, elasticnet with alpha 0 \
-                 (ridge) or several alphas and selection(none), pologit, xpologit, dspoisson, \
+                 (ridge) or several alphas and selection(none), pologit with other than the \
+                 plug-in lassos, vce(robust) and no always-in controls, xpologit, dspoisson, \
                  popoisson and xpopoisson, selection(cv) or lasso() inside xporegress, \
                  poregress with vce(cluster), lassocoef after the inference commands, cvplot, \
                  factor variables, \
@@ -3686,7 +3687,7 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
     let page = match full.as_str() {
         "probit" => "logit",
         "lassoselect" | "lassoknots" | "lassocoef" | "lassoinfo" | "elasticnet" | "sqrtlasso"
-        | "dsregress" | "poregress" | "xporegress" | "dslogit" => "lasso",
+        | "dsregress" | "poregress" | "xporegress" | "dslogit" | "pologit" => "lasso",
         "oprobit" => "ologit",
         "xtabond" | "xtdpd" => "xtdpdsys",
         "tsfill" => "tsset",
