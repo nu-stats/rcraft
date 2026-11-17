@@ -5227,3 +5227,14 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Also:** ereturn list wraps e() names over 17 characters as Stata does; controls(x1-x10) ranges
   are expanded at run time.
 - **Not yet:** pologit, xpologit, dspoisson, popoisson, xpopoisson; cv inside xporegress.
+
+## `_natscale` with steps below 1, 2026-11-16
+
+- **Translated:** `_natscale` with a step below 1 (other than 0.5) wherever neither end label is 0.
+  Stata's r(min) and r(max) there carry last bits of its own arithmetic that RCraft does not reproduce;
+  they agree to 8 digits in 9,119 of the 9,120 swept results now translated (the other is one range
+  where the label rule picks other labels). An end label at 0 with such a step is still declined:
+  Stata gives 0 or a residue such as 2^-55 there. The user chose this and stopped the bit-for-bit search
+  (`plan/stata/natscale-residue.md`, `plan/stata/natscale-literature.md`).
+- **Shares:** probes (520 do-files, each source line once, dry run) 73.7% of the lines a dry run judges
+  (20,685 translated, 7,390 not, 957 known only when run).

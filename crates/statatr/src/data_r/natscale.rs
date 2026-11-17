@@ -11,10 +11,10 @@
 //! upper one rounded out, then the upper end; a step with more than n + 1
 //! labels is dropped, and the cheapest step wins (the smaller on a tie).
 //!
-//! The values here are L·d, U·d and d as doubles. Stata's carry the residue
-//! of its own arithmetic in the last bits (r(min) is 2^-55, not 0, for some
-//! ranges); those lines agree to 8 digits except where the label is 0, and a
-//! label at 0 with a step below 1 is declined.
+//! The values here are L·d, U·d and d as doubles. With a step below 1 (other
+//! than 0.5) Stata's carry the residue of its own arithmetic in the last bits;
+//! they agree to 8 digits except where an end label is 0 (r(min) is 2^-55,
+//! not 0, for some ranges), and an end label at 0 with such a step is declined.
 
 use super::{no, Out, Session};
 use crate::expr_r::Untranslated;
@@ -179,6 +179,24 @@ fn nice_up(v: f64) -> f64 {
     10.0 * base
 }
 
+/// Why a result is not translated, or `None` when it is (see `natscale` below).
+fn declined(s: &Natscale, lo: f64, hi: f64, n: f64) -> Option<&'static str> {
+    if s.min.abs().max(s.max.abs()) > 1e15 || n < 4.0 || hi == lo {
+        return Some(
+            "_natscale is translated only for labels within 1e15, n of 4 or more and a range",
+        );
+    }
+    let exact_step = s.delta >= 1.0 || s.delta == 0.5;
+    if !exact_step && (s.min == 0.0 || s.max == 0.0) {
+        return Some(
+            "_natscale with a step below 1 and an end label at 0 is not translated yet: Stata's \
+             r(min) or r(max) there is 0 or a residue of its arithmetic (such as 2^-55), by a \
+             rule not yet reproduced",
+        );
+    }
+    None
+}
+
 /// A double as an R literal that reads back to the same bits: R's decimal
 /// reading can be off by a unit in the last place, its hexadecimal is not.
 fn r_exact(v: f64) -> String {
@@ -216,19 +234,16 @@ impl Session {
         // Stata's 0 is never -0
         s.min += 0.0;
         s.max += 0.0;
-        // Only where every swept case matches Stata bit for bit (2026-11-15: 27,000
-        // results, plan/stata/natscale-residue.md): a step Stata holds exactly (1 or
-        // more, or 0.5), labels within 1e15, at least 4 labels asked for, and a range.
-        // A step like 0.1 (Stata's 0.1 + 1 ulp) leaves residues in the last bits from
-        // labels kept in locals as %18.0g text, not reproduced yet; n = 3 can pick other
-        // ends than the rule here.
-        let exact_step = s.delta >= 1.0 || s.delta == 0.5;
-        if !exact_step || s.min.abs().max(s.max.abs()) > 1e15 || n < 4.0 || hi == lo {
-            return Err(no(
-                "_natscale is translated only where it matches Stata 19 bit for bit (a step of 1 or \
-                 more, or 0.5, labels within 1e15, n of 4 or more): with other steps Stata's r(min) \
-                 and r(max) carry last bits of its own arithmetic, not reproduced yet",
-            ));
+        // Labels within 1e15, at least 4 labels asked for, and a range (n = 3 can pick
+        // other ends than the rule here). With a step Stata holds exactly (1 or more, or
+        // 0.5) every swept case matches bit for bit (2026-11-15: 27,000 results). With
+        // other steps (0.1 is Stata's 0.1 + 1 ulp) r(min) and r(max) carry last bits of
+        // Stata's own arithmetic; over 15,244 swept results they agree to 8 digits
+        // wherever neither end label is 0. At a 0 label Stata gives 0 or a residue
+        // (2^-55, 2^-56, -2^-54, ...) by a rule not yet found, so that is declined
+        // (plan/stata/natscale-residue.md, 2026-11-16).
+        if let Some(why) = declined(&s, lo, hi, n) {
+            return Err(no(why));
         }
         self.helpers.insert("stata_returned");
         out.line(format!(
@@ -272,6 +287,81 @@ mod tests {
         let s = natscale(-993.191_289_454_414_2, -977.074_994_507_977_7, 3.0);
         assert!(s.min == -1000.0 && s.max == -977.074_994_507_977_7 && s.delta == 20.0);
         assert_eq!(s.count(), 2.0);
+    }
+
+    /// Stata 19's r(min), r(max), r(delta) for steps below 1 (from the sweeps,
+    /// plan/stata/natscale-residue.md): translated where no end label is 0, and
+    /// then equal to 8 digits; an end label at 0 is declined.
+    #[test]
+    #[allow(clippy::excessive_precision)] // Stata's values as printed, to 17 digits
+    fn small_steps_agree_to_8_digits_or_are_declined() {
+        let same8 = |a: f64, b: f64| a == b || (a - b).abs() <= 1e-8 * a.abs().max(b.abs());
+        let taken = [
+            (
+                13.09,
+                15.710000000000001,
+                49.0,
+                13.100000000000001,
+                15.700000000000005,
+                0.10000000000000002,
+            ),
+            (
+                -1.03,
+                -0.2050000000000001,
+                6.0,
+                -1.0000000000000004,
+                -0.20000000000000004,
+                0.20000000000000004,
+            ),
+            (
+                13.050000000000001,
+                15.110000000000001,
+                32.0,
+                13.0,
+                15.100000000000005,
+                0.10000000000000002,
+            ),
+            (
+                0.3,
+                1.7170000000000001,
+                25.0,
+                0.3,
+                1.7000000000000002,
+                0.10000000000000002,
+            ),
+            (
+                12.960000000000001,
+                15.020000000000001,
+                40.0,
+                12.9,
+                15.000000000000007,
+                0.10000000000000002,
+            ),
+            (
+                0.469,
+                0.889,
+                14.0,
+                0.44999999999999996,
+                0.8999999999999999,
+                0.05000000000000001,
+            ),
+        ];
+        for (lo, hi, n, mn, mx, dd) in taken {
+            let s = natscale(lo, hi, n);
+            assert!(declined(&s, lo, hi, n).is_none(), "{lo} {hi} {n}");
+            assert!(
+                same8(s.min, mn) && same8(s.max, mx) && same8(s.delta, dd),
+                "{lo} {hi} {n}: {s:?}"
+            );
+        }
+        // Stata: r(min) 1.3877787807814457e-17 (2^-56), not 0
+        for n in [15.0, 16.0] {
+            let s = natscale(0.0, 0.52, n);
+            assert!(s.min == 0.0 && declined(&s, 0.0, 0.52, n).is_some());
+        }
+        // a step Stata holds exactly is still translated with a label at 0
+        let s = natscale(0.0, 1.13, 5.0);
+        assert!(s.min == 0.0 && declined(&s, 0.0, 1.13, 5.0).is_none());
     }
 
     #[test]

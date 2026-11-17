@@ -636,14 +636,21 @@ fn natscale_leaves_its_labels_in_r() {
         )),
         "{code:?}"
     );
-    // a step below 1 other than 0.5: Stata's last bits are not reproduced, so declined
+    // a step below 1 other than 0.5 with an end label at 0: Stata gives 0 or a
+    // residue there by a rule not yet reproduced, so declined
     let d = run("clear\n_natscale 0 1.01 5\n");
     let s = shown(&d);
     assert!(
-        s.iter()
-            .any(|l| l
-                .contains("_natscale is translated only where it matches Stata 19 bit for bit")),
+        s.iter().any(|l| l
+            .contains("_natscale with a step below 1 and an end label at 0 is not translated yet")),
         "{s:?}"
+    );
+    // the same step with no end label at 0 is translated (Stata agrees to 8 digits)
+    let d = run("clear\n_natscale 13.09 15.71 49\n");
+    assert!(
+        d.translation.lines.iter().all(|l| l.result.is_ok()),
+        "{:?}",
+        shown(&d)
     );
 }
 

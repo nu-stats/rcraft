@@ -864,3 +864,15 @@ ACM's software licence restricts commercial use, and any translation is written 
 - So for the probes the question is only when a zero label carries a residue and which one; the
   translator's current gate (step 1 or more, or 0.5) is stricter than the probe test. Relaxing it to
   "8 digits, a label at 0 declined" (the gate before 4af4a35) is a decision for the user.
+
+## 2026-11-16: translated to 8 digits where no end label is 0; search stopped
+
+The user chose to translate `_natscale` for steps below 1 wherever neither end label is 0 ("Yes,
+translate them"), and then, shown that the last bits change no result (display, graph labels and
+loops all go through `%18.0g` text) and that only probes 225–227 call it, to stop the bit-for-bit
+search and park the zero-label cases ("follow that advice"). `natscale.rs` now declines only an end
+label at 0 with such a step (plus the old limits: labels within 1e15, n ≥ 4, a range). Checked on all
+15,245 swept results: 9,120 translated, 9,119 equal to Stata 19 to 8 digits (the other is the one
+range where the label rule picks other labels: lo 0.469, hi 0.889, n 21), 6,125 declined. The
+scripts and the scoreboard (best bit-for-bit rule 7,781, `lit_rule7781.R`; 13,524 to 8 digits) stay in
+`natscale-work/` if this is ever picked up again.
