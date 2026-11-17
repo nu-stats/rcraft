@@ -17,7 +17,7 @@ pub(super) const POWER_HELPER: &str = r##"
 stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL, n = NULL, n1 = NULL, n2 = NULL,
                         nratio = NULL, onesided = FALSE, direction = "upper", sd = NULL, sd1 = NULL, sd2 = NULL,
                         known = FALSE, sddiff = NULL, corr = NULL, test = "score", continuity = FALSE,
-                        effect = "diff", scale = "variance", prdiscordant = NULL, show = TRUE) {
+                        effect = "diff", scale = "variance", prdiscordant = NULL, show = TRUE, table_row = FALSE) {
   if (method %in% c("onevariance", "twovariances", "onecorrelation", "twocorrelations", "pairedproportions"))
     return(stata_power_g(method, v1, v2, alpha, power, n, n1, n2, nratio, onesided, direction, scale, effect,
                          prdiscordant, show))
@@ -59,8 +59,11 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
     up <- function(cut, df, l) if (is.null(df)) 1 - stats::pnorm(cut - l) else 1 - stats::pt(cut, df, l)
     dn <- function(cut, df, l) if (is.null(df)) stats::pnorm(-cut - l) else stats::pt(-cut, df, l)
     tails <- function(l, df) {
+      # Stata's noncentral t is defined for noncentralities up to 1000, past them the power is missing
+      if (!is.null(df) && abs(l) > 1000) return(NA_real_)
       cut <- if (is.null(df)) zc else stats::qt(1 - alpha / side, df)
-      if (!onesided) up(cut, df, l) + dn(cut, df, l) else if (l >= 0) up(cut, df, l) else dn(cut, df, l)
+      # R's noncentral t can pass 1 by 1e-11 at large n, where Stata's power is 1
+      min(1, if (!onesided) up(cut, df, l) + dn(cut, df, l) else if (l >= 0) up(cut, df, l) else dn(cut, df, l))
     }
     if (method %in% c("onemean", "pairedmeans")) return(tails(sqrt(a) * (x - v1) / s, if (known) NULL else a - 1))
     if (method == "twomeans") {
@@ -107,6 +110,8 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
   if (find == "power") {
     g <- sizes()
     pv <- pw(g[1], g[2], v2)
+    # Stata 19 stops there for two means; one sample (or paired) shows a missing power
+    if (is.na(pv) && two && !table_row) stop_r("failure to compute power; the evaluation of the power function resulted in a missing value: Stata's noncentral t takes a noncentrality up to 1000 (Stata: r(498))")
     N <- if (!two) g[1] else if (actual) n else sum(g)
     x2 <- v2
     iterated <- FALSE
@@ -222,7 +227,7 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
   attr(r, "stata_head") <- c(paste0("Estimated ", what, " for a ", title), testline, h0)
   attr(r, "stata_find") <- find
   if (!show) return(invisible(r))
-  num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
+  num <- function(k, v, extra = "") if (is.na(v)) sprintf("%13s = %9s%s", k, ".", extra) else sprintf("%13s = %9.4f%s", k, v, extra)
   int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
   eff <- if (method == "twoproportions") paste0("  (", switch(effect, diff = "difference", ratio = "ratio", oratio = "odds ratio"), ")") else ""
   sizes_lines <- function(tot = N) {
@@ -696,6 +701,8 @@ stata_power_surv <- function(method, s1 = NULL, s2 = NULL, hratio = NULL, b1 = N
   h0 <- sprintf("H0: %s = %s  versus  Ha: %s %s %s", sym[1], sym[2], sym[1], rel, sym[2])
   # the target's side, only when two-sided (Stata 19)
   if (find == "effect" && !onesided) h0 <- paste0(h0, "; ", sym[1], if (up) " > " else " < ", sym[2])
+  # after cox with b1 given or worked out, Stata keeps r(hratio) out of return list but readable
+  if (!lr && is.null(r$hratio)) attr(r, "stata_hidden") <- list(hratio = exp(b1))
   attr(r, "stata_head") <- c(paste0("Estimated ", what, " for ", if (lr) "" else "", title), testline, h0)
   attr(r, "stata_find") <- find
   if (!show) return(invisible(r))
@@ -751,7 +758,7 @@ stata_power_table <- function(method, lists, fixed = list(), notable = FALSE, sh
   if (prod(lengths(lists)) > 10000) stop_r("power: the lists make more than 10,000 rows")
   rows <- if (length(lists)) rev(expand.grid(rev(lists), KEEP.OUT.ATTRS = FALSE)) else data.frame(row.names = 1L)
   rs <- lapply(seq_len(nrow(rows)), function(i)
-    do.call(stata_power, c(list(method), fixed, as.list(rows[i, , drop = FALSE]), list(show = FALSE))))
+    do.call(stata_power, c(list(method), fixed, as.list(rows[i, , drop = FALSE]), list(show = FALSE, table_row = TRUE))))
   r <- rs[[length(rs)]]
   two <- method %in% c("twomeans", "twoproportions", "twovariances", "twocorrelations")
   sdsc <- identical(r$scale, "standard deviation")
@@ -793,6 +800,7 @@ stata_power_table <- function(method, lists, fixed = list(), notable = FALSE, sh
     for (i in seq_len(nrow(tab))) cat(line(mapply(cell, tab[i, ], fmts, widths)), "\n", sep = "")
     cat(rule, "\n", sep = "")
     if (any(vapply(rs, function(x) !is.null(x$N_a), TRUE))) cat("   Note: N1 and N2 have been rounded down.\n")
+    if (two && method == "twomeans" && anyNA(tab[, "power"])) cat("   Warning: Some of the computations failed; execute each computation separately to see the specific error.\n")
   }
   cat("\n")
   invisible(r)

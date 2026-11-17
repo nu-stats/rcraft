@@ -24,6 +24,8 @@ pub(super) const RETURNED_HELPER: &str = r##"stata_eget <- function(name, text =
 }
 stata_rget <- function(name, text = FALSE) {
   v <- if (exists("stata_r")) stata_r[[name]] else NULL
+  # a value Stata keeps out of return list but lets be read (power cox's r(hratio))
+  if (is.null(v) && exists("stata_r")) v <- attr(stata_r, "stata_hidden")[[name]]
   if (is.null(v) || is.matrix(v)) return(if (text) "" else NA_real_)
   v
 }

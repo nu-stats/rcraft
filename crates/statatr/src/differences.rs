@@ -2945,8 +2945,7 @@ pub const GUIDES: &[Guide] = &[
                 "Not yet",
                 "Graphs, parallel, table() with columns, return list after power oneway (Stata \
                  lists its r() in an order that changes with the number of groups), oneway's \
-                 lists and contrasts, logrank's and cox's lists, wdprob() and simulation, r(hratio) \
-                 after cox given b1 or worked out (Stata keeps it hidden from return list), the \
+                 lists and contrasts, logrank's and cox's lists, wdprob() and simulation, the \
                  other methods (twoway, repeated, oneslope, rsquared, exponential, mcc, cmh, trend, \
                  ...), test(lrchi2), test(fisher), \
                  test(binomial), one group's size that leaves the other not whole, \
@@ -2958,9 +2957,14 @@ pub const GUIDES: &[Guide] = &[
                 "Lists of values print Stata's table, each row worked out as its own power line, in \
                  Stata's order; r() is the last row's, with r(columns), r(labels), r(widths), \
                  r(formats) and r(pss_table). return list after a table is refused: Stata lists \
-                 the table's r(separator) and r(divider) in an order RCraft does not follow. Where \
-                 Stata's own computation fails (its t test at millions of observations) it prints \
-                 a missing power; R works it out.",
+                 the table's r(separator) and r(divider) in an order RCraft does not follow.",
+            ),
+            p(
+                "As Stata's limits",
+                "Stata's noncentral t takes noncentralities up to 1000: past them two means stop \
+                 with r(498) (in a table, a missing power and Stata's warning) and one mean shows a \
+                 missing power, in RCraft as in Stata 19. After cox given b1 or worked out, \
+                 r(hratio) can be read but return list leaves it out, as Stata keeps it.",
             ),
         ],
     },

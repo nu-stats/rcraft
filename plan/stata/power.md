@@ -183,3 +183,15 @@ Observed on Stata 19 SE (probes m1, m2); corpus `power6.do`.
 - logrank's Pr_E is 1 − (s1 + R·s2)/(1 + R), R = N2/N1, in that order: Stata's doubles then give
   0.55000000000000004 for 0.5 and 0.4, and E = ⌈200 × that⌉ is 111 (110.00000000000001), not 110. E is
   rounded up with no tolerance.
+
+## The two left over (2026-11-17)
+
+- After `power cox` with b1 given or worked out, Stata 19 sets r(hratio) = exp(b1) but leaves it out of
+  `return list` (`display r(hratio)` after `power cox -0.4, ...` is .670320046035639). RCraft keeps it the
+  same way: readable, not listed (an attribute of stata_r that stata_rget reads).
+- Stata's noncentral t takes noncentralities up to 1000 (√n·d = 999 gives a power, 1001 a missing one).
+  Past that: two means stop with r(498) ("failure to compute power; ..."), and in a table their row's
+  power is "." with "   Warning: Some of the computations failed; execute each computation separately to
+  see the specific error." under it; one mean (and paired means) show the power as "." with no error
+  and no warning. RCraft does the same. And where R's noncentral t passes 1 at large n (1 + 5e-12),
+  the power is 1, as Stata's.

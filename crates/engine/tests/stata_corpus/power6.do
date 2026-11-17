@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12): no data; Stata 19's results are in power6.recorded
 * commands: power
-* (power with one group's size: n1() or n2() alone, with nratio(), and n() with n1() or n2(); and logrank's events as Stata's doubles round them)
+* (power with one group's size: n1() or n2() alone, with nratio(), and n() with n1() or n2(); logrank's events as Stata's doubles round them; cox's r(hratio) kept out of return list; noncentralities past 1000, where Stata's t gives a missing power)
 * tolerance: 1e-9
 version 19
 set linesize 255
@@ -16,3 +16,13 @@ quietly power twocorrelations 0.2 0.5, n1(60)
 display "@ cr " %24.17g r(power) " " r(N)
 quietly power logrank 0.5 0.4, n1(100) n2(100)
 display "@ lr " %24.17g r(power) " " r(E) " " %24.17g r(Pr_E)
+quietly power cox -0.4, sd(1.2) r2(0.1) alpha(0.01) power(0.9)
+display "@ ch " %24.17g r(hratio)
+quietly power cox, n(100) power(0.8) direction(upper)
+display "@ ct " %24.17g r(hratio) " " %24.17g r(b1)
+quietly power twomeans 0 (1 1.5), n(2000000)
+display "@ tf " r(power) " " r(N)
+quietly power onemean 0 1, n(1002001)
+display "@ of " r(power)
+quietly power twomeans 0 0.5, n(5000)
+display "@ t1 " %24.17g r(power)
