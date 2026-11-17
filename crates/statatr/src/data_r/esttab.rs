@@ -54,7 +54,11 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
                          cells = NULL, compress = FALSE, varwidth = NULL, modelwidth = NULL,
                          mlabels = NULL, prehead = NULL, posthead = NULL, prefoot = NULL, postfoot = NULL,
                          fragment = FALSE, alignment = NULL, format = "screen", booktabs = FALSE, file = NULL, replace = FALSE,
-                         from_eststo = FALSE, refcat = NULL, refcat_label = TRUE, eqlabels = TRUE, elist = NULL) {
+                         from_eststo = FALSE, refcat = NULL, refcat_label = TRUE, eqlabels = TRUE, elist = NULL,
+                         wide = FALSE) {
+  # wide: each statistic beside its coefficient, on the screen and in a .txt so far
+  if (wide && (!is.null(cells) || !(format %in% c("screen", "txt")) || !is.null(mgroups) || isTRUE(mlabels$span)))
+    stop("RCraft: esttab, wide with cells(), mgroups(), spanned mlabels() or a .csv or .tex file is not translated yet", call. = FALSE)
   # compress narrows the columns: 9 for the models, 10 (16 with label) for the names
   if (is.null(modelwidth)) modelwidth <- if (compress) 9 else 12
   if (is.null(varwidth)) varwidth <- if (label) (if (compress) 16 else 20) else (if (compress) 10 else 12)
@@ -70,7 +74,7 @@ stata_esttab <- function(models, d, aux = "t", bfmt = "a3", auxfmt = NULL, star 
                        keep, drop, order, stats, statfmt, sstats, noobs, obslast, numbers, mtitles,
                        nomtitles, title, notes, addnotes, varlabels, nogaps, mgroups, varwidth,
                        modelwidth, format, booktabs, mlabels, prehead, posthead, prefoot, postfoot,
-                       fragment, alignment)
+                       fragment, alignment, wide)
   }
   if (is.null(file) && from_eststo) cat("(tabulating estimates stored by eststo; specify \".\" to tabulate the active results)\n")
   # on the screen a blank line comes first
@@ -139,7 +143,7 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
                                nobase, keep, drop, order, stats, statfmt, sstats, noobs, obslast,
                                numbers, mtitles, nomtitles, title, notes, addnotes, varlabels, nogaps,
                                mgroups, varwidth, modelwidth, format, booktabs, mlabels, prehead,
-                               posthead, prefoot, postfoot, fragment, alignment) {
+                               posthead, prefoot, postfoot, fragment, alignment, wide = FALSE) {
   # varlabels() takes the blank lines between the coefficients away, as nogaps does
   gaps <- !nogaps && is.null(varlabels)
   stats <- c(stats, sstats$names)
@@ -310,10 +314,13 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
     if (is.null(given)) default else gsub("@M", nmod, gsub("@title", if (is.null(title)) "" else title, given, fixed = TRUE), fixed = TRUE)
   }
   if (format %in% c("screen", "txt")) {
-    width <- vw + nmod * (1 + modelwidth + sw)
+    # wide: each model's statistic in a column of its own after its stars (Stata 19 with estout)
+    aw <- if (wide && aux != "none") 1 + modelwidth else 0
+    width <- vw + nmod * (1 + modelwidth + sw + aw)
     rule <- strrep("-", width)
-    cell <- function(x, s = "") paste0(" ", stata_pad(x, modelwidth), stata_pad(s, -sw))
-    row <- function(n, xs, ss = rep("", length(xs))) paste0(nm_cell(n, vw), paste0(mapply(cell, xs, ss), collapse = ""))
+    cell <- function(x, s = "", a = "") paste0(" ", stata_pad(x, modelwidth), stata_pad(s, -sw),
+                                             if (aw) paste0(" ", stata_pad(a, modelwidth)) else "")
+    row <- function(n, xs, ss = rep("", length(xs)), as = rep("", length(xs))) paste0(nm_cell(n, vw), paste0(mapply(cell, xs, ss, as), collapse = ""))
     # spanned: a label from the left of the models it spans
     srow <- function(labs, k) {
       w <- k * (1 + modelwidth + sw) - 1
@@ -327,10 +334,12 @@ stata_esttab_table <- function(models, d, aux, bfmt, auxfmt, star, stars, star_t
     for (h in heads) out <- c(out, if (!is.null(ml) && h$span) srow(h$h, 1) else row("", h$h))
     out <- c(out, sect(posthead, rule))
     for (j in seq_along(all)) {
-      # one line a coefficient with not: no blank lines between them
-      if (j > 1 && aux != "none" && gaps) out <- c(out, "")
-      out <- c(out, row(lab(all[j]), vapply(cells, function(m) m[[j]]$main, ""), vapply(cells, function(m) m[[j]]$st, "")))
-      if (aux != "none") out <- c(out, row("", vapply(cells, function(m) m[[j]]$aux, "")))
+      # one line a coefficient with not, or with wide: no blank lines between them
+      if (j > 1 && aux != "none" && gaps && !aw) out <- c(out, "")
+      auxs <- vapply(cells, function(m) m[[j]]$aux, "")
+      out <- c(out, row(lab(all[j]), vapply(cells, function(m) m[[j]]$main, ""), vapply(cells, function(m) m[[j]]$st, ""),
+                        if (aw) auxs else rep("", length(cells))))
+      if (aux != "none" && !aw) out <- c(out, row("", auxs))
     }
     out <- c(out, sect(prefoot, if (length(srows)) rule))
     for (s in srows) out <- c(out, row(slabel(s), vapply(ms, scell, "", s = s)))
@@ -654,6 +663,7 @@ impl Session {
             ("t", 1),
             ("p", 1),
             ("not", 3),
+            ("wide", 4),
             ("b", 1),
             ("star", 4),
             ("nostar", 6),
@@ -965,7 +975,7 @@ impl Session {
              addnotes = {}, varlabels = {}, nogaps = {}, mgroups = {}, cells = {}, compress = {}, \
              varwidth = {}, modelwidth = {}, mlabels = {}, prehead = {}, posthead = {}, prefoot = {}, postfoot = {}, \
              fragment = {}, alignment = {}, format = {}, booktabs = {}, file = {}, replace = {}, from_eststo = {}, \
-             refcat = {}, refcat_label = {}, eqlabels = {}, elist = {})",
+             refcat = {}, refcat_label = {}, eqlabels = {}, elist = {}, wide = {})",
             names.iter().map(|n| r_text(n)).collect::<Vec<_>>().join(", "),
             r_text(aux),
             r_text(&fmt_arg("b", 1).filter(|f| !f.is_empty()).unwrap_or_else(|| "a3".into())),
@@ -1011,6 +1021,7 @@ impl Session {
             super::stats::r_logical(extra.refcat_label),
             super::stats::r_logical(extra.eqlabels),
             extra.elist,
+            super::stats::r_logical(opts.has("wide", 4)),
         );
         if file.is_none() && self.quiet(c) {
             return Ok(());

@@ -184,6 +184,7 @@ pub const COMMANDS: &[&str] = &[
     "parmest",
     "pca",
     "pdslasso",
+    "pnorm",
     "poisson",
     "poregress",
     "post",
@@ -201,6 +202,7 @@ pub const COMMANDS: &[&str] = &[
     "putexcel",
     "pwcorr",
     "pwd",
+    "qnorm",
     "quietly",
     "ranksum",
     "ratio",
@@ -214,6 +216,7 @@ pub const COMMANDS: &[&str] = &[
     "restore",
     "revrs",
     "rreg",
+    "rvfplot",
     "robreg",
     "rotate",
     "return",
@@ -1634,7 +1637,7 @@ mod tests {
             options("ta", VARS),
             names(&["tab1", "tab2", "table", "tabm", "tabodds", "tabstat", "tabulate"])
         );
-        assert_eq!(options("q", VARS), names(&["quietly"]));
+        assert_eq!(options("q", VARS), names(&["qnorm", "quietly"]));
         assert_eq!(options("quietly regr", VARS), names(&["regress"]));
         assert_eq!(options("qui: reg", VARS), names(&["reghdfe", "regress"]));
         assert_eq!(options("by sex: summ", VARS), names(&["summarize"]));

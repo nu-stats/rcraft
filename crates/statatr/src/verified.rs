@@ -71,7 +71,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ),
     ("estpost", &["esttab2"]),
     ("eststo", &["estout", "marginsplot"]),
-    ("esttab", &["esttab", "esttab2", "esttab3"]),
+    ("esttab", &["esttab", "esttab2", "esttab3", "esttab4"]),
     ("expand", &["made", "random"]),
     ("factor", &["factor"]),
     ("file", &["fileread", "strings"]),

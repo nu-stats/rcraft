@@ -338,6 +338,9 @@ const GRAPHS: &[&str] = &[
     "line",
     "lowess",
     "marginsplot",
+    "pnorm",
+    "qnorm",
+    "rvfplot",
     "scatter",
     "twoway",
 ];

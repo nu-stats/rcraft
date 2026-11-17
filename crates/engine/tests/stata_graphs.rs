@@ -407,18 +407,348 @@ coefplot (m1, label(A) offset(.1)) (m2, label(B)), bylabel(One) || m1, bylabel(T
     ok(&mut e, &code);
 }
 
+/// lfit, qfit, lfitci, qfitci and area draw; the fits' points and bands are
+/// Stata 19's (its sersets: `serset use` after each graph, made-up data typed
+/// in as floats, so to 1e-6).
+#[test]
+fn fits_with_bands_and_areas_are_statas() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let use_ = format!("use \"{dir}/models.dta\", clear\n");
+    for cmd in [
+        "twoway lfitci y x",
+        "twoway qfitci y x, n(5)",
+        "twoway (lfitci y x, level(90) stdf) (scatter y x)",
+        "twoway qfit y x, range(0 12)",
+        "twoway lfit y x, n(5) range(. 3)",
+        "twoway area y x",
+        "twoway (area y x, base(1)) (line y x, sort)",
+    ] {
+        let code = script(&format!("{use_}{cmd}\n"));
+        ok(&mut e, &code);
+    }
+    let d = "d <- data.frame(y = c(1.2, 1.9, 3.4, 3.1, 5.6, 5.2, 7.9, 8.1), x = c(1, 2, 3, 4, 5, 6, 7, 9))";
+    // lfitci y x: 100 points from the data's least x to its greatest
+    let v = numbers(
+        &mut e,
+        &format!("{d}; f <- stata_fitline(d, \"y\", \"x\", degree = 1, n = 100, level = 95)"),
+        "nrow(f), f$x[2], f$y[1], f$lo[1], f$hi[1], f$y[100], f$lo[100], f$hi[100]",
+    );
+    near_stata(
+        &v,
+        &[
+            100.0, 1.080808, 1.159398, 0.0136336, 2.305163, 8.642105, 7.330879, 9.953331,
+        ],
+        1e-6,
+        "lfitci",
+    );
+    // qfitci y x
+    let v = numbers(
+        &mut e,
+        &format!("{d}; f <- stata_fitline(d, \"y\", \"x\", degree = 2, n = 100, level = 95)"),
+        "f$y[1], f$lo[1], f$hi[1], f$y[100], f$lo[100], f$hi[100]",
+    );
+    near_stata(
+        &v,
+        &[1.00028, -0.6960204, 2.696581, 8.460785, 6.522926, 10.39864],
+        1e-6,
+        "qfitci",
+    );
+    // lfitci y x, stdf level(90): the band of a forecast
+    let v = numbers(
+        &mut e,
+        &format!("{d}; f <- stata_fitline(d, \"y\", \"x\", level = 90, stdf = TRUE)"),
+        "f$lo[1], f$hi[1], f$lo[2], f$hi[2]",
+    );
+    near_stata(
+        &v,
+        &[-0.5608029, 2.8796, -0.4780095, 2.947972],
+        1e-6,
+        "lfitci, stdf level(90)",
+    );
+    // lfitci y x, level(90) n(5)
+    let v = numbers(
+        &mut e,
+        &format!("{d}; f <- stata_fitline(d, \"y\", \"x\", n = 5, level = 90)"),
+        "f$x[2], f$y[2], f$lo[2], f$hi[2]",
+    );
+    near_stata(
+        &v,
+        &[3.0, 3.030075, 2.414255, 3.645895],
+        1e-6,
+        "lfitci, level(90) n(5)",
+    );
+    // qfit y x, range(0 12) and lfit y x, range(. 12)
+    let v = numbers(
+        &mut e,
+        &format!(
+            "{d}; f <- stata_fitline(d, \"y\", \"x\", degree = 2, from = 0, to = 12); h <- stata_fitline(d, \"y\", \"x\", n = 3, to = 12)"
+        ),
+        "f$y[1], f$y[100], h$x[2], h$y[2], h$y[3]",
+    );
+    near_stata(
+        &v,
+        &[-0.0904759, 10.67843, 6.5, 6.30376, 11.44812],
+        1e-6,
+        "qfit range(0 12), lfit range(. 12)",
+    );
+}
+
+/// qnorm, pnorm and rvfplot plot Stata 19's points (its sersets, on the same
+/// made-up data typed in with input, so to 1e-6).
+#[test]
+fn normal_plots_and_rvfplot_are_statas() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    ok(
+        &mut e,
+        &format!(
+            "haven::write_dta(data.frame(y = c(1.2, 1.9, 3.4, 3.1, 5.6, 5.2, 7.9, 8.1, NA), x = c(1, 2, 3, 4, 5, 6, 7, 9, 4)), '{dir}/np.dta')"
+        ),
+    );
+    let data = format!("use \"{dir}/np.dta\", clear\n");
+    let code = script(&format!("{data}qnorm y, nodraw\n"));
+    ok(&mut e, &code);
+    let v = numbers(
+        &mut e,
+        "",
+        "nrow(stata_np), stata_np$x, stata_np$y[c(1, 8)]",
+    );
+    near_stata(
+        &v,
+        &[
+            8.0, 1.386411, 2.568067, 3.433665, 4.187907, 4.912094, 5.666336, 6.531933, 7.713589,
+            1.2, 8.1,
+        ],
+        1e-6,
+        "qnorm",
+    );
+    let code = script(&format!("{data}pnorm y, nodraw\n"));
+    ok(&mut e, &code);
+    // Stata lists these in %4.2f
+    let v = numbers(&mut e, "", "stata_np$x[c(1, 8)], round(stata_np$y, 2)");
+    near_stata(
+        &v,
+        &[
+            1.0 / 9.0,
+            8.0 / 9.0,
+            0.10,
+            0.15,
+            0.29,
+            0.33,
+            0.60,
+            0.66,
+            0.90,
+            0.91,
+        ],
+        1e-6,
+        "pnorm",
+    );
+    let code = script(&format!("{data}regress y x\nrvfplot, nodraw\n"));
+    ok(&mut e, &code);
+    let v = numbers(&mut e, "", "stata_rvf$x[c(1, 8)], stata_rvf$y[c(1, 2, 8)]");
+    near_stata(
+        &v,
+        &[1.159398, 8.642105, 0.0406016, -0.1947368, -0.542105],
+        1e-6,
+        "rvfplot",
+    );
+    // Stata's errors for no variable or two
+    let code = script(&format!(
+        "{data}capture noisily qnorm\ndisplay _rc\ncapture noisily pnorm y x\ndisplay _rc\n"
+    ));
+    let text = ok(&mut e, &code);
+    assert!(
+        text.contains("varlist required") && text.contains("100"),
+        "{text}"
+    );
+    assert!(
+        text.contains("too many variables specified") && text.contains("103"),
+        "{text}"
+    );
+}
+
+/// graph pie's slices are Stata 19's (its sersets for StatCraft's probe 260,
+/// whose data Stata's own random draws make).
+#[test]
+fn pie_slices_are_statas() {
+    let Some(mut e) = engine() else { return };
+    let data = "clear\nset seed 260\nset obs 50\ngenerate g = 1 + floor(4 * runiform())\n\
+                generate y = round(1 + 9 * runiform(), .1)\ngenerate a = round(10 * runiform(), .1)\n\
+                generate b = round(20 * runiform(), .1)\ngenerate c = round(5 * runiform(), .1)\n";
+    for (cmd, want) in [
+        ("graph pie, over(g)", vec![9.0, 14.0, 16.0, 11.0]),
+        ("graph pie y, over(g)", vec![58.1, 59.6, 86.6, 68.1]),
+        ("graph pie a b c", vec![286.3, 450.3, 131.5]),
+    ] {
+        let sep = if cmd.contains(',') { " " } else { ", " };
+        let code = script(&format!("{data}{cmd}{sep}nodraw\n"));
+        ok(&mut e, &code);
+        let v = numbers(&mut e, "", "stata_pie$value");
+        near_stata(&v, &want, 1e-6, cmd);
+    }
+    // the slices' labels: the group's value label, or the variable
+    let code = script(&format!(
+        "{data}label define gl 1 \"North\" 2 \"South\" 3 \"East\" 4 \"West\"\nlabel values g gl\ngraph pie, over(g) nodraw\n"
+    ));
+    let text = ok(
+        &mut e,
+        &format!("{code}\ncat(as.character(stata_pie$label), sep = \"|\")"),
+    );
+    assert!(text.contains("North|South|East|West"), "{text}");
+    let code = script(&format!("{data}graph pie a b c, nodraw\n"));
+    let text = ok(
+        &mut e,
+        &format!("{code}\ncat(as.character(stata_pie$label), sep = \"|\")"),
+    );
+    assert!(text.contains("a|b|c"), "{text}");
+}
+
+/// kdensity, at(x) generate(d): the density at each row's x (Stata 19 on
+/// StatCraft's probe 253's data: summarize d).
+#[test]
+fn kdensity_at_generates_the_density_at_each_row() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "clear\nset seed 253\nset obs 60\ngenerate x = round(invnormal(runiform()) * 1.5 + 3, .01)\n\
+         kdensity x, nograph at(x) generate(dat)\nquietly summarize dat\n\
+         display \"@ \" r(N) \" \" %18.0g r(mean) \" \" %18.0g r(min) \" \" %18.0g r(max)\n",
+    );
+    let text = ok(&mut e, &code);
+    let line = text
+        .lines()
+        .find(|l| l.starts_with("@ "))
+        .unwrap_or_default();
+    let v: Vec<f64> = line
+        .split_whitespace()
+        .filter_map(|w| w.parse().ok())
+        .collect();
+    near_stata(
+        &v,
+        &[60.0, 0.1711928, 0.034426, 0.2492593],
+        1e-6,
+        "kdensity at() generate()",
+    );
+}
+
+/// graph matrix draws a cell for each pair (below the diagonal with half),
+/// each with all the rows (StatCraft's probe 261's data; Stata 19's serset
+/// keeps every row, and a missing value leaves out only that cell's point).
+#[test]
+fn graph_matrix_draws_each_pair() {
+    let Some(mut e) = engine() else { return };
+    let data = "clear\nset seed 261\nset obs 30\ngenerate a = round(10 * runiform(), .1)\n\
+                generate b = round(a + 5 * runiform(), .1)\ngenerate c = round(100 * runiform(), 1)\n\
+                generate d = round(2 * invnormal(runiform()), .01)\n";
+    for (cmd, cells) in [
+        ("graph matrix a b c", 6.0),
+        ("graph matrix a b c d, half", 6.0),
+        ("graph matrix a b", 2.0),
+    ] {
+        let sep = if cmd.contains(',') { " " } else { ", " };
+        let code = script(&format!("{data}{cmd}{sep}nodraw\n"));
+        ok(&mut e, &code);
+        let v = numbers(
+            &mut e,
+            "",
+            "nrow(stata_gm$points) / 30, nrow(stata_gm$diag), length(ggplot2::ggplot_build(stata_graph)$data)",
+        );
+        assert_eq!(at(&v, 0), cells, "{cmd}: {v:?}");
+        assert!(at(&v, 1) >= 2.0 && at(&v, 2) >= 2.0, "{cmd}: {v:?}");
+    }
+}
+
+/// The graphs kept in memory, as Stata 19 lists, shows and drops them (its
+/// output for the same lines): sorted with capitals first, in columns two
+/// wider than the longest name, an unnamed graph as Graph.
+#[test]
+fn graphs_in_memory_are_listed_shown_and_dropped_as_statas() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let code = script(&format!(
+        "use \"{dir}/models.dta\", clear\ngraph dir\nscatter y x, name(a) nodraw\nscatter x y, name(bb) nodraw\nline y x, nodraw\n\
+         graph dir\ngraph dir, memory\ngraph display a\ngraph drop a\ngraph dir\n\
+         capture noisily graph display a\ndisplay _rc\ncapture noisily graph drop zz\ndisplay _rc\n\
+         graph drop bb Graph\ngraph dir\ndisplay \"end\"\n"
+    ));
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "    Graph  a      bb",
+            "    Graph  a      bb",
+            "    Graph  bb",
+            "graph a not found",
+            "111",
+            "graph zz not found",
+            "no graphs dropped",
+            "111",
+            "end",
+        ],
+        "{text}"
+    );
+    // more names than fit on a line of 80: four columns filled down
+    let names = [
+        "a",
+        "averylongname12",
+        "m2",
+        "zz",
+        "Q9",
+        "b1",
+        "b2",
+        "b3",
+        "b4",
+        "b5",
+        "b6",
+        "b7",
+        "b8",
+        "b9",
+        "c1",
+        "c2",
+        "c3",
+    ];
+    let mut d = format!("use \"{dir}/models.dta\", clear\n");
+    for n in names {
+        d.push_str(&format!("scatter y x, name({n}) nodraw\n"));
+    }
+    d.push_str("graph dir\n");
+    let text = ok(&mut e, &script(&d));
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim_end)
+        .filter(|l| !l.is_empty())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "    Q9               b3               b8               m2",
+            "    a                b4               b9               zz",
+            "    averylongname12  b5               c1",
+            "    b1               b6               c2",
+            "    b2               b7               c3",
+        ],
+        "{text}"
+    );
+}
+
 #[test]
 fn what_the_graphs_do_not_translate_says_why() {
     for (cmd, why) in [
         ("histogram y, bin(5) width(2)", "may not be combined"),
-        ("twoway (area y x)", "twoway area"),
-        ("graph pie y", "graph pie"),
+        ("twoway (dropline y x)", "twoway dropline"),
+        ("graph pie y, sort", "sort"),
         ("graph export g.png", "needs a graph"),
         ("scatter y x [fw=f]", "weights"),
         ("kdensity y, kernel(foo)", "kernel(foo)"),
         ("graph bar (iqr) y", "(iqr)"),
         ("graph bar (mean), over(g)", "r(100)"),
-        ("scatter y x\ngraph drop g1", "by name"),
+        ("scatter y x\ngraph drop g*", "wildcards"),
+        ("graph dir, detail", "detail"),
         ("twoway bar y x, horizontal", "horizontal"),
         ("twoway (lfit y x, yaxis(2)) (scatter y x)", "yaxis(2)"),
         ("twoway (line y x, yaxis(2))", "every plot"),

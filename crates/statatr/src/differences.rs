@@ -1106,6 +1106,44 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "qnorm",
+        about: "Normal quantile plot",
+        points: &[
+            p(
+                "Points",
+                "The sorted values against the mean plus the standard deviation times the \
+                 normal quantile of i/(N+1), with the line y = x, as Stata 19 plots them. R's \
+                 qqnorm() uses other plotting positions. grid is not translated yet.",
+            ),
+            GRAPH,
+        ],
+    },
+    Guide {
+        command: "pnorm",
+        about: "Standardized normal probability plot",
+        points: &[
+            p(
+                "Points",
+                "The normal probability of each standardized value against i/(N+1), with the \
+                 line y = x and Stata's axes from 0 to 1, as Stata 19 plots them. grid is not \
+                 translated yet.",
+            ),
+            GRAPH,
+        ],
+    },
+    Guide {
+        command: "rvfplot",
+        about: "Residuals against fitted values",
+        points: &[
+            p(
+                "Points",
+                "After regress: the residuals against the fitted values of the estimation \
+                 sample, titled Residuals and Fitted values as in Stata.",
+            ),
+            GRAPH,
+        ],
+    },
+    Guide {
         command: "margins",
         about: "Margins and marginal effects",
         points: &[

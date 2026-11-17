@@ -648,6 +648,8 @@ impl Session {
             self.kinds.clear();
             self.storage.clear();
         }
+        // kept in memory under name(), or as Graph
+        self.remember_graph(&g, out)?;
         // saving(name[, replace]): the graph kept in a file of that name
         if let Some(s) = g.arg("saving", 4) {
             let (name, o) = split_top_comma(&s);

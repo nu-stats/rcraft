@@ -1,10 +1,12 @@
 //! P2B.5: Stata's graph commands drawn with ggplot2.
 //!
 //! `histogram`, `kdensity`, `scatter`, `line`, `connected`, `twoway` (with
-//! `scatter`, `line`, `connected`, `lfit`, `qfit`, `lowess`, `histogram`,
-//! `kdensity`, `bar` and `rarea` layers, in `( )` or split at `||`),
-//! `lowess`, `graph bar`/`hbar`, `graph box`/`hbox`, `graph export` and
-//! `graph drop _all`.
+//! `scatter`, `line`, `connected`, `lfit`, `qfit`, `lfitci`, `qfitci`,
+//! `lowess`, `histogram`, `kdensity`, `bar`, `area`, `rarea`, `rcap` and
+//! `rspike` layers, in `( )` or split at `||`), `lowess`, `qnorm`, `pnorm`,
+//! `rvfplot`, `graph bar`/`hbar`, `graph box`/`hbox`, `graph pie`, `graph
+//! matrix`, `graph export`, `graph save`, `graph combine`, `graph dir`,
+//! `graph display` and `graph drop`.
 //!
 //! What a graph shows is worked out here the way Stata 19 works it out, and
 //! only then handed to ggplot2 to draw, since R's own defaults differ at
@@ -22,7 +24,10 @@
 //! - `lowess`: Stata's, a local line with tricube weights over int((0.8 N -
 //!   0.5) / 2) neighbours on each side and no robustness steps, which is not
 //!   R's `lowess()`;
-//! - `lfit` and `qfit`: least squares lines, `qfit` over 100 points;
+//! - `lfit` and `qfit`: least squares lines, `lfit` at 3 points and `qfit` at
+//!   100 (`n()`, `range()`); `lfitci` and `qfitci` add the band of plus or
+//!   minus t times the standard error of the mean prediction (`stdf`: of a
+//!   forecast), at `level()`; `area` fills to `base()` or the axis bottom;
 //! - `graph bar`: the statistic (mean unless named) of each variable within
 //!   each `over()` group; `(count)` alone counts the rows;
 //! - `graph box`: Stata's quartiles of each group, whiskers to the adjacent
@@ -127,15 +132,30 @@ stata_lowess <- function(x, y, bw = 0.8) {
   out[ok] <- r
   out
 }
-stata_fitline <- function(d, y, x, degree = 1, n = 100) {
+stata_fitline <- function(d, y, x, degree = 1, n = 100, from = NA, to = NA, level = NA, stdf = FALSE) {
   xv <- stata_num(d[[x]])
   yv <- stata_num(d[[y]])
   ok <- !is.na(xv) & !is.na(yv)
-  g <- seq(min(xv[ok]), max(xv[ok]), length.out = n)
+  # range(a b): the line's ends, `.` (NA) the data's own
+  if (is.na(from)) from <- min(xv[ok])
+  if (is.na(to)) to <- max(xv[ok])
+  g <- seq(from, to, length.out = n)
   X <- if (degree == 1) cbind(1, xv[ok]) else cbind(1, xv[ok], xv[ok]^2)
-  b <- solve(crossprod(X), crossprod(X, yv[ok]))
+  XtXi <- solve(crossprod(X))
+  b <- XtXi %*% crossprod(X, yv[ok])
   G <- if (degree == 1) cbind(1, g) else cbind(1, g, g^2)
-  data.frame(x = g, y = drop(G %*% b))
+  out <- data.frame(x = g, y = drop(G %*% b))
+  # lfitci and qfitci: the fit plus or minus t times the standard error of the
+  # mean prediction (stdp), or of a forecast (stdf), as Stata 19 draws them
+  if (!is.na(level)) {
+    df <- sum(ok) - ncol(X)
+    s2 <- sum((yv[ok] - drop(X %*% b))^2) / df
+    se <- sqrt(s2 * rowSums((G %*% XtXi) * G) + if (stdf) s2 else 0)
+    t <- stats::qt(1 - (1 - level / 100) / 2, df)
+    out$lo <- out$y - t * se
+    out$hi <- out$y + t * se
+  }
+  out
 }
 stata_bar_data <- function(d, stats, vars, over = character()) {
   f <- function(s, v) {
@@ -197,6 +217,32 @@ stata_box_data <- function(d, vars, over = character()) {
   out$group <- factor(out$group, levels = levels(key))
   out$series <- factor(out$series, levels = levels(box$series))
   list(box = box, out = out)
+}
+# the graphs kept by name (an unnamed one is `Graph`), as Stata 19 keeps them in memory
+stata_graph_dir <- function() {
+  nm <- if (exists("stata_graphs")) names(stata_graphs) else character()
+  if (!length(nm)) return(invisible(NULL))
+  # Stata's order (capitals first), in columns two wider than the longest name,
+  # filled down, as many as fit the line after four spaces
+  nm <- nm[order(nm, method = "radix")]
+  w <- max(nchar(nm)) + 2
+  ls <- if (exists("stata_linesize")) stata_linesize else 80
+  nc <- max(1, (ls - 4) %/% w)
+  nr <- ceiling(length(nm) / nc)
+  for (r in seq_len(nr)) {
+    idx <- r + (seq_len(nc) - 1) * nr
+    idx <- idx[idx <= length(nm)]
+    cat("    ", sub(" +$", "", paste(formatC(nm[idx], width = -w), collapse = "")), "\n", sep = "")
+  }
+  invisible(NULL)
+}
+stata_graph_get <- function(name) {
+  if (exists("stata_graphs") && !is.null(stata_graphs[[name]])) return(stata_graphs[[name]])
+  stop("graph ", name, " not found (Stata: r(111))", call. = FALSE)
+}
+stata_graph_show <- function(g) {
+  if (inherits(g, "ggplot")) print(g) else { grid::grid.newpage(); grid::grid.draw(g) }
+  invisible(g)
 }"#;
 
 /// Options that change only how a graph looks; ggplot2's defaults stand in.
@@ -428,8 +474,26 @@ impl Session {
              bandwidth 0.9 min(sd, IQR / 1.349) N^(-1/5) unless bwidth(), at min(N, 50) points",
         );
         if let Some(g) = opts.arg("generate", 3) {
-            // generate(x d): the points and the densities as new variables
             let names: Vec<&str> = g.split_whitespace().collect();
+            // with at(v): one new variable, the density at each row's v
+            if let ([gd], true) = (names.as_slice(), opts.arg("at", 2).is_some()) {
+                if !is_name(gd) {
+                    return Err(no("kdensity, generate() needs a new variable name"));
+                }
+                if c.parts.if_exp.is_some() || c.parts.in_range.is_some() {
+                    return Err(no(
+                        "kdensity, at() generate() with if or in is not translated yet",
+                    ));
+                }
+                let d = self.data()?;
+                out.line(format!("{d}[[{}]] <- stata_k$density", r_text(gd)));
+                self.kinds.insert((*gd).to_string(), Kind::Number);
+                if opts.has("nograph", 4) {
+                    return Ok(());
+                }
+                return Err(no("kdensity, at() with a graph is not translated yet"));
+            }
+            // generate(x d): the points and the densities as new variables
             let [gx, gd] = names.as_slice() else {
                 return Err(no("kdensity, generate() takes two new variable names here"));
             };
@@ -534,6 +598,115 @@ impl Session {
             r_text(kernel),
             args.join(", ")
         ))
+    }
+
+    // ---------------- qnorm, pnorm, rvfplot ----------------
+
+    /// `qnorm y` and `pnorm y`: the normal quantile and probability plots, as
+    /// Stata 19 draws them (its sersets): the sorted values against mean + sd
+    /// · invnormal(i/(N+1)), or Φ((value − mean)/sd) against i/(N+1), each
+    /// with the line y = x from the first point's x to the last's.
+    pub(super) fn normal_plot(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+        quantile: bool,
+    ) -> Result<(), Untranslated> {
+        let name = if quantile { "qnorm" } else { "pnorm" };
+        self.no_by(c, name)?;
+        if opts.has("grid", 4) {
+            return Err(no(format!("{name}, grid is not translated yet")));
+        }
+        if c.parts.weight.is_some() {
+            return Err(no("weights in a graph are not translated yet"));
+        }
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let v = match words.as_slice() {
+            [v] if is_name(v) => *v,
+            [] => {
+                out.line("stop(\"varlist required (Stata: r(100))\", call. = FALSE)");
+                return Ok(());
+            }
+            [_, _, ..] => {
+                out.line("stop(\"too many variables specified (Stata: r(103))\", call. = FALSE)");
+                return Ok(());
+            }
+            _ => return Err(no(format!("{name} needs a variable name"))),
+        };
+        let rows = self.rows_for(c, out)?;
+        self.helpers.insert("stata_graph");
+        self.helpers.insert("stata_tab_values");
+        out.line(format!(
+            "stata_np <- local({{ v <- sort(stata_num({rows}${})); n <- length(v); m <- mean(v); s <- stats::sd(v); p <- seq_len(n) / (n + 1); \
+             if (n == 0) stop(\"no observations (Stata: r(2000))\", call. = FALSE); {} }})",
+            r_name(v),
+            if quantile {
+                "data.frame(x = m + s * stats::qnorm(p), y = v)"
+            } else {
+                "data.frame(x = p, y = stats::pnorm((v - m) / s))"
+            }
+        ));
+        let line = "ggplot2::geom_line(data = data.frame(x = range(stata_np$x), y = range(stata_np$x)), ggplot2::aes(x = x, y = y))";
+        let mut layers = vec![
+            "ggplot2::geom_point(data = stata_np, ggplot2::aes(x = x, y = y))".to_string(),
+            line.to_string(),
+        ];
+        let (xtitle, ytitle) = if quantile {
+            (
+                r_text("Inverse normal"),
+                format!("stata_varlab({rows}, {})", r_text(v)),
+            )
+        } else {
+            // pnorm's axes from 0 to 1 by .25, shown with two decimals
+            for ax in ["x", "y"] {
+                layers.push(format!(
+                    "ggplot2::scale_{ax}_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.25), labels = sprintf(\"%.2f\", seq(0, 1, 0.25)))"
+                ));
+            }
+            (
+                r_text("Empirical P[i] = i/(N+1)"),
+                r_text("Normal F[(y-m)/s]"),
+            )
+        };
+        self.draw(c, opts, out, &[("grid", 4)], &layers, &xtitle, &ytitle)
+    }
+
+    /// `rvfplot` after `regress`: the residuals against the fitted values of
+    /// the estimation sample, titled `Residuals` and `Fitted values` (Stata 19).
+    pub(super) fn rvfplot(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if !c.parts.main.trim().is_empty() || c.parts.if_exp.is_some() || c.parts.in_range.is_some()
+        {
+            return Err(no("rvfplot takes no varlist, if or in"));
+        }
+        let est = self.estimates_for("rvfplot")?;
+        if est.fit != super::model::Fit::Regress {
+            return Err(no(format!(
+                "rvfplot after {} is not translated yet (after regress it is)",
+                est.fit.name()
+            )));
+        }
+        self.helpers.insert("stata_graph");
+        self.helpers.insert("stata_tab_values");
+        out.line(
+            "stata_rvf <- data.frame(x = unname(stats::fitted(stata_estimates)), y = unname(stats::residuals(stata_estimates)))",
+        );
+        let layers =
+            vec!["ggplot2::geom_point(data = stata_rvf, ggplot2::aes(x = x, y = y))".to_string()];
+        self.draw(
+            c,
+            opts,
+            out,
+            &[],
+            &layers,
+            &r_text("Fitted values"),
+            &r_text("Residuals"),
+        )
     }
 
     // ---------------- lowess ----------------
@@ -741,12 +914,24 @@ impl Session {
         let same_y = ones
             .iter()
             .all(|l| l.ys.len() == 1 && l.ys.first() == first.ys.first());
-        let ytitle = match first.ys.first() {
-            Some(y) if same_y => format!("stata_varlab({}, {})", first.rows, r_text(y)),
-            _ => "NULL".to_string(),
+        // (Stata 19: lfit or qfit alone is titled `Fitted values`, and a graph
+        // with lfitci or qfitci has no y title)
+        let ytitle = if ones.iter().any(|l| matches!(l.kind, "lfitci" | "qfitci")) {
+            "NULL".to_string()
+        } else if ones.iter().all(|l| matches!(l.kind, "lfit" | "qfit")) {
+            r_text("Fitted values")
+        } else {
+            match first.ys.first() {
+                Some(y) if same_y => format!("stata_varlab({}, {})", first.rows, r_text(y)),
+                _ => "NULL".to_string(),
+            }
         };
         // several layers (or y variables) get a legend, labelled as Stata labels them
-        let legend = parsed.len() > 1 || parsed.iter().any(|l| l.ys.len() > 1);
+        // (lfitci and qfitci draw two series, the band and the line, so they always do)
+        let legend = parsed.len() > 1
+            || parsed
+                .iter()
+                .any(|l| l.ys.len() > 1 || matches!(l.kind, "lfitci" | "qfitci"));
         // a one-layer command's own options are the graph's too
         let mut layer_opts: Vec<(&str, usize)> = vec![("sort", 4), ("by", 2)];
         for l in &parsed {
@@ -801,10 +986,16 @@ impl Session {
             "rspike"
         } else if w == "rarea" {
             "rarea"
+        } else if w == "lfitci" {
+            "lfitci"
+        } else if w == "qfitci" {
+            "qfitci"
+        } else if w == "area" {
+            "area"
         } else {
             return Err(no(format!(
-                "twoway {w} is not translated yet (scatter, line, connected, lfit, qfit, lowess, \
-                 histogram, kdensity, bar, rarea, rcap and rspike are)"
+                "twoway {w} is not translated yet (scatter, line, connected, lfit, qfit, lfitci, \
+                 qfitci, lowess, histogram, kdensity, bar, area, rarea, rcap and rspike are)"
             )));
         };
         let vars: Vec<String> = cmd
@@ -827,7 +1018,11 @@ impl Session {
         } else {
             match vars.split_last() {
                 Some((x, ys)) if !ys.is_empty() => {
-                    if matches!(kind, "lfit" | "qfit" | "lowess" | "bar") && ys.len() != 1 {
+                    if matches!(
+                        kind,
+                        "lfit" | "qfit" | "lfitci" | "qfitci" | "lowess" | "bar" | "area"
+                    ) && ys.len() != 1
+                    {
                         return Err(no(format!("twoway {kind} takes one y and one x")));
                     }
                     if matches!(kind, "rarea" | "rcap" | "rspike") && ys.len() != 2 {
@@ -942,12 +1137,116 @@ impl Session {
                     }
                 }
             }
-            "lfit" | "qfit" => {
+            "lfit" | "qfit" | "lfitci" | "qfitci" => {
                 let y = r_text(l.ys.first().map(String::as_str).unwrap_or(""));
-                let deg = if l.kind == "lfit" { 1 } else { 2 };
+                let deg = if matches!(l.kind, "lfit" | "lfitci") {
+                    1
+                } else {
+                    2
+                };
+                // Stata 19 draws lfit at 3 points and the others at 100; n() sets it
+                let n = match lo.arg("n", 1) {
+                    Some(v) => match v.trim().parse::<u32>() {
+                        Ok(k) if k >= 2 => k,
+                        _ => return Err(no(format!("n({v}) needs a whole number of 2 or more"))),
+                    },
+                    None if l.kind == "lfit" => 3,
+                    None => 100,
+                };
+                // range(a b): the line's ends, `.` the data's own
+                let (from, to) = match lo.arg("range", 1) {
+                    None => ("NA".to_string(), "NA".to_string()),
+                    Some(r) => {
+                        let ends: Vec<&str> = r.split_whitespace().collect();
+                        let end = |s: &str| -> Result<String, Untranslated> {
+                            if s == "." {
+                                return Ok("NA".into());
+                            }
+                            s.parse::<f64>()
+                                .map(r_number)
+                                .map_err(|_| no(format!("range({r}) needs two numbers or .")))
+                        };
+                        match ends.as_slice() {
+                            [a, b] => (end(a)?, end(b)?),
+                            _ => return Err(no(format!("range({r}) needs two numbers or ."))),
+                        }
+                    }
+                };
+                let ci = matches!(l.kind, "lfitci" | "qfitci");
+                let level = if ci {
+                    match lo.arg("level", 3) {
+                        Some(v) => match v.trim().parse::<f64>() {
+                            Ok(p) if (10.0..=99.99).contains(&p) => p,
+                            _ => {
+                                return Err(no(format!(
+                                    "level({v}) needs a number from 10 to 99.99 (Stata: r(198))"
+                                )))
+                            }
+                        },
+                        None => 95.0,
+                    }
+                } else {
+                    f64::NAN
+                };
+                if ci && lo.has("stdp", 4) && lo.has("stdf", 4) {
+                    return Err(no(
+                        "options stdp and stdf may not be combined (Stata: r(198))",
+                    ));
+                }
+                let data = format!(
+                    "stata_fitline({rows}, {y}, {x}, degree = {deg}, n = {n}, from = {from}, to = {to}{})",
+                    if ci {
+                        format!(
+                            ", level = {}, stdf = {}",
+                            r_number(level),
+                            if lo.has("stdf", 4) { "TRUE" } else { "FALSE" }
+                        )
+                    } else {
+                        String::new()
+                    }
+                );
+                if ci {
+                    // the band first, then the line, as Stata draws them; the
+                    // legend says `95% CI` and `Fitted values`
+                    let band = if legend {
+                        format!(", fill = {}", r_text(&format!("{}% CI", fmt_level(level))))
+                    } else {
+                        String::new()
+                    };
+                    g.push(format!(
+                        "ggplot2::geom_ribbon(data = {data}, ggplot2::aes(x = x, ymin = lo, ymax = hi{band}), alpha = 0.5)"
+                    ));
+                    g.push(format!(
+                        "ggplot2::geom_line(data = {data}, ggplot2::aes(x = x, y = y{}))",
+                        fixed("Fitted values".to_string())
+                    ));
+                } else {
+                    g.push(format!(
+                        "ggplot2::geom_line(data = {data}, ggplot2::aes(x = x, y = y{}))",
+                        fixed("Fitted values".to_string())
+                    ));
+                }
+            }
+            "area" => {
+                // the area under y down to base(), or to the bottom of the y axis
+                // when there is no base() (Stata 19, observed in an SVG export)
+                let y = l.ys.first().map(String::as_str).unwrap_or("");
+                let base = match lo.arg("base", 4) {
+                    Some(b) => r_number(
+                        b.trim()
+                            .parse::<f64>()
+                            .map_err(|_| no(format!("base({b}) needs a number")))?,
+                    ),
+                    None => "-Inf".to_string(),
+                };
+                let fill = if legend {
+                    format!(", fill = stata_varlab({rows}, {})", r_text(y))
+                } else {
+                    String::new()
+                };
                 g.push(format!(
-                    "ggplot2::geom_line(data = stata_fitline({rows}, {y}, {x}, degree = {deg}), ggplot2::aes(x = x, y = y{}))",
-                    fixed("Fitted values".to_string())
+                    "ggplot2::geom_ribbon(data = {rows}, ggplot2::aes(x = stata_num(.data[[{x}]]), ymin = {base}, ymax = stata_num(.data[[{yv}]]){fill}), orientation = \"x\")",
+                    yv = r_text(y)
                 ));
             }
             "lowess" => {
@@ -1099,6 +1398,12 @@ impl Session {
         if sub == "bar" || sub == "hbar" {
             return self.graph_bar(c, rest, opts, out, sub == "hbar");
         }
+        if sub == "pie" {
+            return self.graph_pie(c, rest, opts, out);
+        }
+        if abbrev(sub, "matrix", 3) {
+            return self.graph_matrix(c, rest, opts, out);
+        }
         if sub == "box" || sub == "hbox" {
             return self.graph_box(c, rest, opts, out, sub == "hbox");
         }
@@ -1112,19 +1417,202 @@ impl Session {
             return self.graph_combine(c, rest, opts, out);
         }
         if sub == "drop" {
-            // the graphs Stata keeps by name; R keeps only the last, which
-            // `graph drop _all` leaves nothing of to export
-            let names = rest.trim();
-            if names != "_all" {
+            // the graphs Stata keeps by name (an unnamed one is Graph)
+            let names: Vec<&str> = rest.split_whitespace().collect();
+            if names.is_empty() {
+                return Err(no("graph drop needs graph names or _all (Stata: r(198))"));
+            }
+            if names == ["_all"] {
+                self.graph_drawn = false;
+                out.line("if (exists(\"stata_graph\")) rm(stata_graph)");
+                out.line("if (exists(\"stata_graphs\")) rm(stata_graphs)");
+                return Ok(());
+            }
+            if let Some(bad) = names.iter().find(|n| !is_name(n)) {
+                return Err(no(format!(
+                    "graph drop {bad}: graph names with wildcards are not translated yet"
+                )));
+            }
+            // Stata drops none of them when one is not there
+            let list = names
+                .iter()
+                .map(|n| r_text(n))
+                .collect::<Vec<_>>()
+                .join(", ");
+            out.line(format!(
+                "local({{ stata_dn <- c({list}); stata_miss <- setdiff(stata_dn, if (exists(\"stata_graphs\")) names(stata_graphs) else character()); \
+                 if (length(stata_miss)) stop(\"graph \", stata_miss[1], \" not found\\nno graphs dropped (Stata: r(111))\", call. = FALSE); \
+                 stata_graphs[stata_dn] <<- NULL }})"
+            ));
+            return Ok(());
+        }
+        if sub == "dir" {
+            if let Some(o) = opts.other(&[("memory", 3)]) {
+                return Err(no(format!(
+                    "graph dir with the option {o} is not translated yet"
+                )));
+            }
+            if !rest.trim().is_empty() {
                 return Err(no(
-                    "graph drop of graphs by name is not translated yet (graph drop _all is)",
+                    "graph dir with graph names or a pattern is not translated yet",
                 ));
             }
-            self.graph_drawn = false;
-            out.line("if (exists(\"stata_graph\")) rm(stata_graph)");
+            self.helpers.insert("stata_graph");
+            out.line("stata_graph_dir()");
+            return Ok(());
+        }
+        if abbrev(sub, "display", 2) {
+            if let Some(o) = opts.other(&[]) {
+                return Err(no(format!(
+                    "graph display with the option {o} is not translated yet"
+                )));
+            }
+            let name = match rest.split_whitespace().collect::<Vec<_>>().as_slice() {
+                [] => "Graph".to_string(),
+                [n] if is_name(n) => (*n).to_string(),
+                _ => return Err(no("graph display takes one graph name")),
+            };
+            self.helpers.insert("stata_graph");
+            out.line(format!("stata_graph <- stata_graph_get({})", r_text(&name)));
+            if !self.quiet(c) {
+                out.line("stata_graph_show(stata_graph)");
+            }
+            self.graph_drawn = true;
             return Ok(());
         }
         Err(no(format!("graph {sub} is not translated yet")))
+    }
+
+    /// `graph pie, over(g)`, `graph pie y, over(g)` and `graph pie a b c`: a
+    /// slice for each group's rows, each group's sum of y, or each variable's
+    /// sum (Stata 19's sersets), the first at twelve o'clock and the rest
+    /// counterclockwise, labelled by the group's value or the variable.
+    fn graph_pie(
+        &mut self,
+        c: &Command,
+        rest: &str,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "graph pie")?;
+        if c.parts.weight.is_some() {
+            return Err(no("weights in a graph are not translated yet"));
+        }
+        let vars: Vec<&str> = rest.split_whitespace().collect();
+        if let Some(bad) = vars.iter().find(|v| !is_name(v)) {
+            return Err(no(format!(
+                "graph pie {bad}: only variable names are translated"
+            )));
+        }
+        let over = match opts.arg("over", 4) {
+            Some(o) => {
+                let (v, sub) = o.split_once(',').unwrap_or((o.as_str(), ""));
+                if !sub.trim().is_empty() {
+                    return Err(no(format!(
+                        "graph pie, over({o}): over()'s own options are not translated yet"
+                    )));
+                }
+                let v = v.trim().to_string();
+                if !is_name(&v) {
+                    return Err(no(format!("over({v}): one variable is translated")));
+                }
+                Some(v)
+            }
+            None => None,
+        };
+        if over.is_some() && vars.len() > 1 {
+            return Err(no(
+                "graph pie with several variables and over() is not translated yet",
+            ));
+        }
+        if over.is_none() && vars.is_empty() {
+            return Err(no("graph pie needs variables or over() (Stata: r(100))"));
+        }
+        let rows = self.rows_for(c, out)?;
+        self.helpers.insert("stata_graph");
+        self.helpers.insert("stata_tab_values");
+        let (stats, names) = if vars.is_empty() {
+            (vec![r_text("count")], vec![r_text("")])
+        } else {
+            (
+                vars.iter().map(|_| r_text("sum")).collect(),
+                vars.iter().map(|v| r_text(v)).collect(),
+            )
+        };
+        let data = match &over {
+            Some(g) => format!(
+                "local({{ b <- stata_bar_data({rows}, c({}), c({}), {}); data.frame(label = b$group, value = b$value) }})",
+                stats.join(", "),
+                names.join(", "),
+                r_text(g)
+            ),
+            None => format!(
+                "local({{ b <- stata_bar_data({rows}, c({}), c({})); l <- vapply(c({}), function(v) stata_varlab({rows}, v), \"\"); \
+                 data.frame(label = factor(l, levels = unique(l)), value = b$value) }})",
+                stats.join(", "),
+                names.join(", "),
+                names.join(", ")
+            ),
+        };
+        out.line(format!("stata_pie <- {data}"));
+        let layers = vec![
+            "ggplot2::geom_col(data = stata_pie, ggplot2::aes(x = 1, y = value, fill = label), width = 1, position = ggplot2::position_stack(reverse = TRUE))".to_string(),
+            "ggplot2::coord_polar(theta = \"y\", direction = -1)".to_string(),
+            "ggplot2::theme(axis.text = ggplot2::element_blank(), axis.ticks = ggplot2::element_blank(), panel.grid = ggplot2::element_blank())".to_string(),
+            "ggplot2::labs(fill = NULL)".to_string(),
+        ];
+        self.draw(c, opts, out, &[("over", 4)], &layers, "NULL", "NULL")
+    }
+
+    /// `graph matrix a b c [, half]`: a scatter of each variable against each
+    /// other one, the row's variable up and the column's across, the names
+    /// on the diagonal, and only the cells below it with `half`.
+    fn graph_matrix(
+        &mut self,
+        c: &Command,
+        rest: &str,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "graph matrix")?;
+        if c.parts.weight.is_some() {
+            return Err(no("weights in a graph are not translated yet"));
+        }
+        let vars: Vec<&str> = rest.split_whitespace().collect();
+        if let Some(bad) = vars.iter().find(|v| !is_name(v)) {
+            return Err(no(format!(
+                "graph matrix {bad}: only variable names are translated"
+            )));
+        }
+        if vars.len() < 2 {
+            return Err(no(
+                "graph matrix needs two variables or more (Stata: r(102))",
+            ));
+        }
+        let rows = self.rows_for(c, out)?;
+        self.helpers.insert("stata_graph");
+        self.helpers.insert("stata_tab_values");
+        let list = vars
+            .iter()
+            .map(|v| r_text(v))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.line(format!(
+            "stata_gm <- local({{ v <- c({list}); lab <- vapply(v, function(x) stata_varlab({rows}, x), \"\"); \
+             k <- length(v); cells <- expand.grid(i = seq_len(k), j = seq_len(k)); cells <- cells[cells$i {} cells$j, ]; \
+             pts <- do.call(rbind, lapply(seq_len(nrow(cells)), function(r) {{ i <- cells$i[r]; j <- cells$j[r]; \
+               data.frame(row = factor(lab[i], levels = lab), col = factor(lab[j], levels = lab), x = stata_num({rows}[[v[j]]]), y = stata_num({rows}[[v[i]]])) }})); \
+             mid <- vapply(v, function(x) mean(range(stata_num({rows}[[x]]), na.rm = TRUE)), 0); \
+             list(points = pts, diag = data.frame(row = factor(lab, levels = lab), col = factor(lab, levels = lab), x = mid, y = mid, label = lab)) }})",
+            if opts.has("half", 4) { ">" } else { "!=" }
+        ));
+        let layers = vec![
+            "ggplot2::geom_point(data = stata_gm$points, ggplot2::aes(x = x, y = y), na.rm = TRUE)".to_string(),
+            "ggplot2::geom_text(data = stata_gm$diag, ggplot2::aes(x = x, y = y, label = label))".to_string(),
+            "ggplot2::facet_grid(rows = ggplot2::vars(row), cols = ggplot2::vars(col), scales = \"free\")".to_string(),
+            "ggplot2::theme(strip.text = ggplot2::element_blank())".to_string(),
+        ];
+        self.draw(c, opts, out, &[("half", 4)], &layers, "NULL", "NULL")
     }
 
     fn graph_bar(
@@ -1661,6 +2149,15 @@ fn hist_type(opts: &Opts) -> (&'static str, &'static str) {
     }
 }
 
+/// A confidence level as Stata writes it in a legend: `95`, `99.5`.
+fn fmt_level(p: f64) -> String {
+    if p.fract() == 0.0 {
+        format!("{}", p as i64)
+    } else {
+        format!("{p}")
+    }
+}
+
 /// The layers of `twoway (a) (b)` or `twoway a || b`.
 /// The options of one kind of twoway plot that change what it shows.
 fn kind_options(kind: &str) -> Vec<(&'static str, usize)> {
@@ -1678,6 +2175,15 @@ fn kind_options(kind: &str) -> Vec<(&'static str, usize)> {
         "kdensity" => vec![("kernel", 1), ("bwidth", 1), ("n", 1)],
         "lowess" => vec![("bwidth", 2)],
         "bar" => vec![("base", 4), ("vertical", 4)],
+        "area" => vec![("base", 4)],
+        "lfit" | "qfit" => vec![("n", 1), ("range", 1)],
+        "lfitci" | "qfitci" => vec![
+            ("n", 1),
+            ("range", 1),
+            ("level", 3),
+            ("stdp", 4),
+            ("stdf", 4),
+        ],
         "rcap" | "rspike" => vec![("horizontal", 3), ("vertical", 4)],
         _ => Vec::new(),
     }
@@ -1760,21 +2266,37 @@ fn layer_texts(main: &str) -> Result<Vec<String>, Untranslated> {
 }
 
 impl Session {
+    /// A graph just made is kept in memory under `name(n[, replace])`, or as
+    /// `Graph` without one, as Stata 19 keeps it (for `graph dir`, `graph
+    /// display`, `graph combine` and `graph drop`).
+    pub(super) fn remember_graph(
+        &mut self,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let name = match opts.arg("name", 4) {
+            Some(n) => {
+                let (name, _) = super::coefplot::split_top_comma(&n);
+                let name = name.trim().to_string();
+                if !is_name(&name) {
+                    return Err(no(format!("name({n}): a graph name is a plain name")));
+                }
+                name
+            }
+            None => "Graph".to_string(),
+        };
+        out.line(format!(
+            "if (!exists(\"stata_graphs\")) stata_graphs <- list(); stata_graphs[[{}]] <- stata_graph",
+            r_text(&name)
+        ));
+        Ok(())
+    }
+
     /// After a graph is drawn: `name(n[, replace])` keeps it by name for
     /// `graph combine`, `saving(f[, replace])` in a file (R's form under the
     /// .gph name, which Stata cannot open).
     pub(super) fn keep_graph(&mut self, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
-        if let Some(n) = opts.arg("name", 4) {
-            let (name, _) = super::coefplot::split_top_comma(&n);
-            let name = name.trim();
-            if !is_name(name) {
-                return Err(no(format!("name({n}): a graph name is a plain name")));
-            }
-            out.line(format!(
-                "if (!exists(\"stata_graphs\")) stata_graphs <- list(); stata_graphs[[{}]] <- stata_graph",
-                r_text(name)
-            ));
-        }
+        self.remember_graph(opts, out)?;
         if let Some(s) = opts.arg("saving", 4) {
             let (name, o) = super::coefplot::split_top_comma(&s);
             let file = file_name(name.trim(), "gph");

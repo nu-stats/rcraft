@@ -1130,6 +1130,8 @@ impl Session {
              if (!all(grepl(\"^[0-9]+[.]_at$\", names(stata_mplot$b)))) stop(\"RCraft: marginsplot of margins with terms or effects is not translated yet\", call. = FALSE); \
              stata_marginsplot(stata_mplot, stata_av) })",
         );
+        // kept in memory under name(), or as Graph
+        self.remember_graph(opts, out)?;
         if !self.quiet(c) {
             out.line("print(stata_graph)");
         }
