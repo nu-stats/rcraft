@@ -209,3 +209,34 @@ dslogit's variance, 1.4e-8 off).
 pologit, xpologit, dspoisson, popoisson, xpopoisson (StatCraft did not reproduce them); cv or
 lasso() inside xporegress; xfolds(1); lassocoef and lassoinfo after cv lassos; test, lincom,
 margins after these commands.
+
+# pologit, popoisson: what is decoded so far (2026-11-17, not translated)
+
+Observed on probe 480's data (exported from Stata 19 to the scratchpad only) with Stata's %21x:
+
+- **The lasso of each variable of interest is weighted.** Inside `popoisson yc2 d1` the lasso of d1
+  selects x1 alone where the unweighted lasso selects x1 x2; `lasso linear d1 x1-x10 [iweight = mu]`,
+  with mu the fitted mean of the post-lasso Poisson fit (`poisson yc2 d1 x1`), selects the same, at
+  the same lambda (.2416992: the plug-in formula is unchanged). For pologit the weights are
+  mu(1 - mu) of the post-lasso logit. aweights and pweights are not allowed in lasso (r(101)).
+- **Stata's weighted linear lasso:** means and standard deviations weighted with divisor sum(w), the
+  outcome centred at its weighted mean, the objective 1/(2 sum w) sum w (y - zb)^2 + lambda |b|:
+  lambda_max agrees to every digit for two weight sets, and the path to 1e-15 at most lambdas;
+  where Stata's descent stops differs at others (up to 4e-7), not decoded (the scale of the stopping
+  test: tried the weighted, unweighted and unit scales and sum(w)/N factors).
+- **pologit's estimator** (Belloni, Chernozhukov and Wei 2016, as the public manual describes):
+  (1) the logit lasso of y on the variables of interest d and the controls; (2) the logit of y on
+  all d and the controls (1) selected: index s = the controls' part with the constant, weights
+  w = mu(1 - mu); (3) each d_j by the weighted lasso on the controls, then weighted least squares on
+  its selection: residual d~_j; (4) alpha solves sum d~ (y - Lambda(s + d alpha)) = 0 (d in the
+  index, d~ as instruments), by Newton from the coefficients of (2); the variance
+  J^-1 Omega J^-1' / N with J = d~'diag(m(1 - m))d / N, Omega = d~'diag((y - m)^2)d~ / N.
+  With (4) run to convergence two variables of interest agree to 4e-11 (b and V); one variable
+  is 2.5e-7 to 8e-7 off. Stata stops the Newton steps early: in eight cases (one and two
+  variables of interest, different controls) its alpha is the first iterate whose last step moved
+  alpha by less than about 1e-3 relative (max |a - a_old| / (|a| + 1): stopping values 4e-7 to
+  8e-4, going-on values 2e-3 and up), to 1e-11 in every case. The threshold is only bracketed, so
+  this is a fit, not a decoding.
+- **popoisson** with the same scheme (weights mu): one case exact (1e-14), two others 1.4e-8 and
+  9e-8 off at the best iterate, so something before (4) also differs (perhaps where Stata's
+  post-lasso Poisson fit stops). dspoisson was not checked yet.
