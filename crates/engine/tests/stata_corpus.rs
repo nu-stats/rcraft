@@ -4,9 +4,12 @@
 //! the way RCraft runs a do-file (P2C, `statatr::dofile`: its macros, loops
 //! and included files, R asked for the values only it knows); every line
 //! must translate, and each runs in a real R; every value it prints on an
-//! `@ key value ...` line is compared with Stata's to the file's
-//! tolerance (8 significant digits, or 6 where Stata stops iterating at its
-//! tolerance). A command is Verified (`statatr::verified`) only through a
+//! `@ key value ...` line, the n-th time a key is printed against the n-th
+//! time Stata printed it, is compared with Stata's token by token: a number
+//! to the file's tolerance (8 significant digits, or 6 where Stata stops
+//! iterating at its tolerance), anything else (`.`, `.a`, a word) exactly.
+//! A recorded line that cannot be read or compared fails the test; none is
+//! skipped. A command is Verified (`statatr::verified`) only through a
 //! file here that passes.
 //!
 //! Without a supported R, or without haven, dplyr, readr, MASS, nnet,
@@ -157,26 +160,134 @@ fn run_dofile(e: &mut Engine, folder: &str, text: &str) -> Result<String, String
     }
 }
 
-/// The `@ key value ...` lines of a do-file's output, every value as a
-/// number (`.` is missing).
-fn results(text: &str) -> BTreeMap<String, Vec<f64>> {
-    text.lines()
-        .filter_map(|l| {
-            let mut w = l.strip_prefix("@ ")?.split_whitespace();
-            let key = w.next()?;
-            let v: Option<Vec<f64>> = w
-                .map(|v| {
-                    if v == "." {
-                        Some(f64::NAN)
-                    } else {
-                        v.parse().ok()
-                    }
-                })
-                .collect();
-            let v = v.filter(|v| !v.is_empty())?;
-            Some((key.to_string(), v))
-        })
-        .collect()
+/// One value on an `@` line: a number, compared to the tolerance, or any
+/// other token (`.`, `.a` to `.z`, a word, a quoted string), compared as
+/// exactly the same text.
+#[derive(Debug, Clone, PartialEq)]
+enum Tok {
+    Num(f64),
+    Text(String),
+}
+
+impl std::fmt::Display for Tok {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Tok::Num(n) => write!(f, "{n}"),
+            Tok::Text(t) => write!(f, "`{t}`"),
+        }
+    }
+}
+
+/// One `@ key value ...` line, with its line number in the text it came from.
+#[derive(Debug, Clone, PartialEq)]
+struct Row {
+    line: usize,
+    key: String,
+    values: Vec<Tok>,
+}
+
+/// One token of an `@` line. Text unless it is a number: only digits, signs,
+/// a point and an exponent, so `inf`, `nan` and `.a` stay text. A token that
+/// is made of those characters but is not a number (`1.2.3`, `1e`) cannot be
+/// read, and is an error rather than a skipped line.
+fn token(t: &str) -> Result<Tok, String> {
+    let numeric_chars = t.chars().all(|c| c.is_ascii_digit() || "+-.eE".contains(c));
+    let unsigned = t.trim_start_matches(['+', '-']);
+    let digit_led = unsigned.starts_with(|c: char| c.is_ascii_digit())
+        || unsigned
+            .strip_prefix('.')
+            .is_some_and(|r| r.starts_with(|c: char| c.is_ascii_digit()));
+    if numeric_chars && digit_led {
+        return t
+            .parse()
+            .map(Tok::Num)
+            .map_err(|_| format!("`{t}` is not a number"));
+    }
+    Ok(Tok::Text(t.to_string()))
+}
+
+/// The `@ key value ...` lines of a do-file's output, in order. A line that
+/// cannot be read is an error naming its line and token; no line is dropped.
+fn results(text: &str) -> Result<Vec<Row>, String> {
+    let mut out = Vec::new();
+    for (i, l) in text.lines().enumerate() {
+        let Some(rest) = l.strip_prefix("@ ").or((l.trim_end() == "@").then_some("")) else {
+            continue;
+        };
+        let mut w = rest.split_whitespace();
+        let Some(key) = w.next() else {
+            return Err(format!("line {}: `@` line without a key", i + 1));
+        };
+        let values = w
+            .map(|t| token(t).map_err(|why| format!("line {}: token {why}", i + 1)))
+            .collect::<Result<Vec<_>, _>>()?;
+        out.push(Row {
+            line: i + 1,
+            key: key.to_string(),
+            values,
+        });
+    }
+    Ok(out)
+}
+
+/// Compares every line Stata recorded with RCraft's: the n-th time a key was
+/// printed with the n-th time RCraft printed it, token by token, numbers to
+/// the tolerance and everything else exactly. What differs goes to `wrong`.
+fn compare(name: &str, stata: &[Row], got: &[Row], tol: f64, wrong: &mut Vec<String>) {
+    let mut seen: BTreeMap<&str, usize> = BTreeMap::new();
+    for want in stata {
+        let n = seen.entry(want.key.as_str()).or_insert(0);
+        let nth = *n;
+        *n += 1;
+        let Some(have) = got.iter().filter(|g| g.key == want.key).nth(nth) else {
+            wrong.push(format!(
+                "{name}: {} (recorded line {}) was not printed{}",
+                want.key,
+                want.line,
+                if nth > 0 {
+                    format!(" a {}th time", nth + 1)
+                } else {
+                    String::new()
+                }
+            ));
+            continue;
+        };
+        if have.values.len() != want.values.len() {
+            wrong.push(format!(
+                "{name}: {} (recorded line {}) has {} values, Stata's {}",
+                want.key,
+                want.line,
+                have.values.len(),
+                want.values.len()
+            ));
+            continue;
+        }
+        for (i, (have, want_v)) in have.values.iter().zip(&want.values).enumerate() {
+            let same = match (have, want_v) {
+                (Tok::Num(h), Tok::Num(w)) => (h - w).abs() <= tol * w.abs().max(h.abs()),
+                (h, w) => h == w,
+            };
+            if !same {
+                wrong.push(format!(
+                    "{name}: {} (recorded line {}) value {} is {have}, Stata's {want_v} (tolerance {tol})",
+                    want.key,
+                    want.line,
+                    i + 1
+                ));
+            }
+        }
+    }
+    // a key RCraft printed more often than Stata did is a difference too
+    for key in seen.keys() {
+        let count = |l: &[Row]| l.iter().filter(|x| x.key == *key).count();
+        if count(got) > count(stata) {
+            wrong.push(format!(
+                "{name}: {key} was printed {} times, Stata's {}",
+                count(got),
+                count(stata)
+            ));
+        }
+    }
 }
 
 /// A header line of the do-file: `* name: value`.
@@ -192,7 +303,13 @@ fn check_file(e: &mut Engine, dir: &Path, name: &str, wrong: &mut Vec<String>) {
     let dofile = std::fs::read_to_string(dir.join(format!("{name}.do"))).unwrap_or_default();
     let recorded =
         std::fs::read_to_string(dir.join(format!("{name}.recorded"))).unwrap_or_default();
-    let stata = results(&recorded);
+    let stata = match results(&recorded) {
+        Ok(s) => s,
+        Err(why) => {
+            wrong.push(format!("{name}.recorded: {why}"));
+            return;
+        }
+    };
     if stata.is_empty() {
         wrong.push(format!(
             "{name}: nothing recorded; run cargo xtask stata-record"
@@ -210,30 +327,9 @@ fn check_file(e: &mut Engine, dir: &Path, name: &str, wrong: &mut Vec<String>) {
             return;
         }
     };
-    let got = results(&text);
-    for (key, want) in &stata {
-        let Some(have) = got.get(key) else {
-            wrong.push(format!("{name}: {key} was not printed"));
-            continue;
-        };
-        if have.len() != want.len() {
-            wrong.push(format!(
-                "{name}: {key} has {} values, Stata's {}",
-                have.len(),
-                want.len()
-            ));
-            continue;
-        }
-        for (i, (have, want)) in have.iter().zip(want).enumerate() {
-            let same = (want.is_nan() && have.is_nan())
-                || (have - want).abs() <= tol * want.abs().max(have.abs());
-            if !same {
-                wrong.push(format!(
-                    "{name}: {key} value {} is {have}, Stata's {want} (tolerance {tol})",
-                    i + 1
-                ));
-            }
-        }
+    match results(&text) {
+        Ok(got) => compare(name, &stata, &got, tol, wrong),
+        Err(why) => wrong.push(format!("{name} (RCraft's output): {why}")),
     }
 }
 
@@ -335,4 +431,76 @@ fn verified_is_what_the_corpus_checks() {
             .collect();
         assert_eq!(verified, checked, "{head}");
     }
+}
+
+// The comparer itself: it must fail on every kind of difference, and drop
+// no recorded line.
+
+fn rows(text: &str) -> Vec<Row> {
+    results(text).unwrap_or_default()
+}
+
+fn differences(stata: &str, got: &str) -> Vec<String> {
+    let mut wrong = Vec::new();
+    compare("t", &rows(stata), &rows(got), 1e-8, &mut wrong);
+    wrong
+}
+
+#[test]
+fn comparer_passes_lines_that_match() {
+    let line = "@ a 1 2.5 -3e-2 . .a word\n@ b 7\n";
+    assert!(differences(line, line).is_empty());
+    // within 8 significant digits
+    assert!(differences("@ a 1.00000000001", "@ a 1.0\n").is_empty());
+    // text around the `@` lines is not compared
+    assert!(differences("note\n@ a 1\n", "@ a 1\nmore\n").is_empty());
+}
+
+#[test]
+fn comparer_fails_a_numeric_mismatch() {
+    let w = differences("@ a 1 2\n", "@ a 1 2.001\n");
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert!(w[0].contains("value 2"), "{w:?}");
+}
+
+#[test]
+fn comparer_fails_an_extended_missing_mismatch() {
+    assert_eq!(differences("@ a 1 .a\n", "@ a 1 .b\n").len(), 1);
+    assert_eq!(differences("@ a .a\n", "@ a .\n").len(), 1);
+    assert_eq!(differences("@ a .a\n", "@ a 0\n").len(), 1);
+    assert_eq!(differences("@ a 3\n", "@ a .z\n").len(), 1);
+}
+
+#[test]
+fn comparer_fails_a_string_mismatch() {
+    assert_eq!(differences("@ a abc\n", "@ a abd\n").len(), 1);
+    assert_eq!(differences("@ a \"x y\"\n", "@ a \"x z\"\n").len(), 1);
+    // `inf` and `nan` are words, not numbers
+    assert_eq!(differences("@ a inf\n", "@ a nan\n").len(), 1);
+    assert!(differences("@ a abc\n", "@ a abc\n").is_empty());
+}
+
+#[test]
+fn comparer_fails_a_line_that_cannot_be_read() {
+    let why = results("fine\n@ a 1\n@ b 1.2.3\n").unwrap_err();
+    assert!(why.contains("line 3") && why.contains("1.2.3"), "{why}");
+    assert!(results("@ a 1e\n").is_err());
+    assert!(results("@\n").is_err());
+}
+
+#[test]
+fn comparer_fails_a_line_not_printed_or_printed_short() {
+    assert_eq!(differences("@ a 1\n@ b 2\n", "@ a 1\n").len(), 1);
+    assert_eq!(differences("@ a 1 2\n", "@ a 1\n").len(), 1);
+}
+
+#[test]
+fn comparer_compares_every_time_a_key_is_printed() {
+    // the earlier line must not be hidden by the later one
+    let stata = "@ a 1\n@ a 2\n";
+    assert!(differences(stata, stata).is_empty());
+    assert_eq!(differences(stata, "@ a 9\n@ a 2\n").len(), 1);
+    // the first is 1 against 2, the second is not printed
+    assert_eq!(differences(stata, "@ a 2\n").len(), 2);
+    assert_eq!(differences(stata, "@ a 1\n@ a 2\n@ a 2\n").len(), 1);
 }

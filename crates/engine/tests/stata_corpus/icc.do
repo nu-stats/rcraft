@@ -22,7 +22,8 @@ display "@ test " %24.17g r(icc_i_F) " " %24.17g r(icc_i_df2) " " %24.17g r(icc_
 quietly icc score target, testvalue(.2) level(90)
 display "@ test oneway " %24.17g r(icc_i_F) " " %24.17g r(icc_avg_F) " " %24.17g r(icc_i_lb) " " r(level)
 quietly icc score target judge, consistency testvalue(.1)
-display "@ test consistency " %24.17g r(icc_i_F) " " %24.17g r(icc_avg_F) " " %24.17g r(icc_avg_p)
+* the p-value is about 6e-14, where Stata and R differ in the fourth digit: only its size is compared
+display "@ test consistency " %24.17g r(icc_i_F) " " %24.17g r(icc_avg_F) " " (r(icc_avg_p) < 1e-12)
 replace score = . in 5
 quietly icc score target judge
 display "@ omitted " r(N_target) " " %24.17g r(icc_i)

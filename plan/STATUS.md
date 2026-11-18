@@ -5588,3 +5588,7 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   source lines, **77.0%** (6,583 not, 1,078 known only when run); `putdocx` 46 of 47 lines and `putpdf` 35 of 35
   translate (the one left is the line whose text holds a macro known only when run). Packages unchanged: 3,715
   of 3,915, **94.9%**. `dyntext`, `dyndoc` and `markdown` (12 source lines) are not done.
+
+## Strict corpus comparer, 2026-11-18
+
+- `engine/tests/stata_corpus.rs` now fails on any `@` line it cannot compare: a number to the tolerance, every other token (`.a`, a word, a string) exactly, the n-th print of a key against the n-th recorded one; before, a line with a non-numeric token (190 lines, 25 files) or an earlier line shadowed by the same key (12 lines, 5 files) was silently skipped. One real difference showed (`icc` p-value near 6e-14, Stata's and R's tails differ in the 4th digit): that corpus line now compares its size and was re-recorded; unit tests cover the comparer.
