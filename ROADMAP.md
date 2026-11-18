@@ -487,10 +487,9 @@ Command families:
   remaining methods and forms, among them `test(lrchi2)`, `test(fisher)`,
   `test(binomial)`, graphs, and lists of values for some methods. `plan/stata/power.md`.)
 - P2C.12v Spatial: `spset`, `spmatrix`, `spregress`
-  (part done: StatCraft decoded them and merged them on 2026-11-17 (its c5c9c07); the
-  port to RCraft is being built (`plan/stata/spmatrix.md`) and is not on `main` yet.
-  StatCraft's `spregress ml` does not yet match Stata line for line for a single lag or
-  a single error.)
+  (part done: `spset` and `spmatrix` are Verified (corpus `spmatrix.do`, 2026-11-18);
+  `spregress` is refused: Stata stops its likelihood iterations before the maximum, by a
+  derivative search only partly decoded (`plan/stata/spmatrix.md`).)
 - P2C.12w Graphs from a do-file
   (part done: 98.6% of the graph lines of the probes translated (2026-11-01); `coefplot`
   and `marginsplot` Verified; `lfitci`, `qfitci`, `area`, `qnorm`, `pnorm`, `rvfplot`,

@@ -907,6 +907,57 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "spset",
+        about: "Declare spatial data: the id variable and planar coordinates",
+        points: &[
+            p(
+                "As Stata 19",
+                "spset id, coord(x y) makes _ID (a copy of id, labelled Spatial-unit ID), _CX and \
+                 _CY and prints Stata's block; spset alone shows it again and spset, modify coord() \
+                 changes the coordinates. Stata's errors keep their return codes: data not spset, \
+                 already spset, option modify required, an id that does not identify the rows, \
+                 too few coordinate variables, no dataset in use.",
+            ),
+            p(
+                "Differences",
+                "Shapefiles, latitude and longitude (coordsys(latlong)), spset, clear and an id \
+                 with missing values are stopped, saying so.",
+            ),
+        ],
+    },
+    Guide {
+        command: "spmatrix",
+        about: "Spatial weighting matrices",
+        points: &[
+            p(
+                "As Stata 19",
+                "create idistance with normalize(spectral, row, minmax or none), vtruncate(), if \
+                 and in; dir; summarize and its r(); drop, copy and note; export and import in \
+                 Stata's text form; fromdata. The weights agree with Stata's to the last digit or \
+                 two, and the matrices are kept across clear, as in Stata. Stata's errors keep \
+                 their return codes.",
+            ),
+            p(
+                "Differences",
+                "save and use write and read RCraft's own file: a .stswm file Stata saved is not \
+                 read. Contiguity matrices (which need a shapefile), matafromsp and spfrommata \
+                 (Mata), normalize and userdefined are not translated, and create stops on missing \
+                 coordinates or two places at the same point.",
+            ),
+        ],
+    },
+    Guide {
+        command: "spregress",
+        about: "Spatial autoregressive models",
+        points: &[p(
+            "Not translated yet",
+            "Stata 19 stops its likelihood iterations where its numerical derivatives lead, \
+             before the maximum (by up to 1e-3 in rho on made-up data), and on some data it \
+             reaches another optimum. Until that is decoded, spregress lines are marked as not \
+             translated rather than given results that differ from Stata's.",
+        )],
+    },
+    Guide {
         command: "stepwise",
         about: "Stepwise selection of terms for regress, logit, probit and poisson",
         points: &[

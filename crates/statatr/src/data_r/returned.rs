@@ -1958,8 +1958,9 @@ impl Session {
         let name = c.name.as_str();
         match r_left {
             // isvar clears r() and leaves only these: any other name is
-            // missing, as after an r-class program
-            Some((names, cmd)) if ok && cmd == "isvar" => {
+            // missing, as after an r-class program (spmatrix summarize: these
+            // are its texts, its other r() numbers)
+            Some((names, cmd)) if ok && (cmd == "isvar" || cmd == "spmatrix") => {
                 self.helpers.insert("stata_returned");
                 self.r_ret = Returned::Program {
                     cmd,

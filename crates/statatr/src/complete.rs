@@ -240,6 +240,8 @@ pub const COMMANDS: &[&str] = &[
     "sort",
     "spearman",
     "split",
+    "spmatrix",
+    "spset",
     "sqrtlasso",
     "ssc",
     "stcox",
@@ -1162,6 +1164,22 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
 
 /// The subcommands the translator takes after a command's name.
 const SUBCOMMANDS: &[(&str, &[&str])] = &[
+    (
+        "spmatrix",
+        &[
+            "copy",
+            "create",
+            "dir",
+            "drop",
+            "export",
+            "fromdata",
+            "import",
+            "note",
+            "save",
+            "summarize",
+            "use",
+        ],
+    ),
     ("duplicates", &["drop", "report", "tag"]),
     ("survwgt", &["rake"]),
     (

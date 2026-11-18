@@ -98,6 +98,7 @@ mod rreg;
 mod scalars;
 mod sdtest;
 mod sktest;
+mod spatial;
 mod st;
 mod stats;
 mod stepwise;
@@ -739,6 +740,7 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 const HARMLESS: &[&str] = &["putexcel", "outreg", "frmttable", "which", "_rcraft_fail"];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "spmatrix",
     "type",
     "_rcraft_fail",
     "filefilter",
@@ -1447,6 +1449,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_ivprobit" => ivprobit::IVPROBIT_HELPER,
         "stata_stepwise" => stepwise::STEPWISE_HELPER,
         "stata_nestreg" => nestreg::NESTREG_HELPER,
+        "stata_spatial" => spatial::SPATIAL_HELPER,
         "stata_tsreg" => tsreg::TSREG_HELPER,
         "stata_xt_predict" => xt::XT_PREDICT_HELPER,
         "stata_xt_ic" => xt::XT_IC_HELPER,
@@ -2952,6 +2955,9 @@ impl Session {
             "xtabond" | "xtdpdsys" | "xtdpd" => self.xtdpd(c, &opts, out),
             "npregress" => self.npregress(c, &opts, out),
             "ivprobit" => self.ivprobit(c, &opts, out),
+            "spset" => self.spset(c, &opts, out),
+            "spmatrix" => self.spmatrix(c, &opts, out),
+            "spregress" => Err(no(spatial::SPREGRESS_REFUSED)),
             "prais" | "newey" => self.tsreg(c, &opts, out),
             "ivregress" => self.ivregress(c, &opts, out),
             w if crate::lang::syntax::abbrev(w, "histogram", 4) => self.histogram(c, &opts, out),

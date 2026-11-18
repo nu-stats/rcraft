@@ -232,6 +232,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("sktest", &["sktest"]),
     ("sort", &["data", "extended_missing_commands"]),
     ("split", &["strings"]),
+    ("spmatrix", &["spmatrix"]),
+    ("spset", &["spmatrix"]),
     ("sqrtlasso", &["sqrtlasso"]),
     ("stcox", &["likelihood"]),
     ("stepwise", &["stepwise", "stepwise_glm"]),

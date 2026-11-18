@@ -5396,3 +5396,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   that was hidden in one done task is now counted as the tasks it is; no work was undone. A new baseline.
 - **Not done here:** the milestones' current shares were not re-measured (the probes need the private
   corpus). Last recorded: probes 75.4% (2026-11-18, 539 do-files), packages 94.9% of run lines (2026-11-13).
+
+## P2C.12v: spset and spmatrix (spregress on hold), 2026-11-18
+
+- **Translated** (`statatr::data_r::spatial`, ported from StatCraft's PR #23 as R): `spset id, coord(x y)`
+  (planar), `spset`, `spset, modify coord()`; `spmatrix create idistance` with normalize(), vtruncate(), if
+  and in; dir, summarize (r()), drop, copy, note, export, import, fromdata, and save/use in RCraft's own file.
+  Matrices live in R and outlive `clear`, as in Stata.
+- **Checked:** Stata 19 on made-up data: every printed line of two probes agrees (describe aside), the
+  weights to the last bit except spectral normalization (a few ulps, R's LAPACK); corpus `spmatrix.do` (43
+  results, 1e-13). Notes in `plan/stata/spmatrix.md`.
+- **Refused, not guessed:** contiguity (shapefiles), coordsys(latlong), spset, clear, Mata, and `spregress`:
+  Stata stops its likelihood iterations before the maximum (4th to 7th digit) and on some data reaches
+  another optimum; its derivative search is partly decoded (plan note), the estimator is kept as a patch.
