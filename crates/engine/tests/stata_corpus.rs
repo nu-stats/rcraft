@@ -186,11 +186,63 @@ struct Row {
     values: Vec<Tok>,
 }
 
-/// One token of an `@` line. Text unless it is a number: only digits, signs,
+/// A `%21x` hex float as Stata prints it (`-1.8c3c9eecbfb16X-002`: a sign,
+/// `1.` or `0.` and hex digits, `X`, a sign and the exponent in hex). `None`
+/// if the token does not start that way (`[01].`, then hex digits and an
+/// `X`); an error if it does but is not a whole hex float. The values with
+/// exponent 3ff are Stata's missing codes (`.`, `.a`, ...): those stay text,
+/// compared exactly.
+fn hex_float(t: &str) -> Option<Result<Tok, String>> {
+    let body = t.strip_prefix(['+', '-']).unwrap_or(t);
+    let (int, rest) = (body.get(..2)?, body.get(2..)?);
+    if int != "1." && int != "0." {
+        return None;
+    }
+    let x = rest.find('X')?;
+    let (frac, exp) = (rest.get(..x)?, rest.get(x + 1..)?);
+    if !frac.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    let bad = || Some(Err(format!("`{t}` is not a hex float")));
+    let Some(exp_digits) = exp.strip_prefix(['+', '-']) else {
+        return bad();
+    };
+    if frac.is_empty()
+        || frac.len() > 13
+        || exp_digits.is_empty()
+        || exp_digits.len() > 3
+        || !exp_digits.chars().all(|c| c.is_ascii_hexdigit())
+    {
+        return bad();
+    }
+    let (Ok(m), Ok(e)) = (
+        u64::from_str_radix(frac, 16),
+        i32::from_str_radix(exp_digits, 16),
+    ) else {
+        return bad();
+    };
+    if e == 0x3ff && exp.starts_with('+') {
+        return Some(Ok(Tok::Text(t.to_string())));
+    }
+    let e = if exp.starts_with('-') { -e } else { e };
+    let lead = if int == "1." { 1.0 } else { 0.0 };
+    let value = (lead + m as f64 / 16f64.powi(frac.len() as i32)) * 2f64.powi(e);
+    Some(Ok(Tok::Num(if t.starts_with('-') {
+        -value
+    } else {
+        value
+    })))
+}
+
+/// One token of an `@` line. Text unless it is a number (or a hex float, see
+/// `hex_float`): only digits, signs,
 /// a point and an exponent, so `inf`, `nan` and `.a` stay text. A token that
 /// is made of those characters but is not a number (`1.2.3`, `1e`) cannot be
 /// read, and is an error rather than a skipped line.
 fn token(t: &str) -> Result<Tok, String> {
+    if let Some(hex) = hex_float(t) {
+        return hex;
+    }
     let numeric_chars = t.chars().all(|c| c.is_ascii_digit() || "+-.eE".contains(c));
     let unsigned = t.trim_start_matches(['+', '-']);
     let digit_led = unsigned.starts_with(|c: char| c.is_ascii_digit())
@@ -503,4 +555,52 @@ fn comparer_compares_every_time_a_key_is_printed() {
     // the first is 1 against 2, the second is not printed
     assert_eq!(differences(stata, "@ a 2\n").len(), 2);
     assert_eq!(differences(stata, "@ a 1\n@ a 2\n@ a 2\n").len(), 1);
+}
+
+#[test]
+fn comparer_reads_hex_floats_as_numbers() {
+    // the same value with different last hex digits: well within 8 digits
+    let a = "@ a -1.8c3c9eecbfb16X-002 +1.0000000000000X+000\n";
+    let b = "@ a -1.8c3c9eecbfb18X-002 +1.0000000000001X+000\n";
+    assert!(differences(a, b).is_empty());
+    // the exponent is hex, the mantissa's sign counts, zero is zero
+    assert_eq!(
+        rows("@ a +1.2a05f20000000X+021 -1.8000000000000X+000 +0.0000000000000X-3ff\n")
+            .first()
+            .map(|r| r.values.clone()),
+        Some(vec![Tok::Num(1.0e10), Tok::Num(-1.5), Tok::Num(0.0)])
+    );
+    // off by 2^-25 (3e-8), in the 8th significant digit: fails
+    let c = "@ a +1.0000000000000X+000\n";
+    let d = "@ a +1.0000008000000X+000\n";
+    assert_eq!(differences(c, d).len(), 1);
+    // a different value fails, and so does a hex float against a word
+    assert_eq!(differences(c, "@ a +1.8000000000000X+000\n").len(), 1);
+    assert_eq!(differences(c, "@ a word\n").len(), 1);
+}
+
+#[test]
+fn comparer_keeps_hex_missing_codes_exact() {
+    let dot = "@ a +1.0000000000000X+3ff\n";
+    assert!(differences(dot, dot).is_empty());
+    // `.` and `.a` are numbers 8 digits apart; they must not pass for one another
+    assert_eq!(differences(dot, "@ a +1.0000000000001X+3ff\n").len(), 1);
+    assert_eq!(differences(dot, "@ a .\n").len(), 1);
+}
+
+#[test]
+fn comparer_fails_a_malformed_hex_float() {
+    for bad in [
+        "+1.8c3cX",
+        "+1.8c3cX+",
+        "+1.8c3cX+00g",
+        "+1.8c3cX+0000",
+        "+1.X+002",
+        "+1.00000000000000X+002",
+    ] {
+        let why = results(&format!("@ a {bad}\n")).unwrap_err();
+        assert!(why.contains(bad), "{bad}: {why}");
+    }
+    // plain words and decimals that look a little like one stay as they were
+    assert!(results("@ a 1.5 0.25 1.x word\n").is_ok());
 }
