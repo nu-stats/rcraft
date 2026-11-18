@@ -50,6 +50,14 @@ Code from StatCraft (our own project) may be reused. Output that reaches the
 user is R's; it is never presented as Stata's. A command that cannot be
 translated is marked, never guessed.
 
+**Notes from StatCraft.** StatCraft's repository is private and this one is
+public. A behaviour note decoded there may be carried into `plan/stata/` in our
+own words, with its source cited as "ported from statcraft@<sha>". Never copy
+its text, its logs or any Stata output, and never copy its probe results into a
+note as a transcript: the note states the rule and a few short cases. The
+optional sections and header lines for ported and package notes are in
+`plan/stata/README.md`.
+
 **Names.** The product is RCraft. "R" is the name of the language; do not
 imply that RCraft is made or endorsed by the R Foundation or Posit. The
 disclaimer in `NOTICE` applies.
