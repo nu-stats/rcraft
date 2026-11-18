@@ -236,7 +236,11 @@ fn holds(e: &mut Engine, exprs: &[String]) {
             let (_, got) = run(e, Source::Typed, &format!("print({shown})"));
             each.push_str(&format!("\n{x}\n  -> {}", got.trim()));
         }
-        panic!("{all}\n{text}\nchecks one by one:{each}");
+        assert_eq!(
+            outcome,
+            Outcome::Ok,
+            "{all}\n{text}\nchecks one by one:{each}"
+        );
     }
 }
 
