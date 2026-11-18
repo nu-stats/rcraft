@@ -5499,3 +5499,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Checked:** Stata 19 on made-up data: corpus `clonevar.do` (values and 10 return codes, exact). Notes in
   `plan/stata/clonevar.md`.
 - **Refused, not guessed:** options, `by:`, a name pattern or range after `=`.
+
+## P2C.12: mvdecode and mvencode (batch A1 of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::rowcol`): `mvdecode varlist, mv(numlist | numlist = mvc \ ...)` and
+  `mvencode varlist, mv(# | mvc = # \ ...) [override]` with Stata's notes (`b: 2 missing values
+  generated` / `recoded`, `string variable ignored`, `(recast to int)`, `already 5 in 1 observation` and
+  `no action taken` r(9)), `.a` to `.z`, floats matched as stored, and the errors with their return codes.
+- **Checked:** Stata 19 on made-up data: corpus `mvcode.do` (values, missing kinds, 17 return codes,
+  exact); notes read against Stata's log. Notes in `plan/stata/mvdecode.md`.
+- **Found:** the corpus comparer drops any `@` line with a token that is not a number or `.` (`.a`, text),
+  so corpus lines must print numbers and `(x == .a)` tests; clonevar's corpus was redone that way.
+- **Refused, not guessed:** `by:`, numlists with a step, several mvencode clauses for one missing value,
+  and an mvencode value that may not fit the type when the storage type is not known.

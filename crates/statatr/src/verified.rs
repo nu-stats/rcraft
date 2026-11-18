@@ -156,6 +156,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("mkdir", &["mkdir"]),
     ("mkmat", &["matrices"]),
     ("mlogit", &["collinear", "likelihood"]),
+    ("mvdecode", &["mvcode"]),
+    ("mvencode", &["mvcode"]),
     ("mvtest", &["mvtest"]),
     ("nbreg", &["collinear"]),
     ("nestreg", &["nestreg", "nestreg_glm"]),

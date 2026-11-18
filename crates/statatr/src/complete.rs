@@ -175,6 +175,8 @@ pub const COMMANDS: &[&str] = &[
     "mkdir",
     "mkmat",
     "mlogit",
+    "mvdecode",
+    "mvencode",
     "mvtest",
     "nbreg",
     "nestreg",
@@ -731,6 +733,8 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         &["format(", "noblank", "nohalf", "noheader", "title("],
     ),
     ("mkdir", &["public"]),
+    ("mvdecode", &["mv("]),
+    ("mvencode", &["mv(", "override"]),
     ("mkmat", &["matrix(", "nomissing"]),
     (
         "merge",
@@ -1934,6 +1938,7 @@ mod tests {
             "stats" => "all",
             "case" => "g",
             "alternatives" => "t",
+            "mv" => "5",
             _ => "x",
         };
         let o = if opt.ends_with('(') {
