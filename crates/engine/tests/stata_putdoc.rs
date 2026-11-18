@@ -8,8 +8,9 @@
 //! - Word and PDF: what the files hold, as `stata_putdoc/dump.R` reads it
 //!   (paragraph styles and alignment, runs with their bold, italic, underline and
 //!   line break, tables with the text, spans and alignment of each cell, the text
-//!   of each PDF page), against `stata_putdoc/*.txt` (text and structure only,
-//!   made from made-up data).
+//!   of each PDF page), against `stata_putdoc/*.txt`: the structure, the numbers
+//!   as written, and any other text only as its length and a checksum, so that
+//!   no text Stata wrote is kept (`AGENTS.md`, section 1). Made from made-up data.
 //! - Text and HTML: the files exactly, by their MD5 digests (Stata's files are
 //!   not kept). The text is compared without carriage returns: Stata 19 on
 //!   Windows ends the lines a `dd_do` command printed with one, which RCraft

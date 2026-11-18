@@ -1,6 +1,15 @@
-# Reads a .docx or .pdf back for crates/engine/tests/stata_putdoc.rs: the text and structure only (paragraph styles, alignment, runs with
-# bold/italic/underline/line break flags, tables with their cell text, spans and alignment; the text of each PDF page), the same way for
-# the files Stata 19 wrote and the ones RCraft writes.
+# Reads a .docx or .pdf back for crates/engine/tests/stata_putdoc.rs, the same way for the files Stata 19 wrote and the
+# ones RCraft writes: structure only (paragraph styles, alignment, runs with bold/italic/underline/line break flags,
+# tables with their cells' spans and alignment, the pieces of text on each PDF page). A number is kept as it is
+# written; any other text only as its length and a checksum (#11:1a2b3c4d), so no text Stata wrote is kept
+# (AGENTS.md, section 1).
+stata_dump_mask <- function(s) {
+  if (!nzchar(s) || grepl("^ *[-+]?([0-9]+[.]?[0-9]*|[.][0-9]+)(e[-+][0-9]+)? *$", s) || grepl("^ *[.] *$", s)) return(s)
+  b <- as.integer(charToRaw(enc2utf8(s)))
+  a <- 1; d <- 0
+  for (x in b) { a <- (a + x) %% 65521; d <- (d + a) %% 65521 }
+  sprintf("#%d:%04x%04x", length(b), d, a)
+}
 stata_dump_docx <- function(path) {
   td <- tempfile(); dir.create(td); on.exit(unlink(td, recursive = TRUE))
   utils::unzip(path, exdir = td)
@@ -17,7 +26,7 @@ stata_dump_docx <- function(path) {
     for (r in rs) {
       t <- if (grepl("<w:t[ >]", r)) unesc(sub("</w:t>.*$", "", sub("^.*?<w:t[^>]*>", "", r, perl = TRUE))) else ""
       fl <- paste0(c(if (grepl("<w:b[ /]", r)) "b", if (grepl("<w:i[ /]", r)) "i", if (grepl("<w:u[ /]", r)) "u", if (grepl("<w:br[ />]", r)) "L"), collapse = "")
-      if (nzchar(t) || nzchar(fl)) out <- c(out, paste0(if (nzchar(fl)) paste0("{", fl, "}"), t))
+      if (nzchar(t) || nzchar(fl)) out <- c(out, paste0(if (nzchar(fl)) paste0("{", fl, "}"), stata_dump_mask(t)))
     }
     paste(out, collapse = "|")
   }
@@ -71,7 +80,7 @@ stata_dump_pdf <- function(path) {
     items <- regmatches(s, gregexpr("\\[.*?\\]\\s*TJ|\\((?:\\\\.|[^\\\\)])*\\)\\s*Tj", s, perl = TRUE))[[1]]
     for (it in items) {
       parts <- regmatches(it, gregexpr("\\((?:\\\\.|[^\\\\)])*\\)", it, perl = TRUE))[[1]]
-      out <- c(out, paste0("  ", unesc(paste0(substr(parts, 2, nchar(parts) - 1), collapse = ""))))
+      out <- c(out, paste0("  ", stata_dump_mask(unesc(paste0(substr(parts, 2, nchar(parts) - 1), collapse = "")))))
     }
   }
   paste(out, collapse = "\n")

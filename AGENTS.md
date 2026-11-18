@@ -43,9 +43,15 @@ clean-room rules. Allowed: Stata's public manuals, online help and Stata
 Journal articles; command, option and function names and documented syntax;
 black-box observation of a licensed Stata run on made-up data. Forbidden:
 reading Stata's program files, `.ado`, `.mata`, `.sthlp` or `.dlg` files;
-committing anything Stata produced (logs, `.dta`, `.smcl`, `.gph`,
-screenshots); copying StataCorp's example datasets, dialog layouts or
-wording. Observations go into plain-language notes under `plan/stata/`.
+committing what Stata wrote or printed (logs, `.smcl`, `.dta`, `.gph`,
+screenshots or other files, its output, messages and error text); copying
+StataCorp's example datasets, dialog layouts or wording. The one exception is
+recorded values: a corpus `.recorded` file holds only numbers, and exact words
+such as `.a`-style missing codes, that Stata 19 printed for made-up data and
+do-files written by us, one `@ key value` line each. A test that compares
+files Stata wrote keeps only their structure as numbers and plain identifiers,
+checksums of their text, or digests, never the files or their text.
+Observations go into plain-language notes under `plan/stata/`.
 Code from StatCraft (our own project) may be reused. Output that reaches the
 user is R's; it is never presented as Stata's. A command that cannot be
 translated is marked, never guessed.
