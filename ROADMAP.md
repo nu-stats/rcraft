@@ -505,9 +505,9 @@ Command families:
 - P2C.12y Data management and files
   (part done: `merge`, `append`, `reshape`, `collapse`, `contract`, `expand`, `egen`,
   `duplicates`, `label`, `insheet`, `file`, `filefilter`, `fdasave`, `fdause`, `outfile`,
-  `outsheet`, `mkdir` and `rmdir` Verified. Still refused:
-  forms of `egen`; `format`, `sysuse`, `import`, `export`, `fillin`, `expandcl`, `joinby`, `mvdecode`, `mvencode`,
-  `clonevar`, `labelbook`, `mark`, `markout`, `char`, `notes`.)
+  `outsheet`, `mkdir`, `rmdir`, `fillin`, `expandcl`, `joinby`, `mvdecode`, `mvencode` and `clonevar` Verified. Still refused:
+  forms of `egen`; `format`, `sysuse`, `import`, `export`,
+  `labelbook`, `mark`, `markout`, `char`, `notes`.)
 - P2C.12z Programs, macros and matrices
   (part done: `program`, `syntax`, `tokenize`, `gettoken`, `local`, `global`, `matrix`
   (many forms), `mkmat`, `svmat`, `ereturn` and `frame` Verified. Still refused: other

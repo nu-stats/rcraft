@@ -5541,3 +5541,10 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `plan/stata/joinby.md`.
 - **Refused, not guessed:** `update`, `replace` (another `_merge` coding), `by:`. The order of rows paired
   within a key is the using file's; Stata's is unstable.
+
+## P2C.12: batch A1 measured, 2026-11-18
+
+- Probes (539 do-files): 21,944 of 29,676 source lines translated, 6,654 not, 1,078 known only when run:
+  **76.7% of the lines a dry run judges** (76.6% before batch A1; +48 lines, as sized).
+- Packages (46 do-files, 5,187 source lines): 3,715 translated, 200 not, 1,272 known only when run: **94.9%**,
+  unchanged (the 200 refused lines are not in these six commands).
