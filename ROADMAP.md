@@ -500,8 +500,8 @@ Command families:
   forms, `cvplot`, `stcurve`.)
 - P2C.12x Tables and reports
   (part done: `esttab`, `estadd`, `eststo`, `estpost`, `outreg`, `outreg2`, `frmttable`,
-  `parmest`, `putexcel`, `putdocx` and `putpdf` Verified. Not started: `collect`,
-  `etable`, `dtable`, `table`, `asdoc`, `mtable`, `dyndoc`, `dyntext`, `markdown`.)
+  `parmest`, `putexcel`, `putdocx`, `putpdf`, `dyntext`, `dyndoc` and `markdown` Verified. Not
+  started: `collect`, `etable`, `dtable`, `table`, `asdoc`, `mtable`.)
 - P2C.12y Data management and files
   (part done: `merge`, `append`, `reshape`, `collapse`, `contract`, `expand`, `egen`,
   `duplicates`, `label`, `insheet`, `file`, `filefilter`, `fdasave`, `fdause`, `outfile`,

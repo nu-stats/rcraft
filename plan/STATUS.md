@@ -5600,3 +5600,27 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   their return codes. Frequency-weight errors now carry r(401) and r(402) in `stata_wrows`.
 - **Checked:** Stata 19 on made-up data: corpus `pctile.do` (55 results, exact). Notes in `plan/stata/pctile.md`.
 - **Refused, not guessed:** `by:`, string types.
+
+## P2C.12: dyntext, dyndoc and markdown (batch D of the StatCraft port), 2026-11-18
+
+- **Built:** `markdown` in `data_r/dyndoc.rs` (RCraft's own Markdown-to-HTML converter, in R, to Stata's rules);
+  `dyntext` and `dyndoc` in the do-file runner (`dofile/dyndoc.rs`): the source is read from R when the line is
+  reached and its tags become a run of their own, as `do` runs a file. `dd_do` commands are translated and run as
+  any other line, with what each prints kept for the document (echo, output, blank line; `quietly`, `nocommands`,
+  `nooutput`, `noprompt`); `dd_if`/`dd_skip_if` become `if` blocks; `dd_display` is worked out as `display` prints
+  it; `dd_ignore`, `dd_include`, `dd_remove` and `dd_graph` (SVG) as Stata does them. The document is written only
+  when every line of its tags was translated.
+- **Checked:** Stata 19 on made-up data: corpus `dyndoc.do` (12 results, the return codes) and its three files,
+  equal to Stata's by their MD5 digests (`stata_putdoc.rs`; Stata's files are not kept). Probe 547's three files
+  are byte for byte Stata's. Notes in `plan/stata/dyndoc.md`.
+- **Found:** Stata does not nest `dd_if` (a stray `dd_endif` is printed); on Windows the lines a `dd_do` command
+  prints, and the included lines, end in a carriage return in the file; in a tight list a paragraph after a blank
+  line keeps its `<p>`; after `regress` (quietly or not) r() holds only r(table).
+- **Refused, not guessed:** nested `dd_if`, `dd_do` blocks with blank lines, comments, braces or continued lines,
+  other inline tags, options other than `saving()` and `replace`, and `dyntext`/`dyndoc` under `capture` unless
+  Stata stops before the tags run. Probe 546's document is not written: it reads `r(N)` after `regress`, which
+  RCraft does not follow yet.
+- **Measured** (dry run, StatCraft `origin/main` f28890c, 542 probe do-files): probes 22,082 of 28,652 judged
+  source lines, **77.1%** (6,570 not, 1,087 known only when run). `markdown`'s 3 lines translate; the 9 of
+  `dyntext` and `dyndoc` are known only when the do-file runs (the source is written a few lines before and read
+  then), so a dry run neither counts them for nor against. Packages unchanged: 3,715 of 3,915, **94.9%**.

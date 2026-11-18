@@ -756,6 +756,84 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "dyntext",
+        about: "Runs a text with dynamic tags into a text file",
+        points: &[
+            p(
+                "As Stata 19",
+                "dyntext src, saving(file) [replace] prints the processed text and writes it. \
+                 <<dd_do>> blocks run their commands and show each as a do-file's log does \
+                 (. and the command, its output, a blank line), less what quietly, nocommands, \
+                 nooutput and noprompt leave out; <<dd_display: [%fmt] exp>> is what display \
+                 shows; dd_if, dd_else and dd_endif (and dd_skip_if, dd_skip_else, dd_skip_end) \
+                 show or skip their lines, a tag on its own line goes with its line and the \
+                 blank lines around stay; dd_ignore keeps its lines as they are, tags and all, \
+                 and dd_include puts a file's lines in as they are; dd_remove's text is printed \
+                 but taken out of the file. A source that is not there is r(601), a target that \
+                 is there without replace r(602) with its full path, before any tag runs. On \
+                 Windows the lines a dd_do command prints end in a carriage return in the file.",
+            ),
+            p(
+                "In R",
+                "The source is read when the line is reached, and its tags become lines of the \
+                 run: the dd_do commands are translated as any other line, with what each \
+                 prints kept for the document; the file is written only when every line of it \
+                 was translated. The text and the file are the same as Stata's for the corpus \
+                 file and the probes checked. Refused: a dd_if inside another (Stata does not \
+                 nest them), dd_version other than 2, dd_do blocks with blank lines, comments, \
+                 braces or lines that go on (///), dd_graph to anything but an .svg file, other \
+                 tags, and dyntext under capture or quietly unless Stata stops before the tags \
+                 run.",
+            ),
+        ],
+    },
+    Guide {
+        command: "dyndoc",
+        about: "Runs a text with dynamic tags into HTML through Markdown",
+        points: &[
+            p(
+                "As Stata 19",
+                "dyndoc src [, saving(file) replace] runs the tags as dyntext does (the file is \
+                 src with .html without saving()), prints the text, turns it into HTML through \
+                 Markdown (as markdown does) and says successfully converted with the file's \
+                 full path. <<dd_graph>> exports the graph as SVG (Graph.svg, or Graph1.svg \
+                 when that is there) and puts an <img> tag for it, with saving(), replace, \
+                 alt(), height() and width().",
+            ),
+            p(
+                "In R",
+                "As dyntext. The graph is R's (ggplot2), written by R's svg device; the HTML is \
+                 Stata's for the corpus file and the probes checked.",
+            ),
+        ],
+    },
+    Guide {
+        command: "markdown",
+        about: "Turns a Markdown file into HTML",
+        points: &[
+            p(
+                "As Stata 19",
+                "markdown src, saving(file) [replace] writes the HTML body only, one block a \
+                 line: headings with an anchor named after their text (lower case, spaces as \
+                 -, punctuation dropped, the same id twice for the same text), the \
+                 typographer's quotes, dashes (--, ---), ellipses and << >> as entities, tight \
+                 and loose lists (in a tight list a paragraph after a blank line keeps its \
+                 <p>), indented and fenced code, quotes, rules, HTML blocks, pipe tables whose \
+                 cells keep their spaces, code spans, emphasis, links, images, autolinks and \
+                 backslash escapes; a soft line break is a space, two trailing spaces a <br />. \
+                 A source that is not there is r(601), a target that is there without replace \
+                 r(602).",
+            ),
+            p(
+                "In R",
+                "RCraft's own converter, written to Stata's rules: the HTML is byte for byte \
+                 Stata's for the corpus file and the probes checked. Markdown that Stata's \
+                 converter reads in ways not observed (reference links, footnotes, nested \
+                 quotes) may differ.",
+            ),
+        ],
+    },
+    Guide {
         command: "outfile",
         about: "Writes the data as a text file in columns",
         points: &[

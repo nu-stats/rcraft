@@ -53,6 +53,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("dslogit", &["lasso_infer"]),
     ("dsregress", &["lasso_infer"]),
     ("duplicates", &["extended_missing_groups"]),
+    ("dyndoc", &["dyndoc"]),
+    ("dyntext", &["dyndoc"]),
     (
         "egen",
         &[
@@ -151,6 +153,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("lroc", &["lroc"]),
     ("margins", &["cmclogit", "regress"]),
     ("marginsplot", &["marginsplot"]),
+    ("markdown", &["dyndoc"]),
     ("matrix", &["matfuncs", "matrices"]),
     ("mean", &["meanest"]),
     ("medeff", &["medeff"]),

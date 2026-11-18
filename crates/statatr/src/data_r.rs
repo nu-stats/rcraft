@@ -40,6 +40,7 @@ mod coefplot;
 mod contract;
 mod dates;
 mod descr;
+mod dyndoc;
 mod eclass;
 mod epitab;
 mod estat;
@@ -388,6 +389,39 @@ impl Translator {
             code: r.code,
             text: true,
         })
+    }
+
+    /// A line of RCraft's own R (the pieces of a dyntext document), with
+    /// the helpers and packages it calls. It changes nothing the translator
+    /// follows.
+    pub fn own_line(
+        &mut self,
+        span: Span,
+        stata: String,
+        code: String,
+        helpers: &[&'static str],
+        packages: &[&'static str],
+    ) -> Line {
+        self.s.helpers.extend(helpers.iter().copied());
+        Line {
+            span,
+            stata,
+            result: Ok(RCode {
+                code,
+                caveats: Vec::new(),
+                packages: packages.to_vec(),
+            }),
+        }
+    }
+
+    /// A helper R needs before it is asked something that calls it.
+    pub fn need_helper(&mut self, name: &'static str) {
+        self.s.helpers.insert(name);
+    }
+
+    /// Whether a graph was drawn earlier in the do-file (`dd_graph` exports it).
+    pub fn graph_drawn(&self) -> bool {
+        self.s.graph_drawn
     }
 
     /// `line` translated on a copy of this translator.
@@ -754,6 +788,7 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 /// Commands that, translated or not, change neither the data nor its rows nor
 /// e(): they write a table or a file, or look something up.
 const HARMLESS: &[&str] = &[
+    "markdown",
     "putdocx",
     "putpdf",
     "putexcel",
@@ -768,6 +803,7 @@ const HARMLESS: &[&str] = &[
 ];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "markdown",
     "putdocx",
     "putpdf",
     "spmatrix",
@@ -1410,6 +1446,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_outfile" => outfiles::OUTFILE_HELPER,
         "stata_snapshot" => snapshot::SNAPSHOT_HELPER,
         "stata_putdoc" => putdoc::PUTDOC_HELPER,
+        "stata_dyndoc" => dyndoc::DYNDOC_HELPER,
         "stata_xpt" => xport::XPORT_HELPER,
         "stata_fdasave" => xport::FDASAVE_HELPER,
         "stata_fdause" => xport::FDAUSE_HELPER,
@@ -2979,6 +3016,7 @@ impl Session {
             "fdause" => self.fdause(c, &opts, out),
             "putexcel" => self.putexcel(c, &opts, out),
             "putdocx" | "putpdf" => self.putdoc(c, &opts, out),
+            "markdown" => self.markdown(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
                 out.caveat("nothing to do in R: query only shows Stata's own settings");

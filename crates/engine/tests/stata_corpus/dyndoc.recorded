@@ -1,0 +1,13 @@
+* Stata 19.0's results for dyndoc.do, recorded by cargo xtask stata-record
+@ dt_written 0
+@ dd_written 0
+@ dt_exists 602
+@ dt_missing 601
+@ dd_exists 602
+@ dd_missing 601
+@ dt_nosaving 198
+@ dd_default 0
+@ md_written 0
+@ md_exists 602
+@ md_missing 601
+@ md_nosaving 198

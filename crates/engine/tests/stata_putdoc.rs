@@ -1,12 +1,19 @@
-//! P2C.12y (batch D): the files `putdocx` and `putpdf` write, read back. The
-//! corpus file `stata_corpus/putdocx.do` compares the messages and return
-//! codes with Stata 19's (`putdocx.recorded`); this test runs the same
-//! do-file in a folder of its own (without its `erase` lines) and compares what
-//! the three files hold, as `stata_putdoc/dump.R` reads it (paragraph styles and
-//! alignment, runs with their bold, italic, underline and line break, tables with
-//! the text, spans and alignment of each cell, the text of each PDF page), with
-//! what the files Stata 19 wrote for the same do-file hold (`stata_putdoc/*.txt`,
-//! text and structure only, made from made-up data).
+//! P2C.12x (batch D): the files `putdocx`, `putpdf`, `dyntext`, `dyndoc` and
+//! `markdown` write, read back. The corpus files `stata_corpus/putdocx.do` and
+//! `stata_corpus/dyndoc.do` compare the messages and return codes with Stata
+//! 19's; this test runs the same do-files in a folder of their own (without
+//! their `erase` lines) and compares the files they write with the ones Stata 19
+//! wrote for them:
+//!
+//! - Word and PDF: what the files hold, as `stata_putdoc/dump.R` reads it
+//!   (paragraph styles and alignment, runs with their bold, italic, underline and
+//!   line break, tables with the text, spans and alignment of each cell, the text
+//!   of each PDF page), against `stata_putdoc/*.txt` (text and structure only,
+//!   made from made-up data).
+//! - Text and HTML: the files exactly, by their MD5 digests (Stata's files are
+//!   not kept). The text is compared without carriage returns: Stata 19 on
+//!   Windows ends the lines a `dd_do` command printed with one, which RCraft
+//!   writes on Windows only (Stata on Linux and macOS was not observed).
 //!
 //! Skipped with a note without a supported R or the zip package.
 
@@ -202,6 +209,54 @@ fn the_files_hold_what_statas_hold() {
                     want.len(),
                     got.get(want.len().saturating_sub(2)..)
                 ));
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&work);
+    assert!(wrong.is_empty(), "{}", wrong.join("\n"));
+}
+
+/// MD5 digests of the files Stata 19 wrote for `stata_corpus/dyndoc.do`
+/// (2026-11-18), the text file without its carriage returns.
+const DYNDOC_DIGESTS: &[(&str, &str)] = &[
+    ("ddx_out.txt", "7631a0bf16a06f976fa0c3176cbf3d16"),
+    ("ddx_out.html", "92d6ae3216c3209ccb5ae7d224255429"),
+    ("ddx_md.html", "ada4c6a0d26df5224a43bf4363899998"),
+];
+
+#[test]
+fn the_text_and_html_files_are_statas() {
+    let Some(mut e) = engine() else { return };
+    let dofile = std::fs::read_to_string(here("stata_corpus/dyndoc.do")).unwrap_or_default();
+    assert!(!dofile.is_empty(), "stata_corpus/dyndoc.do is missing");
+    let text: String = dofile
+        .lines()
+        .filter(|l| !l.starts_with("erase "))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    let work = std::env::temp_dir().join(format!("rcraft-dyndoc-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&work);
+    assert!(std::fs::create_dir_all(&work).is_ok());
+    let folder = work.display().to_string().replace('\\', "/");
+    let mut wrong = Vec::new();
+    match run_dofile(&mut e, &folder, &text) {
+        Err(why) => wrong.push(format!("dyndoc.do: {why}")),
+        Ok(()) => {
+            for (file, want) in DYNDOC_DIGESTS {
+                let (o, got) = run(
+                    &mut e,
+                    &format!(
+                        "local({{ p <- \"{folder}/{file}\"; b <- readBin(p, \"raw\", file.info(p)$size); \
+                         b <- b[b != as.raw(13)]; t <- tempfile(); writeBin(b, t); \
+                         cat(unname(tools::md5sum(t)), \"\\n\", sep = \"\"); unlink(t) }})"
+                    ),
+                );
+                let got = got.trim();
+                if o != Outcome::Ok || got != *want {
+                    wrong.push(format!(
+                        "{file}: RCraft's file has the digest {got}, Stata's {want}"
+                    ));
+                }
             }
         }
     }

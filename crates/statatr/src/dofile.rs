@@ -18,6 +18,7 @@
 //! what `: list` does) were observed in Stata 19 with made-up values; see
 //! `format`, `macros` and `plan/STATUS.md`.
 
+mod dyndoc;
 mod eval;
 pub(crate) mod format;
 pub(crate) mod macros;
@@ -461,6 +462,8 @@ pub struct Run<'f> {
     isvar_r: Vec<(String, String)>,
     /// A local the line just added sets from what it left (`levelsof, local()`).
     then: Option<(String, Need)>,
+    /// The document a dyntext or dyndoc is making, while its tags run.
+    dd: Option<dyndoc::DynDoc>,
 }
 
 /// What doing an item came to.
@@ -513,6 +516,7 @@ impl<'f> Run<'f> {
             seen_vars: Vec::new(),
             isvar_r: Vec::new(),
             then: None,
+            dd: None,
         }
     }
 
@@ -1178,6 +1182,8 @@ impl<'f> Run<'f> {
                 }
                 Flow::Line
             }
+            "dyntext" | "dyndoc" => self.dyn_command(c, depth, written),
+            "_rcraft_dd" => self.dd_line(c, depth, written),
             "do" | "run" | "include" => {
                 self.done_item(depth);
                 self.run_file(c, &rest, written)
@@ -2603,6 +2609,8 @@ impl<'f> Run<'f> {
     // ---------------- lines ----------------
 
     fn push(&mut self, line: Line, what: What, info: Option<String>, written: String) {
+        let mut line = line;
+        self.dd_wrap(&mut line);
         // a line not translated inside a file run under capture
         if line.result.is_err() {
             for f in &mut self.captured_files {
