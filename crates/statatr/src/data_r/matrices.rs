@@ -71,8 +71,10 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
     if (p == "(Intercept)") return(list(kind = "cons", key = p))
     m <- regmatches(p, regexec("^(factor\\(([^()]+)\\))(.+)$", p))[[1]]
     if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4]))
-    m <- regmatches(p, regexec("^(stata_ib\\(([^,]+), \"[^\"]*\"\\))(.+)$", p))[[1]]
-    if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4]))
+    m <- regmatches(p, regexec("^(stata_ib\\(([^,]+), \"([^\"]*)\"\\))(.+)$", p))[[1]]
+    # a base written "1=2,4" keeps only the levels 2 and 4 as columns (stepwise), no base column
+    if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[5],
+                               keep = if (grepl("=", m[4], fixed = TRUE)) strsplit(sub("^[^=]*=", "", m[4]), ",", fixed = TRUE)[[1]]))
     # ibn.x: every level its own column, none the base (1.x 2.x ..., as Stata names them)
     m <- regmatches(p, regexec("^(stata_ibn\\(([^()]+)\\))(.+)$", p))[[1]]
     if (length(m)) return(list(kind = "f", key = m[2], var = m[3], lev = m[4], nobase = TRUE))
@@ -157,6 +159,11 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
       }
       f <- fs[[1]]
       L <- fit$xlevels[[f$key]]
+      # stepwise's kept levels: these columns only, the base and the pooled levels have none
+      if (!is.null(L) && !is.null(f$keep)) {
+        L <- f$keep
+        f$nobase <- TRUE
+      }
       Ln <- suppressWarnings(as.numeric(L))
       if (is.null(L) || anyNA(Ln)) return(NULL)
       have <- vapply(ii, function(i) Filter(function(p) p$kind == "f", ps[[i]])[[1]]$lev, "")

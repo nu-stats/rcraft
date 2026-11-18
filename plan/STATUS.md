@@ -5380,6 +5380,27 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   (3,715 translated, 200 not, unchanged). 4 probes use nestreg (48 lines).
 
 
+## P2C.12: stepwise's refused forms, 2026-11-18
+
+- **Translated now:** weights (regress all four kinds; logit, probit and poisson fweight, pweight, iweight, with
+  Stata's `aweights not allowed`), `vce(robust)`, `robust`, `vce(cluster v)`, `vce(oim)`, `vce(ols)` and `noconstant`
+  on the command, stepwise's own `level()` (the command's `level()` no longer reaches the final table, as in
+  Stata), factor variables (`i.g`, `ib#.g`: each level a term of its own, the base noted) and
+  `c.x#c.y` / `c.x##c.y`, in groups too; and the errors: `lr` with pweights or robust, a vce type the command
+  lacks, `level()` clashes and range, `vce()`, `robust`, `noconstant`, `beta` before the colon, lockterm1 with a
+  factor variable first. The order of the final model's terms is now Stata's (a removed term's place goes to the
+  last one), which the earlier "written order" only matched by chance.
+- **Checked:** Stata 19 on made-up data, trace lines and e(b) names set against RCraft's line by line (794 trace
+  lines of 303 searches agree with Stata's, p-values to the four digits it prints); corpus `stepwise_weights.do` (44 results, 1e-8),
+  `stepwise_factors.do` (33, 1e-8), `stepwise_weights_glm.do` (51, 1e-6), `stepwise_factors_glm.do` (12, 1e-6).
+  Notes in `plan/stata/stepwise.md`.
+- **Refused, not guessed:** `g#h`, `i.g#c.x`, `ibn.g`, `k.g` words, noconstant with factor variables, lockterm1
+  with a parenthesised factor first term, vce(bootstrap/jackknife/hc2/hc3/opg), a variable listed twice, tobit
+  and the other models; when run, a search that ends with no term.
+- **Shares** (dry run, each source line once, `main` at 719e44d against this change): probes 75.39% -> 75.43%
+  (21,559 -> 21,572 translated, 7,039 -> 7,026 not); packages (46 do-files) 94.9% unchanged (no stepwise line
+  in them). The 13 lines are probe 332 line 27 and probe 333 lines 57-59, 61-67, 82, 83.
+
 ## P2C.12 split into countable tasks, 2026-11-18
 
 - **What changed:** `ROADMAP.md` had P2C.12 as one task, marked done on 2026-11-01, so the Stata-matching

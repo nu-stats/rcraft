@@ -434,9 +434,11 @@ Command families:
   `contrast`, `pwcompare`, `pwmean`, `hausman`, `lrtest`, `predictnl`, forms of `margins`
   and `estat` after models not yet translated, and some `estimates` forms.)
 - P2C.12h `stepwise`
-  (part done 2026-11-17: `regress`, `logit`, `probit` and `poisson`, Verified
-  (`stepwise.do`, `stepwise_glm.do`). Refused, being built: weights, `vce()` and
-  `robust`, factor variables, `tobit`. `plan/stata/stepwise.md`.)
+  (part done 2026-11-18: `regress`, `logit`, `probit` and `poisson`, Verified
+  (`stepwise.do`, `stepwise_glm.do`, `stepwise_weights.do`, `stepwise_weights_glm.do`,
+  `stepwise_factors.do`, `stepwise_factors_glm.do`): weights, `vce()`, `robust`, `noconstant`, `level()` and
+  factor variables included. Refused: `tobit`, interactions with factors, `ibn.`, a variable listed twice.
+  `plan/stata/stepwise.md`.)
 - P2C.12i `nestreg`
   (part done 2026-11-18: `regress`, `logit`, `probit` and `poisson`, Verified
   (`nestreg.do`, `nestreg_glm.do`). Refused: weights, factor variables, a variable listed

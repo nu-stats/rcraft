@@ -251,7 +251,23 @@ stata_omitted_notes <- function() {
 /// which is the cell Stata leaves out, without leaning on R to find a
 /// column collinear (glm's check is tight enough to miss it on some
 /// machines).
-pub(super) const IB_HELPER: &str = r##"stata_ib <- function(x, base) {
+pub(super) const IB_HELPER: &str = r##"# "base=2,4" (stepwise): only the levels 2 and 4 are columns, the others count as the base
+stata_ib <- function(x, base) {
+  keep <- NULL
+  if (grepl("=", base, fixed = TRUE)) {
+    keep <- strsplit(sub("^[^=]*=", "", base), ",", fixed = TRUE)[[1]]
+    base <- sub("=.*$", "", base)
+  }
+  f <- stata_ib_factor(x, base)
+  if (!is.null(keep)) {
+    lv <- levels(f)
+    C <- matrix(0, length(lv), length(keep), dimnames = list(lv, keep))
+    C[cbind(match(keep, lv), seq_along(keep))] <- 1
+    attr(f, "contrasts") <- C
+  }
+  f
+}
+stata_ib_factor <- function(x, base) {
   # numbers, plain or with Stata's value labels: the same factor, made from
   # the distinct values (factor() would write every row as text; margins
   # makes it again for every level it computes)

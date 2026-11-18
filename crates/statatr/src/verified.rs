@@ -239,7 +239,17 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("spset", &["spmatrix"]),
     ("sqrtlasso", &["sqrtlasso"]),
     ("stcox", &["likelihood"]),
-    ("stepwise", &["stepwise", "stepwise_glm"]),
+    (
+        "stepwise",
+        &[
+            "stepwise",
+            "stepwise_factors",
+            "stepwise_factors_glm",
+            "stepwise_glm",
+            "stepwise_weights",
+            "stepwise_weights_glm",
+        ],
+    ),
     ("stset", &["likelihood"]),
     ("suest", &["suest"]),
     (
