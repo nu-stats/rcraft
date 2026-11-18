@@ -79,6 +79,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("fdause", &["fdasave"]),
     ("file", &["fileread", "strings"]),
     ("filefilter", &["filefilter"]),
+    ("fillin", &["fillin"]),
     ("foreach", &["aware", "control"]),
     ("forvalues", &["control"]),
     ("frame", &["frames"]),

@@ -119,6 +119,7 @@ pub const COMMANDS: &[&str] = &[
     "fdause",
     "file",
     "filefilter",
+    "fillin",
     "foreach",
     "format",
     "forvalues",

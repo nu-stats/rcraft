@@ -5512,3 +5512,12 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   so corpus lines must print numbers and `(x == .a)` tests; clonevar's corpus was redone that way.
 - **Refused, not guessed:** `by:`, numlists with a step, several mvencode clauses for one missing value,
   and an mvencode value that may not fit the type when the storage type is not known.
+
+## P2C.12: fillin (batch A1 of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::rowcol`): `fillin varlist` with every combination of the values
+  (`.`, `.a` to `.z` and `""` each a level), `_fillin`, the data sorted by the varlist with repeated
+  combinations kept, labels and formats kept, and the errors with their return codes.
+- **Checked:** Stata 19 on made-up data: corpus `fillin.do` (66 results, exact). Notes in
+  `plan/stata/fillin.md`.
+- **Refused, not guessed:** `by:`, patterns or ranges as the varlist, empty data.

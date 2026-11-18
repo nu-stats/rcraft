@@ -500,3 +500,115 @@ impl Session {
         Ok(())
     }
 }
+
+/// `fillin`: a row for every combination of the variables' values that the
+/// data lack (`plan/stata/fillin.md`). The levels of a variable are the
+/// values it has, `.` and each of `.a` to `.z` a level of its own and `""`
+/// one; the added rows have the other variables missing and `_fillin` 1
+/// (0 on the rows that were there); the data end sorted by the variables
+/// (missing last, rows that repeat a combination kept in their order).
+pub(super) const FILLIN_HELPER: &str = r#"stata_fillin <- function(d, vars) {
+  for (v in vars) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  if (anyDuplicated(vars)) stop("using data not sorted (Stata: r(5))", call. = FALSE)
+  if ("_fillin" %in% names(d)) stop("variable _fillin already defined (Stata: r(110))", call. = FALSE)
+  n <- nrow(d)
+  if (n == 0) stop("fillin of data with no observations is not translated yet", call. = FALSE)
+  strip <- function(x) { if (is.factor(x)) x <- as.integer(x); attributes(x) <- NULL; x }
+  bare <- lapply(d[vars], strip)
+  kinds <- function(b) lapply(b, function(x) if (is.double(x) && anyNA(x)) stata_mv(x) else rep(0, length(x)))
+  mv <- kinds(bare)
+  levels <- lapply(seq_along(vars), function(j) which(!duplicated(data.frame(a = bare[[j]], b = mv[[j]]))))
+  size <- prod(vapply(levels, length, 1))
+  if (size > 5e7) stop("too many observations would be made (Stata: r(901))", call. = FALSE)
+  grid <- expand.grid(levels, KEEP.OUT.ATTRS = FALSE)
+  key <- function(rows) {
+    cols <- c(lapply(seq_along(vars), function(j) bare[[j]][rows[[j]]]), lapply(seq_along(vars), function(j) mv[[j]][rows[[j]]]))
+    names(cols) <- paste0("k", seq_along(cols))
+    as.data.frame(cols, stringsAsFactors = FALSE)
+  }
+  have <- key(rep(list(seq_len(n)), length(vars)))
+  want <- key(as.list(grid))
+  new <- which(is.na(vctrs::vec_match(want, have)))
+  d[["_fillin"]] <- structure(rep(0, n), format.stata = "%8.0g")
+  keep <- lapply(d, attributes)
+  if (length(new)) {
+    add <- lapply(names(d), function(v) {
+      j <- match(v, vars)
+      x <- if (!is.na(j)) d[[v]][grid[[j]][new]] else if (v == "_fillin") rep(1, length(new)) else if (is.character(d[[v]])) rep("", length(new)) else d[[v]][rep(NA_integer_, length(new))]
+      mostattributes(x) <- attributes(d[[v]])
+      x
+    })
+    names(add) <- names(d)
+    d <- dplyr::bind_rows(d, as.data.frame(add, stringsAsFactors = FALSE, optional = TRUE))
+  }
+  b2 <- lapply(d[vars], strip)
+  m2 <- kinds(b2)
+  by <- unlist(lapply(seq_along(vars), function(j) list(b2[[j]], m2[[j]])), recursive = FALSE)
+  d <- d[do.call(order, c(by, list(na.last = TRUE, method = "radix"))), , drop = FALSE]
+  # the variable label and display format stay on every column
+  for (v in names(d)) for (a in c("label", "format.stata")) {
+    if (is.null(attr(d[[v]], a, exact = TRUE)) && !is.null(keep[[v]][[a]])) attr(d[[v]], a) <- keep[[v]][[a]]
+  }
+  rownames(d) <- NULL
+  d
+}"#;
+
+impl Session {
+    /// `fillin varlist`.
+    ///
+    /// Errors, in the order Stata gives them (observed): no variables
+    /// `varlist required` r(100); one variable `too few variables specified`
+    /// r(102); a name the data lack r(111); a variable twice r(5); `_fillin`
+    /// already there r(110).
+    pub(super) fn fillin(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let stop = |out: &mut Out, msg: &str| {
+            out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
+        };
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            return Err(no("fillin with by: is not translated yet"));
+        }
+        if c.parts.weight.is_some() {
+            stop(out, "weights not allowed (Stata: r(101))");
+            return Ok(());
+        }
+        if c.parts.if_exp.is_some() || c.parts.in_range.is_some() {
+            stop(out, "if not allowed (Stata: r(101))");
+            return Ok(());
+        }
+        if let Some(o) = opts.other(&[]) {
+            stop(out, &format!("option {o} not allowed (Stata: r(198))"));
+            return Ok(());
+        }
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        if words.is_empty() {
+            stop(out, "varlist required (Stata: r(100))");
+            return Ok(());
+        }
+        if words.len() == 1 {
+            stop(out, "too few variables specified (Stata: r(102))");
+            return Ok(());
+        }
+        let vars = names(&c.parts.main)?;
+        let d = self.data()?;
+        self.helpers.insert("stata_fillin");
+        self.helpers.insert("stata_mv");
+        out.package("dplyr");
+        out.package("vctrs");
+        out.package("haven");
+        out.line(format!(
+            "{d} <- stata_fillin({d}, c({}))",
+            vars.iter()
+                .map(|v| r_text(v))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+        self.kinds.insert("_fillin".into(), Kind::Number);
+        self.storage.insert("_fillin".into(), Storage::Byte);
+        Ok(())
+    }
+}
