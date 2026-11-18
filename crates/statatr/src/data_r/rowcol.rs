@@ -415,7 +415,7 @@ impl Session {
         if needs_type {
             let unknown = !all_plain
                 || plain.iter().any(|v| {
-                    self.storage.get(v).is_none() && self.kinds.get(v) != Some(&Kind::Text)
+                    !self.storage.contains_key(v) && self.kinds.get(v) != Some(&Kind::Text)
                 });
             if unknown {
                 return Err(no(
