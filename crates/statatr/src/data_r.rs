@@ -95,6 +95,7 @@ mod returned;
 mod revrs;
 mod robreg;
 mod rotate;
+mod rowcol;
 mod rreg;
 mod scalars;
 mod sdtest;
@@ -497,6 +498,7 @@ const BY_EACH: &[&str] = &[
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
     "glm",
+    "clonevar",
     "table",
     "center",
     "contract",
@@ -658,6 +660,10 @@ fn new_vars(c: &Command) -> Vec<String> {
     }
     match c.name.as_str() {
         "generate" | "egen" => words
+            .first()
+            .map(|w| vec![w.to_string()])
+            .unwrap_or_default(),
+        "clonevar" => words
             .first()
             .map(|w| vec![w.to_string()])
             .unwrap_or_default(),
@@ -1444,6 +1450,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_survwgt" => survwgt::SURVWGT_HELPER,
         "stata_isid" => more::ISID_HELPER,
         "stata_contract" => contract::CONTRACT_HELPER,
+        "stata_clone" => rowcol::CLONE_HELPER,
         "stata_recast" => contract::RECAST_HELPER,
         "stata_suest" => suest::SUEST_HELPER,
         "stata_est_table" => esttable::EST_TABLE_HELPER,
@@ -2922,6 +2929,7 @@ impl Session {
             "isid" => self.isid(c, &opts, out),
             "survwgt" => self.survwgt(c, &opts, out),
             "contract" => self.contract(c, &opts, out),
+            "clonevar" => self.clonevar(c, &opts, out),
             "recast" => self.recast(c, &opts, out),
             "isvar" => self.isvar(c, &opts, out),
             "suest" => self.suest(c, &opts, out),

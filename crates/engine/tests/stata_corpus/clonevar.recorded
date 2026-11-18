@@ -1,0 +1,22 @@
+* Stata 19.0's results for clonevar.do, recorded by cargo xtask stata-record
+@ x2     1.10000002384186                  3.5 . .c 1
+@ y2                 10.1 . 40.4
+@ g2 1 2 1 1
+@ s2 a 1 dd
+@ g3 1 . 1 . 1
+@ s3 1 b 1 dd
+@ y3 . 20.2 . .
+@ x3 1.1 . . .
+@ x4 . . . .
+@ same 1 1
+@ indep 1.1 99
+@ rc_exists 110
+@ rc_notfound 111
+@ rc_ifnotfound 111
+@ rc_two 101
+@ rc_two_exists 101
+@ rc_noeq 198
+@ rc_empty 102
+@ rc_weight 101
+@ rc_badname 198
+@ rc_exists_two 101

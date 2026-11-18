@@ -75,6 +75,7 @@ pub const COMMANDS: &[&str] = &[
     "cii",
     "clear",
     "clogit",
+    "clonevar",
     "cluster2",
     "cmclogit",
     "cmset",

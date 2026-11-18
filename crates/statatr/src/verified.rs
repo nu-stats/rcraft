@@ -27,6 +27,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("ci", &["ci"]),
     ("cii", &["ci"]),
     ("clogit", &["clogit"]),
+    ("clonevar", &["clonevar"]),
     ("cluster2", &["cluster2"]),
     ("cmclogit", &["cmclogit"]),
     ("cmset", &["cmclogit"]),

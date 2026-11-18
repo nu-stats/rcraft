@@ -5490,3 +5490,12 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Probes (539 do-files): 21,896 of 29,676 source lines translated, 6,702 not, 1,078 known only when run:
   **76.6% of the lines a dry run judges** (75.4% before batch B and the other work of the day; tiers 1 to 5
   above). Packages (46 do-files): not measured, their folder was not found from this checkout.
+
+## P2C.12: clonevar (batch A1 of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::rowcol`): `clonevar newvar = oldvar [if] [in]` with the type, display
+  format, labels and rounding of the old variable, missing where `if`/`in` does not hold, the
+  `(N missing values generated)` note, and Stata's errors with their return codes.
+- **Checked:** Stata 19 on made-up data: corpus `clonevar.do` (values and 10 return codes, exact). Notes in
+  `plan/stata/clonevar.md`.
+- **Refused, not guessed:** options, `by:`, a name pattern or range after `=`.
