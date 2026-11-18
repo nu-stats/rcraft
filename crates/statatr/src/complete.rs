@@ -510,6 +510,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "hratio(",
             "knownsd",
             "knownsds",
+            "loghazard",
             "n(",
             "n1(",
             "n2(",
@@ -531,8 +532,10 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "sderror(",
             "sdx(",
             "sdy(",
+            "studytime(",
             "table",
             "test(",
+            "unconditional",
             "varerror(",
             "varmeans(",
         ],
@@ -1169,6 +1172,7 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
         "power",
         &[
             "cox",
+            "exponential",
             "logrank",
             "onecorrelation",
             "onemean",
@@ -2005,6 +2009,9 @@ gettoken a b : s, {o}"
             }
             "tetrachoric" => format!("tetrachoric x y z, {o}"),
             "power" if name == "notable" => "power twomeans 0 0.5, n(50 100) notable".to_string(),
+            "power" if matches!(name, "loghazard" | "unconditional" | "studytime") => {
+                format!("power exponential 0.5 0.4, {o}")
+            }
             "power" if matches!(name, "sdx" | "sderror" | "sdy") => {
                 format!("power oneslope 0 0.5, {o}")
             }

@@ -219,3 +219,34 @@ identical to RCraft's, r() to 12 digits or more); corpus `power7.do`.
 - Refused: lists, pcorr without ncontrol(), sderror() with sdy(), oneslope's target with sdy() and b0
   other than 0; Stata's errors (rsquared with one value and ncontrol() but no target, a target with no
   R2_R) as r(198).
+
+## exponential (2026-11-18)
+
+Observed on Stata 19 SE with no data (probes e1, e3, e4, e5: about 30 power lines with return list or
+every r() displayed, set against RCraft's: every printed line identical, r() to 12 digits or more, and
+the three matrices); corpus `power8.do`.
+
+- `power exponential h1 h2` or `h1, hratio()`, n() n1() n2() nratio(), studytime(), loghazard,
+  unconditional, onesided, alpha(), power(): Lachin's test of two exponential hazards. The statistic
+  is the hazard difference h2 − h1 (loghazard: ln(h2/h1)), with φ(h) = h²/P(h) (loghazard: 1/P(h)) and
+  P(h) = 1 − exp(−h·studytime) (1 with no studytime); the variance under H0 is φ at the groups' mean
+  hazard (conditional) or the alternative's (unconditional):
+  power = Φ((√N|Δ| − z·σ0)/σ1), σ1² = φ(h1)/Q1 + φ(h2)/Q2, σ0² = φ(h̄)(1/Q1 + 1/Q2).
+  Sample size N_f = ((zσ0 + z_βσ1)/Δ)², groups ⌈N_f/(1 + R)⌉ and ⌈R·N_f/(1 + R)⌉ (the same sizes as
+  Stata's on every probe: 640, 504, 947, ...); a total that does not split is cut as the others' (N_a).
+- Closed forms: no "Performing iteration ...", no search constants in r(). `note: input parameters are
+  hazard rates.` is the first line, then a blank. Study parameters: alpha power [N N1 N2 / N per group]
+  delta (labelled (hazard difference) or (log hazard-ratio)) [N2/N1]; then "Actual sample sizes:" when a
+  total split, "Accrual and follow-up information:" (duration, follow-up, both studytime) and
+  "Survival information:" (h1, h2, hratio when given).
+- r(): power beta alpha delta nfractional onesided N [N_a] N1 N2 nratio [nratio_a] hratio lnhratio h1 h2
+  hdiff [studytime fperiod] unconditional; macros test ("hazard difference" or "log-hazard difference")
+  effect ("difference", "lnhratio") type method; matrices E0_vec (1 x 3: the total and each group's
+  expected events under H0, each group's rounded to the nearest), Ea_vec (1 x 3 under the alternative) and
+  Pr_vec (1 x 4: the probability of an event under H0 twice, then each group's). H0's hazard is the
+  groups' mean (the first group's when unconditional), at the ratio asked for in the sample-size form and
+  the groups' own in the power form.
+- Refused: lists of values, effect-size determination (n() and power(): Stata's error), the other effect
+  forms (lnhratio(), difference(), hdifference()), fperiod(), aperiod(), the accrual options (Stata's
+  "accrual = 2 (uniform)" output), wdprob() and the rest; Stata's errors (equal hazards, studytime
+  <= 1e-4, two effect forms) as r(198).

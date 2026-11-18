@@ -185,7 +185,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     (
         "power",
         &[
-            "power", "power2", "power3", "power4", "power5", "power6", "power7",
+            "power", "power2", "power3", "power4", "power5", "power6", "power7", "power8",
         ],
     ),
     ("prais", &["arpanel"]),

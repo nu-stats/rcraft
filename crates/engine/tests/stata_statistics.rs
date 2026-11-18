@@ -1304,6 +1304,45 @@ fn power_regression_methods_print_statas_layout() {
     }
 }
 
+/// power exponential in Stata 19's layout, line for line from Stata's own
+/// output (plan/stata/power.md): the note first, accrual and follow-up under
+/// studytime(), unequal groups' ratio, a total that does not split, and the
+/// log hazard-ratio.
+#[test]
+fn power_exponential_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power exponential 0.5 0.4, nratio(2) studytime(3)\n\
+         power exponential 0.5 0.4, n(501)\n\
+         power exponential 0.5 0.6, n(400) studytime(3) loghazard unconditional\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "note: input parameters are hazard rates.",
+        "Estimated sample sizes for two-sample comparison of survivor functions",
+        "Exponential test, hazard difference, conditional",
+        "H0: h2 = h1  versus  Ha: h2 != h1",
+        "Accrual and follow-up information:",
+        "     duration =    3.0000",
+        "    follow-up =    3.0000",
+        "Survival information:",
+        "            N =       947",
+        "           N1 =       316",
+        "           N2 =       631",
+        "        N2/N1 =    1.9968",
+        "Actual sample sizes:",
+        "  N per group =       250",
+        "        power =    0.6989",
+        "Exponential test, log hazard-ratio, unconditional",
+        "H0: ln(HR) = 0  versus  Ha: ln(HR) != 0",
+        "        delta =    0.1823  (log hazard-ratio)",
+        "        power =    0.3728",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
 /// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
 /// on the same data (plan/stata/epitab.md); replace keeps the case variable's
 /// label, which then names ir's row.

@@ -876,6 +876,112 @@ stata_power_reg <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = 
   cat("\n")
   invisible(r)
 }
+
+# power exponential (Stata 19): Lachin's test of two exponential hazards, the hazard difference (or the
+# log hazard-ratio with loghazard), conditional (H0's variance at the groups' mean hazard) or
+# unconditional (the alternative's); with studytime(T) the probability of an event is 1 - exp(-h T)
+stata_power_exp <- function(h1, h2 = NULL, hratio = NULL, loghazard = FALSE, unconditional = FALSE,
+                            studytime = NULL, alpha = 0.05, power = NULL, n = NULL, n1 = NULL, n2 = NULL,
+                            nratio = NULL, onesided = FALSE, show = TRUE) {
+  stop_r <- function(m) stop(m, call. = FALSE)
+  given_hr <- !is.null(hratio)
+  if (is.null(h2)) h2 <- h1 * hratio
+  find <- if (is.null(power) && (!is.null(n) || !is.null(n1))) "power" else "n"
+  actual <- FALSE
+  target <- if (is.null(power)) 0.8 else power
+  if (is.null(nratio)) nratio <- if (!is.null(n1)) n2 / n1 else 1
+  side <- if (onesided) 1 else 2
+  zc <- stats::qnorm(1 - alpha / side)
+  pe <- function(h) if (is.null(studytime)) 1 else 1 - exp(-h * studytime)
+  phi <- function(h) if (loghazard) 1 / pe(h) else h^2 / pe(h)
+  D <- if (loghazard) log(h2 / h1) else h2 - h1
+  sds <- function(R) {
+    Q1 <- 1 / (1 + R)
+    Q2 <- R / (1 + R)
+    s1 <- sqrt(phi(h1) / Q1 + phi(h2) / Q2)
+    s0 <- if (unconditional) s1 else sqrt(phi(Q1 * h1 + Q2 * h2) * (1 / Q1 + 1 / Q2))
+    c(s0, s1)
+  }
+  pw <- function(N, R) {
+    s <- sds(R)
+    stats::pnorm((sqrt(N) * abs(D) - zc * s[1]) / s[2])
+  }
+  if (find == "n") {
+    s <- sds(nratio)
+    Nf <- ((zc * s[1] + stats::qnorm(target) * s[2]) / D)^2
+    g <- c(ceiling(Nf / (1 + nratio) - 1e-9), ceiling(nratio * Nf / (1 + nratio) - 1e-9))
+    pv <- target
+  } else {
+    g <- if (!is.null(n1)) c(n1, n2) else {
+      a <- n / (1 + nratio)
+      if (abs(a - round(a)) < 1e-8 && abs(nratio * round(a) - (n - round(a))) < 1e-8) c(round(a), n - round(a)) else {
+        actual <- TRUE
+        c(floor(a + 1e-9), floor(n * nratio / (1 + nratio) + 1e-9))
+      }
+    }
+    pv <- pw(sum(g), g[2] / g[1])
+  }
+  N <- if (actual) n else sum(g)
+  R <- g[2] / g[1]
+  # the expected events (each group's rounded, the total their sum) and the probabilities of an event:
+  # under H0 at the groups' mean hazard (unconditional: the first group's), then each group's
+  # (the sample size works H0 out at the ratio asked for, the power at the groups' own)
+  Rh <- if (find == "n") nratio else R
+  h0 <- if (unconditional) h1 else (h1 + Rh * h2) / (1 + Rh)
+  e0 <- floor(g * pe(h0) + 0.5)
+  ea <- floor(g * c(pe(h1), pe(h2)) + 0.5)
+  m <- function(v) matrix(v, 1, dimnames = list("r1", paste0("c", seq_along(v))))
+  r <- c(list(power = pv, beta = 1 - pv, alpha = alpha, delta = D, nfractional = 0, onesided = as.numeric(onesided),
+              N = N),
+         if (actual) list(N_a = sum(g)),
+         list(N1 = g[1], N2 = g[2], nratio = nratio),
+         if (abs(R - nratio) > 1e-12) list(nratio_a = R),
+         list(hratio = h2 / h1, lnhratio = log(h2 / h1), h1 = h1, h2 = h2, hdiff = h2 - h1),
+         if (!is.null(studytime)) list(studytime = studytime, fperiod = studytime),
+         list(unconditional = as.numeric(unconditional),
+              test = if (loghazard) "log-hazard difference" else "hazard difference",
+              effect = if (loghazard) "lnhratio" else "difference", type = "test", method = "exponential",
+              E0_vec = m(c(sum(e0), e0)), Ea_vec = m(c(sum(ea), ea)), Pr_vec = m(c(pe(h0), pe(h0), pe(h1), pe(h2)))))
+  testline <- paste0("Exponential test, ", if (loghazard) "log hazard-ratio" else "hazard difference", ", ",
+                     if (unconditional) "unconditional" else "conditional")
+  rel <- if (!onesided) "!=" else if (D >= 0) ">" else "<"
+  h0line <- if (loghazard) sprintf("H0: ln(HR) = 0  versus  Ha: ln(HR) %s 0", rel) else sprintf("H0: h2 = h1  versus  Ha: h2 %s h1", rel)
+  what <- if (find == "n") "sample sizes" else "power"
+  attr(r, "stata_head") <- c(paste0("Estimated ", what, " for two-sample comparison of survivor functions"), testline, h0line)
+  attr(r, "stata_find") <- find
+  if (!show) return(invisible(r))
+  num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
+  int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
+  sizes_lines <- function(tot) c(int("N", tot), if (g[1] == g[2] && is.null(n1)) int("N per group", g[1]) else
+    c(int("N1", g[1]), int("N2", g[2])))
+  study <- c(num("alpha", alpha), if (find == "n") num("power", target),
+             if (find == "power") (if (actual) c(int("N", N), if (nratio != 1) num("N2/N1", nratio)) else
+               c(sizes_lines(N), if (g[1] != g[2]) num("N2/N1", R))),
+             num("delta", D, if (loghazard) "  (log hazard-ratio)" else "  (hazard difference)"),
+             if (find == "n" && nratio != 1) num("N2/N1", nratio))
+  cat("note: input parameters are hazard rates.\n\n")
+  cat(attr(r, "stata_head"), sep = "\n")
+  cat("\nStudy parameters:\n\n")
+  cat(study, sep = "\n")
+  if (actual) {
+    cat("\nActual sample sizes:\n\n")
+    cat(sizes_lines(sum(g)), sep = "\n")
+    if (g[1] != g[2] && abs(R - nratio) > 1e-12) cat(num("N2/N1", R), "\n", sep = "")
+  }
+  if (!is.null(studytime)) {
+    cat("\nAccrual and follow-up information:\n\n")
+    cat(num("duration", studytime), num("follow-up", studytime), sep = "\n")
+  }
+  cat("\nSurvival information:\n\n")
+  cat(num("h1", h1), num("h2", h2), if (given_hr) num("hratio", hratio), sep = "\n")
+  if (find == "n") {
+    cat("\nEstimated sample sizes:\n\n")
+    cat(sizes_lines(N), sep = "\n")
+    if (g[1] != g[2] && abs(R - nratio) > 1e-12) cat(num("N2/N1", R), "\n", sep = "")
+  } else cat("\nEstimated power:\n\n", num("power", pv), "\n", sep = "")
+  cat("\n")
+  invisible(r)
+}
 # power with lists of values (Stata 19): every combination, nested values > alpha > power > n > n1 > n2 >
 # nratio > the method's own numbers (the last varies fastest), each worked out as one power line and
 # printed as Stata's table; r() is the last row's with the table's own (columns, labels, widths,
@@ -1025,6 +1131,16 @@ const R_POWER: &[&str] = &[
     "ntested",
     "ncontrol",
     "rho2_p",
+    "hdiff",
+    "lnhratio",
+    "h1",
+    "h2",
+    "unconditional",
+    "studytime",
+    "fperiod",
+    "E0_vec",
+    "Ea_vec",
+    "Pr_vec",
 ];
 
 /// The methods from onevariance on: Stata's sd flag (not sd()), and
@@ -1315,6 +1431,9 @@ impl Session {
         }
         let main = c.parts.main.trim();
         let (method, rest) = first_word(main);
+        if method == "exponential" {
+            return self.power_exponential(c, rest, opts, out);
+        }
         if matches!(method, "oneslope" | "rsquared" | "pcorr") {
             return self.power_regression(c, method, rest, opts, out);
         }
@@ -1327,7 +1446,7 @@ impl Session {
         let Some((method, extra)) = METHODS.iter().find(|(m, _)| *m == method) else {
             return Err(no(format!(
                 "power {method} is not translated yet (onemean, twomeans, pairedmeans, oneproportion, twoproportions, \
-                 onevariance, twovariances, onecorrelation, twocorrelations, pairedproportions, oneway, logrank, cox, \
+                 onevariance, twovariances, onecorrelation, twocorrelations, pairedproportions, oneway, logrank, cox, exponential, \
                  oneslope, rsquared and pcorr are)"
             )));
         };
@@ -1895,6 +2014,123 @@ impl Session {
             self.helpers.insert(h);
         }
         out.line(format!("stata_r <- stata_power_surv({})", args.join(", ")));
+        self.r_new = Some((R_POWER, "power".into()));
+        Ok(())
+    }
+
+    /// `power exponential h1 [h2]` (or `hratio()`), as Stata 19 prints it.
+    fn power_exponential(
+        &mut self,
+        c: &Command,
+        rest: &str,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let known: &[(&str, usize)] = &[
+            ("alpha", 5),
+            ("power", 5),
+            ("n", 1),
+            ("n1", 2),
+            ("n2", 2),
+            ("nratio", 6),
+            ("onesided", 8),
+            ("hratio", 6),
+            ("loghazard", 9),
+            ("unconditional", 13),
+            ("studytime", 9),
+        ];
+        if let Some(o) = opts.other(known) {
+            return Err(no(format!(
+                "power exponential with the option {o} is not translated yet"
+            )));
+        }
+        if rest.contains('(') {
+            return Err(no(
+                "power exponential: lists of values (Stata's table) are not translated yet",
+            ));
+        }
+        let bad = |what: String| no(format!("power exponential: {what} (Stata: r(198))"));
+        let values = numlist("the hazard rate", rest)?;
+        let hr = match opts.arg("hratio", 6) {
+            Some(t) => match numlist("hratio()", &t)?[..] {
+                [x] if x > 0.0 && x != 1.0 => Some(x),
+                [x] => return Err(bad(format!("hratio({x}) must be above 0 and not 1"))),
+                _ => return Err(no(
+                    "power exponential: a list in hratio() (Stata's table) is not translated yet",
+                )),
+            },
+            None => None,
+        };
+        if values.iter().any(|x| *x <= 0.0) {
+            return Err(bad("hazard rates must be above 0".into()));
+        }
+        let mut args = Vec::new();
+        match (&values[..], hr) {
+            ([a, b], None) => {
+                if a == b {
+                    return Err(bad(
+                        "the control and experimental hazard rates must be different".into(),
+                    ));
+                }
+                args.push(format!("h1 = {}", r_number(*a)));
+                args.push(format!("h2 = {}", r_number(*b)));
+            }
+            ([a], Some(x)) => {
+                args.push(format!("h1 = {}", r_number(*a)));
+                args.push(format!("hratio = {}", r_number(x)));
+            }
+            ([_, _], Some(_)) => {
+                return Err(bad(
+                    "only one of the experimental-group hazard rate and hratio() is allowed".into(),
+                ))
+            }
+            _ => return Err(bad("give the two hazard rates, or one and hratio()".into())),
+        }
+        let ranges: &[(&str, usize, Range)] = &[
+            ("alpha", 5, Range::Prob),
+            ("power", 5, Range::Prob),
+            ("n", 1, Range::Whole),
+            ("n1", 2, Range::Whole),
+            ("n2", 2, Range::Whole),
+            ("nratio", 6, Range::Positive),
+            ("studytime", 9, Range::Positive),
+        ];
+        for &(name, min, range) in ranges {
+            let Some(t) = opts.arg(name, min) else {
+                continue;
+            };
+            let [x] = numlist(&format!("{name}()"), &t)?[..] else {
+                return Err(no(format!(
+                    "power exponential: a list in {name}() (Stata's table) is not translated yet"
+                )));
+            };
+            if !range.holds(x) || (name == "studytime" && x <= 1.0e-4) {
+                return Err(bad(format!("{name}({x}) {}", range.why())));
+            }
+            args.push(format!("{name} = {}", r_number(x)));
+        }
+        let (has_n, has_power) = (opts.has("n", 1), opts.has("power", 5));
+        let groups = opts.has("n1", 2) || opts.has("n2", 2);
+        if has_power && (has_n || groups) {
+            return Err(bad("effect-size determination is not available".into()));
+        }
+        split_groups("exponential", opts, &mut args, &[])?;
+        for (flag, min, r) in [
+            ("onesided", 8, "onesided"),
+            ("loghazard", 9, "loghazard"),
+            ("unconditional", 13, "unconditional"),
+        ] {
+            if opts.has(flag, min) {
+                args.push(format!("{r} = TRUE"));
+            }
+        }
+        if self.quiet(c) {
+            args.push("show = FALSE".into());
+        }
+        for h in ["stata_power", "stata_returned"] {
+            self.helpers.insert(h);
+        }
+        out.line(format!("stata_r <- stata_power_exp({})", args.join(", ")));
         self.r_new = Some((R_POWER, "power".into()));
         Ok(())
     }

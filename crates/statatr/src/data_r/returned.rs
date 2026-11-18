@@ -1165,6 +1165,9 @@ const TEXT_NAMES: &[&str] = &[
 /// The matrices among them.
 const MATRIX_NAMES: &[&str] = &[
     "pss_table",
+    "E0_vec",
+    "Ea_vec",
+    "Pr_vec",
     "b",
     "V",
     "C",
