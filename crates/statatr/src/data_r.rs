@@ -2926,6 +2926,7 @@ impl Session {
             "mata" => self.mata_line(c, out),
             "filefilter" => self.filefilter(c, &opts, out),
             "mkdir" | "rmdir" => self.mkdir(c, &opts, out),
+            "outsheet" => self.outsheet(c, &opts, out),
             "putexcel" => self.putexcel(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {

@@ -174,6 +174,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("oprobit", &["collinear", "likelihood"]),
     ("outreg", &["outreg"]),
     ("outreg2", &["outreg2", "outreg2tex"]),
+    ("outsheet", &["outsheet"]),
     ("parmest", &["clogit_margins"]),
     ("pca", &["pca"]),
     ("pdslasso", &["pdslasso"]),

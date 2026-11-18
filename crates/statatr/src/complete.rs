@@ -186,6 +186,7 @@ pub const COMMANDS: &[&str] = &[
     "order",
     "outreg",
     "outreg2",
+    "outsheet",
     "parmest",
     "pca",
     "pdslasso",
@@ -773,6 +774,17 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     (
         "order",
         &["after(", "alphabetic", "before(", "first", "last"],
+    ),
+    (
+        "outsheet",
+        &[
+            "comma",
+            "delimiter(",
+            "nolabel",
+            "nonames",
+            "noquote",
+            "replace",
+        ],
     ),
     (
         "outreg2",
@@ -2066,6 +2078,10 @@ gettoken a b : s, {o}"
             "mvtest" => format!("mvtest covariances x y, {o}"),
             "file" => format!("file open h using f.txt, write {o}"),
             "mkdir" => format!("mkdir a, {o}"),
+            "outsheet" if name == "delimiter" => {
+                "outsheet using a.out, delimiter(\";\")".to_string()
+            }
+            "outsheet" => format!("outsheet using a.out, {o}"),
             "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),
             "ivprobit" => format!("ivprobit d y (x = w), {o}"),

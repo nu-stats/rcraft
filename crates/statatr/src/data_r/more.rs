@@ -283,10 +283,12 @@ pub(super) const CONCAT_HELPER: &str = r#"stata_concat <- function(m, punct = ""
 /// each variable's display format (its commas left out); a string quoted only when
 /// it holds the delimiter, a quote or a line break (quotes doubled); CRLF on Windows.
 pub(super) const EXPORT_DELIM_HELPER: &str = r#"stata_export_delim <- function(d, file, shown, delim = ",", varnames = TRUE, nolabel = FALSE,
-                               datafmt = FALSE, quote = FALSE, replace = FALSE) {
+                               datafmt = FALSE, quote = FALSE, replace = FALSE,
+                               vars = NULL, sheet = FALSE, noquote = FALSE) {
   if (file.exists(file) && !replace) stop("file ", shown, " already exists (Stata: r(602))", call. = FALSE)
   existed <- file.exists(file)
   q <- function(s) {
+    if (sheet) return(if (noquote) s else paste0("\"", s, "\""))
     need <- quote | grepl(delim, s, fixed = TRUE) | grepl("\"", s, fixed = TRUE) | grepl("\n", s, fixed = TRUE)
     s <- gsub("\"", "\"\"", s, fixed = TRUE)
     ifelse(need, paste0("\"", s, "\""), s)
@@ -333,13 +335,14 @@ pub(super) const EXPORT_DELIM_HELPER: &str = r#"stata_export_delim <- function(d
     }
     out
   }
-  cells <- lapply(d, col)
+  shown_names <- if (is.null(vars)) names(d) else vars
+  cells <- if (is.null(vars)) lapply(d, col) else lapply(vars, function(v) col(d[[v]]))
   body <- if (length(cells)) do.call(paste, c(unname(cells), sep = delim)) else character()
-  lines <- c(if (varnames) paste(names(d), collapse = delim), body)
+  lines <- c(if (varnames) paste(shown_names, collapse = delim), body)
   eol <- if (.Platform$OS.type == "windows") "\r\n" else "\n"
-  if (!existed) cat("(file ", shown, " not found)\n", sep = "")
+  if (!existed && (replace || !sheet)) cat("(file ", shown, " not found)\n", sep = "")
   writeBin(charToRaw(enc2utf8(paste0(lines, eol, collapse = ""))), file)
-  cat("file ", shown, " saved\n", sep = "")
+  if (!sheet) cat("file ", shown, " saved\n", sep = "")
   invisible(NULL)
 }"#;
 

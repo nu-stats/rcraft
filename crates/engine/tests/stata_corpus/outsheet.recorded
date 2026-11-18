@@ -1,0 +1,20 @@
+* Stata 19.0's results for outsheet.do, recorded by cargo xtask stata-record
+@ a 5 1 1 1 1 1
+@ b 5 1 1 1 1
+@ c 5 1 1 1
+@ d 4 1 1 1 1
+@ e 3 1 1 1
+@ f 3 1
+@ g 5 1 1
+@ exists 602
+@ novar 111
+@ delim2 198
+@ both 198
+@ bogus 198
+@ nousing 100
+@ tab 198
+@ i 5 1 1
+@ j 5 1 1 1
+@ k 2 1
+@ l 2 1
+@ m 2 1

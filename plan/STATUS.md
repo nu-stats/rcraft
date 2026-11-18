@@ -5418,3 +5418,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Checked:** Stata 19 on made-up folders, corpus `mkdir.do` (18 return codes, exact). Notes in
   `plan/stata/mkdir.md`. StatCraft's note had a different message for a folder that is there; Stata 19's is
   used.
+
+## P2C.12: outsheet (batch B of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::outfiles`, writing through the `export delimited` helper):
+  `outsheet [varlist] using file [if] [in] [, comma delimiter() nonames nolabel noquote replace]`: tab
+  or comma separated, numbers in their display formats, strings and value labels quoted, `.out`, and
+  Stata's errors with their return codes.
+- **Checked:** Stata 19 on made-up data: each file read back line by line in corpus `outsheet.do` (19
+  results, exact). Notes in `plan/stata/outsheet.md`.
+- **Refused, not guessed:** a variable list with ranges or wildcards.
