@@ -75,6 +75,7 @@ mod nl;
 mod nlcom;
 mod npregress;
 mod oneway;
+mod outfiles;
 mod outreg;
 mod outreg2;
 mod parmest;
@@ -737,13 +738,27 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 
 /// Commands that, translated or not, change neither the data nor its rows nor
 /// e(): they write a table or a file, or look something up.
-const HARMLESS: &[&str] = &["putexcel", "outreg", "frmttable", "which", "_rcraft_fail"];
+const HARMLESS: &[&str] = &[
+    "putexcel",
+    "outreg",
+    "frmttable",
+    "which",
+    "_rcraft_fail",
+    "mkdir",
+    "rmdir",
+    "outsheet",
+    "outfile",
+];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
     "spmatrix",
     "type",
     "_rcraft_fail",
     "filefilter",
+    "mkdir",
+    "rmdir",
+    "outsheet",
+    "outfile",
     "mata",
     "outreg",
     "frmttable",
@@ -2142,6 +2157,7 @@ impl Session {
                     | "erase"
                     | "rm"
                     | "mkdir"
+                    | "rmdir"
                     | "esttab"
                     | "estout"
                     | "outreg2"
@@ -2909,6 +2925,7 @@ impl Session {
             "frmttable" => self.frmttable(c, &opts, out),
             "mata" => self.mata_line(c, out),
             "filefilter" => self.filefilter(c, &opts, out),
+            "mkdir" | "rmdir" => self.mkdir(c, &opts, out),
             "putexcel" => self.putexcel(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {

@@ -169,6 +169,7 @@ pub const COMMANDS: &[&str] = &[
     "medeff",
     "merge",
     "mhodds",
+    "mkdir",
     "mkmat",
     "mlogit",
     "mvtest",
@@ -220,6 +221,7 @@ pub const COMMANDS: &[&str] = &[
     "reshape",
     "restore",
     "revrs",
+    "rmdir",
     "rreg",
     "rvfplot",
     "robreg",
@@ -722,6 +724,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         "matrix",
         &["format(", "noblank", "nohalf", "noheader", "title("],
     ),
+    ("mkdir", &["public"]),
     ("mkmat", &["matrix(", "nomissing"]),
     (
         "merge",
@@ -2062,6 +2065,7 @@ gettoken a b : s, {o}"
             }
             "mvtest" => format!("mvtest covariances x y, {o}"),
             "file" => format!("file open h using f.txt, write {o}"),
+            "mkdir" => format!("mkdir a, {o}"),
             "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),
             "ivprobit" => format!("ivprobit d y (x = w), {o}"),

@@ -2684,7 +2684,7 @@ impl<'f> Run<'f> {
         let (word, _) = main.split_once(char::is_whitespace).unwrap_or((main, ""));
         let writes = matches!(
             name,
-            "save" | "saveold" | "export" | "outsheet" | "log" | "cmdlog"
+            "save" | "saveold" | "export" | "outsheet" | "outfile" | "fdasave" | "log" | "cmdlog"
         ) || (name == "graph" && word == "export")
             || (name == "estimates" && word == "save");
         let role = if writes {
@@ -2697,11 +2697,16 @@ impl<'f> Run<'f> {
                 u.clone(),
                 if matches!(name, "use" | "merge" | "append") {
                     "dta"
+                } else if name == "outfile" {
+                    "raw"
+                } else if name == "outsheet" {
+                    "out"
                 } else {
                     ""
                 },
             ),
             (None, "use" | "save" | "saveold") if !main.is_empty() => (main.to_string(), "dta"),
+            (None, "fdasave" | "fdause") if !main.is_empty() => (main.to_string(), "xpt"),
             // import delimited file.csv, export excel file.xlsx: the file after the kind
             (None, "import" | "export")
                 if word.starts_with("delim")

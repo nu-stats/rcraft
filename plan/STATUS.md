@@ -5409,3 +5409,12 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Refused, not guessed:** contiguity (shapefiles), coordsys(latlong), spset, clear, Mata, and `spregress`:
   Stata stops its likelihood iterations before the maximum (4th to 7th digit) and on some data reaches
   another optimum; its derivative search is partly decoded (plan note), the estimator is kept as a patch.
+## P2C.12: mkdir and rmdir (batch B of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::outfiles`): `mkdir folder [, public]` and `rmdir folder`, with
+  Stata 19's errors: `could not create directory` / `could not remove directory` (r(693)), `invalid
+  syntax` (r(198)) and `varlist not allowed` (r(101)). A nested path whose parent is missing is not
+  made, as in Stata.
+- **Checked:** Stata 19 on made-up folders, corpus `mkdir.do` (18 return codes, exact). Notes in
+  `plan/stata/mkdir.md`. StatCraft's note had a different message for a folder that is there; Stata 19's is
+  used.

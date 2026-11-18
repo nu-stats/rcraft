@@ -1,0 +1,19 @@
+* Stata 19.0's results for mkdir.do, recorded by cargo xtask stata-record
+@ new 0
+@ again 693
+@ inner 0
+@ noparent 693
+@ spaces 0
+@ slash 693
+@ none 198
+@ two 101
+@ public 0
+@ afile 693
+@ full 693
+@ missing 693
+@ rmfile 693
+@ rmnone 198
+@ rminner 0
+@ rmouter 0
+@ rmspaces 0
+@ rmpublic 0

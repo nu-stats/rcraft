@@ -43,6 +43,8 @@ pub const COMMANDS: &[(&str, usize)] = &[
     ("preserve", 8),
     ("restore", 7),
     ("erase", 5),
+    ("outsheet", 4),
+    ("outfile", 4),
     ("use", 3),
     ("compress", 8),
     ("matrix", 3),
