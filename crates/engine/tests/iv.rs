@@ -481,6 +481,14 @@ fn heckman_is_statas_both_ways() {
            up <- th; up[j] <- up[j] + h; dn <- th; dn[j] <- dn[j] - h; (ll(up) - ll(dn)) / (2 * h) }, 0); \
          sec <- sqrt(diag(vcov(model)))",
     );
+    // The likelihood is flat at its maximum, so where the package's optimiser
+    // stops moves with the last digits of the platform's libm and BLAS. On
+    // Ubuntu 26.04 the estimates differ from Stata's by 3e-9 to 9e-9 and the
+    // numeric-Hessian errors by up to 3e-8 (relative), while the likelihood,
+    // the written-out likelihood (1e-12) and the gradient (1e-6) still agree;
+    // Windows and macOS agree to 1e-9. 1e-7 still catches any real
+    // difference from Stata's printed digits.
+    let flat = |a: &str, b: &str| within(a, b, "1e-7");
     holds(
         &mut e,
         &[
@@ -490,24 +498,24 @@ fn heckman_is_statas_both_ways() {
             // earn (x, z1, _cons), works (x, kids, dist, z1, _cons), its log
             // likelihood, rho and sigma; /athrho's and /lnsigma's errors
             // turned into rho's and sigma's by the delta method
-            same(
+            flat(
                 "coef(model)[c(7, 8, 6, 2:5, 1)]",
                 "c(.534451649172847, .274711127288714, 2.12564139551447, \
                    .69097480518434, -.673145313757891, -.168622265882451, .498160788138113, \
                    .647921484814399)",
             ),
-            same(
+            flat(
                 "sec[c(7, 8, 6, 2:5, 1)]",
                 "c(.130226678506693, .110536840824045, .418913261053247, \
                    .155492769454467, .148064116887622, .0687592963926237, .151384792914781, \
                    .497930046016517)",
             ),
             same("logLik(model)", "-122.553124733457"),
-            same(
+            flat(
                 "coef(model)[c('rho', 'sigma')]",
                 "c(.539245698283218, .80605015703993)",
             ),
-            same(
+            flat(
                 "sec[c('rho', 'sigma')]",
                 "c((1 - .539245698283218^2) * .426283215640952, .80605015703993 * .111238713683047)",
             ),
