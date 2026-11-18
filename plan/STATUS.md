@@ -5375,3 +5375,6 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `plan/stata/nestreg.md`.
 - **Refused, not guessed:** weights, factor variables, a variable listed twice, other models and options;
   when run: a collinear model.
+- **Shares** after nestreg (dry run, each source line once): probes 75.4% (21,555 translated, 7,043 not; the probe
+  folder now holds 539 do-files, so not comparable with the 76.0% of 511 before); packages (46 do-files) 94.9%
+  (3,715 translated, 200 not, unchanged). 4 probes use nestreg (48 lines).
