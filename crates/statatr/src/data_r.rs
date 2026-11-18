@@ -499,6 +499,7 @@ const BY_EACH: &[&str] = &[
 const WEIGHTED: &[&str] = &[
     "glm",
     "clonevar",
+    "expandcl",
     "fillin",
     "mvdecode",
     "mvencode",
@@ -1456,6 +1457,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_clone" => rowcol::CLONE_HELPER,
         "stata_mvcode" => rowcol::MVCODE_HELPER,
         "stata_fillin" => rowcol::FILLIN_HELPER,
+        "stata_expandcl" => rowcol::EXPANDCL_HELPER,
         "stata_recast" => contract::RECAST_HELPER,
         "stata_suest" => suest::SUEST_HELPER,
         "stata_est_table" => esttable::EST_TABLE_HELPER,
@@ -2937,6 +2939,7 @@ impl Session {
             "clonevar" => self.clonevar(c, &opts, out),
             "mvdecode" | "mvencode" => self.mvcode(c, &opts, out),
             "fillin" => self.fillin(c, &opts, out),
+            "expandcl" => self.expandcl(c, &opts, out),
             "recast" => self.recast(c, &opts, out),
             "isvar" => self.isvar(c, &opts, out),
             "suest" => self.suest(c, &opts, out),

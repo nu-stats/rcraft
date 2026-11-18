@@ -74,6 +74,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("eststo", &["estout", "marginsplot"]),
     ("esttab", &["esttab", "esttab2", "esttab3", "esttab4"]),
     ("expand", &["made", "random"]),
+    ("expandcl", &["expandcl"]),
     ("factor", &["factor"]),
     ("fdasave", &["fdasave"]),
     ("fdause", &["fdasave"]),

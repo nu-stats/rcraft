@@ -5521,3 +5521,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Checked:** Stata 19 on made-up data: corpus `fillin.do` (66 results, exact). Notes in
   `plan/stata/fillin.md`.
 - **Refused, not guessed:** `by:`, patterns or ranges as the varlist, empty data.
+
+## P2C.12: expandcl (batch A1 of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::rowcol`): `expandcl exp [if] [in], cluster() generate()` with the
+  copies per observation (missing, zero, negative and fractional counts, with Stata's notes), the
+  cluster numbers (clusters in sort order, missing last) and the errors with their return codes.
+- **Checked:** Stata 19 on made-up data: corpus `expandcl.do` (158 results, exact); notes against its log.
+  Notes in `plan/stata/expandcl.md`.
+- **Differs:** the order of one observation's copies, which Stata leaves unstable; RCraft's are in the order of
+  their cluster numbers. Refused: `by:`.

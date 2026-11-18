@@ -612,3 +612,148 @@ impl Session {
         Ok(())
     }
 }
+
+/// `expandcl` (`plan/stata/expandcl.md`): each selected observation becomes
+/// `n` copies (a count that is missing, zero or negative keeps the one
+/// observation, a fraction is rounded), one cluster at a time; `gen` numbers
+/// the (cluster, copy) pairs, the clusters in the sort order of their
+/// variables (missing last), a cluster with k copies taking k numbers in a
+/// row; rows outside `if`/`in` are 1. Stata puts the copies of one row in an
+/// order of its own; here they follow the row, in the order of their numbers.
+pub(super) const EXPANDCL_HELPER: &str = r#"stata_expandcl <- function(d, n, keep, cluster, gen, show = TRUE) {
+  for (v in cluster) if (!v %in% names(d)) stop(v, " not found (Stata: r(111))", call. = FALSE)
+  if (gen %in% names(d)) stop("variable ", gen, " already defined (Stata: r(110))", call. = FALSE)
+  rows <- nrow(d)
+  sel <- if (is.null(keep)) rep(TRUE, rows) else (!is.na(keep) & keep)
+  n <- as.numeric(n)
+  strip <- function(x) { if (is.factor(x)) x <- as.integer(x); attributes(x) <- NULL; x }
+  bare <- lapply(d[cluster], strip)
+  mv <- lapply(bare, function(x) if (is.double(x) && anyNA(x)) stata_mv(x) else rep(0, length(x)))
+  keys <- as.data.frame(c(setNames(bare, paste0("k", seq_along(bare))), setNames(mv, paste0("m", seq_along(mv)))), stringsAsFactors = FALSE)
+  g <- rep(NA_integer_, rows)
+  g[sel] <- vctrs::vec_group_id(keys[sel, , drop = FALSE])
+  idx <- which(sel)
+  # one count for the whole cluster
+  for (k in unique(g[idx])) {
+    v <- n[idx][g[idx] == k]
+    if (length(unique(v)) > 1) stop("expression is not constant within clusters (Stata: r(198))", call. = FALSE)
+  }
+  say <- function(k, one, many) if (k > 0) cat("(", k, " ", if (k == 1) one else many, ")\n", sep = "")
+  ns <- n[idx]
+  if (show) {
+    say(sum(is.na(ns)), "missing count ignored; observation not deleted", "missing counts ignored; observations not deleted")
+    say(sum(!is.na(ns) & ns != floor(ns)), "noninteger count rounded to integer", "noninteger counts rounded to integer")
+  }
+  r <- floor(ns + 0.5)
+  if (show) {
+    say(sum(!is.na(r) & r < 0), "negative count ignored; observation not deleted", "negative counts ignored; observations not deleted")
+    say(sum(!is.na(r) & r == 0), "zero count ignored; observation not deleted", "zero counts ignored; observations not deleted")
+  }
+  r[is.na(r) | r < 1] <- 1
+  kk <- rep(1, rows)
+  kk[idx] <- r
+  # the clusters in sort order, missing last
+  by <- unlist(lapply(seq_along(bare), function(j) list(bare[[j]], mv[[j]])), recursive = FALSE)
+  ord <- do.call(order, c(by, list(na.last = TRUE, method = "radix")))
+  ord <- ord[sel[ord]]
+  first <- g[ord][!duplicated(g[ord])]
+  size <- vapply(first, function(k) max(kk[which(g == k)]), 1)
+  start <- c(0, cumsum(size))[seq_along(first)] + 1
+  begin <- rep(1, rows)
+  begin[idx] <- start[match(g[idx], first)]
+  take <- rep(seq_len(rows), times = kk)
+  copy <- sequence(kk)
+  out <- d[take, , drop = FALSE]
+  for (v in names(d)) {
+    x <- out[[v]]
+    a <- attributes(d[[v]])
+    a$names <- NULL
+    for (nm in names(a)) if (is.null(attr(x, nm, exact = TRUE))) attr(x, nm) <- a[[nm]]
+    out[[v]] <- x
+  }
+  out[[gen]] <- structure(begin[take] + copy - 1, label = "New cluster ID from expandcl", format.stata = "%8.0g")
+  rownames(out) <- NULL
+  if (show) cat("(", nrow(out) - rows, if (nrow(out) - rows == 1) " observation created" else " observations created", ")\n", sep = "")
+  out
+}"#;
+
+impl Session {
+    /// `expandcl [=]exp [if] [in], cluster(varlist) generate(newvar)`.
+    ///
+    /// Observed in Stata 19: both options are required (`option generate()
+    /// required` r(198), then cluster()); no expression is r(198); a string
+    /// expression r(109); `newvar` that is there r(110); an expression that
+    /// is not the same for every selected observation of a cluster r(198).
+    pub(super) fn expandcl(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let stop = |out: &mut Out, msg: &str| {
+            out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
+        };
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            return Err(no("expandcl with by: is not translated yet"));
+        }
+        if c.parts.weight.is_some() {
+            stop(out, "weights not allowed (Stata: r(101))");
+            return Ok(());
+        }
+        if let Some(o) = opts.other(&[("cluster", 2), ("generate", 3)]) {
+            stop(out, &format!("option {o} not allowed (Stata: r(198))"));
+            return Ok(());
+        }
+        let Some(gen) = opts.arg("generate", 3) else {
+            stop(out, "option generate() required (Stata: r(198))");
+            return Ok(());
+        };
+        let Some(cluster) = opts.arg("cluster", 2) else {
+            stop(out, "option cluster() required (Stata: r(198))");
+            return Ok(());
+        };
+        let exp = c.parts.main.trim().trim_start_matches('=').trim();
+        if exp.is_empty() {
+            stop(out, "invalid syntax (Stata: r(198))");
+            return Ok(());
+        }
+        let gen = gen.trim().to_string();
+        if !is_name(&gen) {
+            return Err(no(format!(
+                "expandcl, generate({gen}): one new name is needed"
+            )));
+        }
+        let cluster = names(&cluster)?;
+        let d = self.data()?;
+        let (cond, n, kind) = self.drawing_value(c, exp, out)?;
+        if kind == Kind::Text {
+            stop(out, "type mismatch (Stata: r(109))");
+            return Ok(());
+        }
+        let keep = match cond {
+            Some(k) => format!("dplyr::pull(dplyr::mutate({d}, stata_rows = {k}), stata_rows)"),
+            None => "NULL".into(),
+        };
+        self.helpers.insert("stata_expandcl");
+        self.helpers.insert("stata_mv");
+        out.package("dplyr");
+        out.package("vctrs");
+        out.package("haven");
+        let show = if self.quiet(c) { "FALSE" } else { "TRUE" };
+        out.line(format!(
+            "{d} <- stata_expandcl({d}, dplyr::transmute({d}, stata_n = {n})$stata_n, {keep}, c({}), {}, show = {show})",
+            cluster
+                .iter()
+                .map(|v| r_text(v))
+                .collect::<Vec<_>>()
+                .join(", "),
+            r_text(&gen)
+        ));
+        out.caveat(
+            "Stata puts the copies of one observation in an order of its own; here they follow the \
+             observation, in the order of their cluster numbers",
+        );
+        self.kinds.insert(gen, Kind::Number);
+        Ok(())
+    }
+}
