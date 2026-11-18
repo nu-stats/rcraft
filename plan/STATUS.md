@@ -5395,4 +5395,4 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   of 108 (82%, recounted 2026-11-16) before, 99 of 145 (68%) after. The figure falls because the work
   that was hidden in one done task is now counted as the tasks it is; no work was undone. A new baseline.
 - **Not done here:** the milestones' current shares were not re-measured (the probes need the private
-  corpus). Last recorded: probes 73.7% (2026-11-16), packages 94.9% of run lines (2026-11-13).
+  corpus). Last recorded: probes 75.4% (2026-11-18, 539 do-files), packages 94.9% of run lines (2026-11-13).

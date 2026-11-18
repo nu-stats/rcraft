@@ -534,7 +534,7 @@ Command families:
   is reachable without it or without a decision to translate the zero-label cases.)
 
 Coverage and matching milestones (the share is of the lines a dry run judges, each source
-line once; last measured 73.7% for the 520 probes on 2026-11-16, 94.9% of the run lines of
+line once; last measured 75.4% for the 539 probes on 2026-11-18, 94.9% of the run lines of
 the 46 replication do-files on 2026-11-13; each milestone is closed by measuring again and
 writing the figure into `docs/stata-coverage.md`):
 
