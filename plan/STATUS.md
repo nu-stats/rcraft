@@ -5460,3 +5460,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   (exact). Notes in `plan/stata/outfile.md`.
 - **Refused, not guessed:** `dictionary`, a variable list with ranges or wildcards. A string made another way
   than input, generate or a file is laid out by its longest value (Stata: declared width).
+
+## P2C.12: snapshot (batch B of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::snapshot`): `snapshot save [, label()]`, `list`, `label`, `restore` and
+  `erase` with Stata's numbering (highest plus one), r(snapshot), wrapping at the line size and the errors
+  with their return codes. The snapshots live in the R session and survive `clear`.
+- **Checked:** Stata 19 on made-up data: corpus `snapshot.do` (about 30 return codes and restored values,
+  exact), and the wrapped lines against Stata's log by hand. Notes in `plan/stata/snapshot.md`.
+- **Not followed:** empty data after a restore (RCraft has none); the date of a day before the 10th
+  was not observed.

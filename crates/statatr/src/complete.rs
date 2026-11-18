@@ -241,6 +241,7 @@ pub const COMMANDS: &[&str] = &[
     "signrank",
     "signtest",
     "sktest",
+    "snapshot",
     "sort",
     "spearman",
     "split",
@@ -1029,6 +1030,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("sdtest", &["by(", "level("]),
     ("sdtesti", &["level("]),
     ("sktest", &["noadjust"]),
+    ("snapshot", &["label("]),
     (
         "ci",
         &[
@@ -2090,6 +2092,7 @@ gettoken a b : s, {o}"
             "mvtest" => format!("mvtest covariances x y, {o}"),
             "file" => format!("file open h using f.txt, write {o}"),
             "mkdir" => format!("mkdir a, {o}"),
+            "snapshot" => "snapshot save, label(x)".to_string(),
             "outfile" if name == "runtogether" => "outfile using a.raw, runtogether".to_string(),
             "outfile" => format!("outfile using a.raw, {o}"),
             "outsheet" if name == "delimiter" => {

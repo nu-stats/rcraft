@@ -234,6 +234,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("signrank", &["ranktests"]),
     ("signtest", &["ranktests"]),
     ("sktest", &["sktest"]),
+    ("snapshot", &["snapshot"]),
     ("sort", &["data", "extended_missing_commands"]),
     ("split", &["strings"]),
     ("spmatrix", &["spmatrix"]),

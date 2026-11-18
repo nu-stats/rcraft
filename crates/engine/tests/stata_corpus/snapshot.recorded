@@ -1,0 +1,33 @@
+* Stata 19.0's results for snapshot.do, recorded by cargo xtask stata-record
+@ none_restore 198
+@ none_label 198
+@ none_erase 111
+@ id1 1
+@ id2 2
+@ id3 3
+@ r1 3 1 3 1
+@ r1_y 111
+@ r1_lab 1 1
+@ r3 3 10 30 5
+@ r3_t 111
+@ gone 111
+@ gone_erase 111
+@ low 198
+@ high 198
+@ label_high 198
+@ range_missing 111
+@ id_after 4
+@ id_again 5
+@ list_missing 111
+@ bogus 198
+@ bare 198
+@ opt 198
+@ varlist 101
+@ rest_none 7
+@ rest_two 198
+@ rest_a 7
+@ erase_none 122
+@ erase_a 121
+@ id_long 6
+@ id_reset 1
+@ r_again 3 20

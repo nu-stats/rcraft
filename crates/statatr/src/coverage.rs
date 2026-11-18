@@ -152,6 +152,7 @@ const DATA: &[&str] = &[
     "separate",
     "set",
     "sleep",
+    "snapshot",
     "sort",
     "split",
     "stack",

@@ -99,6 +99,7 @@ mod rreg;
 mod scalars;
 mod sdtest;
 mod sktest;
+mod snapshot;
 mod spatial;
 mod st;
 mod stats;
@@ -1389,6 +1390,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_collapse_w" => more::COLLAPSE_W_HELPER,
         "stata_export_delim" => more::EXPORT_DELIM_HELPER,
         "stata_outfile" => outfiles::OUTFILE_HELPER,
+        "stata_snapshot" => snapshot::SNAPSHOT_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
         "stata_tabulate" => stats::TABULATE_HELPER,
@@ -1672,6 +1674,8 @@ struct Session {
     ssc: Vec<String>,
     /// What `preserve` kept, for `restore`.
     preserved: Option<Box<Preserved>>,
+    /// What the translator followed of each snapshot's data, by its number.
+    snaps: BTreeMap<u32, Box<Preserved>>,
     /// The frames other than the current one (`frame create`), each with what
     /// the translator follows of its data, kept in R in `stata_frames`.
     frames: BTreeMap<String, Preserved>,
@@ -2929,6 +2933,7 @@ impl Session {
             "mkdir" | "rmdir" => self.mkdir(c, &opts, out),
             "outsheet" => self.outsheet(c, &opts, out),
             "outfile" => self.outfile(c, &opts, out),
+            "snapshot" => self.snapshot(c, &opts, out),
             "putexcel" => self.putexcel(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
