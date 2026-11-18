@@ -58,8 +58,8 @@ pub(super) const WROWS_HELPER: &str = r#"stata_wrows <- function(d, w, kind) {
   v <- unclass(d[[w]])
   attributes(v) <- NULL
   ok <- !is.na(v)
-  if (kind == "f" && any(v[ok] != floor(v[ok]))) stop("may not use noninteger frequency weights")
-  if (kind != "i" && any(v[ok] < 0)) stop("negative weights encountered")
+  if (kind == "f" && any(v[ok] != floor(v[ok]))) stop("may not use noninteger frequency weights (Stata: r(401))", call. = FALSE)
+  if (kind != "i" && any(v[ok] < 0)) stop("negative weights encountered (Stata: r(402))", call. = FALSE)
   out <- d[ok & v != 0, , drop = FALSE]
   # base R's rows drop a plain column's label and format: kept, as Stata keeps them
   for (n in names(d)) for (a in c("label", "format.stata")) attr(out[[n]], a) <- attr(d[[n]], a, exact = TRUE)

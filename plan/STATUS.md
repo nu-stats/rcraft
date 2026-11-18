@@ -5592,3 +5592,11 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 ## Strict corpus comparer, 2026-11-18
 
 - `engine/tests/stata_corpus.rs` now fails on any `@` line it cannot compare: a number to the tolerance, every other token (`.a`, a word, a string) exactly, the n-th print of a key against the n-th recorded one; before, a line with a non-numeric token (190 lines, 25 files) or an earlier line shadowed by the same key (12 lines, 5 files) was silently skipped. One real difference showed (`icc` p-value near 6e-14, Stata's and R's tails differ in the 4th digit): that corpus line now compares its size and was re-recorded; unit tests cover the comparer.
+
+## P2C.12c: pctile (batch C of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::descr`): `pctile` with `nquantiles()`, `genp()`, `altdef`, a storage type,
+  frequency, analytic and sampling weights, `if` and `in`, r(r1) ..., the label and format, and the errors with
+  their return codes. Frequency-weight errors now carry r(401) and r(402) in `stata_wrows`.
+- **Checked:** Stata 19 on made-up data: corpus `pctile.do` (55 results, exact). Notes in `plan/stata/pctile.md`.
+- **Refused, not guessed:** `by:`, string types.

@@ -39,6 +39,7 @@ mod codebook;
 mod coefplot;
 mod contract;
 mod dates;
+mod descr;
 mod eclass;
 mod epitab;
 mod estat;
@@ -500,6 +501,7 @@ const BY_EACH: &[&str] = &[
 const WEIGHTED: &[&str] = &[
     "glm",
     "clonevar",
+    "pctile",
     "expandcl",
     "fillin",
     "mvdecode",
@@ -1481,6 +1483,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_fre" => fre::FRE_HELPER,
         "stata_parmest" => parmest::PARMEST_HELPER,
         "stata_xtile" => more::XTILE_HELPER,
+        "stata_pctile" => descr::PCTILE_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_tsfill" => ts::TSFILL_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -3060,6 +3063,7 @@ impl Session {
             "coefplot" => self.coefplot(c, out),
             "parmest" => self.parmest(c, &opts, out),
             "xtile" => self.xtile(c, &opts, out),
+            "pctile" => self.pctile(c, &opts, out),
             "display" => self.display(c, out),
             "return"
                 if matches!(
