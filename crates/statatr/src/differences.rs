@@ -2992,8 +2992,8 @@ pub const GUIDES: &[Guide] = &[
                  lists its r() in an order that changes with the number of groups), oneway's \
                  lists and contrasts, logrank's and cox's lists, wdprob() and simulation, the \
                  other methods (twoway, repeated, mcc, cmh, trend, \
-                 ...), test(lrchi2), test(fisher), \
-                 test(binomial), one group's size that leaves the other not whole, \
+                 ...), the exact tests' sample size and effect size (Stata refuses them too), \
+                 one group's size that leaves the other not whole, \
                  pairedproportions' corr(), diff() and ratio() \
                  forms, and the other options are refused.",
             ),
@@ -3009,7 +3009,10 @@ pub const GUIDES: &[Guide] = &[
                 "Stata's noncentral t takes noncentralities up to 1000: past them two means stop \
                  with r(498) (in a table, a missing power and Stata's warning) and one mean shows a \
                  missing power, in RCraft as in Stata 19. After cox given b1 or worked out, \
-                 r(hratio) can be read but return list leaves it out, as Stata keeps it.",
+                 r(hratio) can be read but return list leaves it out, as Stata keeps it. \
+                 test(binomial) and test(fisher) give the power and the actual alpha only (their \
+                 power is saw-toothed in n, so Stata offers no sample size or effect size); Fisher's \
+                 two-sided p-value is twice the smaller tail.",
             ),
         ],
     },

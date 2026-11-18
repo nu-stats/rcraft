@@ -1343,6 +1343,42 @@ fn power_exponential_prints_statas_layout() {
     }
 }
 
+/// power's exact and likelihood-ratio tests in Stata 19's layout, line for
+/// line from Stata's own output (plan/stata/power.md): "Estimated power and
+/// alpha", the actual alpha, Fisher's unequal groups, and the likelihood-ratio
+/// sample size.
+#[test]
+fn power_exact_and_likelihood_ratio_tests_print_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power oneproportion 0.5 0.65, test(binomial) n(50)\n\
+         power twoproportions 0.3 0.5, test(fisher) n1(40) n2(70)\n\
+         power twoproportions 0.3 0.5, test(lrchi2) nratio(2)\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "Binomial test",
+        "H0: p = p0  versus  Ha: p != p0",
+        "Estimated power and alpha:",
+        "        power =    0.5060",
+        " actual alpha =    0.0328",
+        "Fisher's exact test",
+        "           N1 =        40",
+        "           N2 =        70",
+        "        N2/N1 =    1.7500",
+        "        power =    0.4781",
+        " actual alpha =    0.0315",
+        "Likelihood-ratio test",
+        "Performing iteration ...",
+        "            N =       213",
+        "           N1 =        71",
+        "           N2 =       142",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
 /// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
 /// on the same data (plan/stata/epitab.md); replace keeps the case variable's
 /// label, which then names ir's row.

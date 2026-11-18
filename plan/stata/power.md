@@ -250,3 +250,32 @@ the three matrices); corpus `power8.do`.
   forms (lnhratio(), difference(), hdifference()), fperiod(), aperiod(), the accrual options (Stata's
   "accrual = 2 (uniform)" output), wdprob() and the rest; Stata's errors (equal hazards, studytime
   <= 1e-4, two effect forms) as r(198).
+
+## test(binomial), test(fisher), test(lrchi2) (2026-11-18)
+
+Observed on Stata 19 SE with no data (probes x1 to x3: about 45 lines, every printed line identical to
+RCraft's, r() to 12 digits or more); corpus `power9.do`.
+
+- **Why these were refused, and what Stata itself does:** the exact tests' power is saw-toothed in n, so
+  Stata gives only the power (and the actual alpha): `sample-size determination is not allowed` and
+  `effect-size determination is not allowed` for binomial, `sample-size and effect-size computations
+  are not supported` for Fisher. RCraft refuses those forms as Stata's r(198). Neither test takes
+  continuity (Stata: may not be combined).
+- `oneproportion p0 pa, test(binomial) n()`: critical values C_l = the largest k with P(X ≤ k | p0) ≤
+  α/2 (α one-sided) and C_u = the smallest k with P(X ≥ k | p0) ≤ α/2; power and the actual alpha
+  (alpha_a) are the rejection region's probabilities at pa and p0. One-sided uses the side of pa. Printed
+  under "Estimated power and alpha:" as `power` and ` actual alpha`. r(): power beta alpha alpha_a N
+  onesided p0 pa delta diff C_l C_u, macros type method test. r(C_l) is always set (two-sided or lower),
+  r(C_u) only when pa > p0 (two-sided) or one-sided upper, else missing, though both tails count in the
+  power. A rejection region that does not exist (n(5), p0 .5: Stata prints 0 and 0): refused.
+- `twoproportions p1 p2, test(fisher) n()`: the conditional exact test, p-value twice the smaller tail
+  (two-sided; not "probabilities at most the observed", which only agrees with equal groups), the
+  tail toward the alternative one-sided; power = P(reject | p1, p2), alpha_a = P(reject | p1, p1) (the
+  control proportion). r(): power beta alpha delta nfractional onesided N [N_a] N1 N2 nratio [nratio_a]
+  p1 p2 alpha_a, macros type method test effect; effect(ratio|oratio) only labels delta. Groups up to
+  1e6 in product.
+- `test(lrchi2)`: the likelihood-ratio statistic G = 2 Σ O ln(O/E) of the expected table (O at p1, p2,
+  E at the pooled proportion), power Φ(√G − z) + Φ(−√G − z) (the first only one-sided); sample sizes
+  searched two-sided ("Performing iteration ...") and closed one-sided as the chi-squared's, targets
+  searched; N2 = ceil(nratio N1). r(continuity) = 0 as the chi-squared's; test "lrchi2"; "Likelihood-ratio
+  test" under the title.

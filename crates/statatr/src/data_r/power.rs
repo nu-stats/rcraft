@@ -21,6 +21,8 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
   if (method %in% c("onevariance", "twovariances", "onecorrelation", "twocorrelations", "pairedproportions"))
     return(stata_power_g(method, v1, v2, alpha, power, n, n1, n2, nratio, onesided, direction, scale, effect,
                          prdiscordant, show))
+  if (test %in% c("binomial", "fisher"))
+    return(stata_power_exact(method, v1, v2, alpha, n, n1, n2, nratio, onesided, effect, show))
   two <- method %in% c("twomeans", "twoproportions")
   props <- method %in% c("oneproportion", "twoproportions")
   stop_r <- function(m) stop(m, call. = FALSE)
@@ -80,6 +82,14 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
       upp <- stats::pnorm((sqrt(a) * d - zc * s0) / sa)
       low <- stats::pnorm((-sqrt(a) * d - zc * s0) / sa)
       return(if (!onesided) upp + low else if (d >= 0) upp else low)
+    }
+    if (method == "twoproportions" && test == "lrchi2") {
+      # the likelihood-ratio statistic of the expected table, signed root against the normal's cut
+      pb <- (a * v1 + b * x) / (a + b)
+      O <- c(a * v1, a * (1 - v1), b * x, b * (1 - x))
+      E <- c(a * pb, a * (1 - pb), b * pb, b * (1 - pb))
+      l <- sqrt(2 * sum(O * log(O / E)))
+      return(if (!onesided) stats::pnorm(l - zc) + stats::pnorm(-l - zc) else stats::pnorm(l - zc))
     }
     pb <- (a * v1 + b * x) / (a + b)
     d <- x - v1
@@ -202,7 +212,7 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
       c(head, list(delta = delta), nf, os, it, tail)
     })
   r <- c(r, list(type = "test", method = method), if (find == "effect") list(direction = if (direction == "lower") "lower" else "upper"),
-         if (method == "oneproportion") list(test = test), if (method == "twoproportions") list(test = "chi2", effect = effect))
+         if (method == "oneproportion") list(test = test), if (method == "twoproportions") list(test = if (test == "lrchi2") "lrchi2" else "chi2", effect = effect))
   # the printout
   title <- switch(method, onemean = "one-sample mean test", pairedmeans = "two-sample paired-means test",
                   twomeans = "two-sample means test", oneproportion = "one-sample proportion test",
@@ -216,7 +226,7 @@ stata_power <- function(method, v1 = NULL, v2 = NULL, alpha = 0.05, power = NULL
     twomeans = if (unequal) (if (known) "z test assuming unequal variances" else "Satterthwaite's t test assuming unequal variances")
                else if (known) "z test assuming sd1 = sd2 = sd" else "t test assuming sd1 = sd2 = sd",
     oneproportion = if (test == "wald") "Wald z test" else "Score z test",
-    twoproportions = "Pearson's chi-squared test ")
+    twoproportions = if (test == "lrchi2") "Likelihood-ratio test" else "Pearson's chi-squared test ")
   sym <- switch(method, onemean = c("m", "m0", "ma"), pairedmeans = c("d", "d0", "da"), twomeans = c("m2", "m1", "m2"),
                 oneproportion = c("p", "p0", "pa"), twoproportions = c("p2", "p1", "p2"))
   rel <- if (!onesided) "!=" else if (diff >= 0) ">" else "<"
@@ -982,6 +992,99 @@ stata_power_exp <- function(h1, h2 = NULL, hratio = NULL, loghazard = FALSE, unc
   cat("\n")
   invisible(r)
 }
+
+# power oneproportion test(binomial) and power twoproportions test(fisher) (Stata 19): the exact tests'
+# power by enumeration, with the actual alpha of the rejection region; no sample size or effect size
+# (Stata refuses them: the power of an exact test is saw-toothed in n)
+stata_power_exact <- function(method, v1, v2, alpha, n, n1, n2, nratio, onesided, effect, show) {
+  stop_r <- function(m) stop(m, call. = FALSE)
+  one <- method == "oneproportion"
+  if (is.null(v2) || (is.null(n) && is.null(n1))) stop_r("power: the exact tests give the power only (Stata: r(198))")
+  actual <- FALSE
+  if (is.null(nratio)) nratio <- if (!is.null(n1)) n2 / n1 else 1
+  if (one) {
+    N <- n
+    # the critical values: the rejection region's edges with probability at most alpha (alpha / 2 a side)
+    a <- if (onesided) alpha else alpha / 2
+    cl <- max(c(-1, which(stats::pbinom(0:N, N, v1) <= a) - 1))
+    cu <- min(c(N + 1, which(stats::pbinom(0:N - 1, N, v1, lower.tail = FALSE) <= a) - 1))
+    lower_side <- onesided && v2 < v1
+    upper_side <- onesided && v2 >= v1
+    use_l <- !upper_side && cl >= 0
+    use_u <- !lower_side && cu <= N
+    if ((!onesided && !(use_l && use_u)) || (onesided && !(use_l || use_u)))
+      stop_r("power oneproportion: no exact critical values reach alpha at this n() (Stata prints them with a power of 0)")
+    tail <- function(p) (if (use_l) stats::pbinom(cl, N, p) else 0) +
+      (if (use_u) stats::pbinom(cu - 1, N, p, lower.tail = FALSE) else 0)
+    pv <- tail(v2)
+    al <- tail(v1)
+    g <- c(N, NA)
+    r <- list(power = pv, beta = 1 - pv, alpha = alpha, alpha_a = al, N = N, onesided = as.numeric(onesided),
+              p0 = v1, pa = v2, delta = v2 - v1, diff = v2 - v1,
+              C_l = if (use_l) cl else NA_real_, C_u = if (use_u && (onesided || v2 > v1)) cu else NA_real_,
+              type = "test", method = method, test = "binomial")
+  } else {
+    g <- if (!is.null(n1)) c(n1, n2) else {
+      b <- n / (1 + nratio)
+      if (abs(b - round(b)) < 1e-8 && abs(nratio * round(b) - (n - round(b))) < 1e-8) c(round(b), n - round(b)) else {
+        actual <- TRUE
+        c(floor(b + 1e-9), floor(n * nratio / (1 + nratio) + 1e-9))
+      }
+    }
+    N <- if (actual) n else sum(g)
+    if (g[1] * g[2] > 1e6) stop_r("power twoproportions: Fisher's exact power with groups this large is not translated")
+    tot <- sum(g)
+    x1 <- 0:g[1]
+    rej <- matrix(FALSE, g[1] + 1, g[2] + 1)
+    for (m in 0:tot) {
+      lo <- max(0, m - g[2])
+      hi <- min(g[1], m)
+      k <- lo:hi
+      d <- stats::dhyper(k, g[1], g[2], m)
+      cdf <- cumsum(d)
+      sf <- rev(cumsum(rev(d)))
+      p <- if (!onesided) pmin(1, 2 * pmin(cdf, sf)) else if (v2 > v1) cdf else sf
+      rej[cbind(k + 1, m - k + 1)] <- p <= alpha
+    }
+    w <- function(p1, p2) sum(outer(stats::dbinom(x1, g[1], p1), stats::dbinom(0:g[2], g[2], p2)) * rej)
+    pv <- w(v1, v2)
+    al <- w(v1, v1)
+    R <- g[2] / g[1]
+    delta <- switch(effect, diff = v2 - v1, ratio = v2 / v1, oratio = (v2 / (1 - v2)) / (v1 / (1 - v1)))
+    r <- c(list(power = pv, beta = 1 - pv, alpha = alpha, delta = delta, nfractional = 0, onesided = as.numeric(onesided),
+                N = N), if (actual) list(N_a = sum(g)),
+           list(N1 = g[1], N2 = g[2], nratio = nratio), if (abs(R - nratio) > 1e-12) list(nratio_a = R),
+           list(p1 = v1, p2 = v2, alpha_a = al, type = "test", method = method, test = "fisher", effect = effect))
+  }
+  if (!show) return(invisible(r))
+  num <- function(k, v, extra = "") sprintf("%13s = %9.4f%s", k, v, extra)
+  int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
+  rel <- if (!onesided) "!=" else if (v2 >= v1) ">" else "<"
+  sizes_lines <- function(tot) {
+    if (one) return(int("N", tot))
+    c(int("N", tot), if (g[1] == g[2] && is.null(n1)) int("N per group", g[1]) else c(int("N1", g[1]), int("N2", g[2])))
+  }
+  cat("\n")
+  if (one) {
+    cat("Estimated power for a one-sample proportion test\nBinomial test\n",
+        sprintf("H0: p = p0  versus  Ha: p %s p0", rel), "\n\nStudy parameters:\n\n", sep = "")
+    cat(num("alpha", alpha), int("N", N), num("delta", v2 - v1), num("p0", v1), num("pa", v2), sep = "\n")
+  } else {
+    eff <- paste0("  (", switch(effect, diff = "difference", ratio = "ratio", oratio = "odds ratio"), ")")
+    cat("Estimated power for a two-sample proportions test\nFisher's exact test\n",
+        sprintf("H0: p2 = p1  versus  Ha: p2 %s p1", rel), "\n\nStudy parameters:\n\n", sep = "")
+    given_n <- if (actual) c(int("N", N), if (nratio != 1) num("N2/N1", nratio)) else
+      c(sizes_lines(N), if (g[1] != g[2]) num("N2/N1", R))
+    cat(num("alpha", alpha), given_n, num("delta", delta, eff), num("p1", v1), num("p2", v2), sep = "\n")
+    if (actual) {
+      cat("\nActual sample sizes:\n\n")
+      cat(sizes_lines(sum(g)), sep = "\n")
+      if (g[1] != g[2] && abs(R - nratio) > 1e-12) cat(num("N2/N1", R), "\n", sep = "")
+    }
+  }
+  cat("\nEstimated power and alpha:\n\n", num("power", pv), "\n", num("actual alpha", al), "\n\n", sep = "")
+  invisible(r)
+}
 # power with lists of values (Stata 19): every combination, nested values > alpha > power > n > n1 > n2 >
 # nratio > the method's own numbers (the last varies fastest), each worked out as one power line and
 # printed as Stata's table; r() is the last row's with the table's own (columns, labels, widths,
@@ -1131,6 +1234,9 @@ const R_POWER: &[&str] = &[
     "ntested",
     "ncontrol",
     "rho2_p",
+    "alpha_a",
+    "C_l",
+    "C_u",
     "hdiff",
     "lnhratio",
     "h1",
@@ -1625,7 +1731,26 @@ impl Session {
         if let Some(t) = opts.arg("test", 4) {
             let t = t.trim().to_lowercase();
             match (*method, t.as_str()) {
-                ("oneproportion", "score" | "wald") | ("twoproportions", "chi2") => {
+                ("oneproportion", "score" | "wald") | ("twoproportions", "chi2" | "lrchi2") => {
+                    if t == "lrchi2" && opts.has("continuity", 10) {
+                        return Err(no(
+                            "power twoproportions: lrchi2 and continuity may not be combined (Stata: r(198))",
+                        ));
+                    }
+                    args.push(format!("test = {}", r_text(&t)))
+                }
+                ("oneproportion", "binomial") | ("twoproportions", "fisher") => {
+                    // the exact tests give the power only: Stata refuses the sample size and the effect
+                    if words.len() < 2 || opts.has("power", 5) || !(has_n || n1) {
+                        return Err(no(format!(
+                            "power {method}, test({t}): only the power can be worked out, with two values and n() (Stata: r(198))"
+                        )));
+                    }
+                    if opts.has("continuity", 10) {
+                        return Err(no(format!(
+                            "power {method}: test({t}) and continuity may not be combined (Stata: r(198))"
+                        )));
+                    }
                     args.push(format!("test = {}", r_text(&t)))
                 }
                 _ => {
