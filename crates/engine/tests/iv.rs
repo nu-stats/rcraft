@@ -221,9 +221,23 @@ fn report(text: &str) -> Vec<String> {
 }
 
 fn holds(e: &mut Engine, exprs: &[String]) {
-    let exprs = exprs.join(", ");
-    let (outcome, text) = run(e, Source::Typed, &format!("stopifnot({exprs})"));
-    assert_eq!(outcome, Outcome::Ok, "{exprs}\n{text}");
+    let all = exprs.join(", ");
+    let (outcome, text) = run(e, Source::Typed, &format!("stopifnot({all})"));
+    if outcome != Outcome::Ok {
+        // stopifnot names only the first failure; show each check's own
+        // result, and for a comparison how far apart the two sides are, so a
+        // platform-only difference can be read off the CI log
+        let mut each = String::new();
+        for x in exprs {
+            let shown = x
+                .strip_prefix("isTRUE(")
+                .and_then(|inner| inner.strip_suffix(')'))
+                .unwrap_or(x);
+            let (_, got) = run(e, Source::Typed, &format!("print({shown})"));
+            each.push_str(&format!("\n{x}\n  -> {}", got.trim()));
+        }
+        panic!("{all}\n{text}\nchecks one by one:{each}");
+    }
 }
 
 fn define(e: &mut Engine, code: &str) {
