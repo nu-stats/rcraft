@@ -79,6 +79,9 @@ fn the_share_translated_per_tier() {
     // each source line refused in some run of it: its text and first reason
     let mut source_refused: std::collections::BTreeMap<(String, usize, usize), String> =
         std::collections::BTreeMap::new();
+    // each source line's command word, for the per-command table
+    let mut source_word: std::collections::BTreeMap<(String, usize, usize), String> =
+        std::collections::BTreeMap::new();
     for f in &files {
         let text = std::fs::read_to_string(f).unwrap_or_default();
         let name = f
@@ -104,6 +107,12 @@ fn the_share_translated_per_tier() {
                 .entry((name.clone(), origin.file, origin.span.line))
                 .or_insert(0);
             *slot = (*slot).max(rank);
+            let word = rcraft_statatr::dofile::command_name(line.stata.trim());
+            if !word.is_empty() {
+                source_word
+                    .entry((name.clone(), origin.file, origin.span.line))
+                    .or_insert(word);
+            }
             if let (rcraft_statatr::dofile::Status::Not, Err(e)) = (st, &line.result) {
                 source_refused
                     .entry((name.clone(), origin.file, origin.span.line))
@@ -128,6 +137,27 @@ fn the_share_translated_per_tier() {
             })
             .collect();
         std::fs::write(&out, rows).unwrap_or_else(|e| panic!("{out}: {e}"));
+    }
+    // one row per command and file: source lines (each once), translated, not
+    // translated, known only when run. Names and counts only.
+    if let Ok(out) = std::env::var("RCRAFT_COVERAGE_COMMANDS") {
+        let mut rows: std::collections::BTreeMap<(String, String), (usize, usize, usize, usize)> =
+            std::collections::BTreeMap::new();
+        for (key, word) in &source_word {
+            let rank = distinct.get(key).copied().unwrap_or(0);
+            let e = rows.entry((word.clone(), key.0.clone())).or_default();
+            e.0 += 1;
+            match rank {
+                0 => e.1 += 1,
+                1 => e.3 += 1,
+                _ => e.2 += 1,
+            }
+        }
+        let text: String = rows
+            .iter()
+            .map(|((w, f), (l, t, n, k))| format!("{w}\t{f}\t{l}\t{t}\t{n}\t{k}\n"))
+            .collect();
+        std::fs::write(&out, text).unwrap_or_else(|e| panic!("{out}: {e}"));
     }
     let total = c.total();
     let (dt, dl, dn) = distinct.values().fold((0, 0, 0), |(t, l, n), r| match r {

@@ -9,6 +9,7 @@ publish = false
 
 [dependencies]
 rcraft-catalog.workspace = true
+rcraft-statatr.workspace = true
 
 [lints]
 workspace = true
