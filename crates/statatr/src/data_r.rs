@@ -1531,6 +1531,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_robvar" => descr::ROBVAR_HELPER,
         "stata_bitest" | "stata_bitest_data" | "stata_bitesti" => descr::BITEST_HELPER,
         "stata_swilk" => descr::SWILK_HELPER,
+        "stata_inspect" => descr::INSPECT_HELPER,
+        "stata_dstdize" => descr::DSTDIZE_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_tsfill" => ts::TSFILL_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -3118,6 +3120,8 @@ impl Session {
             "bitest" => self.bitest(c, &opts, out),
             "bitesti" => self.bitesti(c, &opts, out),
             "swilk" => self.swilk(c, &opts, out),
+            "inspect" => self.inspect(c, &opts, out),
+            "dstdize" => self.dstdize(c, &opts, out),
             "display" => self.display(c, out),
             "return"
                 if matches!(

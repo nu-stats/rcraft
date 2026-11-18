@@ -189,6 +189,7 @@ const STATISTICS: &[&str] = &[
     "cii",
     "correlate",
     "cumul",
+    "dstdize",
     "estat",
     "estimates",
     "factor",

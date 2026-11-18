@@ -2130,6 +2130,7 @@ impl Session {
                             && !names.contains(&name)
                             && !(tabstat && super::tabstat::tabstat_text(name))
                             && !(cmd == "centile" && super::centile::centile_names(name))
+                            && !(cmd == "dstdize" && super::descr::dstdize_names(name))
                         {
                             return Err(no(format!(
                                 "{shown} after {cmd} is not kept in R yet (RCraft keeps r() {})",
@@ -2137,6 +2138,7 @@ impl Session {
                             )));
                         }
                         let text = TEXT_NAMES.contains(&name)
+                            || (which == "r" && cmd == "dstdize" && (name == "by" || super::descr::dstdize_names(name)))
                             || (tabstat && super::tabstat::tabstat_text(name))
                             || (which == "e" && self.e_text.contains(name));
                         let get = if which == "e" { "stata_eget" } else { "stata_rget" };

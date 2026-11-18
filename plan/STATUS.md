@@ -5655,3 +5655,14 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   differs by 0.003 and more by a rule not decoded) and for 3 to 11 values (V not decoded). A research item
   for a stronger model: the tied-value rule, V for n < 12, and the 5e-9 offset in W.
 - **Refused, not guessed:** bitest `detail`, robvar with several variables, an empty sample in robvar.
+
+## P2C.12c: inspect and dstdize (batch C of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::descr`): `inspect` (the table, the histogram, labelled variables, r()); `dstdize`
+  with one by() and one stratum variable (tables, summary, r() with matrices and group names, level()).
+- **Checked:** Stata 19 on made-up data: corpus `inspect.do` (19 results, exact), `dstdize.do` (20 results, to 1e-6);
+  the printed output of probes 520, 522 (inspect) and 314 (dstdize) is identical by eye. Notes in
+  `plan/stata/{inspect,dstdize}.md`.
+- **dstdize agrees to about 1e-7**, not 8 digits: Stata keeps adj and se as floats and lands one float step away in
+  some cases.
+- **Refused, not guessed:** dstdize with several by()/strata variables and its other options.

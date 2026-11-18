@@ -968,3 +968,338 @@ impl Session {
         Ok(())
     }
 }
+
+/// `inspect [varlist]`: for each variable the counts of negative, zero and
+/// positive values (and how many of each are integers), the missing values,
+/// a six-row histogram, the smallest and largest value, the number of
+/// distinct values, and for a labelled variable whether every value is in
+/// the label (`plan/stata/inspect.md`). The histogram has a column for each
+/// value when there are five or fewer, else five equal bins from the
+/// smallest to the largest; a column is `floor(6 n / most)` high and a column
+/// with fewer shows a dot at the bottom. A string variable counts as all
+/// missing. r() holds the last variable's counts.
+pub(super) const INSPECT_HELPER: &str = r##"stata_inspect <- function(d, vars = NULL, show = TRUE) {
+  if (is.null(vars)) vars <- names(d)
+  miss <- setdiff(vars, names(d))
+  if (length(miss)) stop("variable ", miss[1], " not found (Stata: r(111))", call. = FALSE)
+  nr <- nrow(d)
+  num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
+  res <- NULL
+  for (v in vars) {
+    xv <- d[[v]]
+    x <- if (is.character(xv)) rep(NA_real_, nr) else num(xv)
+    ok <- !is.na(x)
+    y <- x[ok]
+    neg <- y < 0
+    zer <- y == 0
+    pos <- y > 0
+    int <- y == trunc(y)
+    cnt <- function(sel) c(sum(sel), sum(sel & int), sum(sel & !int))
+    rn <- cnt(neg)
+    rz <- cnt(zer)
+    rp <- cnt(pos)
+    rt <- c(length(y), sum(int), sum(!int))
+    nmiss <- sum(!ok)
+    fy <- stata_float(y)
+    uq <- sort(unique(fy))
+    nu <- length(uq)
+    vl <- if (is.character(xv)) NULL else attr(xv, "labels", exact = TRUE)
+    undoc <- if (is.null(vl)) NA_real_ else sum(!(y %in% num(vl)))
+    cols <- integer(0)
+    if (nu > 0 && nu <= 5) {
+      cols <- vapply(uq, function(u) sum(fy == u), 0L)
+    } else if (nu > 5) {
+      lo <- min(y)
+      hi <- max(y)
+      b <- pmin(floor(5 * (y - lo) / (hi - lo)), 4) + 1
+      cols <- tabulate(b, 5)
+    }
+    h <- if (length(cols)) floor(6 * cols / max(cols)) else integer(0)
+    hist <- vapply(1:6, function(r) {
+      s <- rep(" ", 20)
+      s[1] <- "|"
+      for (j in seq_along(h)) {
+        pos_j <- 4 + 4 * (j - 1)
+        if (h[j] >= 7 - r) s[pos_j] <- "#" else if (r == 6 && h[j] == 0) s[pos_j] <- "."
+      }
+      paste(s, collapse = "")
+    }, "")
+    if (show) {
+      lab <- attr(xv, "label", exact = TRUE)
+      full <- if (is.null(lab) || !nzchar(lab)) paste0(v, ":") else substr(paste0(v, ":  ", lab), 1, 40)
+      under <- if (is.null(lab) || !nzchar(lab)) nchar(v) + 3 else nchar(full)
+      shown <- sub("\\s+$", "", full)
+      cat("\n", formatC(shown, width = -48), "Number of observations\n", sep = "")
+      first <- strrep("-", under)
+      cat(first, strrep(" ", max(0, 39 - under)), strrep("-", 39), "\n", sep = "")
+      cat(sprintf("%50s%14s%14s", "Total", "Integers", "Nonintegers"), "\n", sep = "")
+      f <- function(n) if (n == 0) "-" else format(n, scientific = FALSE, trim = TRUE)
+      row <- function(i, label, r) cat(sprintf("%-29s%-8s%13s%14s%14s", hist[i], label, f(r[1]), f(r[2]), f(r[3])), "\n", sep = "")
+      row(1, "Negative", rn)
+      row(2, "Zero", rz)
+      row(3, "Positive", rp)
+      cat(sprintf("%-29s%s%s   %s   %s", hist[4], strrep(" ", 10), strrep("-", 11), strrep("-", 11), strrep("-", 11)), "\n", sep = "")
+      row(5, "Total", rt)
+      cat(sprintf("%-29s%-8s%13s", hist[6], "Missing", f(nmiss)), "\n", sep = "")
+      cat(sprintf("%-39s%s", paste0("+", strrep("-", 22)), strrep("-", 11)), "\n", sep = "")
+      g9 <- function(u) stata_fmt(u, "%9.0g", trim = TRUE)
+      lo <- if (nu) g9(min(y)) else "."
+      hi <- if (nu > 1) g9(max(y)) else if (nu == 0) "-9.0e+307" else ""
+      cat(sprintf("%-9s%14s%27s", lo, hi, format(nr, scientific = FALSE, trim = TRUE)), "\n", sep = "")
+      if (nu > 99) cat("(More than 99 unique values)\n") else cat(sprintf("%5s unique value%s)", paste0("(", nu), if (nu <= 1) "" else "s"), "\n", sep = "")
+      if (!is.null(vl)) {
+        if (undoc == 0) cat("\n      ", v, " is labeled and all values are documented in the label.\n", sep = "")
+        else cat("\n      ", v, " is labeled but ", format(undoc, scientific = FALSE, trim = TRUE), " values are NOT documented in the label.\n", sep = "")
+      }
+    }
+    res <- list(N_neg = rn[1], N_negint = rn[2], N_0 = rz[1], N_pos = rp[1], N_posint = rp[2], N = rt[1],
+                N_unique = if (nu > 99) NA_real_ else nu, N_undoc = undoc)
+  }
+  res
+}"##;
+
+const R_INSPECT: &[&str] = &[
+    "N_neg", "N_negint", "N_0", "N_pos", "N_posint", "N", "N_unique", "N_undoc",
+];
+
+impl Session {
+    /// `inspect [varlist] [if] [in]`.
+    pub(super) fn inspect(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "inspect")?;
+        if let Some(o) = opts.other(&[]) {
+            stop(out, &format!("option {o} not allowed (Stata: r(101))"));
+            return Ok(());
+        }
+        let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
+        if let Some(v) = vars.iter().find(|v| !is_name(v)) {
+            return Err(no(format!(
+                "inspect {v}: only plain variable names are translated"
+            )));
+        }
+        let rows = self.rows_for(c, out)?;
+        for h in [
+            "stata_inspect",
+            "stata_fmt",
+            "stata_float",
+            "stata_returned",
+        ] {
+            self.helpers.insert(h);
+        }
+        let vpart = if vars.is_empty() {
+            String::new()
+        } else {
+            format!(
+                ", c({})",
+                vars.iter()
+                    .map(|v| r_text(v))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
+        out.line(format!(
+            "stata_r <- stata_inspect({rows}{vpart}{})",
+            if self.quiet(c) { ", show = FALSE" } else { "" }
+        ));
+        self.r_new = Some((R_INSPECT, "inspect".into()));
+        Ok(())
+    }
+}
+
+/// `dstdize cases pop stratum, by(group)`: direct standardization. The
+/// standard population is every row's population by stratum; a group's
+/// adjusted rate is the sum over its strata of the standard share times the
+/// stratum's rate (a stratum the group lacks adds nothing), the crude rate is
+/// its cases over its population, and the variance of the adjusted rate is
+/// the sum of share^2 rate (1 - rate) / population, with a normal interval
+/// (`plan/stata/dstdize.md`).
+pub(super) const DSTDIZE_HELPER: &str = r##"stata_dstdize <- function(d, cases, pop, strata, by, level = 95, show = TRUE) {
+  for (v in c(cases, pop, strata, by)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
+  k <- num(d[[cases]])
+  p <- num(d[[pop]])
+  sv <- d[[strata]]
+  bv <- d[[by]]
+  skey <- if (is.character(sv)) sv else num(sv)
+  bkey <- if (is.character(bv)) bv else num(bv)
+  ok <- !is.na(k) & !is.na(p) & !is.na(skey) & !is.na(bkey) & !(is.character(skey) & skey == "") & !(is.character(bkey) & bkey == "")
+  if (any(is.na(k) | is.na(p))) stop(cases, " has invalid syntax (Stata: r(198))", call. = FALSE)
+  if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
+  k <- k[ok]; p <- p[ok]; skey <- skey[ok]; bkey <- bkey[ok]
+  if (any(k > p)) stop(cases, " must be <= ", pop, " (Stata: r(499))", call. = FALSE)
+  if (anyDuplicated(data.frame(skey, bkey))) {
+    # several rows for a stratum in a group are added up
+    key <- paste(skey, bkey, sep = "")
+    first <- !duplicated(key)
+    k <- as.numeric(rowsum(k, key, reorder = FALSE)[key[first], 1])
+    p <- as.numeric(rowsum(p, key, reorder = FALSE)[key[first], 1])
+    skey <- skey[first]
+    bkey <- bkey[first]
+  }
+  slv <- sort(unique(skey), method = "radix")
+  glv <- sort(unique(bkey), method = "radix")
+  spop <- vapply(slv, function(s) sum(p[skey == s]), 0)
+  sdist <- spop / sum(spop)
+  z <- stats::qnorm(1 - (100 - level) / 200)
+  vl <- if (is.character(bv)) NULL else attr(bv, "labels", exact = TRUE)
+  gname <- function(g) {
+    if (is.character(g)) return(g)
+    n <- if (!is.null(vl)) names(vl)[match(g, num(vl))] else NA
+    if (length(n) && !is.na(n)) n else stata_fmt(g, "%9.0g", trim = TRUE)
+  }
+  comma <- function(x) formatC(x, format = "f", digits = 0, big.mark = ",")
+  out <- lapply(glv, function(g) {
+    i <- which(bkey == g)
+    si <- match(skey[i], slv)
+    o <- order(si)
+    i <- i[o]; si <- si[o]
+    P <- p[i]; K <- k[i]; r <- K / P; s <- sdist[si]
+    adj <- stata_float(sum(s * r))
+    v <- sum(s^2 * r * (1 - r) / P)
+    se <- stata_float(sqrt(v))
+    list(g = g, i = i, P = P, K = K, r = r, s = s, st = skey[i], N = sum(P), cases = sum(K), crude = sum(K) / sum(P),
+         adj = adj, se = se, lb = stata_float(adj - z * se), ub = stata_float(adj + z * se))
+  })
+  if (show) {
+    rule <- strrep("-", 61)
+    cat("\nDirect standardization\n\n")
+    for (o in out) {
+      cat(rule, "\n-> ", by, " = ", gname(o$g), " \n", sep = "")
+      cat("                         -----Unadjusted-----    Std.\n")
+      cat("                                 Pop. Stratum    pop.  \n")
+      cat("  Stratum        Pop.    Cases  dist.    rate   dist.     s*P\n")
+      cat(rule, "\n", sep = "")
+      for (j in seq_along(o$P)) {
+        cat(sprintf("%9s%11s%10s%7.3f%8.4f%8.3f%8.4f", if (is.character(o$st[j])) o$st[j] else stata_fmt(o$st[j], "%9.0g", trim = TRUE),
+                    comma(o$P[j]), format(o$K[j], scientific = FALSE, trim = TRUE), o$P[j] / o$N, o$r[j], o$s[j], o$r[j] * o$s[j]), "\n", sep = "")
+      }
+      cat(rule, "\n", sep = "")
+      cat(sprintf("%-6s%14s%10s", "Total:", comma(o$N), format(o$cases, scientific = FALSE, trim = TRUE)), "\n", sep = "")
+      cat("Note: s*P is Stratum rate multiplied by Std. pop. dist.\n\n")
+      cat(sprintf("%54s %6.1f", "Adjusted cases =", o$adj * o$N), "\n", sep = "")
+      cat(sprintf("%54s %6.4f", "Crude rate =", o$crude), "\n", sep = "")
+      cat(sprintf("%54s %6.4f", "Adjusted rate =", o$adj), "\n", sep = "")
+      cat(sprintf("                         %s%% conf. interval: [%6.4f, %6.4f]", stata_fmt(level, "%9.0g", trim = TRUE), o$lb, o$ub), "\n\n", sep = "")
+    }
+    cat("\nSummary of study populations\n\n")
+    cat(sprintf("%9s             N   Crude rate    Adjusted rate      [%s%% conf. interval]", by, stata_fmt(level, "%9.0g", trim = TRUE)), "\n", sep = "")
+    cat(strrep("-", 79), "\n", sep = "")
+    for (o in out) {
+      cat(sprintf("%9s%14s%13.6f%17.6f%15.6f%11.6f", gname(o$g), comma(o$N), o$crude, o$adj, o$lb, o$ub), "\n", sep = "")
+    }
+    cat(strrep("-", 79), "\n\n", sep = "")
+  }
+  cn <- paste0("c", seq_along(out))
+  row <- function(nm, f) { m <- matrix(vapply(out, f, 0), nrow = 1, dimnames = list(nm, cn)); m }
+  text <- function(g) paste0("`\"", if (is.character(g)) g else stata_fmt(g, "%9.0g", trim = TRUE), "\"'")
+  r <- list(k = length(out), by = by)
+  for (j in seq_along(out)) r[[cn[j]]] <- text(out[[j]]$g)
+  r$se <- row("Se", function(o) o$se)
+  r$ub_adj <- row("Right", function(o) o$ub)
+  r$lb_adj <- row("Left", function(o) o$lb)
+  r$adj <- row("Adjusted", function(o) o$adj)
+  r$crude <- row("Crude", function(o) o$crude)
+  r$Nobs <- row("Nobs", function(o) o$N)
+  r
+}"##;
+
+/// Whether `name` is one of dstdize's `r(c1)`, `r(c2)`, ... (one for each group).
+pub(super) fn dstdize_names(name: &str) -> bool {
+    name.strip_prefix('c')
+        .is_some_and(|n| !n.is_empty() && n.chars().all(|c| c.is_ascii_digit()))
+}
+
+const R_DSTDIZE: &[&str] = &["k", "by", "se", "ub_adj", "lb_adj", "adj", "crude", "Nobs"];
+
+impl Session {
+    /// `dstdize casesvar popvar stratumvar [if] [in], by(groupvar) [level(#)]`.
+    ///
+    /// Observed in Stata 19: by() required r(198); fewer than three
+    /// variables r(102); level() from 10 to 99.99 else r(198); a name the data
+    /// lack r(111); cases above the population r(499); a missing value in
+    /// the cases r(198).
+    pub(super) fn dstdize(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "dstdize")?;
+        if let Some(o) = opts.other(&[("by", 2), ("level", 1)]) {
+            return Err(no(format!(
+                "dstdize with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.weight.is_some() {
+            return Err(no("dstdize with weights is not translated"));
+        }
+        let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
+        if vars.len() < 3 {
+            stop(out, "too few variables specified (Stata: r(102))");
+            return Ok(());
+        }
+        let Some(by) = opts.arg("by", 2) else {
+            stop(out, "option by() required (Stata: r(198))");
+            return Ok(());
+        };
+        let [cases, pop, strata] = vars.as_slice() else {
+            return Err(no(
+                "dstdize with several strata variables is not translated yet",
+            ));
+        };
+        let by = by.trim();
+        if by.split_whitespace().count() != 1 {
+            return Err(no(
+                "dstdize with several by() variables is not translated yet",
+            ));
+        }
+        for v in [cases, pop, strata, &by] {
+            if !is_name(v) {
+                return Err(no(format!(
+                    "dstdize {v}: only plain variable names are translated"
+                )));
+            }
+        }
+        let level = match opts.arg("level", 1) {
+            None => 95.0,
+            Some(l) => {
+                let v: f64 = l
+                    .trim()
+                    .parse()
+                    .map_err(|_| no(format!("level({l}) needs a number")))?;
+                if !(10.0..=99.99).contains(&v) {
+                    stop(
+                        out,
+                        "level() must be between 10 and 99.99 inclusive (Stata: r(198))",
+                    );
+                    return Ok(());
+                }
+                v
+            }
+        };
+        let rows = self.rows_for(c, out)?;
+        for h in [
+            "stata_dstdize",
+            "stata_fmt",
+            "stata_float",
+            "stata_returned",
+        ] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_r <- stata_dstdize({rows}, {}, {}, {}, {}, level = {}{})",
+            r_text(cases),
+            r_text(pop),
+            r_text(strata),
+            r_text(by),
+            r_number(level),
+            if self.quiet(c) { ", show = FALSE" } else { "" }
+        ));
+        self.r_new = Some((R_DSTDIZE, "dstdize".into()));
+        Ok(())
+    }
+}

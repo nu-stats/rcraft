@@ -1934,6 +1934,48 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "inspect",
+        about: "Describes the values of each variable: signs, integers, missing, a small histogram",
+        points: &[
+            p(
+                "As Stata 19",
+                "inspect prints, for each variable, the counts of negative, zero and positive values \
+                 (and how many of each are integers), the missing values, a six-row histogram (a \
+                 column for each value up to five, else five equal bins), the smallest and largest \
+                 value, the number of distinct values (counted as floats, \"More than 99\" above 99) \
+                 and, for a labelled variable, whether every value is in the label. The layout \
+                 is Stata's to the column. r() holds the last variable's counts. A string variable \
+                 counts as all missing.",
+            ),
+            p("Errors", "A name the data lack r(111), an unknown option r(101)."),
+        ],
+    },
+    Guide {
+        command: "dstdize",
+        about: "Direct standardization of rates",
+        points: &[
+            p(
+                "As Stata 19",
+                "dstdize cases pop strata, by(group) takes the standard population as every row's \
+                 population by stratum, and gives each group its adjusted rate (the sum of the \
+                 standard share times the stratum rate), crude rate, normal interval, the tables \
+                 and r() with the matrices adj, crude, se, lb_adj, ub_adj and Nobs and the groups' \
+                 names. level() is taken.",
+            ),
+            p(
+                "Precision",
+                "Stata keeps the adjusted rate and its standard error as floats and sometimes \
+                 lands one float step (about 7e-8 relative) from the rounded double result, in a \
+                 way not found; r() agrees to about 1e-7.",
+            ),
+            p(
+                "Not yet",
+                "Several by() or strata variables, using(), base(), saving(), format(), print, nore \
+                 and weights are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "bitest",
         about: "Exact binomial test of a 0/1 variable",
         points: &[
