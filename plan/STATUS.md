@@ -5484,3 +5484,9 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `fdasave.do` (values read back and return codes, exact). Notes in `plan/stata/fdasave.md`.
 - **Refused, not guessed:** `export sasxport5`, `import sasxport5`, `member()`, `fdause` with data in
   memory and no clear, a labelled column with no label name (from a .dta).
+
+## P2C.12: batch B measured, 2026-11-18
+
+- Probes (539 do-files): 21,896 of 29,676 source lines translated, 6,702 not, 1,078 known only when run:
+  **76.6% of the lines a dry run judges** (75.4% before batch B and the other work of the day; tiers 1 to 5
+  above). Packages (46 do-files): not measured, their folder was not found from this checkout.

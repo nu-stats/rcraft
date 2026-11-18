@@ -504,15 +504,15 @@ Command families:
   `etable`, `dtable`, `table`, `asdoc`, `mtable`, `dyndoc`, `dyntext`, `markdown`.)
 - P2C.12y Data management and files
   (part done: `merge`, `append`, `reshape`, `collapse`, `contract`, `expand`, `egen`,
-  `duplicates`, `label`, `insheet`, `file` and `filefilter` Verified. Still refused:
-  forms of `egen`; `fdasave` and `fdause`, `format`, `sysuse`, `import`, `export`,
-  `outfile`, `outsheet`, `fillin`, `expandcl`, `joinby`, `mvdecode`, `mvencode`,
+  `duplicates`, `label`, `insheet`, `file`, `filefilter`, `fdasave`, `fdause`, `outfile`,
+  `outsheet`, `mkdir` and `rmdir` Verified. Still refused:
+  forms of `egen`; `format`, `sysuse`, `import`, `export`, `fillin`, `expandcl`, `joinby`, `mvdecode`, `mvencode`,
   `clonevar`, `labelbook`, `mark`, `markout`, `char`, `notes`.)
 - P2C.12z Programs, macros and matrices
   (part done: `program`, `syntax`, `tokenize`, `gettoken`, `local`, `global`, `matrix`
   (many forms), `mkmat`, `svmat`, `ereturn` and `frame` Verified. Still refused: other
   `matrix` forms, the macro functions (`colnames`, `rownames`, `coleq`, `colfullnames`,
-  `copy`, `sortedby`, `data label`), `constraint`, `ml`, `c_local`, `sreturn`, `snapshot`,
+  `copy`, `sortedby`, `data label`), `constraint`, `ml`, `c_local`, `sreturn`,
   and the ado helpers (`opts_exclusive`, `_get_diopts`, `_robust`, `_ms_extract_varlist`,
   `_ms_omit_info`).)
 - P2C.12aa Resampling and simulation
