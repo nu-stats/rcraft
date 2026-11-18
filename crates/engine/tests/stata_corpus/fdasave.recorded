@@ -1,0 +1,40 @@
+* Stata 19.0's results for fdasave.do, recorded by cargo xtask stata-record
+@ exists 602
+@ xpf1 0
+@ xpf_none 601
+@ sas4 0
+@ xpf_sas 601
+@ sas5 0
+@ xpf_both 0
+@ n 4 1.5 -2 1.000e+10 .33333333
+@ y 2 1 1 1
+@ z 3 1 0 3
+@ s 1 1 1 1
+@ d 0 1 21915 -365
+@ lab 1 1 1
+@ if 3 1.5 1.000e+10
+@ novallabels 111
+@ nofile 111
+@ missing 601
+@ bogus 198
+@ novars 111
+@ rename_needed 110
+@ renamed 1 2 4 3 2
+@ n1 0
+@ n2 0
+@ n3 0
+@ n4 0
+@ renamed_again 0
+@ noobs 2000
+@ v 0 1 -1 .1 0 -123456.79 2.500e-75 1
+@ toolarge 459
+@ toolong 459
+@ made 0
+@ noobs2 2000
+@ after_noobs 601
+@ after_novars 0
+@ droplabel 111
+@ after_droplabel 601
+@ badvl 198
+@ badopt 198
+@ nofile 100

@@ -120,6 +120,7 @@ mod tsreg;
 mod ttest;
 mod weights;
 mod winsor;
+mod xport;
 mod xt;
 mod xtdpd;
 mod xtregar;
@@ -1391,6 +1392,10 @@ fn helper_code(name: &str) -> &'static str {
         "stata_export_delim" => more::EXPORT_DELIM_HELPER,
         "stata_outfile" => outfiles::OUTFILE_HELPER,
         "stata_snapshot" => snapshot::SNAPSHOT_HELPER,
+        "stata_xpt" => xport::XPORT_HELPER,
+        "stata_fdasave" => xport::FDASAVE_HELPER,
+        "stata_fdause" => xport::FDAUSE_HELPER,
+        "stata_label_dropped" => xport::LABEL_DROPPED_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
         "stata_tabulate" => stats::TABULATE_HELPER,
@@ -2934,6 +2939,8 @@ impl Session {
             "outsheet" => self.outsheet(c, &opts, out),
             "outfile" => self.outfile(c, &opts, out),
             "snapshot" => self.snapshot(c, &opts, out),
+            "fdasave" => self.fdasave(c, &opts, out),
+            "fdause" => self.fdause(c, &opts, out),
             "putexcel" => self.putexcel(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
@@ -3970,8 +3977,10 @@ impl Session {
                                 .unwrap_or_else(|| "NULL".into())
                         )
                     };
+                    // the label's name stays on the column, for fdasave
+                    let name = r_text(lbl);
                     out.line(format!(
-                        "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) haven::labelled(as.numeric(v), labels = {labels}, label = attr(v, \"label\", exact = TRUE))))"
+                        "{d} <- {d} |> dplyr::mutate(dplyr::across({sel}, \\(v) structure(haven::labelled(as.numeric(v), labels = {labels}, label = attr(v, \"label\", exact = TRUE)), vallab = {name})))"
                     ));
                 }
                 Ok(())
@@ -3981,9 +3990,11 @@ impl Session {
                 if names.contains(&"_all") {
                     let all: Vec<String> =
                         self.label_sets.keys().map(|n| label_object(n)).collect();
+                    let dropped: Vec<String> = self.label_sets.keys().map(|n| r_text(n)).collect();
                     self.label_sets.clear();
                     if !all.is_empty() {
                         out.line(format!("rm({})", all.join(", ")));
+                        self.label_dropped(&dropped, out);
                     }
                     return Ok(());
                 }
@@ -3998,6 +4009,8 @@ impl Session {
                         .collect::<Vec<_>>()
                         .join(", ")
                 ));
+                let dropped: Vec<String> = names.iter().map(|n| r_text(n)).collect();
+                self.label_dropped(&dropped, out);
                 Ok(())
             }
             s if !s.is_empty() && "list".starts_with(s) => {

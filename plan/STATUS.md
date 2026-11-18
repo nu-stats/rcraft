@@ -5470,3 +5470,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   exact), and the wrapped lines against Stata's log by hand. Notes in `plan/stata/snapshot.md`.
 - **Not followed:** empty data after a restore (RCraft has none); the date of a day before the 10th
   was not observed.
+
+## P2C.12: fdasave and fdause (batch B of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::xport`, R in `data_r/xport/`): `fdasave file [if] [in] [, rename replace
+  vallabfile()]` writes SAS XPORT version 5 files with formats.xpf or SAS code for the value labels, and
+  `fdause file [, clear novallabels]` reads them, with Stata's checks in Stata's order (the old file
+  erased first under replace), messages and return codes. `label values` keeps the label's name on the
+  column and `label drop` leaves the variables without entries, as Stata does; `decode` gives r(111) and
+  r(182) for a label that is not there.
+- **Checked:** Stata 19: the files RCraft writes equal Stata's byte for byte but the time stamps (six
+  files, and StatCraft's recorded ones), the R round-trips Stata's own files byte for byte, and corpus
+  `fdasave.do` (values read back and return codes, exact). Notes in `plan/stata/fdasave.md`.
+- **Refused, not guessed:** `export sasxport5`, `import sasxport5`, `member()`, `fdause` with data in
+  memory and no clear, a labelled column with no label name (from a .dta).

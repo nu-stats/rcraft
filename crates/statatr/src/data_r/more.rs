@@ -1890,10 +1890,10 @@ impl Session {
             r_text(&g)
         ));
         out.line(format!(
-            "{d} <- {d} |> dplyr::mutate({gn} = (\\(v, keep) {{ if (is.character(v)) stop(\"not possible with string variable\"); l <- attr(v, \"labels\", exact = TRUE); if (is.null(l)) stop({unl}); s <- names(l)[match(as.numeric(v), as.numeric(l))]; s[is.na(s) | !keep] <- \"\"; s }})({src}, {keep}))",
+            "{d} <- {d} |> dplyr::mutate({gn} = (\\(v, keep) {{ if (is.character(v)) stop(\"not possible with string variable\"); l <- attr(v, \"labels\", exact = TRUE); if (is.null(l)) {{ nm <- attr(v, \"vallab\", exact = TRUE); stop(if (!is.null(nm)) paste0(\"label \", nm, \" not found (Stata: r(111))\") else {unl}) }};  s <- names(l)[match(as.numeric(v), as.numeric(l))]; s[is.na(s) | !keep] <- \"\"; s }})({src}, {keep}))",
             gn = r_name(&g),
             src = r_name(var),
-            unl = r_text(&format!("{var} not labeled"))
+            unl = r_text(&format!("{var} not labeled (Stata: r(182))"))
         ));
         self.kinds.insert(g, Kind::Text);
         Ok(())

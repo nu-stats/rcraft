@@ -74,6 +74,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("esttab", &["esttab", "esttab2", "esttab3", "esttab4"]),
     ("expand", &["made", "random"]),
     ("factor", &["factor"]),
+    ("fdasave", &["fdasave"]),
+    ("fdause", &["fdasave"]),
     ("file", &["fileread", "strings"]),
     ("filefilter", &["filefilter"]),
     ("foreach", &["aware", "control"]),
