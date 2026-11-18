@@ -5361,3 +5361,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   1e-6). Notes in `plan/stata/stepwise.md`.
 - **Refused, not guessed:** weights, factor variables, other options; when run: a collinear full model, a
   search ending with no term, and a pr()+pe() search that could take the other kind of step.
+
+## P2C.12: nestreg, 2026-11-18
+
+- **Translated** (`statatr::data_r::nestreg`, a `Prefix::Nestreg` in the reader): `nestreg [, quietly lr
+  lrtable waldtable store()]: regress|logit|probit|poisson depvar (block) (block) ...`, with if/in, level()
+  and, for regress, vce(robust) and vce(cluster). Each block's model is the command on the blocks so far,
+  translated as it would be alone, on the rows the full model uses; the Wald (F with R2, or chi2) and
+  likelihood-ratio boxes and r(wald), r(lr) are worked out in R from the models; e(cmdline), store(), and
+  Stata's errors with their return codes; `quietly` before the command prints nothing.
+- **Checked:** Stata 19 on made-up data: every probe set against Stata's log line by line (blank lines too);
+  corpus `nestreg.do` (regress, 1e-8) and `nestreg_glm.do` (logit, probit, poisson, 1e-5: a Wald p-value agrees to about 6 digits). Notes in
+  `plan/stata/nestreg.md`.
+- **Refused, not guessed:** weights, factor variables, a variable listed twice, other models and options;
+  when run: a collinear model.

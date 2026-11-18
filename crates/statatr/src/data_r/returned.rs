@@ -2216,7 +2216,8 @@ impl Session {
         self.helpers.insert("stata_ml_header");
         // under stepwise: its command line, and e(stepwise) after e(cmdline)
         let (cmdline, args) = match self.sw_cmdline() {
-            Some(line) => (line, format!("{args}, stepwise = TRUE")),
+            Some((line, true)) => (line, format!("{args}, stepwise = TRUE")),
+            Some((line, false)) => (line, args.to_string()),
             None => (cmdline(c), args.to_string()),
         };
         out.line(format!(

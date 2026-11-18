@@ -125,17 +125,20 @@ stata_stepwise <- function(d, kind, lhs, dep, terms, pr = NULL, pe = NULL, forwa
 }
 "##;
 
-/// What a stepwise search leaves for the translation of its command.
+/// What a stepwise search or a nestreg run leaves for the translation of its models.
 #[derive(Debug, Clone)]
 pub(super) struct Sw {
     /// The outcome and every variable of the full model: the rows with none missing.
-    vars: Vec<String>,
-    /// e(cmdline): `stepwise ` and the line after its word, as typed.
-    cmdline: String,
+    pub(super) vars: Vec<String>,
+    /// e(cmdline): for stepwise `stepwise ` and the line after its word, as typed; for
+    /// nestreg the model's own command.
+    pub(super) cmdline: String,
+    /// Whether the fit is a stepwise one, which also leaves e(stepwise).
+    pub(super) mark: bool,
 }
 
 /// The terms of a stepwise command: a word, or a parenthesised group of words.
-fn read_terms(text: &str) -> Option<Vec<Vec<String>>> {
+pub(super) fn read_terms(text: &str) -> Option<Vec<Vec<String>>> {
     let mut terms = Vec::new();
     let mut rest = text.trim();
     while !rest.is_empty() {
@@ -205,9 +208,9 @@ impl Session {
         }
     }
 
-    /// e(cmdline) for a model under stepwise, and whether the fit is one.
-    pub(super) fn sw_cmdline(&self) -> Option<String> {
-        self.sw.as_ref().map(|s| s.cmdline.clone())
+    /// e(cmdline) for a model under stepwise or nestreg, and whether e(stepwise) goes with it.
+    pub(super) fn sw_cmdline(&self) -> Option<(String, bool)> {
+        self.sw.as_ref().map(|s| (s.cmdline.clone(), s.mark))
     }
 
     fn sw_fail(&self, out: &mut Out, msg: &str, rc: u32) -> Result<(), Untranslated> {
@@ -392,6 +395,7 @@ impl Session {
         self.sw = Some(Sw {
             vars,
             cmdline: stepwise_cmdline(c),
+            mark: true,
         });
         let done = self.dispatch(&inner, out);
         self.sw = None;

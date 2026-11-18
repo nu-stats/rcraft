@@ -1280,7 +1280,7 @@ impl Session {
             // (stata_ml_iterations, line for line on probes); nbreg's in three stages
             let iterations = match fit {
                 // stepwise runs its final model without the log
-                _ if opts.has("nolog", 5) || self.sw.is_some() => "NULL",
+                _ if opts.has("nolog", 5) || self.sw.as_ref().is_some_and(|s| s.mark) => "NULL",
                 Fit::Logit => "\"logit\"",
                 Fit::Probit => "\"probit\"",
                 Fit::Ologit => "\"ologit\"",

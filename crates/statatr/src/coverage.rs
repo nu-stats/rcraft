@@ -268,6 +268,7 @@ const MODELS: &[&str] = &[
     "mlexp",
     "mprobit",
     "mvreg",
+    "nestreg",
     "newey",
     "nl",
     "nlogit",

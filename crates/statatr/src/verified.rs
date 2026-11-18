@@ -154,6 +154,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("mlogit", &["collinear", "likelihood"]),
     ("mvtest", &["mvtest"]),
     ("nbreg", &["collinear"]),
+    ("nestreg", &["nestreg", "nestreg_glm"]),
     ("newey", &["arpanel"]),
     ("nl", &["nl"]),
     (

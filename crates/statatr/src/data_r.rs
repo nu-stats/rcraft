@@ -70,6 +70,7 @@ mod model;
 mod more;
 mod mvtest;
 mod natscale;
+mod nestreg;
 mod nl;
 mod nlcom;
 mod npregress;
@@ -1445,6 +1446,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_npregress" => npregress::NPREGRESS_HELPER,
         "stata_ivprobit" => ivprobit::IVPROBIT_HELPER,
         "stata_stepwise" => stepwise::STEPWISE_HELPER,
+        "stata_nestreg" => nestreg::NESTREG_HELPER,
         "stata_tsreg" => tsreg::TSREG_HELPER,
         "stata_xt_predict" => xt::XT_PREDICT_HELPER,
         "stata_xt_ic" => xt::XT_IC_HELPER,
@@ -2732,14 +2734,18 @@ impl Session {
         if self.sw.is_none() && c.prefixes.iter().any(|p| matches!(p, Prefix::Stepwise(_))) {
             return self.stepwise(c, out);
         }
-        // run as a plain command it would give the wrong results
-        if c.prefixes.iter().any(|p| matches!(p, Prefix::Nestreg(_))) {
-            return Err(no("nestreg is not translated yet"));
+        if self.sw.is_none() && c.prefixes.iter().any(|p| matches!(p, Prefix::Nestreg(_))) {
+            return self.nestreg(c, out);
         }
         // the word with no colon after it: not a prefix the reader could take
         if c.name == "stepwise" {
             return Err(no(
                 "stepwise needs its command after a colon: stepwise, pr(#): regress y x1 x2",
+            ));
+        }
+        if c.name == "nestreg" {
+            return Err(no(
+                "nestreg needs its command after a colon: nestreg: regress y (x1) (x2 x3)",
             ));
         }
         match c.name.as_str() {

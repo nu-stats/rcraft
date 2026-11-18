@@ -173,6 +173,7 @@ pub const COMMANDS: &[&str] = &[
     "mlogit",
     "mvtest",
     "nbreg",
+    "nestreg",
     "newey",
     "nl",
     "nlcom",
