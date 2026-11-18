@@ -1936,7 +1936,8 @@ fn r_not_kept(cmd: &str, name: &str) -> Option<&'static str> {
             "it says whether the data changed since they were last saved, which R does not follow",
         ),
         (
-            "power" | super::power::POWER_TABLE | super::power::POWER_ONEWAY,
+            "power" | super::power::POWER_TABLE | super::power::POWER_ONEWAY
+                | super::power::POWER_TREND,
             "init" | "iter" | "deltax" | "function",
         ) => Some(
             "it is a detail of Stata's own search for the answer (its start, rounds, last step and remainder), which R's search does not share",
@@ -2424,6 +2425,11 @@ impl Session {
             Returned::Kept { cmd, .. } if which == "r" && cmd == super::power::POWER_TABLE => {
                 return Err(no(
                     "return list after power with lists of values: Stata 19 lists the table's r(separator) and r(divider) in an order RCraft does not follow (each r() can still be read)",
+                ));
+            }
+            Returned::Kept { cmd, .. } if which == "r" && cmd == super::power::POWER_TREND => {
+                return Err(no(
+                    "return list after power trend: Stata 19 lists its r() in an order that changes with the form, which RCraft does not follow (each r() can still be read)",
                 ));
             }
             Returned::Kept { cmd, .. } if which == "r" && cmd == super::power::POWER_ONEWAY => {

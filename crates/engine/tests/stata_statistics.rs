@@ -1379,6 +1379,37 @@ fn power_exact_and_likelihood_ratio_tests_print_statas_layout() {
     }
 }
 
+/// power trend in Stata 19's layout, line for line from Stata's own output
+/// (plan/stata/power.md): the note, the en dash, a searched two-sided sample
+/// size, a closed one-sided one, and a total that does not split.
+#[test]
+fn power_trend_prints_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let code = script(
+        "power trend 0.2 0.4 0.6\npower trend 0.2 0.4 0.6, onesided\n\
+         power trend 0.6 0.4 0.2, n(61) onesided\n",
+    );
+    let text = ok(&mut e, &code);
+    let lines: Vec<&str> = text.lines().map(str::trim_end).collect();
+    for want in [
+        "note: exposure levels are assumed to be equally spaced.",
+        "Performing iteration ...",
+        "Estimated sample size for a trend test",
+        "Cochran\u{2013}Armitage trend test",
+        "H0: b = 0  versus  Ha: b != 0;  logit(p) = a + b*x",
+        "H0: b = 0  versus  Ha: b > 0;  logit(p) = a + b*x",
+        "H0: b = 0  versus  Ha: b < 0;  logit(p) = a + b*x",
+        "          N_g =         3",
+        "            N =        69",
+        "  N per group =        23",
+        "            N =        54",
+        "Actual sample sizes:",
+        "        power =    0.8477",
+    ] {
+        assert!(lines.contains(&want), "{want:?} in {text}");
+    }
+}
+
 /// cs, cc and ir in Stata 19's layout, line for line from Stata's own output
 /// on the same data (plan/stata/epitab.md); replace keeps the case variable's
 /// label, which then names ir's row.

@@ -1085,6 +1085,70 @@ stata_power_exact <- function(method, v1, v2, alpha, n, n1, n2, nratio, onesided
   cat("\nEstimated power and alpha:\n\n", num("power", pv), "\n", num("actual alpha", al), "\n\n", sep = "")
   invisible(r)
 }
+
+# power trend (Stata 19): Nam's power of the Cochran-Armitage trend test for k equally spaced levels
+# with equal group sizes. S = the weighted covariance of level and proportion, s0 the null and s1 the
+# alternative standard deviation; two-sided adds the opposite tail
+stata_power_trend <- function(p, alpha = 0.05, power = NULL, n = NULL, onesided = FALSE, show = TRUE) {
+  stop_r <- function(m) stop(m, call. = FALSE)
+  k <- length(p)
+  x <- seq_len(k)
+  xb <- mean(x)
+  S <- mean((x - xb) * p)
+  pb <- mean(p)
+  s0 <- sqrt(pb * (1 - pb) * mean((x - xb)^2))
+  s1 <- sqrt(mean((x - xb)^2 * p * (1 - p)))
+  side <- if (onesided) 1 else 2
+  z <- stats::qnorm(1 - alpha / side)
+  pw <- function(N) {
+    l <- sqrt(N) * abs(S)
+    stats::pnorm((l - z * s0) / s1) + if (onesided) 0 else stats::pnorm((-l - z * s0) / s1)
+  }
+  find <- if (is.null(power) && !is.null(n)) "power" else "n"
+  target <- if (is.null(power)) 0.8 else power
+  actual <- FALSE
+  if (find == "n") {
+    f <- function(N) pw(N) - target
+    Na <- stats::uniroot(f, c(1e-6, 10), extendInt = "upX", tol = 1e-13)$root
+    per <- ceiling(Na / k - 1e-9)
+    pv <- target
+  } else {
+    per <- floor(n / k + 1e-9)
+    actual <- per * k != n
+    Na <- per * k
+    if (per < 1) stop_r("power trend: n() is too small for the groups")
+    pv <- pw(Na)
+  }
+  N <- if (actual) n else per * k
+  r <- c(list(continuity = 0, balanced = 1, N_per_group = per, N_avg = per, N_g = k, N_a = Na),
+         stats::setNames(as.list(p), paste0("p", x)),
+         list(power = pv, beta = 1 - pv, alpha = alpha, N = N),
+         if (find == "n") list(nfractional = 0, onesided = as.numeric(onesided)) else
+           list(nfractional = 0, onesided = as.numeric(onesided)),
+         list(type = "test", method = "trend"))
+  if (!show) return(invisible(r))
+  num <- function(k, v) sprintf("%13s = %9.4f", k, v)
+  int <- function(k, v) sprintf("%13s = %9s", k, formatC(v, format = "f", digits = 0, big.mark = ","))
+  rel <- if (!onesided) "!=" else if (S >= 0) ">" else "<"
+  cat("note: exposure levels are assumed to be equally spaced.\n\n")
+  if (find == "n" && !onesided) cat("Performing iteration ...\n\n")
+  cat("Estimated ", if (find == "n") "sample size" else "power", " for a trend test\nCochran–Armitage trend test\n",
+      sprintf("H0: b = 0  versus  Ha: b %s 0;  logit(p) = a + b*x", rel), "\n\nStudy parameters:\n\n", sep = "")
+  study <- c(num("alpha", alpha), if (find == "n") num("power", target),
+             if (find == "power") c(int("N", N), if (!actual) int("N per group", per)),
+             int("N_g", k), mapply(function(i, v) num(paste0("p", i), v), x, p))
+  cat(study, sep = "\n")
+  if (actual) {
+    cat("\nActual sample sizes:\n\n")
+    cat(int("N", per * k), int("N per group", per), sep = "\n")
+  }
+  if (find == "n") {
+    cat("\nEstimated sample sizes:\n\n")
+    cat(int("N", N), int("N per group", per), sep = "\n")
+  } else cat("\nEstimated power:\n\n", num("power", pv), "\n", sep = "")
+  cat("\n")
+  invisible(r)
+}
 # power with lists of values (Stata 19): every combination, nested values > alpha > power > n > n1 > n2 >
 # nratio > the method's own numbers (the last varies fastest), each worked out as one power line and
 # printed as Stata's table; r() is the last row's with the table's own (columns, labels, widths,
@@ -1306,6 +1370,46 @@ const METHODS: &[(&str, &[(&str, usize)])] = &[
 pub(super) const POWER_TABLE: &str = "power, table";
 /// The r() owner after power oneway: `return list` is refused after it.
 pub(super) const POWER_ONEWAY: &str = "power oneway";
+/// The r() owner after power trend: `return list` is refused after it.
+pub(super) const POWER_TREND: &str = "power trend";
+
+/// The r() power trend leaves (Stata 19), for up to 20 levels.
+const R_TREND: &[&str] = &[
+    "continuity",
+    "balanced",
+    "N_per_group",
+    "N_avg",
+    "N_g",
+    "N_a",
+    "power",
+    "beta",
+    "alpha",
+    "N",
+    "nfractional",
+    "onesided",
+    "type",
+    "method",
+    "p1",
+    "p2",
+    "p3",
+    "p4",
+    "p5",
+    "p6",
+    "p7",
+    "p8",
+    "p9",
+    "p10",
+    "p11",
+    "p12",
+    "p13",
+    "p14",
+    "p15",
+    "p16",
+    "p17",
+    "p18",
+    "p19",
+    "p20",
+];
 
 /// The r() power oneway leaves (Stata 19), for up to 20 groups.
 const R_ONEWAY: &[&str] = &[
@@ -1537,6 +1641,9 @@ impl Session {
         }
         let main = c.parts.main.trim();
         let (method, rest) = first_word(main);
+        if method == "trend" {
+            return self.power_trend(c, rest, opts, out);
+        }
         if method == "exponential" {
             return self.power_exponential(c, rest, opts, out);
         }
@@ -1552,7 +1659,7 @@ impl Session {
         let Some((method, extra)) = METHODS.iter().find(|(m, _)| *m == method) else {
             return Err(no(format!(
                 "power {method} is not translated yet (onemean, twomeans, pairedmeans, oneproportion, twoproportions, \
-                 onevariance, twovariances, onecorrelation, twocorrelations, pairedproportions, oneway, logrank, cox, exponential, \
+                 onevariance, twovariances, onecorrelation, twocorrelations, pairedproportions, oneway, logrank, cox, exponential, trend, \
                  oneslope, rsquared and pcorr are)"
             )));
         };
@@ -2140,6 +2247,68 @@ impl Session {
         }
         out.line(format!("stata_r <- stata_power_surv({})", args.join(", ")));
         self.r_new = Some((R_POWER, "power".into()));
+        Ok(())
+    }
+    /// `power trend p1 p2 ... pk`, as Stata 19 prints it (Cochran-Armitage, equally spaced levels).
+    fn power_trend(
+        &mut self,
+        c: &Command,
+        rest: &str,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let known: &[(&str, usize)] = &[("alpha", 5), ("power", 5), ("n", 1), ("onesided", 8)];
+        if let Some(o) = opts.other(known) {
+            return Err(no(format!(
+                "power trend with the option {o} is not translated yet"
+            )));
+        }
+        if rest.contains('(') {
+            return Err(no(
+                "power trend: lists of values (Stata's table) are not translated yet",
+            ));
+        }
+        let bad = |what: String| no(format!("power trend: {what} (Stata: r(198))"));
+        let p = numlist("the proportion", rest)?;
+        if p.len() < 2 || p.len() > 20 {
+            return Err(bad("give 2 to 20 proportions".into()));
+        }
+        if p.iter().any(|x| !(*x > 0.0 && *x < 1.0)) {
+            return Err(bad("proportions must be between 0 and 1".into()));
+        }
+        let mut args = vec![format!("p = {}", r_vector(&p))];
+        for (name, min, range) in [
+            ("alpha", 5, Range::Prob),
+            ("power", 5, Range::Prob),
+            ("n", 1, Range::Whole),
+        ] {
+            let Some(t) = opts.arg(name, min) else {
+                continue;
+            };
+            let [x] = numlist(&format!("{name}()"), &t)?[..] else {
+                return Err(no(format!(
+                    "power trend: a list in {name}() (Stata's table) is not translated yet"
+                )));
+            };
+            if !range.holds(x) {
+                return Err(bad(format!("{name}({x}) {}", range.why())));
+            }
+            args.push(format!("{name} = {}", r_number(x)));
+        }
+        if opts.has("power", 5) && opts.has("n", 1) {
+            return Err(bad("effect-size computation is not available".into()));
+        }
+        if opts.has("onesided", 8) {
+            args.push("onesided = TRUE".into());
+        }
+        if self.quiet(c) {
+            args.push("show = FALSE".into());
+        }
+        for h in ["stata_power", "stata_returned"] {
+            self.helpers.insert(h);
+        }
+        out.line(format!("stata_r <- stata_power_trend({})", args.join(", ")));
+        self.r_new = Some((R_TREND, POWER_TREND.into()));
         Ok(())
     }
 

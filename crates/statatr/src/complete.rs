@@ -1184,6 +1184,7 @@ const SUBCOMMANDS: &[(&str, &[&str])] = &[
             "pairedproportions",
             "pcorr",
             "rsquared",
+            "trend",
             "twocorrelations",
             "twomeans",
             "twoproportions",

@@ -279,3 +279,24 @@ RCraft's, r() to 12 digits or more); corpus `power9.do`.
   searched two-sided ("Performing iteration ...") and closed one-sided as the chi-squared's, targets
   searched; N2 = ceil(nratio N1). r(continuity) = 0 as the chi-squared's; test "lrchi2"; "Likelihood-ratio
   test" under the title.
+
+## trend (2026-11-18)
+
+Observed on Stata 19 SE with no data (probe y2: 14 lines, every printed line identical to RCraft's, the
+values to 12 digits or more); corpus `power10.do`.
+
+- `power trend p1 p2 ... pk` (2 to 20 proportions), n(), power(), alpha(), onesided: Nam's power of the
+  Cochran-Armitage trend test for k equally spaced levels with equal groups ("note: exposure levels are
+  assumed to be equally spaced."). S = mean((x − x̄)·p), s0² = p̄(1 − p̄)·mean((x − x̄)²), s1² = mean((x −
+  x̄)²·p(1 − p)); power = Φ((√N|S| − z·s0)/s1) plus, two-sided, Φ((−√N|S| − z·s0)/s1) (the opposite tail,
+  which only shows at the 7th digit, or the 4th with two levels). Sample size N_a = the root (searched
+  two-sided, "Performing iteration ..."; closed one-sided), N per group = ceil(N_a/k), N = k times it; a
+  total n() that does not split is cut to k·floor(n/k) ("Actual sample sizes"). One-sided, Ha follows
+  the sign of S (`b > 0` or `b < 0`).
+- Printout: "Estimated sample size|power for a trend test", "Cochran–Armitage trend test" (an en dash),
+  `H0: b = 0  versus  Ha: b != 0;  logit(p) = a + b*x`; study parameters alpha, [power], [N, N per
+  group], N_g, p1 ... pk.
+- r() is readable (continuity balanced N_per_group N_avg N_g N_a p# power beta alpha N nfractional onesided
+  type method) but Stata lists it in an order that changes with the form (hash-like, as oneway's), so
+  `return list` after power trend is refused. Refused too: lists (the table), scores(), weights(),
+  nperlevel() (Stata: not allowed), effect-size computation (Stata: not available).
