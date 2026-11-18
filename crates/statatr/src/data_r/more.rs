@@ -2596,6 +2596,8 @@ impl Session {
         }
         // the variables and their types; double(a b) types a group
         let mut vars: Vec<(String, &'static str)> = Vec::new();
+        let mut words_of: std::collections::BTreeMap<String, String> =
+            std::collections::BTreeMap::new();
         let header = c.parts.main.replace('(', " ( ").replace(')', " ) ");
         let mut words = header.split_whitespace().peekable();
         while let Some(w) = words.next() {
@@ -2606,12 +2608,14 @@ impl Session {
                         if n == ")" {
                             break;
                         }
+                        words_of.insert(n.to_string(), w.to_string());
                         vars.push((n.to_string(), t));
                     }
                 } else {
                     let n = words
                         .next()
                         .ok_or_else(|| no("input: a type without a name"))?;
+                    words_of.insert(n.to_string(), w.to_string());
                     vars.push((n.to_string(), t));
                 }
             } else if w == "(" || w == ")" {
@@ -2681,7 +2685,14 @@ impl Session {
                     self.helpers.insert("stata_float");
                     format!("stata_float(as.numeric({v}))")
                 }
-                "string" => format!("as.character({v})"),
+                "string" => match words_of
+                    .get(name)
+                    .and_then(|w| w.strip_prefix("str"))
+                    .and_then(|w| w.parse::<usize>().ok())
+                {
+                    Some(w) => format!("structure(as.character({v}), format.stata = \"%{w}s\")"),
+                    None => format!("as.character({v})"),
+                },
                 _ => format!("as.numeric({v})"),
             };
             parts.push(format!("{} = {v}", r_name(name)));
@@ -2722,6 +2733,17 @@ impl Session {
                 }
                 "double" => {
                     self.storage.insert(name.clone(), Storage::Double);
+                }
+                "integer" => {
+                    let kind = match words_of.get(name).map(String::as_str) {
+                        Some("byte") => Some(Storage::Byte),
+                        Some("int") => Some(Storage::Int),
+                        Some("long") => Some(Storage::Long),
+                        _ => None,
+                    };
+                    if let Some(kind) = kind {
+                        self.storage.insert(name.clone(), kind);
+                    }
                 }
                 _ => {}
             }

@@ -5449,3 +5449,14 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Checked:** Stata 19 on made-up data: each file read back line by line in corpus `outsheet.do` (19
   results, exact). Notes in `plan/stata/outsheet.md`.
 - **Refused, not guessed:** a variable list with ranges or wildcards.
+
+## P2C.12: outfile (batch B of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::outfiles`): `outfile [varlist] using file [if] [in] [, comma noquote
+  nolabel runtogether wide replace]`: the free layout in display-format widths with Stata's line breaking,
+  comma, runtogether for strings, and Stata's errors. `input` now keeps byte, int and long storage and a
+  declared `str#` as a `%#s` display format on the column (also set by `generate str#`).
+- **Checked:** Stata 19 on made-up data: 31 files read back line by line in corpus `outfile.do`
+  (exact). Notes in `plan/stata/outfile.md`.
+- **Refused, not guessed:** `dictionary`, a variable list with ranges or wildcards. A string made another way
+  than input, generate or a file is laid out by its longest value (Stata: declared width).

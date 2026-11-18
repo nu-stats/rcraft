@@ -1388,6 +1388,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_concat" => more::CONCAT_HELPER,
         "stata_collapse_w" => more::COLLAPSE_W_HELPER,
         "stata_export_delim" => more::EXPORT_DELIM_HELPER,
+        "stata_outfile" => outfiles::OUTFILE_HELPER,
         "stata_summarize" => stats::SUMMARIZE_HELPER,
         "stata_tab_values" => stats::TAB_VALUES_HELPER,
         "stata_tabulate" => stats::TABULATE_HELPER,
@@ -2927,6 +2928,7 @@ impl Session {
             "filefilter" => self.filefilter(c, &opts, out),
             "mkdir" | "rmdir" => self.mkdir(c, &opts, out),
             "outsheet" => self.outsheet(c, &opts, out),
+            "outfile" => self.outfile(c, &opts, out),
             "putexcel" => self.putexcel(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
@@ -3489,6 +3491,17 @@ impl Session {
             r_text(var)
         ));
         self.step(c, step, out)?;
+        // a declared str# keeps its width as the display format Stata gives it, which `outfile` and `fdasave` read
+        if let Some(w) = ty
+            .strip_prefix("str")
+            .and_then(|w| w.parse::<usize>().ok())
+            .filter(|_| is_text)
+        {
+            out.line(format!(
+                "attr({d}[[{}]], \"format.stata\") <- \"%{w}s\"",
+                r_text(var)
+            ));
+        }
         // Stata's (6 missing values generated)
         if !self.quiet(c) {
             self.helpers.insert("stata_chg");
@@ -5232,7 +5245,11 @@ display _b[/a]");
             .iter()
             .map(|s| {
                 s.lines()
-                    .rfind(|l| !l.starts_with("stata_gen_note") && !l.starts_with("stata_chg_note"))
+                    .rfind(|l| {
+                        !l.starts_with("stata_gen_note")
+                            && !l.starts_with("stata_chg_note")
+                            && !l.starts_with("attr(")
+                    })
                     .unwrap_or("")
             })
             .collect();

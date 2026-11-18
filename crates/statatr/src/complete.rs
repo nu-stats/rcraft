@@ -184,6 +184,7 @@ pub const COMMANDS: &[&str] = &[
     "oneway",
     "oprobit",
     "order",
+    "outfile",
     "outreg",
     "outreg2",
     "outsheet",
@@ -774,6 +775,17 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     (
         "order",
         &["after(", "alphabetic", "before(", "first", "last"],
+    ),
+    (
+        "outfile",
+        &[
+            "comma",
+            "nolabel",
+            "noquote",
+            "replace",
+            "runtogether",
+            "wide",
+        ],
     ),
     (
         "outsheet",
@@ -2078,6 +2090,8 @@ gettoken a b : s, {o}"
             "mvtest" => format!("mvtest covariances x y, {o}"),
             "file" => format!("file open h using f.txt, write {o}"),
             "mkdir" => format!("mkdir a, {o}"),
+            "outfile" if name == "runtogether" => "outfile using a.raw, runtogether".to_string(),
+            "outfile" => format!("outfile using a.raw, {o}"),
             "outsheet" if name == "delimiter" => {
                 "outsheet using a.out, delimiter(\";\")".to_string()
             }
