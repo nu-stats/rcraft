@@ -46,6 +46,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("count", &["control", "descriptives", "extended_missing"]),
     ("cs", &["epitab", "epitab_by"]),
     ("csi", &["epitab"]),
+    ("cumul", &["cumul"]),
     ("decode", &["labels2"]),
     ("display", &["fmtround"]),
     ("drawnorm", &["asclogit"]),

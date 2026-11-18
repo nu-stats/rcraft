@@ -536,6 +536,7 @@ const WEIGHTED: &[&str] = &[
     "glm",
     "clonevar",
     "pctile",
+    "cumul",
     "expandcl",
     "fillin",
     "mvdecode",
@@ -1521,6 +1522,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_parmest" => parmest::PARMEST_HELPER,
         "stata_xtile" => more::XTILE_HELPER,
         "stata_pctile" => descr::PCTILE_HELPER,
+        "stata_cumul" => descr::CUMUL_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_tsfill" => ts::TSFILL_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -3102,6 +3104,7 @@ impl Session {
             "parmest" => self.parmest(c, &opts, out),
             "xtile" => self.xtile(c, &opts, out),
             "pctile" => self.pctile(c, &opts, out),
+            "cumul" => self.cumul(c, &opts, out),
             "display" => self.display(c, out),
             "return"
                 if matches!(

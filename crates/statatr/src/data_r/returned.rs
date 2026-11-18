@@ -1625,6 +1625,7 @@ pub(super) enum Returned {
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
     "type",
+    "cumul",
     // file open, write and close (file read sets r() itself)
     "file",
     // a program called and returning, and return inside it, set r() themselves

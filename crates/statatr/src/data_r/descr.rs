@@ -250,3 +250,172 @@ impl Session {
         Ok(())
     }
 }
+
+/// `cumul`: the empirical distribution function of a variable, in a new
+/// float variable: the running weight over the total, or the running
+/// weight itself with `freq`, per `by()` group (missing values are a group
+/// of their own). Rows outside the sample, with a missing value or a zero or
+/// missing weight, get missing; a string variable gives a variable of all
+/// missing, as in Stata. `equal` gives tied values the running weight after
+/// the last of them. Without `equal` Stata orders tied values by its own
+/// sort, which is arbitrary and cannot be reproduced; here they keep the
+/// order of the rows (`plan/stata/cumul.md`).
+pub(super) const CUMUL_HELPER: &str = r##"stata_cumul <- function(x, sel = NULL, w = NULL, wtype = "", by = NULL, freq = FALSE, equal = FALSE) {
+  n <- length(x)
+  x <- if (is.character(x)) rep(NA_real_, n) else as.numeric(x)
+  use <- !is.na(x)
+  if (!is.null(sel)) use <- use & rep_len(sel, n) & !is.na(rep_len(sel, n))
+  ww <- if (is.null(w)) rep(1, n) else as.numeric(w)
+  if (!is.null(w)) {
+    use <- use & !is.na(ww)
+    if (any(ww[use] < 0)) stop("negative weights encountered (Stata: r(402))", call. = FALSE)
+    if (wtype == "f" && any(ww[use] != floor(ww[use]))) stop("may not use noninteger frequency weights (Stata: r(401))", call. = FALSE)
+    use <- use & ww != 0
+  }
+  key <- if (is.null(by)) rep("", n) else do.call(paste, c(lapply(by, function(v) {
+    v <- unclass(v)
+    attributes(v) <- NULL
+    ifelse(is.na(v), "\001NA", as.character(v))
+  }), sep = "\002"))
+  res <- rep(NA_real_, n)
+  for (g in unique(key[use])) {
+    idx <- which(use & key == g)
+    idx <- idx[order(x[idx], method = "radix")]
+    # the running weight is held in a float: each sum of the weights is rounded once, and so is the total
+    cs <- cumsum(ww[idx])
+    if (!is.null(w)) cs <- stata_float(cs)
+    if (equal) {
+      run <- rle(x[idx])
+      cs <- rep(cs[cumsum(run$lengths)], run$lengths)
+    }
+    res[idx] <- if (freq) cs else cs / cs[length(cs)]
+  }
+  res <- stata_float(res)
+  attr(res, "format.stata") <- "%9.0g"
+  res
+}"##;
+
+impl Session {
+    /// `cumul varname [if] [in] [weight], generate(newvar) [freq by(varlist)
+    /// equal]`.
+    ///
+    /// Observed in Stata 19: weights f and a (p and i are r(101), a negative
+    /// one r(402), a non-whole fweight r(401)); a missing generate() r(198);
+    /// a name that is there r(110); two variables r(103); none r(100); a name
+    /// the data lack r(111); the new variable is a float labelled `ECDF of x`;
+    /// r() is left alone.
+    pub(super) fn cumul(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "cumul")?;
+        if let Some(o) = opts.other(&[("generate", 3), ("freq", 4), ("by", 2), ("equal", 2)]) {
+            return Err(no(format!(
+                "cumul with the option {o} is not translated yet"
+            )));
+        }
+        for (full, min) in [("generate", 3), ("freq", 4), ("by", 2), ("equal", 2)] {
+            if opts.0.iter().filter(|o| o.is(full, min)).count() > 1 {
+                let shown = if matches!(full, "freq" | "equal") {
+                    full.to_string()
+                } else {
+                    format!("{full}()")
+                };
+                stop(out, &format!("option {shown} not allowed (Stata: r(198))"));
+                return Ok(());
+            }
+        }
+        let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
+        let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let x = match vars.as_slice() {
+            [] => {
+                stop(out, "varlist required (Stata: r(100))");
+                return Ok(());
+            }
+            [v] if is_name(v) => (*v).to_string(),
+            [_] => return Err(no("cumul of an odd name is not translated")),
+            _ => {
+                stop(out, "too many variables specified (Stata: r(103))");
+                return Ok(());
+            }
+        };
+        if let Some((k @ (W::P | W::I), _)) = &w {
+            let word = if *k == W::P { "pweights" } else { "iweights" };
+            stop(out, &format!("{word} not allowed (Stata: r(101))"));
+            return Ok(());
+        }
+        let Some(new) = opts.arg("generate", 3).map(|g| g.trim().to_string()) else {
+            stop(out, "option generate() required (Stata: r(198))");
+            return Ok(());
+        };
+        if !is_name(&new) {
+            stop(out, &format!("{new} invalid name (Stata: r(198))"));
+            return Ok(());
+        }
+        let by: Vec<String> = opts
+            .arg("by", 2)
+            .map(|b| b.split_whitespace().map(str::to_string).collect())
+            .unwrap_or_default();
+        if let Some(b) = by.iter().find(|b| !is_name(b)) {
+            return Err(no(format!("cumul by({b}): variable names are translated")));
+        }
+        let d = self.data()?;
+        let sel = self.condition(c, out)?;
+        out.package("dplyr");
+        self.helpers.insert("stata_cumul");
+        self.helpers.insert("stata_float");
+        out.line(format!(
+            "if ({} %in% names({d})) stop({}, call. = FALSE)",
+            r_text(&new),
+            r_text(&format!("variable {new} already defined (Stata: r(110))"))
+        ));
+        let mut need = vec![x.clone()];
+        need.extend(by.iter().cloned());
+        if let Some((_, wv)) = &w {
+            need.push(wv.clone());
+        }
+        let list = need
+            .iter()
+            .map(|v| r_text(v))
+            .collect::<Vec<_>>()
+            .join(", ");
+        out.line(format!(
+            "if (!all(c({list}) %in% names({d}))) stop(paste0(\"variable \", setdiff(c({list}), names({d}))[1], \" not found (Stata: r(111))\"), call. = FALSE)"
+        ));
+        let mut args = vec![r_name(&x), sel.unwrap_or_else(|| "NULL".into())];
+        if let Some((k, wv)) = &w {
+            args.push(format!("w = {}", r_name(wv)));
+            args.push(format!("wtype = {}", r_text(k.code())));
+        }
+        if !by.is_empty() {
+            args.push(format!(
+                "by = list({})",
+                by.iter().map(|b| r_name(b)).collect::<Vec<_>>().join(", ")
+            ));
+        }
+        if opts.has("freq", 4) {
+            args.push("freq = TRUE".into());
+        }
+        if opts.has("equal", 2) {
+            args.push("equal = TRUE".into());
+        }
+        out.line(format!(
+            "{d} <- dplyr::mutate({d}, {} = stata_cumul({}))",
+            r_name(&new),
+            args.join(", ")
+        ));
+        out.line(format!(
+            "attr({d}[[{}]], \"label\") <- {}",
+            r_text(&new),
+            r_text(&format!("ECDF of {x}"))
+        ));
+        self.kinds.insert(new.clone(), Kind::Number);
+        self.storage.insert(new, Storage::Float);
+        out.caveat(
+            "tied values keep the order of the rows; Stata orders them by its own sort unless equal is given",
+        );
+        Ok(())
+    }
+}

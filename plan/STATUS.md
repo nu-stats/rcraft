@@ -5624,3 +5624,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   source lines, **77.1%** (6,570 not, 1,087 known only when run). `markdown`'s 3 lines translate; the 9 of
   `dyntext` and `dyndoc` are known only when the do-file runs (the source is written a few lines before and read
   then), so a dry run neither counts them for nor against. Packages unchanged: 3,715 of 3,915, **94.9%**.
+## P2C.12c: cumul (batch C of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::descr`): `cumul` with `generate()`, `freq`, `equal`, `by()` (missing values a
+  group), frequency and analytic weights (the running weight kept in a float, as Stata does), `if`, `in`, a
+  string variable, r() left alone, and the errors with their return codes.
+- **Checked:** Stata 19 on made-up data: corpus `cumul.do` (169 results, exact; tied values without `equal`
+  only through what does not depend on their order). Notes in `plan/stata/cumul.md`.
+- **Difference kept (decision for the user):** tied values without `equal` get the order of the rows; Stata's
+  order for them is arbitrary and cannot be reproduced. A runtime refusal was the alternative; it would stop
+  most plotting do-files.
