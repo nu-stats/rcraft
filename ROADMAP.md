@@ -409,9 +409,11 @@ Command families:
   `kap`, `ktau`, `tetrachoric`, `mhodds`, `tabodds`, `sktest`, `alpha` and the epitab
   commands (`cs`, `cc`, `ir` with their immediate forms), each in `VERIFIED`.)
 - P2C.12c Descriptive and checking commands not yet matched
-  (not started, part of it on hold for the user's go: `inspect`, `cumul`, `codebook`,
-  `swilk`, `robvar`, `bitest`, `spearman`, `pctile`, `ds`, and the forms of `summarize`,
-  `list`, `ttest` (`welch`) and `tabodds` that are still refused.)
+  (batch C of the StatCraft port done 2026-11-18: `inspect`, `cumul`, `pcorr`, `bitest` and
+  `bitesti`, `robvar`, `swilk` (12 to 2000 untied values only), `pctile` and `dstdize` (one by() and one
+  stratum variable); `pwmean` on hold (its own session: e() and r() matrices, several over() variables,
+  Tukey). Still open, part of it on hold for the user's go: `codebook`, `spearman`, `ds`, and the forms of
+  `summarize`, `list`, `ttest` (`welch`) and `tabodds` that are still refused.)
 - P2C.12d Functions
   (part done 2026-11-17: 132 functions Verified (distribution, date, string, matrix and
   random-draw functions). Still refused: `word()`, `match()`, `matrix()`, `cofc()`, and
@@ -536,7 +538,7 @@ Command families:
 
 Coverage and matching milestones (the share is of the lines a dry run judges, each source
 line once; **two measures count equally** for the 95% minimum: probe lines and replication-package lines.
-Last measured 2026-11-18 (`main` at 2ba29e2): probes 76.7% (540 do-files), packages 94.9% (3,715 of 3,915
+Last measured 2026-11-18 (`main` at 5646f8c plus batch C): probes 77.3% (542 do-files), packages 94.9% (3,715 of 3,915
 judged source lines of the 46 replication do-files, 5 short of 95%; 98.6% by lines run, the
 older view). Each milestone is closed by measuring again and writing the figure into
 `docs/stata-coverage.md`:
