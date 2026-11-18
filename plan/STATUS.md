@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-11-17.
+Last updated: 2026-11-18.
 
 **Where things are:** Phases 0 to 4 are built (Help, Stata mode and Run my do-file included), but
 P1.2 (a portable R download), P2A.6 and P2A.10 (RCraft's own manuals) and the leftovers
@@ -5548,3 +5548,21 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   **76.7% of the lines a dry run judges** (76.6% before batch A1; +48 lines, as sized).
 - Packages (46 do-files, 5,187 source lines): 3,715 translated, 200 not, 1,272 known only when run: **94.9%**,
   unchanged (the 200 refused lines are not in these six commands).
+
+## Tandem Phase 0 and the two equal 95% measures, 2026-11-18
+
+- **Measures:** the user's 95% minimum is met only when **both** the probe lines (StatCraft's 540 do-files) and
+  the replication-package lines (46 do-files) are at 95% of the lines a dry run judges, each source line once.
+  P2C.12ah (probes) and P2C.12al (packages) in `ROADMAP.md` say so; no sub-task was added or removed.
+- **Fresh baseline** (`main` at 2ba29e2, dry run): probes 21,970 of 28,647 judged source lines, **76.7%**
+  (6,677 not, 1,078 known only when run); packages 3,715 of 3,915, **94.9%** (200 not, 1,272 known only when
+  run; 5 more lines reach 95%). By lines run: probes 86.8%, packages 98.6%. `_natscale` and what follows it is
+  2,178 of the 6,677 refused probe lines (7.6 points).
+- **Tooling:** `cargo xtask stata-matrix` writes `C:\pinokio\api\stata-matrix.csv` (outside both repos, not
+  committed): per command, StatCraft and RCraft status, probe numbers and refused lines, notes, lane owner.
+  `many_dofiles.rs` writes per-command counts with `RCRAFT_COVERAGE_COMMANDS`. First run: 479 commands, both 234,
+  only StatCraft 194, only RCraft 41, neither 10, held 5.
+- **Notes:** `plan/stata/README.md` (new) gives the note format, with the optional R cross-check and Port hints
+  sections and the package header line; `AGENTS.md` allows notes ported from StatCraft in our own words, cited as
+  "ported from statcraft@<sha>".
+- **Not done:** the vendored parser (`lang`, `values`) is not resynced; the drift is assessed in the shared notes.

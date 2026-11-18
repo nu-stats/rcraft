@@ -535,13 +535,16 @@ Command families:
   is reachable without it or without a decision to translate the zero-label cases.)
 
 Coverage and matching milestones (the share is of the lines a dry run judges, each source
-line once; last measured 75.4% for the 539 probes on 2026-11-18, 94.9% of the run lines of
-the 46 replication do-files on 2026-11-13; each milestone is closed by measuring again and
-writing the figure into `docs/stata-coverage.md`):
+line once; **two measures count equally** for the 95% minimum: probe lines and replication-package lines.
+Last measured 2026-11-18 (`main` at 2ba29e2): probes 76.7% (540 do-files), packages 94.9% (3,715 of 3,915
+judged source lines of the 46 replication do-files, 5 short of 95%; 98.6% by lines run, the
+older view). Each milestone is closed by measuring again and writing the figure into
+`docs/stata-coverage.md`:
 
 - P2C.12af Probes 80% of lines translated (not started)
 - P2C.12ag Probes 90% of lines translated (not started)
-- P2C.12ah Probes 95% of lines translated: the user's minimum (not started)
+- P2C.12ah Probes 95% of lines translated: the user's minimum, together with the packages at 95%
+  (P2C.12al); neither measure counts for the minimum without the other (not started)
 - P2C.12ai Probes 98% of lines translated (not started)
 - P2C.12aj Probes 100% of the judged lines translated, or refused only where Stata itself
   stops; the target (not started)
@@ -549,8 +552,9 @@ writing the figure into `docs/stata-coverage.md`):
   run against Stata 19 again and every compared line matches to 8 digits (5,508 of 5,626
   on 2026-11-01, the rest `_natscale`; not measured again since) (not started)
 - P2C.12al Replication packages: the 46 do-files of the 11 public packages to 100% of
-  their lines translated, and every compared result matching (not started; 94.9% of run
-  lines on 2026-11-13)
+  their lines translated, and every compared result matching; 95% of source lines is the
+  user's minimum, equal to the probes' (P2C.12ah) (not started; 94.9% of source lines on
+  2026-11-18, 98.6% of run lines)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.
