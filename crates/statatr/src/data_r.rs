@@ -537,6 +537,7 @@ const WEIGHTED: &[&str] = &[
     "clonevar",
     "pctile",
     "cumul",
+    "pcorr",
     "expandcl",
     "fillin",
     "mvdecode",
@@ -1523,6 +1524,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xtile" => more::XTILE_HELPER,
         "stata_pctile" => descr::PCTILE_HELPER,
         "stata_cumul" => descr::CUMUL_HELPER,
+        "stata_pcorr" => descr::PCORR_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_tsfill" => ts::TSFILL_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -3105,6 +3107,7 @@ impl Session {
             "xtile" => self.xtile(c, &opts, out),
             "pctile" => self.pctile(c, &opts, out),
             "cumul" => self.cumul(c, &opts, out),
+            "pcorr" => self.pcorr(c, &opts, out),
             "display" => self.display(c, out),
             "return"
                 if matches!(

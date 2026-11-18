@@ -202,6 +202,7 @@ pub const COMMANDS: &[&str] = &[
     "outsheet",
     "parmest",
     "pca",
+    "pcorr",
     "pctile",
     "pdslasso",
     "pnorm",

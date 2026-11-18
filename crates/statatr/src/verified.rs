@@ -190,6 +190,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("outsheet", &["outsheet"]),
     ("parmest", &["clogit_margins"]),
     ("pca", &["pca"]),
+    ("pcorr", &["pcorr"]),
     ("pctile", &["pctile"]),
     ("pdslasso", &["pdslasso"]),
     ("poisson", &["collinear", "likelihood"]),

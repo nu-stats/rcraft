@@ -5634,3 +5634,11 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Difference kept (decision for the user):** tied values without `equal` get the order of the rows; Stata's
   order for them is arbitrary and cannot be reproduced. A runtime refusal was the alternative; it would stop
   most plotting do-files.
+
+## P2C.12c: pcorr (batch C of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::descr`): `pcorr` with its table, frequency and analytic weights, `if`, `in`,
+  r(N), r(df), r(sp_corr), r(p_corr) and the errors with their return codes.
+- **Checked:** Stata 19 on made-up data: corpus `pcorr.do` (27 results); the printed table is identical to
+  Stata's in probe 520 (by eye). Notes in `plan/stata/pcorr.md`.
+- **Refused, not guessed:** a collinear regressor (Stata drops the first of the collinear variables), `by:`.

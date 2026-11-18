@@ -419,3 +419,121 @@ impl Session {
         Ok(())
     }
 }
+
+/// `pcorr y x1 x2 ...`: the partial and semipartial correlations of `y` with
+/// each of the others, from the one regression of `y` on all of them (the
+/// rows where every variable is present): with t the coefficient's t
+/// statistic and df the residual degrees of freedom, the partial
+/// correlation is t / sqrt(t^2 + df) and the semipartial one is
+/// t sqrt((1 - R2) / df); the p value is the coefficient's. Frequency weights
+/// count N as their sum, analytic weights keep it as the rows. A variable
+/// repeated is counted once. A regressor collinear with the others is
+/// refused (Stata drops the first of them and prints `(dropped)`; the matrices
+/// it then leaves are not known).
+pub(super) const PCORR_HELPER: &str = r##"stata_pcorr <- function(d, vars, w = NULL, wtype = "", show = TRUE) {
+  miss <- setdiff(vars, names(d))
+  if (length(miss)) stop("variable ", miss[1], " not found (Stata: r(111))", call. = FALSE)
+  vars <- unique(vars)
+  if (length(vars) < 3) stop("too few variables specified (Stata: r(102))", call. = FALSE)
+  num <- function(x) {
+    if (is.character(x)) return(rep(NA_real_, length(x)))
+    x <- unclass(x)
+    attributes(x) <- NULL
+    as.numeric(x)
+  }
+  cols <- lapply(vars, function(v) num(d[[v]]))
+  ok <- Reduce(`&`, lapply(cols, function(x) !is.na(x)))
+  if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
+  W <- if (is.null(w)) rep(1, nrow(d)) else num(d[[w]])
+  W <- W[ok]
+  y <- cols[[1]][ok]
+  X <- cbind(1, do.call(cbind, lapply(cols[-1], function(x) x[ok])))
+  n <- length(y)
+  p <- ncol(X)
+  N <- if (wtype == "f") sum(W) else n
+  df <- N - p
+  if (df < 1) stop("insufficient observations (Stata: r(2001))", call. = FALSE)
+  if (qr(sqrt(W) * X)$rank < p) stop("pcorr with a collinear variable is not translated: Stata drops the first of them", call. = FALSE)
+  B <- solve(crossprod(X * W, X))
+  b <- B %*% crossprod(X * W, y)
+  e <- as.numeric(y - X %*% b)
+  rss <- sum(W * e^2)
+  tss <- sum(W * (y - sum(W * y) / sum(W))^2)
+  R2 <- 1 - rss / tss
+  t <- (b / sqrt(diag(B) * rss / df))[-1]
+  pc <- as.numeric(t / sqrt(t^2 + df))
+  sp <- as.numeric(t * sqrt((1 - R2) / df))
+  pv <- as.numeric(2 * stats::pt(-abs(t), df))
+  nm <- vars[-1]
+  if (show) {
+    cat("(obs=", format(N, scientific = FALSE, trim = TRUE), ")\n\n", sep = "")
+    cat("Partial and semipartial correlations of ", vars[1], " with\n\n", sep = "")
+    cat("               Partial   Semipartial      Partial   Semipartial   Significance\n")
+    cat("   Variable |    corr.         corr.      corr.^2       corr.^2          value\n")
+    cat("------------+-----------------------------------------------------------------\n")
+    for (i in seq_along(nm)) {
+      cat(sprintf("%11s |%9.4f%14.4f%13.4f%14.4f%15.4f", stata_tab_abbrev(nm[i], 11), pc[i], sp[i], pc[i]^2, sp[i]^2, pv[i]), "\n", sep = "")
+    }
+  }
+  mk <- function(v, col) matrix(v, ncol = 1, dimnames = list(nm, col))
+  list(df = df, N = N, sp_corr = mk(sp, "Semipartial Correlation"), p_corr = mk(pc, "Partial Correlation"))
+}"##;
+
+const R_PCORR: &[&str] = &["df", "N", "sp_corr", "p_corr"];
+
+impl Session {
+    /// `pcorr varlist [if] [in] [weight]`.
+    ///
+    /// Observed in Stata 19: weights f and a (p and i r(101), a non-whole
+    /// fweight r(401), a negative one r(402)); no variable r(100); fewer than
+    /// three (after a repeated one is dropped) r(102); a name the data lack
+    /// r(111); no rows, or a string variable, r(2000).
+    pub(super) fn pcorr(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "pcorr")?;
+        if let Some(o) = opts.other(&[]) {
+            return Err(no(format!(
+                "pcorr with the option {o} is not translated yet"
+            )));
+        }
+        let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
+        if let Some((k @ (W::P | W::I), _)) = &w {
+            let word = if *k == W::P { "pweights" } else { "iweights" };
+            stop(out, &format!("{word} not allowed (Stata: r(101))"));
+            return Ok(());
+        }
+        let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
+        if vars.is_empty() {
+            stop(out, "varlist required (Stata: r(100))");
+            return Ok(());
+        }
+        if let Some(v) = vars.iter().find(|v| !is_name(v)) {
+            return Err(no(format!(
+                "pcorr {v}: only plain variable names are translated"
+            )));
+        }
+        let rows = self.rows_for(c, out)?;
+        let rows = self.weighted_rows(rows, &w);
+        for h in ["stata_pcorr", "stata_tables", "stata_returned"] {
+            self.helpers.insert(h);
+        }
+        let wpart = match &w {
+            Some((k, v)) => format!(", w = {}, wtype = {}", r_text(v), r_text(k.code())),
+            None => String::new(),
+        };
+        out.line(format!(
+            "stata_r <- stata_pcorr({rows}, c({}){wpart}{})",
+            vars.iter()
+                .map(|v| r_text(v))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if self.quiet(c) { ", show = FALSE" } else { "" }
+        ));
+        self.r_new = Some((R_PCORR, "pcorr".into()));
+        Ok(())
+    }
+}
