@@ -49,8 +49,10 @@ stata_dump_docx <- function(path) {
 }
 stata_dump_pdf <- function(path) {
   b <- readBin(path, "raw", file.info(path)$size)
-  txt <- rawToChar(replace(b, b == as.raw(0), as.raw(1)))
-  Encoding(txt) <- "latin1"
+  # one plain ASCII character per byte (a non-ASCII byte becomes ?), so that no locale (UTF-8 on Linux and macOS,
+  # Windows code pages) translates the binary file and the byte offsets stay the characters' offsets
+  ascii <- function(r) iconv(rawToChar(replace(r, r == as.raw(0), as.raw(1))), "latin1", "ASCII", sub = "?")
+  txt <- ascii(b)
   st <- gregexpr("(?<!end)stream\r?\n", txt, perl = TRUE)[[1]]
   en <- gregexpr("endstream", txt, fixed = TRUE)[[1]]
   mt <- attr(st, "match.length")
@@ -62,8 +64,7 @@ stata_dump_pdf <- function(path) {
   out <- character(); page <- 0L
   for (i in seq_along(st)) {
     raw <- b[(st[i] + mt[i]):(en[i] - 1)]
-    s <- tryCatch(rawToChar(memDecompress(raw, "gzip")), error = function(e) tryCatch(rawToChar(raw), error = function(e) ""))
-    Encoding(s) <- "latin1"
+    s <- tryCatch(ascii(memDecompress(raw, "gzip")), error = function(e) tryCatch(ascii(raw), error = function(e) ""))
     if (!grepl("T[jJ]", s, useBytes = TRUE)) next
     page <- page + 1L
     out <- c(out, paste0("PAGE ", page))
