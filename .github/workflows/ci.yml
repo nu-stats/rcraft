@@ -52,12 +52,16 @@ jobs:
           # first unless R_HOME says which one to use
           echo "R_HOME=$(Rscript -e 'cat(R.home())')" >> "$GITHUB_ENV"
           Rscript --version
+      # v2: ubuntu-latest moved to 26.04, whose ICU is not the one the cached
+      # stringi was built against (libicui18n.so.74), so the old library cannot
+      # load. Bump the token to drop every library cached before an image change;
+      # it is in restore-keys too, or the old library would come back by prefix.
       - name: Cache the R packages
         uses: actions/cache@v4
         with:
           path: ${{ env.R_LIBS_USER }}
-          key: r-lib-${{ runner.os }}-${{ steps.pins.outputs.r }}-${{ steps.pins.outputs.snapshot }}-${{ hashFiles('.github/workflows/ci.yml') }}
-          restore-keys: r-lib-${{ runner.os }}-${{ steps.pins.outputs.r }}-${{ steps.pins.outputs.snapshot }}-
+          key: r-lib-v2-${{ runner.os }}-${{ steps.pins.outputs.r }}-${{ steps.pins.outputs.snapshot }}-${{ hashFiles('.github/workflows/ci.yml') }}
+          restore-keys: r-lib-v2-${{ runner.os }}-${{ steps.pins.outputs.r }}-${{ steps.pins.outputs.snapshot }}-
       - name: R packages the file-format tests use
         shell: bash
         env:
