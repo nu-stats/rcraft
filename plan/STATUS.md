@@ -5642,3 +5642,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Checked:** Stata 19 on made-up data: corpus `pcorr.do` (27 results); the printed table is identical to
   Stata's in probe 520 (by eye). Notes in `plan/stata/pcorr.md`.
 - **Refused, not guessed:** a collinear regressor (Stata drops the first of the collinear variables), `by:`.
+
+## P2C.12c: bitest, bitesti, robvar and swilk (batch C of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::descr`): `bitest` (frequency weights, if, in) and `bitesti` with Stata's
+  tails, `k_opp`, the one-tail notes and r(); `robvar` (W0, W50, W10 with their p values, r()); `swilk` for
+  12 to 2000 untied values, with V, z and p.
+- **Checked:** Stata 19 on made-up data: corpus `bitest.do` (39 results), `robvar.do` (19), `swilk.do` (15, to
+  1e-6); the printed output of probes 236 (bitest) and 250 (robvar) is identical by eye. Notes in
+  `plan/stata/{bitest,robvar,swilk}.md`.
+- **swilk agrees to 7 digits at best (W within about 1e-8 of Stata's)** and is refused for tied values (Stata's W
+  differs by 0.003 and more by a rule not decoded) and for 3 to 11 values (V not decoded). A research item
+  for a stronger model: the tied-value rule, V for n < 12, and the 5e-9 offset in W.
+- **Refused, not guessed:** bitest `detail`, robvar with several variables, an empty sample in robvar.

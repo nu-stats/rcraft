@@ -537,3 +537,434 @@ impl Session {
         Ok(())
     }
 }
+
+/// `robvar y, by(g)`: the summary table of `y` in each group of `g`
+/// (`tabulate g, summarize(y)`'s), then Levene's W0 and Brown and Forsythe's
+/// W50 and W10: the one-way F statistic of the absolute deviations from each
+/// group's mean, median and 10% trimmed mean (the trimmed mean drops the
+/// integer part of 0.1 n values from each end). r() holds N, the three
+/// statistics and their p values, and the degrees of freedom k - 1 and
+/// N - k. With one group, or when the deviations are all alike, the
+/// statistics are missing.
+pub(super) const ROBVAR_HELPER: &str = r##"stata_robvar <- function(d, y, g, show = TRUE) {
+  for (v in c(y, g)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  if (is.character(d[[y]])) stop("type mismatch (Stata: r(109))", call. = FALSE)
+  num <- function(v) { u <- unclass(v); attributes(u) <- NULL; as.numeric(u) }
+  x <- num(d[[y]])
+  gv <- d[[g]]
+  gk <- if (is.character(gv)) gv else num(gv)
+  keep <- !is.na(x) & !is.na(gk) & !(is.character(gk) & gk == "")
+  if (!any(keep)) stop("no observations (Stata: r(2000))", call. = FALSE)
+  if (show) invisible(stata_oneway(d, y, g, tabulate = TRUE, anova = FALSE))
+  x <- x[keep]
+  gk <- gk[keep]
+  lv <- sort(unique(gk), method = "radix")
+  k <- length(lv)
+  N <- length(x)
+  stat <- function(center) {
+    z <- numeric(N)
+    for (v in lv) { i <- gk == v; z[i] <- abs(x[i] - center(x[i])) }
+    zbar <- mean(z)
+    n <- vapply(lv, function(v) sum(gk == v), 0)
+    zm <- vapply(lv, function(v) mean(z[gk == v]), 0)
+    num <- sum(n * (zm - zbar)^2)
+    den <- sum((z - zm[match(gk, lv)])^2)
+    if (k < 2 || N <= k || den <= 0) return(c(NA_real_, NA_real_))
+    f <- num / (k - 1) / (den / (N - k))
+    c(f, stats::pf(f, k - 1, N - k, lower.tail = FALSE))
+  }
+  w0 <- stat(mean)
+  w50 <- stat(stats::median)
+  w10 <- stat(function(v) mean(v, trim = 0.1))
+  if (show) {
+    one <- function(lab, s) {
+      # 8 significant digits, fewer when the text would pass 10 columns, with the leading zero
+      fm <- function(v) { for (dg in 8:1) { t <- sprintf(paste0("%.", dg, "g"), v); if (nchar(t) <= 10) break }; t }
+      f <- if (is.na(s[1])) " ." else fm(s[1])
+      p <- if (is.na(s[2])) " ." else fm(s[2])
+      cat("\n", sprintf("%-3s =  %s   df(%s, %s)     Pr > F = %s", lab, f, k - 1, N - k, p), "\n", sep = "")
+    }
+    one("W0", w0)
+    one("W50", w50)
+    one("W10", w10)
+    cat("\n")
+  }
+  list(N = N, w10 = w10[1], p_w10 = w10[2], w50 = w50[1], p_w50 = w50[2], w0 = w0[1], p_w0 = w0[2],
+       df_1 = k - 1, df_2 = N - k)
+}"##;
+
+const R_ROBVAR: &[&str] = &[
+    "N", "w10", "p_w10", "w50", "p_w50", "w0", "p_w0", "df_1", "df_2",
+];
+
+impl Session {
+    /// `robvar varname [if] [in], by(varname)`.
+    ///
+    /// Observed in Stata 19: no weights (r(101)); by() required r(198); two
+    /// by variables r(103); a string `varname` r(109); a name the data lack
+    /// r(111); no varname r(100).
+    pub(super) fn robvar(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "robvar")?;
+        if let Some(o) = opts.other(&[("by", 2)]) {
+            return Err(no(format!(
+                "robvar with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.weight.is_some() {
+            stop(out, "weights not allowed (Stata: r(101))");
+            return Ok(());
+        }
+        let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let [y] = vars.as_slice() else {
+            if vars.is_empty() {
+                stop(out, "varlist required (Stata: r(100))");
+                return Ok(());
+            }
+            return Err(no("robvar with more than one variable is not translated"));
+        };
+        if !is_name(y) {
+            return Err(no(format!(
+                "robvar {y}: only a plain variable name is translated"
+            )));
+        }
+        let Some(by) = opts.arg("by", 2) else {
+            stop(out, "option by() required (Stata: r(198))");
+            return Ok(());
+        };
+        let by: Vec<&str> = by.split_whitespace().collect();
+        let [g] = by.as_slice() else {
+            stop(out, "by(): too many variables specified (Stata: r(103))");
+            return Ok(());
+        };
+        if !is_name(g) {
+            return Err(no(format!(
+                "robvar by({g}): only a plain variable name is translated"
+            )));
+        }
+        let rows = self.rows_for(c, out)?;
+        for h in [
+            "stata_robvar",
+            "stata_oneway",
+            "stata_fmt",
+            "stata_returned",
+        ] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_r <- stata_robvar({rows}, {}, {}{})",
+            r_text(y),
+            r_text(g),
+            if self.quiet(c) { ", show = FALSE" } else { "" }
+        ));
+        self.r_new = Some((R_ROBVAR, "robvar".into()));
+        Ok(())
+    }
+}
+
+/// `bitest` and `bitesti`: the exact binomial test of `k` successes in `N`
+/// trials against `p`. The one-sided tails are `Pr(K >= k)` and `Pr(K <= k)`;
+/// the two-sided probability is the tail on `k`'s side plus the opposite
+/// tail from the outcome `k_opp` out, the first one whose probability is no
+/// more than that of `k` (to a relative 1e-7, so equal probabilities count).
+/// When `k` is the expected count the two-sided p is 1; when no outcome on
+/// the other side is as unlikely the other tail is empty, `k_opp` is missing
+/// and the two-sided p is the one tail (Stata says so in a note).
+pub(super) const BITEST_HELPER: &str = r##"stata_bitest <- function(N, k, p, name = NULL, show = TRUE) {
+  if (N > 1e7) stop("bitest with more than 10 million trials is not translated", call. = FALSE)
+  pu <- if (k <= 0) 1 else stats::pbinom(k - 1, N, p, lower.tail = FALSE)
+  pl <- stats::pbinom(k, N, p)
+  mu <- N * p
+  d <- stats::dbinom(0:N, N, p)
+  lim <- d[k + 1] * (1 + 1e-7)
+  kopp <- NA_real_
+  p2 <- NA_real_
+  if (abs(k - mu) <= 1e-9 * max(1, mu)) {
+    kopp <- k
+    p2 <- 1
+  } else if (k < mu) {
+    j0 <- ceiling(mu)
+    hit <- if (j0 <= N) which(d[(j0 + 1):(N + 1)] <= lim) else integer(0)
+    if (length(hit)) kopp <- j0 + hit[1] - 1
+    p2 <- pl + if (is.na(kopp)) 0 else stats::pbinom(kopp - 1, N, p, lower.tail = FALSE)
+  } else {
+    j0 <- floor(mu)
+    hit <- which(d[1:(j0 + 1)] <= lim)
+    if (length(hit)) kopp <- hit[length(hit)] - 1
+    p2 <- pu + if (is.na(kopp)) 0 else stats::pbinom(kopp, N, p)
+  }
+  p2 <- min(p2, 1)
+  if (show) {
+    fk <- function(v) formatC(v, format = "f", digits = 0, big.mark = ",")
+    g <- function(v) stata_fmt(v, "%9.0g", trim = TRUE)
+    cat("\nBinomial probability test\n\n")
+    if (is.null(name)) {
+      cat("            N   Observed k   Expected k   Assumed p   Observed p\n")
+      cat(strrep("-", 64), "\n", sep = "")
+      cat(sprintf("%13s%13s%13s%12.5f%13.5f", fk(N), fk(k), g(mu), p, k / N), "\n\n", sep = "")
+    } else {
+      cat("    Variable |            N   Observed k   Expected k   Assumed p   Observed p\n")
+      cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
+      cat(sprintf("%12s |%13s%13s%13s%12.5f%13.5f", stata_tab_abbrev(name, 12), fk(N), fk(k), g(mu), p, k / N), "\n\n", sep = "")
+    }
+    kk <- fk(k)
+    up <- paste0("Pr(k >= ", kk, ")")
+    lo <- paste0("Pr(k <= ", kk, ")")
+    two <- if (is.na(kopp)) {
+      if (k < mu) lo else up
+    } else if (kopp < k) {
+      paste0("Pr(k <= ", fk(kopp), " or k >= ", kk, ")")
+    } else {
+      paste0("Pr(k <= ", kk, " or k >= ", fk(kopp), ")")
+    }
+    wd <- max(nchar(c(up, lo, two)))
+    line <- function(l, v, tag) cat("  ", formatC(l, width = -wd), " = ", sprintf("%8.6f", v), "  (", tag, ")\n", sep = "")
+    line(up, pu, "one-sided test")
+    line(lo, pl, "one-sided test")
+    line(two, p2, "two-sided test")
+    if (is.na(kopp)) cat("  note: ", if (k < mu) "upper" else "lower", " tail of two-sided p-value is empty\n", sep = "")
+  }
+  list(k_opp = kopp, p = p2, k = k, P_p = p, N = N, p_l = pl, p_u = pu)
+}
+stata_bitest_data <- function(d, v, p, w = NULL, show = TRUE) {
+  if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  num <- function(x) { u <- unclass(x); attributes(u) <- NULL; as.numeric(u) }
+  if (!(p > 0 && p < 1)) stop("success probability #p must be in (0,1) (Stata: r(450))", call. = FALSE)
+  x <- if (is.character(d[[v]])) rep(NA_real_, nrow(d)) else num(d[[v]])
+  wv <- if (is.null(w)) rep(1, nrow(d)) else num(d[[w]])
+  ok <- !is.na(x) & !is.na(wv)
+  if (any(x[ok] != 0 & x[ok] != 1)) stop(v, " is not a 0/1 variable (Stata: r(450))", call. = FALSE)
+  if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
+  stata_bitest(sum(wv[ok]), sum(wv[ok] * x[ok]), p, name = v, show = show)
+}
+stata_bitesti <- function(N, k, p, show = TRUE) {
+  if (N != floor(N)) stop("invalid number of trials (Stata: r(7))", call. = FALSE)
+  if (N < 1 || k < 0 || k != floor(k) || k > N) stop("invalid number of successes (Stata: r(450))", call. = FALSE)
+  if (!(p > 0 && p < 1)) stop("invalid success probability (Stata: r(450))", call. = FALSE)
+  stata_bitest(N, k, p, show = show)
+}"##;
+
+const R_BITEST: &[&str] = &["k_opp", "p", "k", "P_p", "N", "p_l", "p_u"];
+
+impl Session {
+    /// `bitest varname == #p [if] [in] [fweight]`.
+    ///
+    /// Observed in Stata 19: only frequency weights (a, p and i r(101), a
+    /// non-whole one r(401)); a variable other than 0 and 1 r(450); #p outside
+    /// (0,1) r(450); no `=exp` r(100); no rows or a string r(2000).
+    pub(super) fn bitest(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "bitest")?;
+        if let Some(o) = opts.other(&[]) {
+            return Err(no(format!(
+                "bitest with the option {o} is not translated yet"
+            )));
+        }
+        let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
+        if let Some((k, _)) = &w {
+            if *k != W::F {
+                let word = match k {
+                    W::A => "aweights",
+                    W::P => "pweights",
+                    _ => "iweights",
+                };
+                stop(out, &format!("{word} not allowed (Stata: r(101))"));
+                return Ok(());
+            }
+        }
+        let Some((lhs, rhs)) = c.parts.main.split_once("==") else {
+            stop(out, "=exp required (Stata: r(100))");
+            return Ok(());
+        };
+        let vars: Vec<&str> = lhs.split_whitespace().collect();
+        let [v] = vars.as_slice() else {
+            if vars.is_empty() {
+                stop(out, "varlist required (Stata: r(100))");
+                return Ok(());
+            }
+            stop(out, "== invalid name (Stata: r(198))");
+            return Ok(());
+        };
+        if !is_name(v) {
+            return Err(no(format!(
+                "bitest {v}: only a plain variable name is translated"
+            )));
+        }
+        let p: f64 = rhs
+            .trim()
+            .parse()
+            .map_err(|_| no("bitest var == #p: a number is translated for #p"))?;
+        let rows = self.rows_for(c, out)?;
+        let rows = self.weighted_rows(rows, &w);
+        for h in [
+            "stata_bitest",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+        ] {
+            self.helpers.insert(h);
+        }
+        let wpart = match &w {
+            Some((_, wv)) => format!(", w = {}", r_text(wv)),
+            None => String::new(),
+        };
+        out.line(format!(
+            "stata_r <- stata_bitest_data({rows}, {}, {}{wpart}{})",
+            r_text(v),
+            r_number(p),
+            if self.quiet(c) { ", show = FALSE" } else { "" }
+        ));
+        self.r_new = Some((R_BITEST, "bitest".into()));
+        Ok(())
+    }
+
+    /// `bitesti #N #succ #p`.
+    pub(super) fn bitesti(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "bitesti")?;
+        if let Some(o) = opts.other(&[]) {
+            return Err(no(format!(
+                "bitesti with the option {o} is not translated yet"
+            )));
+        }
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let [n, k, p] = words.as_slice() else {
+            stop(out, "invalid syntax (Stata: r(198))");
+            return Ok(());
+        };
+        let num = |s: &str| {
+            s.parse::<f64>()
+                .map_err(|_| no("bitesti: numbers written out are translated"))
+        };
+        let (n, k, p) = (num(n)?, num(k)?, num(p)?);
+        for h in [
+            "stata_bitest",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+        ] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_r <- stata_bitesti({}, {}, {}{})",
+            r_number(n),
+            r_number(k),
+            r_number(p),
+            if self.quiet(c) { ", show = FALSE" } else { "" }
+        ));
+        self.r_new = Some((R_BITEST, "bitest".into()));
+        Ok(())
+    }
+}
+
+/// `swilk varlist`: the Shapiro-Wilk W test for normal data. W is R's
+/// `shapiro.test` (Royston's AS R94); V, z and the p value follow from it by
+/// Royston's normalising transformation for n from 12 to 2000, which gives
+/// Stata's z, V and p to 16 digits from Stata's own W. Stata's W itself
+/// differs from R's by about 1e-8 relative (5e-9 in the probes), so every
+/// value agrees to 7 digits and the printed table to its digits. With tied
+/// values Stata's W differs by much more (a pair of equal values in 10 moved
+/// it by 0.003), by a rule that is not decoded, so tied values are refused;
+/// so are 4 to 11 values (V's rule there is not decoded) and more than 2000.
+/// Fewer than 4 values print a row of dots, as Stata does.
+pub(super) const SWILK_HELPER: &str = r##"stata_swilk <- function(d, vars, show = TRUE) {
+  miss <- setdiff(vars, names(d))
+  if (length(miss)) stop("variable ", miss[1], " not found (Stata: r(111))", call. = FALSE)
+  one <- function(v) {
+    x <- d[[v]]
+    x <- if (is.character(x)) numeric(0) else { u <- unclass(x); attributes(u) <- NULL; as.numeric(u) }
+    x <- x[!is.na(x)]
+    n <- length(x)
+    if (n >= 1 && all(x == x[1])) stop("no observations (Stata: r(2000))", call. = FALSE)
+    if (n < 3) return(list(n = n, w = NA_real_, v = NA_real_, z = NA_real_, p = NA_real_))
+    if (n < 12) stop("swilk of fewer than 12 values is not translated: Stata's V there is not decoded", call. = FALSE)
+    if (n > 2000) stop("swilk of more than 2000 values is not translated", call. = FALSE)
+    if (anyDuplicated(x)) stop("swilk with tied values is not translated: Stata's W differs from Royston's where values repeat", call. = FALSE)
+    W <- unname(stats::shapiro.test(x)$statistic)
+    l <- log(n)
+    mu <- 0.0038915 * l^3 - 0.083751 * l^2 - 0.31082 * l - 1.5861
+    sg <- exp(0.0030302 * l^2 - 0.082676 * l - 0.4803)
+    z <- (log(1 - W) - mu) / sg
+    list(n = n, w = W, v = (1 - W) / exp(mu), z = z, p = stats::pnorm(z, lower.tail = FALSE))
+  }
+  res <- lapply(vars, one)
+  if (show) {
+    cat("\n                   Shapiro–Wilk W test for normal data\n\n")
+    cat("    Variable |        Obs       W           V         z       Prob>z\n")
+    cat(strrep("-", 13), "+", strrep("-", 54), "\n", sep = "")
+    f <- function(v, fmt) if (is.na(v)) formatC(".", width = as.integer(sub("%([0-9]+)\\..*", "\\1", fmt))) else sprintf(fmt, v)
+    for (i in seq_along(vars)) {
+      r <- res[[i]]
+      cat(sprintf("%12s |%11d", stata_tab_abbrev(vars[i], 12), as.integer(r$n)), f(r$w, "%11.5f"), f(r$v, "%11.3f"), f(r$z, "%10.3f"), f(r$p, "%11.5f"), "\n", sep = "")
+    }
+    if (any(vapply(res, function(r) r$n < 3, TRUE))) {
+      cat("Note: The normal approximation to the sampling distribution of W'\n      is valid for 4<=n<=2000.\n")
+    }
+    cat("\n")
+  }
+  r <- res[[length(res)]]
+  list(p = r$p, z = r$z, V = r$v, W = r$w, N = r$n)
+}"##;
+
+const R_SWILK: &[&str] = &["p", "z", "V", "W", "N"];
+
+impl Session {
+    /// `swilk varlist [if] [in]`.
+    ///
+    /// Observed in Stata 19: no weights (r(101)); no variable r(100); a
+    /// constant variable r(2000) "no observations"; a string variable or
+    /// fewer than 4 values a row of dots (r(N) the count); r() holds the
+    /// last variable's p, z, V, W and N.
+    pub(super) fn swilk(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "swilk")?;
+        if let Some(o) = opts.other(&[]) {
+            stop(out, &format!("option {o} not allowed (Stata: r(198))"));
+            return Ok(());
+        }
+        if c.parts.weight.is_some() {
+            stop(out, "weights not allowed (Stata: r(101))");
+            return Ok(());
+        }
+        let vars: Vec<&str> = c.parts.main.split_whitespace().collect();
+        if vars.is_empty() {
+            stop(out, "varlist required (Stata: r(100))");
+            return Ok(());
+        }
+        if let Some(v) = vars.iter().find(|v| !is_name(v)) {
+            return Err(no(format!(
+                "swilk {v}: only plain variable names are translated"
+            )));
+        }
+        let rows = self.rows_for(c, out)?;
+        for h in ["stata_swilk", "stata_tables", "stata_returned"] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_r <- stata_swilk({rows}, c({}){})",
+            vars.iter()
+                .map(|v| r_text(v))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if self.quiet(c) { ", show = FALSE" } else { "" }
+        ));
+        self.r_new = Some((R_SWILK, "swilk".into()));
+        Ok(())
+    }
+}

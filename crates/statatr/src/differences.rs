@@ -1934,6 +1934,82 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "bitest",
+        about: "Exact binomial test of a 0/1 variable",
+        points: &[
+            p(
+                "As Stata 19",
+                "bitest var == #p counts the successes (frequency weights count rows several \
+                 times) and prints the one-sided tails Pr(k >= observed) and Pr(k <= observed), \
+                 and the two-sided probability: the tail on k's side plus the opposite tail from \
+                 the first outcome, past the expected count, that is no more likely than k \
+                 (equal probabilities count). When k is the expected count the two-sided p is 1; \
+                 when no outcome on the other side is as unlikely the other tail is empty, \
+                 r(k_opp) is missing and a note says so. r() holds k_opp, p, k, P_p, N, p_l and \
+                 p_u. The probabilities are exact (pbinom and dbinom) and agree to 9 digits.",
+            ),
+            p(
+                "Errors",
+                "Not a 0/1 variable, or #p outside (0,1), r(450); weights other than fweights \
+                 r(101); no rows r(2000). The messages were read off Stata's log by eye.",
+            ),
+            p("Not yet", "The detail option, by:, and a #p that is not a number written out."),
+        ],
+    },
+    Guide {
+        command: "bitesti",
+        about: "Exact binomial test from the numbers of trials and successes",
+        points: &[p(
+            "As Stata 19",
+            "bitesti #N #succ #p is bitest on the counts, with the same tails, k_opp and r(). \
+             A non-whole #N is r(7), #succ above #N or #p outside (0,1) is r(450), a wrong \
+             number of arguments r(198). The detail option is refused.",
+        )],
+    },
+    Guide {
+        command: "robvar",
+        about: "Tests that the variances of groups are equal, robustly",
+        points: &[
+            p(
+                "As Stata 19",
+                "robvar x, by(g) prints the summary of x in each group, then Levene's W0 and Brown \
+                 and Forsythe's W50 and W10: the one-way F of the absolute deviations from each \
+                 group's mean, median and 10% trimmed mean (the integer part of 0.1 n values \
+                 dropped from each end, as R's mean(trim = 0.1)), with df(k - 1, N - k) and the \
+                 p value. r() holds N, w10, p_w10, w50, p_w50, w0, p_w0, df_1 and df_2; with one \
+                 group or constant data they are missing, as in Stata. All agree to 9 digits.",
+            ),
+            p(
+                "Errors",
+                "Weights r(101), no by() r(198), two by variables r(103), a string variable \
+                 r(109). A sample with no rows is an empty table in Stata; here R stops.",
+            ),
+        ],
+    },
+    Guide {
+        command: "swilk",
+        about: "Shapiro-Wilk test of normality",
+        points: &[
+            p(
+                "What agrees",
+                "W is R's shapiro.test (Royston's AS R94), which differs from Stata's by about \
+                 5e-9 to 9e-9, so W agrees to 7 digits. V, z and the p value are worked out from W \
+                 by Royston's normalising transformation (for 12 to 2000 values), which gives \
+                 Stata's own V, z and p from Stata's own W to 16 digits; they carry W's \
+                 difference, up to 4e-7 relative in the p value. The printed table agrees to its \
+                 digits except where a value is within that rounding of a boundary.",
+            ),
+            p(
+                "What does not",
+                "With tied values Stata's W differs from Royston's by 0.003 or more, by a rule \
+                 not decoded; for 3 to 11 values V comes from a rule not decoded either. Both \
+                 stop with a message instead of printing numbers that would be off. So do more \
+                 than 2000 values. A string variable or fewer than 3 values print a row of dots, \
+                 as in Stata.",
+            ),
+        ],
+    },
+    Guide {
         command: "pcorr",
         about: "Partial and semipartial correlations of one variable with the others",
         points: &[

@@ -2107,7 +2107,9 @@ impl Session {
                         let tabstat = which == "r" && cmd == "tabstat";
                         // power's r(beta) is its number (1 - power), not regress's e(beta)
                         let power_beta = which == "r" && cmd.starts_with("power") && name == "beta";
-                        if (MATRIX_NAMES.contains(&name) && !power_beta)
+                        // swilk's r(W) and r(V) are its numbers
+                        let swilk_scalar = which == "r" && cmd == "swilk" && matches!(name, "W" | "V");
+                        if (MATRIX_NAMES.contains(&name) && !power_beta && !swilk_scalar)
                             || (tabstat && super::tabstat::tabstat_matrix(name))
                         {
                             return Err(no(format!(
