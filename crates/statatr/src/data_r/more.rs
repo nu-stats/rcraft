@@ -3013,7 +3013,7 @@ impl Session {
     /// stays a float, as in Stata's .dta): `merge` takes them for the variables the
     /// data in memory does not have (the keys stay the master's). Whether it has one RCraft does not
     /// know of is R's to say, and it stops there rather than guess the type.
-    fn saved_types(&mut self, path: &str, d: &str, keys: &[String], out: &mut Out) {
+    pub(super) fn saved_types(&mut self, path: &str, d: &str, keys: &[String], out: &mut Out) {
         let Some(kept) = self.saved.get(&self.file_key(path)).cloned() else {
             return;
         };

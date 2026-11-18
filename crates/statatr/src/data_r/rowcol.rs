@@ -757,3 +757,191 @@ impl Session {
         Ok(())
     }
 }
+
+/// `joinby` (`plan/stata/joinby.md`): every pairing of a master row with
+/// the using rows that have the same key; the master's rows stay in their
+/// order (an unmatched one where it is), the using-only rows follow in key
+/// order. The new variables are the using file's other variables, after
+/// `_merge` when there is one. A variable in both files keeps the master's
+/// value; a using-only row has the keys and nothing else of the master.
+pub(super) const JOINBY_HELPER: &str = r#"stata_joinby <- function(d, u, keys, common = FALSE, unmatched = "none", merge = "_merge") {
+  if (common) {
+    keys <- intersect(names(d), names(u))
+    if (!length(keys)) stop("no variables in common to master and using data (Stata: r(198))", call. = FALSE)
+    cat("join on common variables: ", paste(keys, collapse = " "), "\n", sep = "")
+  }
+  for (k in keys) if (!k %in% names(d) || !k %in% names(u)) stop("variable ", k, " not found (Stata: r(111))", call. = FALSE)
+  for (k in keys) if (is.character(d[[k]]) != is.character(u[[k]])) stop("key variable ", k, " is ", if (is.character(d[[k]])) "a string" else "numeric", " in master but ", if (is.character(u[[k]])) "a string" else "numeric", " in using data (Stata: r(106))", call. = FALSE)
+  if (unmatched != "none" && merge %in% names(d)) stop("variable ", merge, " already defined (Stata: r(110))", call. = FALSE)
+  strip <- function(x) { if (is.factor(x)) x <- as.integer(x); attributes(x) <- NULL; x }
+  key <- function(z) {
+    b <- lapply(z[keys], strip)
+    m <- lapply(b, function(x) if (is.double(x) && anyNA(x)) stata_mv(x) else rep(0, length(x)))
+    as.data.frame(c(setNames(b, paste0("k", seq_along(b))), setNames(m, paste0("m", seq_along(m)))), stringsAsFactors = FALSE)
+  }
+  kd <- key(d)
+  ku <- key(u)
+  g <- vctrs::vec_group_id(rbind(kd, ku))
+  gd <- g[seq_len(nrow(d))]
+  gu <- g[nrow(d) + seq_len(nrow(u))]
+  byg <- split(seq_along(gu), gu)
+  hits <- byg[as.character(gd)]
+  n <- vapply(hits, length, 1L)
+  keep_master <- unmatched %in% c("master", "both")
+  reps <- ifelse(n > 0, n, if (keep_master) 1L else 0L)
+  midx <- rep(seq_len(nrow(d)), reps)
+  uidx <- unlist(lapply(seq_along(hits), function(i) if (n[i] > 0) hits[[i]] else if (keep_master) NA_integer_ else integer(0)))
+  if (is.null(uidx)) uidx <- integer(0)
+  code <- ifelse(is.na(uidx), 1, 3)
+  if (unmatched %in% c("using", "both")) {
+    only <- which(!gu %in% gd)
+    if (length(only)) {
+      by <- unlist(lapply(seq_along(keys), function(j) list(ku[[j]][only], ku[[length(keys) + j]][only])), recursive = FALSE)
+      only <- only[do.call(order, c(by, list(na.last = TRUE, method = "radix")))]
+      midx <- c(midx, rep(NA_integer_, length(only)))
+      uidx <- c(uidx, only)
+      code <- c(code, rep(2, length(only)))
+    }
+  }
+  from_u <- is.na(midx)
+  out <- list()
+  for (v in names(d)) {
+    x <- d[[v]]
+    xv <- as.vector(unclass(x))[midx]
+    if (v %in% keys && any(from_u)) {
+      yv <- as.vector(unclass(u[[v]]))[uidx]
+      if (is.character(xv)) xv[from_u] <- yv[from_u] else xv[from_u] <- yv[from_u]
+    }
+    if (is.character(xv)) xv[is.na(xv)] <- ""
+    a <- attributes(x)
+    a$names <- NULL
+    for (nm in names(a)) attr(xv, nm) <- a[[nm]]
+    out[[v]] <- xv
+  }
+  if (unmatched != "none") {
+    lab <- c("only in master data" = 1, "only in using data" = 2, "both in master and using data" = 3)
+    out[[merge]] <- structure(haven::labelled(as.numeric(code), lab), format.stata = "%29.0g")
+  }
+  for (v in setdiff(names(u), names(d))) {
+    x <- u[[v]]
+    xv <- as.vector(unclass(x))[uidx]
+    if (is.character(xv)) xv[is.na(xv)] <- ""
+    a <- attributes(x)
+    a$names <- NULL
+    for (nm in names(a)) attr(xv, nm) <- a[[nm]]
+    out[[v]] <- xv
+  }
+  res <- as.data.frame(out, stringsAsFactors = FALSE, optional = TRUE)
+  names(res) <- names(out)
+  if (!nrow(res)) cat("(joinby on ", paste(keys, collapse = " "), " is empty)\n", sep = "")
+  res
+}"#;
+
+impl Session {
+    /// `joinby [varlist] using filename [, unmatched(none|both|master|using)
+    /// _merge(varname)]`.
+    ///
+    /// Observed in Stata 19: no `using` is r(100); a name the data lack
+    /// r(111); a file that is not there r(601); `unmatched(foo)` `foo is
+    /// invalid value for unmatch()` r(198); another option r(198); `if` is
+    /// r(101); no variable in common r(198); a key that is a string in one
+    /// file and a number in the other r(106); `_merge` there when
+    /// `unmatched()` asks for it r(110). With no varlist it joins on the
+    /// variables in common and says `join on common variables: k`.
+    pub(super) fn joinby(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        let stop = |out: &mut Out, msg: &str| {
+            out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
+        };
+        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
+            return Err(no("joinby with by: is not translated yet"));
+        }
+        let Some(file) = c.using.clone() else {
+            stop(out, "using required (Stata: r(100))");
+            return Ok(());
+        };
+        if c.parts.if_exp.is_some() || c.parts.in_range.is_some() {
+            stop(out, "if not allowed (Stata: r(101))");
+            return Ok(());
+        }
+        if let Some(o) = opts.other(&[
+            ("unmatched", 1),
+            ("_merge", 2),
+            ("update", 6),
+            ("replace", 7),
+        ]) {
+            stop(out, &format!("option {o} not allowed (Stata: r(198))"));
+            return Ok(());
+        }
+        if opts.has("update", 6) || opts.has("replace", 7) {
+            return Err(no(
+                "joinby with update or replace is not translated yet (Stata then makes _merge with other codes)",
+            ));
+        }
+        let unmatched = match opts.arg("unmatched", 1) {
+            None => "none".to_string(),
+            Some(u) => {
+                let u = u.trim().to_ascii_lowercase();
+                let full = ["none", "both", "master", "using"];
+                match full
+                    .iter()
+                    .find(|f| !u.is_empty() && f.starts_with(u.as_str()))
+                {
+                    Some(f) => f.to_string(),
+                    None => {
+                        stop(
+                            out,
+                            &format!("{u} is invalid value for unmatch() (Stata: r(198))"),
+                        );
+                        return Ok(());
+                    }
+                }
+            }
+        };
+        let merge = match opts.arg("_merge", 2) {
+            Some(m) if is_name(m.trim()) => m.trim().to_string(),
+            Some(m) => return Err(no(format!("joinby, _merge({m}): one new name is needed"))),
+            None => "_merge".to_string(),
+        };
+        let words: Vec<&str> = c.parts.main.split_whitespace().collect();
+        let common = words.is_empty();
+        let keys = if common {
+            Vec::new()
+        } else {
+            names(&c.parts.main)?
+        };
+        let d = self.data()?;
+        let path = file_name(&file, "dta");
+        self.saved_types(&path, &d, &keys, out);
+        // the file may hold .a to .z (tagged NAs)
+        self.tags.set(true);
+        self.helpers.insert("stata_joinby");
+        self.helpers.insert("stata_mv");
+        out.package("haven");
+        out.package("vctrs");
+        let p = r_text(&path);
+        out.line(format!(
+            "if (!file.exists({p})) stop({}, call. = FALSE)",
+            r_text(&format!("file {path} not found (Stata: r(601))"))
+        ));
+        out.line(format!(
+            "{d} <- stata_joinby({d}, haven::read_dta({p}), c({}), common = {}, unmatched = {}, merge = {})",
+            keys.iter().map(|k| r_text(k)).collect::<Vec<_>>().join(", "),
+            super::stats::r_logical(common),
+            r_text(&unmatched),
+            r_text(&merge)
+        ));
+        if unmatched != "none" {
+            self.kinds.insert(merge, Kind::Number);
+        }
+        out.caveat(
+            "Stata puts the rows paired within one key in an order of its own, and the order \
+             here is the using file's; sort before looking at them",
+        );
+        Ok(())
+    }
+}

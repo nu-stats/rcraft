@@ -146,6 +146,7 @@ pub const COMMANDS: &[&str] = &[
     "isvar",
     "ivprobit",
     "ivregress",
+    "joinby",
     "kap",
     "kdensity",
     "keep",
@@ -469,6 +470,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "varimax",
         ],
     ),
+    ("joinby", &["unmatched(", "_merge("]),
     ("kap", &["absolute", "tab", "wgt("]),
     (
         "icc",
@@ -2118,6 +2120,7 @@ gettoken a b : s, {o}"
             "outsheet" => format!("outsheet using a.out, {o}"),
             "svmat" => format!("matrix A = (1, 2)\nsvmat A, {o}"),
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),
+            "joinby" => format!("joinby k using t, {o}"),
             "ivprobit" => format!("ivprobit d y (x = w), {o}"),
             "label" => format!("label define l 1 \"a\", {o}"),
             // what predict can make depends on the model: hr after stcox, pr after

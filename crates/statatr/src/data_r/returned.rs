@@ -2396,6 +2396,10 @@ impl Session {
         }
         // a value from the data, with no data known: said why, not run without it
         let d = self.data()?;
+        // _N with no rows is 0, which the first row of an empty column is not
+        if e.trim() == "_N" {
+            return Ok((format!("as.numeric(nrow({d}))"), kind));
+        }
         out.package("dplyr");
         Ok((
             format!("dplyr::transmute({d}, stata_v = {code})$stata_v[1]"),

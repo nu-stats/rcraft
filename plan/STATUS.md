@@ -5531,3 +5531,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   Notes in `plan/stata/expandcl.md`.
 - **Differs:** the order of one observation's copies, which Stata leaves unstable; RCraft's are in the order of
   their cluster numbers. Refused: `by:`.
+
+## P2C.12: joinby (batch A1 of the StatCraft port), 2026-11-18
+
+- **Translated** (`statatr::data_r::rowcol`): `joinby [varlist] using file [, unmatched() _merge()]` with
+  the many-to-many pairing, the unmatched rows, the labelled `_merge`, the keys in common by default and
+  the errors with their return codes. Also `display _N` of data with no rows is 0, as in Stata.
+- **Checked:** Stata 19 on made-up data: corpus `joinby.do` (49 results, exact). Notes in
+  `plan/stata/joinby.md`.
+- **Refused, not guessed:** `update`, `replace` (another `_merge` coding), `by:`. The order of rows paired
+  within a key is the using file's; Stata's is unstable.
