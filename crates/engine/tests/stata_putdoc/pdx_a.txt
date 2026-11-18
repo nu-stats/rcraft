@@ -1,0 +1,59 @@
+P style=Title jc=-
+P style=Subtitle jc=-
+P style=Heading1 jc=-
+P style=Heading2 jc=-
+P style=Heading9 jc=-
+P style=- jc=- .333333333|1234567.89|1.2346e+11|.|    0.333|{biuL}u
+TABLE
+  ROW  0.33 | 1234.5678
+  ROW text | .
+P style=- jc=-
+P style=- jc=-
+TABLE
+  ROW  | x | s | k
+  ROW 2 | 0.50 | a2 | two
+  ROW 3 | 0.75 | a3 | 0
+  ROW 4 | 1.00 | a4 | one
+  ROW 5 | 1.25 | a5 | two
+  ROW 6 | 1.50 | a6 | 0
+P style=- jc=-
+TABLE
+  ROW 0.50
+  ROW 0.75
+P style=- jc=-
+TABLE
+  ROW 1.5 | 2
+  ROW 3 | 4
+  ROW 5 | 6
+P style=- jc=-
+TABLE
+  ROW r1 | 1.5 | 2
+  ROW r2 | 3 | 4
+  ROW r3 | 5 | 6
+P style=- jc=-
+TABLE
+  ROW c1 | c2
+  ROW 1.5 | 2
+  ROW 3 | 4
+  ROW 5 | 6
+P style=- jc=-
+TABLE
+  ROW  | c1 | c2
+  ROW r1 | 1.5 | 2.0
+  ROW r2 | 3.0 | 4.0
+  ROW r3 | 5.0 | 6.0
+P style=- jc=-
+TABLE
+  ROW x{right} | Coefficient{right} | Std. err.{right} | t{right} | P>|t|{right} | [95% conf. interval]{span2}{right}
+  ROW k{right} | -.125{right} | .2538762{right} | -0.49{right} | 0.648{right} | -.8298733{right} | .5798733{right}
+  ROW _cons{right} | 1{right} | .3277528{right} | 3.05{right} | 0.038{right} | .0900124{right} | 1.909988{right}
+P style=- jc=-
+TABLE
+  ROW x{right} | Coefficient{right} | Std. err.{right} | t{right} | P>|t|{right} | [95% conf. interval]{span2}{right}
+  ROW k{right} | -.125{right} | .2538762{right} | -0.49{right} | 0.648{right} | -.8298733{right} | .5798733{right}
+  ROW _cons{right} | 1{right} | .3277528{right} | 3.05{right} | 0.038{right} | .0900124{right} | 1.909988{right}
+P style=- jc=-
+PAGEBREAK
+P style=- jc=center Centered
+P style=- jc=-
+P style=- jc=- second

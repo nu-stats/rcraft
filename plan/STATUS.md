@@ -5566,3 +5566,25 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   sections and the package header line; `AGENTS.md` allows notes ported from StatCraft in our own words, cited as
   "ported from statcraft@<sha>".
 - **Not done:** the vendored parser (`lang`, `values`) is not resynced; the drift is assessed in the shared notes.
+
+## P2C.12: putdocx and putpdf (batch D of the StatCraft port), 2026-11-18
+
+- **Built** (`crates/statatr/src/data_r/putdoc.rs`): the document is kept in R (`stata_pd`, one per command)
+  and written by `save`: `begin`, `clear`, `paragraph` (`style()`, `halign()`), `text` (`bold`, `italic`,
+  `underline`, `linebreak`, `nformat()`), `table` as `(r, c)`, `name(i,j)`, `data()` with `varnames` and
+  `obsno`, `matrix()` and `etable` (after `regress`, kept only while r() still holds it, as Stata does),
+  `describe` (leaving r(nrows) and r(ncols)), `pagebreak` and `save` with `replace` and `append`.
+  Word files are written part by part and zipped (officer's template has no Title or TableGrid style, French
+  style ids, A4 pages); PDFs are drawn by R's pdf device.
+- **Checked:** Stata 19 on made-up data: corpus `putdocx.do` (57 results, return codes and r() counts), and the
+  files read back (`stata_putdoc.rs`): the three files hold the same paragraphs, styles, runs, tables, spans,
+  alignment and page break (Word), and the same text in the same order (PDF), as Stata's. Messages were set
+  against Stata's log by eye. Notes in `plan/stata/putdocx.md`.
+- **Found:** `putdocx table = etable` reads r(), so it fails after `quietly regress` and after a command that
+  replaces r() (`summarize`, `describe name`); putpdf accepts a table of 0 rows and is unusable after.
+- **Refused, not guessed:** `image`, `sectionbreak`, `pagenumber`, `textblock`, `textfile`, document
+  `append()`, `collect`, begin's options, fonts, cell and table options, `etable` after other models.
+- **Measured** (dry run, StatCraft `origin/main` f28890c, 542 probe do-files): probes 22,078 of 28,661 judged
+  source lines, **77.0%** (6,583 not, 1,078 known only when run); `putdocx` 46 of 47 lines and `putpdf` 35 of 35
+  translate (the one left is the line whose text holds a macro known only when run). Packages unchanged: 3,715
+  of 3,915, **94.9%**. `dyntext`, `dyndoc` and `markdown` (12 source lines) are not done.

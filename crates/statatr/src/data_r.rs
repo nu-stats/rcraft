@@ -85,6 +85,7 @@ mod post;
 mod postfile;
 mod power;
 mod prtest;
+mod putdoc;
 mod putexcel;
 mod random;
 mod rangestat;
@@ -751,6 +752,8 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 /// Commands that, translated or not, change neither the data nor its rows nor
 /// e(): they write a table or a file, or look something up.
 const HARMLESS: &[&str] = &[
+    "putdocx",
+    "putpdf",
     "putexcel",
     "outreg",
     "frmttable",
@@ -763,6 +766,8 @@ const HARMLESS: &[&str] = &[
 ];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "putdocx",
+    "putpdf",
     "spmatrix",
     "type",
     "_rcraft_fail",
@@ -1402,6 +1407,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_export_delim" => more::EXPORT_DELIM_HELPER,
         "stata_outfile" => outfiles::OUTFILE_HELPER,
         "stata_snapshot" => snapshot::SNAPSHOT_HELPER,
+        "stata_putdoc" => putdoc::PUTDOC_HELPER,
         "stata_xpt" => xport::XPORT_HELPER,
         "stata_fdasave" => xport::FDASAVE_HELPER,
         "stata_fdause" => xport::FDAUSE_HELPER,
@@ -1696,6 +1702,10 @@ struct Session {
     preserved: Option<Box<Preserved>>,
     /// What the translator followed of each snapshot's data, by its number.
     snaps: BTreeMap<u32, Box<Preserved>>,
+    /// Whether Stata still holds the table the last estimation command printed (Some(true)),
+    /// holds none (Some(false): quietly, or r() was replaced since) or it is not known (None).
+    /// which is what `putdocx table = etable` takes the table from.
+    est_shown: Option<bool>,
     /// The frames other than the current one (`frame create`), each with what
     /// the translator follows of its data, kept in R in `stata_frames`.
     frames: BTreeMap<String, Preserved>,
@@ -2604,6 +2614,9 @@ impl Session {
             .err()
             .is_some_and(|e| e.reason.contains(crate::dofile::KNOWN_WHEN_RUN));
         self.track_returned(c, done.is_ok(), later, r_left);
+        if done.is_ok() && MODELS.contains(&c.name.as_str()) {
+            self.est_shown = Some(!silent(c));
+        }
         if let Err(e) = &done {
             self.lose_estimates(c, &e.reason);
         }
@@ -2962,6 +2975,7 @@ impl Session {
             "fdasave" => self.fdasave(c, &opts, out),
             "fdause" => self.fdause(c, &opts, out),
             "putexcel" => self.putexcel(c, &opts, out),
+            "putdocx" | "putpdf" => self.putdoc(c, &opts, out),
             // query shows Stata's settings, which R does not have
             "query" => {
                 out.caveat("nothing to do in R: query only shows Stata's own settings");

@@ -1,0 +1,57 @@
+* Stata 19.0's results for putdocx.do, recorded by cargo xtask stata-record
+@ pd_nodoc 198
+@ pd_nodoc_text 198
+@ pd_twice 110
+@ pd_noparagraph 198
+@ pd_zero_rows 198
+@ pd_zero_cols 198
+@ pd_halign 198
+@ pd_style_Normal 198
+@ pd_style_Title 0
+@ pd_style_Subtitle 0
+@ pd_style_Heading1 0
+@ pd_style_Heading2 0
+@ pd_style_Heading9 0
+@ pd_style_Heading10 198
+@ pd_style_title 198
+@ pd_style_Emphasis 198
+@ pd_nformat 198
+@ pd_after_table 198
+@ pd_cell_col 198
+@ pd_cell_row 198
+@ pd_cell_none 198
+@ pd_a 2 2
+@ pd_b 6 4
+@ pd_c 2 1
+@ pd_data_nosuch 111
+@ pd_matrix_nosuch 111
+@ pd_m1 3 2
+@ pd_m2 3 3
+@ pd_m3 4 2
+@ pd_m4 4 3
+@ pd_etable_quiet 111
+@ pd_e 3 7
+@ pd_etable_after_describe 111
+@ pd_describe_none 198
+@ pd_after_break 198
+@ pd_save_nofile 198
+@ pd_save_ext 198
+@ pd_save_closed 198
+@ pd_save_exists 198
+@ pd_append_none 601
+@ pd_cleared 198
+@ pf_nodoc 198
+@ pf_twice 110
+@ pf_noparagraph 198
+@ pf_halign 198
+@ pf_style 198
+@ pf_cell_row 198
+@ pf_a 2 3
+@ pf_b 6 3
+@ pf_m1 4 3
+@ pf_e 3 7
+@ pf_save_ext 198
+@ pf_save_closed 198
+@ pf_save_exists 198
+@ pf_append 198
+@ done 1

@@ -1848,6 +1848,7 @@ pub(super) const R_EST_TABLE: &[&str] = &["names"];
 pub(super) const R_ALPHA: &[&str] = &["k"];
 pub(super) const R_FILEFILTER: &[&str] = &["occurrences", "bytes_from", "bytes_to"];
 pub(super) const R_SNAPSHOT: &[&str] = &["snapshot"];
+pub(super) const R_PUTDOC_DESCRIBE: &[&str] = &["nrows", "ncols"];
 pub(super) const R_ALPHA_CASEWISE: &[&str] = &["k", "alpha", "cov", "rho"];
 /// What `test` leaves in r(), with r(dropped_1) and the like for each
 /// constraint it drops (one of base levels only)
@@ -1962,6 +1963,7 @@ impl Session {
             // missing, as after an r-class program (spmatrix summarize: these
             // are its texts, its other r() numbers)
             Some((names, cmd)) if ok && (cmd == "isvar" || cmd == "spmatrix") => {
+                self.est_shown = Some(false);
                 self.helpers.insert("stata_returned");
                 self.r_ret = Returned::Program {
                     cmd,
@@ -1969,6 +1971,7 @@ impl Session {
                 }
             }
             Some((names, cmd)) if ok => {
+                self.est_shown = Some(false);
                 // what reads r() back (stata_rget) comes with it
                 self.helpers.insert("stata_returned");
                 self.r_ret = Returned::Kept {
@@ -1982,7 +1985,10 @@ impl Session {
             _ if name == "frame" && c.parts.main.split_whitespace().next() != Some("pwf") => {}
             // matrix list (the one matrix command translated) leaves it too
             _ if ok && name == "matrix" => {}
+            // putdocx and putpdf: only describe name sets r() (Stata 19, probes 544 and 545)
+            _ if ok && (name == "putdocx" || name == "putpdf") => {}
             _ => {
+                self.est_shown = None;
                 self.r_ret = Returned::Lost(if ok {
                     format!("{name} replaces r() in Stata with results RCraft does not keep yet")
                 } else if later {
