@@ -378,16 +378,178 @@ skipped. It never gives a silent wrong answer.
   and `rgamma()` give Stata 19's numbers, then `runiformint()`,
   `rbinomial()` and the others
   (done 2026-11-01 for the first four: Stata's generator (mt64) and StatCraft's decoding of its normal and gamma methods, written in R (`data_r/random.rs`), its state kept in R across lines, `preserve`, `by` and typed lines; draws only for the rows an `if`/`in` selects; `random.do` in the corpus checks them exactly. Design and observations in `plan/stata/random-numbers.md`. The other random functions followed the same day: `rexponential()`, `rlogistic()`, `rweibull()`, `rweibullph()`, `rcauchy()`, `rlaplace()`, `rpareto()`, `rgeometric()`, `rigaussian()`, `rchi2()`, `runiformint()`, and `rbinomial()`, `rnbinomial()` and `rhypergeometric()` in the ranges whose method is known, checked on 34 × 1,500 of Stata's draws and in `variates.do`. `rt()` (a ratio of uniforms, Stata's stream exactly and its draws to the last bit or so) and `rbeta()` (each method its manual names; equal shapes above 1 not yet) followed on 2026-11-05 (`variates2.do`). Still to come: `rpoisson()`, `rbeta()` with equal shapes above 1, KISS32 under `version` 13 or earlier, `c(rngstate)`.)
-- P2C.12 Closer to Stata on the probes: no compared line differs, and more
-  lines are compared
-  (done 2026-11-01:
-  - `capture` gives Stata's `_rc` and `noisily` Stata's message for a name that is not there (111) and a variable already defined (110).
-  - A refused line that may fit a model hides the model before it from `estat`, `predict`, `test`, `lincom` and `margins`; commands that only read the model (`testparm`, `estimates store`, ...) do not.
-  - A refused add-on or do-file program makes the globals the do-file has not set unknown.
-  - `invnormal()` and `normal()` give Stata's doubles (Verified in `random.do`).
-  - The storage types' `c()` constants are translated.
-  - `_natscale` uses StatCraft's decoded rule.
-  Observations in `plan/stata/errors-and-normal.md`. Still to come: `poisson` to 8 digits, whose starting point is not yet known.)
+**P2C.12 Closer to Stata on the probes** is the name of a group, not a task, and is not
+counted. Its goal: no compared line differs, and more lines are compared, until every
+line of the probes and the replication packages that Stata runs is translated and gives
+Stata's result. Until 2026-11-18 it was one task, marked done on 2026-11-01, which took in
+all the Stata-matching work after that and so hid it. It is split into P2C.12a to
+P2C.12al: 38 tasks, grouped by command family (a to ae) and by coverage and matching
+milestones (af to al). Marks: **done** only where every command named is in `VERIFIED`
+(`crates/statatr/src/verified.rs`) with a corpus file and recorded Stata 19 output;
+**part done** where the commands are Verified but some forms are still refused; **not
+started** otherwise; **on hold** where the user parked it (still to be built, not dropped).
+Marks are as of `main` on 2026-11-18. The 95% in the milestones is a floor, not the end.
+Findings per command are in `plan/stata/`; what the probes still refuse, in
+`docs/stata-coverage.md`.
+
+Command families:
+
+- P2C.12a Foundations
+  (done 2026-11-01: `capture` gives Stata's `_rc` and `noisily` its message for a name
+  that is not there (111) and a variable already defined (110); a refused line that may
+  fit a model hides the model before it from `estat`, `predict`, `test`, `lincom` and
+  `margins`; a refused add-on or do-file program makes the globals the do-file has not
+  set unknown; `invnormal()` and `normal()` give Stata's doubles; the storage types'
+  `c()` constants. Errors that stop a line are printed in Stata's words (2026-11-15).
+  Observations in `plan/stata/errors-and-normal.md`.)
+- P2C.12b Tests, tables and intervals
+  (done 2026-11-17: `ttest` and `ttesti`, `sdtest`, `prtest`, `ranksum`, `signrank`,
+  `signtest`, `kwallis`, `oneway`, `ci`, `centile`, `tabstat`, `tabulate` with
+  percentages, `correlate`, `pwcorr`, `mean`, `proportion`, `ratio`, `total`, `icc`,
+  `kap`, `ktau`, `tetrachoric`, `mhodds`, `tabodds`, `sktest`, `alpha` and the epitab
+  commands (`cs`, `cc`, `ir` with their immediate forms), each in `VERIFIED`.)
+- P2C.12c Descriptive and checking commands not yet matched
+  (not started, part of it on hold for the user's go: `inspect`, `cumul`, `codebook`,
+  `swilk`, `robvar`, `bitest`, `spearman`, `pctile`, `ds`, and the forms of `summarize`,
+  `list`, `ttest` (`welch`) and `tabodds` that are still refused.)
+- P2C.12d Functions
+  (part done 2026-11-17: 132 functions Verified (distribution, date, string, matrix and
+  random-draw functions). Still refused: `word()`, `match()`, `matrix()`, `cofc()`, and
+  the old names `chiprob()`, `fprob()`, `invfprob()`, `invnorm()`, `normprob()` and
+  `nttail()`. `rpoisson()` and `rbeta()` with equal shapes stay with P2C.11.)
+- P2C.12e Single-equation models
+  (part done 2026-11-17: `regress`, `logit`, `probit`, `poisson`, `nbreg`, `ologit`,
+  `oprobit`, `mlogit`, `clogit`, `anova`, `rreg`, `robreg`, `newey`, `prais` and `nl`
+  Verified. Some forms of each are still refused (the probes' `logit`, `probit`,
+  `poisson`, `nbreg`, `regress` and `ologit` groups, `e(ic)` after `logit`), and
+  `poisson` to 8 digits, open since 2026-11-01, is not recorded closed.)
+- P2C.12f Other single-equation models
+  (not started, except that `glm` is translated by maximum likelihood (2026-11-15) and is
+  not yet in the corpus: `tobit`, `cnsreg`, `fracreg`, `betareg`, `qreg`, `areg`,
+  `heckman`, `intreg`, `truncreg`, `mprobit`, `slogit`, `zip`, `zinb`, `ztp`, `ztnb`,
+  `tpoisson`, `tnbreg`, `cloglog`, `hetprobit`, `logistic`, `nlogit`.)
+- P2C.12g Post-estimation
+  (part done 2026-11-17: `predict`, `estat`, `estimates`, `test`, `testparm`, `lincom`,
+  `nlcom`, `testnl`, `margins`, `marginsplot` and `suest` Verified. Still refused:
+  `contrast`, `pwcompare`, `pwmean`, `hausman`, `lrtest`, `predictnl`, forms of `margins`
+  and `estat` after models not yet translated, and some `estimates` forms.)
+- P2C.12h `stepwise`
+  (part done 2026-11-17: `regress`, `logit`, `probit` and `poisson`, Verified
+  (`stepwise.do`, `stepwise_glm.do`). Refused, being built: weights, `vce()` and
+  `robust`, factor variables, `tobit`. `plan/stata/stepwise.md`.)
+- P2C.12i `nestreg`
+  (part done 2026-11-18: `regress`, `logit`, `probit` and `poisson`, Verified
+  (`nestreg.do`, `nestreg_glm.do`). Refused: weights, factor variables, a variable listed
+  twice, other models. `plan/stata/nestreg.md`.)
+- P2C.12j Panel models, first set
+  (part done 2026-11-16: `xtset`, `xtreg`, `xtregar`, `xtabond`, `xtdpd` and `xtdpdsys`
+  Verified. Some `xtreg` forms are still refused.)
+- P2C.12k Panel models, the rest
+  (not started: `xtlogit`, `xtpoisson`, `xtnbreg`, `xtprobit`, `xtcloglog`, `xtologit`,
+  `xtoprobit`, `xttobit`, `xtgls`, `xtgee`, `xtpcse`, `xtivreg`, `xtunitroot`,
+  `xtdescribe`, `xtsum`, `xttab`; and collinear terms in the panel, survival and IV
+  models, left from P2C.13.)
+- P2C.12l Survival
+  (part done: `stset` and `stcox` Verified. Not started: `streg`, `sts`, `stptime`,
+  `ltable`, `stcurve`, `stir`, `stsum`, `stdescribe`.)
+- P2C.12m Survey
+  (part done: `svyset` and `svy` Verified. Not started: `svyset` with strata or stages,
+  `svydescribe`, `svy: mean`.)
+- P2C.12n Instrumental variables
+  (part done 2026-11-17: `ivregress` and `ivprobit` Verified (`ivprobit.do`, with its
+  `predict pr` after `twostep` and a collinear instrument). Not started: `ivreg2`,
+  `ivtobit`, `gmm`.)
+- P2C.12o Lasso and double selection
+  (part done 2026-11-17: `lasso`, `elasticnet`, `sqrtlasso`, `lassoselect`, `dsregress`,
+  `dslogit`, `poregress`, `pologit` and `xporegress` Verified; `lassocoef`, `lassoknots`
+  and `lassoinfo` translated (2026-11-15) and checked in the lasso corpus files but not
+  listed in `VERIFIED` yet. Not started: `dspoisson`, `popoisson`, `xpologit`,
+  `xpopoisson`, `cvplot`.)
+- P2C.12p Smoothing and nonparametric
+  (part done 2026-11-17: `npregress kernel` Verified. Not started: `npregress series`,
+  `lpoly`, `boxcox`.)
+- P2C.12q Mixed-effects models
+  (on hold, not started: `mixed`, then `melogit`, `mepoisson`, `menbreg`, `meprobit` and
+  `menl`, which wait for it.)
+- P2C.12r Time series
+  (not started: `dfuller`, `dfgls`, `pperron`, `var`, `varsoc`, `vargranger`, `irf`,
+  `corrgram`, `wntestq`, `tsreport`, `tsappend`, `forecast`, `arch`, `ucm`, `sspace`.)
+- P2C.12s Systems and multivariate models
+  (part done: `pca`, `factor`, `rotate` and `mvtest` Verified. Not started: `sureg`,
+  `nlsur`, `mvreg`, `manova`, `manovatest`, `canon`, `discrim`, `mds`, `sem`, `dfactor`.)
+- P2C.12t `arima` and `gsem`
+  (on hold, not started: `arima` and most of `gsem`, set aside by the user.)
+- P2C.12u Power and sample size
+  (part done 2026-11-18: `power` Verified for `onemean`, `twomeans`, `pairedmeans`,
+  `oneproportion`, `twoproportions`, `pairedproportions`, `onevariance`, `twovariances`,
+  `onecorrelation`, `twocorrelations`, `oneway`, `logrank`, `cox`, `exponential`,
+  `oneslope`, `rsquared` and `pcorr` (`power.do` to `power8.do`). Being built: the
+  remaining methods and forms, among them `test(lrchi2)`, `test(fisher)`,
+  `test(binomial)`, graphs, and lists of values for some methods. `plan/stata/power.md`.)
+- P2C.12v Spatial: `spset`, `spmatrix`, `spregress`
+  (part done: StatCraft decoded them and merged them on 2026-11-17 (its c5c9c07); the
+  port to RCraft is being built (`plan/stata/spmatrix.md`) and is not on `main` yet.
+  StatCraft's `spregress ml` does not yet match Stata line for line for a single lag or
+  a single error.)
+- P2C.12w Graphs from a do-file
+  (part done: 98.6% of the graph lines of the probes translated (2026-11-01); `coefplot`
+  and `marginsplot` Verified; `lfitci`, `qfitci`, `area`, `qnorm`, `pnorm`, `rvfplot`,
+  `avplot`, `screeplot`, `pie` and `graph matrix` added 2026-11-17. Not started:
+  `graph export` with no graph drawn earlier in the file, the `twoway qfit` and `rcap`
+  forms, `cvplot`, `stcurve`.)
+- P2C.12x Tables and reports
+  (part done: `esttab`, `estadd`, `eststo`, `estpost`, `outreg`, `outreg2`, `frmttable`,
+  `parmest` and `putexcel` Verified. Not started: `putdocx`, `putpdf`, `collect`,
+  `etable`, `dtable`, `table`, `asdoc`, `mtable`, `dyndoc`, `dyntext`, `markdown`.)
+- P2C.12y Data management and files
+  (part done: `merge`, `append`, `reshape`, `collapse`, `contract`, `expand`, `egen`,
+  `duplicates`, `label`, `insheet`, `file` and `filefilter` Verified. Still refused:
+  forms of `egen`; `fdasave` and `fdause`, `format`, `sysuse`, `import`, `export`,
+  `outfile`, `outsheet`, `fillin`, `expandcl`, `joinby`, `mvdecode`, `mvencode`,
+  `clonevar`, `labelbook`, `mark`, `markout`, `char`, `notes`.)
+- P2C.12z Programs, macros and matrices
+  (part done: `program`, `syntax`, `tokenize`, `gettoken`, `local`, `global`, `matrix`
+  (many forms), `mkmat`, `svmat`, `ereturn` and `frame` Verified. Still refused: other
+  `matrix` forms, the macro functions (`colnames`, `rownames`, `coleq`, `colfullnames`,
+  `copy`, `sortedby`, `data label`), `constraint`, `ml`, `c_local`, `sreturn`, `snapshot`,
+  and the ado helpers (`opts_exclusive`, `_get_diopts`, `_robust`, `_ms_extract_varlist`,
+  `_ms_omit_info`).)
+- P2C.12aa Resampling and simulation
+  (part done: `bootstrap` and `bsample` Verified (P2C.16). Not started: `permute`,
+  `simulate`, `jackknife`, `statsby`, `rolling`, `bca` and `vce(bootstrap)`.)
+- P2C.12ab Multiple imputation
+  (not started: `mi`.)
+- P2C.12ac Treatment effects and difference in differences
+  (not started: `teffects`, `tebalance`, `didregress`, `xtdidregress`; `medeff` is
+  Verified.)
+- P2C.12ad Mata and compiled plugins
+  (on hold: outside the first release (P2B.11, P2C.10); the do-files' Mata blocks stay
+  refused and counted here until it is taken up.)
+- P2C.12ae `_natscale`'s last bits
+  (on hold: translated and Verified wherever no end label is 0 (14,841 results bit for bit
+  and 9,119 of 9,120 to 8 digits on 2026-11-16); declined with the reason where an end
+  label is 0 with a step below 1 (6,125 of 15,245 swept results). The bit-for-bit search
+  was parked by the user on 2026-11-16 (`plan/stata/natscale-residue.md`). Before the
+  narrowing it held 3,018 probe lines, 10.9 points of the share: no milestone from 95% on
+  is reachable without it or without a decision to translate the zero-label cases.)
+
+Coverage and matching milestones (the share is of the lines a dry run judges, each source
+line once; last measured 73.7% for the 520 probes on 2026-11-16, 94.9% of the run lines of
+the 46 replication do-files on 2026-11-13; each milestone is closed by measuring again and
+writing the figure into `docs/stata-coverage.md`):
+
+- P2C.12af Probes 80% of lines translated (not started)
+- P2C.12ag Probes 90% of lines translated (not started)
+- P2C.12ah Probes 95% of lines translated: the user's minimum (not started)
+- P2C.12ai Probes 98% of lines translated (not started)
+- P2C.12aj Probes 100% of the judged lines translated, or refused only where Stata itself
+  stops; the target (not started)
+- P2C.12ak More lines compared, none differing: at each milestone above, the probes are
+  run against Stata 19 again and every compared line matches to 8 digits (5,508 of 5,626
+  on 2026-11-01, the rest `_natscale`; not measured again since) (not started)
+- P2C.12al Replication packages: the 46 do-files of the 11 public packages to 100% of
+  their lines translated, and every compared result matching (not started; 94.9% of run
+  lines on 2026-11-13)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

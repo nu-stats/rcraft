@@ -14,7 +14,7 @@ as it was; much of what it lists as not started has been built since (Phases 2A,
 | 2 Command window, Results | Done (P2.2 finished 2026-11-14: Tab at the cursor, argument names, columns inside `[["`; P2.3: the table inside `summary(lm)` and Copy for Word, same day). |
 | 2A Help | Done but **P2A.6** (RCraft's own manual as pages in the app) and **P2A.10** (RCraft's own PDF manuals, "down the road"). |
 | 2B Stata mode | Done (P2B.1 to P2B.12). |
-| 2C Run my do-file | Done (P2C.1 to P2C.16), with the leftovers below; verification goes on in StatCraft's probes and the replication packages. |
+| 2C Run my do-file | P2C.1 to P2C.11 and P2C.13 to P2C.16 done, with the leftovers below. P2C.12 (closer to Stata) was split on 2026-11-18 into 38 tasks, P2C.12a to P2C.12al: 2 done, 19 part done, 4 on hold, 13 not started (`ROADMAP.md`). |
 | 3 Data | Done (the `.sas7bdat` catalogue files of P3.2 followed on 2026-11-13). |
 | 4 Statistics | Done (P4.1's grids in Results followed on 2026-11-14; its Q-Q plot is Graphs > Normal Q-Q plot). |
 | 5 Graphs | P5.1, P5.3, P5.4 done (zoom, Copy and the heatmap followed on 2026-11-14). **P5.2 (ggplot2 builder) not started.** |
@@ -48,7 +48,7 @@ Partly done, with what is missing:
 - P2B.5: `pie`, `graph matrix`, twoway `area`/`lfitci`/`function`, `by()` with fitted layers or
   histograms, `xlabel()` as axis breaks.
 - P2C: `rpoisson()`, `rbeta()` with equal shapes above 1, KISS32 and `c(rngstate)` (P2C.11);
-  `poisson` to 8 digits (P2C.12); collinear terms in the panel, survival and IV models (P2C.13);
+  `poisson` to 8 digits (P2C.12e); collinear terms in the panel, survival and IV models (P2C.13);
   bootstrap's `bca` and `vce(bootstrap)` (P2C.16); probe 448's `c_local`.
 - (P5.1's zoom and copy and P5.3's heatmap followed on 2026-11-14; survival curves came with P6.3.)
 

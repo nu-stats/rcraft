@@ -5378,3 +5378,21 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Shares** after nestreg (dry run, each source line once): probes 75.4% (21,555 translated, 7,043 not; the probe
   folder now holds 539 do-files, so not comparable with the 76.0% of 511 before); packages (46 do-files) 94.9%
   (3,715 translated, 200 not, unchanged). 4 probes use nestreg (48 lines).
+
+
+## P2C.12 split into countable tasks, 2026-11-18
+
+- **What changed:** `ROADMAP.md` had P2C.12 as one task, marked done on 2026-11-01, so the Stata-matching
+  work after that (core statistics, lasso, panel dynamics, ivprobit, stepwise, nestreg, power) moved no
+  figure. It is now a group, not counted, with 38 tasks, P2C.12a to P2C.12al: command families (a to ae)
+  and coverage and matching milestones (af to al). Its goal is unchanged, and the milestones go on to 100%
+  of the judged lines; the user's 95% is a floor.
+- **Marks, as of `main` on 2026-11-18:** 2 done (a, b), 19 part done, 4 on hold (mixed-effects, `arima` and
+  `gsem`, Mata, `_natscale`'s last bits), 13 not started. Done only where every command named is in
+  `VERIFIED`; part where some forms are refused; the lasso post-commands and `glm` are translated but not
+  in `VERIFIED`, and are marked so.
+- **Count:** 108 tasks before, 145 after (107 + 38). Counted as the monitor does (done 1, part 0.5): 88.5
+  of 108 (82%, recounted 2026-11-16) before, 99 of 145 (68%) after. The figure falls because the work
+  that was hidden in one done task is now counted as the tasks it is; no work was undone. A new baseline.
+- **Not done here:** the milestones' current shares were not re-measured (the probes need the private
+  corpus). Last recorded: probes 73.7% (2026-11-16), packages 94.9% of run lines (2026-11-13).
