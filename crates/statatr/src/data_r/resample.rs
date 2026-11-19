@@ -334,13 +334,23 @@ impl Session {
         let r_left = self.r_new.take();
         self.track_returned(&inner, true, false, r_left);
         // a command with no e(sample): the observations its if and in pick are the units
-        if !eclass && inner.parts.in_range.is_some() {
-            return Err(no(
-                "jackknife of a command without e(sample) with in is not translated yet (in counts the rows left, which move when one is left out)",
-            ));
-        }
-        let picked = if !eclass && inner.parts.if_exp.is_some() {
-            self.condition(&inner, &mut body)?
+        // (Stata leaves one out of the rows its if and in pick, the rows keeping their
+        // places; here those rows are taken first and the command runs on them without
+        // its if and in)
+        let picked = if !eclass
+            && (inner.parts.if_exp.is_some() || inner.parts.in_range.is_some())
+        {
+            let k = self.condition(&inner, &mut body)?;
+            let mut bare = inner.clone();
+            bare.parts.if_exp = None;
+            bare.parts.in_range = None;
+            body = Out::default();
+            self.e_new = false;
+            self.r_new = None;
+            self.dispatch(&bare, &mut body)?;
+            let r_left = self.r_new.take();
+            self.track_returned(&bare, true, false, r_left);
+            k
         } else {
             None
         };
@@ -423,6 +433,12 @@ impl Session {
         };
         let _ = names;
         out.line(format!("stata_jk_full <- {d}"));
+        if let Some(k) = &picked {
+            out.package("dplyr");
+            out.line(format!(
+                "stata_jk_rows <- dplyr::transmute(stata_jk_full, stata_sel = {k})$stata_sel\nstata_jk_rows <- !is.na(stata_jk_rows) & stata_jk_rows\n{d} <- stata_jk_full[stata_jk_rows, , drop = FALSE]"
+            ));
+        }
         out.line(code.clone());
         out.line("stata_fit_failed <- FALSE");
         out.line(format!("stata_jk_obs <- {obs}"));

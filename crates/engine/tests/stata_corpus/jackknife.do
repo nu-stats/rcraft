@@ -58,3 +58,9 @@ display "@ if2_e " e(N) " " e(N_reps) " " %24.17g _b[m] " " %24.17g _se[m]
 replace cat3 = . in 1/3
 capture noisily jackknife _b, cluster(cat3) nodots: regress y x
 display "@ rc459 " _rc
+* in: the rows it picks keep their places while one is left out
+import delimited corpus.csv, clear
+jackknife m=r(mean), nodots: summarize y in 5/30
+display "@ in_e " e(N) " " e(N_reps) " " %24.17g _b[m] " " %24.17g _se[m]
+jackknife m=r(mean) s=r(sd), nodots: summarize y if x > 0 in 10/50
+display "@ inif_e " e(N) " " e(N_reps) " " %24.17g _b[m] " " %24.17g _se[m] " " %24.17g _se[s]

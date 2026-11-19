@@ -117,3 +117,12 @@ forvalues i = 1/`=_N' {
     display "@ rs_`i' " start[`i'] " " end[`i'] " " %24.17g mean[`i']
 }
 capture erase rolling_1.dta
+* rrecursive: the window ends at the last period and its start moves on
+import delimited corpus.csv, clear
+generate tt = _n
+tsset tt
+rolling mean=r(mean), window(15) rrecursive stepsize(7) clear nodots: summarize y
+display "@ rq_n " _N
+forvalues i = 1/`=_N' {
+    display "@ rq_`i' " start[`i'] " " end[`i'] " " %24.17g mean[`i']
+}

@@ -101,7 +101,7 @@ stata_sb_result <- function(full, g, res, by, total = FALSE, exps = character())
   rownames(out) <- NULL
   out
 }
-stata_roll_windows <- function(d, time, window, step = 1, recursive = FALSE, delta = 1) {
+stata_roll_windows <- function(d, time, window, step = 1, recursive = FALSE, delta = 1, rrecursive = FALSE) {
   if (!time %in% names(d)) stop("variable ", time, " not found (Stata: r(111))", call. = FALSE)
   tv <- d[[time]]
   attributes(tv) <- NULL
@@ -114,6 +114,11 @@ stata_roll_windows <- function(d, time, window, step = 1, recursive = FALSE, del
   k <- floor((hi - lo - span) / (step * delta) + 1e-9) + 1
   ends <- lo + span + (seq_len(k) - 1) * step * delta
   starts <- if (recursive) rep(lo, length(ends)) else ends - span
+  # rrecursive: the end stays at the last period, the start moves on
+  if (rrecursive) {
+    starts <- ends - span
+    ends <- rep(hi, length(starts))
+  }
   tol <- 1e-9 * max(abs(delta), 1)
   rows <- lapply(seq_along(ends), function(i) which(tv >= starts[i] - tol & tv <= ends[i] + tol))
   list(start = starts, end = ends, rows = rows)
@@ -474,6 +479,7 @@ impl Session {
         if let Some(o) = opts.other(&[
             ("window", 6),
             ("recursive", 9),
+            ("rrecursive", 10),
             ("stepsize", 4),
             ("clear", 5),
             ("nodots", 4),
@@ -515,6 +521,10 @@ impl Session {
                 .ok_or_else(|| no("stepsize(#) takes a whole number of 1 or more"))?,
         };
         let recursive = opts.has("recursive", 9);
+        let rrecursive = opts.has("rrecursive", 10);
+        if recursive && rrecursive {
+            return Err(no("rolling with recursive and rrecursive together is not translated"));
+        }
         let nodots = opts.has("nodots", 4);
         let (Some(time), None) = (self.panel_time.clone(), self.panel.clone()) else {
             return Err(no(
@@ -538,10 +548,11 @@ impl Session {
         let tf = super::stats::r_logical;
         out.line(format!("stata_sb_full <- {d}"));
         out.line(format!(
-            "stata_sb_w <- stata_roll_windows(stata_sb_full, {}, {window}, {step}, {}, delta = {})",
+            "stata_sb_w <- stata_roll_windows(stata_sb_full, {}, {window}, {step}, {}, delta = {}, rrecursive = {})",
             super::r_text(&time),
             tf(recursive),
-            self.ts_delta.clone().unwrap_or_else(|| "1".to_string())
+            self.ts_delta.clone().unwrap_or_else(|| "1".to_string()),
+            tf(rrecursive)
         ));
         out.line(format!(
             "stata_sb_begin({}, {}, character(), character(), character(), {}, header = FALSE{})",
