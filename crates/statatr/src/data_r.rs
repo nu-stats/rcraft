@@ -65,6 +65,7 @@ mod margins;
 mod matrices;
 mod meanest;
 mod medeff;
+mod meta;
 mod mexpr;
 mod mhodds;
 mod ml;
@@ -451,6 +452,19 @@ impl Translator {
         self.s.data.as_deref()
     }
 
+    /// Why the characteristics R holds are not Stata's, if they are not (a
+    /// command rebuilt the data, or a char or notes line was not translated).
+    pub fn chars_unknown(&self) -> Option<&str> {
+        self.s.chars_lost.as_deref()
+    }
+
+    /// Whether `tsset`, `xtset`, `stset`, `svyset` or `fvset` ran: Stata keeps
+    /// characteristics of its own then (named with a leading underscore),
+    /// which R does not hold.
+    pub fn chars_reserved(&self) -> bool {
+        self.s.chars_reserved_now()
+    }
+
     /// The text a value label set the do-file defined gives `value`: the
     /// value itself when the set has no text for it (as `: label set #`);
     /// `None` when the do-file did not define the set.
@@ -535,6 +549,7 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "compare",
     "glm",
     "clonevar",
     "pctile",
@@ -801,6 +816,14 @@ const MARGINS_DISPLAY: &[(&str, usize)] = &[("asobserved", 5), ("noatlegend", 10
 /// Commands that, translated or not, change neither the data nor its rows nor
 /// e(): they write a table or a file, or look something up.
 const HARMLESS: &[&str] = &[
+    "char",
+    "notes",
+    "note",
+    "labelbook",
+    "compare",
+    "ds",
+    "lookfor",
+    "misstable",
     "markdown",
     "putdocx",
     "putpdf",
@@ -816,6 +839,14 @@ const HARMLESS: &[&str] = &[
 ];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "char",
+    "notes",
+    "note",
+    "labelbook",
+    "compare",
+    "ds",
+    "lookfor",
+    "misstable",
     "markdown",
     "putdocx",
     "putpdf",
@@ -1514,6 +1545,10 @@ fn helper_code(name: &str) -> &'static str {
         "stata_isid" => more::ISID_HELPER,
         "stata_contract" => contract::CONTRACT_HELPER,
         "stata_clone" => rowcol::CLONE_HELPER,
+        "stata_char_var" => meta::CHAR_HELPER,
+        "stata_dta_chars_layout" => meta::DTA_CHARS_HELPER,
+        "stata_ds" => meta::DS_HELPER,
+        "stata_misstable" => meta::MISSTABLE_HELPER,
         "stata_mvcode" => rowcol::MVCODE_HELPER,
         "stata_fillin" => rowcol::FILLIN_HELPER,
         "stata_expandcl" => rowcol::EXPANDCL_HELPER,
@@ -1752,6 +1787,10 @@ struct Session {
     /// The data came from a file this do-file did not save, so whether it
     /// was `tsset` is not known.
     ts_unknown: bool,
+    /// Why the characteristics and notes in R are not Stata's: a command that
+    /// rebuilds the data (merge, reshape, collapse) or a char or notes line
+    /// that was not translated; `use` and `clear` start them over.
+    chars_lost: Option<String>,
     /// `set type double`: new numeric variables are double, not float (Stata's
     /// default for generate, egen and import delimited).
     type_double: bool,
@@ -2697,6 +2736,26 @@ impl Session {
             self.e_ret =
                 returned::Returned::Lost(format!("e() after {} is not kept in R yet", c.name));
         }
+        // what rebuilds the data takes the characteristics R kept with it
+        if done.is_ok()
+            && self.chars_lost.is_none()
+            && matches!(
+                c.name.as_str(),
+                "merge"
+                    | "append"
+                    | "reshape"
+                    | "collapse"
+                    | "contract"
+                    | "xpose"
+                    | "joinby"
+                    | "expand"
+                    | "expandcl"
+                    | "fillin"
+                    | "stack"
+            )
+        {
+            self.chars_lost = Some(format!("{} rebuilds the data", c.name));
+        }
         // a line that is not translated still runs in Stata, so it counts too
         // (putexcel only writes a spreadsheet, translated or not)
         let harmless = HARMLESS.contains(&c.name.as_str());
@@ -3028,6 +3087,7 @@ impl Session {
                 if let Some(d) = self.data.take() {
                     out.line(format!("rm({d})"));
                 }
+                self.chars_lost = None;
                 self.data_lost = None;
                 self.kinds.clear();
                 self.storage.clear();
@@ -3056,6 +3116,13 @@ impl Session {
             "survwgt" => self.survwgt(c, &opts, out),
             "contract" => self.contract(c, &opts, out),
             "clonevar" => self.clonevar(c, &opts, out),
+            "char" => self.char_cmd(c, out),
+            "notes" | "note" => self.notes_cmd(c, out),
+            "labelbook" => self.labelbook(c, &opts, out),
+            "compare" => self.compare(c, &opts, out),
+            "ds" => self.ds(c, &opts, out),
+            "lookfor" => self.lookfor(c, &opts, out),
+            "misstable" => self.misstable(c, &opts, out),
             "mvdecode" | "mvencode" => self.mvcode(c, &opts, out),
             "fillin" => self.fillin(c, &opts, out),
             "expandcl" => self.expandcl(c, &opts, out),
@@ -3322,6 +3389,10 @@ impl Session {
         }
         read.push(')');
         let mut steps = vec![read];
+        // the characteristics the file holds
+        self.helpers.insert("stata_dta_chars_layout");
+        steps.push(format!("stata_chars_read({})", r_text(&path)));
+        self.chars_lost = None;
         if opts.has("nolabel", 5) {
             steps.push("haven::zap_labels()".into());
         }
@@ -3383,6 +3454,9 @@ impl Session {
             ));
         }
         out.line(format!("haven::write_dta({d}, {})", r_text(&path)));
+        // the characteristics go into the file as Stata keeps them
+        self.helpers.insert("stata_dta_chars_layout");
+        out.line(format!("stata_chars_write({}, {d})", r_text(&path)));
         self.saved.insert(
             self.file_key(&path),
             Kept {
@@ -5354,14 +5428,18 @@ display _b[/a]");
         let out = r("use \"study hours.dta\", clear\nsave results, replace\nsave results");
         assert_eq!(
             out[0],
-            "study_hours <- haven::read_dta(\"study hours.dta\")"
+            "study_hours <- haven::read_dta(\"study hours.dta\") |> stata_chars_read(\"study hours.dta\")"
         );
-        assert_eq!(out[1], "haven::write_dta(study_hours, \"results.dta\")");
+        assert_eq!(
+            out[1],
+            "haven::write_dta(study_hours, \"results.dta\")
+stata_chars_write(\"results.dta\", study_hours)"
+        );
         assert!(out[2].starts_with("if (file.exists(\"results.dta\")) stop("));
         let out = r("use id score using panel, clear");
         assert_eq!(
             out[0],
-            "panel <- haven::read_dta(\"panel.dta\", col_select = c(id, score))"
+            "panel <- haven::read_dta(\"panel.dta\", col_select = c(id, score)) |> stata_chars_read(\"panel.dta\")"
         );
         let out = r("import delimited using data.csv, clear\nimport excel survey.xlsx, sheet(\"Wave 2\") firstrow clear");
         assert!(out[0].starts_with(

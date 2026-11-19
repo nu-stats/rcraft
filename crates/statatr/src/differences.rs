@@ -557,6 +557,128 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "char",
+        about: "Sets, lists and reads characteristics of the data and of variables",
+        points: &[
+            p(
+                "As Stata 19",
+                "char var[name] text, char _dta[name] text and char list [var[]] behave as in Stata 19: the \
+                 text loses blanks at both ends and a pair of quotes round all of it, no text removes the \
+                 characteristic, names are case-sensitive, a variable name may be abbreviated and a bad name is \
+                 invalid syntax (r(198)). `: char var[name]` and `var[name]` read them in macros.",
+            ),
+            p(
+                "In R",
+                "A characteristic is the attribute stata_char on the column (on the data frame for _dta). \
+                 They go into a .dta file on save and come back on use. After merge, append, reshape, collapse and \
+                 the like they are not known, and the commands say so. char list after tsset, xtset, stset, svyset \
+                 or fvset is refused (Stata lists the characteristics those set). The order of a listing is the one \
+                 set last first, not always Stata's. char rename and quotes inside the text are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "notes",
+        about: "Adds, lists, drops, replaces and searches notes of the data and of variables",
+        points: &[
+            p(
+                "As Stata 19",
+                "note: text and note var: text add; notes, notes var, notes list and notes in # list; notes drop \
+                 (_dta, _all or variables, in #, #/# or a list) says (N notes dropped); notes replace var in # : text, \
+                 notes renumber and notes search word work as in Stata 19. The count is kept in note0 and each note in \
+                 noteN, so the numbers stay as Stata leaves them after a drop. A variable that is not there is r(111).",
+            ),
+            p(
+                "In R",
+                "Notes are characteristics (see char). A note with the word TS (the date and time Stata puts there), \
+                 quotes in the text and notes search with several words are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "labelbook",
+        about: "Describes value label sets and their problems",
+        points: &[
+            p(
+                "As Stata 19",
+                "labelbook [names] [, problems length(#)] prints a page per set (range, gaps, string lengths, uniqueness, \
+                 blanks, numeric labels, the definition and the variables that use it) or the table of problems, and \
+                 leaves r(names), r(gaps), r(notused), r(numeric), r(blanks), r(nuniq) and r(nuniq_sh).",
+            ),
+            p(
+                "In R",
+                "It knows the sets the do-file defined. After a data file was read, or for a set with an empty label, it is \
+                 refused: R does not keep the names of the sets that came with a file. The heading says [unnamed]; list() \
+                 and the other options are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "compare",
+        about: "Compares two variables value by value",
+        points: &[
+            p(
+                "As Stata 19",
+                "compare a b [if] [in] gives the counts of a<b, a=b and a>b, those defined in both with the minimum, \
+                 average and maximum of the difference, those missing in one only and in both, and the total; r(N) is the \
+                 number of rows. Strings compare in byte order. One variable is r(102), three r(103), a weight r(101).",
+            ),
+            p(
+                "In R",
+                "A number against a string is refused (R stops). Options are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "ds",
+        about: "Lists variable names in columns",
+        points: &[
+            p(
+                "As Stata 19",
+                "ds [varlist] [, not has(...) not(...) alpha] prints the names in columns like describe, simple and \
+                 leaves them in r(varlist). not alone leaves out the varlist; has() and not() choose by type string, \
+                 type numeric, varlabel [pattern] or vallab.",
+            ),
+            p(
+                "In R",
+                "The storage types, format, char and vallab patterns, detail, varwidth() and skip() are refused: R keeps \
+                 none of Stata's types or formats.",
+            ),
+        ],
+    },
+    Guide {
+        command: "lookfor",
+        about: "Finds variables by words in their name or label",
+        points: &[
+            p(
+                "As Stata 19",
+                "lookfor word ... finds the variables whose name or variable label holds any of the words, capitals \
+                 ignored, a quoted phrase as one word, and leaves them in r(varlist). No words is r(198).",
+            ),
+            p(
+                "In R",
+                "Stata prints describe's rows; R has no storage types or display formats, so RCraft prints the name, \
+                 R's class and the label.",
+            ),
+        ],
+    },
+    Guide {
+        command: "misstable",
+        about: "Tables the missing values of numeric variables",
+        points: &[
+            p(
+                "As Stata 19",
+                "misstable summarize [varlist] [if] [in] [, all] prints Obs=., Obs>. (.a to .z) and Obs<. with the \
+                 unique values and the minimum and maximum, and leaves the last variable's r(N_lt_dot), r(N_eq_dot), \
+                 r(N_gt_dot), r(K_uniq), r(min), r(max) and r(vartype).",
+            ),
+            p(
+                "In R",
+                "patterns, tree, nested and the options generate() and exok are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "expandcl",
         about: "Copies whole clusters of observations and numbers the copies",
         points: &[
@@ -4647,6 +4769,7 @@ pub fn guide(command: &str) -> Option<&'static Guide> {
         "prop" => "proportion",
         "rm" => "erase",
         "rmdir" => "mkdir",
+        "note" => "notes",
         "fdause" => "fdasave",
         "args" | "marksample" => "program",
         "scatter" | "line" | "connected" => "twoway",

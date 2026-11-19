@@ -1635,6 +1635,7 @@ pub(super) enum Returned {
 /// Commands after which Stata 19 still holds the r() it held before
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
+    "char",
     "type",
     "cumul",
     // file open, write and close (file read sets r() itself)
@@ -1683,6 +1684,12 @@ const LEAVE_R_ALONE: &[&str] = &[
 /// Commands that never change e() (an untranslated command not here might
 /// be an estimation command, after which e() is not known).
 const LEAVE_E_ALONE: &[&str] = &[
+    "char",
+    "labelbook",
+    "compare",
+    "ds",
+    "lookfor",
+    "misstable",
     // write a table or look something up only, translated or not
     "putexcel",
     "outreg",
@@ -1977,7 +1984,11 @@ impl Session {
             // missing, as after an r-class program (spmatrix summarize: these
             // are its texts, its other r() numbers; regress: only r(table))
             Some((names, cmd))
-                if ok && (cmd == "isvar" || cmd == "spmatrix" || cmd == "regress") =>
+                if ok
+                    && matches!(
+                        cmd.as_str(),
+                        "isvar" | "spmatrix" | "regress" | "labelbook" | "ds" | "lookfor" | "misstable"
+                    ) =>
             {
                 self.est_shown = Some(false);
                 self.helpers.insert("stata_returned");

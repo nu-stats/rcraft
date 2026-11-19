@@ -1,0 +1,15 @@
+* Stata 19.0's results for lookfor.do, recorded by cargo xtask stata-record
+@ weight 1
+@ thing 1
+@ THING 1
+@ x 1
+@ the_x 1
+@ phrase 1
+@ phrase2 1
+@ any 1
+@ g 1
+@ nothing 1
+@ valuelabel 1
+@ valuelabelname 1
+@ quiet 1
+@ rc_none 198

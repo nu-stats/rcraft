@@ -1,0 +1,24 @@
+* Stata 19.0's results for char.do, recorded by cargo xtask stata-record
+@ get 1 1 1 1 1
+@ macro 1 1 1
+@ removed 1 1 1
+@ trim 25 1
+@ words 1 1 1
+@ case 1 1
+@ number 8
+@ define 1
+@ abbrev 1
+@ replaced 1
+@ rename 1 1
+@ rc_nosuch 111
+@ rc_badname 111
+@ rc_empty 198
+@ rc_list_plain 198
+@ rc_list_nosuch 111
+@ rc_ambiguous 111
+@ dropped 1 1
+@ kept 1 1
+@ sorted 1
+@ restored 1 1
+@ reread 1 1 1
+@ reread2 1 1

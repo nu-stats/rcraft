@@ -1,0 +1,14 @@
+* Stata 19.0's results for labelbook.do, recorded by cargo xtask stata-record
+@ all_names 1 1 1 1 1 1 1
+@ one 1 1 1
+@ two 1 1 1
+@ problems 1 1 1
+@ odd 1 1 1 1 1 1 1
+@ odd_problems 1 1 1 1 1
+@ len5 1 1
+@ len40 1 1
+@ shared 1 1
+@ gl_shared 1 1 1
+@ rc_nosuch 111
+@ rc_second 111
+@ quiet 1

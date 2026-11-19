@@ -292,6 +292,14 @@ fn file_read_local(c: &reader::Command) -> Option<String> {
 
 /// Commands that leave the data's variable names as they were.
 const NAMES_STAY: &[&str] = &[
+    "char",
+    "notes",
+    "note",
+    "labelbook",
+    "compare",
+    "ds",
+    "lookfor",
+    "misstable",
     "type",
     "glm",
     "display",
@@ -2790,6 +2798,11 @@ impl Env for Run<'_> {
             Some(Macro::Text(t)) => Ok(t.clone()),
             Some(Macro::Later(why)) => Err(Stop::Later(format!("`{name}' {why}"))),
             Some(Macro::Lost(why)) => Err(Stop::Not(format!("`{name}' is not known: {why}"))),
+            // `x[name]' and `_dta[name]': a characteristic
+            None if char_ref(name).is_some() => {
+                let (owner, ch) = char_ref(name).unwrap_or((name, ""));
+                self.char_value(owner, ch)
+            }
             // macval(), a class member (`.a.b'): forms of macro RCraft does not have
             None if name.contains(['(', '.']) => Err(Stop::Not(format!(
                 "`{name}': this form of macro (macval(), class members) is not translated yet"
@@ -2925,6 +2938,18 @@ impl Env for Run<'_> {
                     format!("the label of {var}"),
                 ))
             }
+            // `: char var[name]` and `: char _dta[name]`
+            "char" => {
+                let arg = rest.trim();
+                let Some((owner, ch)) = arg
+                    .split_once('[')
+                    .and_then(|(o, r)| r.strip_suffix(']').map(|c| (o.trim(), c.trim())))
+                    .filter(|(o, c)| (*o == "_dta" || macros::is_name(o)) && !c.is_empty())
+                else {
+                    return Err(Stop::Stata(": char: the form is var[name]".into()));
+                };
+                self.char_value(owner, ch)
+            }
             // `: label (var) #` from the data's labels; `: label set #` from the do-file's label define
             "label" => {
                 let arg = rest.trim();
@@ -2975,6 +3000,32 @@ impl Env for Run<'_> {
 }
 
 impl Run<'_> {
+    /// The text of a characteristic, asked of R (which holds them as attributes).
+    fn char_value(&mut self, owner: &str, name: &str) -> Result<String, Stop> {
+        if let Some(why) = self.t.chars_unknown() {
+            return Err(Stop::Not(format!(
+                "`{owner}[{name}]' is not known here: the characteristics are not (\"{why}\")"
+            )));
+        }
+        // a characteristic Stata's own commands set (_TStvar, _fv_base)
+        if name.starts_with('_') && self.t.chars_reserved() {
+            return Err(Stop::Not(format!(
+                "`{owner}[{name}]' may be one Stata's tsset, xtset, stset, svyset or fvset set, which R does not hold"
+            )));
+        }
+        let Some(d) = self.t.data().map(str::to_string) else {
+            return Err(Stop::Later(format!(
+                "`{owner}[{name}]' (no data are known here)"
+            )));
+        };
+        self.t.need_helper("stata_char_var");
+        let (o, n) = (crate::expr_r::r_text(owner), crate::expr_r::r_text(name));
+        self.ask(Need::R(
+            format!("cat(stata_char_get({d}, {o}, {n}))"),
+            format!("the characteristic {owner}[{name}]"),
+        ))
+    }
+
     fn list_function(&mut self, rest: &str) -> Result<String, Stop> {
         use macros::ListOp;
         let ws: Vec<&str> = rest.split_whitespace().collect();
@@ -3642,3 +3693,10 @@ fn replace_path(text: &str, from: &str, to: &str) -> String {
 
 #[cfg(test)]
 mod tests;
+
+/// `x[name]` or `_dta[name]` as a macro name: the owner and the characteristic.
+fn char_ref(name: &str) -> Option<(&str, &str)> {
+    let (owner, rest) = name.split_once('[')?;
+    let ch = rest.strip_suffix(']')?;
+    ((owner == "_dta" || macros::is_name(owner)) && macros::is_name(ch)).then_some((owner, ch))
+}

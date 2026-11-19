@@ -1,0 +1,17 @@
+* Stata 19.0's results for compare.do, recorded by cargo xtask stata-record
+@ N_xy 40
+@ lt 20
+@ eq 10
+@ gt 10
+@ N_xz 40
+@ N_gk 40
+@ N_ss2 40
+@ N_if 12
+@ N_in 16
+@ N_none 0
+@ N_xx 40
+@ N_quiet 40
+@ rc_one 102
+@ rc_three 103
+@ rc_weight 101
+@ rc_nosuch 111

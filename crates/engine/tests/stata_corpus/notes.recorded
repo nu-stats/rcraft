@@ -1,0 +1,25 @@
+* Stata 19.0's results for notes.do, recorded by cargo xtask stata-record
+@ add 1 1 1 1 1 1
+@ drop1 2 1 1
+@ replace 1 1
+@ replace_none 1
+@ gap 3 1 1
+@ after 4 1
+@ droptop 3
+@ again 4 1
+@ droprange 1 1 1
+@ restart 1 1
+@ dropall 1 1
+@ words 1 1
+@ second 2 1
+@ dta_form 1 3
+@ dropdta 3 1 1
+@ renumber 1 1 1
+@ empty 2
+@ empty2 2
+@ rc_notes_nosuch 111
+@ rc_note_nosuch 111
+@ rc_drop_nosuch 111
+@ rc_drop_none 0
+@ reread 1 1 1 1 1
+@ dropall2 1 1 1 1
