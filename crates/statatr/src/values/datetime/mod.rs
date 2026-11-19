@@ -1,3 +1,5 @@
+// Vendored from StatCraft crates/core/src/datetime/mod.rs at 7f1724005070. Do not edit: run
+// `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Dates and times.
 //!
 //! Behaviour reference: `plan/stata/dates.md`, checked by
@@ -383,7 +385,8 @@ pub fn big_cofd(d: f64) -> f64 {
 
 /// `dofC(C)`
 pub fn dofbig(c: f64) -> f64 {
-    dofc(cofc_from_big(c))
+    // the wall clock's day: a leap second stays on its own day (probe 702)
+    dofc(leap::wall_clock(c).0)
 }
 
 /// `hhC`, `mmC`, `ssC`: hour, minute and second of a datetime/C value;
@@ -429,5 +432,20 @@ mod tests {
         assert_eq!(isleapyear(1900.0), 0.0);
         assert!(is_missing(hms(24.0, 0.0, 0.0)));
         assert_eq!(ss(-0.5), 59.999);
+    }
+
+    /// probe 702: a time inside a leap second is on the leap day itself
+    #[test]
+    fn dofbig_in_a_leap_second() {
+        let c = big_mdyhms(12.0, 31.0, 2016.0, 23.0, 59.0, 60.25);
+        assert_eq!(dofbig(c), 20_819.0);
+        assert_eq!(
+            dofbig(big_mdyhms(1.0, 1.0, 2017.0, 0.0, 0.0, 0.0)),
+            20_820.0
+        );
+        assert_eq!(
+            dofbig(big_mdyhms(12.0, 31.0, 2016.0, 23.0, 59.0, 59.999)),
+            20_819.0
+        );
     }
 }

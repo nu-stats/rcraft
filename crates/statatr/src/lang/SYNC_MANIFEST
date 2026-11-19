@@ -1,0 +1,11 @@
+# Written by `cargo xtask sync-statcraft-lang`; do not edit.
+# `cargo xtask ci` re-hashes these files and fails if one differs.
+statcraft_commit 7f172400507033b9065cdddd72b84417188b070b
+839b9a754d9300c3c7a6c36000a0cc22b400db27df4d287c2ae0c6b6e0d27a95  lang/expr.rs
+8bc39d6eb0f74072e66809463a12c34b13de3447549a6eb0b66ba6aa61ecd734  lang/script.rs
+a2be848a98f254b2ad257cf297c9f5a8d83671b204573aa365dbe8476249d8a9  lang/syntax.rs
+8b54c4bc6e0dc4121c1c662fbfa8316a03242a40d2389c9fddeebbbfcc12602e  values/missing.rs
+e58febc3c24c72588dc5599ec2b91208b716217dc658aa47595ec180542c9be9  values/hex.rs
+6b1e2004b2b5b2f43e4eca523b39124eb267f289c6bd2916a512b662369f9a4d  values/datetime/mod.rs
+8c77c4cb387b6d593ec0a8349082cd11830cdb0bed6ff6ddd95fa438f8396a34  values/datetime/parse.rs
+bcbefb1083a8a882af1e673b2d7902ed72bdc255b80ca0b604f847c96313820e  values/datetime/leap.rs

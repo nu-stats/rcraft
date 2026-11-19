@@ -5,6 +5,7 @@ mod corpus;
 mod coverage;
 mod layers;
 mod matrix;
+mod sync;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -17,6 +18,9 @@ usage: cargo xtask <task>
   layers               check that crates only depend on lower layers
   assets               check that every file in assets/ is listed in ATTRIBUTION.md
   coverage [--check]   regenerate docs/coverage.md from the catalog
+  sync-statcraft-lang [--check|--diff]
+                       copy StatCraft's parser into crates/statatr (needs the StatCraft checkout),
+                       or check the copy against its manifest (ci does) or against StatCraft
   stata-record         run the Stata corpus on a licensed Stata and keep its results (P2B.10)
   stata-matrix         write the RCraft and StatCraft command table (C:/pinokio/api/stata-matrix.csv; not committed)";
 
@@ -33,6 +37,7 @@ fn main() -> ExitCode {
         Some("coverage") => coverage::run(rest.iter().any(|a| a == "--check")),
         Some("stata-record") => corpus::record(),
         Some("stata-matrix") => matrix::run(rest),
+        Some("sync-statcraft-lang") => sync::run(rest),
         _ => {
             eprintln!("{USAGE}");
             return ExitCode::from(2);
@@ -48,6 +53,7 @@ fn main() -> ExitCode {
 }
 
 fn ci() -> Result {
+    sync::check()?;
     cargo(&["fmt", "--all", "--check"])?;
     cargo(&[
         "clippy",

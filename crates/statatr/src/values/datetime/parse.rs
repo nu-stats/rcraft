@@ -1,3 +1,5 @@
+// Vendored from StatCraft crates/core/src/datetime/parse.rs at 7f1724005070. Do not edit: run
+// `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Strings to dates: `date()`, `clock()`, `Clock()`, `monthly()`, ...
 //!
 //! Behaviour reference: `plan/stata/dates.md` ("Strings to dates"),

@@ -1,3 +1,5 @@
+// Vendored from StatCraft crates/core/src/missing.rs at 7f1724005070. Do not edit: run
+// `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Missing values: `.` and `.a` to `.z`.
 //!
 //! Behaviour reference: `plan/stata/missing-values.md`.

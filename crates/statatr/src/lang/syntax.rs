@@ -1,3 +1,5 @@
+// Vendored from StatCraft crates/lang/src/syntax.rs at 7f1724005070. Do not edit: run
+// `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Standard command syntax: `[varlist] [=exp] [if exp] [in range] [, options]`.
 //!
 //! Behaviour reference: `plan/stata/data-commands.md`. Only the text is taken

@@ -1,3 +1,5 @@
+// Vendored from StatCraft crates/core/src/datetime/leap.rs at 7f1724005070. Do not edit: run
+// `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Leap seconds, for datetime/C (`%tC`, `Clock()`, `Cofc()`, `cofC()`).
 //!
 //! The 27 leap seconds added at the end of these UTC days, from the IERS

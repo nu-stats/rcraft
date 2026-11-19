@@ -1,3 +1,5 @@
+// Vendored from StatCraft crates/lang/src/script.rs at 7f1724005070. Do not edit: run
+// `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Reading do-files into command lines.
 //!
 //! Behaviour reference: `plan/stata/do-files.md`. A logical command line
@@ -29,14 +31,19 @@ pub fn read(source: &str) -> Vec<Line> {
     let mut text = String::new();
     let mut in_block = false;
     let mut semicolon = false;
+    // lines end at LF, CR LF, or a lone CR: old Mac files such as
+    // egenmore's `_gsieve.ado` use CR alone
+    let source = if source.contains('\r') {
+        std::borrow::Cow::Owned(source.replace("\r\n", "\n").replace('\r', "\n"))
+    } else {
+        std::borrow::Cow::Borrowed(source)
+    };
     let raw: Vec<&str> = source.split('\n').collect();
     // the text after the final newline is a line too (Stata echoes it)
     for line in raw {
         let line = line.strip_suffix('\r').unwrap_or(line);
-        // Stata 19 keeps the backslashes as written (probe 139: `"a\\b"` shows
-        // a\\b and length("\\") is 2; checked again on 2026-11-06 with
-        // `"x \\ \hline"`, 11 characters); only version 8.2 and before halve
-        // a run, which `reduce_backslashes` does where that is asked for
+        // a line keeps its backslashes as written (probes 139, 703); only
+        // version 8.2 and before halve runs, after macro expansion
         // `#delimit ;` and `#delimit cr`: commands end at `;` or at the
         // end of the line
         let trimmed = line.trim_start();
@@ -117,10 +124,10 @@ fn semicolon_at(text: &str) -> Option<usize> {
 }
 
 /// Each run of backslashes loses half its length (`\\` is `\`, `\\\` is
-/// `\\`). With `protect_quote`, a run just before a `"` stays as it is,
-/// as when Stata reads a line; before version 9 Stata also reduces after
-/// macro expansion, quotes or not (probe 139).
-pub fn reduce_backslashes(line: &str, protect_quote: bool) -> String {
+/// `\\`), quotes or not: what version 8.2 and before do to a line after
+/// macro expansion (probes 139, 703). Version 9 and after keep a line's
+/// backslashes as written.
+pub fn reduce_backslashes(line: &str) -> String {
     if !line.contains("\\\\") {
         return line.to_string();
     }
@@ -139,12 +146,7 @@ pub fn reduce_backslashes(line: &str, protect_quote: bool) -> String {
             .iter()
             .take_while(|&&d| d == '\\')
             .count();
-        let next = chars.get(i + run).copied();
-        let keep = if protect_quote && next == Some('"') {
-            run
-        } else {
-            run / 2 + run % 2
-        };
+        let keep = run / 2 + run % 2;
         out.extend(std::iter::repeat_n('\\', keep));
         i += run;
     }
@@ -196,6 +198,14 @@ fn strip_comments(line: &str, mut in_block: bool, starts_command: bool) -> (Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// probe 703: `display strlen("x \\ y")` is 6 in Stata 19
+    #[test]
+    fn lines_keep_their_backslashes() {
+        let lines = read("display strlen(\"x \\\\ y\")\n");
+        assert_eq!(lines[0].text, "display strlen(\"x \\\\ y\")");
+        assert_eq!(reduce_backslashes("p\\\\q \\\\\\\""), "p\\q \\\\\"");
+    }
 
     #[test]
     fn comments_and_continuations() {

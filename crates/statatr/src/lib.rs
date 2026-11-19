@@ -5,9 +5,9 @@
 //! # Vendored from StatCraft
 //!
 //! `lang` and `values` are copied from StatCraft (our own project, which has
-//! the same two licences as RCraft), at commit `a245039`
-//! (`nu-stats/statcraft`, branch `lang/shared-parsers`, from the crates
-//! `statcraft-lang` and `statcraft-core`). They are copied and not depended on
+//! the same two licences as RCraft), at the commit recorded in `lang/SYNC_MANIFEST`
+//! (`nu-stats/statcraft`, from the crates `statcraft-lang` and
+//! `statcraft-core`). They are copied and not depended on
 //! because StatCraft's repository is private and RCraft's is public, so a
 //! dependency would break every build outside it.
 //!
@@ -16,10 +16,16 @@
 //! - `values/datetime/{mod,parse,leap}.rs`: `crates/core/src/datetime/`; the
 //!   `display` part (date formats) is left out, with its two `pub use` lines.
 //!
-//! The only edits are the paths (`statcraft_core::` became `crate::values::`)
-//! and that left-out part. Fix a parser bug in both places; `plan/STATUS.md`
-//! says so. The clean-room rules (AGENTS.md section 1) held for the original
-//! and hold for this copy: nothing here comes from Stata's program files.
+//! Nobody edits those files by hand. `cargo xtask sync-statcraft-lang` copies
+//! them from StatCraft's `origin/main`, rewrites the paths (`statcraft_core::`
+//! becomes `crate::values::`), leaves out the `display` part and writes
+//! `lang/SYNC_MANIFEST` (the StatCraft commit and a hash per file).
+//! `cargo xtask ci` re-hashes the files and fails if one differs. Fix a parser
+//! bug in StatCraft, then sync. `lang/mod.rs`, `values/mod.rs` and
+//! `lang/commands.rs` (the command table, which StatCraft keeps in its engine)
+//! are RCraft's own. The clean-room rules (AGENTS.md section 1) held for the
+//! original and hold for this copy: nothing here comes from Stata's program
+//! files.
 
 pub mod complete;
 pub mod coverage;
