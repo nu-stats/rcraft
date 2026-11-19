@@ -5950,3 +5950,21 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   these commands translates now); packages **94.0%**, unchanged. Still refused: printed `spearman` of two variables (its p-value), `jackknife` with `in`, `statsby` and
   `rolling` without `clear` or `saving()`, `rrecursive`, replications that stop with an error (Stata records missing), more than 2,000 replications.
 
+
+## P2C.12l: stdescribe, stsum, sts, stptime, stir, ltable, streg, stcurve (batch K of the StatCraft port), 2026-11-19
+
+- **Translated** (`statatr::data_r::{survival,streg}`, `st.rs`): `stdescribe` (all of r()), `stsum` (`by()`, r()), `sts list` (survivor, `failure`, `na`, `by()`, `at()`, `level()`),
+  `sts generate` (`s se(s) lb(s) ub(s) na se(na) lb(na) ub(na) h n d`, `by()`), `sts test` (log-rank, `wilcoxon`, `tware`, `peto`, `fh(p q)`, `strata()`; r(chi2), r(df)),
+  `sts graph`, `stptime` (`by()`, `at()`, `trim`, `per()`, `dd()`, `level()`; r()), `stir` (also `strata()`; `ir`'s r()), `ltable` (`by()`, `intervals()`, `failure`, `hazard`,
+  `noadjust`, `level()`, `fweight`, `test`), `streg` (exponential, Weibull, lognormal, loglogistic, Gompertz; PH or AFT metric, `nohr`, `tr`, `time`, robust, clustered, `id()` clusters; e()),
+  and `stcurve` after `streg`. `stset` gained `time0()` (gaps in a subject's records) and `clear`, `stcox` `nolog`; `_b[/ln_p]` reads the `/:ln_p` column.
+- **Checked:** Stata 19 on made-up data, corpus `survival.do` (63 results: the descriptive commands, `sts generate` values of every function, every test, `stptime`, `stir`, and several records with gaps)
+  and `streg.do` (36 results, all five distributions, metrics, robust and clustered errors, late entry); both to 1e-8, `streg` with Stata's own `tolerance()` options set tight (at its default
+  Stata stops 1e-7 to 1e-6 short of the maximum), one number (the loglogistic coefficient with late entry, 3e-8 off even then) to 7 decimals. `ltable`'s tables (which Stata does not store) were compared
+  number for number with its log in a scratch run; the corpus keeps `r(chi2)` and `r(df)` after `test`. Notes in `plan/stata/survival.md`.
+- **Corrections to StatCraft's note** (found here): `ltable`'s likelihood-ratio statistic is not the closed form (Stata's is about 7e-6 above it); `sts generate` leaves `h`, `n`, `d` missing where nobody fails
+  and `se(na)` missing at the first row; `stset, enter(time t0)` is not the way to give gaps (it keeps `t0 = previous t`; `time0(t0)` does); with `id()` set, robust errors cluster on the subject in `streg` as in `stcox`.
+- **Refused, not guessed:** see `plan/stata/survival.md` (`streg` generalized gamma, factor variables, `strata()`, `frailty()`, predict and estat after it; `stcurve` after `stcox`; `sts` with late entry; `sts test, cox`;
+  `ltable` graphs and `overlay`; `stptime, smr()`).
+- **Shares after batch K:** probes **78.6%** (22,804 of 30,103 source lines; was 22,725, 78.3%; of the 67 lines of these commands plus their graph exports only the `stcurve` after `stcox`, `overlay` and `smr()` lines are refused now);
+  packages **94.0%** (3,996 of 5,601), unchanged.

@@ -475,8 +475,12 @@ Command families:
   `xtcloglog`, `xtologit`, `xtoprobit`, `xttobit`, `xtgls`, `xtgee`, `xtpcse`, `xtivreg`,
   `xtunitroot`; and collinear terms in the panel, survival and IV models, left from P2C.13.)
 - P2C.12l Survival
-  (part done: `stset` and `stcox` Verified. Not started: `streg`, `sts`, `stptime`,
-  `ltable`, `stcurve`, `stir`, `stsum`, `stdescribe`.)
+  (part done: `stset` and `stcox` Verified. `stdescribe`, `stsum`, `sts` (list, generate, test), `stptime`, `stir`, `ltable` and `streg`
+  (exponential, Weibull, lognormal, loglogistic, Gompertz) Verified 2026-11-19, batch K of the StatCraft port (`survival.do`, `streg.do`, to 1e-8, `streg`
+  with Stata run at its tightest tolerance); `sts graph` and `stcurve` after `streg` are drawn (not compared); `stset` takes `time0()` and `clear`. Refused:
+  `streg` with the generalized gamma, factor variables, `strata()`, `frailty()`, `predict` and `estat` after it; `stcurve` after `stcox`; `sts` with late entry,
+  `sts test, cox`; `ltable` graphs; `stptime, smr()`, see `plan/stata/survival.md`;
+  measured: probes 78.3% -> 78.6% (22,725 -> 22,804 translated source lines), packages 94.0% unchanged (3,996 of 5,601).)
 - P2C.12m Survey
   (part done: `svyset` and `svy` Verified. Not started: `svyset` with strata or stages,
   `svydescribe`, `svy: mean`.)
