@@ -5968,3 +5968,28 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `ltable` graphs and `overlay`; `stptime, smr()`).
 - **Shares after batch K:** probes **78.6%** (22,804 of 30,103 source lines; was 22,725, 78.3%; of the 67 lines of these commands plus their graph exports only the `stcurve` after `stcox`, `overlay` and `smr()` lines are refused now);
   packages **94.0%** (3,996 of 5,601), unchanged.
+
+## P2C.12al: package quick wins: bs, cd "", graph combine l1()/l2(), outreg2 onecol, 2026-11-19
+
+Row 1 of the refusal ranking (side-session note `refusal-ranking-2026-11-19.md`): four forms seen only in the replication
+packages. Each checked on Stata 19.0 SE with made-up data.
+
+- **`bs` and `bstrap`** are `bootstrap` (`bst`, `boo`, `boot`, `boots` are not: r(199), r(101)); the reader maps them.
+  With them came two bootstrap fixes: an r-class command's sample is its `if` and `in` rows, missing values kept (RCraft
+  resampled all rows), and the percentile interval's points are taken in percent (`(100 - 90) / 2 = 5`; the fraction gave
+  4.999..., which moved an exact position at 20 replications). Corpus `bs.do` (9 results, 1e-9), with the package's
+  sequence (`e(ci_percentile)`, `e(b)`, `e(N)` into matrices and locals). Still refused: `bs` of a program
+  the do-file defines (4 package lines and 16 after them; it needs the runner to write replications out, as
+  `permute` does), an estimation command with `in`. 8 more package lines (`matrix mean = e(b)`, `matrix N = e(N)` after
+  `local ub = ci[2,1]`) are refused only by the dry run, which cannot evaluate the local; a real run translates them (`bs.do`). Note in `plan/stata/resampling.md`.
+- **`cd` and `cd ""`** (16 TZEN38 lines: a global never set): Stata on Windows prints the folder and stays; RCraft prints
+  `getwd()` on Windows and stops with a message elsewhere (Stata's manual: home folder; not observed). `plan/stata/cd.md`.
+- **`graph combine` `l1()` and `l2()`** (5 lines): left titles, the text before the first comma (`c(black) si(medium)` is
+  look); `title()` of `graph combine` now drops its look options too. `plan/stata/graph-combine.md`; test in
+  `engine/tests/stata_graphs.rs`.
+- **`outreg2 onecol`**: after `regress`, `xtreg, fe` and `reghdfe` Stata writes byte for byte the files it writes without
+  it; taken after those three, refused after others. Corpus `outreg2_onecol.do` (tolerance 0). The package's 3 lines stay
+  refused: they follow `tobit` and use outreg2's own layout and number format. `plan/stata/outreg2.md`.
+- **Shares:** packages **94.7%** (4,025 of 4,249 judged source lines; was 3,996, 94.0%); probes **78.7%** (22,823 of
+  30,115, StatCraft b7d392e's 545 probe do-files), unchanged: no probe uses these forms. The ranking expected about
+  95.4%; the 20 lines of `bs` of a program, the 8 dry-run-only lines and the 3 outreg2 lines make the difference.

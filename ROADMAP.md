@@ -607,8 +607,9 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   on 2026-11-01, the rest `_natscale`; not measured again since) (not started)
 - P2C.12al Replication packages: the 46 do-files of the 11 public packages to 100% of
   their lines translated, and every compared result matching; 95% of source lines is the
-  user's minimum, equal to the probes' (P2C.12ah) (not started; 94.0% of source lines on
-  2026-11-19; 87.8% on 2026-11-18 while the resynced reader still missed `# delimit ;`, 94.9% with the old one that
+  user's minimum, equal to the probes' (P2C.12ah) (not started; 94.7% of source lines on
+  2026-11-19 after the package quick wins (4,025 of 4,249: `bs`, `cd ""`, `graph combine` `l1()`/`l2()`, `outreg2 onecol`;
+  `bs` of a program the do-file defines and the outreg2 lines after `tobit` still refused), 94.0% before them; 87.8% on 2026-11-18 while the resynced reader still missed `# delimit ;`, 94.9% with the old one that
   read 6J6BAW as one line)
 - P2C.12am `# delimit ;` with a blank after the `#` (done 2026-11-19): the reader took `#delimit` and `#d` but not
   `# delimit`, so 322 lines of 6J6BAW (CR-only, run in `;` mode) did not translate. Stata 19 accepts blanks or a tab
