@@ -48,3 +48,13 @@ display "@ vce_logit " %24.17g _b[x] " " %24.17g _se[x] " " %24.17g _se[w] " " %
 display "@ vce_logit_e " e(N) " " e(N_reps) " " e(df_r) " " %24.17g e(ll)
 probit yb x w, vce(jack) nolog
 display "@ vce_probit " %24.17g _b[x] " " %24.17g _se[x] " " %24.17g _se[w] " " %24.17g _se[_cons]
+* a command with no e(sample): the observations its if picks are the units
+import delimited corpus.csv, clear
+jackknife r(mean), nodots: summarize y if x > 0
+display "@ if_e " e(N) " " e(N_reps) " " e(df_r) " " %24.17g _b[_jk_1] " " %24.17g _se[_jk_1]
+jackknife m=r(mean), nodots: summarize y if x < 0.5 & w > -1
+display "@ if2_e " e(N) " " e(N_reps) " " %24.17g _b[m] " " %24.17g _se[m]
+* a missing value of the cluster variable
+replace cat3 = . in 1/3
+capture noisily jackknife _b, cluster(cat3) nodots: regress y x
+display "@ rc459 " _rc

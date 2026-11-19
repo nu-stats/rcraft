@@ -1686,6 +1686,11 @@ const LEAVE_R_ALONE: &[&str] = &[
     "codebook_",
     "assert",
     "scalar",
+    "preserve",
+    "postfile",
+    "post",
+    "postclose",
+    "restore",
 ];
 
 /// Commands that never change e() (an untranslated command not here might
@@ -1792,6 +1797,9 @@ const LEAVE_E_ALONE: &[&str] = &[
     "help",
     "search",
     "preserve",
+    "postfile",
+    "post",
+    "postclose",
     "restore",
     "sample",
     "expand",

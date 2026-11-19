@@ -5940,3 +5940,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Shares after batch I:** probes **78.3%** (22,725 of 30,103 source lines; was 22,588, 78.0%; of the 57 lines of these commands plus their dependents
   only the `spearman` line, one `r(nosuch)` line and the `format c*` lines of probe 304 are refused now); packages **94.0%** (3,996 of 5,601), unchanged.
 
+- **Follow-up, the same day (the refused forms of batch I):** `quietly spearman y x` keeps `r(rho)` and `r(N)` (so `permute x r(rho): spearman y x`
+  runs); `r(nosuch)` after `summarize` is missing and `permute` stops with r(322); `permute` runs e-class programs (their e(sample) and `_b`); `_b` and
+  `_se` after `logit` and `probit` are named after the equation in `statsby`, `rolling`, `simulate` and `permute` (`yb_b_x`); `statsby` and `rolling` take
+  `saving()` (and refuse `clear` with it, r(198)); `rolling` windows are periods of the time variable, so gaps in time work; `jackknife` of a command with
+  no `e(sample)` takes `if`, and a missing cluster value is r(459). Also: `preserve`, `restore`, `postfile`, `post` and `postclose` leave r() as it was
+  (checked in Stata 19); `format varlist %fmt` takes patterns; `drop _all` removes the observations too. Corpus: `permute.do` 158, `statsby.do` 119, `jackknife.do` 31, `simulate.do`, new
+  `restore_r.do` and `resample_logit.do` (1e-6: float results of maximum likelihood estimates). **Shares:** probes **78.4%** (22,734 of 30,103; every probe line of
+  these commands translates now); packages **94.0%**, unchanged. Still refused: printed `spearman` of two variables (its p-value), `jackknife` with `in`, `statsby` and
+  `rolling` without `clear` or `saving()`, `rrecursive`, replications that stop with an error (Stata records missing), more than 2,000 replications.
+

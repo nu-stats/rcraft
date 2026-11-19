@@ -183,6 +183,10 @@ capture noisily permute y r(mean), reps(0): summarize y
 display "@ rc125 " _rc
 capture noisily permute y r(mean) reps(5): summarize y
 display "@ rc133 " _rc
+capture noisily permute y r(nosuch), reps(5) nodots: summarize y
+display "@ rc322 " _rc
+permute x r(rho) r(N), reps(60) seed(30448) nodots: quietly spearman y x
+display "@ spq " %24.17g el(r(b), 1, 1) " " el(r(b), 1, 2) " " el(r(c_lower), 1, 1) " " el(r(c_upper), 1, 1) " " %24.17g el(r(p_twosided), 1, 1)
 capture erase permute_1.dta
 capture erase permute_2.dta
 capture erase permute_3.dta
@@ -202,3 +206,24 @@ forvalues i = 1/5 {
     display "@ es_`i' " %24.17g _b_x[`i'] " " %24.17g _b_cons[`i']
 }
 capture erase permute_10.dta
+* a program that fits a model: its e(sample) is the sample, and _b is the model's
+program define permreg, eclass
+    regress y x
+end
+import delimited corpus.csv, clear
+permute x _b, reps(15) seed(30449) nodots saving(permute_11, replace double): permreg
+display "@ ep " r(N) " " %24.17g el(r(b), 1, 1) " " %24.17g el(r(b), 1, 2) " " el(r(c_lower), 1, 1) " " el(r(c_upper), 1, 2) " " r(k_eexp)
+use permute_11, clear
+forvalues i = 1/4 {
+    display "@ ep_`i' " %24.17g _b_x[`i'] " " %24.17g _b_cons[`i']
+}
+capture erase permute_11.dta
+* _b after logit: the variables and the table are named after the equation
+import delimited corpus.csv, clear
+permute yb _b, reps(12) seed(30450) nodots saving(permute_12, replace double): logit yb x
+display "@ pl " r(N) " " %24.17g el(r(b), 1, 1) " " %24.17g el(r(b), 1, 2) " " el(r(c_lower), 1, 1) " " el(r(c_upper), 1, 2) " " r(k_eexp)
+use permute_12, clear
+forvalues i = 1/4 {
+    display "@ pl_`i' " %24.17g yb_b_x[`i'] " " %24.17g yb_b_cons[`i']
+}
+capture erase permute_12.dta

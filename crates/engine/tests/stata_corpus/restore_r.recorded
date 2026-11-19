@@ -1,0 +1,5 @@
+* Stata 19.0's results for restore_r.do, recorded by cargo xtask stata-record
+@ pre        .1476166692872842 60
+@ post       .80860000433666368 35 60       .35199999809265137
+@ rest     -.082200000171239171 60
+@ e 60       1.4132133233631001

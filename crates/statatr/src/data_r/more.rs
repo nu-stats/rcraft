@@ -2985,12 +2985,18 @@ impl Session {
                 "format {fmt} is not a format RCraft has yet (Stata: invalid %format)"
             )));
         }
-        if vars.iter().any(|v| !is_name(v)) {
-            return Err(no(
-                "format with patterns or ranges of variables is not translated yet",
-            ));
-        }
         let d = self.data()?;
+        if vars.iter().any(|v| !is_name(v)) {
+            // patterns and ranges: the names the data have, found in R
+            let sel = select(&vars.join(" "))?;
+            out.package("dplyr");
+            out.line(format!(
+                "for (.v in names(dplyr::select({d}, {sel}))) attr({d}[[.v]], \"format.stata\") <- {}",
+                r_text(fmt)
+            ));
+            out.caveat("the display format is kept with the variable (and in a saved .dta); R's own printing does not use it");
+            return Ok(());
+        }
         for v in &vars {
             out.line(format!(
                 "if (!{0} %in% names({d})) stop(\"variable {1} not found (Stata: r(111))\", call. = FALSE)",

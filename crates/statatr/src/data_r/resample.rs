@@ -333,11 +333,17 @@ impl Session {
         let eclass = self.e_new;
         let r_left = self.r_new.take();
         self.track_returned(&inner, true, false, r_left);
-        if !eclass && (inner.parts.if_exp.is_some() || inner.parts.in_range.is_some()) {
+        // a command with no e(sample): the observations its if and in pick are the units
+        if !eclass && inner.parts.in_range.is_some() {
             return Err(no(
-                "jackknife of a command without e(sample) with if or in is not translated yet",
+                "jackknife of a command without e(sample) with in is not translated yet (in counts the rows left, which move when one is left out)",
             ));
         }
+        let picked = if !eclass && inner.parts.if_exp.is_some() {
+            self.condition(&inner, &mut body)?
+        } else {
+            None
+        };
         let (stats, by_b) = self.jackknife_stats(&p.explist, &inner, eclass, &mut body)?;
         let nfun = if eclass { "e(N)" } else { "r(N)" };
         let (ncode, _) = self.value(nfun, &mut body)?;
@@ -423,6 +429,11 @@ impl Session {
         out.line(format!("stata_jk_n <- {ncode}"));
         out.line(if eclass {
             "stata_jk_rows <- stata_esample".to_string()
+        } else if let Some(k) = &picked {
+            format!(
+                "stata_jk_rows <- dplyr::transmute(stata_jk_full, stata_sel = {k})$stata_sel
+stata_jk_rows <- !is.na(stata_jk_rows) & stata_jk_rows"
+            )
         } else {
             "stata_jk_rows <- rep(TRUE, nrow(stata_jk_full))".to_string()
         });
@@ -434,8 +445,9 @@ impl Session {
         out.line("stata_jk_sub <- stata_jk_full[stata_jk_rows, , drop = FALSE]");
         match &cluster {
             Some(v) => out.line(format!(
-                "stata_jk_unit <- match(stata_jk_sub[[{0}]], sort(unique(stata_jk_sub[[{0}]])))\nif (anyNA(stata_jk_sub[[{0}]])) stop(\"jackknife with a missing value of the cluster variable is not translated yet\", call. = FALSE)",
-                super::r_text(v)
+                "stata_jk_unit <- match(stata_jk_sub[[{0}]], sort(unique(stata_jk_sub[[{0}]])))\nif (anyNA(stata_jk_sub[[{0}]])) stop(\"missing values not allowed in cluster variable {1} (Stata: r(459))\", call. = FALSE)",
+                super::r_text(v),
+                v
             )),
             None => out.line("stata_jk_unit <- seq_len(nrow(stata_jk_sub))"),
         }

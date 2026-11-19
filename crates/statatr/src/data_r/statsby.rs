@@ -18,20 +18,37 @@ stata_sb_vec <- function(se = FALSE) {
   b <- stata_bs_b()
   v <- if (se) {
     s <- sqrt(diag(stata_e$V))
-    names(s) <- colnames(stata_e$V)
-    s[names(b)]
+    nmf <- colnames(stata_e$b)
+    keep <- !grepl("(^|[:#])[0-9]*[bo]n?\\.", nmf) & !grepl("(^|:)o\\.", nmf)
+    if (length(s) == length(nmf)) s[keep] else { names(s) <- colnames(stata_e$V); s[names(b)] }
   } else b
   out <- as.vector(v)
-  names(out) <- paste0(if (se) "_se_" else "_b_", ifelse(names(b) == "_cons", "cons", names(b)))
+  # logit and probit name their variables after the equation (yb_b_x, labelled [yb]_b[x])
+  dep <- if (!is.null(stata_e$cmd) && stata_e$cmd %in% c("logit", "probit")) stata_e$depvar else NULL
+  kind <- if (se) "se" else "b"
+  nm <- paste0(if (is.null(dep)) "" else dep, "_", kind, "_", ifelse(names(b) == "_cons", "cons", names(b)))
+  names(out) <- nm
+  for (j in seq_along(nm)) {
+    assign(nm[j], list(kind = kind, eq = dep, coef = names(b)[j],
+                       label = paste0(if (is.null(dep)) "" else paste0("[", dep, "]"), "_", kind, "[", names(b)[j], "]")),
+           envir = stata_sb_reg)
+  }
   out
 }
-stata_sb_begin <- function(cmdname, command, names, exps, by, nodots, header = TRUE) {
+stata_sb_reg <- new.env()
+stata_sb_write <- function(out, path, label) {
+  haven::write_dta(out, path, label = label)
+  invisible(NULL)
+}
+stata_sb_begin <- function(cmdname, command, names, exps, by, nodots, header = TRUE, saving = NULL, replace = FALSE) {
+  if (!is.null(saving) && !replace && file.exists(saving)) stop("file ", saving, " already exists (Stata: r(602))", call. = FALSE)
   if (!nodots) cat("(running ", cmdname, " on estimation sample)\n", sep = "")
   if (header) {
     pad <- function(s) formatC(s, width = 13)
     cat("\n", pad("Command"), ": ", command, "\n", sep = "")
     for (j in seq_along(names)) cat(pad(names[j]), ": ", exps[j], "\n", sep = "")
     cat(pad("By"), ": ", if (length(by)) paste(by, collapse = " ") else "<none>", "\n\n", sep = "")
+    if (!is.null(saving) && !file.exists(saving)) cat("(file ", saving, " not found)\n", sep = "")
     if (!nodots) cat("Statsby groups:\n")
   }
   invisible(NULL)
@@ -61,8 +78,8 @@ stata_sb_table <- function(res, exps = character()) {
   for (i in seq_along(res)) if (!is.null(res[[i]])) m[i, names(res[[i]])] <- res[[i]]
   lab <- vapply(nm, function(n) {
     if (n %in% names(exps)) return(exps[[n]])
-    if (startsWith(n, "_b_")) return(paste0("_b[", ifelse(n == "_b_cons", "_cons", substring(n, 4)), "]"))
-    if (startsWith(n, "_se_")) return(paste0("_se[", ifelse(n == "_se_cons", "_cons", substring(n, 5)), "]"))
+    info <- get0(n, envir = stata_sb_reg, inherits = FALSE)
+    if (!is.null(info)) return(info$label)
     n
   }, "")
   list(m = m, lab = lab)
@@ -84,24 +101,28 @@ stata_sb_result <- function(full, g, res, by, total = FALSE, exps = character())
   rownames(out) <- NULL
   out
 }
-stata_roll_windows <- function(d, time, window, step = 1, recursive = FALSE) {
+stata_roll_windows <- function(d, time, window, step = 1, recursive = FALSE, delta = 1) {
   if (!time %in% names(d)) stop("variable ", time, " not found (Stata: r(111))", call. = FALSE)
   tv <- d[[time]]
   attributes(tv) <- NULL
-  n <- nrow(d)
   if (anyNA(tv) || is.unsorted(tv)) stop("rolling with a time variable that is missing or not in order is not translated yet", call. = FALSE)
-  delta <- if (n > 1) min(diff(tv)) else 1
-  if (n > 1 && any(abs(diff(tv) - delta) > 1e-9)) stop("rolling with gaps in the time variable is not translated yet", call. = FALSE)
-  if (window > n) stop("window() is larger than the sample (Stata: r(2001))", call. = FALSE)
-  ends <- seq(window, n, by = step)
-  starts <- if (recursive) rep(1L, length(ends)) else ends - window + 1L
-  list(start = as.integer(starts), end = as.integer(ends))
+  # a window is `window` periods of the time variable, whether or not each has an observation
+  lo <- min(tv)
+  hi <- max(tv)
+  span <- (window - 1) * delta
+  if (hi - lo < span - 1e-9 * abs(delta)) stop("window() is larger than the sample (Stata: r(2001))", call. = FALSE)
+  k <- floor((hi - lo - span) / (step * delta) + 1e-9) + 1
+  ends <- lo + span + (seq_len(k) - 1) * step * delta
+  starts <- if (recursive) rep(lo, length(ends)) else ends - span
+  tol <- 1e-9 * max(abs(delta), 1)
+  rows <- lapply(seq_along(ends), function(i) which(tv >= starts[i] - tol & tv <= ends[i] + tol))
+  list(start = starts, end = ends, rows = rows)
 }
 stata_roll_result <- function(full, time, w, res, exps = character()) {
   tb <- stata_sb_table(res, exps)
   out <- list()
   for (nm in c("start", "end")) {
-    x <- full[[time]][w[[nm]]]
+    x <- w[[nm]]
     mostattributes(x) <- attributes(full[[time]])
     out[[nm]] <- x
   }
@@ -113,6 +134,17 @@ stata_roll_result <- function(full, time, w, res, exps = character()) {
   rownames(out) <- NULL
   out
 }"##;
+
+/// `saving = path, replace = flag` for the R call, when `saving()` was given.
+fn saving_args(saving: &Option<(String, bool, bool)>) -> String {
+    saving.as_ref().map_or(String::new(), |(p, r, _)| {
+        format!(
+            ", saving = {}, replace = {}",
+            super::r_text(p),
+            super::stats::r_logical(*r)
+        )
+    })
+}
 
 /// The R of each statistic, and the named expressions with their texts.
 type Stats = (Vec<String>, Vec<(String, String)>);
@@ -156,9 +188,9 @@ impl Session {
         let mut unnamed = 0;
         for item in &items {
             if item == "_b" || item == "_se" {
-                if !eclass || inner.name != "regress" {
+                if !eclass || !matches!(inner.name.as_str(), "regress" | "logit" | "probit") {
                     return Err(no(format!(
-                        "{prefix} {item} is translated after regress only (Stata names the logit and probit variables after the equation); not here yet"
+                        "{prefix} {item} is translated after regress, logit and probit; not here yet"
                     )));
                 }
                 codes.push(format!(
@@ -266,6 +298,19 @@ impl Session {
         self.chars_lost = Some("statsby and rolling replace the data".into());
     }
 
+    /// With no `clear` the data are as they were; the model and r() are not known.
+    fn keep_data_after_resampling(&mut self) {
+        self.esample = false;
+        self.drew.set(false);
+        self.estimates = None;
+        self.estimates_lost = Some(
+            "statsby or rolling ran the command on parts of the data: the model before them is gone".into(),
+        );
+        self.e_ret = super::returned::Returned::Lost(
+            "e() after statsby or rolling is the last run of the command, which RCraft does not keep".into(),
+        );
+    }
+
     fn take_helpers(&mut self, body: &mut Out, out: &mut Out) {
         for h in NEEDS {
             self.helpers.insert(h);
@@ -284,14 +329,32 @@ impl Session {
         let p = split_prefixed(c, "statsby")?;
         let opt_list = p.options.clone();
         let opts = Opts(&opt_list);
-        if let Some(o) = opts.other(&[("by", 2), ("clear", 5), ("total", 5), ("nodots", 4)]) {
+        if let Some(o) = opts.other(&[
+            ("by", 2),
+            ("clear", 5),
+            ("total", 5),
+            ("nodots", 4),
+            ("saving", 4),
+        ]) {
             return Err(no(format!(
                 "statsby with the option {o} is not translated yet"
             )));
         }
-        if !opts.has("clear", 5) {
+        let clear = opts.has("clear", 5);
+        let saving = match opts.arg("saving", 4) {
+            Some(sv) => Some(super::permute_run::saving_of(&sv)?),
+            None => None,
+        };
+        if saving.as_ref().is_some_and(|sv| sv.2) {
+            return Err(no("statsby, saving(, double) is not translated yet"));
+        }
+        if clear && saving.is_some() {
+            out.line("stop(\"clear and saving() are mutually exclusive options (Stata: r(198))\", call. = FALSE)");
+            return Ok(());
+        }
+        if !clear && saving.is_none() {
             return Err(no(
-                "statsby without clear (it needs clear or saving(), which is not translated yet)",
+                "statsby without clear or saving(): Stata stops (r(4)) when the data have changed since they were saved, which RCraft does not know",
             ));
         }
         let by_arg = opts.arg("by", 2).unwrap_or_default();
@@ -346,12 +409,13 @@ impl Session {
             }
         ));
         out.line(format!(
-            "stata_sb_begin({}, {}, c({}), c({}), c({by_r}), {})",
+            "stata_sb_begin({}, {}, c({}), c({}), c({by_r}), {}{})",
             super::r_text(&inner.name),
             super::r_text(&p.inner),
             q(&names),
             q(&exps),
-            tf(nodots)
+            tf(nodots),
+            saving_args(&saving)
         ));
         out.line("stata_sb_res <- vector(\"list\", length(stata_sb_rows))");
         out.line(format!(
@@ -361,14 +425,40 @@ impl Session {
             tf(nodots)
         ));
         out.line(format!(
-            "{d} <- stata_sb_result(stata_sb_full, stata_sb_g, stata_sb_res, c({by_r}), total = {}, exps = c({exp_labels}))",
+            "stata_sb_out <- stata_sb_result(stata_sb_full, stata_sb_g, stata_sb_res, c({by_r}), total = {}, exps = c({exp_labels}))",
             tf(total)
         ));
-        out.line("rm(stata_sb_full, stata_sb_g, stata_sb_rows, stata_sb_res)");
-        self.resampled_data(&by);
-        for n in &names {
-            self.kinds.insert(n.clone(), Kind::Number);
-            self.storage.insert(n.clone(), Storage::Float);
+        if let Some((path, _, _)) = &saving {
+            out.package("haven");
+            out.line(format!(
+                "stata_sb_write(stata_sb_out, {}, {})",
+                super::r_text(path),
+                super::r_text(&format!("statsby: {}", inner.name))
+            ));
+        }
+        // without clear the data in memory stay, sorted by the by() variables
+        out.line(format!(
+            "{d} <- {}",
+            if clear {
+                "stata_sb_out".to_string()
+            } else if by.is_empty() {
+                "stata_sb_full".to_string()
+            } else {
+                format!(
+                    "stata_sb_full[do.call(order, c(lapply(c({by_r}), function(v) {{ x <- stata_sb_full[[v]]; attributes(x) <- NULL; x }}), list(na.last = TRUE, method = \"radix\"))), , drop = FALSE]"
+                )
+            }
+        ));
+        out.line("rm(stata_sb_full, stata_sb_g, stata_sb_rows, stata_sb_res, stata_sb_out)");
+        if clear {
+            self.resampled_data(&by);
+            for n in &names {
+                self.kinds.insert(n.clone(), Kind::Number);
+                self.storage.insert(n.clone(), Storage::Float);
+            }
+        } else {
+            self.keep_data_after_resampling();
+            out.caveat("Stata sorts the data by the by() variables; rows with equal values may come in another order there");
         }
         out.caveat("each group runs the command on that group's rows; the statistics are kept as floats, as Stata keeps them");
         Ok(())
@@ -387,14 +477,27 @@ impl Session {
             ("stepsize", 4),
             ("clear", 5),
             ("nodots", 4),
+            ("saving", 4),
         ]) {
             return Err(no(format!(
                 "rolling with the option {o} is not translated yet"
             )));
         }
-        if !opts.has("clear", 5) {
+        let clear = opts.has("clear", 5);
+        let saving = match opts.arg("saving", 4) {
+            Some(sv) => Some(super::permute_run::saving_of(&sv)?),
+            None => None,
+        };
+        if saving.as_ref().is_some_and(|sv| sv.2) {
+            return Err(no("rolling, saving(, double) is not translated yet"));
+        }
+        if clear && saving.is_some() {
+            out.line("stop(\"clear and saving() are mutually exclusive options (Stata: r(198))\", call. = FALSE)");
+            return Ok(());
+        }
+        if !clear && saving.is_none() {
             return Err(no(
-                "rolling without clear (it needs clear or saving(), which is not translated yet)",
+                "rolling without clear or saving(): Stata stops (r(4)) when the data have changed since they were saved, which RCraft does not know",
             ));
         }
         let window: u32 = opts
@@ -435,15 +538,17 @@ impl Session {
         let tf = super::stats::r_logical;
         out.line(format!("stata_sb_full <- {d}"));
         out.line(format!(
-            "stata_sb_w <- stata_roll_windows(stata_sb_full, {}, {window}, {step}, {})",
+            "stata_sb_w <- stata_roll_windows(stata_sb_full, {}, {window}, {step}, {}, delta = {})",
             super::r_text(&time),
-            tf(recursive)
+            tf(recursive),
+            self.ts_delta.clone().unwrap_or_else(|| "1".to_string())
         ));
         out.line(format!(
-            "stata_sb_begin({}, {}, character(), character(), character(), {}, header = FALSE)",
+            "stata_sb_begin({}, {}, character(), character(), character(), {}, header = FALSE{})",
             super::r_text(&inner.name),
             super::r_text(&p.inner),
-            tf(nodots)
+            tf(nodots),
+            saving_args(&saving)
         ));
         out.line("stata_sb_n <- length(stata_sb_w$end)");
         out.line("stata_sb_res <- vector(\"list\", stata_sb_n)");
@@ -452,22 +557,42 @@ impl Session {
             tf(nodots)
         ));
         out.line(format!(
-            "for (stata_sb_i in seq_len(stata_sb_n)) {{\n{d} <- stata_sb_full[stata_sb_w$start[stata_sb_i]:stata_sb_w$end[stata_sb_i], , drop = FALSE]\nstata_sb_res[stata_sb_i] <- list(tryCatch({{\n{code}\nstata_sb_f(c({}))\n}}, error = function(e) NULL))\nstata_bs_dot(stata_sb_i, stata_sb_n, {})\n}}",
+            "for (stata_sb_i in seq_len(stata_sb_n)) {{\n{d} <- stata_sb_full[stata_sb_w$rows[[stata_sb_i]], , drop = FALSE]\nstata_sb_res[stata_sb_i] <- list(tryCatch({{\n{code}\nstata_sb_f(c({}))\n}}, error = function(e) NULL))\nstata_bs_dot(stata_sb_i, stata_sb_n, {})\n}}",
             codes.join(", "),
             tf(nodots)
         ));
         out.line(format!(
-            "{d} <- stata_roll_result(stata_sb_full, {}, stata_sb_w, stata_sb_res, exps = c({exp_labels}))",
+            "stata_sb_out <- stata_roll_result(stata_sb_full, {}, stata_sb_w, stata_sb_res, exps = c({exp_labels}))",
             super::r_text(&time)
         ));
-        out.line("rm(stata_sb_full, stata_sb_w, stata_sb_n, stata_sb_res)");
-        self.resampled_data(&[]);
-        for n in ["start", "end"] {
-            self.kinds.insert(n.to_string(), Kind::Number);
+        if let Some((path, _, _)) = &saving {
+            out.package("haven");
+            out.line(format!(
+                "stata_sb_write(stata_sb_out, {}, {})",
+                super::r_text(path),
+                super::r_text(&format!("rolling: {}", inner.name))
+            ));
         }
-        for (n, _) in &named {
-            self.kinds.insert(n.clone(), Kind::Number);
-            self.storage.insert(n.clone(), Storage::Float);
+        out.line(format!(
+            "{d} <- {}",
+            if clear {
+                "stata_sb_out"
+            } else {
+                "stata_sb_full"
+            }
+        ));
+        out.line("rm(stata_sb_full, stata_sb_w, stata_sb_n, stata_sb_res, stata_sb_out)");
+        if clear {
+            self.resampled_data(&[]);
+            for n in ["start", "end"] {
+                self.kinds.insert(n.to_string(), Kind::Number);
+            }
+            for (n, _) in &named {
+                self.kinds.insert(n.clone(), Kind::Number);
+                self.storage.insert(n.clone(), Storage::Float);
+            }
+        } else {
+            self.keep_data_after_resampling();
         }
         out.caveat("each window runs the command on its own rows of the data in time order; the statistics are kept as floats, as Stata keeps them");
         Ok(())

@@ -20,6 +20,8 @@ pub(super) struct Loop {
     command: String,
     cmdname: String,
     program: bool,
+    /// A program of class eclass: its model, if its last line fits one, is the command's.
+    eprogram: bool,
     /// The data, and what is known of them, when the line began.
     before: Option<Box<Preserved>>,
     first: bool,
@@ -44,7 +46,7 @@ const RESAMPLING: [&str; 8] = [
 ];
 
 /// Splits `file [, replace double]` of `saving()`.
-fn saving_of(s: &str) -> Result<(String, bool, bool), Untranslated> {
+pub(super) fn saving_of(s: &str) -> Result<(String, bool, bool), Untranslated> {
     let (file, sub) = match super::random::top_level(s, ',') {
         Some(i) => (s.get(..i).unwrap_or(""), s.get(i + 1..).unwrap_or("")),
         None => (s, ""),
@@ -109,9 +111,6 @@ impl Session {
         let text = super::returned::after_name(c);
         let (kindword, line) = first_word(text.trim());
         let name = if permute { "permute" } else { "simulate" };
-        if kindword == "eprogram" && permute {
-            return Err(no("permute of an e-class program is not translated yet"));
-        }
         let cmd = crate::reader::read(&format!("{name} {line}"));
         let Some(cmd) = cmd.commands().first().map(|c| (*c).clone()) else {
             return Err(no("the line could not be read"));
@@ -190,12 +189,14 @@ impl Session {
             command: p.inner.trim().to_string(),
             cmdname,
             program: kindword == "program" || kindword == "eprogram",
+            eprogram: kindword == "eprogram",
             before: None,
             first: true,
         })
     }
 
     /// The R that evaluates an item after one run of the command.
+    #[allow(clippy::too_many_arguments)]
     fn loop_item(
         &mut self,
         item: &str,
@@ -203,6 +204,7 @@ impl Session {
         cmdname: &str,
         stem: &str,
         unnamed: &mut usize,
+        complete: bool,
         out: &mut Out,
     ) -> Result<String, Untranslated> {
         if item == "_b" || item == "_se" {
@@ -211,13 +213,31 @@ impl Session {
                     "{item} is translated after regress, logit and probit; not here yet"
                 )));
             }
+            if item == "_se" && stem == "_pm_" && matches!(cmdname, "logit" | "probit") {
+                return Err(no(
+                    "_se after logit and probit in permute is not translated yet (its equation names are not decoded)",
+                ));
+            }
             return Ok(format!(
                 "stata_sb_vec({})",
                 if item == "_se" { "TRUE" } else { "FALSE" }
             ));
         }
         let (name, exp) = named_item(item, unnamed, stem);
-        let (code, kind) = self.value(&exp, out)?;
+        let (code, kind) = match self.value(&exp, out) {
+            Ok(v) => v,
+            // a name of r() that a command whose r() RCraft keeps whole does not leave is
+            // missing in Stata too (permute then stops with r(322))
+            Err(e)
+                if complete
+                    && exp.starts_with("r(")
+                    && exp.ends_with(')')
+                    && e.reason.contains("is not kept in R yet (RCraft keeps r()") =>
+            {
+                ("NA_real_".to_string(), Kind::Number)
+            }
+            Err(e) => return Err(e),
+        };
         if kind == Kind::Text {
             return Err(no(format!("{exp} is a string (Stata: type mismatch)")));
         }
@@ -249,8 +269,18 @@ impl Session {
         }
         let mut unnamed = 0;
         let mut codes = Vec::new();
+        // summarize without options leaves exactly the r() RCraft keeps
+        let complete = l.cmdname == "summarize" && !l.command.contains(',');
         for item in &items {
-            codes.push(self.loop_item(item, eclass, &l.cmdname, stem, &mut unnamed, out)?);
+            codes.push(self.loop_item(
+                item,
+                eclass,
+                &l.cmdname,
+                stem,
+                &mut unnamed,
+                complete,
+                out,
+            )?);
         }
         Ok(format!("c({})", codes.join(", ")))
     }
@@ -315,7 +345,12 @@ impl Session {
     }
 
     fn pm_collect_in(&mut self, l: &mut Loop, out: &mut Out) -> Result<(), Untranslated> {
-        let eclass = !l.program && self.prev_eclass;
+        let eclass = (!l.program || l.eprogram) && self.prev_eclass;
+        if l.eprogram {
+            if let super::returned::Returned::Kept { cmd, .. } = &self.e_ret {
+                l.cmdname = cmd.clone();
+            }
+        }
         let d = self.data()?;
         let vec = self.loop_values(l, eclass, "_pm_", out)?;
         if l.first {

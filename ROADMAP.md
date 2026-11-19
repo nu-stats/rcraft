@@ -557,10 +557,14 @@ Command families:
   (part done: `bootstrap` and `bsample` Verified (P2C.16). `jackknife` (also as `vce(jackknife)` of `regress`, `logit` and
   `probit`), `statsby`, `rolling`, `permute` and `simulate` Verified 2026-11-19, batch I of the StatCraft port (`jackknife.do`,
   `statsby.do`, `permute.do` (146 results), `simulate.do`, all to 1e-8, `permute` with Stata's own permutations and draws);
-  `permute` and `simulate` run programs the do-file defines, one replication after another; refused: `spearman`, `r(nosuch)`,
-  `permute` of an e-class program, `statsby` and `rolling` with `saving()` or without `clear`, `rolling` over gaps, `_b` of
-  `logit` in `statsby`, replications that stop with an error, see `plan/stata/resampling.md`;
-  measured: probes 78.0% -> 78.3% (22,588 -> 22,725 translated source lines), packages 94.0% unchanged (3,996 of 5,601).
+  `permute` and `simulate` run programs the do-file defines, one replication after another. Follow-up 2026-11-19 (the refused
+  lines of the batch): `quietly spearman y x` (r(rho), r(N)), `r(nosuch)` (r(322)), e-class programs in `permute`, `_b` after
+  `logit` and `probit` (named after the equation), `saving()` of `statsby` and `rolling`, `rolling` over gaps in time, `jackknife` with
+  `if` and its r(459); `preserve`, `restore`, `post`, `postfile` and `postclose` leave r(), `format c*`; every probe line of batch I
+  now translates. Still refused: `spearman` printed (p-value), `jackknife` of a command with `in`, `statsby` and `rolling` with
+  neither `clear` nor `saving()`, `rrecursive`, replications that stop with an error, more than 2,000 replications,
+  see `plan/stata/resampling.md`;
+  measured: probes 78.0% -> 78.4% (22,588 -> 22,734 translated source lines), packages 94.0% unchanged (3,996 of 5,601).
   Not started: `bca` and `vce(bootstrap)`.)
 - P2C.12ab Multiple imputation
   (not started: `mi`.)

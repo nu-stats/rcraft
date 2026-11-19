@@ -214,11 +214,16 @@ stata_pm_end <- function(permvar, command, byvec, eq, named_exps, saving_double 
   obs <- if (saving_double) st$obs else stats::setNames(stata_float(st$obs), names(st$obs))
   k <- length(obs)
   nm0 <- names(obs)
-  bare <- function(x, p) { y <- sub(paste0("^", p), "", x); ifelse(y == "cons", "_cons", y) }
-  nm <- if (byvec) ifelse(startsWith(nm0, "_b_"), if (eq) paste0("b:", bare(nm0, "_b_")) else bare(nm0, "_b_"),
-                    ifelse(startsWith(nm0, "_se_"), if (eq) paste0("se:", bare(nm0, "_se_")) else bare(nm0, "_se_"), nm0)) else nm0
-  labels <- ifelse(startsWith(nm0, "_b_"), paste0("_b[", bare(nm0, "_b_"), "]"), ifelse(startsWith(nm0, "_se_"), paste0("_se[", bare(nm0, "_se_"), "]"), nm0))
-  expstexts <- if (byvec) labels else named_exps$exp
+  info <- lapply(nm0, function(n) get0(n, envir = stata_sb_reg, inherits = FALSE))
+  bare <- function(i, n) if (is.null(info[[i]])) n else info[[i]]$coef
+  nm <- if (byvec) vapply(seq_along(nm0), function(i) {
+    x <- info[[i]]
+    if (is.null(x)) return(nm0[i])
+    if (eq) paste0(x$kind, ":", x$coef) else if (!is.null(x$eq)) paste0(x$eq, ":", x$coef) else x$coef
+  }, "") else nm0
+  eq <- eq || (byvec && any(grepl(":", nm, fixed = TRUE)))
+  labels <- vapply(seq_along(nm0), function(i) if (is.null(info[[i]])) nm0[i] else info[[i]]$label, "")
+  expstexts <- if (byvec) vapply(seq_along(nm0), function(i) if (is.null(info[[i]])) nm0[i] else paste0("_", info[[i]]$kind, "[", info[[i]]$coef, "]"), "") else named_exps$exp
   if (!byvec) labels <- named_exps$exp
   n <- vapply(seq_len(k), function(j) sum(!is.na(reps[, j])), 0)
   cl <- vapply(seq_len(k), function(j) sum(reps[, j] <= obs[j], na.rm = TRUE), 0)

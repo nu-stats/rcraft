@@ -211,6 +211,7 @@ pub(crate) const INFER_COMMANDS: &[&str] = &[
 /// The commands whose main part is a varlist (with factor variables for the
 /// models): there a pattern, a range or `_all` is made the data's names.
 const VARLIST: &[&str] = &[
+    "format",
     "dsregress",
     "poregress",
     "xporegress",
@@ -1590,6 +1591,17 @@ impl<'f> Run<'f> {
                             None => (main.clone(), String::new()),
                         }
                     }
+                    // format %fmt varlist, or format varlist %fmt: the formats are not names
+                    "format" => {
+                        let (fmts, names): (Vec<&str>, Vec<&str>) =
+                            main.split_whitespace().partition(|w| w.starts_with('%'));
+                        let lead = if fmts.is_empty() {
+                            String::new()
+                        } else {
+                            format!("{} ", fmts.join(" "))
+                        };
+                        (lead, names.join(" "))
+                    }
                     _ => (String::new(), main.clone()),
                 };
                 // and a name R has not given as a variable may abbreviate one
@@ -1600,7 +1612,12 @@ impl<'f> Run<'f> {
                         && (self.vars.is_some()
                             || words.iter().any(|w| !self.seen_vars.iter().any(|v| v == w)))
                 };
-                if VARLIST.contains(&c.name.as_str()) && (varlist::needs_names(&list) || unseen()) {
+                // drop _all takes the observations too: the words are not made names
+                let drop_all = c.name == "drop" && matches!(list.trim(), "_all" | "*");
+                if VARLIST.contains(&c.name.as_str())
+                    && !drop_all
+                    && (varlist::needs_names(&list) || unseen())
+                {
                     match self.vars_now() {
                         Err(Stop::Ask(need)) => return Flow::Ask(need),
                         Ok(Some(vars)) => match varlist::expand(&list, &vars) {

@@ -22,7 +22,8 @@ and, for `permute` and `simulate`, `crates/statatr/src/dofile/resample.rs`.
 ## jackknife
 
 - The command runs on the data, then once for each observation of its estimation sample (each cluster with
-  `cluster()`) left out. A command with no `e(sample)` uses all observations; `if` or `in` on such a command is refused.
+  `cluster()`) left out. A command with no `e(sample)` uses all observations, or with an `if` only the observations it picks (`e(N_reps)`
+  is their number; `in` is refused, because it counts the rows left, which move when one is left out).
 - The replicates are floats. V = (n - 1)/n times the sum of products of the deviations from their mean; t on n - 1 degrees
   of freedom (`e(df_r)`), `e(N_reps)` n.
 - **Correction to StatCraft's note:** `e(b_jk)` is not the mean of the replicates. It is the bias-corrected value
@@ -34,9 +35,9 @@ and, for `permute` and `simulate`, `crates/statatr/src/dofile/resample.rs`.
 - `regress y x, vce(jackknife)` (and `logit`, `probit`) is the same run as `jackknife _b: regress y x`, with the line as
   typed in `e(cmdline)`.
 - r() after it holds only `r(table)` (9 rows b, se, t, pvalue, ll, ul, df, crit, eform).
+- A missing value of the cluster variable is r(459) (`missing values not allowed in cluster variable g`).
 - Notes: options other than `cluster()`, `level()`, `nodots` and `notable` are refused; so are statistics other than
-  `_b` after those three models and r() or e() expressions, a missing value of the cluster variable, and a replication that
-  stops with an error (Stata drops it).
+  `_b` after those three models and r() or e() expressions, and a replication that stops with an error (Stata drops it).
 
 ## statsby
 
@@ -49,9 +50,11 @@ and, for `permute` and `simulate`, `crates/statatr/src/dofile/resample.rs`.
 - Output: `(running cmd on estimation sample)`, a blank line, `Command:`, the named expressions and `By:` (`<none>` without
   `by()`), a blank line, `Statsby groups:` and a dot a group on a line of its own (no count); `nodots` drops the
   running line and the dots.
-- **Refused:** `clear` missing (Stata then needs `saving()`), `saving()`, `subsets`, `basepop()`, `double`, `by()` of a
-  list that is not plain names, `_b` and `_se` after `logit` or `probit` (Stata names the variables after the equation:
-  `yb_b_x`, `[yb]_b[x]`), `if` or `in` on the command.
+- `saving(file[, replace])` writes the results (data label `statsby: summarize`) and leaves the data in memory, sorted by the `by()`
+  variables (rows with equal values may come in another order than Stata's); `clear` with `saving()` is r(198).
+- After `logit` or `probit`, `_b` and `_se` name the variables after the equation (`yb_b_x`, `yb_se_cons`, labelled `[yb]_b[x]`).
+- **Refused:** neither `clear` nor `saving()` (Stata stops with r(4) only when the data have changed since they were saved), `saving(, double)`,
+  `subsets`, `basepop()`, `double`, `by()` of a list that is not plain names, `if` or `in` on the command.
 - After it the data are the results, `tsset` is gone, r() and e() are not known.
 
 ## rolling
@@ -61,8 +64,11 @@ and, for `permute` and `simulate`, `crates/statatr/src/dofile/resample.rs`.
   the time variable's values (its type and format) at the first and last row of the window.
 - Output: `(running cmd on estimation sample)`, a blank line, `Rolling replications (41): ` with a dot a replication,
   the count every tenth, then ` done`; no header.
-- **Refused:** gaps in the time variable (or one not in order), `rrecursive`, `by()`, `saving()`, `keep`, `reject()`,
-  `window()` that is not a whole number, `clear` missing.
+- A window is `window` periods of the time variable, whether or not each has an observation (checked with gaps: the windows run
+  from the first time value to the last minus the window, and `start` and `end` are those time values, not observed rows); `recursive` keeps the start.
+- `saving(file[, replace])` as in `statsby`.
+- **Refused:** a time variable that is missing or not in order, `rrecursive`, `by()`, `keep`, `reject()`, `window()` that is not a whole number,
+  neither `clear` nor `saving()`.
 
 ## permute
 
@@ -90,8 +96,12 @@ and, for `permute` and `simulate`, `crates/statatr/src/dofile/resample.rs`.
   exp1...; matrices b, n, c_lower, c_upper, p_lower, p_upper, p_twosided, se_p_*, ci_p_* (2 rows ll and ul). Not kept: `r(rngstate)`.
   e() is empty afterwards. The data are put back.
 - Default `reps()` is 100. `_b _se` together put `b:` and `se:` equations in the table; `_b` alone none; `saving()` names them `_b_x`, `_se_x`.
-- **Refused:** `permute` of an e-class program, `r(nosuch)` (Stata: r(322) evaluated to missing in unpermuted data; RCraft cannot tell
-  a name that does not exist from one it does not keep, so it refuses the line), `spearman` and every command not translated, `strata()` of
+- An e-class program is the command like any model: its e(sample) is the sample, `_b` its model's. After a command whose r() RCraft keeps whole
+  (`summarize` without options) a name it does not leave is missing, so `r(nosuch)` is r(322). After `logit` and `probit`, `_b` is named after the
+  equation (`yb_b_x`; the table has an equation heading `yb`).
+- `quietly spearman y x` gives `r(rho)` and `r(N)` (its p-values are not reproduced, so a printed `spearman y x` is still refused).
+- **Refused:** `_se` after `logit` and `probit` (equation names not decoded), `r(nosuch)` after commands whose r() RCraft does not keep whole,
+  `spearman` printed and every command not translated, `strata()` of
   several variables, `_b`/`_se` with other expressions or in another order, `_b` after commands other than `regress`, `logit` and `probit`,
   `left`, `right`, `eps()`, `saving(, every())`, a command that sorts the data with a two-valued variable (the original values are
   matched to the rows by position).
@@ -105,6 +115,8 @@ and, for `permute` and `simulate`, `crates/statatr/src/dofile/resample.rs`.
   r() is what the last replication's program left (checked: `return list` shows the last run's `r(sd)` and `r(mean)`), e() is empty.
 - Output: a blank line, `Command:` and the named expressions, a blank line, `Simulations (25): ` and a dot a replication, the count every tenth,
   a line break after every fiftieth, ` done`.
+- After `logit` and `probit`, `_b` and `_se` give `yb_b_x`, `yb_se_x`, labelled `[yb]_b[x]` (corpus `resample_logit.do`, compared to 1e-6: the
+  results are floats, and Stata's and RCraft's maximum likelihood estimates agree to about 1e-8, so a float rounds differently now and then).
 - **Refused:** `saving(, double)`, `reps()` missing (Stata r(198)), e-class programs whose last line is not a model, `_b` after programs
   that end with anything but `regress`, `logit` or `probit`, replications that stop with an error.
 
@@ -115,3 +127,11 @@ and, for `permute` and `simulate`, `crates/statatr/src/dofile/resample.rs`.
 - A float column built by `import delimited` stays float in Stata after `replace y = <expression>`; RCraft does not round the replaced
   value to float (not new here). The corpus uses values that are exact in a float (2.5, 3.25) after it.
 - Stata's `describe` after `rolling` names a temporary file; RCraft shows its own list.
+## Other things fixed with it
+
+- `preserve` and `restore` leave r() and e() as the last command left them (checked in Stata 19: `restore` after a `summarize` inside the
+  preserved block still shows that `r(mean)`); the translator had them replace r(). Corpus `restore_r.do`.
+- `format varlist %fmt` takes patterns and ranges (`format c* %18.0f`).
+- `drop _all` is not turned into a list of variable names (that left the observations): it removes them too, and is accepted with no data.
+- `return scalar x = runiform()` takes Stata's draw.
+

@@ -73,3 +73,47 @@ forvalues i = 1/`=_N' {
     display "@ r3_row`i' " start[`i'] " " end[`i'] " " %24.17g sd[`i']
 }
 restore
+* saving() with and without clear: the data stay as they were without it
+import delimited corpus.csv, clear
+statsby m=r(mean) n=r(N), by(cat3) saving(statsby_1, replace) nodots: summarize x
+display "@ sv_data " _N " " cat3[1] " " cat3[_N]
+use statsby_1, clear
+display "@ sv_file " _N
+forvalues i = 1/`=_N' {
+    display "@ sv_`i' " cat3[`i'] " " %24.17g m[`i'] " " n[`i']
+}
+import delimited corpus.csv, clear
+capture noisily statsby m=r(mean), by(cat3) clear saving(statsby_2, replace) nodots: summarize x
+display "@ rc198 " _rc
+capture erase statsby_1.dta
+capture erase statsby_2.dta
+* rolling over time with gaps: a window is periods of the time variable
+import delimited corpus.csv, clear
+generate tt = _n
+drop if inlist(tt, 4, 5, 6, 13, 40)
+tsset tt
+rolling mean=r(mean) n=r(N), window(8) clear nodots: summarize y
+display "@ rg_n " _N
+forvalues i = 1/`=_N' {
+    display "@ rg_`i' " start[`i'] " " end[`i'] " " %24.17g mean[`i'] " " n[`i']
+}
+import delimited corpus.csv, clear
+generate tt = _n
+drop if inlist(tt, 4, 5, 6, 13, 40)
+tsset tt
+rolling mean=r(mean), window(8) recursive stepsize(5) clear nodots: summarize y
+display "@ rr_n " _N
+forvalues i = 1/`=_N' {
+    display "@ rr_`i' " start[`i'] " " end[`i'] " " %24.17g mean[`i']
+}
+import delimited corpus.csv, clear
+generate tt = _n
+tsset tt
+rolling mean=r(mean), window(20) stepsize(10) saving(rolling_1, replace) nodots: summarize y
+display "@ rs_data " _N
+use rolling_1, clear
+display "@ rs_file " _N
+forvalues i = 1/`=_N' {
+    display "@ rs_`i' " start[`i'] " " end[`i'] " " %24.17g mean[`i']
+}
+capture erase rolling_1.dta

@@ -222,7 +222,7 @@ stata_spearman <- function(d, vars, show = TRUE) {
     rho <- R[1, 2]
     t <- rho * sqrt((N - 2) / (1 - rho^2))
     rr <- list(N = N, rho = rho, p = 2 * stats::pt(-abs(t), N - 2), p_l = stats::pt(t, N - 2), p_u = stats::pt(-t, N - 2))
-    if (!show) return(rr)
+    if (!show) return(list(N = N, rho = rho))
     cat(sprintf("\nNumber of observations = %6d\n%22s = %6.4f\n\nTest of H0: %s and %s are independent\n%22s = %6.4f\n",
                 N, "Spearman's rho", rho, vars[1], vars[2], "Prob", rr$p))
     return(rr)
@@ -376,6 +376,8 @@ const R_SIGNRANK: &[&str] = &[
 const R_SIGNTEST: &[&str] = &["N", "N_pos", "N_neg", "N_tie", "p", "p_l", "p_u"];
 const R_KWALLIS: &[&str] = &["df", "chi2", "p", "chi2_adj", "p_adj"];
 const R_SPEARMAN: &[&str] = &["N", "rho", "p", "p_l", "p_u"];
+/// What `quietly spearman x y` keeps: the p-values are not Stata's.
+const R_SPEARMAN_QUIET: &[&str] = &["N", "rho"];
 const R_KTAU: &[&str] = &[
     "N", "tau_a", "tau_b", "score", "se_score", "p", "Nobs", "Tau_a", "Tau_b", "Score", "Se_Score",
     "P",
@@ -492,15 +494,21 @@ impl Session {
                 // Stata 19 takes the p-value of two from a four-parameter beta fitted to the
                 // permutation moments ([R] spearman), not reproduced yet: the matrix of three or
                 // more only
-                if vars.len() == 2 {
+                // Under quietly the rank correlation and N are all that is kept: r(rho) and r(N) are
+                // exact; the p-value is not (r(p), r(p_l) and r(p_u) are then not known).
+                if vars.len() == 2 && quiet.is_empty() {
                     return Err(no(
-                        "spearman of two variables (its p-value, from a four-parameter beta as Stata 19 fits it) is not translated yet",
+                        "spearman of two variables (its p-value, from a four-parameter beta as Stata 19 fits it) is not translated yet; quietly spearman gives r(rho) and r(N)",
                     ));
                 }
                 let q: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
                 (
                     format!("stata_spearman({rows}, c({}){quiet})", q.join(", ")),
-                    R_SPEARMAN,
+                    if vars.len() == 2 {
+                        R_SPEARMAN_QUIET
+                    } else {
+                        R_SPEARMAN
+                    },
                 )
             }
         };
@@ -513,7 +521,7 @@ impl Session {
             self.helpers.insert(h);
         }
         out.line(format!("stata_r <- {call}"));
-        if cmd == "spearman" {
+        if cmd == "spearman" && names.len() != 2 {
             // the matrix form's r() was not checked against Stata
             self.r_ret = super::returned::Returned::Lost(
                 "r() after spearman of three or more variables was not checked against Stata"
