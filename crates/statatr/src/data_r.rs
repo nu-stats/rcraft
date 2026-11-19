@@ -1509,6 +1509,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_fillin" => rowcol::FILLIN_HELPER,
         "stata_expandcl" => rowcol::EXPANDCL_HELPER,
         "stata_joinby" => rowcol::JOINBY_HELPER,
+        "stata_dta_types" => rowcol::DTA_TYPES_HELPER,
         "stata_recast" => contract::RECAST_HELPER,
         "stata_suest" => suest::SUEST_HELPER,
         "stata_est_table" => esttable::EST_TABLE_HELPER,
@@ -1616,6 +1617,10 @@ struct Session {
     lost_vars: BTreeMap<String, String>,
     /// The file it came from (for `save` without a name).
     file: Option<String>,
+    /// A .dta file `use` read that this do-file did not save, while nothing since
+    /// could have changed a variable's storage type: its header holds the types
+    /// (read when the R runs), which `mvencode` needs.
+    file_types: Option<String>,
     /// Variable types made by the do-file itself.
     kinds: BTreeMap<String, Kind>,
     /// The base levels `fvset base` chose: variable -> level.
@@ -2857,6 +2862,38 @@ impl Session {
                 "nestreg needs its command after a colon: nestreg: regress y (x1) (x2 x3)",
             ));
         }
+        // only these leave the storage types of the variables `use` read as they were
+        if !matches!(
+            c.name.as_str(),
+            "use"
+                | "sort"
+                | "gsort"
+                | "keep"
+                | "drop"
+                | "summarize"
+                | "sum"
+                | "display"
+                | "describe"
+                | "list"
+                | "tabulate"
+                | "tab"
+                | "count"
+                | "assert"
+                | "label"
+                | "format"
+                | "order"
+                | "generate"
+                | "gen"
+                | "egen"
+                | "scalar"
+                | "local"
+                | "global"
+                | "set"
+                | "mvdecode"
+                | "mvencode"
+        ) {
+            self.file_types = None;
+        }
         match c.name.as_str() {
             // a model's name alone shows its last fit again (Stata 19)
             "regress" | "logit" | "probit" | "poisson"
@@ -3284,6 +3321,12 @@ impl Session {
         self.panel = kept.panel;
         self.panel_time = kept.panel_time;
         self.ts_delta = kept.ts_delta;
+        // a file this do-file did not save: its header has the storage types
+        self.file_types = if self.ts_unknown {
+            Some(path.clone())
+        } else {
+            None
+        };
         self.file = Some(path);
         // a file this do-file saved keeps its variables' kinds and storage types
         self.kinds = kept.kinds;

@@ -80,7 +80,7 @@ end
 mvencode b, mv(500)
 mvencode i, mv(40000)
 mvencode l, mv(3000000000)
-mvencode f, mv(0.1)
+mvencode f, mv(0.15)
 mvencode d, mv(1e300)
 display "@ recast " b[1] " " i[1] " " %20.0f l[1]
 display "@ recast_b " %20.0f l[3] " " %20.15g f[1] " " (d[1] == 1e300)
@@ -269,3 +269,28 @@ capture by g: mvencode x, mv(-9)
 display "@ rc_mve_unsorted " _rc
 capture bysort g: mvencode x, mv(-9)
 display "@ rc_mve_sorted " _rc " " g[1] " " x[1]
+* data read from a file: mvtypes.dta (Stata 19 wrote it: b byte, i int, l long, f float, d double, with . .a .b)
+* mvencode needs each variable's storage type to know when it recasts and how a float rounds; it reads it from the file's header
+use mvtypes, clear
+mvencode b i l f d, mv(-999999)
+display "@ ft1 " b[1] " " i[2] " " l[3] " " f[4] " " d[5] " " b[2] " " f[5] " " (b[5] == .a)
+use mvtypes, clear
+mvencode f, mv(0.15)
+display "@ ft2 " %20.15g f[4] " " (f[5] == 0.15)
+use mvtypes, clear
+mvencode f d, mv(.a = 0.15)
+display "@ ft3 " %20.15g f[5] " " %20.15g d[5] " " (f[4] == .) " " (d[5] == .)
+use mvtypes, clear
+generate double z = .
+mvencode _all, mv(-5000)
+display "@ ft4 " b[1] " " i[2] " " l[3] " " f[4] " " d[5] " " z[1] " " z[5]
+use mvtypes, clear
+mvencode b i if _n > 1, mv(.5)
+display "@ ft5 " b[1] " " b[5] " " i[2] " " i[5]
+use mvtypes, clear
+sort d
+mvencode l, mv(2147483640)
+display "@ ft6 " %20.0f l[3]
+use mvtypes, clear
+mvdecode b i l f d, mv(100 200)
+display "@ ft7 " b[1] " " (i[1] == .) " " (i[2] == .) " " (f[1] == .)

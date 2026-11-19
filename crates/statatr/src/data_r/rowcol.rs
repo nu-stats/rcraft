@@ -4,6 +4,41 @@
 
 use super::*;
 
+/// The storage types a .dta file's header holds (haven does not keep them),
+/// named by variable: `byte`, `int`, `long`, `float`, `double` or `str`. The
+/// file formats 117 to 119 (Stata 13 and later); older files give none.
+pub(super) const DTA_TYPES_HELPER: &str = r#"stata_dta_types <- function(path) {
+  none <- setNames(character(0), character(0))
+  if (!file.exists(path)) return(none)
+  raw <- readBin(path, "raw", n = 2000000L)
+  at <- function(tag) {
+    p <- grepRaw(charToRaw(tag), raw, fixed = TRUE)
+    if (length(p)) p[1] else NA_integer_
+  }
+  rel <- at("<release>")
+  bo <- at("<byteorder>")
+  k0 <- at("<K>")
+  tv <- at("<variable_types>")
+  nm <- at("<varnames>")
+  if (anyNA(c(rel, bo, k0, tv, nm))) return(none)
+  release <- suppressWarnings(as.integer(rawToChar(raw[(rel + 9L):(rel + 11L)])))
+  if (is.na(release) || release < 117L) return(none)
+  endian <- if (rawToChar(raw[(bo + 11L):(bo + 13L)]) == "MSF") "big" else "little"
+  k0 <- k0 + 3L
+  k <- if (release >= 119L) readBin(raw[k0:(k0 + 3L)], "integer", size = 4L, endian = endian) else readBin(raw[k0:(k0 + 1L)], "integer", size = 2L, signed = FALSE, endian = endian)
+  tv <- tv + 16L
+  codes <- readBin(raw[tv:(tv + 2L * k - 1L)], "integer", n = k, size = 2L, signed = FALSE, endian = endian)
+  nm <- nm + 10L
+  width <- if (release >= 118L) 129L else 33L
+  names <- vapply(seq_len(k), function(i) {
+    b <- raw[(nm + (i - 1L) * width):(nm + i * width - 1L)]
+    z <- which(b == as.raw(0L))
+    rawToChar(b[seq_len(if (length(z)) z[1] - 1L else width)])
+  }, "")
+  types <- ifelse(codes == 65530L, "byte", ifelse(codes == 65529L, "int", ifelse(codes == 65528L, "long", ifelse(codes == 65527L, "float", ifelse(codes == 65526L, "double", "str")))))
+  setNames(types, names)
+}"#;
+
 /// A copy of `x` that keeps its label, display format and value label; rows
 /// outside `if`/`in` become missing (`.` or `""`).
 pub(super) const CLONE_HELPER: &str = r#"stata_clone <- function(x, keep = NULL) {
@@ -206,7 +241,7 @@ impl Session {
 /// `codes`: for mvdecode the missing value each clause makes ("" is `.`,
 /// else the letter of `.a` to `.z`); for mvencode the kind each clause takes
 /// ("*" every kind, "" is `.`, or a letter).
-pub(super) const MVCODE_HELPER: &str = r#"stata_mvcode <- function(d, vars, kind, vals, codes, keep = NULL, st = character(0), override = FALSE, show = TRUE) {
+pub(super) const MVCODE_HELPER: &str = r#"stata_mvcode <- function(d, vars, kind, vals, codes, keep = NULL, st = character(0), override = FALSE, show = TRUE, ft = character(0), must_know = FALSE) {
   ab <- function(v) sprintf("%12s", if (nchar(v) <= 12) v else paste0(substr(v, 1, 10), "~", substr(v, nchar(v), nchar(v))))
   s1 <- function(n, one, many) if (n == 1) one else many
   cnt <- function(n) format(n, scientific = FALSE, trim = TRUE)
@@ -229,6 +264,7 @@ pub(super) const MVCODE_HELPER: &str = r#"stata_mvcode <- function(d, vars, kind
     if (!is.double(y)) y <- as.numeric(y)
     sel <- if (is.null(keep)) rep(TRUE, length(y)) else keep
     tag <- unname(st[v])
+    if (kind != "decode" && is.na(tag) && v %in% names(ft)) tag <- unname(ft[v])
     known <- !is.na(tag)
     fl <- known && tag == "float"
     if (kind == "decode") {
@@ -278,6 +314,8 @@ pub(super) const MVCODE_HELPER: &str = r#"stata_mvcode <- function(d, vars, kind
       done <- done | hit
     }
     n <- sum(done)
+    if (n > 0 && must_know && is.na(p$tag)) stop("RCraft: mvencode needs the storage type of ", v, ", which this data does not carry; not translated", call. = FALSE)
+    if (n > 0 && must_know && identical(p$tag, "float") && any(abs(unlist(vals[used])) > 1.7e38)) stop("RCraft: mvencode of a value too large for a float is not translated yet", call. = FALSE)
     if (n > 0) {
       if (show) cat(ab(v), ": ", cnt(n), " missing ", s1(n, "value", "values"), " recoded\n", sep = "")
       if (!is.na(p$tag) && p$tag %in% names(lim)) {
@@ -575,17 +613,22 @@ impl Session {
                 .iter()
                 .flatten()
                 .any(|x| *x != x.trunc() || *x < -127.0 || *x > 100.0);
+        let mut file_types: Option<String> = None;
         if needs_type {
             let unknown = !all_plain
                 || plain.iter().any(|v| {
                     !self.storage.contains_key(v) && self.kinds.get(v) != Some(&Kind::Text)
                 });
-            if unknown {
+            // the types of a file `use` read are in its header, read when the R runs
+            if unknown && self.file_types.is_none() {
                 return Err(no(
                     "mvencode with a value that may not fit the variable's type needs the storage \
-                     type, which is known only for variables the do-file made (R does not keep \
-                     Stata's types)",
+                     type, which is known only for variables the do-file made or a file it has \
+                     read and not changed since (R does not keep Stata's types)",
                 ));
+            }
+            if unknown {
+                file_types = self.file_types.clone();
             }
             if vals.iter().flatten().any(|x| x.abs() > 1.7e38)
                 && plain
@@ -649,8 +692,15 @@ impl Session {
         out.package("dplyr");
         out.package("haven");
         let show = if self.quiet(c) { "FALSE" } else { "TRUE" };
+        let types = match &file_types {
+            Some(path) => {
+                self.helpers.insert("stata_dta_types");
+                format!(", ft = stata_dta_types({}), must_know = TRUE", r_text(path))
+            }
+            None => String::new(),
+        };
         out.line(format!(
-            "{d} <- stata_mvcode({d}, {vars}, {}, {vals_r}, {codes_r}, keep = {keep}, st = {st}, override = {}, show = {show})",
+            "{d} <- stata_mvcode({d}, {vars}, {}, {vals_r}, {codes_r}, keep = {keep}, st = {st}, override = {}, show = {show}{types})",
             r_text(if decode { "decode" } else { "encode" }),
             super::stats::r_logical(!decode && opts.has("override", 4)),
         ));
@@ -659,6 +709,8 @@ impl Session {
             for v in &plain {
                 self.storage.remove(v);
             }
+            // a type may have changed: the file's header no longer says
+            self.file_types = None;
         }
         Ok(())
     }
@@ -1131,5 +1183,69 @@ impl Session {
              here is the using file's; sort before looking at them",
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::data_r::translate;
+    use crate::reader::read;
+
+    fn r(source: &str) -> Vec<String> {
+        translate(&read(source))
+            .lines
+            .into_iter()
+            .map(|l| match l.result {
+                Ok(r) => r.code,
+                Err(e) => format!("NOT: {}", e.reason),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_file_the_do_file_read_gives_the_storage_types_for_mvencode() {
+        let out = r("use survey, clear\nmvencode a b, mv(-999)\nsort a\nmvencode a b, mv(-998)");
+        assert!(
+            out[1].contains("ft = stata_dta_types(\"survey.dta\"), must_know = TRUE"),
+            "{out:?}"
+        );
+        // the first mvencode may have recast a variable, so the file no longer says
+        assert!(
+            out[3].starts_with("NOT:"),
+            "the first mvencode may have recast: {out:?}"
+        );
+    }
+
+    #[test]
+    fn a_value_that_fits_a_byte_needs_no_types() {
+        let out = r("use survey, clear\nreplace a = 1\nmvencode a b, mv(-99)");
+        assert!(!out[2].contains("stata_dta_types"), "{out:?}");
+        assert!(!out[2].starts_with("NOT:"), "{out:?}");
+    }
+
+    #[test]
+    fn a_change_after_use_takes_the_types_back() {
+        for change in [
+            "replace a = 1",
+            "recode a (1 = 2)",
+            "rename a z",
+            "merge 1:1 id using other",
+            "compress",
+        ] {
+            let out = r(&format!(
+                "use survey, clear\n{change}\nmvencode b, mv(-999)"
+            ));
+            assert!(
+                out[2].starts_with("NOT:") && out[2].contains("storage"),
+                "{change}: {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_file_the_do_file_saved_keeps_its_own_types() {
+        let out =
+            r("generate byte a = 1\nsave made, replace\nuse made, clear\nmvencode a, mv(-999)");
+        assert!(!out[3].contains("stata_dta_types"), "{out:?}");
     }
 }

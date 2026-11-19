@@ -5517,7 +5517,7 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 
 - **Translated:** `mv(1(2)9)`, `1 3 to 9`, `1 3 : 9`, commas and spaces around parentheses, reversed ends; the
   invalid ones are r(121) with Stata's text (the whole list). Corpus `mvcode.do` 75 results, exact; Stata 19
-  observed with `plan/stata/mvdecode.md`. Also mvencode with several clauses for one code (first wins; only an applied clause recasts) and a trailing backslash. Corpus `mvcode.do` 111 results. Still refused: an mvencode value of unknown type fit (`by:` is now Stata's r(190) for all six, second round).
+  observed with `plan/stata/mvdecode.md`. Also mvencode with several clauses for one code (first wins; only an applied clause recasts) and a trailing backslash. Corpus `mvcode.do` 111 results. mvencode now reads the storage types of a `use`d .dta file from its header when the R runs (corpus fixture `mvtypes.dta`; `plan/stata/mvdecode.md`). Nothing of batch A1 is refused now except the cases that name a command the translator does not know.
 
 ## P2C.12: by: with the six A1 commands, 2026-11-18 (second round of A1)
 

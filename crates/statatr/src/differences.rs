@@ -659,8 +659,10 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "In R",
-                "A value that may not fit the type is translated only when the storage type is known (variables the \
-                 do-file made); otherwise the line is refused.",
+                "A value that may not fit the type needs the storage type: known for variables the do-file made, and \
+                 for a .dta file use read (its header is read when the R runs) while nothing since could have \
+                 changed a type (sort, keep, drop, generate and the like are fine; replace, recode, merge and so \
+                 on are not). Otherwise the line is refused.",
             ),
         ],
     },
