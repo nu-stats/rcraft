@@ -192,6 +192,7 @@ const STATISTICS: &[&str] = &[
     "cii",
     "correlate",
     "corrgram",
+    "varsoc",
     "wntestq",
     "cumul",
     "dstdize",

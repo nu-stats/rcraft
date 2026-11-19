@@ -479,6 +479,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "xtunitroot")?;
+        if self.refuse_extras(c, out, "", false) {
+            return Ok(());
+        }
         let words: Vec<&str> = c.parts.main.split_whitespace().collect();
         let Some((test, rest)) = words.split_first() else {
             stop(out, "invalid syntax (Stata: r(198))");
@@ -636,10 +639,12 @@ impl Session {
                     [name @ ("bartlett" | "parzen"), n] if n.parse::<u32>().is_ok() => {
                         format!("list(name = {}, lags = {n})", r_text(name))
                     }
-                    _ => return Err(no(format!(
+                    _ => {
+                        return Err(no(format!(
                         "xtunitroot hadri, kernel({}): only bartlett # and parzen # are translated",
                         k.trim()
-                    ))),
+                    )))
+                    }
                 }
             }
         };

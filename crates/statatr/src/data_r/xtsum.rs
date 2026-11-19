@@ -506,7 +506,7 @@ pub(super) fn tsreport_name(name: &str) -> Option<u8> {
 
 /// The R of `c(a = "%8.0g", ...)`: the display format Stata gave each of these
 /// variables when `generate` made them, for those whose storage is known.
-fn formats(s: &Session, names: &[&str]) -> String {
+pub(super) fn formats(s: &Session, names: &[&str]) -> String {
     let list: Vec<String> = names
         .iter()
         .filter_map(|v| {
@@ -555,7 +555,13 @@ impl Session {
     }
 
     /// Whether a command that has no varlist, weights or `if`/`in` got one.
-    fn refuse_extras(&self, c: &Command, out: &mut Out, what: &str, if_in: bool) -> bool {
+    pub(super) fn refuse_extras(
+        &self,
+        c: &Command,
+        out: &mut Out,
+        what: &str,
+        if_in: bool,
+    ) -> bool {
         if c.parts.weight.is_some() {
             stop(out, "weights not allowed (Stata: r(101))");
             return true;

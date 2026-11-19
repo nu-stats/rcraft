@@ -2181,6 +2181,7 @@ impl Session {
                             || (tabstat && super::tabstat::tabstat_text(name))
                             || (which == "r" && cmd == "tsreport" && super::xtsum::tsreport_name(name) == Some(1))
                             || (which == "r" && cmd == "xtunitroot" && super::xtunitroot::text_name(name))
+                            || (which == "r" && cmd == "varsoc" && super::tstests::varsoc_text(name))
                             || (which == "e" && self.e_text.contains(name));
                         let get = if which == "e" { "stata_eget" } else { "stata_rget" };
                         Ok((

@@ -5,6 +5,7 @@
 //! value, as `L.` and `D.` see it.
 
 use super::stats::r_logical;
+use super::xtsum::formats;
 use super::*;
 
 fn stop(out: &mut Out, msg: &str) {
@@ -543,6 +544,7 @@ pub(super) fn tstest_matrix(cmd: &str, name: &str) -> bool {
     match cmd {
         "corrgram" => corrgram_name(name) == Some(true),
         "pperron" | "dfgls" => name == "cvalues" || (cmd == "dfgls" && name == "results"),
+        "varsoc" => name == "stats",
         _ => false,
     }
 }
@@ -558,6 +560,9 @@ impl Session {
     ) -> Result<(), Untranslated> {
         let name = c.name.as_str();
         self.no_by(c, name)?;
+        if self.refuse_extras(c, out, "", false) {
+            return Ok(());
+        }
         let allowed: &[(&str, usize)] = match name {
             "dfuller" => &[
                 ("noconstant", 3),
@@ -773,6 +778,218 @@ impl Session {
             "stata_r <- local({{ stata_d <- {frame}; {helper}(stata_d, {ts}, {call}{show}) }})"
         ));
         self.r_new = Some((names, name.into()));
+        Ok(())
+    }
+}
+
+/// `varsoc`: the lag-order selection criteria of a vector autoregression, each order
+/// fitted on the sample the longest one leaves.
+pub(super) const VARSOC_HELPER: &str = r##"stata_varsoc <- function(d, endog, time, delta = 1, keep = rep(TRUE, nrow(d)), maxlag = 4, exog = character(0),
+                         constant = TRUE, fmts = character(0), show = TRUE) {
+  for (v in c(endog, exog)) {
+    if (!(v %in% names(d))) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+    if (is.character(d[[v]]) || is.factor(d[[v]])) stop("type mismatch (Stata: r(109))", call. = FALSE)
+  }
+  tv <- stata_xt_num(d[[time]])
+  ok <- !is.na(tv)
+  if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
+  k <- rep(NA_integer_, length(tv))
+  k[ok] <- as.integer(round((tv[ok] - min(tv[ok])) / delta)) + 1L
+  span <- max(k[ok])
+  grid <- function(v) {
+    x <- rep(NA_real_, span)
+    x[k[ok]] <- stata_xt_num(d[[v]])[ok]
+    x
+  }
+  G <- lapply(endog, grid)
+  ys <- do.call(cbind, lapply(G, function(g) g[k]))
+  lagm <- function(l) do.call(cbind, lapply(G, function(g) stata_tst_lag(g, l)[k]))
+  lags <- lapply(seq_len(maxlag), lagm)
+  ex <- if (length(exog)) do.call(cbind, lapply(exog, function(v) stata_xt_num(d[[v]]))) else NULL
+  allm <- cbind(ys, do.call(cbind, lags), ex)
+  used <- keep & ok & stats::complete.cases(allm)
+  n <- sum(used)
+  if (n == 0) stop("no observations (Stata: r(2000))", call. = FALSE)
+  neq <- length(endog)
+  Ys <- ys[used, , drop = FALSE]
+  rows <- matrix(NA_real_, maxlag + 1, 9, dimnames = list(rep("r1", maxlag + 1), c("lag", "LL", "LR", "df", "p", "FPE", "AIC", "HQIC", "SBIC")))
+  for (ord in 0:maxlag) {
+    X <- cbind(if (ord > 0) do.call(cbind, lags[seq_len(ord)])[used, , drop = FALSE], if (!is.null(ex)) ex[used, , drop = FALSE], if (constant) rep(1, n))
+    if (is.null(X)) {
+      E <- Ys
+      kk <- 0
+    } else {
+      q <- qr(X)
+      if (q$rank < ncol(X)) stop("the exogenous variables may not be collinear with the dependent variables, or their lags (Stata: r(198))", call. = FALSE)
+      E <- qr.resid(q, Ys)
+      kk <- ncol(X)
+    }
+    sigma <- crossprod(E) / n
+    detsig <- det(sigma)
+    ll <- -0.5 * n * (neq * log(2 * pi) + log(detsig) + neq)
+    tp <- neq * kk
+    rows[ord + 1, c("lag", "LL")] <- c(ord, ll)
+    rows[ord + 1, "FPE"] <- detsig * ((n + kk) / (n - kk))^neq
+    rows[ord + 1, "AIC"] <- -2 * ll / n + 2 * tp / n
+    rows[ord + 1, "HQIC"] <- -2 * ll / n + 2 * log(log(n)) * tp / n
+    rows[ord + 1, "SBIC"] <- -2 * ll / n + log(n) * tp / n
+  }
+  for (i in seq_len(maxlag)) {
+    lr <- 2 * (rows[i + 1, "LL"] - rows[i, "LL"])
+    rows[i + 1, c("LR", "df", "p")] <- c(lr, neq^2, stats::pchisq(lr, neq^2, lower.tail = FALSE))
+  }
+  tused <- tv[used]
+  tmin <- min(tused)
+  tmax <- max(tused)
+  present <- rep(NA_real_, span)
+  present[k[used]] <- 1
+  gaps <- stata_tst_gaps(present)
+  if (show) {
+    lrstar <- which(!is.na(rows[, "p"]) & rows[, "p"] < 0.05)
+    lrstar <- if (length(lrstar)) max(lrstar) - 1 else NA_integer_
+    star <- function(i, s) if (!is.na(s) && s == i) "*" else " "
+    sf <- function(col) which.min(rows[, col]) - 1
+    stars <- c(sf("FPE"), sf("AIC"), sf("HQIC"), sf("SBIC"))
+    tf <- stata_xt_fmt_of(d, time, fmts)
+    left <- paste0("   Sample: ", stata_xt_text(tmin, tf), " thru ", stata_xt_text(tmax, tf))
+    cat("\nLag-order selection criteria\n\n")
+    cat(left, stata_tst_pad(paste0("Number of obs = ", n), 78 - nchar(left)), "\n", sep = "")
+    rule <- paste0("  +", strrep("-", 75), "+")
+    cat(rule, "\n  | Lag |    LL      LR      df    p     FPE       AIC      HQIC      SBIC    |\n", sep = "")
+    cat("  |-----+", strrep("-", 69), "|\n", sep = "")
+    g6 <- function(v, w) stata_tst_pad(stata_fmt(v, paste0("%", w, ".6g"), trim = TRUE), w)
+    for (i in 0:maxlag) {
+      r <- rows[i + 1, ]
+      tests <- if (i == 0) strrep(" ", 20) else paste0(stata_tst_pad(stata_fmt(r[["LR"]], "%8.5g", trim = TRUE), 8), star(i, lrstar),
+                                                         stata_tst_pad(as.character(r[["df"]]), 4), "  ", sprintf("%5.3f", r[["p"]]))
+      cat("  | ", stata_tst_pad(as.character(i), 3), " | ", stata_tst_pad(stata_fmt(r[["LL"]], "%9.6g", trim = TRUE), 8), " ", tests, " ",
+          stata_tst_pad(stata_fmt(r[["FPE"]], "%7.6g", trim = TRUE), 7), star(i, stars[1]), g6(r[["AIC"]], 9), star(i, stars[2]),
+          g6(r[["HQIC"]], 9), star(i, stars[3]), g6(r[["SBIC"]], 9), star(i, stars[4]), " |\n", sep = "")
+    }
+    cat(rule, "\n   * optimal lag\n   Endogenous: ", paste(endog, collapse = " "), "\n    Exogenous: ", paste(c(exog, if (constant) "_cons"), collapse = " "), "\n", sep = "")
+  }
+  invisible(list(N_gaps = gaps, mlag = maxlag, N = n, tmax = tmax, tmin = tmin,
+                 exog = paste(c(exog, if (constant) "_cons"), collapse = " "), endog = paste(endog, collapse = " "), stats = rows))
+}"##;
+
+const R_VARSOC: &[&str] = &[
+    "N_gaps", "mlag", "N", "tmax", "tmin", "exog", "endog", "stats",
+];
+
+/// The names `varsoc` leaves as text.
+pub(super) fn varsoc_text(name: &str) -> bool {
+    matches!(name, "exog" | "endog")
+}
+
+impl Session {
+    /// `varsoc depvarlist [if] [in] [, maxlag(#) exog(varlist) noconstant]`.
+    pub(super) fn varsoc(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        self.no_by(c, "varsoc")?;
+        if self.refuse_extras(c, out, "", false) {
+            return Ok(());
+        }
+        if let Some(o) = opts.other(&[("maxlag", 4), ("exog", 4), ("noconstant", 3)]) {
+            stop(out, &format!("option {o} not allowed (Stata: r(198))"));
+            return Ok(());
+        }
+        let endog: Vec<String> = c
+            .parts
+            .main
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
+        if opts.has("noconstant", 3) {
+            return Err(no(
+                "varsoc, noconstant is not translated yet (Stata's statistics without a constant, even at lag 0, are not decoded)",
+            ));
+        }
+        if endog.is_empty() {
+            stop(out, "varlist required (Stata: r(198))");
+            return Ok(());
+        }
+        if let Some(v) = endog.iter().find(|v| !is_name(v)) {
+            return Err(no(format!(
+                "varsoc {v}: only plain variable names are translated"
+            )));
+        }
+        let exog: Vec<String> = opts
+            .arg("exog", 4)
+            .map(|e| e.split_whitespace().map(str::to_string).collect())
+            .unwrap_or_default();
+        if let Some(v) = exog.iter().find(|v| !is_name(v)) {
+            return Err(no(format!(
+                "varsoc, exog({v}): only plain variable names are translated"
+            )));
+        }
+        let maxlag = match opts.arg("maxlag", 4) {
+            None => 4,
+            Some(t) => match t.trim().parse::<i64>() {
+                Ok(v) if (1..=100).contains(&v) => v,
+                Ok(v) if v < 1 => {
+                    stop(out, "maxlag() must be positive (Stata: r(198))");
+                    return Ok(());
+                }
+                Ok(_) => {
+                    return Err(no("varsoc, maxlag(): only 1 to 100 lags are translated"));
+                }
+                Err(_) => {
+                    stop(out, "option maxlag() incorrectly specified (Stata: r(198))");
+                    return Ok(());
+                }
+            },
+        };
+        if self.panel.is_some() {
+            return Err(no(
+                "varsoc after xtset (a panel) is not translated: Stata's lags and sample would be within panels",
+            ));
+        }
+        let Some((_, Some(time))) = self.panel_state(
+            true,
+            out,
+            "time variable not set, use tsset varname ... (Stata: r(111))",
+            "time variable not set, use tsset varname ... (Stata: r(111))",
+            111,
+        )?
+        else {
+            return Ok(());
+        };
+        let d = self.data()?;
+        let cond = self.condition(c, out)?;
+        let keep = match cond {
+            Some(cond) => {
+                out.package("dplyr");
+                format!(
+                    "seq_len(nrow(stata_d)) %in% dplyr::filter(dplyr::mutate(stata_d, stata_obs_ = dplyr::row_number()), {cond})$stata_obs_"
+                )
+            }
+            None => "rep(TRUE, nrow(stata_d))".to_string(),
+        };
+        for h in [
+            "stata_varsoc",
+            "stata_tst_common",
+            "stata_xt_common",
+            "stata_fmt",
+            "stata_tables",
+        ] {
+            self.helpers.insert(h);
+        }
+        let names = |v: &[String]| v.iter().map(|s| r_text(s)).collect::<Vec<_>>().join(", ");
+        let show = if self.quiet(c) { ", show = FALSE" } else { "" };
+        let fmts = formats(self, &[time.as_str()]);
+        out.line(format!(
+            "stata_r <- local({{ stata_d <- {d}; stata_varsoc(stata_d, c({}), {}, delta = {}, keep = {keep}, maxlag = {maxlag}, exog = c({}), constant = {}{fmts}{show}) }})",
+            names(&endog),
+            r_text(&time),
+            self.ts_delta.clone().unwrap_or_else(|| "1".to_string()),
+            names(&exog),
+            r_logical(!opts.has("noconstant", 3)),
+        ));
+        self.r_new = Some((R_VARSOC, "varsoc".into()));
         Ok(())
     }
 }

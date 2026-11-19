@@ -347,6 +347,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("ttesti", &["ttest"]),
     ("unab", &["aware"]),
     ("use", &["savedfloat"]),
+    ("varsoc", &["varsoc"]),
     ("which", &["which"]),
     ("while", &["control"]),
     ("winsor", &["winsor"]),

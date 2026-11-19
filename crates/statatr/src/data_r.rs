@@ -551,6 +551,13 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "dfuller",
+    "pperron",
+    "dfgls",
+    "corrgram",
+    "wntestq",
+    "xtunitroot",
+    "varsoc",
     "compare",
     "glm",
     "clonevar",
@@ -842,6 +849,7 @@ const HARMLESS: &[&str] = &[
 
 const LEAVE_DATA_ALONE: &[&str] = &[
     "xtunitroot",
+    "varsoc",
     "dfuller",
     "pperron",
     "dfgls",
@@ -1599,6 +1607,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_pperron" => tstests::PPERRON_HELPER,
         "stata_corrgram" | "stata_wntestq" => tstests::CORRGRAM_HELPER,
         "stata_dfgls" => tstests::DFGLS_HELPER,
+        "stata_varsoc" => tstests::VARSOC_HELPER,
         "stata_xtunitroot" => xtunitroot::XTUNITROOT_HELPER,
         "stata_tsappend" => xtsum::TSAPPEND_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -3209,6 +3218,7 @@ impl Session {
             "tsreport" => self.tsreport(c, &opts, out),
             "dfuller" | "pperron" | "dfgls" | "corrgram" | "wntestq" => self.tstest(c, &opts, out),
             "xtunitroot" => self.xtunitroot(c, &opts, out),
+            "varsoc" => self.varsoc(c, &opts, out),
             "tsappend" => self.tsappend(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
             "xtregar" => self.xtregar(c, &opts, out),
