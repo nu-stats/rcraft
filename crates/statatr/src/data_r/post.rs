@@ -351,6 +351,14 @@ impl Session {
         if matches!(&self.e_ret, super::returned::Returned::Program { cmd, .. } if cmd == "lasso") {
             return self.lasso_predict(c, opts, out);
         }
+        if self.sureg_active().is_some()
+            && self
+                .estimates
+                .as_ref()
+                .is_some_and(|e| matches!(e.fit, Fit::Sureg | Fit::Mvreg))
+        {
+            return self.sureg_predict(c, opts, out);
+        }
         // a model line that waits for the run (a dry run): so does predict
         if let super::returned::Returned::Lost(why) = &self.e_ret {
             if self.estimates.is_none() && why.contains(crate::dofile::KNOWN_WHEN_RUN) {
@@ -383,6 +391,7 @@ impl Session {
             ],
             Fit::Ivregress => &[("xb", 2), ("residuals", 1)],
             Fit::Cnsreg => &[("xb", 2), ("residuals", 1)],
+            Fit::Sureg | Fit::Mvreg => &[],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("scores", 2)],
@@ -1285,6 +1294,8 @@ enum Names {
     Plain,
     Equation(String),
     Mlogit,
+    /// sureg and mvreg: `[eq]x`, the first equation when none is named
+    Equations(String),
 }
 
 fn names_of(est: &Estimates) -> Option<Names> {
@@ -1300,6 +1311,7 @@ fn names_of(est: &Estimates) -> Option<Names> {
         | Fit::Oprobit
         | Fit::Clogit => Some(Names::Equation(est.dep.clone())),
         Fit::Mlogit => Some(Names::Mlogit),
+        Fit::Sureg | Fit::Mvreg => Some(Names::Equations(est.dep.clone())),
         _ => None,
     }
 }
@@ -1389,6 +1401,8 @@ fn shown_name(t: &str, style: &Names) -> Option<String> {
         (Names::Plain, None) => Some(name),
         (Names::Equation(d), None) => Some(format!("[{d}]{name}")),
         (Names::Equation(d), Some(e)) if e == *d => Some(format!("[{d}]{name}")),
+        (Names::Equations(d), None) => Some(format!("[{d}]{name}")),
+        (Names::Equations(_), Some(e)) if !e.is_empty() => Some(format!("[{e}]{name}")),
         (Names::Mlogit, None) => Some(format!("[stata:first]{name}")),
         (Names::Mlogit, Some(e)) if !e.is_empty() && !e.starts_with('#') => {
             Some(format!("[{e}]{name}"))
@@ -1534,6 +1548,13 @@ fn coef_name(t: &str, est: &Estimates) -> Result<String, Untranslated> {
                 })
         })
     };
+    if matches!(est.fit, Fit::Sureg | Fit::Mvreg) {
+        return Ok(if t.contains(':') {
+            t.to_string()
+        } else {
+            format!("{}:{t}", est.dep)
+        });
+    }
     if let Some((eq, name)) = t.split_once(':') {
         if est.fit != Fit::Mlogit {
             return Err(no(format!("{t}: {} has one equation", est.fit.name())));

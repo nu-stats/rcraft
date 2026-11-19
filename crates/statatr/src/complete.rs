@@ -201,6 +201,7 @@ pub const COMMANDS: &[&str] = &[
     "mlogit",
     "mvdecode",
     "mvencode",
+    "mvreg",
     "mvtest",
     "nbreg",
     "nestreg",
@@ -302,6 +303,7 @@ pub const COMMANDS: &[&str] = &[
     "stsum",
     "suest",
     "summarize",
+    "sureg",
     "survwgt",
     "svy",
     "svyset",
@@ -819,6 +821,16 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "robust",
             "rrr",
             "vce(",
+        ],
+    ),
+    (
+        "mvreg",
+        &["corr", "level(", "noconstant", "noheader", "notable"],
+    ),
+    (
+        "sureg",
+        &[
+            "corr", "dfk", "isure", "level(", "nolog", "noheader", "notable", "small",
         ],
     ),
     ("newey", &["lag(", "level(", "noconstant"]),
@@ -1832,7 +1844,7 @@ mod tests {
         assert_eq!(options("regr", VARS), names(&["regress"]));
         assert_eq!(
             options("su", VARS),
-            names(&["suest", "summarize", "survwgt"])
+            names(&["suest", "summarize", "sureg", "survwgt"])
         );
         assert_eq!(
             options("ta", VARS),
@@ -2073,6 +2085,9 @@ mod tests {
             "cii" if name == "sd" => format!("cii variances 20 4, {o}"),
             "cii" => format!("cii proportions 20 5, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
+            "mvreg" => format!("mvreg y y2 = x1 x2, {o}"),
+            "sureg" if name == "isure" => "sureg (y x1) (y2 x2), isure nolog".to_string(),
+            "sureg" => format!("sureg (y x1) (y2 x2), {o}"),
             "cnsreg" if name == "constraints" => format!(
                 "constraint 1 x1 = x2
 cnsreg y x1 x2 x3, {o}"

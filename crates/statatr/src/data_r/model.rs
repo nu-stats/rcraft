@@ -54,6 +54,9 @@ pub(super) enum Fit {
     Glm,
     /// `cnsreg`: restricted least squares (`lsfam`)
     Cnsreg,
+    /// `sureg` and `mvreg` (`sureg`)
+    Sureg,
+    Mvreg,
 }
 
 impl Fit {
@@ -79,6 +82,8 @@ impl Fit {
             Fit::Suest => "suest",
             Fit::Glm => "glm",
             Fit::Cnsreg => "cnsreg",
+            Fit::Sureg => "sureg",
+            Fit::Mvreg => "mvreg",
         }
     }
 
