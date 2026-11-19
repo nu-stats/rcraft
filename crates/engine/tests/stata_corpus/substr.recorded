@@ -1,0 +1,18 @@
+* Stata 19.0's results for substr.do, recorded by cargo xtask stata-record
+@ substr1 [bcd] [] [ef] [ef] [bcdef] [] [] [] [f] [] [] []
+@ substr2 [] [bcdef] [ab] [f] [a] [] [abcdef] [] [cdef] [def]
+@ substr3 1 2 2 1 1 2 1
+@ usubstr1 [bcd] [] [ef] [ef] [bcdef] [] [] [] [f] [] [] [] [] [ab] [f]
+@ usubstr2 [aü] [ü] [] [aü] [éaü] [éa] [] [本] [語] 1
+@ substr_rows 1 [ij] [hij] [fg] [bc] [abc] []
+@ substr_rows 2 [g] [rug] [d_] [ü] [d_ü] []
+@ substr_rows 3 [] [] [] [] [] []
+@ substr_rows 4 [] [] [] [] [] []
+@ substr_rows 5 [024-05-17] [-17] [05] [] [] []
+@ substr_rows 6 [] [ext] [ex] [] [] [ext]
+@ substr_nums 1 . .
+@ substr_nums 2 . .
+@ substr_nums 3 . .
+@ substr_nums 4 . .
+@ substr_nums 5 2024 5
+@ substr_nums 6 . .

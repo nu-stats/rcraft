@@ -76,6 +76,7 @@ scalar sc = 7
 display "@ matrix " matrix(3) " " matrix(M[1,2]) " " matrix(2 + M[2,1]) " " matrix(sc) " " matrix(.) " " matrix(M[1,1] * 5) " [" matrix("a") "]"
 generate zz = matrix(M[2,2]) in 1
 generate ww = matrix(sc) in 1
+display "@ matel_out " M[3,3] " " M[0,1] " " M[1,.] " " M[-1,1] " " M[1,2.7] " " M[2.9,1] " " matrix(M[3,3]) " " matrix(M[3,3] + 1) " " scalar(M[5,5])
 display "@ scalar " scalar(sc) " " scalar(4) " " scalar(2 + 3) " [" scalar("a") "] " scalar(sc + 1) " " scalar(M[2,2]) " " scalar(.)
 display "@ matrix_gen " zz[1] " " zz[2] " " ww[1]
 * match() and the old names

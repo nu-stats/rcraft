@@ -428,10 +428,12 @@ Command families:
   `matrix()`, `scalar(exp)`, `match()`, the noncentral `nt()`, `nttail()`, `nchi2()`, `nchi2tail()`,
   `nF()` and `nFtail()`, and the old names `chiprob()`, `fprob()`, `invfprob()`, `invnorm()`,
   `normprob()`, `proper()`, `itrim()`, `index()` and `reverse()` (32 more functions Verified, corpus
-  `functions_f.do` and `noncentral.do`). Refused: `cofc()` in lower case (Stata: unknown function),
-  `nt()` and `nttail()` with a noncentrality parameter above 37.62 in size (R stops; R's value there
-  is an approximation Stata does not use). Not done: `invnt()`, `invnF()`, `invnchi2()` and the
-  `np` solvers (`npnt()`, ...), no probe uses them. `plan/stata/functions-f.md`.
+  `functions_f.do` and `noncentral.do`). Refused: `cofc()` in lower case (Stata: unknown function).
+  Second round 2026-11-19: `nt()` and `nttail()` with a noncentrality parameter above 37.62 (integrated, to
+  1e-13 of Stata), `invnchi2()`, `invnchi2tail()`, `invnt()`, `invnttail()`, `substr()` and `usubstr()` with
+  any start and length (corpus `noncentral2.do`, `substr.do`), and `A[i,j]` outside the matrix is `.`. Not done:
+  `invnF()`, `invnFtail()` and the `np` solvers (`npnt()`, `npnF()`, `npnchi2()`): no probe uses them and Stata's
+  missing values there follow no rule found. `plan/stata/functions-f.md`.
   Probes 22,397 -> 22,430 translated lines (77.5%); packages not re-run (87.8%).
   `rpoisson()` and `rbeta()` with equal shapes stay with P2C.11.)
 - P2C.12e Single-equation models

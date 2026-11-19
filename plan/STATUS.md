@@ -5821,3 +5821,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   comment now (`data_r.rs`, a line).
 - **Shares after batch H:** probes 77.5% (22,627 of 30,282 source lines, 551 do-files); no line of the four probes (173, 576, 153,
   548) is refused for these commands any more. Packages not re-measured: this session did not find their folder.
+
+## P2C.12d, second round of batch F: what the first round refused, 2026-11-19
+
+- **Done:** `nt()` and `nttail()` for `|np|` from 37.62 to 1000 (the cdf integrated where R's `pt()` takes an approximation;
+  1e-13 of Stata), `invnchi2()`, `invnchi2tail()`, `invnt()` and `invnttail()` (corpus `noncentral2.do`, 1,006 results, 1e-7),
+  `substr()` by bytes and `usubstr()` by characters with every start and length, so the refusals "from the end" and "not written
+  out" are gone (`substr.do`, 17 lines of results, with rows from columns), and `A[i,j]` outside a matrix is `.`, as Stata gives
+  (`functions_f.do`). 6 functions added to `VERIFIED_FUNCTIONS` (4 more files name some old ones).
+- **Not done:** `invnF()`, `invnFtail()`, `npnt()`, `npnF()`, `npnchi2()` (no probe line uses them; Stata's missing values
+  and last digits there follow no rule a grid of 17,000 cases gave, see `plan/stata/functions-f.md`); `cofc()` stays refused
+  (not a Stata function); `regexs()` after a `regexm()` of an earlier command (a caveat is shown).
+- **Limit:** a string cut in the middle of a character (`substr()` by bytes of text that is not ASCII) is not valid UTF-8; R
+  functions that follow (`substr()` to a `str12`, `nchar()`) may stop on it where Stata keeps the bytes.

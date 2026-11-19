@@ -50,6 +50,10 @@ pub(super) const FUNCTIONS: &[(&str, &[usize])] = &[
     ("invgammaptail", &[2]),
     ("invibeta", &[3]),
     ("invibetatail", &[3]),
+    ("invnchi2", &[3]),
+    ("invnchi2tail", &[3]),
+    ("invnt", &[3]),
+    ("invnttail", &[3]),
     ("invt", &[2]),
     ("invttail", &[2]),
     ("lnfactorial", &[1]),
@@ -172,20 +176,74 @@ stata_d_invfprob <- stata_d_invFtail
 # in the cdf; Stata gives missing for nt() and nttail() with df above 1e10 or |np| above 1000, for nchi2()
 # df above 1e6 or np outside 0 .. 1e4, for nF() df above 1e8 or np outside 0 .. 1e4 (nFtail(): no limit on df,
 # np 0 .. 1000),
-# and R's pt() turns to a normal approximation at |np| above 37.62 that Stata does not use
-stata_d_ntok <- function(d, np) {
-  if (any(stata_d_pos(d, 1e10) & !is.na(np) & abs(np) > 37.62 & abs(np) <= 1000)) {
-    stop("nt() with a noncentrality parameter above 37.62 in size is not translated: R takes an approximation there that Stata does not", call. = FALSE)
-  }
-  stata_d_pos(d, 1e10) & !is.na(np) & abs(np) <= 1000
-}
+# and R's pt() turns to a normal approximation at |np| above 37.62 that Stata does not use: there the cdf is
+# integrated, nt = E[pnorm(t w - np)] for w = sqrt(chisq(df) / df), which gives Stata's values to about 1e-13
 # R gives wrong values for |t| above 1e154 (Stata: 0 and 1)
 stata_d_ntbig <- function(t) { big <- !is.na(t) & abs(t) > 1e100; t[big] <- sign(t[big]) * Inf; t }
-stata_d_nt <- function(d, np, t) stata_d_keep(stata_d_run(stats::pt(stata_d_ntbig(t), d, np)), stata_d_ntok(d, np))
-stata_d_nttail <- function(d, np, t) stata_d_keep(stata_d_run(stats::pt(stata_d_ntbig(t), d, np, lower.tail = FALSE)), stata_d_ntok(d, np))
+stata_d_ntint <- function(d, np, t, upper) {
+  f <- function(w) {
+    z <- t * w - np
+    (if (upper) stats::pnorm(-z) else stats::pnorm(z)) * 2 * d * w * stats::dchisq(d * w^2, d)
+  }
+  q <- sqrt(stats::qchisq(c(1e-12, .001, .5, .999, 1 - 1e-12), d) / d)
+  # the integrand turns over where t w = np, within 8 / |t| of it
+  w0 <- if (t != 0 && np / t > 0) np / t
+  near <- if (!is.null(w0)) w0 + c(-8, -4, -1, 0, 1, 4, 8) / abs(t)
+  brk <- sort(unique(c(0, q, w0, near[!is.na(near) & near > 0], Inf)))
+  brk <- brk[!is.na(brk)]
+  sum(vapply(seq_len(length(brk) - 1L), function(i) {
+    stats::integrate(f, brk[i], brk[i + 1L], rel.tol = 1e-13, abs.tol = 1e-300, subdivisions = 2000L, stop.on.error = FALSE)$value
+  }, 0))
+}
+stata_d_ntcdf <- function(d, np, t, upper) {
+  if (length(d) == 0L || length(np) == 0L || length(t) == 0L) return(numeric(0))
+  n <- max(length(d), length(np), length(t))
+  d <- rep_len(as.numeric(d), n)
+  np <- rep_len(as.numeric(np), n)
+  t <- stata_d_ntbig(rep_len(as.numeric(t), n))
+  r <- stata_d_run(stats::pt(t, d, np, lower.tail = !upper))
+  ok <- stata_d_pos(d, 1e10) & !is.na(np) & abs(np) <= 1000
+  for (i in which(ok & !is.na(t) & abs(np) > 37.62)) {
+    r[i] <- if (is.infinite(t[i])) as.numeric((t[i] > 0) != upper) else stata_d_ntint(d[i], np[i], t[i], upper)
+  }
+  stata_d_keep(r, ok)
+}
+stata_d_nt <- function(d, np, t) stata_d_ntcdf(d, np, t, FALSE)
+stata_d_nttail <- function(d, np, t) stata_d_ntcdf(d, np, t, TRUE)
 stata_d_nchi2ok <- function(d, np) stata_d_pos(d, 1e6) & !is.na(np) & np >= 0 & np <= 1e4
 stata_d_nchi2 <- function(d, np, x) stata_d_keep(stata_d_run(stats::pchisq(x, d, np)), stata_d_nchi2ok(d, np))
 stata_d_nchi2tail <- function(d, np, x) stata_d_keep(stata_d_run(stats::pchisq(x, d, np, lower.tail = FALSE)), stata_d_nchi2ok(d, np))
+# the inverses: invnchi2() is R's qchisq() (to 2e-10), on the domain of nchi2(); p of 0 is 0 and of 1 missing
+# (the tail the other way round). invnt() and invnttail() find t by root-finding on nt() (Stata: df 1 to 1e6,
+# |np| to 1000, p from 1e-8 to 1 - 1e-8, and for np of 0 the central t, invnt() from p of 7.07e-151)
+stata_d_invnchi2 <- function(d, np, p) stata_d_keep(stata_d_run(stats::qchisq(p, d, np)), stata_d_nchi2ok(d, np))
+stata_d_invnchi2tail <- function(d, np, p) stata_d_keep(stata_d_run(stats::qchisq(p, d, np, lower.tail = FALSE)), stata_d_nchi2ok(d, np))
+stata_d_invnt1 <- function(d, np, p, upper) {
+  if (anyNA(c(d, np, p)) || d < 1 || d > 1e6 || abs(np) > 1000 || p <= 0 || p >= 1) return(NA_real_)
+  if (np == 0 && !upper) return(if (p < 7.07e-151) NA_real_ else stats::qt(p, d))
+  if (p < 1e-8 || p > 1 - 1e-8) return(NA_real_)
+  if (np == 0) return(stats::qt(p, d, lower.tail = FALSE))
+  x0 <- tryCatch(stata_d_run(stats::qt(p, d, np, lower.tail = !upper)), error = function(e) NA_real_)
+  y0 <- if (is.finite(x0)) asinh(x0) else asinh(np)
+  g <- function(y) (if (upper) -1 else 1) * (stata_d_ntcdf(d, np, sinh(y), upper) - p)
+  lo <- y0 - 1
+  hi <- y0 + 1
+  for (k in 1:60) if (is.finite(g(lo)) && g(lo) > 0) lo <- lo - 2^(k / 3) else break
+  for (k in 1:60) if (is.finite(g(hi)) && g(hi) < 0) hi <- hi + 2^(k / 3) else break
+  if (!is.finite(g(lo)) || !is.finite(g(hi)) || g(lo) > 0 || g(hi) < 0) return(NA_real_)
+  sinh(stats::uniroot(g, c(lo, hi), tol = 1e-15, maxiter = 1000)$root)
+}
+stata_d_invnt_ <- function(d, np, p, upper) {
+  if (length(d) == 0L || length(np) == 0L || length(p) == 0L) return(numeric(0))
+  n <- max(length(d), length(np), length(p))
+  d <- rep_len(as.numeric(d), n)
+  np <- rep_len(as.numeric(np), n)
+  p <- rep_len(as.numeric(p), n)
+  vapply(seq_len(n), function(i) stata_d_invnt1(d[i], np[i], p[i], upper), 0)
+}
+stata_d_invnt <- function(d, np, p) stata_d_invnt_(d, np, p, FALSE)
+stata_d_invnttail <- function(d, np, p) stata_d_invnt_(d, np, p, TRUE)
+
 stata_d_nFok <- function(a, b, np, top, hi) stata_d_pos(a, hi) & stata_d_pos(b, hi) & !is.na(np) & np >= 0 & np <= top
 stata_d_nF <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np)), stata_d_nFok(a, b, np, 1e4, 1e8))
 stata_d_nFtail <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np, lower.tail = FALSE)), stata_d_nFok(a, b, np, 1e3, Inf))"##;

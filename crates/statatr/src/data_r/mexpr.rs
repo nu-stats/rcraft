@@ -136,12 +136,14 @@ stata_mdiag <- function(v) {
   dimnames(m) <- if (all(grepl("^[rc][0-9]+$", nm))) list(stata_mdefault(length(v), "r"), stata_mdefault(length(v), "c")) else list(nm, nm)
   m
 }
-# one element, by number or by name; missing outside it
+# one element, by number or by name; missing outside it (Stata 19: `.`, not an error)
 stata_matel <- function(m, i, j, name) {
   m <- stata_mnamed(m)
+  # a name the matrix does not have is an error; a number outside it (or missing) gives `.`
+  if ((is.character(i) && is.na(match(i, rownames(m)))) || (is.character(j) && is.na(match(j, colnames(m))))) stop(name, "[", i, ",", j, "] not found (Stata: r(111))", call. = FALSE)
   i <- if (is.character(i)) match(i, rownames(m)) else floor(i)
   j <- if (is.character(j)) match(j, colnames(m)) else floor(j)
-  if (is.na(i) || is.na(j) || i < 1 || j < 1 || i > nrow(m) || j > ncol(m)) stop(name, "[", i, ",", j, "] invalid subscript (Stata: r(503))", call. = FALSE)
+  if (is.na(i) || is.na(j) || i < 1 || j < 1 || i > nrow(m) || j > ncol(m)) return(NA_real_)
   unname(m[i, j])
 }
 # A[i, j] = value: a scalar there, or a matrix with its corner there

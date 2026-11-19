@@ -50,6 +50,7 @@
 @ udsub1 [aü] [ü] [] [aü] [éaü] [éa] [] [é]
 @ udsub2 [日] [] [本] [本] [] [日] [b] []
 @ matrix 3 2 5 7 . 5 [a]
+@ matel_out . . . . 2 3 . . .
 @ scalar 7 4 5 [a] 8 4 .
 @ matrix_gen 4 . 7
 @ match 1 1 0 1 0

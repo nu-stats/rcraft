@@ -1121,26 +1121,6 @@ impl Translator<'_> {
                 self.helpers.push("stata_strmatch");
                 Ok((format!("stata_strmatch({s}, {p})"), Kind::Number))
             }
-            "substr" | "usubstr" => {
-                want(3)?;
-                let (s, _) = self.expr(arg(0)?)?;
-                match (plain_number(arg(1)?), arg(2)?) {
-                    (Some(n1), e) if n1 >= 1.0 && n1.fract() == 0.0 => {
-                        let start = n1 as i64;
-                        if is_missing_literal(e) {
-                            return Ok((format!("substr({s}, {start}, nchar({s}))"), Kind::Text));
-                        }
-                        match plain_number(e) {
-                            Some(n2) if n2 >= 1.0 && n2.fract() == 0.0 => Ok((
-                                format!("substr({s}, {start}, {})", start + n2 as i64 - 1),
-                                Kind::Text,
-                            )),
-                            _ => Err(no("substr() with a length that is not a whole number written out is not translated yet")),
-                        }
-                    }
-                    _ => Err(no("substr() counting from the end, or from a position that is not written out, is not translated yet")),
-                }
-            }
             "ustrpos" => {
                 want(2)?;
                 let (s, _) = self.expr(arg(0)?)?;
@@ -1765,7 +1745,10 @@ mod tests {
             "ifelse((is.na(x) | x > 1), 1, 2)"
         );
         assert_eq!(code("sum(x)", Use::Value), "cumsum(dplyr::coalesce(x, 0))");
-        assert_eq!(code("substr(s, 2, 3)", Use::Value), "substr(s, 2, 4)");
+        assert_eq!(
+            code("substr(s, 2, 3)", Use::Value),
+            "stata_bsubstr(s, 2, 3)"
+        );
         assert_eq!(
             code("subinstr(s, \"a\", \"b\", .)", Use::Value),
             "gsub(\"a\", \"b\", s, fixed = TRUE, useBytes = TRUE)"
@@ -1794,7 +1777,6 @@ mod tests {
     fn what_is_not_translated_says_why_and_caveats_are_given() {
         for (text, why) in [
             ("foo(x)", "foo() is not translated"),
-            ("substr(s, -2, 1)", "from the end"),
             ("year(s, 2)", "takes 1 argument"),
             ("x +", "Stata would not read it"),
             ("_se[x]", "estimation"),

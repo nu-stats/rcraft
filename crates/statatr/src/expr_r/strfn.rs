@@ -237,6 +237,22 @@ stata_bsubstr <- function(s, n1, n2) {
     stata_sf_bytes(a[seq_along(a) >= st & seq_along(a) < st + k])
   }, "", USE.NAMES = FALSE)
 }
+# usubstr(): the same by characters
+stata_usubstr <- function(s, n1, n2) {
+  s <- stata_sf_chr(s)
+  m <- stata_sf_n(s, n1, n2)
+  s <- rep_len(s, m)
+  n1 <- trunc(rep_len(as.numeric(n1), m))
+  n2 <- trunc(rep_len(as.numeric(n2), m))
+  la <- nchar(s, type = "chars", allowNA = TRUE)
+  la[is.na(la)] <- 0L
+  st <- ifelse(!is.na(n1) & n1 < 0, la + n1 + 1, n1)
+  k <- ifelse(is.na(n2), Inf, n2)
+  none <- is.na(n1) | n1 == 0 | is.na(st) | st < 1 | st > la | k < 1
+  r <- substr(s, ifelse(none, 1, st), ifelse(none, 0, pmin(la, st + k - 1)))
+  r[none] <- ""
+  r
+}
 # udsubstr(): n1 counts characters as usubstr() does, n2 display columns (two for a wide character); whole characters only
 stata_udsubstr <- function(s, n1, n2) {
   s <- stata_sf_chr(s)
@@ -275,7 +291,9 @@ const FUNCTIONS: &[(&str, &str, &str, Kind)] = &[
     ("strreverse", "stata_strreverse", "s", Kind::Text),
     ("strrpos", "stata_strrpos", "ss", Kind::Number),
     ("subinword", "stata_subinword", "sssn", Kind::Text),
+    ("substr", "stata_bsubstr", "snn", Kind::Text),
     ("udsubstr", "stata_udsubstr", "snn", Kind::Text),
+    ("usubstr", "stata_usubstr", "snn", Kind::Text),
     ("word", "stata_word", "sn", Kind::Text),
 ];
 

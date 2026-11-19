@@ -59,11 +59,12 @@ again on Stata 19 here. Translated in `crates/statatr/src/expr_r/strfn.rs` (stri
   `""`, `("a日b", 3, 1)` is `b`): `n1` and `n2` are cut towards zero; a negative `n1` counts from the
   end; `n1` of 0, missing, past the end, or before the start (`-10` of 6) gives `""`; `n2` missing
   (`.`, `.a`) is the rest, 0 or below `""`. `substr()` and `usubstr()` follow the same rules (not
-  retranslated here).
+  retranslated here); since round 2 they are: `substr()` by bytes and `usubstr()` by characters, any start and length.
 - `match()` is `strmatch()`.
 - `matrix(exp)` is `exp` read with its names as scalars and matrices: a variable named in it is
   "not found" (r(111)); a matrix on its own is r(109); `matrix(.)` and `matrix("a")` give `.` and `a`.
-  Outside the matrix `A[3,3]` is `.` in Stata (RCraft's `A[i,j]` stops with r(503), not changed).
+  `A[i,j]` outside the matrix, or with a missing index, is `.` in Stata (round 2: RCraft gave an r(503) stop); a
+  row or column name the matrix lacks is r(111); a non-whole index is cut.
 - `cofc()` in lower case is not a Stata function (r(133), "unknown function"); `Cofc()` and `cofC()`
   are, and were done. RCraft refuses `cofc()` with that reason.
 
@@ -76,20 +77,32 @@ again on Stata 19 here. Translated in `crates/statatr/src/expr_r/strfn.rs` (stri
 - `nt(df, np, t)` and `nttail(df, np, t)` (the noncentral t): R's `pt(t, df, ncp)` agrees to about
   1e-9 in the cdf. Missing when df is 0 or below or above 1e10, when `np` is above 1000 in size, or
   any argument is missing. R switches to a rough approximation at `|np|` above 37.62, which Stata
-  does not use (the values then differ in the 3rd digit): **RCraft stops there** (an R error) and
-  does not give a number. `|t|` above 1e154 breaks R; set to infinity (Stata: 1 and 0).
+  does not use (the values then differ in the 3rd digit): there RCraft integrates the cdf instead,
+  `E[pnorm(t w - np)]` for `w = sqrt(chisq(df)/df)` with break points where `t w = np`, which
+  gives Stata's values to about 1e-13 (`noncentral2.do`; round 2, 2026-11-19). `|t|` above 1e154
+  breaks R; set to infinity (Stata: 1 and 0).
 - `nchi2(df, np, x)`, `nchi2tail`: R's `pchisq(x, df, ncp)`. Missing for df 0 or below or above 1e6,
   `np` below 0 or above 1e4, missing arguments; `x` below 0 gives 0 (tail 1). R rounds results below
   about 1e-300 to 0 where Stata keeps them (not matched).
 - `nF(a, b, np, x)`: R's `pf(x, a, b, ncp)`. Missing for a degree of freedom 0 or below or above 1e8,
   `np` below 0 or above 1e4. `nFtail()`: no limit on the degrees of freedom, `np` at most 1000.
   Results below about 1e-3 agree only to a few digits (R's series stops at 1e-9 absolute).
-- Not done (no probe lines, so not decoded): `invnt()`, `invnttail()`, `invnF()`, `invnFtail()`,
-  `invnchi2()`, `invnchi2tail()`, `npnt()`, `npnF()`, `npnchi2()`; they exist in Stata 19.
+- `invnchi2(df, np, p)`, `invnchi2tail()` (round 2): R's `qchisq(p, df, ncp)` agrees to 2e-10. Same limits as
+  `nchi2()` (df 1e6, np 1e4); `invnchi2(.., 0)` is 0 and `(.., 1)` missing, the tail the other way round.
+- `invnt(df, np, p)`, `invnttail()` (round 2): found by root-finding on `nt()`; Stata gives missing for df
+  below 1 or above 1e6, `|np|` above 1000, p outside (0, 1), and, for `np` other than 0 or for the tail, p below
+  1e-8 or above 1 - 1e-8; `invnt()` with np of 0 is the central t from p of 7.07e-151. Stata's own search stops at about
+  1e-10 in the cdf, so within about a factor of 100 of those p limits its values are only that good (the
+  corpus keeps to p of .001 to .999, where both agree to 1e-7 or better).
+- Not done: `invnF()` and `invnFtail()` (Stata gives missing in patterns that depend on p, np and both degrees
+  of freedom in ways a grid of 7,000 cases did not reduce to a rule: p limits near 1e-8, 1e-14 and 1 - 2.4e-4 for
+  one pair of degrees of freedom, df of 0 gives numbers, and values only to about 1e-8), and the np solvers `npnt()`,
+  `npnF()`, `npnchi2()` (p of 1e-10 is missing and the values of `npnt` differ from the exact root at 1e-8: Stata's
+  solver is coarser than R's); no probe uses them.
 
 ## Open and refused
 
-- `nt()`/`nttail()` with `|np|` between 37.62 and 1000 (an R error, not a number); `cofc()`.
+- `cofc()`; `invnF()`, `invnFtail()`, `npnt()`, `npnF()`, `npnchi2()` (above).
 - `regexs()` after a `regexm()` of an earlier command (see above); `ustrregexm()` and its `ustrregexs()`
   are not touched (`ustrregexm` is `grepl`, `ustrregexs` is not translated).
 - `strpos()` and `strreverse()` of a string with bytes that are not UTF-8 work on bytes; R shows the
