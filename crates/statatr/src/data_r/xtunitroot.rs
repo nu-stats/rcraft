@@ -20,6 +20,22 @@ stata_xtur_t1 <- matrix(c(6.0, -1.125, 0.497, -1.520, 1.745, 7.0, -1.178, 0.506,
 stata_xtur_t2 <- array(c(-3.79, -2.66, -2.54, -2.50, -2.46, -2.44, -2.43, -2.42, -2.42, -2.40, -2.40, -3.45, -2.47, -2.38, -2.33, -2.32, -2.31, -2.29, -2.28, -2.28, -2.28, -2.27, -3.06, -2.32, -2.24, -2.21, -2.19, -2.18, -2.16, -2.16, -2.16, -2.16, -2.15, -2.79, -2.14, -2.10, -2.08, -2.07, -2.05, -2.04, -2.05, -2.04, -2.04, -2.04, -2.61, -2.06, -2.02, -2.00, -1.99, -1.99, -1.98, -1.98, -1.98, -1.97, -1.97, -2.51, -2.01, -1.97, -1.95, -1.94, -1.94, -1.93, -1.93, -1.93, -1.93, -1.92, -2.20, -1.85, -1.83, -1.82, -1.82, -1.82, -1.81, -1.81, -1.81, -1.81, -1.81, -2.00, -1.75, -1.74, -1.73, -1.73, -1.73, -1.73, -1.73, -1.73, -1.73, -1.73, -2.76, -2.28, -2.21, -2.19, -2.18, -2.16, -2.16, -2.15, -2.16, -2.15, -2.15, -2.57, -2.17, -2.11, -2.09, -2.08, -2.07, -2.07, -2.06, -2.06, -2.06, -2.05, -2.42, -2.06, -2.02, -1.99, -1.99, -1.99, -1.98, -1.98, -1.97, -1.98, -1.97, -2.28, -1.95, -1.92, -1.91, -1.90, -1.90, -1.90, -1.89, -1.89, -1.89, -1.89, -2.18, -1.89, -1.87, -1.86, -1.85, -1.85, -1.85, -1.85, -1.84, -1.84, -1.84, -2.11, -1.85, -1.83, -1.82, -1.82, -1.82, -1.81, -1.81, -1.81, -1.81, -1.81, -1.95, -1.75, -1.74, -1.73, -1.73, -1.73, -1.73, -1.73, -1.73, -1.73, -1.73, -1.84, -1.68, -1.67, -1.67, -1.67, -1.67, -1.67, -1.67, -1.67, -1.67, -1.67, -2.38, -2.10, -2.06, -2.04, -2.04, -2.02, -2.02, -2.02, -2.02, -2.02, -2.01, -2.27, -2.01, -1.98, -1.96, -1.95, -1.95, -1.95, -1.95, -1.94, -1.95, -1.94, -2.17, -1.93, -1.90, -1.89, -1.88, -1.88, -1.88, -1.88, -1.88, -1.88, -1.88, -2.06, -1.85, -1.83, -1.82, -1.82, -1.82, -1.81, -1.81, -1.81, -1.81, -1.81, -2.00, -1.80, -1.79, -1.78, -1.78, -1.78, -1.78, -1.78, -1.78, -1.77, -1.77, -1.96, -1.77, -1.76, -1.75, -1.75, -1.75, -1.75, -1.75, -1.75, -1.75, -1.75, -1.85, -1.70, -1.69, -1.69, -1.69, -1.69, -1.68, -1.68, -1.68, -1.68, -1.69, -1.77, -1.64, -1.64, -1.64, -1.64, -1.64, -1.64, -1.64, -1.64, -1.64, -1.64, -8.12, -3.42, -3.21, -3.13, -3.09, -3.05, -3.03, -3.02, -3.00, -3.00, -2.99, -7.36, -3.20, -3.03, -2.97, -2.94, -2.93, -2.90, -2.88, -2.88, -2.87, -2.86, -6.44, -3.03, -2.88, -2.84, -2.82, -2.79, -2.78, -2.77, -2.76, -2.75, -2.75, -5.72, -2.86, -2.74, -2.71, -2.69, -2.68, -2.67, -2.65, -2.66, -2.65, -2.64, -5.54, -2.75, -2.67, -2.63, -2.62, -2.61, -2.59, -2.60, -2.59, -2.58, -2.58, -5.16, -2.69, -2.61, -2.58, -2.58, -2.56, -2.55, -2.55, -2.55, -2.54, -2.54, -4.50, -2.53, -2.48, -2.46, -2.45, -2.45, -2.44, -2.44, -2.44, -2.44, -2.43, -4.00, -2.42, -2.39, -2.38, -2.37, -2.37, -2.36, -2.36, -2.36, -2.36, -2.36, -4.66, -2.98, -2.87, -2.82, -2.80, -2.79, -2.77, -2.76, -2.75, -2.75, -2.75, -4.38, -2.85, -2.76, -2.72, -2.70, -2.69, -2.68, -2.67, -2.67, -2.66, -2.66, -4.11, -2.74, -2.66, -2.63, -2.62, -2.60, -2.60, -2.59, -2.59, -2.58, -2.58, -3.88, -2.63, -2.57, -2.55, -2.53, -2.53, -2.52, -2.52, -2.52, -2.51, -2.51, -3.73, -2.56, -2.52, -2.49, -2.48, -2.48, -2.48, -2.47, -2.47, -2.46, -2.46, -3.62, -2.52, -2.48, -2.46, -2.45, -2.45, -2.44, -2.44, -2.44, -2.44, -2.43, -3.35, -2.42, -2.38, -2.38, -2.37, -2.37, -2.36, -2.36, -2.36, -2.36, -2.36, -3.13, -2.34, -2.32, -2.32, -2.31, -2.31, -2.31, -2.31, -2.31, -2.31, -2.31, -3.73, -2.77, -2.70, -2.67, -2.65, -2.64, -2.63, -2.62, -2.63, -2.62, -2.62, -3.60, -2.68, -2.62, -2.59, -2.58, -2.57, -2.57, -2.56, -2.56, -2.55, -2.55, -3.45, -2.59, -2.54, -2.52, -2.51, -2.51, -2.50, -2.50, -2.50, -2.49, -2.49, -3.33, -2.52, -2.47, -2.46, -2.45, -2.45, -2.44, -2.44, -2.44, -2.44, -2.44, -3.26, -2.47, -2.44, -2.42, -2.41, -2.41, -2.41, -2.40, -2.40, -2.40, -2.40, -3.18, -2.44, -2.40, -2.39, -2.39, -2.38, -2.38, -2.38, -2.38, -2.38, -2.38, -3.02, -2.36, -2.33, -2.33, -2.33, -2.32, -2.32, -2.32, -2.32, -2.32, -2.32, -2.90, -2.30, -2.29, -2.28, -2.28, -2.28, -2.28, -2.28, -2.28, -2.28, -2.28), dim = c(11, 8, 3, 2))
 stata_xtur_t3 <- array(c(-1.504, -1.514, -1.522, -1.520, -1.526, -1.523, -1.527, -1.519, -1.524, -1.532, 1.069, 0.923, 0.851, 0.809, 0.789, 0.770, 0.760, 0.749, 0.736, 0.735, -1.488, -1.503, -1.516, -1.514, -1.519, -1.520, -1.524, -1.519, -1.522, -1.530, 1.255, 1.011, 0.915, 0.861, 0.831, 0.803, 0.781, 0.770, 0.753, 0.745, -1.319, -1.387, -1.428, -1.443, -1.460, -1.476, -1.493, -1.490, -1.498, -1.514, 1.421, 1.078, 0.969, 0.905, 0.865, 0.830, 0.798, 0.789, 0.766, 0.754, -1.306, -1.366, -1.413, -1.433, -1.453, -1.471, -1.489, -1.486, -1.495, -1.512, 1.759, 1.181, 1.037, 0.952, 0.907, 0.858, 0.819, 0.802, 0.782, 0.761, -1.171, -1.260, -1.329, -1.363, -1.394, -1.428, -1.454, -1.458, -1.470, -1.495, 2.080, 1.279, 1.097, 1.005, 0.946, 0.886, 0.842, 0.819, 0.801, 0.771, NA, NA, -1.313, -1.351, -1.384, -1.421, -1.451, -1.454, -1.467, -1.494, NA, NA, 1.171, 1.055, 0.980, 0.912, 0.863, 0.839, 0.814, 0.781, NA, NA, NA, -1.289, -1.331, -1.380, -1.418, -1.427, -1.444, -1.476, NA, NA, NA, 1.114, 1.023, 0.942, 0.886, 0.858, 0.834, 0.795, NA, NA, NA, -1.273, -1.319, -1.371, -1.411, -1.423, -1.441, -1.474, NA, NA, NA, 1.164, 1.062, 0.968, 0.910, 0.875, 0.851, 0.806, NA, NA, NA, -1.212, -1.266, -1.329, -1.377, -1.393, -1.415, -1.456, NA, NA, NA, 1.217, 1.105, 0.996, 0.929, 0.896, 0.871, 0.818, -2.166, -2.167, -2.168, -2.167, -2.172, -2.173, -2.176, -2.174, -2.174, -2.177, 1.132, 0.869, 0.763, 0.713, 0.690, 0.655, 0.633, 0.621, 0.610, 0.597, -2.173, -2.169, -2.172, -2.172, -2.173, -2.177, -2.180, -2.178, -2.176, -2.179, 1.453, 0.975, 0.845, 0.769, 0.734, 0.687, 0.654, 0.641, 0.627, 0.605, -1.914, -1.999, -2.047, -2.074, -2.095, -2.120, -2.137, -2.143, -2.146, -2.158, 1.627, 1.036, 0.882, 0.796, 0.756, 0.702, 0.661, 0.653, 0.634, 0.613, -1.922, -1.977, -2.032, -2.065, -2.091, -2.117, -2.137, -2.142, -2.146, -2.158, 2.482, 1.214, 0.983, 0.861, 0.808, 0.735, 0.688, 0.674, 0.650, 0.625, -1.750, -1.823, -1.911, -1.968, -2.009, -2.057, -2.091, -2.103, -2.114, -2.135, 3.947, 1.332, 1.052, 0.913, 0.845, 0.759, 0.705, 0.685, 0.662, 0.629, NA, NA, -1.888, -1.955, -1.998, -2.051, -2.087, -2.101, -2.111, -2.135, NA, NA, 1.165, 0.991, 0.899, 0.792, 0.730, 0.705, 0.673, 0.638, NA, NA, NA, -1.868, -1.923, -1.995, -2.042, -2.065, -2.081, -2.113, NA, NA, NA, 1.055, 0.945, 0.828, 0.753, 0.725, 0.689, 0.650, NA, NA, NA, -1.851, -1.912, -1.986, -2.036, -2.063, -2.079, -2.112, NA, NA, NA, 1.145, 1.009, 0.872, 0.786, 0.747, 0.713, 0.661, NA, NA, NA, -1.761, -1.835, -1.925, -1.987, -2.024, -2.046, -2.088, NA, NA, NA, 1.208, 1.063, 0.902, 0.808, 0.766, 0.728, 0.670), dim = c(10, 2, 9, 2))
 
+# Levin, Lin and Chu's adjustment table (Table 2): the mean and standard-deviation adjustments at T-tilde
+# = 25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 250 and Inf, per deterministic term
+stata_xtur_llc_tab <- list(
+  n = list(mu = c(0.004, 0.003, 0.002, 0.002, 0.001, 0.001, 0.001, 0, 0, 0, 0, 0, 0),
+           sg = c(1.049, 1.035, 1.027, 1.021, 1.017, 1.014, 1.011, 1.008, 1.007, 1.006, 1.005, 1.001, 1)),
+  c = list(mu = c(-0.554, -0.546, -0.541, -0.537, -0.533, -0.531, -0.527, -0.524, -0.521, -0.520, -0.518, -0.509, -0.5),
+           sg = c(0.919, 0.889, 0.867, 0.850, 0.837, 0.826, 0.810, 0.798, 0.789, 0.782, 0.776, 0.742, 0.707)),
+  t = list(mu = c(-0.703, -0.674, -0.653, -0.637, -0.624, -0.614, -0.598, -0.587, -0.578, -0.571, -0.566, -0.533, -0.5),
+           sg = c(1.003, 0.949, 0.906, 0.971, 0.842, 0.818, 0.780, 0.751, 0.728, 0.710, 0.695, 0.603, 0.5)))
+stata_xtur_llc_adj <- function(det, tt) {
+  a <- stata_xtur_llc_tab[[det]]
+  kn <- c(25, 30, 35, 40, 45, 50, 60, 70, 80, 90, 100, 250)
+  if (tt <= 25) return(c(a$mu[1], a$sg[1]))
+  if (tt > 250) return(c(a$mu[13], a$sg[13]))
+  c(stats::approx(kn, a$mu[1:12], tt)$y, stats::approx(kn, a$sg[1:12], tt)$y)
+}
 stata_xtur_interp <- function(xs, ys, x) {
   ok <- !is.na(ys)
   xs <- xs[ok]
@@ -110,10 +126,12 @@ stata_xtunitroot <- function(d, test, y, panel, time, delta = 1, keep = rep(TRUE
   g <- match(pv, ids)
   nt <- tabulate(g, length(ids))
   bad <- function() stop("xtunitroot ", test, " with an unbalanced panel or a gap in the series is not translated (Stata: strongly balanced data only)", call. = FALSE)
-  if (length(unique(nt)) != 1 || anyNA(yv)) bad()
+  unbal <- function() stop("xtunitroot llc requires strongly balanced data (Stata: r(498))", call. = FALSE)
+  if (length(unique(nt)) != 1 || anyNA(yv)) { if (test == "llc") unbal() else bad() }
   tt <- nt[1]
   Y <- matrix(yv, nrow = tt)
   Tm <- matrix(tv, nrow = tt)
+  if (test == "llc" && any(Tm != Tm[, 1])) unbal()
   if (any(Tm != Tm[, 1]) || any(abs(diff(Tm[, 1]) - delta) > 1e-9)) bad()
   n <- ncol(Y)
   if (tt < 4) stop("fewer than 4 periods: not translated (Stata: r(2001))", call. = FALSE)
@@ -303,6 +321,107 @@ stata_xtunitroot <- function(d, test, y, panel, time, delta = 1, keep = rep(TRUE
     r$N_g <- n
     r$N <- n * tt
     m$test <- "breitung"
+  } else if (test == "llc") {
+    p <- if (is.null(lags)) 1 else lags
+    auto <- is.null(kernel) || is.null(kernel$lags)
+    kname <- if (is.null(kernel)) "bartlett" else kernel$name
+    # the bandwidth of each panel follows the number of rows the panel has in the data, not in the sample
+    rowsn <- as.vector(table(factor(as.character(pa[!is.na(pa) & !is.na(ta)]), levels = as.character(ids))))
+    kv <- if (auto) floor(3.21 * rowsn^(1 / 3)) else rep(kernel$lags, n)
+    kk <- mean(kv)
+    # a sample that starts after the data do reads the one period before it (never for a demeaned series)
+    s0 <- 1L
+    Yf <- Y
+    if (!demean && pre) {
+      if (anyNA(full[s1 - 1L, ])) refuse("a sample that starts after the data do, with the period before it missing,")
+      s0 <- 2L
+      Yf <- full[(s1 - 1L):span, , drop = FALSE]
+    }
+    nf <- nrow(Yf)
+    rows <- (if (s0 > 1L) s0 + p else p + 2L):nf
+    nr <- length(rows)
+    ncx <- p + switch(det, n = 0, c = 1, t = 2)
+    if (nr <= ncx + 1) refuse("a sample with this few periods for the lags,")
+    ev <- NULL
+    vv <- NULL
+    sg <- numeric(n)
+    sy <- numeric(n)
+    for (i in seq_len(n)) {
+      y <- Yf[, i]
+      dep <- y[rows] - y[rows - 1]
+      X <- matrix(0, nr, 0)
+      for (j in seq_len(p)) X <- cbind(X, y[rows - j] - y[rows - j - 1])
+      if (det == "c") X <- cbind(X, 1)
+      if (det == "t") X <- cbind(X, 1, rows)
+      e <- stata_xtur_resid(X, dep)
+      v <- stata_xtur_resid(X, y[rows - 1])
+      rho <- sum(e * v) / sum(v^2)
+      s <- sqrt(sum((e - rho * v)^2) / nr)
+      if (!is.finite(s) || s < 1e-12) refuse("a panel that the lags fit exactly,")
+      dy <- diff(y)
+      if (s0 > 1L) dy <- dy[(s0 - 1L):length(dy)]
+      z <- switch(det, n = dy, c = dy - mean(dy), t = stata_xtur_resid(cbind(1, seq_along(dy)), dy))
+      n1 <- length(z)
+      lr <- sum(z^2) / n1
+      for (l in seq_len(kv[i])) {
+        if (l >= n1) break
+        x <- l / (kv[i] + 1)
+        w <- if (kname == "bartlett") 1 - x else if (x <= 0.5) 1 - 6 * x^2 + 6 * x^3 else 2 * (1 - x)^3
+        lr <- lr + 2 * w * sum(z[(l + 1):n1] * z[1:(n1 - l)]) / n1
+      }
+      sy[i] <- sqrt(lr)
+      sg[i] <- s
+      ev <- c(ev, e / s)
+      vv <- c(vv, v / s)
+    }
+    sbar <- mean(sy / sg)
+    dl <- sum(ev * vv) / sum(vv^2)
+    nn <- length(ev)
+    res <- ev - dl * vv
+    ve <- sum(res^2) / nn
+    se <- sqrt(ve / sum(vv^2))
+    td <- dl / se
+    ad <- stata_xtur_llc_adj(det, nr)
+    tds <- (td - nn * sbar / ve * se * ad[1]) / ad[2]
+    if (!is.finite(tds)) refuse("a series with no variation,")
+    ptd <- stats::pnorm(td)
+    ptds <- stats::pnorm(tds)
+    if (show) {
+      stata_xtur_head(paste0("Levin–Lin–Chu unit-root test for ", y), 33 + nchar(y),
+                      c("H0: Panels contain unit roots", "Ha: Panels are stationary"), n, tt)
+      stata_xtur_two("AR parameter: Common", if (det == "n") "Asymptotics: root(N)/T -> 0" else "Asymptotics: N/T -> 0")
+      cat("Panel means:  ", stata_xtur_inc(det != "n"), "\n", sep = "")
+      stata_xtur_two(paste0("Time trend:   ", stata_xtur_inc(det == "t")), cs)
+      cat("\nADF regressions: ", stata_xtur_lags(p, "0 lags"), "\n", sep = "")
+      kn <- if (kname == "bartlett") "Bartlett" else "Parzen"
+      if (auto) cat("LR variance:     ", kn, " kernel, ", sprintf("%.2f", kk), " lags average (chosen by LLC)\n", sep = "")
+      else cat("LR variance:     ", kn, " kernel, ", stata_xtur_lags(kk, "0 lags"), "\n", sep = "")
+      rule()
+      cat("                    Statistic      p-value\n")
+      rule()
+      cat(" ", stata_tst_left("Unadjusted t", 15), stata_tst_pad(sprintf("%.4f", td), 12), if (det == "n") stata_tst_pad(sprintf("%.4f", ptd), 14), "\n", sep = "")
+      cat(" ", stata_tst_left("Adjusted t*", 15), stata_tst_pad(sprintf("%.4f", tds), 12), stata_tst_pad(sprintf("%.4f", ptds), 14), "\n", sep = "")
+      rule()
+    }
+    if (det == "n") r$p_td <- ptd
+    r$p_tds <- ptds
+    r$sig_adj <- ad[2]
+    r$mu_adj <- ad[1]
+    r$delta <- dl
+    r$se_delta <- se
+    r$Var_ep <- ve
+    r$sbar <- sbar
+    r$ttilde <- nr
+    r$td <- td
+    r$tds <- tds
+    r$N_g <- n
+    r$N_t <- tt
+    r$N <- nn
+    if (auto) r$hac_lagm <- kk else r$hac_lags <- kk
+    r$adf_lags <- p
+    m$test <- "llc"
+    m$hac_kernel <- kname
+    if (auto) m$hac_method <- "llc"
   } else if (test == "fisher") {
     p <- lags
     pp <- ur == "pperron"
@@ -420,7 +539,7 @@ stata_xtunitroot <- function(d, test, y, panel, time, delta = 1, keep = rep(TRUE
     m$test <- "hadri"
   }
   if (demean) m$demean <- "demean"
-  if (test %in% c("ips", "ht", "breitung", "hadri")) m$deterministics <- dn
+  if (test %in% c("ips", "ht", "breitung", "hadri", "llc")) m$deterministics <- dn
   invisible(c(r, m))
 }"##;
 
@@ -460,13 +579,29 @@ const R_XTUNITROOT: &[&str] = &[
     "test",
     "demean",
     "deterministics",
+    "p_td",
+    "p_tds",
+    "sig_adj",
+    "mu_adj",
+    "delta",
+    "se_delta",
+    "Var_ep",
+    "sbar",
+    "ttilde",
+    "td",
+    "tds",
+    "hac_lagm",
+    "hac_lags",
+    "adf_lags",
+    "hac_kernel",
+    "hac_method",
 ];
 
 /// The names `xtunitroot` leaves as text.
 pub(super) fn text_name(name: &str) -> bool {
     matches!(
         name,
-        "options" | "urtest" | "test" | "demean" | "deterministics"
+        "options" | "urtest" | "test" | "demean" | "deterministics" | "hac_kernel" | "hac_method"
     )
 }
 
@@ -489,12 +624,7 @@ impl Session {
         };
         let allowed: &[(&str, usize)] = match *test {
             "ips" => &[("trend", 5), ("demean", 6), ("lags", 1), ("noconstant", 4)],
-            "ht" => &[
-                ("noconstant", 4),
-                ("trend", 5),
-                ("demean", 6),
-                ("altt", 4),
-            ],
+            "ht" => &[("noconstant", 4), ("trend", 5), ("demean", 6), ("altt", 4)],
             "breitung" => &[
                 ("noconstant", 4),
                 ("trend", 5),
@@ -518,11 +648,13 @@ impl Session {
                 ("robust", 6),
                 ("kernel", 6),
             ],
-            "llc" => {
-                return Err(no(
-                    "xtunitroot llc is not translated yet: Levin, Lin and Chu's adjustment table (their Table 2) and its bandwidth rule are not decoded here",
-                ))
-            }
+            "llc" => &[
+                ("noconstant", 4),
+                ("trend", 5),
+                ("demean", 6),
+                ("lags", 1),
+                ("kernel", 6),
+            ],
             _ => {
                 stop(out, "invalid syntax (Stata: r(198))");
                 return Ok(());
@@ -530,6 +662,14 @@ impl Session {
         };
         if let Some(o) = opts.other(allowed) {
             stop(out, &format!("option {o} not allowed (Stata: r(198))"));
+            return Ok(());
+        }
+        // an option given twice is r(198), as is a second kernel()
+        if let Some((f, _)) = allowed
+            .iter()
+            .find(|(f, m)| opts.0.iter().filter(|o| o.is(f, *m)).count() > 1)
+        {
+            stop(out, &format!("option {f} given twice (Stata: r(198))"));
             return Ok(());
         }
         let var = match rest {
@@ -578,6 +718,10 @@ impl Session {
             Some(t) => match t.trim().parse::<i64>() {
                 Ok(v) if v >= 0 => Some(v),
                 Ok(_) => {
+                    stop(out, "option lags() incorrectly specified (Stata: r(198))");
+                    return Ok(());
+                }
+                Err(_) if *test == "llc" && t.trim().parse::<f64>().is_ok() => {
                     stop(out, "option lags() incorrectly specified (Stata: r(198))");
                     return Ok(());
                 }
@@ -633,6 +777,33 @@ impl Session {
         }
         let kernel = match opts.arg("kernel", 6) {
             None => "NULL".to_string(),
+            Some(k) if *test == "llc" => {
+                let w: Vec<&str> = k.split_whitespace().collect();
+                match w.as_slice() {
+                    [("bartlett" | "parzen")] => {
+                        stop(
+                            out,
+                            "kernel() needs a number of lags or a lag-selection rule (Stata: r(198))",
+                        );
+                        return Ok(());
+                    }
+                    [name @ ("bartlett" | "parzen"), "llc"] => {
+                        format!("list(name = {}, lags = NULL)", r_text(name))
+                    }
+                    [("bartlett" | "parzen"), "nwest"] => {
+                        return Err(no(
+                            "xtunitroot llc, kernel(... nwest): the Newey-West bandwidth is not translated yet (Stata's choice is not decoded)",
+                        ));
+                    }
+                    [name @ ("bartlett" | "parzen"), n] if n.parse::<u32>().is_ok() => {
+                        format!("list(name = {}, lags = {n})", r_text(name))
+                    }
+                    _ => {
+                        stop(out, "option kernel() incorrectly specified (Stata: r(198))");
+                        return Ok(());
+                    }
+                }
+            }
             Some(k) => {
                 let w: Vec<&str> = k.split_whitespace().collect();
                 match w.as_slice() {
