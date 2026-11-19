@@ -54,3 +54,26 @@ capture clonevar 1z = x
 display "@ rc_badname " _rc
 capture clonevar x2 = x y
 display "@ rc_exists_two " _rc
+* by and bysort are not allowed (r(190)), after a name the data lack (r(111)) and rows not in order (r(5))
+clear
+input byte g double x
+1 1
+1 2
+2 3
+end
+sort g
+capture by g: clonevar z = x
+display "@ rc_clone_by " _rc " " _N
+capture by nosuch: clonevar z = x
+display "@ rc_clone_nosuch " _rc
+capture bysort x: clonevar z = x
+display "@ rc_clone_bysort " _rc " " _N
+clear
+input byte g double x
+2 1
+1 2
+end
+capture by g: clonevar z = x
+display "@ rc_clone_unsorted " _rc
+capture bysort g: clonevar z = x
+display "@ rc_clone_sorted " _rc " " g[1] " " x[1]

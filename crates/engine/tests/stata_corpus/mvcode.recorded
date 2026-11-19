@@ -110,3 +110,13 @@
 @ dec_odd66 121
 @ enc_odd 198
 @ enc_odd2 198
+@ rc_mvd_by 190 3
+@ rc_mvd_nosuch 111
+@ rc_mvd_bysort 190 3
+@ rc_mvd_unsorted 5
+@ rc_mvd_sorted 190 1 2
+@ rc_mve_by 190 3
+@ rc_mve_nosuch 111
+@ rc_mve_bysort 190 3
+@ rc_mve_unsorted 5
+@ rc_mve_sorted 190 1 2

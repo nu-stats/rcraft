@@ -141,3 +141,8 @@
 @ rc_update_unm 198
 @ rc_update_merge 0
 @ rc_update_merge2 110
+@ rc_jby_by 190 3
+@ rc_jby_nosuch 111
+@ rc_jby_bysort 190 3
+@ rc_jby_unsorted 5
+@ rc_jby_sorted 190 1 2

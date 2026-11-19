@@ -35,7 +35,8 @@ the one-value form. Translated in `crates/statatr/src/data_r/rowcol.rs` (`stata_
 
 - A numlist (2026-11-18, second round; corpus section "mvdecode numlists", 75 results): `1(2)9`, `a/b` (by 1), `n1 n2 to n3` and `n1 n2 : n3` (step n2-n1), commas between numbers, spaces around `(` `)` `/`. The sign of the step is ignored and the ends may come either way (`9(-2)1`, `5(2)1`, `3/1` all work); a step of 0, `5 to 8`, `1 to 3`, `1(2)3(4)5`, `1,,3`, a leading comma and text are r(121), saying the whole list (`1(0)3 is not a valid numlist`). Computed values are kept to 14 digits so `0(.1).3` matches a double .3 and a float .3.
 - mvencode with more than one clause for a code (second round): the first clause takes the value (`.a=1  .a=2` gives 1; `.a=1  .=2  .a=3` gives .a 1, . 2); the "already" lines still come for every clause value, shadowed ones too; and only a clause that changed a value can recast (`.=1  .a=500` on a byte with no .a stays byte; `.a=500  .a=1` recasts). A backslash at the end of `mv()` is nothing (`1 = .a `); one with nothing beside it elsewhere is ` is not a valid numlist` r(121) (mvdecode) or ` is not a missing value code` r(198) (mvencode); `1 ` is `= expected`.
-- Refused: `by:`, and an mvencode value that may not fit the type when the variable's storage type is not known
+- `by:` is r(190), see clonevar.md.
+- Refused: an mvencode value that may not fit the type when the variable's storage type is not known
   (R does not keep Stata's types for data read from a file; it is known for variables the do-file made).
   Afterwards the storage of those variables is unknown.
 - The order of tests is: weights (r(101)), unknown option, varlist (r(100)), `mv()`, then the variables.

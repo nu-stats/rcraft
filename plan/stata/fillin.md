@@ -15,5 +15,6 @@ Observed on Stata 19 SE with made-up data (corpus `fillin.do`: 66 results, exact
 - Errors, in this order: no varlist r(100); one variable `too few variables specified` r(102); a name the
   data lack r(111); the same variable twice r(5) (`using data not sorted`, Stata's internal merge);
   `_fillin` already there `variable _fillin already defined` r(110). Weights and `if` are r(101).
-- Not translated: `by:`, a pattern or range as the varlist, data with no rows. More than 50 million
+- `by:`: see clonevar.md (r(190)).
+- Not translated: a pattern or range as the varlist, data with no rows. More than 50 million
   rows is stopped with r(901), as StatCraft does.

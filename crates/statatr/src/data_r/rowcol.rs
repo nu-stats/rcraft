@@ -15,6 +15,78 @@ pub(super) const CLONE_HELPER: &str = r#"stata_clone <- function(x, keep = NULL)
 }"#;
 
 impl Session {
+    /// `by` or `bysort` before one of the six commands: Stata does not allow it
+    /// and says `NAME may not be combined with by` r(190), after a name the data
+    /// lack (r(111)) and the rows not being in order (`not sorted`, r(5); `bysort`
+    /// sorts them first). True when the prefix was there and the stop is written.
+    fn by_not_allowed(
+        &mut self,
+        c: &Command,
+        name: &str,
+        out: &mut Out,
+    ) -> Result<bool, Untranslated> {
+        let Some((varlist, sort)) = c.prefixes.iter().find_map(|p| match p {
+            Prefix::By { varlist, sort, .. } => Some((varlist.clone(), *sort)),
+            _ => None,
+        }) else {
+            return Ok(false);
+        };
+        let (group, within) = match varlist.split_once('(') {
+            Some((g, w)) => (g.to_string(), w.trim_end_matches(')').to_string()),
+            None => (varlist.clone(), String::new()),
+        };
+        let plain = |s: &str| -> Result<Vec<String>, Untranslated> {
+            s.split_whitespace()
+                .map(|w| {
+                    if is_name(w) {
+                        Ok(w.to_string())
+                    } else {
+                        Err(no(format!(
+                            "by {w}: only variable names written out are translated in a by prefix"
+                        )))
+                    }
+                })
+                .collect()
+        };
+        let (group, within) = (plain(&group)?, plain(&within)?);
+        if group.is_empty() {
+            return Err(no("by needs a variable"));
+        }
+        let d = self.data()?;
+        let vector = |v: &[String]| {
+            let v: Vec<String> = v.iter().map(|x| r_text(x)).collect();
+            format!("c({})", v.join(", "))
+        };
+        for v in group.iter().chain(&within) {
+            out.line(format!(
+                "if (!{} %in% names({d})) stop({}, call. = FALSE)",
+                r_text(v),
+                r_text(&format!("variable {v} not found (Stata: r(111))"))
+            ));
+        }
+        if sort {
+            if let Some((Some(arrange), _)) = self.by(c, out)? {
+                out.line(format!("{d} <- {d} |> {arrange}"));
+            }
+        } else {
+            self.helpers.insert("stata_by_groups");
+            let tags = self.mv_on(out);
+            out.line(format!(
+                "invisible(stata_by_groups({d}, {}, within = {}, tags = {}))",
+                vector(&group),
+                vector(&within),
+                super::stats::r_logical(tags)
+            ));
+        }
+        out.line(format!(
+            "stop({}, call. = FALSE)",
+            r_text(&format!(
+                "{name} may not be combined with by (Stata: r(190))"
+            ))
+        ));
+        Ok(true)
+    }
+
     /// `clonevar newvar = varname [if] [in]`: the variable's type, display
     /// format, variable label, value label and characteristics, and its
     /// values where the condition holds (missing elsewhere).
@@ -36,8 +108,8 @@ impl Session {
                 "clonevar with the option {o} is not translated yet"
             )));
         }
-        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
-            return Err(no("clonevar with by: is not translated yet"));
+        if self.by_not_allowed(c, "clonevar", out)? {
+            return Ok(());
         }
         let stop = |out: &mut Out, msg: &str| {
             out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
@@ -444,8 +516,8 @@ impl Session {
                 r_text(&format!("{msg} (Stata: r({rc}))"))
             ));
         };
-        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
-            return Err(no(format!("{} with by: is not translated yet", c.name)));
+        if self.by_not_allowed(c, &c.name, out)? {
+            return Ok(());
         }
         let known: &[(&str, usize)] = if decode {
             &[("mv", 2)]
@@ -660,8 +732,8 @@ impl Session {
         let stop = |out: &mut Out, msg: &str| {
             out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
         };
-        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
-            return Err(no("fillin with by: is not translated yet"));
+        if self.by_not_allowed(c, "fillin", out)? {
+            return Ok(());
         }
         if c.parts.weight.is_some() {
             stop(out, "weights not allowed (Stata: r(101))");
@@ -784,8 +856,8 @@ impl Session {
         let stop = |out: &mut Out, msg: &str| {
             out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
         };
-        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
-            return Err(no("expandcl with by: is not translated yet"));
+        if self.by_not_allowed(c, "expandcl", out)? {
+            return Ok(());
         }
         if c.parts.weight.is_some() {
             stop(out, "weights not allowed (Stata: r(101))");
@@ -965,8 +1037,8 @@ impl Session {
         let stop = |out: &mut Out, msg: &str| {
             out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
         };
-        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
-            return Err(no("joinby with by: is not translated yet"));
+        if self.by_not_allowed(c, "joinby", out)? {
+            return Ok(());
         }
         let Some(file) = c.using.clone() else {
             stop(out, "using required (Stata: r(100))");

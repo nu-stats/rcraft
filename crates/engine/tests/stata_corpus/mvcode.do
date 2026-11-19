@@ -223,3 +223,49 @@ display "@ enc_odd " _rc
 capture mvencode x, mv(5 \)
 display "@ enc_odd2 " _rc
 erase mvcode_me.dta
+* by and bysort are not allowed (r(190)), after a name the data lack (r(111)) and rows not in order (r(5))
+clear
+input byte g double x
+1 1
+1 2
+2 3
+end
+sort g
+capture by g: mvdecode x, mv(1)
+display "@ rc_mvd_by " _rc " " _N
+capture by nosuch: mvdecode x, mv(1)
+display "@ rc_mvd_nosuch " _rc
+capture bysort x: mvdecode x, mv(1)
+display "@ rc_mvd_bysort " _rc " " _N
+clear
+input byte g double x
+2 1
+1 2
+end
+capture by g: mvdecode x, mv(1)
+display "@ rc_mvd_unsorted " _rc
+capture bysort g: mvdecode x, mv(1)
+display "@ rc_mvd_sorted " _rc " " g[1] " " x[1]
+* by and bysort are not allowed (r(190)), after a name the data lack (r(111)) and rows not in order (r(5))
+clear
+input byte g double x
+1 1
+1 2
+2 3
+end
+sort g
+capture by g: mvencode x, mv(-9)
+display "@ rc_mve_by " _rc " " _N
+capture by nosuch: mvencode x, mv(-9)
+display "@ rc_mve_nosuch " _rc
+capture bysort x: mvencode x, mv(-9)
+display "@ rc_mve_bysort " _rc " " _N
+clear
+input byte g double x
+2 1
+1 2
+end
+capture by g: mvencode x, mv(-9)
+display "@ rc_mve_unsorted " _rc
+capture bysort g: mvencode x, mv(-9)
+display "@ rc_mve_sorted " _rc " " g[1] " " x[1]

@@ -65,3 +65,8 @@
 @ r6_18 102 2 7 0
 @ r6_19 102 100 . 1
 @ r6_20 102 101 . 1
+@ rc_fil_by 190 3
+@ rc_fil_nosuch 111
+@ rc_fil_bysort 190 3
+@ rc_fil_unsorted 5
+@ rc_fil_sorted 190 1 2

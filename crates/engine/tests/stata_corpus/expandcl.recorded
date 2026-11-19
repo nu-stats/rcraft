@@ -157,3 +157,8 @@
 @ rc_const 198
 @ rc_nosuch 111
 @ after 13
+@ rc_ecl_by 190 3
+@ rc_ecl_nosuch 111
+@ rc_ecl_bysort 190 3
+@ rc_ecl_unsorted 5
+@ rc_ecl_sorted 190 1 2

@@ -20,3 +20,8 @@
 @ rc_weight 101
 @ rc_badname 198
 @ rc_exists_two 101
+@ rc_clone_by 190 3
+@ rc_clone_nosuch 111
+@ rc_clone_bysort 190 3
+@ rc_clone_unsorted 5
+@ rc_clone_sorted 190 1 2

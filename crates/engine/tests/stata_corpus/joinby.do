@@ -202,6 +202,29 @@ capture joinby k using joinby_u3, update
 display "@ rc_update_merge " _rc
 capture joinby k using joinby_u3, update unmatched(master)
 display "@ rc_update_merge2 " _rc
+* by and bysort are not allowed (r(190)), after a name the data lack (r(111)) and rows not in order (r(5))
+clear
+input byte g double x
+1 1
+1 2
+2 3
+end
+sort g
+capture by g: joinby g using joinby_u
+display "@ rc_jby_by " _rc " " _N
+capture by nosuch: joinby g using joinby_u
+display "@ rc_jby_nosuch " _rc
+capture bysort x: joinby g using joinby_u
+display "@ rc_jby_bysort " _rc " " _N
+clear
+input byte g double x
+2 1
+1 2
+end
+capture by g: joinby g using joinby_u
+display "@ rc_jby_unsorted " _rc
+capture bysort g: joinby g using joinby_u
+display "@ rc_jby_sorted " _rc " " g[1] " " x[1]
 erase joinby_u.dta
 erase joinby_m.dta
 erase joinby_u2.dta

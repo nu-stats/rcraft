@@ -22,4 +22,4 @@ Translated in `crates/statatr/src/data_r/rowcol.rs` (`stata_expandcl`).
   showed numbers 4,3 then 1,2 then 5,6 then 6,5: it is not stable, nor sorted). RCraft puts the copies in
   the order of their numbers; a do-file that depends on the order of the copies would differ. The corpus
   sorts by `id` and `newvar` before it looks.
-- Not translated: `by:`.
+- `by:`: r(190), see clonevar.md.

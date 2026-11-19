@@ -100,3 +100,26 @@ display "@ rc_const " _rc
 capture expandcl 2, cluster(nosuch) generate(ng)
 display "@ rc_nosuch " _rc
 display "@ after " _N
+* by and bysort are not allowed (r(190)), after a name the data lack (r(111)) and rows not in order (r(5))
+clear
+input byte g double x
+1 1
+1 2
+2 3
+end
+sort g
+capture by g: expandcl 2, cluster(g) generate(ng)
+display "@ rc_ecl_by " _rc " " _N
+capture by nosuch: expandcl 2, cluster(g) generate(ng)
+display "@ rc_ecl_nosuch " _rc
+capture bysort x: expandcl 2, cluster(g) generate(ng)
+display "@ rc_ecl_bysort " _rc " " _N
+clear
+input byte g double x
+2 1
+1 2
+end
+capture by g: expandcl 2, cluster(g) generate(ng)
+display "@ rc_ecl_unsorted " _rc
+capture bysort g: expandcl 2, cluster(g) generate(ng)
+display "@ rc_ecl_sorted " _rc " " g[1] " " x[1]

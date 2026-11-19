@@ -14,5 +14,6 @@ Observed on Stata 19 SE with made-up data (corpus `clonevar.do`, values and retu
   options or weights, `varlist not allowed` / `weights not allowed` r(101) (before the check that the new
   name is free); the new name taken, `variable x already defined` r(110); the old name (or one in `if`)
   not there, r(111); a name that is not one, r(198).
-- Not translated: options, `by:` (Stata runs it, and wants the data sorted: r(5)), a pattern or range
+- `by:` and `bysort` (second round): Stata does not allow them with any of the six commands: `NAME may not be combined with by` r(190), after a by-variable the data lack (r(111)) and data not in order (`not sorted`, r(5); bysort sorts first, so it gives 190 and leaves the data sorted). Corpus: `rc_*_by` lines in each file.
+- Not translated: options, a pattern or range
   after `=` (Stata: `x2 not allowed` r(101) for the first name it finds).

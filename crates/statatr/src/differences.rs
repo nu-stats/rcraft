@@ -552,7 +552,7 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "In R",
                 "The copy is a plain copy of the column with its attributes, so labelled columns \
-                 stay labelled. Options and by: are refused rather than guessed.",
+                 stay labelled. Options are refused rather than guessed; by: stops with Stata's r(190).",
             ),
         ],
     },
@@ -574,7 +574,7 @@ pub const GUIDES: &[Guide] = &[
                 "In R",
                 "Stata keeps the copies of one observation next to it in an order of its own, not \
                  stable; RCraft puts them in the order of their numbers, so code that depends on \
-                 the order of the copies, rather than sorting first, can differ. by: is refused.",
+                 the order of the copies, rather than sorting first, can differ. by: stops with Stata's r(190).",
             ),
         ],
     },
@@ -594,8 +594,8 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "In R",
-                "Labels, display formats and value labels stay on the columns. by:, patterns in the \
-                 varlist and data with no rows are refused.",
+                "Labels, display formats and value labels stay on the columns. Patterns in the \
+                 varlist and data with no rows are refused; by: stops with Stata's r(190).",
             ),
         ],
     },
@@ -621,7 +621,7 @@ pub const GUIDES: &[Guide] = &[
                 "In R",
                 "Stata puts the rows paired within one key in an order of its own, which changes \
                  from run to run; RCraft's are in the using file's order, so sort before looking. \
-                 update, replace and by: are refused.",
+                 by: stops with Stata's r(190).",
             ),
         ],
     },
@@ -641,7 +641,7 @@ pub const GUIDES: &[Guide] = &[
                 "In R",
                 "Labels, display formats and storage stay. When the variable's type is not known (data read \
                  from a file) the value is matched as typed and as rounded to float. The numlist may be 1 2, \
-                 5/7, 1(2)9, 1 3 to 9 or 1 3 : 9, as Stata reads them. by: is refused.",
+                 5/7, 1(2)9, 1 3 to 9 or 1 3 : 9, as Stata reads them. by: stops with Stata's r(190).",
             ),
         ],
     },

@@ -99,3 +99,26 @@ forvalues i = 1/`N' {
     display "@ r6_`i' " `kk' " " `jj' " " v[`i'] " " _fillin[`i']
 }
 
+* by and bysort are not allowed (r(190)), after a name the data lack (r(111)) and rows not in order (r(5))
+clear
+input byte g double x
+1 1
+1 2
+2 3
+end
+sort g
+capture by g: fillin g x
+display "@ rc_fil_by " _rc " " _N
+capture by nosuch: fillin g x
+display "@ rc_fil_nosuch " _rc
+capture bysort x: fillin g x
+display "@ rc_fil_bysort " _rc " " _N
+clear
+input byte g double x
+2 1
+1 2
+end
+capture by g: fillin g x
+display "@ rc_fil_unsorted " _rc
+capture bysort g: fillin g x
+display "@ rc_fil_sorted " _rc " " g[1] " " x[1]

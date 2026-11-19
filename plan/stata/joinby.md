@@ -40,4 +40,4 @@ Stata's log). StatCraft had only probe 138 and no note. Translated in
   - A variable in both files takes the wider of the two storage types in Stata; RCraft forgets the storage
     type of one the do-file knew differently in the two files (a file the do-file did not save is not
     compared).
-- `by:` is refused. Stata's hidden `9999 signature` entry of `__MERGE` is not made.
+- `by:` is r(190), see clonevar.md. Stata's hidden `9999 signature` entry of `__MERGE` is not made.

@@ -5517,7 +5517,17 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 
 - **Translated:** `mv(1(2)9)`, `1 3 to 9`, `1 3 : 9`, commas and spaces around parentheses, reversed ends; the
   invalid ones are r(121) with Stata's text (the whole list). Corpus `mvcode.do` 75 results, exact; Stata 19
-  observed with `plan/stata/mvdecode.md`. Also mvencode with several clauses for one code (first wins; only an applied clause recasts) and a trailing backslash. Corpus `mvcode.do` 111 results. Still refused: `by:`, an mvencode value of unknown type fit.
+  observed with `plan/stata/mvdecode.md`. Also mvencode with several clauses for one code (first wins; only an applied clause recasts) and a trailing backslash. Corpus `mvcode.do` 111 results. Still refused: an mvencode value of unknown type fit (`by:` is now Stata's r(190) for all six, second round).
+
+## P2C.12: by: with the six A1 commands, 2026-11-18 (second round of A1)
+
+- **Translated:** Stata does not allow `by` or `bysort` with clonevar, mvdecode, mvencode, fillin, expandcl or
+  joinby: `NAME may not be combined with by` r(190), after r(111) for a by-variable the data lack and r(5) for
+  rows not in order (bysort sorts first). Checked on all six in their corpus files (`rc_*_by` lines). The
+  earlier note that Stata runs them under by was wrong.
+- **Seen on the way, not fixed:** a variable holding `.a` prints as `.` through `display x[i]` and through
+  `` `=x[i]' `` after a `save`/`use` round trip in R, and `input` may not make `.a` values; the corpus lines use
+  tests (`x == .a`) or a `cond()` code instead.
 
 ## P2C.12: fillin (batch A1 of the StatCraft port), 2026-11-18
 
