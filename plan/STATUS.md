@@ -5993,3 +5993,16 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Shares:** packages **94.7%** (4,025 of 4,249 judged source lines; was 3,996, 94.0%); probes **78.7%** (22,823 of
   30,115, StatCraft b7d392e's 545 probe do-files), unchanged: no probe uses these forms. The ranking expected about
   95.4%; the 20 lines of `bs` of a program, the 8 dry-run-only lines and the 3 outreg2 lines make the difference.
+## P2C.12aa round 3: the last refused forms of batch I, 2026-11-19
+
+- **Done** (each checked in Stata 19 on made-up data): `spearman` of two variables printed, its p-value a symmetric beta with rho's permutation variance and
+  kurtosis (Stata's to 4 decimals; Stata's r(p) differs in the 7th digit for some samples by a rule not found, so r(p) stops when read; with ties Stata's kurtosis
+  is not the exact one, so printing stops); `jackknife` of a command with `in` (the rows keep their places); `statsby` and `rolling` with neither `clear` nor
+  `saving()`: the data replaced when Stata counts them as saved, r(4) when changed (RCraft follows it through `use`, `save`, 21 commands checked one by one);
+  `rolling, rrecursive`; a replication of `simulate` or `permute` that stops with an error ends there and leaves missing results (Stata's `x` dots); `error #`;
+  any number of replications: a built-in command's run in one R loop, and a program's after its second and third replications are the same R with no value
+  asked of R (5,000 replications of a small program in 12 seconds; a program whose R changes between replications stays held to 2,000).
+- **Corpus:** `jackknife.do` 33, `statsby.do` 133, `permute.do` 181 (2,500 replications of a program and of `ttest`), `simulate.do` 51 (2,500 replications),
+  new `spearman.do` 36; `spearman` added to `VERIFIED`.
+- **Shares:** probes **78.7%** (22,817 of 30,103, with batch K); packages **94.0%** (3,996 of 5,601), unchanged.
+
