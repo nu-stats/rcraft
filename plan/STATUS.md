@@ -5894,3 +5894,13 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Shares after batch G:** probes **78.0%** (22,588 of 30,040 source lines; was 22,513, 77.8%); packages **94.0%**
   (3,996 of 5,601), unchanged. Of the 78 probe lines of these commands that were refused before, 13 still are: the two `arch` lines
   (probe 318) and the `llc` and `breitung robust`/`lags()` lines of probe 330.
+
+## P2C.12d, fourth round of batch F: nF() and nFtail() as Stata computes them, 2026-11-19
+
+- **Done:** `nF()` and `nFtail()` follow Stata 19's own computation, found on 3,528 probe values: np of 0 is the central F
+  (R's `pf()` given `ncp = 0` takes its noncentral series, which gave 0 for a tail of 1e-25), otherwise the Poisson mixture of
+  betas at y = a x / (a x + b) taken in double, and `nFtail()` is 1 - `nF()`, as Stata's is. Every Stata value of 1e-20 or
+  more agrees to 1e-9; before, values below about 1e-3 agreed to a few digits only. Corpus `noncentral4.do` (1,521 lines, 1e-7).
+- **Not matched:** Stata's `nF()` below about 1e-20 with np of 100 or more (Stata sums only part of the series) and `nFtail()`
+  below about 1e-7 (the rounding of Stata's 1 - nF()). The inverses keep the exact series: Stata's form of nF() there made
+  no case closer.

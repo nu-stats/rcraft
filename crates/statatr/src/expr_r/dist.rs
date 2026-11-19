@@ -253,8 +253,30 @@ stata_d_invnt <- function(d, np, p) stata_d_invnt_(d, np, p, FALSE)
 stata_d_invnttail <- function(d, np, p) stata_d_invnt_(d, np, p, TRUE)
 
 stata_d_nFok <- function(a, b, np, top, hi) stata_d_pos(a, hi) & stata_d_pos(b, hi) & !is.na(np) & np >= 0 & np <= top
-stata_d_nF <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np)), stata_d_nFok(a, b, np, 1e4, 1e8))
-stata_d_nFtail <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np, lower.tail = FALSE)), stata_d_nFok(a, b, np, 1e3, Inf))
+# nF() and nFtail() as Stata 19 computes them (fourth round): np of 0 is the central F (R's pf() without ncp,
+# since given ncp = 0 it takes its noncentral series, good only to 1e-9); else the Poisson mixture of betas at
+# y = a x / (a x + b) taken in double, as Stata takes it (so x near 1e15 loses what Stata loses), and the
+# tail as 1 - nF() (Stata's tail below about 1e-15 is that subtraction's rounding). Stata's own nF() below
+# about 1e-20 with np of 100 or more sums only part of the series (0 where it should not); not matched
+stata_d_nF1 <- function(a, b, np, x, upper) {
+  if (anyNA(c(a, b, np, x)) || a <= 0 || b <= 0 || np < 0 || np > 1e4) return(NA_real_)
+  if (np == 0) return(stats::pf(x, a, b, lower.tail = !upper))
+  if (x <= 0) return(as.numeric(upper))
+  y <- if (is.finite(a * x)) a * x / (a * x + b) else 1
+  m <- np / 2
+  j <- 0:ceiling(m + 12 * sqrt(m) + 40)
+  w <- stats::dpois(j, m)
+  j <- j[w > 0]
+  w <- w[w > 0]
+  s <- sum(w * stats::pbeta(y, a / 2 + j, b / 2))
+  if (upper) 1 - s else s
+}
+stata_d_nF <- function(a, b, np, x) {
+  stata_d_keep(stata_d_vec(function(a, b, np, x) stata_d_nF1(a, b, np, x, FALSE), a, b, np, x), stata_d_nFok(a, b, np, 1e4, 1e8))
+}
+stata_d_nFtail <- function(a, b, np, x) {
+  stata_d_keep(stata_d_vec(function(a, b, np, x) stata_d_nF1(a, b, np, x, TRUE), a, b, np, x), stata_d_nFok(a, b, np, 1e3, Inf))
+}
 # the noncentral F's inverses and the noncentrality solvers (third round). Stata's values are good to about
 # 1e-14 in the cdf, R's pf() with a noncentrality only to about 1e-9 (its pnbeta series), so the noncentral F
 # is summed here as the Poisson mixture of betas, which keeps its digits in both tails

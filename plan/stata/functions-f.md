@@ -84,9 +84,16 @@ again on Stata 19 here. Translated in `crates/statatr/src/expr_r/strfn.rs` (stri
 - `nchi2(df, np, x)`, `nchi2tail`: R's `pchisq(x, df, ncp)`. Missing for df 0 or below or above 1e6,
   `np` below 0 or above 1e4, missing arguments; `x` below 0 gives 0 (tail 1). R rounds results below
   about 1e-300 to 0 where Stata keeps them (not matched).
-- `nF(a, b, np, x)`: R's `pf(x, a, b, ncp)`. Missing for a degree of freedom 0 or below or above 1e8,
-  `np` below 0 or above 1e4. `nFtail()`: no limit on the degrees of freedom, `np` at most 1000.
-  Results below about 1e-3 agree only to a few digits (R's series stops at 1e-9 absolute).
+- `nF(a, b, np, x)`: missing for a degree of freedom 0 or below or above 1e8, `np` below 0 or above 1e4.
+  `nFtail()`: no limit on the degrees of freedom, `np` at most 1000. Fourth round (2026-11-19): computed as Stata
+  does, found on 3,528 probe values. For np of 0, the central F (R's `pf()` without `ncp`; with `ncp = 0` it takes
+  its noncentral series, which gave 0 for a tail of 1e-25). Otherwise, the Poisson mixture of betas at
+  y = a x / (a x + b) taken in double (so x near 1e15 loses the digits Stata loses), and `nFtail()` is 1 - `nF()`, as
+  Stata's is: its tails below about 1e-15 are that subtraction's rounding (multiples of 2^-53). Every Stata value of
+  1e-20 or more agrees to 1e-9 (`noncentral4.do`, 1,521 lines, 1e-7); R's `pf()` with `ncp` was good only to 1e-9
+  absolute. Not matched: Stata's `nF()` below about 1e-20 with np of 100 or more, where Stata sums only part of the
+  series (0, or a value too small, where the full sum is 1e-30 or 1e-111); and `nFtail()` below about 1e-7, which is
+  Stata's 1 - nF() rounding.
 - `invnchi2(df, np, p)`, `invnchi2tail()` (round 2): R's `qchisq(p, df, ncp)` agrees to 2e-10. Same limits as
   `nchi2()` (df 1e6, np 1e4); `invnchi2(.., 0)` is 0 and `(.., 1)` missing, the tail the other way round.
 - `invnt(df, np, p)`, `invnttail()` (round 2): found by root-finding on `nt()`; Stata gives missing for df

@@ -434,7 +434,8 @@ Command families:
   any start and length (corpus `noncentral2.do`, `substr.do`), and `A[i,j]` outside the matrix is `.`. Third round
   2026-11-19: `invnF()`, `invnFtail()` and the `np` solvers `npnt()`, `npnF()`, `npnchi2()`, with Stata's edges found
   by bisection and the noncentral F summed as a Poisson mixture of betas (R's `pf` with `ncp` is good only to 1e-9;
-  corpus `noncentral3.do`). `plan/stata/functions-f.md`.
+  corpus `noncentral3.do`). Fourth round: `nF()` and `nFtail()` as Stata computes them (Stata values of 1e-20 or more
+  to 1e-9; corpus `noncentral4.do`). `plan/stata/functions-f.md`.
   Probes 22,397 -> 22,430 translated lines (77.5%); packages not re-run (87.8%).
   `rpoisson()` and `rbeta()` with equal shapes stay with P2C.11.)
 - P2C.12e Single-equation models
