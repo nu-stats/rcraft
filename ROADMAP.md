@@ -432,6 +432,7 @@ Command families:
   `nt()` and `nttail()` with a noncentrality parameter above 37.62 in size (R stops; R's value there
   is an approximation Stata does not use). Not done: `invnt()`, `invnF()`, `invnchi2()` and the
   `np` solvers (`npnt()`, ...), no probe uses them. `plan/stata/functions-f.md`.
+  Probes 22,397 -> 22,430 translated lines (77.5%); packages not re-run (87.8%).
   `rpoisson()` and `rbeta()` with equal shapes stay with P2C.11.)
 - P2C.12e Single-equation models
   (part done 2026-11-17: `regress`, `logit`, `probit`, `poisson`, `nbreg`, `ologit`,

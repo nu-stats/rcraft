@@ -5780,3 +5780,6 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   refused, and `substr()` counts characters where Stata counts bytes (non-ASCII text); `A[i,j]` outside the matrix is `.` in
   Stata and an r(503) stop here; `regexs()` after a `regexm()` of an earlier command gives each row's groups, Stata the last
   row's (a caveat is shown).
+- **Shares after batch F:** probes 77.5% (22,397 -> 22,430 translated lines of the 30,029 source lines; probe 138's nine
+  `joinby` lines and the `word()` lines of probes 110, 143 and 144 translate, and probes 670 and 671 no longer refuse a
+  line); the replication packages were not re-run (their folder is outside both repositories), so 87.8% stands.
