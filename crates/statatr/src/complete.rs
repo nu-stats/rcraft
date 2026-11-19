@@ -92,12 +92,15 @@ pub const COMMANDS: &[&str] = &[
     "connected",
     "continue",
     "correlate",
+    "corrgram",
     "count",
     "cs",
     "csi",
     "cumul",
     "decode",
     "describe",
+    "dfgls",
+    "dfuller",
     "dstdize",
     "destring",
     "display",
@@ -226,6 +229,7 @@ pub const COMMANDS: &[&str] = &[
     "postfile",
     "postutil",
     "power",
+    "pperron",
     "prais",
     "predict",
     "preserve",
@@ -319,6 +323,7 @@ pub const COMMANDS: &[&str] = &[
     "which",
     "while",
     "winsor",
+    "wntestq",
     "xporegress",
     "xpose",
     "xtabond",
@@ -1208,6 +1213,14 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ("xtsum", &["i("]),
     ("xttab", &["i("]),
     ("tsreport", &["casewise", "detail", "panel"]),
+    (
+        "dfuller",
+        &["drift", "lags(", "noconstant", "regress", "trend"],
+    ),
+    ("pperron", &["lags(", "noconstant", "regress", "trend"]),
+    ("dfgls", &["ers", "maxlag(", "notrend"]),
+    ("corrgram", &["lags(", "noplot", "yw"]),
+    ("wntestq", &["lags("]),
     ("tsappend", &["add(", "last(", "tsfmt("]),
     ("pctile", &["altdef", "genp(", "nquantiles("]),
     ("cumul", &["by(", "equal", "freq", "generate("]),
@@ -2252,6 +2265,9 @@ gettoken a b : s, {o}"
             "tsappend" if name == "add" => "xtset id t\ntsappend, add(1)".to_string(),
             "tsappend" => "xtset id t\ntsappend, last(25jun1965) tsfmt(td)".to_string(),
             "tsset" => format!("tsset t, {o}"),
+            "dfuller" | "pperron" | "dfgls" | "corrgram" | "wntestq" => {
+                format!("tsset t\n{cmd} y, {o}")
+            }
             _ => format!("{cmd} y, {o}"),
         };
         format!("use s\n{line}\n")

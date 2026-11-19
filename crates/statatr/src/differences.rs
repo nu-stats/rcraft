@@ -3229,6 +3229,76 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "dfuller",
+        about: "Augmented Dickey-Fuller unit-root test",
+        points: &[
+            p(
+                "As Stata 19",
+                "dfuller y regresses D.y on L.y, lags(#) lagged differences, _trend with trend and a constant unless noconstant, over the rows if and in keep; a gap in time or a missing value only drops the rows that need it. The statistic is L.y's t, with Fuller's critical values (linear in the sample size) and MacKinnon's approximate p-value; drift uses the t distribution of the regression. regress shows the regression table. A time-series operator may stand for the variable. r() holds lags, N, Zt, p (not with noconstant) and cv_1, cv_5, cv_10. A negative lags() counts as 0.",
+            ),
+            p(
+                "Errors",
+                "Without tsset r(111), a second variable r(103), no variable r(100), trend with noconstant, drift with trend or noconstant and an unknown option r(198), lags() that is not a whole number r(198), several panels in the sample r(459), a string variable r(109). A sample too small for the regression is refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "pperron",
+        about: "Phillips-Perron unit-root test",
+        points: &[
+            p(
+                "As Stata 19",
+                "pperron y regresses y on L.y (and _trend, and a constant unless noconstant) and corrects the statistics for the residuals' autocorrelation with Newey-West weights; lags(#) sets the lags (the default is floor(4 (T/100)^(2/9)); a negative number gives the default). Z(rho) and Z(t) have Fuller's critical values; the p-value is MacKinnon's for Z(t) (none with noconstant). r() holds N, lags, Zrho, Zt, pval and the matrix cvalues (the statistic and the 1%, 5% and 10% values of each row).",
+            ),
+            p(
+                "Errors",
+                "As dfuller. A sample too small for the regression is refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "dfgls",
+        about: "DF-GLS unit-root test",
+        points: &[
+            p(
+                "As Stata 19",
+                "dfgls y detrends the series by GLS (a trend, or only a mean with notrend) and tests the detrended series for each lag from maxlag(#) (the default is Schwert's floor(12 (T/100)^(1/4))) down to 1. The 1% value is Elliott, Rothenberg and Stock's, the 5% and 10% values Cheung and Lai's response surface (all three Elliott-Rothenberg-Stock's with ers). It prints the lag Ng and Perron's sequential test picks and the minimum SIC and MAIC. r() holds maxlag, N, the chosen lags and criteria, and the matrices cvalues and results; with maxlag(0) only N, cv_1, cv_5, cv_10, rmse0 and dft0, with maxlag(1) only maxlag, N and the matrices.",
+            ),
+            p(
+                "Errors",
+                "Without tsset r(111), a gap in the sample r(498), maxlag() that is not a whole number r(126), more lags than the sample holds r(2000) or r(2001), several panels r(459), an unknown option r(198). A sample too small for the lags is refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "corrgram",
+        about: "Autocorrelations, partial autocorrelations and Q statistics",
+        points: &[
+            p(
+                "As Stata 19",
+                "corrgram y, lags(#) prints the autocorrelation (sum of products about the mean over the sum of squares, over the pairs of times both present), the partial autocorrelation (the last coefficient of y on its first k lags, or Yule-Walker with yw), Ljung and Box's Q and its p-value, and the bars (not with noplot). The default is min(floor(n/2) - 2, 40) lags. A gap in time or a missing value is noted. r() holds lags, the scalars ac#, pac#, q# and p# for the first ten lags and the matrices AC, PAC, Q and P with all of them.",
+            ),
+            p(
+                "Errors",
+                "Without tsset r(111), a second variable r(103), no variable r(100), lags() of 0 or as long as the sample r(498), a string variable r(109), several panels r(459), an unknown option r(198).",
+            ),
+        ],
+    },
+    Guide {
+        command: "wntestq",
+        about: "Portmanteau (Q) test for white noise",
+        points: &[
+            p(
+                "As Stata 19",
+                "wntestq y, lags(#) prints Ljung and Box's Q at the last lag with its chi-squared p-value (the default lags are those of corrgram). r() holds df, p and stat.",
+            ),
+            p(
+                "Errors",
+                "As corrgram, except that a string variable gives r(2000).",
+            ),
+        ],
+    },
+    Guide {
         command: "xtset",
         about: "Declares panel data",
         points: &[p(

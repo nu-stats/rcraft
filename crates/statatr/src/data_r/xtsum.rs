@@ -524,7 +524,7 @@ fn formats(s: &Session, names: &[&str]) -> String {
 impl Session {
     /// What `xtset` and `tsset` left, or Stata's own stop when they were not
     /// run: the panel variable and, when `time`, the time variable.
-    fn panel_state(
+    pub(super) fn panel_state(
         &self,
         need_time: bool,
         out: &mut Out,

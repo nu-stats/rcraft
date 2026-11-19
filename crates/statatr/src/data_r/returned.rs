@@ -2147,6 +2147,7 @@ impl Session {
                         if (MATRIX_NAMES.contains(&name) && !power_beta && !swilk_scalar)
                             || (tabstat && super::tabstat::tabstat_matrix(name))
                             || (which == "r" && cmd == "tsreport" && super::xtsum::tsreport_name(name) == Some(2))
+                            || (which == "r" && super::tstests::tstest_matrix(cmd, name))
                         {
                             return Err(no(format!(
                                 "{shown} is a matrix, which an expression cannot take (Stata: type mismatch); matrix list {shown} shows it"
@@ -2168,6 +2169,7 @@ impl Session {
                             && !(cmd == "centile" && super::centile::centile_names(name))
                             && !(cmd == "dstdize" && super::descr::dstdize_names(name))
                             && !(cmd == "tsreport" && super::xtsum::tsreport_name(name).is_some())
+                            && !(cmd == "corrgram" && super::tstests::corrgram_name(name).is_some())
                         {
                             return Err(no(format!(
                                 "{shown} after {cmd} is not kept in R yet (RCraft keeps r() {})",
