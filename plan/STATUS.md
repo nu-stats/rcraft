@@ -1,6 +1,6 @@
 # Status
 
-Last updated: 2026-11-18.
+Last updated: 2026-11-19.
 
 **Where things are:** Phases 0 to 4 are built (Help, Stata mode and Run my do-file included), but
 P1.2 (a portable R download), P2A.6 and P2A.10 (RCraft's own manuals) and the leftovers
@@ -5919,3 +5919,24 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   match to 4e-9, but its numerical scores differ from the exact ones in the 7th digit, so 8 digits fail by one). `llc` with
   `lags(aic|bic|hqic)` and `kernel(... nwest)` are not decoded. Notes in `plan/stata/{xtunitroot,tstests}.md`.
 - **Shares:** probes **78.0%** (22,590 of 30,040 source lines; was 22,588): only the `llc` lines of probe 330 turn; packages unchanged.
+
+## P2C.12aa: jackknife, statsby, rolling, permute, simulate (batch I of the StatCraft port), 2026-11-19
+
+- **Translated** (`statatr::data_r::{resample,statsby,permute,permute_run}`, `dofile::resample`): `jackknife` (`_b` after `regress`, `logit` and
+  `probit`, r() and e() statistics, `cluster()`, `level()`, and `vce(jackknife)` of those three), `statsby` (`by()`, `by(, missing)`, `total`, `_b`
+  and `_se` after `regress`), `rolling` (`window()`, `recursive`, `stepsize()`), `permute` (Stata's own permutations: the general shuffle, strata, the
+  two-valued variable, a model's estimation sample; the table, r() with its matrices, `saving()`) and `simulate` (programs and built-in commands, `_b`
+  and `_se`, e() values). `permute` and `simulate` are written out by the runner as one run of lines per replication, so a program the do-file
+  defines runs as it would in Stata; `drop _all` with no data is accepted and `return scalar` takes a random draw.
+- **Checked:** Stata 19 on made-up data, corpus `jackknife.do` (28 results), `statsby.do` (40), `permute.do` (146: every permutation, 12 + 8 + 6 + 8 draws of
+  encoded statistics, the draws that follow, rc 111, 125 and 133) and `simulate.do` (35), all to 1e-8. Notes in `plan/stata/resampling.md`.
+- **Corrections to StatCraft's notes** (found here): `e(b_jk)` of `jackknife` is the bias-corrected n times the observed minus (n - 1) times the mean of
+  the replicates, not their mean; `statsby` has no `missing` option in Stata 19 (it is `by(vars, missing)`); the two-valued `permute` swaps the *values* of
+  an array (smaller group first) and writes them back to the rows in that order; `simulate` does not restore the data before each replication.
+- **Refused, not guessed:** `spearman` (so `permute x r(rho): spearman y x`), `r(nosuch)` in `permute`, `permute` of an e-class program, more than 2,000
+  replications, `statsby` and `rolling` without `clear` or with `saving()`, `subsets`, `rrecursive`, `rolling` over gaps in time, `statsby _b` after `logit`
+  (Stata names the variables after the equation), `jackknife` of a command with `if` or `in` that sets no `e(sample)`, replications that stop with an error
+  (Stata records missing; R stops).
+- **Shares after batch I:** probes **78.3%** (22,725 of 30,103 source lines; was 22,588, 78.0%; of the 57 lines of these commands plus their dependents
+  only the `spearman` line, one `r(nosuch)` line and the `format c*` lines of probe 304 are refused now); packages **94.0%** (3,996 of 5,601), unchanged.
+

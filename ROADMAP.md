@@ -554,8 +554,14 @@ Command families:
   and the ado helpers (`opts_exclusive`, `_get_diopts`, `_robust`, `_ms_extract_varlist`,
   `_ms_omit_info`).)
 - P2C.12aa Resampling and simulation
-  (part done: `bootstrap` and `bsample` Verified (P2C.16). Not started: `permute`,
-  `simulate`, `jackknife`, `statsby`, `rolling`, `bca` and `vce(bootstrap)`.)
+  (part done: `bootstrap` and `bsample` Verified (P2C.16). `jackknife` (also as `vce(jackknife)` of `regress`, `logit` and
+  `probit`), `statsby`, `rolling`, `permute` and `simulate` Verified 2026-11-19, batch I of the StatCraft port (`jackknife.do`,
+  `statsby.do`, `permute.do` (146 results), `simulate.do`, all to 1e-8, `permute` with Stata's own permutations and draws);
+  `permute` and `simulate` run programs the do-file defines, one replication after another; refused: `spearman`, `r(nosuch)`,
+  `permute` of an e-class program, `statsby` and `rolling` with `saving()` or without `clear`, `rolling` over gaps, `_b` of
+  `logit` in `statsby`, replications that stop with an error, see `plan/stata/resampling.md`;
+  measured: probes 78.0% -> 78.3% (22,588 -> 22,725 translated source lines), packages 94.0% unchanged (3,996 of 5,601).
+  Not started: `bca` and `vce(bootstrap)`.)
 - P2C.12ab Multiple imputation
   (not started: `mi`.)
 - P2C.12ac Treatment effects and difference in differences
