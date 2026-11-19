@@ -418,7 +418,7 @@ Command families:
   `cimeans` and other tables, zero or one residual degrees of freedom; open: `r(groups#)`, which is refused because the
   order of the letters is not always Stata's, and Dunnett's numbers, which Stata approximates to about 1e-6 to 3e-4,
   see `plan/stata/pwmean.md`). Still open, part of it on hold for the user's go:
-  `codebook`, `spearman`, `ds`, and the forms of `summarize`, `list`, `ttest` (`welch`) and `tabodds` that are
+  `codebook`, `spearman`, and the forms of `summarize`, `list`, `ttest` (`welch`) and `tabodds` that are
   still refused.)
 - P2C.12d Functions
   (part done 2026-11-17: 132 functions Verified (distribution, date, string, matrix and
@@ -529,9 +529,12 @@ Command families:
 - P2C.12y Data management and files
   (part done: `merge`, `append`, `reshape`, `collapse`, `contract`, `expand`, `egen`,
   `duplicates`, `label`, `insheet`, `file`, `filefilter`, `fdasave`, `fdause`, `outfile`,
-  `outsheet`, `mkdir`, `rmdir`, `fillin`, `expandcl`, `joinby`, `mvdecode`, `mvencode` and `clonevar` Verified. Still refused:
+  `outsheet`, `mkdir`, `rmdir`, `fillin`, `expandcl`, `joinby`, `mvdecode`, `mvencode`, `clonevar`, `char`, `note`, `notes`,
+  `labelbook`, `compare`, `ds`, `lookfor` and `misstable summarize` Verified (batch A2 of the StatCraft port, 2026-11-19; refused:
+  `char rename`, `notes` with `TS` or quotes, `labelbook` after a data file was read, `ds` with storage types or formats,
+  `misstable patterns`, `tree` and `nested`, see `plan/stata/{char,notes,labelbook,compare,ds,lookfor,misstable}.md`). Still refused:
   forms of `egen`; `format`, `sysuse`, `import`, `export`,
-  `labelbook`, `mark`, `markout`, `char`, `notes`.)
+  `mark`, `markout`.)
 - P2C.12z Programs, macros and matrices
   (part done: `program`, `syntax`, `tokenize`, `gettoken`, `local`, `global`, `matrix`
   (many forms), `mkmat`, `svmat`, `ereturn` and `frame` Verified. Still refused: other

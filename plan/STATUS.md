@@ -5834,3 +5834,24 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   (not a Stata function); `regexs()` after a `regexm()` of an earlier command (a caveat is shown).
 - **Limit:** a string cut in the middle of a character (`substr()` by bytes of text that is not ASCII) is not valid UTF-8; R
   functions that follow (`substr()` to a `str12`, `nchar()`) may stop on it where Stata keeps the bytes.
+
+## P2C.12y: char, notes, labelbook, compare, ds, lookfor, misstable (batch A2 of the StatCraft port), 2026-11-19
+
+- **Translated** (`statatr::data_r::meta`): `char` (set, replace, remove, `char list`, `: char var[name]` and the plain macro
+  `var[name]`, `_dta`), `note` and `notes` (add, list, drop, replace, renumber, search; the count in `note0`), `labelbook` (the pages,
+  `problems`, `length()`, r()), `compare`, `ds` (varlist, `not`, `alpha`, `has()` and `not()` with `type string|numeric`, `varlabel`
+  with a pattern, `vallab`), `lookfor` and `misstable summarize` (with `all`, r() of the last variable shown).
+- **Characteristics are kept in R** as an attribute on the column (on the data frame for `_dta`), and in the .dta file: `save` writes
+  the file's characteristics section and `use` reads it (formats 117 to 119), so notes and characteristics survive a round trip and a
+  file Stata wrote. After `merge`, `append`, `reshape`, `collapse` and the other commands that rebuild the data they are marked not
+  known, and the commands refuse rather than guess.
+- **Checked:** Stata 19 on made-up data: corpus `char.do` (23 results), `notes.do` (24), `labelbook.do` (13), `compare.do` (16), `ds.do` (29),
+  `lookfor.do` (14), `misstable.do` (16), all exact. Only numbers and words are recorded, so the printed tables of `labelbook`, `compare`,
+  `ds`, `lookfor` and `misstable` were compared with Stata's log line by line by hand (identical except where R has no Stata
+  storage types: `lookfor` prints R's class). Notes in `plan/stata/{char,notes,labelbook,compare,ds,lookfor,misstable}.md`.
+- **Refused, not guessed:** `char rename`, `char dir`; a characteristic or note with quotes inside; a note with the word `TS`
+  (the stamp is the time the line runs); `notes search` with several words; `char list` after `tsset`, `xtset`, `stset`, `svyset` or
+  `fvset` (Stata lists characteristics those set); `labelbook` after a data file was read, with `list()`, with a set with an empty
+  label, and `problems` with `length()`; `compare` of a number with a string; `ds` with storage types, `format`, `char`, `detail`,
+  `varwidth()`, `skip()` and `vallab` with a pattern; `misstable patterns`, `tree`, `nested` and `generate()`.
+- **Shares:** probes 77.4% -> 77.6% (22,397 -> 22,446 translated of 30,029 source lines, +49); packages unchanged at 87.8% (3,750 of 4,272).
