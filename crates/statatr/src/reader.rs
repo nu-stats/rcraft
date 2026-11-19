@@ -231,6 +231,11 @@ fn command_word(word: &str) -> String {
     {
         return (*name).to_string();
     }
+    // names Stata 19 takes for a command they do not abbreviate (bs and
+    // bstrap run bootstrap; bst, boo and boot do not: plan/stata/resampling.md)
+    if matches!(word, "bs" | "bstrap") {
+        return "bootstrap".to_string();
+    }
     resolve(word).to_string()
 }
 

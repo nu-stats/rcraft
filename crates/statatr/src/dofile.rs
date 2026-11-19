@@ -1908,7 +1908,10 @@ impl<'f> Run<'f> {
                 self.file_refs(c, index);
                 if c.name == "cd" && line.result.is_ok() {
                     let dir = clean_path(&c.parts.main);
-                    self.cwd = join(&self.cwd, &dir);
+                    // `cd ""` stays where it is (Stata 19 on Windows)
+                    if !dir.is_empty() {
+                        self.cwd = join(&self.cwd, &dir);
+                    }
                 }
                 let used = line.result.is_ok();
                 self.push(line, What::Command, info, written);

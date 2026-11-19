@@ -3358,8 +3358,11 @@ impl Session {
             "cd" => {
                 let dir = file_name(&c.parts.main, "");
                 if dir.is_empty() {
-                    // Stata on Windows prints the folder; elsewhere it goes home
-                    return Err(no("cd without a folder is not translated: Stata does different things on Windows and elsewhere"));
+                    // `cd` and `cd ""`: Stata 19 on Windows prints the folder
+                    // and stays (plan/stata/cd.md); elsewhere it goes to the
+                    // home folder, which is not checked, so R stops there
+                    out.line("if (.Platform$OS.type == \"windows\") cat(getwd(), \"\\n\", sep = \"\") else stop(\"cd without a folder goes to the home folder in Stata on this system, which RCraft does not translate\", call. = FALSE)");
+                    return Ok(());
                 }
                 out.line(format!("setwd({})", r_text(&dir)));
                 self.folder = if is_absolute(&dir) {
@@ -6031,6 +6034,68 @@ replace t = D.t");
         );
         assert!(
             out[18].starts_with("NOT: replace that reads t at this or a later time"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn bs_and_bstrap_are_bootstrap_and_in_picks_the_sample() {
+        let out = r("use d
+bs r(mean), reps(5) seed(1): summarize y in 10/40
+bstrap r(mean), reps(5): summarize y if g == 1
+bst r(mean), reps(5): summarize y
+bs _b, reps(5): regress y x in 10/40");
+        // in: the rows picked once, the command run on them without it
+        assert!(
+            out[1].contains("stata_bs_rows <- dplyr::pull(")
+                && out[1].contains("d <- stata_bs_full[stata_bs_rows, , drop = FALSE]"),
+            "{out:?}"
+        );
+        assert!(out[2].contains("stata_bs_rows <- dplyr::pull("), "{out:?}");
+        assert!(out[3].starts_with("NOT"), "{out:?}");
+        assert!(
+            out[4].contains("estimation command with in is not translated"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn outreg2_onecol_is_taken_after_models_of_one_equation_only() {
+        let out = r("use d
+regress y x
+outreg2 using t.xls, tstat bdec(3) tdec(2) replace onecol
+logit b x
+outreg2 using t.xls, tstat bdec(3) tdec(2) onecol");
+        assert!(!out[2].starts_with("NOT"), "{out:?}");
+        assert!(
+            out[4].contains("onecol after logit is not translated yet"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn cd_without_a_folder_prints_it_on_windows_and_stays() {
+        // Stata 19 on Windows: cd and cd "" print the folder, c(pwd) unchanged
+        let out = r("cd \"C:/work/data\"
+cd \"\"
+cd
+clear
+set obs 3
+generate t = _n
+tsset t
+save FOMC, replace
+use \"C:/work/data/fomc.dta\", clear
+generate l = L.t");
+        for line in &out[1..3] {
+            assert!(
+                line.starts_with("if (.Platform$OS.type == \"windows\") cat(getwd()")
+                    && line.contains("stop(\"cd without a folder goes to the home folder"),
+                "{out:?}"
+            );
+        }
+        // the folder is still C:/work/data, so the file saved there is known
+        assert!(
+            out[9].contains("stata_ts(t, 1, 0, 0, t, NULL, 1)"),
             "{out:?}"
         );
     }

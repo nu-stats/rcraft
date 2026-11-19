@@ -446,6 +446,7 @@ pub const GUIDES: &[Guide] = &[
         points: &[
             p("In R", "setwd(), with the folder as written: a relative one is taken from the folder the do-file is in then, as in Stata."),
             p("Paths", "A \\ in a path is read as /, which R takes on every system. A folder the do-file names that is somewhere else on this machine can be pointed to before the run, in the do-file window."),
+            p("No folder", "cd alone, or cd \"\" (as a global that was never set leaves it), prints the folder and stays there, as Stata does on Windows. On macOS and Linux Stata goes to the home folder instead; RCraft stops there with a message rather than guess."),
         ],
     },
     Guide {
@@ -5171,6 +5172,10 @@ fn full(word: &str) -> String {
     {
         return (*name).to_string();
     }
+    // the other names Stata takes for bootstrap
+    if matches!(word, "bs" | "bstrap") {
+        return "bootstrap".to_string();
+    }
     crate::lang::commands::resolve(word).to_string()
 }
 
@@ -5212,6 +5217,10 @@ mod tests {
         assert_eq!(page("probit d x"), Some("logit"));
         assert_eq!(page("tab2 g h"), Some("tabulate"));
         assert_eq!(page("scatter y x"), Some("twoway"));
+        assert_eq!(
+            page("qui bs m = r(mean), reps(5): sum y"),
+            Some("bootstrap")
+        );
         assert_eq!(page("prop g"), Some("proportion"));
         assert_eq!(page("capture rm out.dta"), Some("erase"));
         assert_eq!(page("args a b"), Some("program"));

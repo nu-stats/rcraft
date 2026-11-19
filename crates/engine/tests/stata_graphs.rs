@@ -786,6 +786,34 @@ fn graphs_in_memory_are_listed_shown_and_dropped_as_statas() {
     );
 }
 
+/// `graph combine` with `l1()` and `l2()`, which Stata 19 takes for
+/// `l1title()` and `l2title()`, and titles with their look options after a
+/// comma, as BraderTuckerDuell writes them: each text, upright on the left
+/// (l1 beside the graphs, l2 outside it), the title on top.
+#[test]
+fn graph_combine_puts_left_titles_beside_the_graphs() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let code = script(&format!(
+        "use \"{dir}/models.dta\", clear\nscatter y x, name(a) nodraw\nscatter x y, name(b) nodraw\n\
+         gr combine a b, graphr(fc(white) lc(white) ifc(white) ilc(white)) ycommon xcommon imargin(zero) rows(1) \
+         l2(Mean of level of support, c(black) si(medium)) l1(\"Inner, quoted\") title(Top, si(large)) nodraw\n"
+    ));
+    ok(&mut e, &code);
+    let text = ok(
+        &mut e,
+        "cat(vapply(Filter(function(g) inherits(g, \"text\"), stata_graph$grobs), function(g) paste(g$label, g$rot), \"\"), sep = \"|\")",
+    );
+    assert_eq!(
+        text.trim(),
+        "Inner, quoted 90|Mean of level of support 90|Top 0",
+        "{code}"
+    );
+    // the layout: two graphs in a row, two title columns and a title row
+    let dims = numbers(&mut e, "0", "dim(stata_graph)");
+    assert_eq!(dims, [2.0, 4.0], "{code}");
+}
+
 #[test]
 fn what_the_graphs_do_not_translate_says_why() {
     for (cmd, why) in [

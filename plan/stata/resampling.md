@@ -135,3 +135,27 @@ and, for `permute` and `simulate`, `crates/statatr/src/dofile/resample.rs`.
 - `drop _all` is not turned into a list of variable names (that left the observations): it removes them too, and is accepted with no data.
 - `return scalar x = runiform()` takes Stata's draw.
 
+
+## bootstrap: the names bs and bstrap, an r-class command's sample (2026-11-19)
+
+Observed on Stata 19.0 SE with made-up data (corpus `bs.do`, 1e-9), for the BraderTuckerDuell package's
+`bs mean = r(mean), reps(100) seed(010101) level(90): sum support if(...)`.
+
+- **Names:** `bs` and `bstrap` run `bootstrap`. `bootstrap` itself is not abbreviated: `bst`, `bstr`, `bo`, `boo`
+  and `boots` are unknown commands (r(199)); `boot` is some other command (it stops with "=exp not allowed",
+  r(101)). The reader maps `bs` and `bstrap` to `bootstrap`; the others stay unknown.
+- **Sample of an r-class command** (`summarize` and the like): the rows its `if` and `in` pick, missing values of its
+  variables kept (`bs r(mean): summarize y` with 7 of 60 values missing has e(N) 60; with `if g==1` 30, with
+  `in 10/40` 31, with both 15). Each replication resamples those rows. RCraft took all rows before, so `if` gave
+  wrong replications; now the rows are picked once. With `in`, the command runs on those rows without its `if`
+  and `in` (in a replication `in 10/40` would count the resampled rows). An estimation command with `in` is refused
+  for now (its sample is e(sample), found after the fit).
+- **Percentile interval:** the points are taken in percent from the level in percent, `(100 - 90) / 2 = 5`. RCraft
+  computed `100 * (1 - 0.9) / 2`, which is 4.999...; with 20 replications the 5th percentile then sits at an exact
+  position (20 x 5 / 100 = 1) and Stata averages the 1st and 2nd values, which the fraction missed.
+- **Also as the package has it:** `seed(010101)` (leading zeros), `level(90)`, `if(...)` with no blank, the command over
+  two lines (the package is in `#delimit ;` mode; the corpus uses `///`), then `matrix ci = e(ci_percentile)`, `local lb = ci[1,1]`, `matrix mean = e(b)`,
+  `matrix N = e(N)`.
+- **Open, refused:** `bs` (or `bootstrap`) of a program the do-file defines (`bs diff = r(diff), ...: diff`, four
+  package lines and the lines after them). Like `permute`, it needs the runner to write each replication out
+  (resample, run the program, collect), which is more than a word form; refused with "diff is not translated yet".

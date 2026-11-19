@@ -2476,6 +2476,9 @@ impl Session {
             ("ycommon", 5),
             ("xcommon", 5),
             ("imargin", 4),
+            // l1title() and l2title(): titles on the left (Stata 19 takes l1() and l2())
+            ("l1title", 2),
+            ("l2title", 2),
         ]);
         known.extend(TITLES.iter().map(|(o, m, _)| (*o, *m)));
         if let Some(o) = opts.other(&known) {
@@ -2518,12 +2521,15 @@ impl Session {
         }
         out.package("ggplot2");
         self.helpers.insert("stata_combine");
-        let title = match opts.arg("title", 1) {
-            Some(t) => r_text(t.trim().trim_matches('"')),
+        // a title's text is what comes before its look options (`l2(text, c(black))`)
+        let text = |o: &str, m: usize| match opts.raw(o, m) {
+            Some(t) => r_text(&title_text(&t)),
             None => "NULL".into(),
         };
+        let title = text("title", 1);
+        let (l1, l2) = (text("l1title", 2), text("l2title", 2));
         out.line(format!(
-            "stata_graph <- stata_combine(list({}){}, title = {title})",
+            "stata_graph <- stata_combine(list({}){}, title = {title}, l1 = {l1}, l2 = {l2})",
             pieces.join(", "),
             layout.iter().map(|l| format!(", {l}")).collect::<String>()
         ));
@@ -2537,9 +2543,17 @@ impl Session {
     }
 }
 
+/// A title's text: what comes before a comma outside quotes and parentheses (the
+/// textbox options after it, `c(black) si(medium)`, are Stata's look), without
+/// the quotes around it.
+fn title_text(arg: &str) -> String {
+    let (text, _) = super::coefplot::split_top_comma(arg);
+    text.trim().trim_matches('"').to_string()
+}
+
 /// `graph combine`'s R: the graphs (ggplots, or graphs combined already) in a
 /// grid, by rows, as many columns as asked or Stata's near-square default.
-pub(super) const COMBINE_HELPER: &str = r##"stata_combine <- function(plots, ncol = NULL, nrow = NULL, title = NULL) {
+pub(super) const COMBINE_HELPER: &str = r##"stata_combine <- function(plots, ncol = NULL, nrow = NULL, title = NULL, l1 = NULL, l2 = NULL) {
   n <- length(plots)
   if (is.null(ncol) && is.null(nrow)) ncol <- ceiling(sqrt(n))
   if (is.null(ncol)) ncol <- ceiling(n / nrow)
@@ -2548,9 +2562,14 @@ pub(super) const COMBINE_HELPER: &str = r##"stata_combine <- function(plots, nco
   while (length(grobs) < nrow * ncol) grobs <- c(grobs, list(grid::nullGrob()))
   g <- gtable::gtable_matrix("stata_combine", matrix(grobs[seq_len(nrow * ncol)], nrow, ncol, byrow = TRUE),
                              widths = grid::unit(rep(1, ncol), "null"), heights = grid::unit(rep(1, nrow), "null"))
+  # l1title() beside the graphs, l2title() to the left of it, read upwards
+  for (left in list(l1, l2)) if (!is.null(left)) {
+    g <- gtable::gtable_add_cols(g, grid::unit(2, "lines"), pos = 0)
+    g <- gtable::gtable_add_grob(g, grid::textGrob(left, rot = 90), t = 1, b = nrow, l = 1, name = "stata_left_title")
+  }
   if (!is.null(title)) {
     g <- gtable::gtable_add_rows(g, grid::unit(2, "lines"), pos = 0)
-    g <- gtable::gtable_add_grob(g, grid::textGrob(title), t = 1, l = 1, r = ncol)
+    g <- gtable::gtable_add_grob(g, grid::textGrob(title), t = 1, l = 1, r = ncol(g))
   }
   g
 }"##;

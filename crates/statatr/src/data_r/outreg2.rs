@@ -248,6 +248,7 @@ impl Session {
             ("ctitle", 2),
             ("addtext", 4),
             ("addstat", 4),
+            ("onecol", 6),
         ]) {
             return Err(no(format!(
                 "outreg2 with the option {o} is not translated yet"
@@ -317,6 +318,19 @@ impl Session {
         let Some(est) = self.estimates.as_ref() else {
             return Err(no("outreg2: no model is fitted before it in this do-file"));
         };
+        // onecol: one column for all equations; after a model of one equation
+        // Stata 19 writes the same files with it or without (plan/stata/outreg2.md)
+        if opts.has("onecol", 6)
+            && !matches!(
+                est.fit,
+                model::Fit::Regress | model::Fit::Xtreg | model::Fit::Reghdfe
+            )
+        {
+            return Err(no(format!(
+                "outreg2 with the option onecol after {} is not translated yet",
+                est.fit.name()
+            )));
+        }
         // keep(): a##b is a, b and a#b; factor variables only when keep()
         // leaves their columns out
         let keep: Option<Vec<String>> = opts.arg("keep", 4).map(|k| {

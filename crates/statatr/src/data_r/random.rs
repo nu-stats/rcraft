@@ -1144,8 +1144,11 @@ stata_bs_report <- function(obs, reps, exps, command, n_used, level = 0.95, mode
   e$z0 <- row(z0, "z0")
   e$se <- row(se, "se")
   e$ci_normal <- ci(obs - z * se, obs + z * se)
-  e$ci_percentile <- ci(vapply(seq_len(k), function(j) pct(X[, j], 100 * alpha), 0),
-                        vapply(seq_len(k), function(j) pct(X[, j], 100 - 100 * alpha), 0))
+  # the percentile points in percent from the level in percent, as Stata takes
+  # them (100 * alpha is 4.999... at level 90, which moves an exact position)
+  lp <- (100 - round(100 * level, 8)) / 2
+  e$ci_percentile <- ci(vapply(seq_len(k), function(j) pct(X[, j], lp), 0),
+                        vapply(seq_len(k), function(j) pct(X[, j], 100 - lp), 0))
   e$ci_bc <- ci(vapply(seq_len(k), function(j) pct(X[, j], 100 * stats::pnorm(2 * z0[j] - z)), 0),
                 vapply(seq_len(k), function(j) pct(X[, j], 100 * stats::pnorm(2 * z0[j] + z)), 0))
   e
@@ -1632,11 +1635,35 @@ impl Session {
             self.set_seed(s.trim(), &mut o)?;
             seed_line = Some(o.code.join("\n"));
         }
+        // an r-class command's sample is its if and in, missing values kept
+        // (Stata 19, plan/stata/resampling.md); with in, the command runs on
+        // those rows without its if and in, since in counts the rows of the
+        // data it is given and a replication's are the resampled ones
+        let in_was = inner.parts.in_range.is_some();
+        let in_rows = match inner.parts.in_range {
+            Some(_) => {
+                let cond = self.condition(&inner, out)?;
+                inner.parts.in_range = None;
+                inner.parts.if_exp = None;
+                cond
+            }
+            None => None,
+        };
         let mut body = Out::default();
         self.e_new = false;
         self.r_new = None;
         self.dispatch(&inner, &mut body)?;
         let eclass = self.e_new;
+        if eclass && in_rows.is_some() {
+            return Err(no(
+                "bootstrap of an estimation command with in is not translated yet",
+            ));
+        }
+        let rclass_cond = match in_rows {
+            Some(c) => Some(c),
+            None if !eclass => self.condition(&inner, out)?,
+            None => None,
+        };
         let r_left = self.r_new.take();
         self.track_returned(&inner, true, false, r_left);
         // the statistics: _b, name=exp or exp (named _bs_1, ...)
@@ -1750,13 +1777,29 @@ impl Session {
         if let Some(s) = seed_line {
             out.line(s);
         }
+        if !eclass {
+            if rclass_cond.is_some() {
+                out.package("dplyr");
+            }
+            out.line(match &rclass_cond {
+                Some(cond) => {
+                    format!(
+                        "stata_bs_rows <- dplyr::pull(dplyr::mutate(stata_bs_full, stata_sel = {cond}), stata_sel) %in% TRUE"
+                    )
+                }
+                None => "stata_bs_rows <- rep(TRUE, nrow(stata_bs_full))".to_string(),
+            });
+            if in_was {
+                out.line(format!(
+                    "{d} <- stata_bs_full[stata_bs_rows, , drop = FALSE]"
+                ));
+            }
+        }
         out.line(code.clone());
         out.line(format!("stata_bs_obs <- {stats}"));
-        out.line(if eclass {
-            "stata_bs_rows <- stata_esample".to_string()
-        } else {
-            "stata_bs_rows <- rep(TRUE, nrow(stata_bs_full))".to_string()
-        });
+        if eclass {
+            out.line("stata_bs_rows <- stata_esample");
+        }
         out.line(if by_b {
             "stata_bs_model <- stata_e"
         } else {

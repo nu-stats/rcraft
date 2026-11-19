@@ -68,3 +68,13 @@ matched byte for byte (`outreg2tex.do` keeps the checks):
 
 Found on the way: Stata 19 keeps backslashes on a do-file line as written (probe 139 again: only
 version 8.2 and before halve a run); RCraft's reader halved `\` (StatCraft's front end does too).
+
+## onecol (2026-11-19)
+
+As BraderTuckerDuell writes it (`outreg2 using "table2.tex", replace tex(frag) bdec(4) onecol`). Observed in Stata 19
+with made-up data: after `regress`, `xtreg, fe` and `reghdfe`, with `tstat` or `se`, to .xls/.txt and to .tex with
+`tex(fragment)`, and a column added to a table, the files written with `onecol` are byte for byte the ones written
+without it (onecol puts the equations of a model of several in one column; these have one). RCraft takes `onecol`
+after those three models (corpus `outreg2_onecol.do`) and refuses it after the others. The package's own lines stay
+refused for other reasons: they follow `tobit`, and they have neither `tstat` nor `se` (outreg2's own layout) nor
+`tdec()`, and write `tex(frag)`.
