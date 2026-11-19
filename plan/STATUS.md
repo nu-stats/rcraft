@@ -5539,8 +5539,12 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   the errors with their return codes. Also `display _N` of data with no rows is 0, as in Stata.
 - **Checked:** Stata 19 on made-up data: corpus `joinby.do` (49 results, exact). Notes in
   `plan/stata/joinby.md`.
-- **Refused, not guessed:** `update`, `replace` (another `_merge` coding), `by:`. The order of rows paired
-  within a key is the using file's; Stata's is unstable.
+- **Refused, not guessed:** `by:`. The order of rows paired within a key is the using file's; Stata's is
+  unstable.
+- **Later the same day: `update` and `update replace` translated** (probe 138 lines 36 and 40): corpus
+  `joinby.do` now 146 results, exact. Missing master values take the using file's whatever it is, `replace`
+  overwrites with a non-missing using value, every paired row is `_merge` 3, `replace` alone is r(198).
+  `plan/stata/joinby.md` has the rules.
 
 ## P2C.12: batch A1 measured, 2026-11-18
 

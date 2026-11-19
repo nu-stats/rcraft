@@ -126,6 +126,84 @@ input str2 j double w
 end
 capture joinby using joinby_u
 display "@ rc_common " _rc
+* update and update replace: the master's value against the using file's, every kind of missing
+clear
+set obs 16
+generate byte k = _n
+generate byte ui = mod(_n-1, 4) + 1
+generate double u = .
+replace u = 7 if ui == 1
+replace u = .a if ui == 3
+replace u = .c if ui == 4
+generate str1 s = cond(mod(ceil(_n/2), 2) == 1, "x", "")
+keep k u s
+save joinby_u3, replace
+clear
+set obs 17
+generate byte k = _n
+generate byte mi = ceil(_n/4)
+generate double u = .
+replace u = 5 if mi == 1
+replace u = .a if mi == 3
+replace u = .b if mi == 4
+generate str1 s = cond(mod(_n, 2) == 1, "m", "")
+generate byte id = _n
+keep k u s id
+save joinby_m3, replace
+joinby k using joinby_u3
+display "@ n11 " _N
+forvalues i = 1/`=_N' {
+    display "@ r11_`i' " (u[`i'] == 5) (u[`i'] == .) (u[`i'] == .a) (u[`i'] == .b) " " (s[`i'] == "m")
+}
+foreach how in update "update replace" {
+    use joinby_m3, clear
+    joinby k using joinby_u3, `how'
+    display "@ n12 " _N
+    sort id
+    forvalues i = 1/`=_N' {
+        display "@ r12_`i' " (u[`i'] == 5) (u[`i'] == 7) (u[`i'] == .) (u[`i'] == .a) (u[`i'] == .b) (u[`i'] == .c) " " (s[`i'] == "m") (s[`i'] == "x") (s[`i'] == "")
+    }
+    capture confirm variable _merge
+    display "@ n12_merge " _rc
+}
+* update with unmatched(): _merge, its labels and format, the using-only rows take the using file's values
+use joinby_m3, clear
+drop if k == 17 | k == 1
+joinby k using joinby_u3, update unmatched(both) _merge(how)
+display "@ n13 " _N
+sort how k
+forvalues i = 1/`=_N' {
+    display "@ r13_`i' " how[`i'] " " k[`i'] " " (u[`i'] == 5) (u[`i'] == 7) (u[`i'] == .) (u[`i'] == .a) (u[`i'] == .b) (u[`i'] == .c) " " (s[`i'] == "m") (s[`i'] == "x") (s[`i'] == "")
+}
+* a variable that is a string in one file and a number in the other is not touched
+clear
+input byte k double s
+1 5
+3 6
+end
+joinby k using joinby_u3, update unmatched(both)
+display "@ n14 " _N
+sort _merge k
+forvalues i = 1/`=_N' {
+    display "@ r14_`i' " _merge[`i'] " " k[`i'] " " s[`i'] " " (u[`i'] == 7) (u[`i'] == .)
+}
+* the errors of update and replace
+use joinby_m3, clear
+capture joinby k using joinby_u3, replace
+display "@ rc_replace " _rc
+capture joinby k using joinby_u3, upd
+display "@ rc_abbrev " _rc
+capture joinby nosuch using joinby_u3, replace
+display "@ rc_replace_var " _rc
+capture joinby k using joinby_u3, update unmatched(foo)
+display "@ rc_update_unm " _rc
+generate byte _merge = 1
+capture joinby k using joinby_u3, update
+display "@ rc_update_merge " _rc
+capture joinby k using joinby_u3, update unmatched(master)
+display "@ rc_update_merge2 " _rc
 erase joinby_u.dta
 erase joinby_m.dta
 erase joinby_u2.dta
+erase joinby_u3.dta
+erase joinby_m3.dta

@@ -764,7 +764,13 @@ impl Session {
 /// order. The new variables are the using file's other variables, after
 /// `_merge` when there is one. A variable in both files keeps the master's
 /// value; a using-only row has the keys and nothing else of the master.
-pub(super) const JOINBY_HELPER: &str = r#"stata_joinby <- function(d, u, keys, common = FALSE, unmatched = "none", merge = "_merge") {
+/// With `update` a master value that is missing (any kind) or "" in a paired
+/// row takes the using file's value, whatever it is; with `replace` as well a
+/// master value is replaced by a using value that is not missing or "". A
+/// using-only row then has the using file's values of the variables in both.
+/// A variable that is a string in one file and a number in the other is left
+/// as the master has it. The paired rows are always `_merge` 3.
+pub(super) const JOINBY_HELPER: &str = r#"stata_joinby <- function(d, u, keys, common = FALSE, unmatched = "none", merge = "_merge", update = FALSE, replace = FALSE) {
   if (common) {
     keys <- intersect(names(d), names(u))
     if (!length(keys)) stop("no variables in common to master and using data (Stata: r(198))", call. = FALSE)
@@ -772,7 +778,10 @@ pub(super) const JOINBY_HELPER: &str = r#"stata_joinby <- function(d, u, keys, c
   }
   for (k in keys) if (!k %in% names(d) || !k %in% names(u)) stop("variable ", k, " not found (Stata: r(111))", call. = FALSE)
   for (k in keys) if (is.character(d[[k]]) != is.character(u[[k]])) stop("key variable ", k, " is ", if (is.character(d[[k]])) "a string" else "numeric", " in master but ", if (is.character(u[[k]])) "a string" else "numeric", " in using data (Stata: r(106))", call. = FALSE)
+  if (replace && !update) stop("option replace may not be specified without update (Stata: r(198))", call. = FALSE)
   if (unmatched != "none" && merge %in% names(d)) stop("variable ", merge, " already defined (Stata: r(110))", call. = FALSE)
+  cv <- setdiff(intersect(names(d), names(u)), keys)
+  cv <- cv[vapply(cv, function(v) is.character(d[[v]]) == is.character(u[[v]]), TRUE)]
   strip <- function(x) { if (is.factor(x)) x <- as.integer(x); attributes(x) <- NULL; x }
   key <- function(z) {
     b <- lapply(z[keys], strip)
@@ -812,6 +821,14 @@ pub(super) const JOINBY_HELPER: &str = r#"stata_joinby <- function(d, u, keys, c
       yv <- as.vector(unclass(u[[v]]))[uidx]
       if (is.character(xv)) xv[from_u] <- yv[from_u] else xv[from_u] <- yv[from_u]
     }
+    if (update && v %in% cv) {
+      yv <- as.vector(unclass(u[[v]]))[uidx]
+      both <- !from_u & !is.na(uidx)
+      mx <- if (is.character(xv)) is.na(xv) | xv == "" else is.na(xv)
+      my <- if (is.character(yv)) is.na(yv) | yv == "" else is.na(yv)
+      take <- from_u | (both & (mx | (replace & !my)))
+      xv[take] <- yv[take]
+    }
     if (is.character(xv)) xv[is.na(xv)] <- ""
     a <- attributes(x)
     a$names <- NULL
@@ -819,8 +836,8 @@ pub(super) const JOINBY_HELPER: &str = r#"stata_joinby <- function(d, u, keys, c
     out[[v]] <- xv
   }
   if (unmatched != "none") {
-    lab <- c("only in master data" = 1, "only in using data" = 2, "both in master and using data" = 3)
-    out[[merge]] <- structure(haven::labelled(as.numeric(code), lab), format.stata = "%29.0g")
+    lab <- if (update) c("only in master data" = 1, "only in using data" = 2, "in both, master agrees with using data" = 3, "in both, missing in master data updated" = 4, "in both, master disagrees with using data" = 5) else c("only in master data" = 1, "only in using data" = 2, "both in master and using data" = 3)
+    out[[merge]] <- structure(haven::labelled(as.numeric(code), lab), format.stata = if (update) "%41.0g" else "%29.0g")
   }
   for (v in setdiff(names(u), names(d))) {
     x <- u[[v]]
@@ -877,11 +894,8 @@ impl Session {
             stop(out, &format!("option {o} not allowed (Stata: r(198))"));
             return Ok(());
         }
-        if opts.has("update", 6) || opts.has("replace", 7) {
-            return Err(no(
-                "joinby with update or replace is not translated yet (Stata then makes _merge with other codes)",
-            ));
-        }
+        let update = opts.has("update", 6);
+        let replace = opts.has("replace", 7);
         let unmatched = match opts.arg("unmatched", 1) {
             None => "none".to_string(),
             Some(u) => {
@@ -917,6 +931,15 @@ impl Session {
         let d = self.data()?;
         let path = file_name(&file, "dta");
         self.saved_types(&path, &d, &keys, out);
+        // a variable in both files takes the wider type: not known here, so the
+        // storage of one the two files hold differently is no longer known
+        if let Some(kept) = self.saved.get(&self.file_key(&path)).cloned() {
+            for (v, s) in &kept.storage {
+                if self.storage.get(v).is_some_and(|m| m != s) {
+                    self.storage.remove(v);
+                }
+            }
+        }
         // the file may hold .a to .z (tagged NAs)
         self.tags.set(true);
         self.helpers.insert("stata_joinby");
@@ -929,11 +952,13 @@ impl Session {
             r_text(&format!("file {path} not found (Stata: r(601))"))
         ));
         out.line(format!(
-            "{d} <- stata_joinby({d}, haven::read_dta({p}), c({}), common = {}, unmatched = {}, merge = {})",
+            "{d} <- stata_joinby({d}, haven::read_dta({p}), c({}), common = {}, unmatched = {}, merge = {}, update = {}, replace = {})",
             keys.iter().map(|k| r_text(k)).collect::<Vec<_>>().join(", "),
             super::stats::r_logical(common),
             r_text(&unmatched),
-            r_text(&merge)
+            r_text(&merge),
+            super::stats::r_logical(update),
+            super::stats::r_logical(replace)
         ));
         if unmatched != "none" {
             self.kinds.insert(merge, Kind::Number);
