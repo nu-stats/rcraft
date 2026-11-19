@@ -413,8 +413,11 @@ Command families:
   `bitesti`, `robvar`, `swilk` (12 to 2000 untied values only), `pctile` and `dstdize` (one by() and one
   stratum variable); `pwmean` done 2026-11-18 in its own session (one or several over() variables, the five
   `mcompare()` methods, the table options, `groups`, `sort`, `level()`, e() and r() with their matrices; Tukey to
-  about 1e-7; refused: `snk` and `dunnett`, a bare `pwmean`, `r(groups#)` because the order of the letters is
-  not always Stata's, see `plan/stata/pwmean.md`). Still open, part of it on hold for the user's go:
+  about 1e-7) and finished 2026-11-19 (`snk`, `duncan` and `dunnett`, a bare `pwmean` that shows the last results
+  again, `over(i.g)` and a variable twice, an empty `mcompare()`, an option given twice, an adjusted method with
+  `cimeans` and other tables, zero or one residual degrees of freedom; open: `r(groups#)`, which is refused because the
+  order of the letters is not always Stata's, and Dunnett's numbers, which Stata approximates to about 1e-6 to 3e-4,
+  see `plan/stata/pwmean.md`). Still open, part of it on hold for the user's go:
   `codebook`, `spearman`, `ds`, and the forms of `summarize`, `list`, `ttest` (`welch`) and `tabodds` that are
   still refused.)
 - P2C.12d Functions

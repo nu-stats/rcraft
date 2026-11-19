@@ -5737,3 +5737,25 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - Not in the corpus: the matrix column names with `bn` (`: colnames` is not translated), checked by hand against Stata.
 - **Shares after pwmean:** probes 77.4% (22,383 -> 22,397 translated lines of the 543 do-files); packages unchanged at 87.8%
   (3,750 of 4,272).
+
+### P2C.12c: pwmean, the refusals taken away (second round), 2026-11-19
+
+- **Why they were refused:** most were things not yet run in Stata (snk, duncan, dunnett, the order of the comparison
+  tables with an adjusted method and cimeans, what a bare `pwmean` shows, what Stata prints with no residual degrees of
+  freedom); two were already known to be Stata's own answers (`over(i.g)` and an option twice) but were refused instead of
+  mirrored.
+- **Now translated:** `mcompare(snk)`, `duncan` and `dunnett` (the critical value and p-value of the range for the number of
+  means a pair spans; Dunnett against the first group with correlation one half whatever the group sizes), the table order
+  (the comparison count before `groups` and before the first table of contrasts, not before every table), an adjusted
+  method with `cimeans` and other tables, a bare `pwmean` (replays the groups kept in e() with new options: r(301) after
+  another estimation, r(102) with an if or in, r(198) with over()), `over(i.g)`, `ib#.`, `c.`, a variable twice in over(),
+  an empty `mcompare()`, an option twice (r(198); a second `level()` only when it says 95), the letters as every maximal set
+  with no significant pair (Duncan with groups of unequal size gave sets that are not runs), `r(k_groups)` at 95% unless
+  `groups` is shown, and zero or one residual degrees of freedom (missing values, as Stata prints them).
+- **Checked:** Stata 19: `pwmean_more.do` (47 results, 1e-8), `pwmean_range.do` (77, 1e-6: Stata's range quantile is about
+  3e-8 off for long spans) and `pwmean_dunnett.do` (24, 1e-3: Stata's `dunnettprob` is approximate, its critical value 1.5e-6
+  to 6e-6 and its p-values up to 2.2e-4 away from the exact integral); the printed tables of four more probes of our own
+  are identical to Stata's log except the seventh digit of Tukey, SNK and Duncan limits and Dunnett's fifth.
+- **Still open:** the order of the letters of `groups` for overlapping sets (24 of 134 designs; `r(groups#)` stays refused and
+  `groups` carries a caveat) and Dunnett's last digits. The letter order needs a decision on how much more to spend on it
+  (several variants tried again today, none matched).

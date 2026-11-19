@@ -221,7 +221,16 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("putexcel", &["marginsplot", "putexcel"]),
     ("putpdf", &["putdocx"]),
     ("pwcorr", &["descriptives"]),
-    ("pwmean", &["pwmean", "pwmean_tukey"]),
+    (
+        "pwmean",
+        &[
+            "pwmean",
+            "pwmean_dunnett",
+            "pwmean_more",
+            "pwmean_range",
+            "pwmean_tukey",
+        ],
+    ),
     ("ranksum", &["ranktests"]),
     ("ratio", &["meanest"]),
     ("recast", &["contract"]),
