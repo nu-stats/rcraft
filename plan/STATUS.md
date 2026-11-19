@@ -5703,3 +5703,24 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   not, 1,272 known only when run) against **94.9%** (3,715, 200) before: the old reader read the CR-only file 6J6BAW
   (572 lines, no LF) as one line, the new one reads its 357 distinct lines, 322 not translated (`# delimit ;`, with a
   blank after the `#`; P2C.12am). The other 45 do-files are unchanged. 87.8% is the package figure from now on.
+
+## P2C.12c: pwmean (batch C of the StatCraft port, the last piece), 2026-11-18
+
+- **Translated** (`statatr::data_r::pwmean`): `pwmean y, over(vars)` with one or several over() variables and `mcompare()`
+  (noadjust, bonferroni, sidak, scheffe, tukey), `effects`, `pveffects`, `cieffects`, `ci`, `cimeans`, `groups`, `sort` and
+  `level()`: Stata's tables to the column (the comparison count before each adjusted table, the label column, the `groups`
+  note wrapped at the table's width, the label rule `one#2` or `2 1`), e() (b, V, b_vs, V_vs and the error matrices with
+  Stata's column names) and r() (table, table_vs, k_groups, level and the method).
+- **Checked:** Stata 19 on made-up data: corpus `pwmean.do` (102 results to 1e-8) and `pwmean_tukey.do` (15 results to
+  1e-7); the printed tables of 70 more cases of our own probes are identical to Stata's log line by line, except a Tukey limit
+  that falls on the other side of a rounding in the seventh digit. Notes in `plan/stata/pwmean.md`.
+- **Precision:** Tukey uses R's `ptukey`; Stata's `tukeyprob()` is about 1e-10 from the exact value and R's about 4e-12, so
+  Tukey p-values and limits agree to about 1e-7 relative (3e-9 in the critical value), not 8 digits, in their own file.
+- **Level():** r(table) and r(table_vs) hold the limits at level() only for the tables shown (cimeans; contrasts with
+  intervals or p), else the 95% ones (decoded here).
+- **Refused, not guessed:** `mcompare(snk)` and `mcompare(dunnett)`, a bare `pwmean`, an adjusted method with `cimeans` and
+  another table, an option twice, `over(i.g)`, `r(groups#)` (the sets of means that share a letter are right in 134 of 134 cases
+  tried, but in 24 of them Stata deals the letters in another order than the lowest run first; the order is not found,
+  so `groups` carries a caveat and `r(groups#)` is not kept). R stops (it does not print Stata's tables) when the
+  groups leave 0 residual degrees of freedom, or 1 with Tukey.
+- Not in the corpus: the matrix column names with `bn` (`: colnames` is not translated), checked by hand against Stata.

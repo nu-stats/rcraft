@@ -89,6 +89,7 @@ mod power;
 mod prtest;
 mod putdoc;
 mod putexcel;
+mod pwmean;
 mod random;
 mod rangestat;
 mod ranktests;
@@ -541,6 +542,7 @@ const WEIGHTED: &[&str] = &[
     "robvar",
     "bitest",
     "swilk",
+    "pwmean",
     "expandcl",
     "fillin",
     "mvdecode",
@@ -1534,6 +1536,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_swilk" => descr::SWILK_HELPER,
         "stata_inspect" => descr::INSPECT_HELPER,
         "stata_dstdize" => descr::DSTDIZE_HELPER,
+        "stata_pwmean" => pwmean::PWMEAN_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_tsfill" => ts::TSFILL_HELPER,
         "stata_ts" => ts::TS_HELPER,
@@ -3159,6 +3162,7 @@ impl Session {
             "swilk" => self.swilk(c, &opts, out),
             "inspect" => self.inspect(c, &opts, out),
             "dstdize" => self.dstdize(c, &opts, out),
+            "pwmean" => self.pwmean(c, &opts, out),
             "display" => self.display(c, out),
             "return"
                 if matches!(

@@ -411,9 +411,12 @@ Command families:
 - P2C.12c Descriptive and checking commands not yet matched
   (batch C of the StatCraft port done 2026-11-18: `inspect`, `cumul`, `pcorr`, `bitest` and
   `bitesti`, `robvar`, `swilk` (12 to 2000 untied values only), `pctile` and `dstdize` (one by() and one
-  stratum variable); `pwmean` on hold (its own session: e() and r() matrices, several over() variables,
-  Tukey). Still open, part of it on hold for the user's go: `codebook`, `spearman`, `ds`, and the forms of
-  `summarize`, `list`, `ttest` (`welch`) and `tabodds` that are still refused.)
+  stratum variable); `pwmean` done 2026-11-18 in its own session (one or several over() variables, the five
+  `mcompare()` methods, the table options, `groups`, `sort`, `level()`, e() and r() with their matrices; Tukey to
+  about 1e-7; refused: `snk` and `dunnett`, a bare `pwmean`, `r(groups#)` because the order of the letters is
+  not always Stata's, see `plan/stata/pwmean.md`). Still open, part of it on hold for the user's go:
+  `codebook`, `spearman`, `ds`, and the forms of `summarize`, `list`, `ttest` (`welch`) and `tabodds` that are
+  still refused.)
 - P2C.12d Functions
   (part done 2026-11-17: 132 functions Verified (distribution, date, string, matrix and
   random-draw functions). Still refused: `word()`, `match()`, `matrix()`, `cofc()`, and
@@ -433,7 +436,7 @@ Command families:
 - P2C.12g Post-estimation
   (part done 2026-11-17: `predict`, `estat`, `estimates`, `test`, `testparm`, `lincom`,
   `nlcom`, `testnl`, `margins`, `marginsplot` and `suest` Verified. Still refused:
-  `contrast`, `pwcompare`, `pwmean`, `hausman`, `lrtest`, `predictnl`, forms of `margins`
+  `contrast`, `pwcompare`, `hausman`, `lrtest`, `predictnl`, forms of `margins`
   and `estat` after models not yet translated, and some `estimates` forms.)
 - P2C.12h `stepwise`
   (part done 2026-11-18: `regress`, `logit`, `probit` and `poisson`, Verified

@@ -218,6 +218,7 @@ const STATISTICS: &[&str] = &[
     "proportion",
     "prtest",
     "pwcorr",
+    "pwmean",
     "qreg",
     "ranksum",
     "ratio",
