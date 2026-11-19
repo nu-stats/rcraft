@@ -41,6 +41,20 @@ impl Run<'_> {
                 self.push(line, What::Command, None, written);
                 Flow::Line
             }
+            // a built-in command: one line, its replications in one R loop
+            Ok(plan)
+                if !self
+                    .programs
+                    .contains_key(plan.inner.split_whitespace().next().unwrap_or("")) =>
+            {
+                let tag = if permute { "pm" } else { "sm" };
+                let mut cmd = self.internal(c.span, &format!("_rcraft_{tag}_loop builtin {}", rest.trim()));
+                cmd.prefixes = c.prefixes.clone();
+                let mut line = self.t.command(&cmd);
+                line.stata = c.text.clone();
+                self.push(line, What::Command, None, written);
+                Flow::Line
+            }
             Ok(plan) if plan.reps > MOST_REPS => {
                 let line = self.t.refused(
                     c.span,

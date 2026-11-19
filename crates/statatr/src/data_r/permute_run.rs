@@ -376,6 +376,78 @@ stata_rep_failed <- FALSE"
         Ok(())
     }
 
+    /// The command after the colon, translated once with `quietly` on it: its R
+    /// (helpers and packages taken), and whether it posted e().
+    fn loop_inner(&mut self, command: &str, out: &mut Out) -> Result<(String, bool), Untranslated> {
+        let program = crate::reader::read(command);
+        let mut inner = match program.commands().as_slice() {
+            [one] => (*one).clone(),
+            _ => return Err(no("more than one command after the colon is not translated")),
+        };
+        inner.prefixes.push(crate::reader::Prefix::Quietly);
+        let mut body = Out::default();
+        self.e_new = false;
+        self.r_new = None;
+        self.dispatch(&inner, &mut body)?;
+        let eclass = self.e_new;
+        let r_left = self.r_new.take();
+        self.track_returned(&inner, true, false, r_left);
+        self.prev_eclass = eclass;
+        for h in std::mem::take(&mut body.helpers) {
+            self.helpers.insert(h);
+        }
+        for p in &body.packages {
+            out.package(p);
+        }
+        Ok((body.code.join("\n"), eclass))
+    }
+
+    /// `_rcraft_pm_loop builtin <the permute line>`: a built-in command, its
+    /// replications in one R loop (as many as asked for).
+    pub(super) fn pm_loop(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        self.pm_begin(c, out)?;
+        let Some(l) = self.resampling.clone() else {
+            return Err(no("permute: the line that began it is not known"));
+        };
+        let d = self.data()?;
+        let (code, _) = self.loop_inner(&l.command, out)?;
+        // the run on the data as they are: an error there stops the line, as in Stata
+        out.line(code.clone());
+        self.pm_collect(c, out)?;
+        let mut rep = Out::default();
+        self.pm_collect(c, &mut rep)?;
+        for h in std::mem::take(&mut rep.helpers) {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "for (stata_pm_i in seq_len({})) {{\n{d} <- stata_pm_shuffle({d})\ntryCatch({{\n{code}\n}}, error = function(e) stata_rep_failed <<- TRUE)\n{}\n}}",
+            l.reps,
+            rep.code.join("\n")
+        ));
+        self.pm_end(c, out)
+    }
+
+    /// `_rcraft_sm_loop builtin <the simulate line>`: a built-in command, its
+    /// replications in one R loop.
+    pub(super) fn sm_loop(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
+        self.sm_begin(c, out)?;
+        let Some(l) = self.resampling.clone() else {
+            return Err(no("simulate: the line that began it is not known"));
+        };
+        let (code, _) = self.loop_inner(&l.command, out)?;
+        let mut rep = Out::default();
+        self.sm_collect(c, &mut rep)?;
+        for h in std::mem::take(&mut rep.helpers) {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "for (stata_sm_i in seq_len({})) {{\ntryCatch({{\n{code}\n}}, error = function(e) stata_rep_failed <<- TRUE)\n{}\n}}",
+            l.reps,
+            rep.code.join("\n")
+        ));
+        self.sm_end(c, out)
+    }
+
     /// `_rcraft_pm_shuffle`: the permutation before a replication.
     pub(super) fn pm_shuffle(&mut self, _c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         let d = self.data()?;

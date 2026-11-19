@@ -3153,6 +3153,8 @@ impl Session {
             ))),
             "statsby" => self.statsby(c, out),
             "_rcraft_pm_begin" => self.pm_begin(c, out),
+            "_rcraft_pm_loop" => self.pm_loop(c, out),
+            "_rcraft_sm_loop" => self.sm_loop(c, out),
             "_rcraft_pm_collect" => self.pm_collect(c, out),
             "_rcraft_pm_shuffle" => self.pm_shuffle(c, out),
             "_rcraft_pm_end" => self.pm_end(c, out),

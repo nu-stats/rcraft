@@ -248,3 +248,12 @@ forvalues i = 1/12 {
     display "@ pf_`i' " %24.17g code[`i']
 }
 capture erase permute_13.dta
+* more replications than are written out line by line: a built-in command runs in one loop
+clear
+set seed 3044
+set obs 40
+generate treat = _n > 20
+generate y = round(rnormal() + 0.6*treat, .01)
+permute treat diff=(r(mu_2)-r(mu_1)), reps(2500) seed(30449) nodots: ttest y, by(treat)
+display "@ big " el(r(n), 1, 1) " " el(r(c_lower), 1, 1) " " el(r(c_upper), 1, 1) " " %24.17g el(r(p_twosided), 1, 1)
+display "@ big_next " %24.17g runiform()
