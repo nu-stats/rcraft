@@ -13,6 +13,10 @@
 //! only. R's `qf` is not used: it gives 0 for small p and swaps to chi2 for
 //! df2 above 4e5, where Stata's `invF()` is right; the F quantile comes from
 //! `qbeta` instead, on whichever side of one half keeps its digits.
+//!
+//! Batch F (`plan/stata/functions-f.md`) adds the noncentral `nt()`, `nttail()`, `nchi2()`,
+//! `nchi2tail()`, `nF()` and `nFtail()` (R's `pt`, `pchisq` and `pf` with `ncp`, and the limits past
+//! which Stata gives missing) and the old names `chiprob()`, `fprob()` and `invfprob()`.
 
 use super::*;
 
@@ -28,8 +32,10 @@ pub(super) const FUNCTIONS: &[(&str, &[usize])] = &[
     ("chi2", &[2]),
     ("chi2den", &[2]),
     ("chi2tail", &[2]),
+    ("chiprob", &[2]),
     ("comb", &[2]),
     ("digamma", &[1]),
+    ("fprob", &[3]),
     ("gammaden", &[4]),
     ("gammap", &[2]),
     ("gammaptail", &[2]),
@@ -39,6 +45,7 @@ pub(super) const FUNCTIONS: &[(&str, &[usize])] = &[
     ("invFtail", &[3]),
     ("invchi2", &[2]),
     ("invchi2tail", &[2]),
+    ("invfprob", &[3]),
     ("invgammap", &[2]),
     ("invgammaptail", &[2]),
     ("invibeta", &[3]),
@@ -49,7 +56,13 @@ pub(super) const FUNCTIONS: &[(&str, &[usize])] = &[
     ("lngamma", &[1]),
     ("lnnormal", &[1]),
     ("lnnormalden", &[1, 2, 3]),
+    ("nF", &[4]),
+    ("nFtail", &[4]),
+    ("nchi2", &[3]),
+    ("nchi2tail", &[3]),
     ("normalden", &[1, 2, 3]),
+    ("nt", &[3]),
+    ("nttail", &[3]),
     ("poisson", &[2]),
     ("poissonp", &[2]),
     ("poissontail", &[2]),
@@ -145,7 +158,37 @@ stata_d_binomialp <- function(n, k, p) {
 stata_d_poisok <- function(m, k) stata_d_pos(m, 2^53) & !is.na(k) & k >= 0
 stata_d_poisson <- function(m, k) stata_d_keep(stata_d_run(stats::ppois(floor(k), m)), stata_d_poisok(m, k))
 stata_d_poissontail <- function(m, k) stata_d_keep(stata_d_run(stats::ppois(floor(k) - 1, m, lower.tail = FALSE)), stata_d_poisok(m, k))
-stata_d_poissonp <- function(m, k) stata_d_keep(stata_d_run(stats::dpois(floor(k), m)), stata_d_poisok(m, k) & m <= 1e8 & k <= 1e9)"##;
+stata_d_poissonp <- function(m, k) stata_d_keep(stata_d_run(stats::dpois(floor(k), m)), stata_d_poisok(m, k) & m <= 1e8 & k <= 1e9)
+# the old names: chiprob() is chi2tail() except that it gives 1, not missing, above 2e17 degrees of freedom
+stata_d_chiprob <- function(d, x) {
+  r <- stata_d_chi2tail(d, x)
+  big <- !is.na(d) & d > 2e17 & !is.na(x)
+  r[rep_len(big, length(r))] <- 1
+  r
+}
+stata_d_fprob <- stata_d_Ftail
+stata_d_invfprob <- stata_d_invFtail
+# the noncentral distributions are R's (AS 243 and the series of R's pnchisq and pnbeta), to about 1e-9 apart
+# in the cdf; Stata gives missing for nt() and nttail() with df above 1e10 or |np| above 1000, for nchi2()
+# df above 1e6 or np outside 0 .. 1e4, for nF() df above 1e8 or np outside 0 .. 1e4 (nFtail(): no limit on df,
+# np 0 .. 1000),
+# and R's pt() turns to a normal approximation at |np| above 37.62 that Stata does not use
+stata_d_ntok <- function(d, np) {
+  if (any(stata_d_pos(d, 1e10) & !is.na(np) & abs(np) > 37.62 & abs(np) <= 1000)) {
+    stop("nt() with a noncentrality parameter above 37.62 in size is not translated: R takes an approximation there that Stata does not", call. = FALSE)
+  }
+  stata_d_pos(d, 1e10) & !is.na(np) & abs(np) <= 1000
+}
+# R gives wrong values for |t| above 1e154 (Stata: 0 and 1)
+stata_d_ntbig <- function(t) { big <- !is.na(t) & abs(t) > 1e100; t[big] <- sign(t[big]) * Inf; t }
+stata_d_nt <- function(d, np, t) stata_d_keep(stata_d_run(stats::pt(stata_d_ntbig(t), d, np)), stata_d_ntok(d, np))
+stata_d_nttail <- function(d, np, t) stata_d_keep(stata_d_run(stats::pt(stata_d_ntbig(t), d, np, lower.tail = FALSE)), stata_d_ntok(d, np))
+stata_d_nchi2ok <- function(d, np) stata_d_pos(d, 1e6) & !is.na(np) & np >= 0 & np <= 1e4
+stata_d_nchi2 <- function(d, np, x) stata_d_keep(stata_d_run(stats::pchisq(x, d, np)), stata_d_nchi2ok(d, np))
+stata_d_nchi2tail <- function(d, np, x) stata_d_keep(stata_d_run(stats::pchisq(x, d, np, lower.tail = FALSE)), stata_d_nchi2ok(d, np))
+stata_d_nFok <- function(a, b, np, top, hi) stata_d_pos(a, hi) & stata_d_pos(b, hi) & !is.na(np) & np >= 0 & np <= top
+stata_d_nF <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np)), stata_d_nFok(a, b, np, 1e4, 1e8))
+stata_d_nFtail <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np, lower.tail = FALSE)), stata_d_nFok(a, b, np, 1e3, Inf))"##;
 
 impl Translator<'_> {
     /// A distribution function: its R helper on the arguments' numbers.
@@ -216,7 +259,23 @@ mod tests {
             code("invFtail(3, 20, .05)").map(|r| r.0),
             Ok("stata_d_invFtail(3, 20, 0.05)".to_string())
         );
+        assert_eq!(
+            code("nttail(df, 1.5, t)").map(|r| r.0),
+            Ok("stata_d_nttail(df, 1.5, t)".to_string())
+        );
+        assert_eq!(
+            code("nF(3, 10, np, x)").map(|r| r.0),
+            Ok("stata_d_nF(3, 10, np, x)".to_string())
+        );
+        assert_eq!(
+            code("chiprob(3, 7.81)").map(|r| r.0),
+            Ok("stata_d_chiprob(3, 7.81)".to_string())
+        );
         let refused = |t: &str| translate(t, &none, Use::Value).err().map(|e| e.reason);
+        assert_eq!(
+            refused("nt(5, 1)"),
+            Some("nt() takes 3 arguments (Stata: invalid syntax)".to_string())
+        );
         assert_eq!(
             refused("ttail(5)"),
             Some("ttail() takes 2 arguments (Stata: invalid syntax)".to_string())

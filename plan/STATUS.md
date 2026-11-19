@@ -5759,3 +5759,24 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Still open:** the order of the letters of `groups` for overlapping sets (24 of 134 designs; `r(groups#)` stays refused and
   `groups` carries a caveat) and Dunnett's last digits. The letter order needs a decision on how much more to spend on it
   (several variants tried again today, none matched).
+
+## P2C.12d: functions, batch F of the StatCraft port, 2026-11-19
+
+- **Translated** (`statatr::expr_r::strfn`, `expr_r::dist`): `word()`, `wordcount()` (fixed: tabs and new lines are not
+  separators), `strproper()` (`proper()`), `stritrim()` (`itrim()`), `strrpos()`, `strpos()` (`index()`; now bytes, and Stata's
+  empty-string cases), `strreverse()` (`reverse()`), `subinword()`, `regexr()`, `regexm()` (now through R's PCRE, keeping its
+  groups) with `regexs()`, `plural()`, `bsubstr()`, `udsubstr()`, `matrix()`, `scalar(exp)`, `match()`, the old names
+  `normprob()`, `invnorm()`, `chiprob()`, `fprob()` and `invfprob()`, and the noncentral `nt()`, `nttail()`, `nchi2()`,
+  `nchi2tail()`, `nF()` and `nFtail()`.
+- **Checked:** Stata 19 on made-up arguments: corpus `functions_f.do` (813 results, 1e-8; the string results with their
+  blanks shown as `_`) and `noncentral.do` (1,176 results, 1e-6); 32 functions added to `VERIFIED_FUNCTIONS`. The noncentral
+  distributions agree with R's to about 1e-9 in the cdf; Stata's limits past which it gives missing are written out
+  (df 1e10 for t, 1e6 for chi2, 1e8 for nF; np 1000, 1e4 and 1e4, 1e3 for nFtail). Notes in `plan/stata/functions-f.md`.
+- **Refused, not guessed:** `cofc()` in lower case (not a Stata function: unknown function, r(133)); `nt()` and `nttail()`
+  with `|np|` between 37.62 and 1000 stop in R (R changes to an approximation there that Stata does not use). Not done and
+  not in any probe: `invnt()`, `invnttail()`, `invnF()`, `invnFtail()`, `invnchi2()`, `invnchi2tail()`, `npnt()`, `npnF()`,
+  `npnchi2()`.
+- **Found on the way, not fixed:** `substr()` and `usubstr()` with a start counted from the end or not written out are still
+  refused, and `substr()` counts characters where Stata counts bytes (non-ASCII text); `A[i,j]` outside the matrix is `.` in
+  Stata and an r(503) stop here; `regexs()` after a `regexm()` of an earlier command gives each row's groups, Stata the last
+  row's (a caveat is shown).

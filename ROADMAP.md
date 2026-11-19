@@ -422,9 +422,17 @@ Command families:
   still refused.)
 - P2C.12d Functions
   (part done 2026-11-17: 132 functions Verified (distribution, date, string, matrix and
-  random-draw functions). Still refused: `word()`, `match()`, `matrix()`, `cofc()`, and
-  the old names `chiprob()`, `fprob()`, `invfprob()`, `invnorm()`, `normprob()` and
-  `nttail()`. `rpoisson()` and `rbeta()` with equal shapes stay with P2C.11.)
+  random-draw functions). Batch F of the StatCraft port done 2026-11-19: `word()` and `wordcount()`
+  (blanks only), `strproper()`, `stritrim()`, `strrpos()`, `strpos()` (bytes), `strreverse()`,
+  `subinword()`, `regexr()`, `regexm()` with `regexs()`, `plural()`, `bsubstr()`, `udsubstr()`,
+  `matrix()`, `scalar(exp)`, `match()`, the noncentral `nt()`, `nttail()`, `nchi2()`, `nchi2tail()`,
+  `nF()` and `nFtail()`, and the old names `chiprob()`, `fprob()`, `invfprob()`, `invnorm()`,
+  `normprob()`, `proper()`, `itrim()`, `index()` and `reverse()` (32 more functions Verified, corpus
+  `functions_f.do` and `noncentral.do`). Refused: `cofc()` in lower case (Stata: unknown function),
+  `nt()` and `nttail()` with a noncentrality parameter above 37.62 in size (R stops; R's value there
+  is an approximation Stata does not use). Not done: `invnt()`, `invnF()`, `invnchi2()` and the
+  `np` solvers (`npnt()`, ...), no probe uses them. `plan/stata/functions-f.md`.
+  `rpoisson()` and `rbeta()` with equal shapes stay with P2C.11.)
 - P2C.12e Single-equation models
   (part done 2026-11-17: `regress`, `logit`, `probit`, `poisson`, `nbreg`, `ologit`,
   `oprobit`, `mlogit`, `clogit`, `anova`, `rreg`, `robreg`, `newey`, `prais` and `nl`

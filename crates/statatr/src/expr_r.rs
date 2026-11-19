@@ -36,6 +36,7 @@ use crate::values::datetime::parse_date;
 use crate::values::missing::{is_missing, missing_code, missing_label};
 
 pub(crate) mod dist;
+pub(crate) mod strfn;
 
 /// What an R expression holds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -202,6 +203,7 @@ pub fn translate_drawing(
         draw_call: None,
         helpers: Vec::new(),
         bytes_ok: false,
+        no_vars: false,
         tags: tags || tagged,
     };
     let (code, kind) = t.expr(&tree)?;
@@ -246,6 +248,8 @@ struct Translator<'a> {
     /// Inside subinstr()'s search and replacement, which Stata works on as
     /// bytes: there char(128) to char(255) are single bytes R can match too.
     bytes_ok: bool,
+    /// Inside matrix(): names are scalars and matrices, never variables.
+    no_vars: bool,
     /// The data may hold extended missing values ([`translate_drawing`]).
     tags: bool,
 }
@@ -557,6 +561,11 @@ impl Translator<'_> {
                 }
                 // a variable before a scalar of the same name, as in Stata
                 _ => match (self.kind_of)(n) {
+                    Some(_) if self.no_vars => {
+                        return Err(no(format!(
+                            "matrix({n}) names a variable (Stata: {n} not found, r(111))"
+                        )))
+                    }
                     Some(k) => (r_name(n), k),
                     None => (self.returned)("scalar?", n).unwrap_or((r_name(n), Kind::Unknown)),
                 },
@@ -582,6 +591,11 @@ impl Translator<'_> {
                 Expr::Text(key) => (self.returned)(name, &key.replace(AT, "@")),
                 _ => Err(no(format!("{name}[] needs a coefficient name"))),
             };
+        }
+        if self.no_vars && (self.kind_of)(name).is_some() {
+            return Err(no(format!(
+                "matrix({name}[]) names a variable (Stata: {name} not found, r(111))"
+            )));
         }
         let var = r_name(name);
         let kind = (self.kind_of)(name).unwrap_or(Kind::Unknown);
@@ -843,7 +857,7 @@ impl Translator<'_> {
             // R's qnorm and pnorm give Stata 19's doubles bit for bit
             // (checked on 20,000 values, tails and subnormals included);
             // invnormal() outside 0 < p < 1 is missing in Stata
-            "invnormal" => {
+            "invnormal" | "invnorm" => {
                 want(1)?;
                 let (p, pk) = self.expr(arg(0)?)?;
                 let p = number(&p, pk)?;
@@ -887,7 +901,7 @@ impl Translator<'_> {
                 };
                 Ok((v.to_string(), Kind::Number))
             }
-            "normal" => {
+            "normal" | "normprob" => {
                 want(1)?;
                 let (z, zk) = self.expr(arg(0)?)?;
                 Ok((format!("stats::pnorm({})", number(&z, zk)?), Kind::Number))
@@ -1043,13 +1057,13 @@ impl Translator<'_> {
                 Ok((format!("nchar({s}, type = \"bytes\")"), Kind::Number))
             }
             "ustrlen" => self.text_fn("nchar", args, Kind::Number),
-            // words are what spaces and tabs separate; quotes are not special
-            // (Stata 19: wordcount(`"a "b c" d"') is 4)
+            // words are what blanks separate, not tabs or new lines; quotes are not special
+            // (Stata 19: wordcount(`"a "b c" d"') is 4, wordcount("a<tab>b") is 1)
             "wordcount" => {
                 want(1)?;
                 let (s, _) = self.expr(arg(0)?)?;
                 Ok((
-                    format!("as.numeric(lengths(regmatches({s}, gregexpr(\"[^ \\t]+\", {s}))))"),
+                    format!("as.numeric(lengths(regmatches({s}, gregexpr(\"[^ ]+\", {s}))))"),
                     Kind::Number,
                 ))
             }
@@ -1094,7 +1108,7 @@ impl Translator<'_> {
                 Ok((format!("stata_char({n})"), Kind::Text))
             }
             // strmatch(s, pattern): * any characters, ? one, the rest as written
-            "strmatch" => {
+            "strmatch" | "match" => {
                 want(2)?;
                 let (s, sk) = self.expr(arg(0)?)?;
                 let (p, pk) = self.expr(arg(1)?)?;
@@ -1127,7 +1141,7 @@ impl Translator<'_> {
                     _ => Err(no("substr() counting from the end, or from a position that is not written out, is not translated yet")),
                 }
             }
-            "strpos" | "ustrpos" => {
+            "ustrpos" => {
                 want(2)?;
                 let (s, _) = self.expr(arg(0)?)?;
                 let (t, _) = self.expr(arg(1)?)?;
@@ -1172,13 +1186,41 @@ impl Translator<'_> {
                     Err(no("subinstr() replacing a count other than 1 or all (.) is not translated yet"))
                 }
             }
-            "regexm" | "ustrregexm" => {
+            // regexm() keeps the groups of its match for regexs(), which Stata gives from the last
+            // call; its expressions are PCRE-like (leftmost first, lookahead, (?i), <)
+            "regexm" => {
+                want(2)?;
+                let (s, sk) = self.expr(arg(0)?)?;
+                let (re, rk) = self.expr(arg(1)?)?;
+                if matches!(sk, Kind::Number | Kind::Logical)
+                    || matches!(rk, Kind::Number | Kind::Logical)
+                {
+                    return Err(no("regexm() takes two strings (Stata: type mismatch)"));
+                }
+                self.caveat("regular expressions: Stata's and R's dialects differ in some details");
+                self.helpers.push("stata_strfn");
+                Ok((format!("stata_regexm({s}, {re})"), Kind::Logical))
+            }
+            "ustrregexm" => {
                 want(2)?;
                 let (s, _) = self.expr(arg(0)?)?;
                 let (re, _) = self.expr(arg(1)?)?;
                 self.caveat("regular expressions: Stata's and R's dialects differ in some details");
                 Ok((format!("grepl({re}, {s})"), Kind::Logical))
             }
+            // matrix(exp): exp read with its names as scalars and matrices, not variables
+            "matrix" => {
+                want(1)?;
+                let before = std::mem::replace(&mut self.no_vars, true);
+                let r = self.expr(arg(0)?);
+                self.no_vars = before;
+                r
+            }
+            // lower-case cofc() is no Stata function (Cofc() and cofC() are)
+            "cofc" => Err(no(
+                "cofc() is not a Stata function (unknown function, r(133)): Stata stops there; \
+                 Cofc() and cofC() are the leap-second ones",
+            )),
             "real" => {
                 want(1)?;
                 let (s, _) = self.expr(arg(0)?)?;
@@ -1216,7 +1258,9 @@ impl Translator<'_> {
             },
             "scalar" => match args {
                 [Expr::Name(n)] => (self.returned)("scalar", n),
-                _ => Err(no("scalar() takes one scalar name")),
+                // scalar(exp) reads exp with its names as scalars and matrices, as matrix(exp) does
+                [_] => self.call("matrix", args),
+                _ => Err(no("scalar() takes one scalar name or one expression")),
             },
             "r" => match args {
                 [Expr::Name(n)] => (self.returned)("r", n),
@@ -1339,6 +1383,7 @@ impl Translator<'_> {
             | "rhypergeometric" | "rt" | "rbeta" => self.draw(name, args),
             n if DATE_FUNCTIONS.iter().any(|(f, _)| *f == n) => self.date_fn(n, args),
             n if dist::is_distribution(n) => self.distribution(n, args),
+            n if strfn::is_string_function(n) => self.string_function(n, args),
             n if DATE_READERS.iter().any(|(f, _)| *f == n) => self.date_reader(n, args),
             n if LEAP_SECOND_FUNCTIONS.contains(&n) => Err(no(format!(
                 "{n}() counts leap seconds (datetime/C), which is not translated yet; \

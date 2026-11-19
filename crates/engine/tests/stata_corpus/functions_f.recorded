@@ -1,0 +1,814 @@
+* Stata 19.0's results for functions_f.do, recorded by cargo xtask stata-record
+@ word [a] [b] [c] [] [] [c] [b] [a] []
+@ word_n [a] [b] [c] [] [] [] []
+@ word_blanks [] [] [a] [b] [b] [six] [one] []
+@ word_tab 3 1 3 2 [a,b] [c;d]
+@ word_quote ["b] [c"] ["a]
+@ word_utf [ñ] [ü]
+@ wordcount 3 0 0 1 1 4 2
+@ proper [Hello_World] [O'Neil_Mc-Donald] [123Abc_Def] [A1B2_C3D] [_Multiple__Spaces_] [X_Y_Z.W] [It'S] [] [.]
+@ proper_utf [ÉLan_Vital_ñAndú] [Mary-Ann_Smith] [One,Two;Three] [(Paren)_[Brack]] [ß_StraßE] [Ab12Cd] [_A] [A'B] [A-B-C]
+@ proper_tab 4 1 1 1
+@ itrim [a_b] [__a_b__] [x___] [___x] [] [____] [a_b] [a_"b_c"_d] [a_b_c_d]
+@ itrim_tab 4 4 5 7 3 3 4 1
+@ rpos 5 0 6 0 0 2 0 4 4 3 4 0 5 2 3
+@ pos 2 1 0 0 4 3 0 1 1 2 0
+@ rev [cba] [] [_c__b_a] 5 1 2 1 1
+@ subword1 [a_x_c] [ab_x_x] [ab_x_b] [ab_x_x] [ab_x_x] [ab_b_b] [ab_b_b] [ab_x_b]
+@ subword2 [a,b_c] [x_c] [a_x] [x] [a_b_c] [] [a__c] [a_x_y_z_c]
+@ subword3 [a__x___c] [x___c] [a_b] [_x_] [bb_bb] [aXb_y] [x]
+@ subword4 [a   b_x_c] [a.b_c] [a-b] [é_x] [éb_x] [a_b_c] [a_b_c] [x_b] [a_b]
+@ subword5 [a_x_c] [a_b_c] [bb_bb_b_b] [a_b_a_b] [z_z] [aa_b_aa_b] [a_x_x] [a_b_b] [a_x_x]
+@ regexr1 [axc] [axcabc] [abc] [xabc] [x] [x] [xabc] [xabc] [abcx]
+@ regexr2 [a[\1]c] [a[\0]c] [a\1c] [a\\c] [a$1c] [a&c]
+@ regexr3 [x.c] [axc] [Ax] [abc] [abc] [abc_def] [xbc] [xc] [xaaa]
+@ regexr4 [xbc] [abc_def] [x] [abc] [axc] [axc] [xb] [abc]
+@ regexr5 [abc] [abc] [abc] [a*c] [axc] [a(c] [a)c] [axc] [axc] [a?c] [a+c]
+@ regexr6 [xb] [xb] [x] [xaa] [a_x] [fooxbar] [xb] [xbc] [x] [a+b] [x] [AB]
+@ regexr_utf [éx] [axb] 2 4
+@ regexm1 1 [abc123] [abc] [123] [] [] [] [] [] [abc]
+@ regexm2 0 [] []
+@ regexm3 1 [b] []
+@ regexm4 1 0 []
+@ regexm5 1 [] [] 1 [a] 1 [abcd] [a] [bcd]
+@ regexm6 1 1 1 1 0 1 0 1
+@ regexm7 [a]
+@ regexm_rows 1 [555] [1234] 1
+@ regexm_rows 2 [] [] 0
+@ regexm_rows 3 [200] [3000] 1
+@ regexm_rows 4 [7] [8] 1
+@ regexm_rows2 1 [a]
+@ regexm_rows2 2 [n]
+@ regexm_rows2 3 [200]
+@ regexm_rows2 4 [7]
+@ plural1 [cats] [cat] [cats] [cats] [cat] [cats] [cats] [cats] [buss] [citys] [s] [] [Cats] [cat_s]
+@ plural2 [ren] [child] [m] [wi] [mice] [en] [cit] [city] [] [ca] [] [cat] [cats] [cat]
+@ plural3 [es] [children] [cat] [ren] [ren] [child]
+@ bsub1 [bcd] [] [ef] [ef] [bcdef] [] [] [] [f] [] [] []
+@ bsub2 [] [bcdef] [ab] [f] [a] [] [abcdef] []
+@ bsub3 1 2 2 1 1
+@ udsub1 [aü] [ü] [] [aü] [éaü] [éa] [] [é]
+@ udsub2 [日] [] [本] [本] [] [日] [b] []
+@ matrix 3 2 5 7 . 5 [a]
+@ scalar 7 4 5 [a] 8 4 .
+@ matrix_gen 4 . 7
+@ match 1 1 0 1 0
+@ normprob -3     .0013498980316300946     .0013498980316300946
+@ normprob -1       .15865525393145705       .15865525393145705
+@ normprob 0                       .5                       .5
+@ normprob .1       .53982783727702899       .53982783727702899
+@ normprob 1.96       .97500210485177963       .97500210485177963
+@ normprob 5       .99999971334842808       .99999971334842808
+@ normprob 38                        1                        1
+@ normprob -38                        0                        0
+@ normprob 40                        1                        1
+@ normprob .                        .                        .
+@ invnorm -1                        .                        .
+@ invnorm 0                        .                        .
+@ invnorm 1e-300      -37.047096299361201      -37.047096299361201
+@ invnorm 1e-10      -6.3613409024040557      -6.3613409024040557
+@ invnorm .025      -1.9599639845400538      -1.9599639845400538
+@ invnorm .5                        0                        0
+@ invnorm .975       1.9599639845400536       1.9599639845400536
+@ invnorm 1                        .                        .
+@ invnorm 1.5                        .                        .
+@ invnorm .                        .                        .
+@ chiprob -1 -1                        .
+@ chiprob -1 0                        .
+@ chiprob -1 .5                        .
+@ chiprob -1 3                        .
+@ chiprob -1 7.81                        .
+@ chiprob -1 100                        .
+@ chiprob -1 1e6                        .
+@ chiprob -1 .                        .
+@ chiprob 0 -1                        .
+@ chiprob 0 0                        .
+@ chiprob 0 .5                        .
+@ chiprob 0 3                        .
+@ chiprob 0 7.81                        .
+@ chiprob 0 100                        .
+@ chiprob 0 1e6                        .
+@ chiprob 0 .                        .
+@ chiprob .5 -1                        1
+@ chiprob .5 0                        1
+@ chiprob .5 .5       .25632205526853913
+@ chiprob .5 3      .033416444158979063
+@ chiprob .5 7.81     .0017223121158774083
+@ chiprob .5 100   2.7881948481582583e-24
+@ chiprob .5 1e6                        0
+@ chiprob .5 .                        .
+@ chiprob 1 -1                        1
+@ chiprob 1 0                        1
+@ chiprob 1 .5       .47950012218695337
+@ chiprob 1 3       .08326451666355035
+@ chiprob 1 7.81     .0051957904297631622
+@ chiprob 1 100   1.5239706048321104e-23
+@ chiprob 1 1e6                        0
+@ chiprob 1 .                        .
+@ chiprob 3 -1                        1
+@ chiprob 3 0                        1
+@ chiprob 3 .5        .9188914116546758
+@ chiprob 3 3       .39162517627108884
+@ chiprob 3 7.81      .050106056350005895
+@ chiprob 3 100   1.5541594313896026e-21
+@ chiprob 3 1e6                        0
+@ chiprob 3 .                        .
+@ chiprob 100 -1                        1
+@ chiprob 100 0                        1
+@ chiprob 100 .5                        1
+@ chiprob 100 3                        1
+@ chiprob 100 7.81                        1
+@ chiprob 100 100       .48119168452794525
+@ chiprob 100 1e6                        0
+@ chiprob 100 .                        .
+@ chiprob 1e6 -1                        1
+@ chiprob 1e6 0                        1
+@ chiprob 1e6 .5                        1
+@ chiprob 1e6 3                        1
+@ chiprob 1e6 7.81                        1
+@ chiprob 1e6 100                        1
+@ chiprob 1e6 1e6       .49981193681248576
+@ chiprob 1e6 .                        .
+@ chiprob 1e17 -1                        1
+@ chiprob 1e17 0                        1
+@ chiprob 1e17 .5                        1
+@ chiprob 1e17 3                        1
+@ chiprob 1e17 7.81                        1
+@ chiprob 1e17 100                        1
+@ chiprob 1e17 1e6                        1
+@ chiprob 1e17 .                        .
+@ chiprob 2e17 -1                        1
+@ chiprob 2e17 0                        1
+@ chiprob 2e17 .5                        1
+@ chiprob 2e17 3                        1
+@ chiprob 2e17 7.81                        1
+@ chiprob 2e17 100                        1
+@ chiprob 2e17 1e6                        1
+@ chiprob 2e17 .                        .
+@ chiprob 3e17 -1                        1
+@ chiprob 3e17 0                        1
+@ chiprob 3e17 .5                        1
+@ chiprob 3e17 3                        1
+@ chiprob 3e17 7.81                        1
+@ chiprob 3e17 100                        1
+@ chiprob 3e17 1e6                        1
+@ chiprob 3e17 .                        .
+@ chiprob . -1                        .
+@ chiprob . 0                        .
+@ chiprob . .5                        .
+@ chiprob . 3                        .
+@ chiprob . 7.81                        .
+@ chiprob . 100                        .
+@ chiprob . 1e6                        .
+@ chiprob . .                        .
+@ fprob -1 -1 -1                        .
+@ fprob -1 -1 0                        .
+@ fprob -1 -1 .5                        .
+@ fprob -1 -1 4.1                        .
+@ fprob -1 -1 30                        .
+@ fprob -1 -1 .                        .
+@ fprob -1 0 -1                        .
+@ fprob -1 0 0                        .
+@ fprob -1 0 .5                        .
+@ fprob -1 0 4.1                        .
+@ fprob -1 0 30                        .
+@ fprob -1 0 .                        .
+@ fprob -1 .5 -1                        .
+@ fprob -1 .5 0                        .
+@ fprob -1 .5 .5                        .
+@ fprob -1 .5 4.1                        .
+@ fprob -1 .5 30                        .
+@ fprob -1 .5 .                        .
+@ fprob -1 1 -1                        .
+@ fprob -1 1 0                        .
+@ fprob -1 1 .5                        .
+@ fprob -1 1 4.1                        .
+@ fprob -1 1 30                        .
+@ fprob -1 1 .                        .
+@ fprob -1 10 -1                        .
+@ fprob -1 10 0                        .
+@ fprob -1 10 .5                        .
+@ fprob -1 10 4.1                        .
+@ fprob -1 10 30                        .
+@ fprob -1 10 .                        .
+@ fprob -1 1e6 -1                        .
+@ fprob -1 1e6 0                        .
+@ fprob -1 1e6 .5                        .
+@ fprob -1 1e6 4.1                        .
+@ fprob -1 1e6 30                        .
+@ fprob -1 1e6 .                        .
+@ fprob -1 . -1                        .
+@ fprob -1 . 0                        .
+@ fprob -1 . .5                        .
+@ fprob -1 . 4.1                        .
+@ fprob -1 . 30                        .
+@ fprob -1 . .                        .
+@ fprob 0 -1 -1                        .
+@ fprob 0 -1 0                        .
+@ fprob 0 -1 .5                        .
+@ fprob 0 -1 4.1                        .
+@ fprob 0 -1 30                        .
+@ fprob 0 -1 .                        .
+@ fprob 0 0 -1                        .
+@ fprob 0 0 0                        .
+@ fprob 0 0 .5                        .
+@ fprob 0 0 4.1                        .
+@ fprob 0 0 30                        .
+@ fprob 0 0 .                        .
+@ fprob 0 .5 -1                        .
+@ fprob 0 .5 0                        .
+@ fprob 0 .5 .5                        .
+@ fprob 0 .5 4.1                        .
+@ fprob 0 .5 30                        .
+@ fprob 0 .5 .                        .
+@ fprob 0 1 -1                        .
+@ fprob 0 1 0                        .
+@ fprob 0 1 .5                        .
+@ fprob 0 1 4.1                        .
+@ fprob 0 1 30                        .
+@ fprob 0 1 .                        .
+@ fprob 0 10 -1                        .
+@ fprob 0 10 0                        .
+@ fprob 0 10 .5                        .
+@ fprob 0 10 4.1                        .
+@ fprob 0 10 30                        .
+@ fprob 0 10 .                        .
+@ fprob 0 1e6 -1                        .
+@ fprob 0 1e6 0                        .
+@ fprob 0 1e6 .5                        .
+@ fprob 0 1e6 4.1                        .
+@ fprob 0 1e6 30                        .
+@ fprob 0 1e6 .                        .
+@ fprob 0 . -1                        .
+@ fprob 0 . 0                        .
+@ fprob 0 . .5                        .
+@ fprob 0 . 4.1                        .
+@ fprob 0 . 30                        .
+@ fprob 0 . .                        .
+@ fprob .5 -1 -1                        .
+@ fprob .5 -1 0                        .
+@ fprob .5 -1 .5                        .
+@ fprob .5 -1 4.1                        .
+@ fprob .5 -1 30                        .
+@ fprob .5 -1 .                        .
+@ fprob .5 0 -1                        .
+@ fprob .5 0 0                        .
+@ fprob .5 0 .5                        .
+@ fprob .5 0 4.1                        .
+@ fprob .5 0 30                        .
+@ fprob .5 0 .                        .
+@ fprob .5 .5 -1                        1
+@ fprob .5 .5 0                        1
+@ fprob .5 .5 .5       .56544011515757464
+@ fprob .5 .5 4.1       .37061376050068201
+@ fprob .5 .5 30       .22970063248219993
+@ fprob .5 .5 .                        .
+@ fprob .5 1 -1                        1
+@ fprob .5 1 0                        1
+@ fprob .5 1 .5       .47874640712638661
+@ fprob .5 1 4.1       .24023306535284014
+@ fprob .5 1 30      .096885714767746753
+@ fprob .5 1 .                        .
+@ fprob .5 10 -1                        1
+@ fprob .5 10 0                        1
+@ fprob .5 10 .5       .37255816257200669
+@ fprob .5 10 4.1      .083398237887755189
+@ fprob .5 10 30      .001128185723048082
+@ fprob .5 10 .                        .
+@ fprob .5 1e6 -1                        1
+@ fprob .5 1e6 0                        1
+@ fprob .5 1e6 .5       .35984292055598077
+@ fprob .5 1e6 4.1      .065439135780030605
+@ fprob .5 1e6 30   .000030884287838002793
+@ fprob .5 1e6 .                        .
+@ fprob .5 . -1                        .
+@ fprob .5 . 0                        .
+@ fprob .5 . .5                        .
+@ fprob .5 . 4.1                        .
+@ fprob .5 . 30                        .
+@ fprob .5 . .                        .
+@ fprob 1 -1 -1                        .
+@ fprob 1 -1 0                        .
+@ fprob 1 -1 .5                        .
+@ fprob 1 -1 4.1                        .
+@ fprob 1 -1 30                        .
+@ fprob 1 -1 .                        .
+@ fprob 1 0 -1                        .
+@ fprob 1 0 0                        .
+@ fprob 1 0 .5                        .
+@ fprob 1 0 4.1                        .
+@ fprob 1 0 30                        .
+@ fprob 1 0 .                        .
+@ fprob 1 .5 -1                        1
+@ fprob 1 .5 0                        1
+@ fprob 1 .5 .5       .68311289932563812
+@ fprob 1 .5 4.1       .44295712106735213
+@ fprob 1 .5 30       .27338305568615262
+@ fprob 1 .5 .                        .
+@ fprob 1 1 -1                        1
+@ fprob 1 1 0                        1
+@ fprob 1 1 .5       .60817344796939288
+@ fprob 1 1 4.1       .29203494105707878
+@ fprob 1 1 30       .11496411795103313
+@ fprob 1 1 .                        .
+@ fprob 1 10 -1                        1
+@ fprob 1 10 0                        1
+@ fprob 1 10 .5          .49564750438312
+@ fprob 1 10 4.1      .070408271031321815
+@ fprob 1 10 30     .0002702957472546176
+@ fprob 1 10 .                        .
+@ fprob 1 1e6 -1                        1
+@ fprob 1 1e6 0                        1
+@ fprob 1 1e6 .5        .4795002869586561
+@ fprob 1 1e6 4.1      .042883478706150252
+@ fprob 1 1e6 30   4.3214992222543029e-08
+@ fprob 1 1e6 .                        .
+@ fprob 1 . -1                        .
+@ fprob 1 . 0                        .
+@ fprob 1 . .5                        .
+@ fprob 1 . 4.1                        .
+@ fprob 1 . 30                        .
+@ fprob 1 . .                        .
+@ fprob 2 -1 -1                        .
+@ fprob 2 -1 0                        .
+@ fprob 2 -1 .5                        .
+@ fprob 2 -1 4.1                        .
+@ fprob 2 -1 30                        .
+@ fprob 2 -1 .                        .
+@ fprob 2 0 -1                        .
+@ fprob 2 0 0                        .
+@ fprob 2 0 .5                        .
+@ fprob 2 0 4.1                        .
+@ fprob 2 0 30                        .
+@ fprob 2 0 .                        .
+@ fprob 2 .5 -1                        1
+@ fprob 2 .5 0                        1
+@ fprob 2 .5 .5       .75983568565159254
+@ fprob 2 .5 4.1       .48962398914135336
+@ fprob 2 .5 30       .30151134457776363
+@ fprob 2 .5 .                        .
+@ fprob 2 1 -1                        1
+@ fprob 2 1 0                        1
+@ fprob 2 1 .5       .70710678118654757
+@ fprob 2 1 4.1       .32969023669789355
+@ fprob 2 1 30       .12803687993289598
+@ fprob 2 1 .                        .
+@ fprob 2 10 -1                        1
+@ fprob 2 10 0                        1
+@ fprob 2 10 .5       .62092132305915526
+@ fprob 2 10 4.1      .050077548481083867
+@ fprob 2 10 30   .000059499018266198511
+@ fprob 2 10 .                        .
+@ fprob 2 1e6 -1                        1
+@ fprob 2 1e6 0                        1
+@ fprob 2 1e6 .5       .60653081134521636
+@ fprob 2 1e6 4.1      .016572953989253344
+@ fprob 2 1e6 30   9.3660482833240873e-14
+@ fprob 2 1e6 .                        .
+@ fprob 2 . -1                        .
+@ fprob 2 . 0                        .
+@ fprob 2 . .5                        .
+@ fprob 2 . 4.1                        .
+@ fprob 2 . 30                        .
+@ fprob 2 . .                        .
+@ fprob 10 -1 -1                        .
+@ fprob 10 -1 0                        .
+@ fprob 10 -1 .5                        .
+@ fprob 10 -1 4.1                        .
+@ fprob 10 -1 30                        .
+@ fprob 10 -1 .                        .
+@ fprob 10 0 -1                        .
+@ fprob 10 0 0                        .
+@ fprob 10 0 .5                        .
+@ fprob 10 0 4.1                        .
+@ fprob 10 0 30                        .
+@ fprob 10 0 .                        .
+@ fprob 10 .5 -1                        1
+@ fprob 10 .5 0                        1
+@ fprob 10 .5 .5       .82885767510394537
+@ fprob 10 .5 4.1       .53115341964036733
+@ fprob 10 .5 30       .32648052756480567
+@ fprob 10 .5 .                        .
+@ fprob 10 1 -1                        1
+@ fprob 10 1 0                        1
+@ fprob 10 1 .5       .81233012913039704
+@ fprob 10 1 4.1       .36793135617910944
+@ fprob 10 1 30       .14121962254445167
+@ fprob 10 1 .                        .
+@ fprob 10 10 -1                        1
+@ fprob 10 10 0                        1
+@ fprob 10 10 .5       .85515419397449588
+@ fprob 10 10 4.1      .018009442127157927
+@ fprob 10 10 30   3.9471317088349628e-06
+@ fprob 10 10 .                        .
+@ fprob 10 1e6 -1                        1
+@ fprob 10 1e6 0                        1
+@ fprob 10 1e6 .5       .89117751790896615
+@ fprob 10 1e6 4.1   .000011287281610789923
+@ fprob 10 1e6 30   1.5881693304089869e-58
+@ fprob 10 1e6 .                        .
+@ fprob 10 . -1                        .
+@ fprob 10 . 0                        .
+@ fprob 10 . .5                        .
+@ fprob 10 . 4.1                        .
+@ fprob 10 . 30                        .
+@ fprob 10 . .                        .
+@ fprob 1e6 -1 -1                        .
+@ fprob 1e6 -1 0                        .
+@ fprob 1e6 -1 .5                        .
+@ fprob 1e6 -1 4.1                        .
+@ fprob 1e6 -1 30                        .
+@ fprob 1e6 -1 .                        .
+@ fprob 1e6 0 -1                        .
+@ fprob 1e6 0 0                        .
+@ fprob 1e6 0 .5                        .
+@ fprob 1e6 0 4.1                        .
+@ fprob 1e6 0 30                        .
+@ fprob 1e6 0 .                        .
+@ fprob 1e6 .5 -1                        1
+@ fprob 1e6 .5 0                        1
+@ fprob 1e6 .5 .5       .84648622834902942
+@ fprob 1e6 .5 4.1       .54166226145788221
+@ fprob 1e6 .5 30       .33278272226313343
+@ fprob 1e6 .5 .                        .
+@ fprob 1e6 1 -1                        1
+@ fprob 1e6 1 0                        1
+@ fprob 1e6 1 .5       .84270048161916533
+@ fprob 1e6 1 4.1        .3785982249028062
+@ fprob 1e6 1 30       .14486782240508086
+@ fprob 1e6 1 .                        .
+@ fprob 1e6 10 -1                        1
+@ fprob 1e6 10 0                        1
+@ fprob 1e6 10 .5       .97074617692000287
+@ fprob 1e6 10 4.1     .0082652945051718066
+@ fprob 1e6 10 30   9.3298081265824684e-07
+@ fprob 1e6 10 .                        .
+@ fprob 1e6 1e6 -1                        1
+@ fprob 1e6 1e6 0                        1
+@ fprob 1e6 1e6 .5                        1
+@ fprob 1e6 1e6 4.1                        0
+@ fprob 1e6 1e6 30                        0
+@ fprob 1e6 1e6 .                        .
+@ fprob 1e6 . -1                        .
+@ fprob 1e6 . 0                        .
+@ fprob 1e6 . .5                        .
+@ fprob 1e6 . 4.1                        .
+@ fprob 1e6 . 30                        .
+@ fprob 1e6 . .                        .
+@ fprob . -1 -1                        .
+@ fprob . -1 0                        .
+@ fprob . -1 .5                        .
+@ fprob . -1 4.1                        .
+@ fprob . -1 30                        .
+@ fprob . -1 .                        .
+@ fprob . 0 -1                        .
+@ fprob . 0 0                        .
+@ fprob . 0 .5                        .
+@ fprob . 0 4.1                        .
+@ fprob . 0 30                        .
+@ fprob . 0 .                        .
+@ fprob . .5 -1                        .
+@ fprob . .5 0                        .
+@ fprob . .5 .5                        .
+@ fprob . .5 4.1                        .
+@ fprob . .5 30                        .
+@ fprob . .5 .                        .
+@ fprob . 1 -1                        .
+@ fprob . 1 0                        .
+@ fprob . 1 .5                        .
+@ fprob . 1 4.1                        .
+@ fprob . 1 30                        .
+@ fprob . 1 .                        .
+@ fprob . 10 -1                        .
+@ fprob . 10 0                        .
+@ fprob . 10 .5                        .
+@ fprob . 10 4.1                        .
+@ fprob . 10 30                        .
+@ fprob . 10 .                        .
+@ fprob . 1e6 -1                        .
+@ fprob . 1e6 0                        .
+@ fprob . 1e6 .5                        .
+@ fprob . 1e6 4.1                        .
+@ fprob . 1e6 30                        .
+@ fprob . 1e6 .                        .
+@ fprob . . -1                        .
+@ fprob . . 0                        .
+@ fprob . . .5                        .
+@ fprob . . 4.1                        .
+@ fprob . . 30                        .
+@ fprob . . .                        .
+@ invfprob 0 0 -1                        .
+@ invfprob 0 0 0                        .
+@ invfprob 0 0 1e-12                        .
+@ invfprob 0 0 .05                        .
+@ invfprob 0 0 .5                        .
+@ invfprob 0 0 .99                        .
+@ invfprob 0 0 1                        .
+@ invfprob 0 0 1.5                        .
+@ invfprob 0 0 .                        .
+@ invfprob 0 1 -1                        .
+@ invfprob 0 1 0                        .
+@ invfprob 0 1 1e-12                        .
+@ invfprob 0 1 .05                        .
+@ invfprob 0 1 .5                        .
+@ invfprob 0 1 .99                        .
+@ invfprob 0 1 1                        .
+@ invfprob 0 1 1.5                        .
+@ invfprob 0 1 .                        .
+@ invfprob 0 10 -1                        .
+@ invfprob 0 10 0                        .
+@ invfprob 0 10 1e-12                        .
+@ invfprob 0 10 .05                        .
+@ invfprob 0 10 .5                        .
+@ invfprob 0 10 .99                        .
+@ invfprob 0 10 1                        .
+@ invfprob 0 10 1.5                        .
+@ invfprob 0 10 .                        .
+@ invfprob 0 1e6 -1                        .
+@ invfprob 0 1e6 0                        .
+@ invfprob 0 1e6 1e-12                        .
+@ invfprob 0 1e6 .05                        .
+@ invfprob 0 1e6 .5                        .
+@ invfprob 0 1e6 .99                        .
+@ invfprob 0 1e6 1                        .
+@ invfprob 0 1e6 1.5                        .
+@ invfprob 0 1e6 .                        .
+@ invfprob 0 . -1                        .
+@ invfprob 0 . 0                        .
+@ invfprob 0 . 1e-12                        .
+@ invfprob 0 . .05                        .
+@ invfprob 0 . .5                        .
+@ invfprob 0 . .99                        .
+@ invfprob 0 . 1                        .
+@ invfprob 0 . 1.5                        .
+@ invfprob 0 . .                        .
+@ invfprob .5 0 -1                        .
+@ invfprob .5 0 0                        .
+@ invfprob .5 0 1e-12                        .
+@ invfprob .5 0 .05                        .
+@ invfprob .5 0 .5                        .
+@ invfprob .5 0 .99                        .
+@ invfprob .5 0 1                        .
+@ invfprob .5 0 1.5                        .
+@ invfprob .5 0 .                        .
+@ invfprob .5 1 -1                        .
+@ invfprob .5 1 0                        .
+@ invfprob .5 1 1e-12   2.9090122840867075e+23
+@ invfprob .5 1 .05       115.36306955074528
+@ invfprob .5 1 .5       .41421356237309481
+@ invfprob .5 1 .99   5.9085226087704943e-08
+@ invfprob .5 1 1                        0
+@ invfprob .5 1 1.5                        .
+@ invfprob .5 1 .                        .
+@ invfprob .5 10 -1                        .
+@ invfprob .5 10 0                        .
+@ invfprob .5 10 1e-12       3020.9745086879957
+@ invfprob .5 10 .05       5.9572290138438309
+@ invfprob .5 10 .5       .18939702904045602
+@ invfprob .5 10 .99   2.9135043884018032e-08
+@ invfprob .5 10 1                        0
+@ invfprob .5 10 1.5                        .
+@ invfprob .5 10 .                        .
+@ invfprob .5 1e6 -1                        .
+@ invfprob .5 1e6 0                        .
+@ invfprob .5 1e6 1e-12       95.729870634544312
+@ invfprob .5 1e6 .05        4.840474037666457
+@ invfprob .5 1e6 .5       .17469534806258624
+@ invfprob .5 1e6 .99   2.6998811967338901e-08
+@ invfprob .5 1e6 1                        0
+@ invfprob .5 1e6 1.5                        .
+@ invfprob .5 1e6 .                        .
+@ invfprob .5 . -1                        .
+@ invfprob .5 . 0                        .
+@ invfprob .5 . 1e-12                        .
+@ invfprob .5 . .05                        .
+@ invfprob .5 . .5                        .
+@ invfprob .5 . .99                        .
+@ invfprob .5 . 1                        .
+@ invfprob .5 . 1.5                        .
+@ invfprob .5 . .                        .
+@ invfprob 1 0 -1                        .
+@ invfprob 1 0 0                        .
+@ invfprob 1 0 1e-12                        .
+@ invfprob 1 0 .05                        .
+@ invfprob 1 0 .5                        .
+@ invfprob 1 0 .99                        .
+@ invfprob 1 0 1                        .
+@ invfprob 1 0 1.5                        .
+@ invfprob 1 0 .                        .
+@ invfprob 1 1 -1                        .
+@ invfprob 1 1 0                        .
+@ invfprob 1 1 1e-12   4.0528473456935121e+23
+@ invfprob 1 1 .05        161.4476387975883
+@ invfprob 1 1 .5       .99999999999999911
+@ invfprob 1 1 .99     .0002467807028240953
+@ invfprob 1 1 1                        0
+@ invfprob 1 1 1.5                        .
+@ invfprob 1 1 .                        .
+@ invfprob 1 10 -1                        .
+@ invfprob 1 10 0                        .
+@ invfprob 1 10 1e-12       1888.5025499291396
+@ invfprob 1 10 .05       4.9646027437307065
+@ invfprob 1 10 .5       .48973692115835465
+@ invfprob 1 10 .99    .00016512967522423067
+@ invfprob 1 10 1                        0
+@ invfprob 1 10 1.5                        .
+@ invfprob 1 10 .                        .
+@ invfprob 1 1e6 -1                        .
+@ invfprob 1 1e6 0                        .
+@ invfprob 1 1e6 1e-12       50.845445919651624
+@ invfprob 1 1e6 .05       3.8414681198431566
+@ invfprob 1 1e6 .5       .45493675407152789
+@ invfprob 1 1e6 .99    .00015708793646598948
+@ invfprob 1 1e6 1                        0
+@ invfprob 1 1e6 1.5                        .
+@ invfprob 1 1e6 .                        .
+@ invfprob 1 . -1                        .
+@ invfprob 1 . 0                        .
+@ invfprob 1 . 1e-12                        .
+@ invfprob 1 . .05                        .
+@ invfprob 1 . .5                        .
+@ invfprob 1 . .99                        .
+@ invfprob 1 . 1                        .
+@ invfprob 1 . 1.5                        .
+@ invfprob 1 . .                        .
+@ invfprob 2 0 -1                        .
+@ invfprob 2 0 0                        .
+@ invfprob 2 0 1e-12                        .
+@ invfprob 2 0 .05                        .
+@ invfprob 2 0 .5                        .
+@ invfprob 2 0 .99                        .
+@ invfprob 2 0 1                        .
+@ invfprob 2 0 1.5                        .
+@ invfprob 2 0 .                        .
+@ invfprob 2 1 -1                        .
+@ invfprob 2 1 0                        .
+@ invfprob 2 1 1e-12   5.0000000000000053e+23
+@ invfprob 2 1 .05       199.50000000000023
+@ invfprob 2 1 .5       1.4999999999999996
+@ invfprob 2 1 .99      .010152025303540452
+@ invfprob 2 1 1                        0
+@ invfprob 2 1 1.5                        .
+@ invfprob 2 1 .                        .
+@ invfprob 2 10 -1                        .
+@ invfprob 2 10 0                        .
+@ invfprob 2 10 1e-12       1250.9432157547894
+@ invfprob 2 10 .05        4.102821015130397
+@ invfprob 2 10 .5       .74349177498517482
+@ invfprob 2 10 .99      .010060443549826568
+@ invfprob 2 10 1                        0
+@ invfprob 2 10 1.5                        .
+@ invfprob 2 10 .                        .
+@ invfprob 2 1e6 -1                        .
+@ invfprob 2 1e6 0                        .
+@ invfprob 2 1e6 1e-12       27.631784603320362
+@ invfprob 2 1e6 .05       2.9957412479837719
+@ invfprob 2 1e6 .5       .69314766101318237
+@ invfprob 2 1e6 .99      .010050335954510697
+@ invfprob 2 1e6 1                        0
+@ invfprob 2 1e6 1.5                        .
+@ invfprob 2 1e6 .                        .
+@ invfprob 2 . -1                        .
+@ invfprob 2 . 0                        .
+@ invfprob 2 . 1e-12                        .
+@ invfprob 2 . .05                        .
+@ invfprob 2 . .5                        .
+@ invfprob 2 . .99                        .
+@ invfprob 2 . 1                        .
+@ invfprob 2 . 1.5                        .
+@ invfprob 2 . .                        .
+@ invfprob 10 0 -1                        .
+@ invfprob 10 0 0                        .
+@ invfprob 10 0 1e-12                        .
+@ invfprob 10 0 .05                        .
+@ invfprob 10 0 .5                        .
+@ invfprob 10 0 .99                        .
+@ invfprob 10 0 1                        .
+@ invfprob 10 0 1.5                        .
+@ invfprob 10 0 .                        .
+@ invfprob 10 1 -1                        .
+@ invfprob 10 1 0                        .
+@ invfprob 10 1 1e-12   6.0562133789062363e+23
+@ invfprob 10 1 .05       241.88174725083343
+@ invfprob 10 1 .5        2.041912620422293
+@ invfprob 10 1 .99      .099559060156561852
+@ invfprob 10 1 1                        0
+@ invfprob 10 1 1.5                        .
+@ invfprob 10 1 .                        .
+@ invfprob 10 10 -1                        .
+@ invfprob 10 10 0                        .
+@ invfprob 10 10 1e-12       659.13881112342756
+@ invfprob 10 10 .05       2.9782370160823213
+@ invfprob 10 10 .5       1.0000000000000027
+@ invfprob 10 10 .99       .20622184495859236
+@ invfprob 10 10 1                        0
+@ invfprob 10 10 1.5                        .
+@ invfprob 10 10 .                        .
+@ invfprob 10 1e6 -1                        .
+@ invfprob 10 1e6 0                        .
+@ invfprob 10 1e6 1e-12       7.8474411635436478
+@ invfprob 10 1e6 .05       1.8307132399103914
+@ invfprob 10 1e6 .5       .93418240331032654
+@ invfprob 10 1e6 .99       .25582051995932553
+@ invfprob 10 1e6 1                        0
+@ invfprob 10 1e6 1.5                        .
+@ invfprob 10 1e6 .                        .
+@ invfprob 10 . -1                        .
+@ invfprob 10 . 0                        .
+@ invfprob 10 . 1e-12                        .
+@ invfprob 10 . .05                        .
+@ invfprob 10 . .5                        .
+@ invfprob 10 . .99                        .
+@ invfprob 10 . 1                        .
+@ invfprob 10 . 1.5                        .
+@ invfprob 10 . .                        .
+@ invfprob 1e6 0 -1                        .
+@ invfprob 1e6 0 0                        .
+@ invfprob 1e6 0 1e-12                        .
+@ invfprob 1e6 0 .05                        .
+@ invfprob 1e6 0 .5                        .
+@ invfprob 1e6 0 .99                        .
+@ invfprob 1e6 0 1                        .
+@ invfprob 1e6 0 1.5                        .
+@ invfprob 1e6 0 .                        .
+@ invfprob 1e6 1 -1                        .
+@ invfprob 1e6 1 0                        .
+@ invfprob 1e6 1 1e-12   6.3661945405777945e+23
+@ invfprob 1e6 1 .05        254.3143168933679
+@ invfprob 1e6 1 .5        2.198107739263409
+@ invfprob 1e6 1 .99       .15071767394262836
+@ invfprob 1e6 1 1                        0
+@ invfprob 1e6 1 1.5                        .
+@ invfprob 1e6 1 .                        .
+@ invfprob 1e6 10 -1                        .
+@ invfprob 1e6 10 0                        .
+@ invfprob 1e6 10 1e-12        481.2642201234878
+@ invfprob 1e6 10 .05        2.537883534475375
+@ invfprob 1e6 10 .5       1.0704547596448473
+@ invfprob 1e6 10 .99       .43085939678056584
+@ invfprob 1e6 10 1                        0
+@ invfprob 1e6 10 1.5                        .
+@ invfprob 1e6 10 .                        .
+@ invfprob 1e6 1e6 -1                        .
+@ invfprob 1e6 1e6 0                        .
+@ invfprob 1e6 1e6 1e-12        1.014168463743399
+@ invfprob 1e6 1e6 .05       1.0032951258486089
+@ invfprob 1e6 1e6 .5       .99999999999999911
+@ invfprob 1e6 1e6 .99       .99535810802733016
+@ invfprob 1e6 1e6 1                        0
+@ invfprob 1e6 1e6 1.5                        .
+@ invfprob 1e6 1e6 .                        .
+@ invfprob 1e6 . -1                        .
+@ invfprob 1e6 . 0                        .
+@ invfprob 1e6 . 1e-12                        .
+@ invfprob 1e6 . .05                        .
+@ invfprob 1e6 . .5                        .
+@ invfprob 1e6 . .99                        .
+@ invfprob 1e6 . 1                        .
+@ invfprob 1e6 . 1.5                        .
+@ invfprob 1e6 . .                        .
+@ invfprob . 0 -1                        .
+@ invfprob . 0 0                        .
+@ invfprob . 0 1e-12                        .
+@ invfprob . 0 .05                        .
+@ invfprob . 0 .5                        .
+@ invfprob . 0 .99                        .
+@ invfprob . 0 1                        .
+@ invfprob . 0 1.5                        .
+@ invfprob . 0 .                        .
+@ invfprob . 1 -1                        .
+@ invfprob . 1 0                        .
+@ invfprob . 1 1e-12                        .
+@ invfprob . 1 .05                        .
+@ invfprob . 1 .5                        .
+@ invfprob . 1 .99                        .
+@ invfprob . 1 1                        .
+@ invfprob . 1 1.5                        .
+@ invfprob . 1 .                        .
+@ invfprob . 10 -1                        .
+@ invfprob . 10 0                        .
+@ invfprob . 10 1e-12                        .
+@ invfprob . 10 .05                        .
+@ invfprob . 10 .5                        .
+@ invfprob . 10 .99                        .
+@ invfprob . 10 1                        .
+@ invfprob . 10 1.5                        .
+@ invfprob . 10 .                        .
+@ invfprob . 1e6 -1                        .
+@ invfprob . 1e6 0                        .
+@ invfprob . 1e6 1e-12                        .
+@ invfprob . 1e6 .05                        .
+@ invfprob . 1e6 .5                        .
+@ invfprob . 1e6 .99                        .
+@ invfprob . 1e6 1                        .
+@ invfprob . 1e6 1.5                        .
+@ invfprob . 1e6 .                        .
+@ invfprob . . -1                        .
+@ invfprob . . 0                        .
+@ invfprob . . 1e-12                        .
+@ invfprob . . .05                        .
+@ invfprob . . .5                        .
+@ invfprob . . .99                        .
+@ invfprob . . 1                        .
+@ invfprob . . 1.5                        .
+@ invfprob . . .                        .
