@@ -1987,7 +1987,13 @@ impl Session {
                 if ok
                     && matches!(
                         cmd.as_str(),
-                        "isvar" | "spmatrix" | "regress" | "labelbook" | "ds" | "lookfor" | "misstable"
+                        "isvar"
+                            | "spmatrix"
+                            | "regress"
+                            | "labelbook"
+                            | "ds"
+                            | "lookfor"
+                            | "misstable"
                     ) =>
             {
                 self.est_shown = Some(false);

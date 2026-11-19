@@ -5854,4 +5854,4 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   `fvset` (Stata lists characteristics those set); `labelbook` after a data file was read, with `list()`, with a set with an empty
   label, and `problems` with `length()`; `compare` of a number with a string; `ds` with storage types, `format`, `char`, `detail`,
   `varwidth()`, `skip()` and `vallab` with a pattern; `misstable patterns`, `tree`, `nested` and `generate()`.
-- **Shares:** probes 77.4% -> 77.6% (22,397 -> 22,446 translated of 30,029 source lines, +49); packages unchanged at 87.8% (3,750 of 4,272).
+- **Shares:** A2 alone added 49 translated probe lines (measured on its own before the rebase: 22,397 -> 22,446). On main with batches F and H: probes **77.8%** (22,513 of 30,040 source lines); packages **94.0%** (3,996 of 5,601), unchanged by A2.
