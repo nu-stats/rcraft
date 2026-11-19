@@ -5868,3 +5868,29 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   below p of about 1e-6 and with degrees of freedom of 1e4 or more, p within 1e-10 of 1, and `npnt` near its p limits.
 - **Not changed:** `nF()` and `nFtail()` still use R's `pf()`, so their values below about 1e-3 still agree only to a few
   digits; the series used here could replace it.
+
+## P2C.12r: dfuller, pperron, dfgls, corrgram, wntestq, varsoc, xtunitroot (batch G of the StatCraft port), 2026-11-19
+
+- **Translated** (`statatr::data_r::tstests` and `xtunitroot`, two new files; `ts.rs` only read): `dfuller` (constant, `noconstant`,
+  `trend`, `drift`, `lags()`, `regress`; Fuller's tables and MacKinnon's p-values), `pperron` (the Newey-West corrected Z(rho) and
+  Z(t), r(cvalues)), `dfgls` (GLS detrending, Ng-Perron, SIC and MAIC choices, Cheung-Lai and ERS values, `ers`, `notrend`,
+  `maxlag()`), `corrgram` (the bars, `noplot`, `yw`, a note for gaps; r() with ac#, pac#, q#, p# for lags 1 to 10 and the four
+  matrices), `wntestq`, `varsoc` (lag orders 0 to `maxlag()`, `exog()`; r(stats)) and `xtunitroot` (`ips` with and without
+  `lags()`, `ht`, `breitung`, `fisher` with `dfuller` or `pperron`, `hadri` with `robust` and the Bartlett and Parzen kernels).
+  A series is read on the grid of the `tsset` times (a gap is a missing value), `if` and `in` choose the rows and the lags read
+  every row; the panel tests read the periods before a late-starting sample for their lags, as Stata does.
+- **Checked:** Stata 19 on made-up data: corpus `tstests.do` (114 results), `varsoc.do` (33) and `xtunitroot.do` (99), all to 1e-8
+  (they include the error return codes). Notes in `plan/stata/{tstests,xtunitroot}.md`.
+- **Corrections to StatCraft's notes** (found here): the report's number lines are right-aligned to column 62 (two-digit N
+  shifts the title); `corrgram` keeps `ac#` scalars for lags 1 to 10 only; `r(cvalues)` of `pperron` holds the statistic, not
+  the p-value; `dfgls` has shorter r() for `maxlag(0)` and `maxlag(1)`; `ht` leaves no `mean` or `Var` and counts N as n x T;
+  `ips` with `lags()` (even 0) is W-t-bar with no `tbar`; Stata's `xtunitroot hadri` p-values reach 1e-39, so the upper tail is
+  needed; `fisher`'s `r(options)` lists `trend` or `drift` before `lags()`.
+- **Refused, not guessed:** `xtunitroot llc` (Levin-Lin-Chu's adjustment table and bandwidth are not decoded; StatCraft has
+  neither), `breitung` with `robust` or `lags()`, `ips` with `lags()` above 8 or unbalanced data, `hadri` with `kernel(qs)`,
+  `fisher` with `noconstant`, a `pperron` Fisher test with trend, `demean` or a late-starting sample, a Fisher test with a
+  panel p-value of 0 or 1, `ht` with trend on a late-starting sample; `varsoc, noconstant`; `ac`, `pac` and `arch`
+  (Stata stops short of the optimum, so even StatCraft matches it only to 2e-3); a regression too small for Stata's statistic.
+- **Shares after batch G:** probes **78.0%** (22,588 of 30,040 source lines; was 22,513, 77.8%); packages **94.0%**
+  (3,996 of 5,601), unchanged. Of the 78 probe lines of these commands that were refused before, 13 still are: the two `arch` lines
+  (probe 318) and the `llc` and `breitung robust`/`lags()` lines of probe 330.
