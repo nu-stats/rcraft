@@ -5513,6 +5513,12 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Refused, not guessed:** `by:`, numlists with a step, several mvencode clauses for one missing value,
   and an mvencode value that may not fit the type when the storage type is not known.
 
+## P2C.12: mvdecode numlists with a step, 2026-11-18 (second round of A1)
+
+- **Translated:** `mv(1(2)9)`, `1 3 to 9`, `1 3 : 9`, commas and spaces around parentheses, reversed ends; the
+  invalid ones are r(121) with Stata's text (the whole list). Corpus `mvcode.do` 75 results, exact; Stata 19
+  observed with `plan/stata/mvdecode.md`. Also mvencode with several clauses for one code (first wins; only an applied clause recasts) and a trailing backslash. Corpus `mvcode.do` 111 results. Still refused: `by:`, an mvencode value of unknown type fit.
+
 ## P2C.12: fillin (batch A1 of the StatCraft port), 2026-11-18
 
 - **Translated** (`statatr::data_r::rowcol`): `fillin varlist` with every combination of the values

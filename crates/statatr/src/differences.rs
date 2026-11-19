@@ -635,13 +635,13 @@ pub const GUIDES: &[Guide] = &[
                  makes others .a to .z. A value is matched in the variable's own type, so 1.1 matches a float 1.1. \
                  It says (name, right-aligned in 12) N missing values generated for each variable it changed and \
                  string variable ignored for a string. The errors have Stata's messages and return codes: no mv() \
-                 (r(198)), . or text in the list (r(121)), a code that is not a missing value (r(198)).",
+                 (r(198)), . or text or a list such as 5 to 8 or 1(0)3 (r(121)), a code that is not a missing value (r(198)).",
             ),
             p(
                 "In R",
                 "Labels, display formats and storage stay. When the variable's type is not known (data read \
-                 from a file) the value is matched as typed and as rounded to float. by: and numlists with a step \
-                 are refused.",
+                 from a file) the value is matched as typed and as rounded to float. The numlist may be 1 2, \
+                 5/7, 1(2)9, 1 3 to 9 or 1 3 : 9, as Stata reads them. by: is refused.",
             ),
         ],
     },
@@ -654,12 +654,13 @@ pub const GUIDES: &[Guide] = &[
                 "mvencode varlist, mv(#) turns every kind of missing value into #; mv(.a = #) only .a. It says N missing \
                  values recoded, and (recast to int) when the value does not fit the type. If a variable already holds # \
                  it says already # in N observations, then no action taken (r(9)) and changes no variable, unless \
-                 override is given.",
+                 override is given. When several clauses name the same missing value the first takes it, and only a \
+                 clause that changed something can recast.",
             ),
             p(
                 "In R",
                 "A value that may not fit the type is translated only when the storage type is known (variables the \
-                 do-file made); otherwise the line is refused. Several clauses for one missing value are refused.",
+                 do-file made); otherwise the line is refused.",
             ),
         ],
     },

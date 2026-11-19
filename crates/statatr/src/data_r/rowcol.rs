@@ -193,19 +193,23 @@ pub(super) const MVCODE_HELPER: &str = r#"stata_mvcode <- function(d, vars, kind
     y <- p$y
     n <- 0
     done <- rep(FALSE, length(y))
+    used <- integer(0)
     for (k in seq_along(vals)) {
       val <- vals[[k]]
       want <- if (codes[k] == "*") p$mk > 0 else p$mk == (if (codes[k] == "") 1 else match(codes[k], letters) + 1)
       hit <- p$sel & !done & want
       if (p$fl) val <- stata_float(val)
-      if (any(hit)) y[hit] <- val
+      if (any(hit)) {
+        y[hit] <- val
+        used <- c(used, k)
+      }
       done <- done | hit
     }
     n <- sum(done)
     if (n > 0) {
       if (show) cat(ab(v), ": ", cnt(n), " missing ", s1(n, "value", "values"), " recoded\n", sep = "")
       if (!is.na(p$tag) && p$tag %in% names(lim)) {
-        types <- vapply(unlist(vals), fit, "")
+        types <- vapply(unlist(vals[used]), fit, "")
         need <- types[which.max(rank[types])]
         if (rank[need] > rank[p$tag] && show) cat("              (recast to ", need, ")\n", sep = "")
       }
@@ -224,41 +228,125 @@ enum Mv {
     Refused(Untranslated),
 }
 
-/// `1 2 5/7` as numbers (a range counts by 1).
+/// One element of a numlist.
+enum NumItem {
+    Num(f64),
+    Many(Vec<f64>),
+}
+
+/// `lo` to `hi` in steps of `step` (its sign is ignored and the ends may come in
+/// either order, as Stata's numlist takes them). A value is kept to 14 digits, so
+/// `0(.1).3` holds the .3 a variable holds.
+fn mv_steps(a: f64, b: f64, step: f64) -> Result<Vec<f64>, bool> {
+    let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+    let s = step.abs();
+    if s.is_nan() || s <= 0.0 || !lo.is_finite() || !hi.is_finite() {
+        return Err(false);
+    }
+    let n = ((hi - lo) / s + 1e-9).floor();
+    if n.is_nan() {
+        return Err(false);
+    }
+    if n > 10_000.0 {
+        return Err(true);
+    }
+    Ok((0..=n as u64)
+        .map(|i| {
+            let x = lo + i as f64 * s;
+            format!("{x:.13e}").parse::<f64>().unwrap_or(x)
+        })
+        .collect())
+}
+
+/// A numlist as numbers: `1 2`, `5/7` (by 1), `1(2)9`, `1 3 to 9` and `1 3 : 9`
+/// (the step is the gap between the first two), commas between numbers, spaces
+/// around parentheses. Stata says `TEXT is not a valid numlist` r(121) for any
+/// other form (`5 to 8`, `1(0)3`, `1(2)3(4)5`, `1,,3`).
 fn mv_numlist(text: &str) -> Result<Vec<f64>, Mv> {
-    let mut out = Vec::new();
-    for tok in text.split_whitespace() {
-        if tok.contains('(') || tok.contains(')') {
-            return Err(Mv::Refused(no(
-                "mvdecode with a numlist that has a step, as 1(2)9, is not translated yet",
-            )));
-        }
-        if let Some((a, b)) = tok.split_once('/') {
-            if let (Ok(a), Ok(b)) = (a.parse::<f64>(), b.parse::<f64>()) {
-                if a.is_finite() && b.is_finite() && a <= b {
-                    if b - a > 10_000.0 {
-                        return Err(Mv::Refused(no(
-                            "mvdecode with a range of more than 10,000 values is not translated",
-                        )));
-                    }
-                    let mut x = a;
-                    while x <= b {
-                        out.push(x);
-                        x += 1.0;
-                    }
-                    continue;
+    let bad = || Mv::Error(format!("{text} is not a valid numlist"), 121);
+    let t = text.trim();
+    if t.starts_with(',') || t.ends_with(',') || t.contains(",,") || t.contains(", ,") {
+        return Err(bad());
+    }
+    // spaces next to a parenthesis and commas are nothing
+    let mut s = String::new();
+    for ch in t.chars() {
+        match ch {
+            ',' => s.push(' '),
+            '(' | ')' => {
+                while s.ends_with(' ') {
+                    s.pop();
                 }
+                s.push(ch);
             }
-        } else if let Ok(x) = tok.parse::<f64>() {
-            if x.is_finite() {
-                out.push(x);
-                continue;
-            }
+            c => s.push(c),
         }
-        return Err(Mv::Error(format!("{tok} is not a valid numlist"), 121));
+    }
+    let s = s
+        .replace("( ", "(")
+        .replace(") ", ")")
+        .replace(" /", "/")
+        .replace("/ ", "/");
+    let steps = |a: f64, b: f64, st: f64| {
+        mv_steps(a, b, st).map_err(|big| {
+            if big {
+                Mv::Refused(no(
+                    "mvdecode with a range of more than 10,000 values is not translated",
+                ))
+            } else {
+                bad()
+            }
+        })
+    };
+    let num = |w: &str| w.parse::<f64>().ok().filter(|x| x.is_finite());
+    let words: Vec<&str> = s.split_whitespace().collect();
+    let mut items: Vec<NumItem> = Vec::new();
+    let mut i = 0;
+    while let Some(&w) = words.get(i) {
+        if w == "to" || w == ":" {
+            // `n1 n2 to n3`
+            let (Some(NumItem::Num(b)), Some(NumItem::Num(a))) = (items.pop(), items.pop()) else {
+                return Err(bad());
+            };
+            let Some(c) = words.get(i + 1).and_then(|c| num(c)) else {
+                return Err(bad());
+            };
+            let v = steps(a, c, b - a)?;
+            items.push(NumItem::Many(v));
+            i += 2;
+            continue;
+        }
+        if let Some((a, rest)) = w.split_once('(') {
+            let Some((st, b)) = rest.split_once(')') else {
+                return Err(bad());
+            };
+            let (Some(a), Some(st), Some(b)) = (num(a), num(st), num(b)) else {
+                return Err(bad());
+            };
+            let v = steps(a, b, st)?;
+            items.push(NumItem::Many(v));
+        } else if let Some((a, b)) = w.split_once('/') {
+            let (Some(a), Some(b)) = (num(a), num(b)) else {
+                return Err(bad());
+            };
+            let v = steps(a, b, 1.0)?;
+            items.push(NumItem::Many(v));
+        } else if let Some(x) = num(w) {
+            items.push(NumItem::Num(x));
+        } else {
+            return Err(bad());
+        }
+        i += 1;
+    }
+    let mut out = Vec::new();
+    for it in items {
+        match it {
+            NumItem::Num(x) => out.push(x),
+            NumItem::Many(v) => out.extend(v),
+        }
     }
     if out.is_empty() {
-        return Err(Mv::Error(" is not a valid numlist".into(), 121));
+        return Err(bad());
     }
     Ok(out)
 }
@@ -287,6 +375,19 @@ fn mv_clauses(mv: &str, decode: bool) -> Result<(Vec<Vec<f64>>, Vec<String>), Mv
     let text = mv.trim();
     let parts: Vec<&str> = text.split('\\').map(str::trim).collect();
     let single = parts.len() == 1 && !text.contains('=');
+    // a backslash at the end is nothing (`1 = .a \`); one anywhere else with
+    // nothing beside it is not a list or a code
+    let parts: Vec<&str> = match parts.split_last() {
+        Some((last, rest)) if last.is_empty() && !rest.is_empty() => rest.to_vec(),
+        _ => parts,
+    };
+    if !single && parts.iter().any(|p| p.is_empty()) {
+        return Err(if decode {
+            Mv::Error("\\ is not a valid numlist".into(), 121)
+        } else {
+            Mv::Error("\\ is not a missing value code".into(), 198)
+        });
+    }
     let mut vals = Vec::new();
     let mut codes = Vec::new();
     if decode {
@@ -376,16 +477,6 @@ impl Session {
             }
             Err(Mv::Refused(r)) => return Err(r),
         };
-        if !decode {
-            // clauses that could take the same observation twice are not translated
-            let mut seen = BTreeSet::new();
-            let every = codes.iter().any(|k| k == "*");
-            if (every && codes.len() > 1) || !codes.iter().all(|k| seen.insert(k.clone())) {
-                return Err(no(
-                    "mvencode with several clauses for the same missing value is not translated yet",
-                ));
-            }
-        }
         // names written out, or a pattern
         let words: Vec<&str> = c.parts.main.split_whitespace().collect();
         let plain: Vec<String> = words
