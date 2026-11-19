@@ -2620,6 +2620,130 @@ pub const GUIDES: &[Guide] = &[
         )],
     },
     Guide {
+        command: "streg",
+        about: "Parametric survival regression after stset",
+        points: &[
+            p(
+                "Method",
+                "The exponential, Weibull, lognormal, loglogistic and Gompertz distributions, fitted \
+                 by maximum likelihood with Newton's method and exact derivatives to its limit. The \
+                 log likelihood is that of log time (as Stata reports it); late entry (time0(), \
+                 enter()) takes the log survivor function at the entry time off. Stata stops at its \
+                 own tolerance, so its last digits can differ unless tolerance() is set tight.",
+            ),
+            p(
+                "Metrics",
+                "Hazard ratios by default for the proportional-hazards models (nohr gives the \
+                 coefficients), time (and tr, the time ratios) for the accelerated-failure-time \
+                 metric of the exponential and Weibull; the ancillary parameter is /ln_p, \
+                 /lnsigma, /lngamma or /gamma, with p and 1/p, sigma or gamma below.",
+            ),
+            p(
+                "Variances",
+                "robust and vce(cluster v) scale the sandwich by N / (N - 1) or G / (G - 1); with \
+                 id() the clusters are the subjects. e() holds what Stata's does (b, V, ll, ll_0, \
+                 chi2, N_sub, N_fail, risk ...).",
+            ),
+            p(
+                "Not yet",
+                "Other distributions (generalized gamma), factor variables, strata(), ancillary(), \
+                 frailty(), offset(), vce(opg), and predict, test, lincom, margins and estat after \
+                 it are refused with the reason.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "sts",
+        about: "Kaplan-Meier lists, new variables and tests of equal survival",
+        points: &[
+            p(
+                "Forms",
+                "sts list (survivor, failure or na, by(), at(), level()), sts generate (s, se(s), \
+                 lb(s), ub(s), na, se(na), lb(na), ub(na), h, n, d, by()) and sts test (logrank, \
+                 wilcoxon, tware, peto, fh(p q), strata()); r(chi2) and r(df) after sts test.",
+            ),
+            p(
+                "Not yet",
+                "sts graph, the cox and trend tests, adjustfor(), enter and compare, and any of \
+                 these with late entry are refused with the reason.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "stdescribe",
+        about: "Describes survival-time data per subject",
+        points: &[
+            p(
+                "Method",
+                "Records, entry and exit times, gaps, time at risk and failures per subject, with \
+                 their mean, minimum, median and maximum; all of r() is kept.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "stsum",
+        about: "Summarizes survival-time data: time at risk, rate, survival times",
+        points: &[
+            p(
+                "Method",
+                "Time at risk, the incidence rate, the subjects and the 25%, 50% and 75% survival \
+                 times (the first time the Kaplan-Meier estimate falls to the level), with by(); \
+                 r() holds the total's.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "stptime",
+        about: "Person-time and the incidence rate of survival-time data",
+        points: &[
+            p(
+                "Method",
+                "Needs an id() set by stset. Person-time, failures and the rate with the interval \
+                 rate * exp(+-z / sqrt(failures)), by(), at() (pieces (a, b] and a last open one \
+                 unless trim), per(), dd() and level(); r(ptime), r(failures), r(rate), r(lb) and \
+                 r(ub) hold the total.",
+            ),
+            p("Not yet", "smr(), using(), jackknife, cox, weibull and the other models."),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "stir",
+        about: "Incidence-rate ratios from survival-time data",
+        points: &[
+            p(
+                "Method",
+                "The comparison ir makes, with failures and time at risk by exposure (the larger \
+                 value of a two-valued variable is exposed), and strata() for the stratified table; \
+                 r() is ir's.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
+        command: "ltable",
+        about: "Life tables for individual-level or aggregate data",
+        points: &[
+            p(
+                "Method",
+                "Actuarial intervals [kw, (k + 1)w): those lost count for half the interval, the \
+                 survivor function is the product of 1 - d / n', Greenwood's variance gives the \
+                 standard error, the interval is on the log-log scale. failure, hazard, noadjust, \
+                 level(), intervals(), by(), fweight and test (the likelihood-ratio statistic of \
+                 the exponential model, then the log-rank test; r(chi2) and r(df) are the log-rank's).",
+            ),
+            p(
+                "Not yet",
+                "graph, overlay, tvid() and saving() are refused with the reason.",
+            ),
+            LAYOUT_R,
+        ],
+    },
+    Guide {
         command: "stcox",
         about: "Cox regression",
         points: &[

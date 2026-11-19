@@ -73,6 +73,8 @@ stata_bpost <- function(key, se = FALSE) {
   if (is.null(b)) stop("_b not allowed when e(b) is not present", call. = FALSE)
   nm <- colnames(b)
   i <- match(key, nm)
+  # _b[/ln_p]: an ancillary parameter, the equation named / in e(b)
+  if (is.na(i) && startsWith(key, "/") && !startsWith(key, "/:")) i <- match(paste0("/:", substring(key, 2)), nm)
   # a name without an equation is the first equation's
   if (is.na(i) && !grepl(":", key, fixed = TRUE) && grepl(":", nm[1], fixed = TRUE)) {
     i <- match(paste0(sub(":.*$", "", nm[1]), ":", key), nm)

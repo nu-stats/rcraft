@@ -496,7 +496,7 @@ const R_CS_EXACT: &[&str] = &[
 const R_CC: &[&str] = &[
     "afp", "ub_afe", "lb_afe", "chi2", "p", "afe", "ub_or", "lb_or", "or",
 ];
-const R_IR: &[&str] = &[
+pub(super) const R_IR: &[&str] = &[
     "ird",
     "lb_ird",
     "ub_ird",
@@ -530,7 +530,7 @@ const R_CC_BY: &[&str] = &[
 ];
 const R_TABODDS: &[&str] = &["chi2_tr", "p_trend", "chi2_hom", "df_hom", "p_hom"];
 const R_TABODDS_ADJUST: &[&str] = &["chi2_tr", "p_trend"];
-const R_IR_BY: &[&str] = &[
+pub(super) const R_IR_BY: &[&str] = &[
     "irr",
     "lb_irr",
     "ub_irr",

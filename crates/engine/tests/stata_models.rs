@@ -821,8 +821,8 @@ fn what_is_not_translated_after_a_model_says_why() {
         "after mlogit an equation needs its names written with equations"
     );
     assert!(
-        refusal("use \"d.dta\"\nlogit y x\nstreg x, dist(weibull)\n").contains("streg"),
-        "streg is not translated yet"
+        refusal("use \"d.dta\"\nlogit y x\nstset t\nstreg x, dist(ggamma)\n").contains("streg"),
+        "streg with the generalized gamma is not translated"
     );
     assert!(
         refusal("use \"d.dta\"\nnbreg y x, vce(bootstrap)\n").contains("bootstrap"),

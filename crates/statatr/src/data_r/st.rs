@@ -22,7 +22,7 @@ use super::*;
 
 /// `stset`: Stata's `_st`, `_d`, `_t` and `_t0`, and its summary.
 pub(super) const STSET_HELPER: &str = r#"stata_stset <- function(d, time, fail = NULL, values = NULL, id = NULL,
-                        origin = 0, enter = 0, exit = Inf, scale = 1) {
+                        origin = 0, enter = 0, exit = Inf, scale = 1, time0 = NULL) {
   num <- function(v) as.vector(unclass(v))
   t <- num(time)
   dd <- if (is.null(fail)) rep(1, length(t)) else {
@@ -31,7 +31,10 @@ pub(super) const STSET_HELPER: &str = r#"stata_stset <- function(d, time, fail =
   }
   t1 <- (t - origin) / scale
   t0 <- rep_len((pmax(origin, enter) - origin) / scale, length(t))
-  if (!is.null(id)) {
+  if (!is.null(time0)) {
+    # the start of each record is given (gaps allowed)
+    t0 <- (num(time0) - origin) / scale
+  } else if (!is.null(id)) {
     # several records of one subject: each starts where the one before ended
     iv <- num(id)
     o <- order(iv, t1)
@@ -138,6 +141,11 @@ pub(super) const PHTEST_HELPER: &str = r#"stata_phtest <- function(fit, detail =
 pub(super) struct StSet {
     /// The subject variable of `id()`, if any.
     pub(super) id: Option<String>,
+    /// The failure event as the other `st` commands print it (`died`, or
+    /// `1 (meaning all fail)` without `failure()`).
+    pub(super) fail: String,
+    /// The analysis time as printed (`t`, or `t/10` with `scale(10)`).
+    pub(super) time: String,
 }
 
 impl Session {
@@ -147,6 +155,26 @@ impl Session {
         opts: &Opts,
         out: &mut Out,
     ) -> Result<(), Untranslated> {
+        if opts.has("clear", 5) {
+            if !c.parts.main.trim().is_empty() || opts.0.len() > 1 {
+                return Err(no("stset, clear takes nothing else here"));
+            }
+            if self.stset.is_none() {
+                out.line("stop(\"data not st (Stata: r(119))\", call. = FALSE)");
+                return Ok(());
+            }
+            let d = self.data()?;
+            out.package("dplyr");
+            out.line(format!(
+                "{d} <- dplyr::select({d}, -dplyr::any_of(c(\"_st\", \"_d\", \"_t\", \"_t0\")))"
+            ));
+            for v in ["_st", "_d", "_t", "_t0"] {
+                self.kinds.remove(v);
+                self.storage.remove(v);
+            }
+            self.stset = None;
+            return Ok(());
+        }
         if let Some(o) = opts.other(&[
             ("failure", 1),
             ("id", 2),
@@ -154,6 +182,7 @@ impl Session {
             ("enter", 2),
             ("exit", 2),
             ("scale", 2),
+            ("time0", 5),
             ("noshow", 4),
         ]) {
             return Err(no(format!(
@@ -175,8 +204,11 @@ impl Session {
         let d = self.data()?;
         let col = |v: &str| format!("{d}${}", r_name(v));
         let mut args = vec![d.clone(), col(time)];
+        let mut fail_text = "1 (meaning all fail)".to_string();
+        let mut time_text = time.to_string();
         if let Some(f) = opts.arg("failure", 1) {
             let f = f.trim();
+            fail_text = f.to_string();
             let (var, values) = match f.split_once("==") {
                 Some((v, vals)) => (v.trim(), Some(vals.trim())),
                 None => (f, None),
@@ -205,6 +237,13 @@ impl Session {
             Some(v) => return Err(no(format!("id({v}) needs one variable name"))),
             None => None,
         };
+        if let Some(v) = opts.arg("time0", 5) {
+            let v = v.trim();
+            if !is_name(v) {
+                return Err(no(format!("stset, time0({v}) needs one variable name")));
+            }
+            args.push(format!("time0 = {}", col(v)));
+        }
         // origin(), enter() and exit() take `time exp` (or a plain variable or number)
         for (o, m) in [("origin", 1), ("enter", 2), ("exit", 2)] {
             if let Some(a) = opts.arg(o, m) {
@@ -235,6 +274,7 @@ impl Session {
                 .parse()
                 .map_err(|_| no(format!("scale({s}) needs a number")))?;
             args.push(format!("scale = {}", r_number(n)));
+            time_text = format!("{time}/{}", s.trim());
         }
         self.helpers.insert("stata_stset");
         let call = format!("stata_stset({})", args.join(", "));
@@ -246,7 +286,11 @@ impl Session {
         for v in ["_st", "_d", "_t", "_t0"] {
             self.kinds.insert(v.to_string(), Kind::Number);
         }
-        self.stset = Some(StSet { id });
+        self.stset = Some(StSet {
+            id,
+            fail: fail_text,
+            time: time_text,
+        });
         out.caveat("_st, _d, _t and _t0 are made as Stata makes them; a row that enters at or after its end is not used");
         Ok(())
     }
@@ -274,6 +318,7 @@ impl Session {
             ("level", 3),
             ("strata", 3),
             ("noshow", 4),
+            ("nolog", 3),
         ]) {
             return Err(no(format!(
                 "stcox with the option {o} is not translated yet"

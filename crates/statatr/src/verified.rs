@@ -165,6 +165,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("logit", &["collinear", "interactions", "likelihood"]),
     ("lookfor", &["lookfor"]),
     ("lroc", &["lroc"]),
+    ("ltable", &["survival"]),
     ("margins", &["cmclogit", "regress"]),
     ("marginsplot", &["marginsplot"]),
     ("markdown", &["dyndoc"]),
@@ -290,6 +291,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("sqrtlasso", &["sqrtlasso"]),
     ("statsby", &["resample_logit", "statsby"]),
     ("stcox", &["likelihood"]),
+    ("stdescribe", &["survival"]),
     (
         "stepwise",
         &[
@@ -301,7 +303,12 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
             "stepwise_weights_glm",
         ],
     ),
-    ("stset", &["likelihood"]),
+    ("stir", &["survival"]),
+    ("stptime", &["survival"]),
+    ("streg", &["streg"]),
+    ("sts", &["survival"]),
+    ("stset", &["likelihood", "streg", "survival"]),
+    ("stsum", &["survival"]),
     ("suest", &["suest"]),
     (
         "summarize",

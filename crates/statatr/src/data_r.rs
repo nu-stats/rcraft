@@ -114,7 +114,9 @@ mod st;
 mod stats;
 mod statsby;
 mod stepwise;
+mod streg;
 mod suest;
+mod survival;
 mod survwgt;
 mod svy;
 mod table;
@@ -557,6 +559,7 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "ltable",
     "dfuller",
     "pperron",
     "dfgls",
@@ -1633,6 +1636,10 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xt_other" => xt::XT_OTHER_HELPER,
         "stata_ivregress" => iv::IV_HELPER,
         "stata_stset" => st::STSET_HELPER,
+        "stata_survival" => survival::SURVIVAL_HELPER,
+        "stata_stgraph" => survival::STGRAPH_HELPER,
+        "stata_streg" => streg::STREG_HELPER,
+        "stata_stptime" => survival::STPTIME_HELPER,
         "stata_graph" => graph::GRAPH_HELPER,
         "stata_combine" => graph::COMBINE_HELPER,
         "stata_stcox" => st::STCOX_HELPER,
@@ -3287,6 +3294,14 @@ impl Session {
             "screeplot" => self.screeplot(c, &opts, out),
             "stset" => self.stset(c, &opts, out),
             "stcox" => self.stcox(c, &opts, out),
+            "stdescribe" => self.stdescribe(c, &opts, out),
+            "streg" => self.streg(c, &opts, out),
+            "stcurve" => self.stcurve(c, &opts, out),
+            "stsum" => self.stsum(c, &opts, out),
+            "sts" => self.sts(c, &opts, out),
+            "stptime" => self.stptime(c, &opts, out),
+            "stir" => self.stir(c, &opts, out),
+            "ltable" => self.ltable(c, &opts, out),
             "clogit" => self.clogit(c, &opts, out),
             "glm" => self.ml(c, &opts, out, model::Fit::Glm),
             "robreg" => self.robreg(c, &opts, out),
@@ -5647,8 +5662,8 @@ stata_chars_write(\"results.dta\", study_hours)"
     fn what_is_not_translated_says_why() {
         for (src, why) in [
             (
-                "use s\nstreg x, dist(weibull)",
-                "streg is not translated yet",
+                "use s\nstset t\nstreg x, dist(ggamma)",
+                "is not translated yet (exponential",
             ),
             (
                 "use s\nforeach v of varlist x y {\nsum `v'\n}",
