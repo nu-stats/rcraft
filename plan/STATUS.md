@@ -5795,3 +5795,29 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   6J6BAW's `# delimit ;` lines now translate; 53 of its lines are still refused (mmodes, outtable and the like). Probes
   77.5% (22,439 of 28,946 judged lines of 544 do-files). 94.0% is the package figure from now on; the old reader's
   94.9% counted 6J6BAW as one line.
+
+## P2C.12k and P2C.12r: xtdescribe, xtsum, xttab, tsreport, tsappend (batch H of the StatCraft port), 2026-11-19
+
+- **Translated** (`statatr::data_r::xtsum`, a new file; `ts.rs` was only read): `xtdescribe` (the header lines, Delta and
+  Span with the unit word of the time's format, the distribution of T_i, the patterns most frequent first, `patterns()`,
+  and `width()` with its grouped columns, note and rules; r() is `summarize T_i, detail`), `xtsum` (overall, between and
+  within with `N`, `n`, `T-bar` or `T`; if and in; r() of the last variable), `xttab` (overall, between and within, value
+  labels, r(results) with its column equations and r(n_panels)), `tsreport` (with and without a varlist, `detail`,
+  `casewise`, `panel`, if and in; the gap rule at a panel's end and at the sample's last row, the column widths from the
+  display formats, r() with its text macros and numbered results, r(table)) and `tsappend` (`add()` and `last()` with
+  `tsfmt()`, the gaps it fills as `tsfill` does, Stata's notes when `last()` is not past the data, r(add)).
+- **Checked:** Stata 19 on made-up data: corpus `xtpanel.do` (787 results, `xtdescribe`, `xtsum`, `xttab`) and `tspanel.do` (365
+  results, `tsreport`, `tsappend`), all to 1e-9; about 100 printed tables of our own compared line by line with Stata's log,
+  identical. Probes 173 and 153 agree on every line compared (the `return list` after `xtset`, which Stata fills and RCraft
+  does not keep, is the one line not translated). Notes in `plan/stata/{xtdescribe,xtsum,xttab,tsreport,tsappend}.md`.
+- **Corrections to StatCraft's notes** (found here): `tsappend` also fills the gaps and sets r(add); xtdescribe's patterns are
+  counted on the grouped patterns when `width()` groups them, a tie going by the full pattern; `xtsum` takes a missing
+  panel value as a panel; `xttab` shows values as `%9.0g` whatever the format and keeps them as floats in r(results).
+- **Refused, not guessed:** `i()` and `t()` that name other variables than `xtset` holds (Stata resets the panel); `width()`
+  below 3; a `%tc` or `%tC` time in `xtdescribe` and `tsreport`; `tsreport` and `tsappend` on data not in panel and time
+  order (Stata sorts in `tsreport`); `tsappend` with a missing panel value or `tsfmt()` other than `td`, `tw`, `tm`, `tq`, `th`.
+- **A bug found and fixed on the way:** a caveat with a line break (the one `xtset id t, quarterly` and the other unit options
+  give) broke the script `Line::script()` writes, since only its first line was a comment; every line of a caveat is a
+  comment now (`data_r.rs`, a line).
+- **Shares after batch H:** probes 77.5% (22,627 of 30,282 source lines, 551 do-files); no line of the four probes (173, 576, 153,
+  548) is refused for these commands any more. Packages not re-measured: this session did not find their folder.

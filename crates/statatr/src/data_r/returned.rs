@@ -1050,6 +1050,9 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 
 /// The `e()` and `r()` names that are macros (text) in Stata.
 const TEXT_NAMES: &[&str] = &[
+    "panelvar",
+    "timevar",
+    "tsfmt",
     "levels",
     "rtext",
     "target",
@@ -1166,6 +1169,7 @@ const TEXT_NAMES: &[&str] = &[
 
 /// The matrices among them.
 const MATRIX_NAMES: &[&str] = &[
+    "results",
     "pss_table",
     "E0_vec",
     "Ea_vec",
@@ -2125,6 +2129,7 @@ impl Session {
                         let swilk_scalar = which == "r" && cmd == "swilk" && matches!(name, "W" | "V");
                         if (MATRIX_NAMES.contains(&name) && !power_beta && !swilk_scalar)
                             || (tabstat && super::tabstat::tabstat_matrix(name))
+                            || (which == "r" && cmd == "tsreport" && super::xtsum::tsreport_name(name) == Some(2))
                         {
                             return Err(no(format!(
                                 "{shown} is a matrix, which an expression cannot take (Stata: type mismatch); matrix list {shown} shows it"
@@ -2145,6 +2150,7 @@ impl Session {
                             && !(tabstat && super::tabstat::tabstat_text(name))
                             && !(cmd == "centile" && super::centile::centile_names(name))
                             && !(cmd == "dstdize" && super::descr::dstdize_names(name))
+                            && !(cmd == "tsreport" && super::xtsum::tsreport_name(name).is_some())
                         {
                             return Err(no(format!(
                                 "{shown} after {cmd} is not kept in R yet (RCraft keeps r() {})",
@@ -2154,6 +2160,7 @@ impl Session {
                         let text = TEXT_NAMES.contains(&name)
                             || (which == "r" && cmd == "dstdize" && (name == "by" || super::descr::dstdize_names(name)))
                             || (tabstat && super::tabstat::tabstat_text(name))
+                            || (which == "r" && cmd == "tsreport" && super::xtsum::tsreport_name(name) == Some(1))
                             || (which == "e" && self.e_text.contains(name));
                         let get = if which == "e" { "stata_eget" } else { "stata_rget" };
                         Ok((

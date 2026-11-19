@@ -328,6 +328,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("tetrachoric", &["tetrachoric"]),
     ("tokenize", &["made"]),
     ("total", &["meanest"]),
+    ("tsappend", &["tspanel"]),
+    ("tsreport", &["tspanel"]),
     ("tsset", &["timeseries"]),
     ("ttest", &["descriptives", "ttest"]),
     ("ttesti", &["ttest"]),
@@ -339,6 +341,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("xporegress", &["lasso_infer"]),
     ("xpose", &["made"]),
     ("xtabond", &["xtdpd"]),
+    ("xtdescribe", &["xtpanel"]),
     ("xtdpd", &["xtdpd"]),
     ("xtdpdsys", &["xtdpd"]),
     ("xtile", &["xtile"]),
@@ -354,6 +357,8 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ),
     ("xtregar", &["arpanel"]),
     ("xtset", &["likelihood", "panel", "xtreg_r2"]),
+    ("xtsum", &["xtpanel"]),
+    ("xttab", &["xtpanel"]),
 ];
 
 /// Each Verified function, with the corpus files that check it (the

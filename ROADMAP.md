@@ -464,10 +464,12 @@ Command families:
   (part done 2026-11-16: `xtset`, `xtreg`, `xtregar`, `xtabond`, `xtdpd` and `xtdpdsys`
   Verified. Some `xtreg` forms are still refused.)
 - P2C.12k Panel models, the rest
-  (not started: `xtlogit`, `xtpoisson`, `xtnbreg`, `xtprobit`, `xtcloglog`, `xtologit`,
-  `xtoprobit`, `xttobit`, `xtgls`, `xtgee`, `xtpcse`, `xtivreg`, `xtunitroot`,
-  `xtdescribe`, `xtsum`, `xttab`; and collinear terms in the panel, survival and IV
-  models, left from P2C.13.)
+  (part done: `xtdescribe`, `xtsum` and `xttab` Verified 2026-11-19, batch H of the StatCraft
+  port, with the printed tables and r() as Stata 19's (`xtpanel.do`); refused: `i()` and `t()`
+  naming other variables than `xtset` holds, `width()` below 3, a `%tc` time,
+  `plan/stata/xtdescribe.md`. Not started: `xtlogit`, `xtpoisson`, `xtnbreg`, `xtprobit`,
+  `xtcloglog`, `xtologit`, `xtoprobit`, `xttobit`, `xtgls`, `xtgee`, `xtpcse`, `xtivreg`,
+  `xtunitroot`; and collinear terms in the panel, survival and IV models, left from P2C.13.)
 - P2C.12l Survival
   (part done: `stset` and `stcox` Verified. Not started: `streg`, `sts`, `stptime`,
   `ltable`, `stcurve`, `stir`, `stsum`, `stdescribe`.)
@@ -491,8 +493,11 @@ Command families:
   (on hold, not started: `mixed`, then `melogit`, `mepoisson`, `menbreg`, `meprobit` and
   `menl`, which wait for it.)
 - P2C.12r Time series
-  (not started: `dfuller`, `dfgls`, `pperron`, `var`, `varsoc`, `vargranger`, `irf`,
-  `corrgram`, `wntestq`, `tsreport`, `tsappend`, `forecast`, `arch`, `ucm`, `sspace`.)
+  (part done: `tsreport` and `tsappend` Verified 2026-11-19, batch H of the StatCraft port
+  (`tspanel.do`); `tsappend` fills the gaps as `tsfill` does, as Stata does; refused: data not
+  in panel and time order, a `%tc` time, a missing panel value, `plan/stata/tsreport.md`.
+  Not started: `dfuller`, `dfgls`, `pperron`, `var`, `varsoc`, `vargranger`, `irf`,
+  `corrgram`, `wntestq`, `forecast`, `arch`, `ucm`, `sspace`.)
 - P2C.12s Systems and multivariate models
   (part done: `pca`, `factor`, `rotate` and `mvtest` Verified. Not started: `sureg`,
   `nlsur`, `mvreg`, `manova`, `manovatest`, `canon`, `discrim`, `mds`, `sem`, `dfactor`.)

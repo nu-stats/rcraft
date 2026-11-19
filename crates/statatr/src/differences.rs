@@ -3000,6 +3000,113 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "xtdescribe",
+        about: "Describes the participation pattern of a panel",
+        points: &[
+            p(
+                "As Stata 19",
+                "xtdescribe prints the panel and time lines (first, second, ..., last), Delta and \
+                 Span, the distribution of T_i and the patterns of presence, most frequent first \
+                 (patterns(#), 9 by default; width(#) groups periods into one column each, with \
+                 the note under the table). r() is summarize T_i, detail. A missing time counts \
+                 in T as a value of its own, and rows with a missing panel are left out. The \
+                 corpus file xtpanel checks r() and the tables were compared with Stata's \
+                 printout.",
+            ),
+            p(
+                "Errors",
+                "Without xtset (or with a panel and no time) r(459), a time with fewer than two \
+                 values r(459), weights and a varlist r(101), an unknown option r(198). \
+                 i() and t() other than the variables xtset holds are refused, as is width() \
+                 below 3 and a %tc time.",
+            ),
+        ],
+    },
+    Guide {
+        command: "xtsum",
+        about: "Summarizes variation within and between panels",
+        points: &[
+            p(
+                "As Stata 19",
+                "xtsum [varlist] prints the overall, between and within mean, standard \
+                 deviation, minimum and maximum with N, n and T-bar (T when every panel has as \
+                 many rows). Without a varlist every variable is shown (a string one as no \
+                 rows). A missing panel value is a panel of its own. r() holds the last \
+                 variable's thirteen values.",
+            ),
+            p(
+                "Errors",
+                "Without xtset r(459), weights r(101), an unknown option r(198), a name the \
+                 data lack r(111). i() other than the panel variable is refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "xttab",
+        about: "Tabulates a variable overall, between and within panels",
+        points: &[
+            p(
+                "As Stata 19",
+                "xttab x prints the overall, between and within frequencies and percents (the \
+                 between percent of all panels, so the column can pass 100; the within percent \
+                 the mean share of the panels' rows). A value shows as its value label cut to 8 \
+                 characters, or as %9.0g writes it. r(results) is the table (its values as \
+                 floats) and r(n_panels) the number of panels.",
+            ),
+            p(
+                "Errors",
+                "No varlist r(100), two variables r(103), a string variable r(109), no rows \
+                 r(2000), without xtset r(459), weights r(101), any option other than i() \
+                 r(198).",
+            ),
+        ],
+    },
+    Guide {
+        command: "tsreport",
+        about: "Reports the periods and gaps of time-series data",
+        points: &[
+            p(
+                "As Stata 19",
+                "tsreport prints the starting and ending period, the observations and the gaps \
+                 (with a panel the end of each panel counts too, the last row only when its \
+                 period is before the sample's end, unless panel is given). detail lists the \
+                 gaps; a varlist gives a summary table (one report each with detail, or one \
+                 for the rows complete in all with casewise). r() holds N_gaps, N_obs, start, \
+                 end (numbered with a varlist), the text panelvar, timevar and tsfmt, var# and \
+                 the table(s) of the gap report.",
+            ),
+            p(
+                "Errors",
+                "Without tsset r(111), a name the data lack r(111), a string variable r(109), \
+                 casewise with one variable r(198), an unknown option r(198), weights r(101). \
+                 Data not in panel and time order and a %tc time are refused.",
+            ),
+        ],
+    },
+    Guide {
+        command: "tsappend",
+        about: "Adds periods to time-series data",
+        points: &[
+            p(
+                "As Stata 19",
+                "tsappend, add(#) adds # periods after each panel's last; last(date) \
+                 tsfmt(td, tw, tm, tq or th) adds periods up to a date. The periods missing \
+                 inside each panel are filled too, as tsfill does; the other variables are \
+                 missing in new rows, and the data end in panel and time order. r(add) is # (or, \
+                 with last(), the periods added after the panels' ends). When last() is not \
+                 after the data's end Stata says so and adds nothing.",
+            ),
+            p(
+                "Errors",
+                "Neither add() nor last() r(198), add() not a positive whole number, add() with \
+                 last() or tsfmt(), last() without tsfmt(), a missing time, an unknown option \
+                 r(198); a varlist, if, in and weights r(101); without tsset r(111). Data not in \
+                 panel and time order, a missing panel value and tsfmt() other than td, tw, tm, \
+                 tq and th are refused.",
+            ),
+        ],
+    },
+    Guide {
         command: "xtset",
         about: "Declares panel data",
         points: &[p(

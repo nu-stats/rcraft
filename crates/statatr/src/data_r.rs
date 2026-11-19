@@ -129,6 +129,7 @@ mod xport;
 mod xt;
 mod xtdpd;
 mod xtregar;
+mod xtsum;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -185,7 +186,7 @@ impl Line {
                     out.push('\n');
                 }
                 for c in &r.caveats {
-                    out.push_str(&format!("#   note: {c}\n"));
+                    out.push_str(&format!("#   note: {}\n", c.replace('\n', "\n#   ")));
                 }
             }
             Err(e) => out.push_str(&format!("#   not translated: {}\n", e.reason)),
@@ -543,6 +544,11 @@ const WEIGHTED: &[&str] = &[
     "bitest",
     "swilk",
     "pwmean",
+    "xtdescribe",
+    "xtsum",
+    "xttab",
+    "tsreport",
+    "tsappend",
     "expandcl",
     "fillin",
     "mvdecode",
@@ -1540,6 +1546,12 @@ fn helper_code(name: &str) -> &'static str {
         "stata_pwmean" => pwmean::PWMEAN_HELPER,
         "stata_tsset" => ts::TSSET_HELPER,
         "stata_tsfill" => ts::TSFILL_HELPER,
+        "stata_xt_common" => xtsum::XT_COMMON_HELPER,
+        "stata_xtdescribe" => xtsum::XTDESCRIBE_HELPER,
+        "stata_xtsum" => xtsum::XTSUM_HELPER,
+        "stata_xttab" => xtsum::XTTAB_HELPER,
+        "stata_tsreport" => xtsum::TSREPORT_HELPER,
+        "stata_tsappend" => xtsum::TSAPPEND_HELPER,
         "stata_ts" => ts::TS_HELPER,
         "stata_rows_replace" => ts::ROWS_REPLACE_HELPER,
         "stata_xtset" => xt::XTSET_HELPER,
@@ -3110,6 +3122,11 @@ impl Session {
             "xtset" => self.xtset(c, &opts, out),
             "tsset" => self.tsset(c, &opts, out),
             "tsfill" => self.tsfill(c, &opts, out),
+            "xtdescribe" => self.xtdescribe(c, &opts, out),
+            "xtsum" => self.xtsum(c, &opts, out),
+            "xttab" => self.xttab(c, &opts, out),
+            "tsreport" => self.tsreport(c, &opts, out),
+            "tsappend" => self.tsappend(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
             "xtregar" => self.xtregar(c, &opts, out),
             "xtabond" | "xtdpdsys" | "xtdpd" => self.xtdpd(c, &opts, out),
@@ -5722,6 +5739,78 @@ tabulate g h, generate(d)");
             "{out:?}"
         );
         assert!(out[4].starts_with("NOT"), "{out:?}");
+    }
+
+    #[test]
+    fn panel_and_time_series_summaries() {
+        let out = r("clear
+set obs 6
+generate int id = 1 + floor((_n - 1) / 3)
+generate int t = mod(_n - 1, 3)
+xtdescribe
+xtset id
+xtdescribe
+xtsum t
+xtset id t
+xtdescribe, patterns(2) width(5)
+xtdescribe x
+xtsum t if id > 1, i(id)
+xttab t
+xttab t id
+xtsum t [fweight = id]
+tsreport id, detail
+tsreport id t, casewise
+tsreport t, nosuch
+tsappend, add(2)
+tsappend, last(25jun1965) tsfmt(td)
+tsappend
+tsappend, add(0)
+xtset, clear
+tsreport
+xtsum t");
+        // no xtset, then only a panel: Stata's own stops, the return codes in the text
+        assert!(
+            out[4].contains("stop(") && out[4].contains("must specify panelvar and timevar"),
+            "{out:?}"
+        );
+        assert!(out[6].contains("must specify timevar"), "{out:?}");
+        assert!(
+            out[7].contains("stata_xtsum(") && out[7].contains("\"id\""),
+            "{out:?}"
+        );
+        assert!(
+            out[9].contains("stata_xtdescribe(")
+                && out[9].contains("patterns = 2, width = 5")
+                && out[9].contains("fmts = c("),
+            "{out:?}"
+        );
+        assert!(out[10].contains("varlist not allowed"), "{out:?}");
+        assert!(
+            out[11].contains("stata_xtsum(") && out[11].contains("id > 1"),
+            "{out:?}"
+        );
+        assert!(out[12].contains("stata_xttab("), "{out:?}");
+        assert!(out[13].contains("too many variables"), "{out:?}");
+        assert!(out[14].contains("weights not allowed"), "{out:?}");
+        assert!(
+            out[15].contains("stata_obs_ = dplyr::row_number()")
+                && out[15].contains("detail = TRUE"),
+            "{out:?}"
+        );
+        assert!(out[16].contains("casewise = TRUE"), "{out:?}");
+        assert!(out[17].contains("option nosuch not allowed"), "{out:?}");
+        assert!(
+            out[18].contains("stata_tsappend(") && out[18].contains("add = 2"),
+            "{out:?}"
+        );
+        assert!(out[19].contains("last = "), "{out:?}");
+        assert!(
+            out[20].contains("you must specify either add() or last()"),
+            "{out:?}"
+        );
+        assert!(out[21].contains("positive integer"), "{out:?}");
+        assert!(out[23].contains("time variable not set"), "{out:?}");
+        assert!(out[24].contains("must specify panelvar"), "{out:?}");
     }
 
     #[test]
