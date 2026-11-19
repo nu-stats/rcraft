@@ -285,6 +285,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("sktest", &["sktest"]),
     ("snapshot", &["snapshot"]),
     ("sort", &["data", "extended_missing_commands"]),
+    ("spearman", &["spearman"]),
     ("split", &["strings"]),
     ("spmatrix", &["spmatrix"]),
     ("spset", &["spmatrix"]),

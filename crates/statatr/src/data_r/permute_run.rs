@@ -382,7 +382,11 @@ stata_rep_failed <- FALSE"
         let program = crate::reader::read(command);
         let mut inner = match program.commands().as_slice() {
             [one] => (*one).clone(),
-            _ => return Err(no("more than one command after the colon is not translated")),
+            _ => {
+                return Err(no(
+                    "more than one command after the colon is not translated",
+                ))
+            }
         };
         inner.prefixes.push(crate::reader::Prefix::Quietly);
         let mut body = Out::default();

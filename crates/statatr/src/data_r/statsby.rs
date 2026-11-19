@@ -593,7 +593,9 @@ impl Session {
         let recursive = opts.has("recursive", 9);
         let rrecursive = opts.has("rrecursive", 10);
         if recursive && rrecursive {
-            return Err(no("rolling with recursive and rrecursive together is not translated"));
+            return Err(no(
+                "rolling with recursive and rrecursive together is not translated",
+            ));
         }
         let nodots = opts.has("nodots", 4);
         let (Some(time), None) = (self.panel_time.clone(), self.panel.clone()) else {

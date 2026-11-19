@@ -24,6 +24,10 @@ pub(super) const RETURNED_HELPER: &str = r##"stata_eget <- function(name, text =
 }
 stata_rget <- function(name, text = FALSE) {
   v <- if (exists("stata_r")) stata_r[[name]] else NULL
+  # a value Stata has that RCraft does not reproduce for these data (spearman's p with ties)
+  if (is.null(v) && exists("stata_r") && name %in% attr(stata_r, "stata_unknown")) {
+    stop("r(", name, ") is not known here: RCraft does not reproduce it for these data", call. = FALSE)
+  }
   # a value Stata keeps out of return list but lets be read (power cox's r(hratio))
   if (is.null(v) && exists("stata_r")) v <- attr(stata_r, "stata_hidden")[[name]]
   if (is.null(v) || is.matrix(v)) return(if (text) "" else NA_real_)

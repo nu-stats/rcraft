@@ -2965,8 +2965,10 @@ impl Session {
         }
         if c.prefixes.contains(&Prefix::Replication) && !out.code.is_empty() {
             // a replication that stopped with an error runs no more of its lines
-            let body = out.code.join("
-");
+            let body = out.code.join(
+                "
+",
+            );
             out.code = vec![format!(
                 "if (!isTRUE(get0(\"stata_rep_failed\"))) tryCatch({{
 {body}

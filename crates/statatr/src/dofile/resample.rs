@@ -104,7 +104,10 @@ impl Run<'_> {
         };
         // a built-in command: one line, its replications in one R loop
         if kind == "builtin" {
-            let mut cmd = self.internal(c.span, &format!("_rcraft_{tag}_loop builtin {}", rest.trim()));
+            let mut cmd = self.internal(
+                c.span,
+                &format!("_rcraft_{tag}_loop builtin {}", rest.trim()),
+            );
             cmd.prefixes = c.prefixes.clone();
             let mut line = self.t.command(&cmd);
             line.stata = c.text.clone();
@@ -176,7 +179,8 @@ impl Run<'_> {
         };
         let l2 = self.lines.len();
         let first = self.lines.get(l0..l1).and_then(alike);
-        let second = self.lines.get(l1..l2).and_then(alike);        if self.asks == a0 && first.is_some() && first == second && n > 0 {
+        let second = self.lines.get(l1..l2).and_then(alike);
+        if self.asks == a0 && first.is_some() && first == second && n > 0 {
             let body: Vec<String> = self
                 .lines
                 .get(l1..l2)

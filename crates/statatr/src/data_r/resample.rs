@@ -337,8 +337,7 @@ impl Session {
         // (Stata leaves one out of the rows its if and in pick, the rows keeping their
         // places; here those rows are taken first and the command runs on them without
         // its if and in)
-        let picked = if !eclass
-            && (inner.parts.if_exp.is_some() || inner.parts.in_range.is_some())
+        let picked = if !eclass && (inner.parts.if_exp.is_some() || inner.parts.in_range.is_some())
         {
             let k = self.condition(&inner, &mut body)?;
             let mut bare = inner.clone();

@@ -220,11 +220,26 @@ stata_spearman <- function(d, vars, show = TRUE) {
   dimnames(R) <- list(vars, vars)
   if (length(vars) == 2) {
     rho <- R[1, 2]
-    t <- rho * sqrt((N - 2) / (1 - rho^2))
-    rr <- list(N = N, rho = rho, p = 2 * stats::pt(-abs(t), N - 2), p_l = stats::pt(t, N - 2), p_u = stats::pt(-t, N - 2))
-    if (!show) return(list(N = N, rho = rho))
+    # Stata 19: a symmetric beta on [-c, c] with the variance 1/(N - 1) and the kurtosis of
+    # rho's permutation distribution (without ties: 3(25N^3 - 38N^2 - 35N + 72) / (25N(N + 1)(N - 1)))
+    ties <- anyDuplicated(X[, 1]) > 0 || anyDuplicated(X[, 2]) > 0
+    if (ties) {
+      if (show) stop("spearman of two variables with tied values is not translated yet: Stata's p-value with ties is not reproduced", call. = FALSE)
+      return(structure(list(N = N, rho = rho), stata_unknown = c("p", "p_l", "p_u")))
+    }
+    b2 <- 3 * (25 * N^3 - 38 * N^2 - 35 * N + 72) / (25 * N * (N + 1) * (N - 1))
+    a <- 3 * (b2 - 1) / (2 * (3 - b2))
+    cc <- sqrt((2 * a + 1) / (N - 1))
+    pu <- if (N < 4 || !is.finite(a) || a <= 0) NA_real_ else stats::pbeta((rho + cc) / (2 * cc), a, a, lower.tail = FALSE)
+    pl <- if (is.na(pu)) NA_real_ else stats::pbeta((rho + cc) / (2 * cc), a, a)
+    p <- min(1, 2 * min(pu, pl))
+    # the same as Stata's to 4 decimals (as printed); in r() Stata's p differs from this
+    # beta's in the 7th digit for some samples, by a rule not decoded: r(p), r(p_l) and
+    # r(p_u) stop with the reason when read
+    rr <- structure(list(N = N, rho = rho), stata_unknown = c("p", "p_l", "p_u"))
+    if (!show) return(rr)
     cat(sprintf("\nNumber of observations = %6d\n%22s = %6.4f\n\nTest of H0: %s and %s are independent\n%22s = %6.4f\n",
-                N, "Spearman's rho", rho, vars[1], vars[2], "Prob", rr$p))
+                N, "Spearman's rho", rho, vars[1], vars[2], "Prob", p))
     return(rr)
   }
   rr <- list(N = N, rho = R[nrow(R), nrow(R) - 1], Rho = R)
@@ -376,8 +391,6 @@ const R_SIGNRANK: &[&str] = &[
 const R_SIGNTEST: &[&str] = &["N", "N_pos", "N_neg", "N_tie", "p", "p_l", "p_u"];
 const R_KWALLIS: &[&str] = &["df", "chi2", "p", "chi2_adj", "p_adj"];
 const R_SPEARMAN: &[&str] = &["N", "rho", "p", "p_l", "p_u"];
-/// What `quietly spearman x y` keeps: the p-values are not Stata's.
-const R_SPEARMAN_QUIET: &[&str] = &["N", "rho"];
 const R_KTAU: &[&str] = &[
     "N", "tau_a", "tau_b", "score", "se_score", "p", "Nobs", "Tau_a", "Tau_b", "Score", "Se_Score",
     "P",
@@ -491,24 +504,13 @@ impl Session {
                 if vars.len() < 2 || vars.iter().any(|v| !is_name(v)) {
                     return Err(no("spearman takes two or more variable names written out"));
                 }
-                // Stata 19 takes the p-value of two from a four-parameter beta fitted to the
-                // permutation moments ([R] spearman), not reproduced yet: the matrix of three or
-                // more only
-                // Under quietly the rank correlation and N are all that is kept: r(rho) and r(N) are
-                // exact; the p-value is not (r(p), r(p_l) and r(p_u) are then not known).
-                if vars.len() == 2 && quiet.is_empty() {
-                    return Err(no(
-                        "spearman of two variables (its p-value, from a four-parameter beta as Stata 19 fits it) is not translated yet; quietly spearman gives r(rho) and r(N)",
-                    ));
-                }
+                // two: Stata 19's p-value from a symmetric beta with the permutation
+                // variance and kurtosis (no ties; with ties R stops, or under quietly keeps
+                // r(rho) and r(N) only)
                 let q: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
                 (
                     format!("stata_spearman({rows}, c({}){quiet})", q.join(", ")),
-                    if vars.len() == 2 {
-                        R_SPEARMAN_QUIET
-                    } else {
-                        R_SPEARMAN
-                    },
+                    R_SPEARMAN,
                 )
             }
         };
@@ -521,7 +523,7 @@ impl Session {
             self.helpers.insert(h);
         }
         out.line(format!("stata_r <- {call}"));
-        if cmd == "spearman" && names.len() != 2 {
+        if cmd == "spearman" && main.split_whitespace().count() > 2 {
             // the matrix form's r() was not checked against Stata
             self.r_ret = super::returned::Returned::Lost(
                 "r() after spearman of three or more variables was not checked against Stata"
