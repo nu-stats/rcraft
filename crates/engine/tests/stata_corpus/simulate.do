@@ -74,3 +74,13 @@ display "@ f_n " _N
 forvalues i = 1/4 {
     display "@ f_`i' " %24.17g m[`i']
 }
+* many replications of a program: after the third, one R loop
+clear
+simulate mean=r(mean) sd=r(sd), reps(2500) seed(77) nodots: sim1
+display "@ m_n " _N
+foreach i in 1 2 3 4 5 1000 2499 2500 {
+    display "@ m_`i' " %24.17g mean[`i'] " " %24.17g sd[`i']
+}
+summarize mean
+display "@ m_sum " %24.17g r(sum) " " %24.17g r(sd)
+display "@ m_next " %24.17g runiform()

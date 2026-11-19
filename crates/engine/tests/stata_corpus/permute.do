@@ -257,3 +257,15 @@ generate y = round(rnormal() + 0.6*treat, .01)
 permute treat diff=(r(mu_2)-r(mu_1)), reps(2500) seed(30449) nodots: ttest y, by(treat)
 display "@ big " el(r(n), 1, 1) " " el(r(c_lower), 1, 1) " " el(r(c_upper), 1, 1) " " %24.17g el(r(p_twosided), 1, 1)
 display "@ big_next " %24.17g runiform()
+* many replications of a program
+clear
+set obs 6
+generate id = _n
+generate x = _n - 1
+permute x code=r(code), reps(2500) seed(3041) saving(permute_14, replace double) nodots: permcode
+display "@ pb " el(r(n), 1, 1) " " el(r(c_lower), 1, 1) " " el(r(c_upper), 1, 1)
+use permute_14, clear
+foreach i in 1 2 3 4 5 1000 2500 {
+    display "@ pb_`i' " %24.17g code[`i']
+}
+capture erase permute_14.dta

@@ -579,7 +579,7 @@ stata_rep_failed <- FALSE"
             .collect::<Vec<_>>()
             .join(", ");
         out.line(format!(
-            "{d} <- stata_sm_end(c({labels}){}, cmdname = {})\nrm(stata_sm_full)",
+            "{d} <- stata_sm_end(c({labels}){}, cmdname = {})",
             l.saving.as_ref().map_or(String::new(), |(p, _, _)| format!(
                 ", saving = {}",
                 super::r_text(p)

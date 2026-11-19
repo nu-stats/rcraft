@@ -442,6 +442,12 @@ pub struct Run<'f> {
     /// The temporary variables each program being run made, innermost last:
     /// Stata drops them when it returns.
     program_temps: Vec<Vec<String>>,
+    /// How many values the runner has asked R for (`permute` and `simulate` compare).
+    asks: usize,
+    /// Where the replications of a `permute` or `simulate` line started: the line and the asks.
+    rs_marks: Vec<(usize, usize)>,
+    /// The lines of one replication of that line, as written out.
+    rs_unit: Option<String>,
     /// A line before that was not translated runs a program or an add-on,
     /// which may set any global; the globals the do-file has not set are not
     /// known after it.
@@ -511,6 +517,9 @@ impl<'f> Run<'f> {
             refs: Vec::new(),
             programs: BTreeMap::new(),
             program_temps: Vec::new(),
+            asks: 0,
+            rs_marks: Vec::new(),
+            rs_unit: None,
             globals_unknown: None,
             one_line_if: None,
             captured_files: Vec::new(),
@@ -568,6 +577,10 @@ impl<'f> Run<'f> {
                 Flow::Next => {}
                 Flow::Line => return Event::Line,
                 Flow::Ask(need) => {
+                    // (the data's names are the same from one replication to the next)
+                    if !matches!(need, Need::Names) {
+                        self.asks += 1;
+                    }
                     let code = match &need {
                         Need::Value(exp) => self.t.value_code(exp),
                         Need::Display(rest) => self.t.display_code(rest),
@@ -1518,6 +1531,8 @@ impl<'f> Run<'f> {
                 Flow::Line
             }
             "permute" | "simulate" => self.resample_loop(c, &rest, depth, written),
+            "_rcraft_rs_mark" => self.resample_mark(depth),
+            "_rcraft_rs_compile" => self.resample_compile(c, &rest, depth, written),
             name if self.programs.contains_key(name) => {
                 self.done_item(depth);
                 let Some(def) = self.programs.get(name).cloned() else {
