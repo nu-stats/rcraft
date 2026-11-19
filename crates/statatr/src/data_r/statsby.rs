@@ -140,6 +140,54 @@ stata_roll_result <- function(full, time, w, res, exps = character()) {
   out
 }"##;
 
+/// Commands after which Stata 19 still counts the data as saved (each checked:
+/// `statsby` without `clear` then runs instead of stopping with r(4)).
+const KEEP_SAVED: &[&str] = &[
+    "sort",
+    "gsort",
+    "tsset",
+    "xtset",
+    "order",
+    "summarize",
+    "list",
+    "describe",
+    "display",
+    "count",
+    "tabulate",
+    "codebook",
+    "correlate",
+    "ttest",
+    "regress",
+    "logit",
+    "return",
+    "ereturn",
+    "estimates",
+    "preserve",
+    "restore",
+];
+
+/// Commands that leave the data changed since they were saved (checked as above).
+const CHANGE_SAVED: &[&str] = &["generate", "label", "format", "import", "insheet", "input"];
+
+/// Whether Stata counts the data as saved after the command `c` (`None`: not known).
+pub(super) fn saved_after(c: &Command, ok: bool, before: Option<bool>) -> Option<bool> {
+    let name = c.name.as_str();
+    if !ok {
+        return None;
+    }
+    match name {
+        // the data a plain `use file` reads, or what `save` wrote, are saved; no data is no change
+        "use" if c.parts.if_exp.is_none() && c.parts.in_range.is_none() && c.using.is_none() => {
+            Some(true)
+        }
+        "save" | "saveold" | "clear" => Some(true),
+        "set" if c.parts.main.trim_start().starts_with("obs") => Some(false),
+        _ if KEEP_SAVED.contains(&name) => before,
+        _ if CHANGE_SAVED.contains(&name) => Some(false),
+        _ => None,
+    }
+}
+
 /// `saving = path, replace = flag` for the R call, when `saving()` was given.
 fn saving_args(saving: &Option<(String, bool, bool)>) -> String {
     saving.as_ref().map_or(String::new(), |(p, r, _)| {
@@ -357,10 +405,21 @@ impl Session {
             out.line("stop(\"clear and saving() are mutually exclusive options (Stata: r(198))\", call. = FALSE)");
             return Ok(());
         }
+        // neither: Stata replaces data it counts as saved, and stops with r(4) otherwise
+        let mut clear = clear;
         if !clear && saving.is_none() {
-            return Err(no(
-                "statsby without clear or saving(): Stata stops (r(4)) when the data have changed since they were saved, which RCraft does not know",
-            ));
+            match self.saved_now {
+                Some(true) => clear = true,
+                Some(false) => {
+                    out.line("stop(\"no; dataset in memory has changed since last saved (Stata: r(4))\", call. = FALSE)");
+                    return Ok(());
+                }
+                None => {
+                    return Err(no(
+                        "statsby without clear or saving(): Stata stops (r(4)) when the data have changed since they were saved, which RCraft does not know here",
+                    ))
+                }
+            }
         }
         let by_arg = opts.arg("by", 2).unwrap_or_default();
         let (by_list, by_rest) = match by_arg.split_once(',') {
@@ -501,10 +560,21 @@ impl Session {
             out.line("stop(\"clear and saving() are mutually exclusive options (Stata: r(198))\", call. = FALSE)");
             return Ok(());
         }
+        // neither: Stata replaces data it counts as saved, and stops with r(4) otherwise
+        let mut clear = clear;
         if !clear && saving.is_none() {
-            return Err(no(
-                "rolling without clear or saving(): Stata stops (r(4)) when the data have changed since they were saved, which RCraft does not know",
-            ));
+            match self.saved_now {
+                Some(true) => clear = true,
+                Some(false) => {
+                    out.line("stop(\"no; dataset in memory has changed since last saved (Stata: r(4))\", call. = FALSE)");
+                    return Ok(());
+                }
+                None => {
+                    return Err(no(
+                        "rolling without clear or saving(): Stata stops (r(4)) when the data have changed since they were saved, which RCraft does not know here",
+                    ))
+                }
+            }
         }
         let window: u32 = opts
             .arg("window", 6)

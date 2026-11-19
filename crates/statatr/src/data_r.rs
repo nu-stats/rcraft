@@ -1843,6 +1843,9 @@ struct Session {
     resampling: Option<Box<permute_run::Loop>>,
     /// The last command that was not one of RCraft's own set e(sample).
     prev_eclass: bool,
+    /// Whether Stata counts the data as saved (unchanged since `use` or `save`):
+    /// `None` when RCraft does not know.
+    saved_now: Option<bool>,
     r_ret: returned::Returned,
     /// This command left r(): the names it keeps, and its name.
     r_new: Option<(&'static [&'static str], String)>,
@@ -1929,6 +1932,7 @@ struct Preserved {
     ts_delta: Option<String>,
     ts_unknown: bool,
     stset: Option<st::StSet>,
+    saved_now: Option<bool>,
 }
 
 /// Collects one command's R.
@@ -2771,6 +2775,7 @@ impl Session {
             .is_some_and(|e| e.reason.contains(crate::dofile::KNOWN_WHEN_RUN));
         self.track_returned(c, done.is_ok(), later, r_left);
         if !c.name.starts_with("_rcraft_") {
+            self.saved_now = statsby::saved_after(c, done.is_ok(), self.saved_now);
             self.prev_eclass = self.e_new;
         }
         if done.is_ok() && MODELS.contains(&c.name.as_str()) {
@@ -4744,6 +4749,7 @@ impl Session {
             ts_delta: self.ts_delta.clone(),
             ts_unknown: self.ts_unknown,
             stset: self.stset.clone(),
+            saved_now: self.saved_now,
         }
     }
 
@@ -4759,6 +4765,7 @@ impl Session {
         self.ts_delta = p.ts_delta;
         self.ts_unknown = p.ts_unknown;
         self.stset = p.stset;
+        self.saved_now = p.saved_now;
         // the rows may not be the ones the last model was fitted on
         self.esample = false;
         self.changed_since_fit = true;
@@ -4934,6 +4941,7 @@ impl Session {
         self.ts_delta = p.ts_delta;
         self.ts_unknown = p.ts_unknown;
         self.stset = p.stset;
+        self.saved_now = p.saved_now;
         // the rows may not be the ones the last model was fitted on
         self.esample = false;
         self.changed_since_fit = true;

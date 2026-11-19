@@ -54,6 +54,7 @@ forvalues i = 1/`=_N' {
 restore
 generate tt = _n
 tsset tt
+tsset tt
 preserve
 rolling _b, window(20) clear nodots: regress y x
 display "@ r1_n " _N
@@ -126,3 +127,32 @@ display "@ rq_n " _N
 forvalues i = 1/`=_N' {
     display "@ rq_`i' " start[`i'] " " end[`i'] " " %24.17g mean[`i']
 }
+* neither clear nor saving(): Stata replaces data it counts as saved, and stops with r(4) otherwise
+import delimited corpus.csv, clear
+capture noisily statsby m=r(mean), by(cat3) nodots: summarize x
+display "@ nc_import " _rc " " _N
+save statsby_3, replace
+capture noisily statsby m=r(mean), by(cat3) nodots: summarize x
+display "@ nc_saved " _rc " " _N " " %24.17g m[1]
+use statsby_3, clear
+sort x
+summarize y
+regress y x
+capture noisily statsby m=r(mean), by(cat3) nodots: summarize x
+display "@ nc_sorted " _rc " " _N
+use statsby_3, clear
+generate zz = 1
+capture noisily statsby m=r(mean), by(cat3) nodots: summarize x
+display "@ nc_gen " _rc " " _N
+use statsby_3, clear
+preserve
+restore
+generate tt = _n
+tsset tt
+capture noisily rolling m=r(mean), window(20) stepsize(20) nodots: summarize y
+display "@ nc_roll_gen " _rc
+use statsby_3, clear
+tsset id
+capture noisily rolling m=r(mean), window(20) stepsize(20) nodots: summarize y
+display "@ nc_roll " _rc " " _N " " %24.17g m[1]
+capture erase statsby_3.dta
