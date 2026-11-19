@@ -290,6 +290,109 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "jackknife",
+        about: "Repeats a command with each observation (or cluster) left out",
+        points: &[
+            p(
+                "Method",
+                "The command runs on the data, then once for each observation of its estimation \
+                 sample (each cluster with cluster()) left out. The replicates are kept as floats, \
+                 as Stata keeps them; the variance is (n - 1)/n times the sum of products of the \
+                 deviations, with t on n - 1 degrees of freedom. e(b_jk) is the bias-corrected \
+                 value, n times the observed minus (n - 1) times the mean of the replicates.",
+            ),
+            p(
+                "Forms",
+                "jackknife exp_list: command with r() or e() values, or _b after regress, logit or \
+                 probit; regress, logit and probit with vce(jackknife) are the same run. \
+                 cluster(), level(), nodots and notable are translated; r(table) is left.",
+            ),
+            p(
+                "Not yet",
+                "Other options, a command with if or in that sets no e(sample), a missing value of \
+                 the cluster variable, and a replication that stops with an error are refused with \
+                 the reason.",
+            ),
+        ],
+    },
+    Guide {
+        command: "statsby",
+        about: "Collects a command's results for each group of the data",
+        points: &[
+            p(
+                "Groups",
+                "The command runs on each group's rows, in ascending order of the by() variables; \
+                 a missing by value is left out unless by(vars, missing); total adds a last row. \
+                 The data become the results, floats labelled with their expressions.",
+            ),
+            p(
+                "Not yet",
+                "Without clear, saving(), subsets and _b or _se after logit or probit (Stata names \
+                 those variables after the equation) are refused with the reason.",
+            ),
+        ],
+    },
+    Guide {
+        command: "rolling",
+        about: "Collects a command's results over windows of a time series",
+        points: &[
+            p(
+                "Windows",
+                "window(#) consecutive observations of the data tsset by a time variable, \
+                 stepsize(#), and recursive for windows that keep the first observation. start and \
+                 end are the time variable's values; the data become the results.",
+            ),
+            p(
+                "Not yet",
+                "Gaps in time, xtset data, rrecursive, saving() and a missing clear are refused \
+                 with the reason.",
+            ),
+        ],
+    },
+    Guide {
+        command: "permute",
+        about: "Repeats a command on random permutations of one variable",
+        points: &[
+            p(
+                "Draws",
+                "The permutations are Stata's own, drawn from the generator after seed(): the \
+                 command runs once on the data as they are, then once for each replication, \
+                 with the variable permuted among the estimation sample's rows (within each \
+                 stratum with strata()). A variable with two values is permuted the way Stata \
+                 does it, with fewer draws. The data are put back afterwards.",
+            ),
+            p(
+                "Results",
+                "The table, r() with its matrices (b, n, c_lower, p_twosided, ci_p_*, ...) and \
+                 saving(file[, replace double]); e() is empty afterwards. A program the do-file \
+                 defines runs once for each replication, so the R holds its lines that many times.",
+            ),
+            p(
+                "Not yet",
+                "spearman, r(nosuch), an e-class program, more than 2,000 replications, left, \
+                 right and eps() are refused with the reason.",
+            ),
+        ],
+    },
+    Guide {
+        command: "simulate",
+        about: "Repeats a program or command and keeps its results as the data",
+        points: &[
+            p(
+                "Method",
+                "seed() is set, then the program or command runs reps() times on the data as the \
+                 last run left them; the statistics (r() and e() values, or _b and _se) become \
+                 the data, floats labelled with their expressions. r() is what the last run left.",
+            ),
+            p(
+                "Not yet",
+                "A replication that stops with an error (Stata records a missing row; R stops), \
+                 saving(, double), and _b after a program that does not end with regress, logit or \
+                 probit are refused with the reason.",
+            ),
+        ],
+    },
+    Guide {
         command: "bsample",
         about: "Replaces the data with a sample drawn with replacement",
         points: &[

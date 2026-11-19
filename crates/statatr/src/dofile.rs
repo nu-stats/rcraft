@@ -23,6 +23,7 @@ mod eval;
 pub(crate) mod format;
 pub(crate) mod macros;
 mod progsyntax;
+mod resample;
 mod scan;
 mod varlist;
 
@@ -1511,6 +1512,7 @@ impl<'f> Run<'f> {
                 );
                 Flow::Line
             }
+            "permute" | "simulate" => self.resample_loop(c, &rest, depth, written),
             name if self.programs.contains_key(name) => {
                 self.done_item(depth);
                 let Some(def) = self.programs.get(name).cloned() else {

@@ -84,6 +84,8 @@ mod outreg2;
 mod parmest;
 mod pca;
 mod pdslasso;
+mod permute;
+mod permute_run;
 mod post;
 mod postfile;
 mod power;
@@ -96,6 +98,7 @@ mod rangestat;
 mod ranktests;
 mod rawread;
 mod reghdfe;
+mod resample;
 mod returned;
 mod revrs;
 mod robreg;
@@ -109,6 +112,7 @@ mod snapshot;
 mod spatial;
 mod st;
 mod stats;
+mod statsby;
 mod stepwise;
 mod suest;
 mod survwgt;
@@ -139,6 +143,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::expr_r::{self, r_name, r_number, r_text, Kind, Untranslated, Use};
 use crate::lang::syntax::Opt;
 use crate::reader::{Command, Item, Opener, Prefix, Program, Span};
+
+pub use permute::plan as resample_plan;
 
 /// How a Stata line starts in the R script, as a comment above its R.
 pub const STATA_COMMENT: &str = "# Stata: ";
@@ -1673,6 +1679,10 @@ fn helper_code(name: &str) -> &'static str {
         "stata_drawnorm" => random::DRAWNORM_HELPER,
         "stata_bootstrap" => random::BOOTSTRAP_HELPER,
         "stata_estat_bootstrap" => random::ESTAT_BOOTSTRAP_HELPER,
+        "stata_jackknife" => resample::JACKKNIFE_HELPER,
+        "stata_statsby" => statsby::STATSBY_HELPER,
+        "stata_permute" => permute::PERMUTE_HELPER,
+        "stata_simulate" => permute::SIMULATE_HELPER,
         _ => FLOAT_HELPER,
     }
 }
@@ -1822,6 +1832,10 @@ struct Session {
     fit_ts: Option<String>,
     /// Who left the e() and r() an expression would read (P2B.6).
     e_ret: returned::Returned,
+    /// The `permute` or `simulate` line being run, replication by replication.
+    resampling: Option<Box<permute_run::Loop>>,
+    /// The last command that was not one of RCraft's own set e(sample).
+    prev_eclass: bool,
     r_ret: returned::Returned,
     /// This command left r(): the names it keeps, and its name.
     r_new: Option<(&'static [&'static str], String)>,
@@ -2749,6 +2763,9 @@ impl Session {
             .err()
             .is_some_and(|e| e.reason.contains(crate::dofile::KNOWN_WHEN_RUN));
         self.track_returned(c, done.is_ok(), later, r_left);
+        if !c.name.starts_with("_rcraft_") {
+            self.prev_eclass = self.e_new;
+        }
         if done.is_ok() && MODELS.contains(&c.name.as_str()) {
             self.est_shown = Some(!silent(c));
         }
@@ -2949,6 +2966,11 @@ impl Session {
         if self.sw.is_none() && c.prefixes.iter().any(|p| matches!(p, Prefix::Nestreg(_))) {
             return self.nestreg(c, out);
         }
+        if matches!(c.name.as_str(), "regress" | "logit" | "probit")
+            && resample::vce_jackknife(&opts)
+        {
+            return self.jackknife_vce(c, out);
+        }
         // the word with no colon after it: not a prefix the reader could take
         if c.name == "stepwise" {
             return Err(no(
@@ -3106,6 +3128,22 @@ impl Session {
             }
             "bsample" => self.bsample(c, &opts, out),
             "bootstrap" => self.bootstrap(c, out),
+            "jackknife" => self.jackknife(c, out),
+            // the do-file runner writes these out replication by replication
+            "permute" | "simulate" => Err(no(format!(
+                "{} is translated when a do-file runs it (each replication is written out as lines), not as one typed line",
+                c.name
+            ))),
+            "statsby" => self.statsby(c, out),
+            "_rcraft_pm_begin" => self.pm_begin(c, out),
+            "_rcraft_pm_collect" => self.pm_collect(c, out),
+            "_rcraft_pm_shuffle" => self.pm_shuffle(c, out),
+            "_rcraft_pm_end" => self.pm_end(c, out),
+            "_rcraft_sm_begin" => self.sm_begin(c, out),
+            "_rcraft_sm_collect" => self.sm_collect(c, out),
+            "_rcraft_sm_end" => self.sm_end(c, out),
+            "_rcraft_rs_fail" => self.rs_fail(c, out),
+            "rolling" => self.rolling(c, out),
             "clear" => {
                 if let Some(d) = self.data.take() {
                     out.line(format!("rm({d})"));
@@ -3947,6 +3985,14 @@ impl Session {
             )));
         }
         let sel = select(main)?;
+        // nothing to drop when there are no data (Stata does not mind)
+        if !keep
+            && (main == "_all" || main == "*")
+            && self.data.is_none()
+            && self.data_lost.is_none()
+        {
+            return Ok(());
+        }
         let d = self.data()?;
         if !keep && (main == "_all" || main == "*") {
             out.line(format!("{d} <- {d}[0, 0]"));

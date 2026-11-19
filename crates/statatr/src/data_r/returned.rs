@@ -1644,6 +1644,13 @@ const LEAVE_R_ALONE: &[&str] = &[
     "_rcraft_program_begin",
     "_rcraft_program_end",
     "_rcraft_fail",
+    "_rcraft_rs_fail",
+    "_rcraft_pm_begin",
+    "_rcraft_pm_collect",
+    "_rcraft_pm_shuffle",
+    "_rcraft_sm_begin",
+    "_rcraft_sm_collect",
+    "_rcraft_sm_end",
     // marginsplot draws the margins and leaves their r() (Stata 19)
     "marginsplot",
     // putexcel set and its writes leave r() (Stata 19)
@@ -1699,6 +1706,13 @@ const LEAVE_E_ALONE: &[&str] = &[
     "_rcraft_program_begin",
     "_rcraft_program_end",
     "_rcraft_fail",
+    "_rcraft_rs_fail",
+    "_rcraft_pm_begin",
+    "_rcraft_pm_collect",
+    "_rcraft_pm_shuffle",
+    "_rcraft_sm_begin",
+    "_rcraft_sm_collect",
+    "_rcraft_sm_end",
     "frame",
     "return",
     "parmest",
@@ -3069,7 +3083,7 @@ impl Session {
                 }
                 let (value, text) = match exp {
                     Some(e) => {
-                        let (v, kind) = self.value(e, out)?;
+                        let (v, kind, _) = self.drawing(e, Use::Value, "1", out)?;
                         if sub == "scalar" && kind == Kind::Text {
                             return Err(no(
                                 "return scalar of text: Stata refuses it (type mismatch)",

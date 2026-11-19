@@ -1,0 +1,75 @@
+* RCraft's Stata corpus (P2C.12, batch I): made-up data; Stata 19's results are in statsby.recorded
+* commands: statsby rolling
+* (statsby: r() statistics named and not, by() of one and two variables, _b and _se, total, missing, a group the command fails in; rolling: windows, recursive, stepsize, _b)
+* tolerance: 1e-8
+version 19
+set linesize 255
+import delimited corpus.csv, clear
+preserve
+statsby mean=r(mean) n=r(N), by(cat3) clear nodots: summarize x
+display "@ s1_n " _N
+forvalues i = 1/`=_N' {
+    display "@ s1_row`i' " cat3[`i'] " " %24.17g mean[`i'] " " n[`i']
+}
+restore
+preserve
+statsby sd=r(sd), by(cat3 g) clear nodots: summarize y
+display "@ s2_n " _N
+forvalues i = 1/`=_N' {
+    display "@ s2_row`i' " cat3[`i'] " " g[`i'] " " %24.17g sd[`i']
+}
+restore
+preserve
+statsby _b _se, by(cat3) clear nodots: regress y x
+display "@ s3_n " _N
+forvalues i = 1/`=_N' {
+    display "@ s3_row`i' " cat3[`i'] " " %24.17g _b_x[`i'] " " %24.17g _b_cons[`i'] " " %24.17g _se_x[`i'] " " %24.17g _se_cons[`i']
+}
+restore
+preserve
+statsby r(mean) r(max), by(g) total clear nodots: summarize x
+display "@ s4_n " _N
+forvalues i = 1/`=_N' {
+    display "@ s4_row`i' " g[`i'] " " %24.17g _stat_1[`i'] " " %24.17g _stat_2[`i']
+}
+restore
+preserve
+statsby b=_b[x] r2=e(r2) n=e(N), clear nodots: regress y x w
+display "@ s5 " _N " " %24.17g b[1] " " %24.17g r2[1] " " n[1]
+restore
+preserve
+replace cat3 = . in 1/3
+statsby m=r(mean), by(cat3) clear nodots: summarize x
+display "@ s6_n " _N
+restore, preserve
+statsby m=r(mean), by(cat3, missing) clear nodots: summarize x
+display "@ s6m_n " _N " " %24.17g m[_N]
+restore
+preserve
+statsby bx=_b[x] ll=e(ll), by(cat3) clear nodots: logit yb x
+display "@ s7_n " _N
+forvalues i = 1/`=_N' {
+    display "@ s7_row`i' " %24.17g bx[`i'] " " %24.17g ll[`i']
+}
+restore
+generate tt = _n
+tsset tt
+preserve
+rolling _b, window(20) clear nodots: regress y x
+display "@ r1_n " _N
+display "@ r1_first " start[1] " " end[1] " " %24.17g _b_x[1] " " %24.17g _b_cons[1]
+display "@ r1_last " start[_N] " " end[_N] " " %24.17g _b_x[_N] " " %24.17g _b_cons[_N]
+restore
+preserve
+rolling mean=r(mean) sd=r(sd), window(12) recursive clear nodots: summarize x
+display "@ r2_n " _N
+display "@ r2_a " start[1] " " end[1] " " %24.17g mean[1] " " %24.17g sd[1]
+display "@ r2_b " start[_N] " " end[_N] " " %24.17g mean[_N] " " %24.17g sd[_N]
+restore
+preserve
+rolling sd=r(sd), window(15) stepsize(7) clear nodots: summarize y
+display "@ r3_n " _N
+forvalues i = 1/`=_N' {
+    display "@ r3_row`i' " start[`i'] " " end[`i'] " " %24.17g sd[`i']
+}
+restore

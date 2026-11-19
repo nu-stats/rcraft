@@ -306,6 +306,7 @@ const MODELS: &[&str] = &[
     "slogit",
     "spmatrix",
     "spregress",
+    "rolling",
     "spset",
     "sqrtlasso",
     "statsby",
