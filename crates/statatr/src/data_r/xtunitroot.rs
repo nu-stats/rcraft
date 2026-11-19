@@ -780,7 +780,7 @@ impl Session {
             Some(k) if *test == "llc" => {
                 let w: Vec<&str> = k.split_whitespace().collect();
                 match w.as_slice() {
-                    [("bartlett" | "parzen")] => {
+                    ["bartlett" | "parzen"] => {
                         stop(
                             out,
                             "kernel() needs a number of lags or a lag-selection rule (Stata: r(198))",
@@ -790,7 +790,7 @@ impl Session {
                     [name @ ("bartlett" | "parzen"), "llc"] => {
                         format!("list(name = {}, lags = NULL)", r_text(name))
                     }
-                    [("bartlett" | "parzen"), "nwest"] => {
+                    ["bartlett" | "parzen", "nwest"] => {
                         return Err(no(
                             "xtunitroot llc, kernel(... nwest): the Newey-West bandwidth is not translated yet (Stata's choice is not decoded)",
                         ));

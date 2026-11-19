@@ -5912,7 +5912,7 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   (Stata's own values at every `ttilde`), the long-run variance of `D.y` (demeaned, detrended or as it is) with the Bartlett or
   Parzen kernel, the bandwidth of each panel from the rows it has in the data, the late-starting sample that reads one period
   before it, and r(). `lags()`, `kernel(bartlett # | parzen # | ... llc)`, `noconstant`, `trend` and `demean` work; unbalanced
-  panels stop with r(498). `stata_rget` returns `.` for an r() text name that is absent (Stata's expression does; the macro does not).
+  panels stop with r(498). An absent r() text name reads `.` in a Stata expression, empty in RCraft (not changed: the macro form shares the code).
 - **Refused, tried:** `breitung` with `robust` or `lags()` (about 100 prewhitening, scaling and base variants for `lags()`; for
   `robust` the one-panel case is the plain pooled t statistic but several panels follow neither a GLS nor a sandwich form) and
   `arch` (BHHH for 5 iterations, then BFGS for 10, with Stata's step-forward line search; start values and the first step

@@ -52,8 +52,7 @@ corpus `xtunitroot.do` (99 results, 1e-8) and, for `llc` (decoded here), `xtunit
     inside the sample (`ttilde = T - lags - 1`). Starting at the first row of the data is the ordinary case.
   - r(): the scalars `p_td` (noconstant only, the unadjusted t's p-value), `p_tds sig_adj mu_adj delta se_delta Var_ep sbar
     ttilde td tds N_g N_t N hac_lagm` (or `hac_lags`) and `adf_lags`, the texts `test deterministics hac_kernel hac_method`
-    (not with an explicit lag count) and `demean`. A text r() name that is absent reads `.` in an expression, as Stata does
-    (`stata_rget` now returns `.`; the macro form is empty).
+    (not with an explicit lag count) and `demean`. A text r() name that is absent reads `.` in a Stata expression (the macro form is empty); RCraft gives empty for both, so the corpus does not print an absent one.
   - Header: `Asymptotics: N/T -> 0` (`root(N)/T -> 0` and `Panel means: Not included` with `noconstant`); `ADF regressions:
     # lags`; `LR variance:  Bartlett kernel, 9.00 lags average (chosen by LLC)` (or `Bartlett kernel, 3 lags`); the table has
     `Unadjusted t` (with its p-value for noconstant) and `Adjusted t*`.

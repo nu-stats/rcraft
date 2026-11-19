@@ -51,7 +51,7 @@ display "@ l11 " r(N) " " r(ttilde) " " %24.17g r(td) " " %24.17g r(tds) " " %24
 * kernel()
 xtunitroot llc y, kernel(bartlett 3)
 display "@ k1 " r(hac_lags) " " r(hac_lagm) " " %24.17g r(tds) " " %24.17g r(sbar)
-display "@ k1s [" r(hac_kernel) "] [" r(hac_method) "]"
+display "@ k1s [" r(hac_kernel) "]"
 xtunitroot llc y, kernel(parzen 3)
 display "@ k2 " r(hac_lags) " " %24.17g r(tds) " " %24.17g r(sbar)
 display "@ k2s [" r(hac_kernel) "]"
