@@ -470,6 +470,9 @@ pub(super) const TSAPPEND_HELPER: &str = r##"stata_tsappend <- function(d, time,
   list(d = out, add = if (!is.null(add)) add else appended)
 }"##;
 
+/// The panel variable and the time variable `xtset` left.
+type PanelSettings = (Option<String>, Option<String>);
+
 const R_XTSUM: &[&str] = &[
     "max_w", "min_w", "sd_w", "max_b", "min_b", "sd_b", "max", "min", "sd", "mean", "Tbar", "n",
     "N",
@@ -528,7 +531,7 @@ impl Session {
         msg_none: &str,
         msg_no_time: &str,
         code: u16,
-    ) -> Result<Option<(Option<String>, Option<String>)>, Untranslated> {
+    ) -> Result<Option<PanelSettings>, Untranslated> {
         if self.ts_unknown {
             return Err(no(
                 "the data were read from a file whose xtset or tsset settings are not known here; \
