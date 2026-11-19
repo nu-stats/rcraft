@@ -82,12 +82,14 @@ pub const COMMANDS: &[&str] = &[
     "cluster2",
     "cmclogit",
     "cmset",
+    "cnsreg",
     "codebook",
     "coefplot",
     "collapse",
     "compare",
     "compress",
     "confirm",
+    "constraint",
     "contract",
     "connected",
     "continue",
@@ -371,6 +373,10 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("drawnorm", &["clear", "cov(", "double", "means(", "n("]),
+    (
+        "cnsreg",
+        &["constraints(", "level(", "noconstant", "robust", "vce("],
+    ),
     (
         "clogit",
         &[
@@ -2008,6 +2014,7 @@ mod tests {
             "generate" => "z",
             "corr" => "exchangeable",
             "baseoutcome" => "1",
+            "constraints" => "1",
             "failure" => "d",
             "id" | "i" => "id",
             "j" => "t",
@@ -2066,6 +2073,14 @@ mod tests {
             "cii" if name == "sd" => format!("cii variances 20 4, {o}"),
             "cii" => format!("cii proportions 20 5, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
+            "cnsreg" if name == "constraints" => format!(
+                "constraint 1 x1 = x2
+cnsreg y x1 x2 x3, {o}"
+            ),
+            "cnsreg" => format!(
+                "constraint 1 x1 = x2
+cnsreg y x1 x2 x3, constraints(1) {o}"
+            ),
             "cmclogit" => format!("cmset g t\ncmclogit d x, {o}"),
             "cluster2" => "cluster2 y x, fcluster(g) tcluster(t)".to_string(),
             "coefplot" => format!("regress y x\ncoefplot, {o}"),

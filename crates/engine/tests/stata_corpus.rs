@@ -373,7 +373,13 @@ fn check_file(e: &mut Engine, dir: &Path, name: &str, wrong: &mut Vec<String>) {
         .unwrap_or(1e-8);
     let folder = dir.display().to_string().replace('\\', "/");
     let text = match run_dofile(e, &folder, &dofile) {
-        Ok(t) => t,
+        Ok(t) => {
+            // RCRAFT_CORPUS_SHOW=1 prints what R printed, to compare with Stata's log by eye
+            if std::env::var("RCRAFT_CORPUS_SHOW").is_ok() {
+                eprintln!("{t}");
+            }
+            t
+        }
         Err(why) => {
             wrong.push(format!("{name}: {why}"));
             return;

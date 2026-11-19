@@ -257,6 +257,8 @@ const MODELS: &[&str] = &[
     "bootstrap",
     "bsample",
     "clogit",
+    "cnsreg",
+    "constraint",
     "cluster2",
     "cloglog",
     "cmclogit",

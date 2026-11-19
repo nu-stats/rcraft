@@ -61,6 +61,7 @@ mod ivprobit;
 mod kap;
 mod lasso;
 mod lroc;
+mod lsfam;
 mod margins;
 mod matrices;
 mod meanest;
@@ -559,6 +560,7 @@ const BY_EACH: &[&str] = &[
 /// The commands that take weights here; each reads `c.parts.weight` itself
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
+    "cnsreg",
     "ltable",
     "dfuller",
     "pperron",
@@ -1493,6 +1495,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_rreg" => rreg::RREG_HELPER,
         "stata_medeff" => medeff::MEDEFF_HELPER,
         "stata_nl" => nl::NL_HELPER,
+        "stata_lsfam" => lsfam::LSFAM_HELPER,
         "stata_est_mark" => returned::EST_MARK_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
@@ -3190,6 +3193,8 @@ impl Session {
             "rreg" => self.rreg(c, &opts, out),
             "medeff" => self.medeff(c, &opts, out),
             "nl" => self.nl(c, &opts, out),
+            "constraint" => self.constraint(c, out),
+            "cnsreg" => self.cnsreg(c, &opts, out),
             "marginsplot" => self.marginsplot(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),
             "erase" | "rm" => self.erase(c, out),

@@ -1640,6 +1640,7 @@ pub(super) enum Returned {
 /// (checked one by one); every other command replaces or clears r().
 const LEAVE_R_ALONE: &[&str] = &[
     "char",
+    "constraint",
     "type",
     "cumul",
     // file open, write and close (file read sets r() itself)
@@ -1703,6 +1704,7 @@ const LEAVE_R_ALONE: &[&str] = &[
 /// be an estimation command, after which e() is not known).
 const LEAVE_E_ALONE: &[&str] = &[
     "char",
+    "constraint",
     "labelbook",
     "compare",
     "ds",
@@ -2024,6 +2026,7 @@ impl Session {
                             | "ds"
                             | "lookfor"
                             | "misstable"
+                            | "constraint"
                     ) =>
             {
                 self.est_shown = Some(false);

@@ -3671,6 +3671,53 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "cnsreg",
+        about: "Constrained linear regression",
+        points: &[
+            p(
+                "As Stata 19",
+                "cnsreg y x..., constraints(numlist) reads each defined constraint as a linear \
+                 equation in the coefficients (`x1 = x2`, `2*x1 - x2 = x3 + 1`, `_cons = 2`, \
+                 `_b[x1] = 1`), counts equal ones once, and fits restricted least squares by \
+                 projection: b = b0 + T a, b0 the smallest b meeting R b = r, T a basis of what \
+                 the constraints leave free. Degrees of freedom N - (k - m), s^2 = RSS/df. noconstant, \
+                 vce(robust) and vce(cluster v) (HC1, G/(G-1) with the clusters), level(), \
+                 fweights, aweights and pweights (which imply robust) are taken. The F test is that \
+                 of the slopes given the constraints, and goes with its Prob > F when it \
+                 contradicts them (a slope fixed at a value); e(p) keeps the residual degrees of \
+                 freedom even with clusters, as Stata does. A constraint that does not parse, or names \
+                 a variable the model lacks, is dropped with Stata's note; none left is r(111), \
+                 repeated or contradicting ones r(412), a missing constraints() r(198). The header, \
+                 the constraint lines, `(constrained)` and the table print as Stata's, and e() \
+                 (b, V, Cns, V_modelbased) is Stata's. predict (xb, residuals) and test work after it.",
+            ),
+            p(
+                "Not yet",
+                "Factor variables and operators in the model, iweights, collinear, mse1, and \
+                 constraints with more than one =, products or powers of coefficients (Stata: r(131)) \
+                 beyond the error, or the [eq]x form beyond its r(303).",
+            ),
+        ],
+    },
+    Guide {
+        command: "constraint",
+        about: "Define and list linear constraints",
+        points: &[
+            p(
+                "As Stata 19",
+                "constraint [define] # exp keeps the text as typed (1 to 1999), without checking it \
+                 until a command uses it; constraint dir and list [numlist] print `     1:  x1 = x2`; \
+                 get # sets r(defined) and r(contents); free sets r(free), the highest number not in \
+                 use; drop takes a numlist or _all. Only get and free change r(). cnsreg reads them.",
+            ),
+            p(
+                "Not yet",
+                "Numbers above 1999 (Stata accepts them silently), quoted text, and the \
+                 constraints() option of other models (logit, poisson, sspace and the rest).",
+            ),
+        ],
+    },
+    Guide {
         command: "rreg",
         about: "Robust regression (Huber then biweight iterations)",
         points: &[

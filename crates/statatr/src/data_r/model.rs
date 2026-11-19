@@ -52,6 +52,8 @@ pub(super) enum Fit {
     Suest,
     /// `glm` (maximum likelihood)
     Glm,
+    /// `cnsreg`: restricted least squares (`lsfam`)
+    Cnsreg,
 }
 
 impl Fit {
@@ -76,6 +78,7 @@ impl Fit {
             Fit::Asclogit => "asclogit",
             Fit::Suest => "suest",
             Fit::Glm => "glm",
+            Fit::Cnsreg => "cnsreg",
         }
     }
 

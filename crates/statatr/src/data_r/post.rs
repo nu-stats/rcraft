@@ -382,6 +382,7 @@ impl Session {
                 ("xbu", 3),
             ],
             Fit::Ivregress => &[("xb", 2), ("residuals", 1)],
+            Fit::Cnsreg => &[("xb", 2), ("residuals", 1)],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("scores", 2)],
@@ -624,6 +625,18 @@ impl Session {
                     r_name(&est.dep)
                 ),
                 Fit::Ivregress => format!("unname(stata_iv_xb(stata_estimates, {d}))"),
+                Fit::Cnsreg if opts.has("residuals", 1) => {
+                    self.helpers.insert("stata_lsfam");
+                    self.helpers.insert("stata_float");
+                    format!(
+                        "{} - stata_float(stata_ls_xb(stata_e, {d}))",
+                        r_name(&est.dep)
+                    )
+                }
+                Fit::Cnsreg => {
+                    self.helpers.insert("stata_lsfam");
+                    format!("stata_ls_xb(stata_e, {d})")
+                }
                 _ if opts.has("xb", 2) => newdata(", type = \"link\""),
                 _ => newdata(", type = \"response\""),
             };
