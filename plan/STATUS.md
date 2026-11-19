@@ -5724,3 +5724,5 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   so `groups` carries a caveat and `r(groups#)` is not kept). R stops (it does not print Stata's tables) when the
   groups leave 0 residual degrees of freedom, or 1 with Tukey.
 - Not in the corpus: the matrix column names with `bn` (`: colnames` is not translated), checked by hand against Stata.
+- **Shares after pwmean:** probes 77.4% (22,383 -> 22,397 translated lines of the 543 do-files); packages unchanged at 87.8%
+  (3,750 of 4,272).

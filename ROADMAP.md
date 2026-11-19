@@ -541,7 +541,7 @@ Command families:
 
 Coverage and matching milestones (the share is of the lines a dry run judges, each source
 line once; **two measures count equally** for the 95% minimum: probe lines and replication-package lines.
-Last measured 2026-11-18 (`main` at 592a1ce plus the parser resync of P0.3): probes 77.3% (542 do-files),
+Last measured 2026-11-18 (`main` at c1185f6 plus pwmean): probes 77.4% (543 do-files, 22,397 of 28,929 judged lines),
 packages 87.8% (3,750 of 4,272 judged source lines of the 46 replication do-files). It was 94.9% (3,715 of 3,915) with
 the old reader, which saw one CR-only package file (6J6BAW, 572 lines with no LF) as a single line; the resynced
 reader splits it into its real lines, 322 of which are not translated yet (P2C.12am). The other 45 do-files are
