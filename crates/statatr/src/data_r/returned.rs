@@ -1852,6 +1852,8 @@ pub(super) const R_LEVELSOF: &[&str] = &["N", "r", "levels"];
 /// What `split` leaves in r().
 pub(super) const R_SPLIT: &[&str] = &["k_new", "varlist"];
 pub(super) const R_ISVAR: &[&str] = &["varlist", "badlist"];
+/// regress leaves only the matrix r(table): no text, every other name missing.
+pub(super) const R_REGRESS: &[&str] = &[];
 pub(super) const R_EST_TABLE: &[&str] = &["names"];
 pub(super) const R_ALPHA: &[&str] = &["k"];
 pub(super) const R_FILEFILTER: &[&str] = &["occurrences", "bytes_from", "bytes_to"];
@@ -1969,8 +1971,10 @@ impl Session {
         match r_left {
             // isvar clears r() and leaves only these: any other name is
             // missing, as after an r-class program (spmatrix summarize: these
-            // are its texts, its other r() numbers)
-            Some((names, cmd)) if ok && (cmd == "isvar" || cmd == "spmatrix") => {
+            // are its texts, its other r() numbers; regress: only r(table))
+            Some((names, cmd))
+                if ok && (cmd == "isvar" || cmd == "spmatrix" || cmd == "regress") =>
+            {
                 self.est_shown = Some(false);
                 self.helpers.insert("stata_returned");
                 self.r_ret = Returned::Program {
@@ -2101,6 +2105,9 @@ impl Session {
                     Returned::Lost(why) => Err(no(format!("{shown} is not known here: {why}"))),
                     // what an r-class program returned; a name it did not is missing, as in Stata
                     // or what ereturn posted
+                    Returned::Program { cmd, .. } if which == "r" && cmd == "regress" && name == "table" => Err(no(
+                        "r(table) is a matrix, which an expression cannot take (Stata: type mismatch)",
+                    )),
                     Returned::Program { texts, .. } => {
                         let text = texts.iter().any(|t| t == name);
                         let get = if which == "e" { "stata_eget" } else { "stata_rget" };
@@ -2203,6 +2210,11 @@ impl Session {
             ))),
             Returned::Lost(why) => Err(no(format!("matrix list {shown}: {why}"))),
             Returned::Program { cmd, .. } => {
+                if which == "r" && cmd == "regress" {
+                    return Err(no(format!(
+                        "matrix list {shown} after regress is not translated yet (RCraft does not keep r(table))"
+                    )));
+                }
                 if which == "r" {
                     return Err(no(format!(
                         "matrix list {shown} after the program {cmd} is not translated yet"
@@ -2445,6 +2457,11 @@ impl Session {
                 )))
             }
             Returned::Lost(why) => return Err(no(format!("{} list: {why}", c.name))),
+            Returned::Program { cmd, .. } if which == "r" && cmd == "regress" => {
+                return Err(no(
+                    "return list after regress: Stata 19 lists r(table), which RCraft does not keep yet",
+                ))
+            }
             Returned::Program { .. } => {}
             Returned::Kept { cmd, .. } if which == "r" && cmd == super::power::POWER_TABLE => {
                 return Err(no(

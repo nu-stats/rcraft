@@ -30,7 +30,9 @@ are byte for byte Stata's too. Translated in `crates/statatr/src/dofile/dyndoc.r
 - `<<dd_graph[: saving(file.svg) replace alt() height() width()]>>` exports the graph as SVG and becomes `<img
   src="file" height="200" alt="plot" >`; with no `saving()` the file is `Graph.svg`, or `Graph1.svg` when that is
   there.
-- After `regress`, quietly or not, r() holds only r(table) (observed 2026-11-18), so `r(N)` there is missing.
+- After `regress`, quietly or not, r() holds only r(table) (observed 2026-11-18, corpus `regress_r.do`
+  2026-11-19), so `r(N)` there is missing. RCraft follows this: `regress` clears r() and any r() name it is
+  asked for is missing; `return list` and `matrix list r(table)` after it are refused (r(table) is not kept).
 
 ## Markdown into HTML
 
@@ -66,6 +68,6 @@ continued lines, attributes other than the four, inline tags other than `dd_disp
 `dd_graph` to a file other than `.svg` or to one that is there without `replace`, `dd_include` of a missing file,
 `dyndoc, docx`, `nostop` and the other options, and `dyntext`/`dyndoc` under `capture` or `quietly` unless Stata
 stops before the tags run. A document whose tags have a line RCraft does not translate is not written (that line,
-and the save, are refused): probe 546 reads `r(N)` after `regress`, which RCraft does not follow yet (Stata: missing).
+and the save, are refused). Probe 546 reads `r(N)` after `regress`, missing as in Stata since 2026-11-19.
 Not compared: the SVG file itself (R's graph), and long message lines, which Stata wraps at the line size and RCraft
 does not.

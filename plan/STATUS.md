@@ -5638,12 +5638,23 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   line keeps its `<p>`; after `regress` (quietly or not) r() holds only r(table).
 - **Refused, not guessed:** nested `dd_if`, `dd_do` blocks with blank lines, comments, braces or continued lines,
   other inline tags, options other than `saving()` and `replace`, and `dyntext`/`dyndoc` under `capture` unless
-  Stata stops before the tags run. Probe 546's document is not written: it reads `r(N)` after `regress`, which
-  RCraft does not follow yet.
+  Stata stops before the tags run. Probe 546's document was not written at first: it reads `r(N)` after
+  `regress`, which RCraft did not follow (now it does; see the entry below).
 - **Measured** (dry run, StatCraft `origin/main` f28890c, 542 probe do-files): probes 22,082 of 28,652 judged
   source lines, **77.1%** (6,570 not, 1,087 known only when run). `markdown`'s 3 lines translate; the 9 of
   `dyntext` and `dyndoc` are known only when the do-file runs (the source is written a few lines before and read
   then), so a dry run neither counts them for nor against. Packages unchanged: 3,715 of 3,915, **94.9%**.
+
+## P2C.12x: r() after regress, 2026-11-19
+
+- **Translated:** `regress`, shown or quietly, clears r() and leaves only r(table), as Stata 19 does: `r(N)`,
+  `r(mean)` or any other r() name read after it is missing (before, RCraft refused such a line as not known).
+  `return list` and `matrix list r(table)` after it stay refused (r(table) is not kept in R); `r(table)` in an
+  expression is Stata's type mismatch.
+- **Checked:** Stata 19 on made-up data: corpus `regress_r.do` (5 results). Probe 546 now runs to its end in R
+  (its one compared line matches) and its three files are byte for byte Stata's.
+- **Measured** (dry run, StatCraft `origin/main` 7f17240, 544 probe do-files): probes 22,405 of 28,946 judged
+  source lines, **77.4%**; packages unchanged, 3,750 of 4,272, **87.8%**.
 ## P2C.12c: cumul (batch C of the StatCraft port), 2026-11-18
 
 - **Translated** (`statatr::data_r::descr`): `cumul` with `generate()`, `freq`, `equal`, `by()` (missing values a

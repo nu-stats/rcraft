@@ -1751,9 +1751,10 @@ fn what_is_not_kept_is_refused_with_the_reason() {
         ),
         ("use s\ntabulate g h, chi2\ndisplay r(gamma)\n", "not kept"),
         (
-            "use s\nsummarize y\nregress y x\ndisplay r(mean)\n",
-            "regress replaces r()",
+            "use s\nregress y x\nreturn list\n",
+            "Stata 19 lists r(table), which RCraft does not keep",
         ),
+        ("use s\nregress y x\ndisplay r(table)\n", "type mismatch"),
         (
             "use s\nregress y x\nglm y x, family(gamma)\ndisplay e(N)\n",
             "glm was not translated",
@@ -1772,6 +1773,15 @@ fn what_is_not_kept_is_refused_with_the_reason() {
     // a name Stata does not have is missing, as in Stata
     let t = translate(&read("use s\nregress y x\ngenerate z = e(nosuch)\n"));
     assert!(t.lines.iter().all(|l| l.result.is_ok()), "{:?}", t.lines);
+    // regress leaves only r(table), quietly or not (Stata 19): r(mean) and
+    // r(N) after it are missing, and R's r() is cleared
+    for dofile in [
+        "use s\nsummarize y\nregress y x\ndisplay r(mean)\n",
+        "use s\nsummarize y\nquietly regress y x\ngenerate n = r(N)\n",
+    ] {
+        let s = script(dofile);
+        assert!(s.contains("stata_r <- list()"), "{dofile}: {s}");
+    }
 }
 
 /// r() after the ttests, correlate's other forms, pwcorr, tab1, tab2,

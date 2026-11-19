@@ -1,0 +1,6 @@
+* Stata 19.0's results for regress_r.do, recorded by cargo xtask stata-record
+@ sum_before 6 3.5
+@ after_shown 1 1 1
+@ sum_again 6 3.5
+@ after_quiet 1 1 6
+@ local_n 1

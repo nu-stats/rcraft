@@ -239,6 +239,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
             "interactions",
             "regress",
             "regress_exact",
+            "regress_r",
         ],
     ),
     ("replace", &["data", "extended_missing", "random"]),
@@ -283,6 +284,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
             "control",
             "descriptives",
             "extended_missing",
+            "regress_r",
             "tabulate_more",
         ],
     ),
@@ -513,7 +515,8 @@ mod tests {
                     "control",
                     "interactions",
                     "regress",
-                    "regress_exact"
+                    "regress_exact",
+                    "regress_r"
                 ][..]
             )
         );

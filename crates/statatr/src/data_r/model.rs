@@ -445,6 +445,10 @@ impl Session {
                  b[colnames(X) == \"(Intercept)\"] <- NA; b })",
             );
         }
+        // r(): only r(table), quietly or not (Stata 19, 2026-11-18), so r(N)
+        // and any other name are missing
+        out.line("stata_r <- list()");
+        self.r_new = Some((super::returned::R_REGRESS, "regress".into()));
         if self.quiet(c) {
             return Ok(());
         }
