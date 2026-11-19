@@ -1,4 +1,4 @@
-// Vendored from StatCraft crates/lang/src/script.rs at 7f1724005070. Do not edit: run
+// Vendored from StatCraft crates/lang/src/script.rs at b7d392e87dcc. Do not edit: run
 // `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Reading do-files into command lines.
 //!
@@ -47,16 +47,8 @@ pub fn read(source: &str) -> Vec<Line> {
         // `#delimit ;` and `#delimit cr`: commands end at `;` or at the
         // end of the line
         let trimmed = line.trim_start();
-        if !in_block
-            && (trimmed.starts_with("#delimit") || trimmed.starts_with("#d ") || trimmed == "#d")
-        {
-            let arg = trimmed
-                .split_whitespace()
-                .nth(1)
-                .unwrap_or("cr")
-                .trim_end_matches(';');
-            semicolon =
-                arg.is_empty() || arg == ";" || trimmed.trim_end().ends_with(';') && arg != "cr";
+        if let Some(on) = delimit_directive(trimmed).filter(|_| !in_block) {
+            semicolon = on;
             physical.push(line.to_string());
             out.push(Line {
                 physical: std::mem::take(&mut physical),
@@ -108,6 +100,23 @@ pub fn read(source: &str) -> Vec<Line> {
         });
     }
     out
+}
+
+/// A `#delimit` line: `Some(true)` for `;`, `Some(false)` for `cr` (or no
+/// argument), `None` for any other line. Stata 19 takes blanks or a tab
+/// between `#` and the word, any abbreviation from `#d` up (`#de`, `#del`,
+/// `#delim`), and no blank before the `;` (probe 754); `#dx` and `#delimitx`
+/// stop with r(199).
+fn delimit_directive(trimmed: &str) -> Option<bool> {
+    let after = trimmed.strip_prefix('#')?.trim_start();
+    let end = after
+        .find(|c: char| c.is_whitespace() || c == ';')
+        .unwrap_or(after.len());
+    let word = after.get(..end)?;
+    if word.is_empty() || !"delimit".starts_with(word) {
+        return None;
+    }
+    Some(after.get(end..).unwrap_or("").trim_start().starts_with(';'))
 }
 
 /// Where the first `;` outside quotes is.
@@ -205,6 +214,36 @@ mod tests {
         let lines = read("display strlen(\"x \\\\ y\")\n");
         assert_eq!(lines[0].text, "display strlen(\"x \\\\ y\")");
         assert_eq!(reduce_backslashes("p\\\\q \\\\\\\""), "p\\q \\\\\"");
+    }
+
+    /// probe 754: a blank or tab after `#`, abbreviations, and no blank
+    /// before the `;` all switch the delimiter
+    #[test]
+    fn delimit_forms() {
+        for on in [
+            "#delimit ;",
+            "# delimit ;",
+            "#\tdelimit ;",
+            "#  delimit ;",
+            "#d ;",
+            "# d ;",
+            "#de ;",
+            "# del ;",
+            "# delim ;",
+            "#delimit;",
+            "# delimit;",
+            "  # delimit ;",
+        ] {
+            let lines = read(&format!("{on}\ndisplay 1\n + 2 ;\n"));
+            assert_eq!(lines[1].text, "display 1\n + 2".replace('\n', " "), "{on}");
+            assert_eq!(delimit_directive(on.trim_start()), Some(true), "{on}");
+        }
+        for off in ["#delimit cr", "# delimit cr", "#d cr", "# d cr"] {
+            assert_eq!(delimit_directive(off), Some(false), "{off}");
+        }
+        for not in ["#dx ;", "#delimitx ;", "# data", "display 1", "#"] {
+            assert_eq!(delimit_directive(not), None, "{not}");
+        }
     }
 
     #[test]

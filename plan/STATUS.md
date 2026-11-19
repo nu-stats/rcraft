@@ -5783,3 +5783,15 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Shares after batch F:** probes 77.5% (22,397 -> 22,430 translated lines of the 30,029 source lines; probe 138's nine
   `joinby` lines and the `word()` lines of probes 110, 143 and 144 translate, and probes 670 and 671 no longer refuse a
   line); the replication packages were not re-run (their folder is outside both repositories), so 87.8% stands.
+
+## P2C.12am: `# delimit ;` with a blank after the `#`, 2026-11-19
+
+- **Probe:** Stata 19 takes a blank or tab after the `#`, any abbreviation from `#d` (`#de`, `#del`, `#delim`) and
+  `#delimit;` with no blank; `#dx` and `#delimitx` stop with r(199) (StatCraft probe 754).
+- **Fix:** StatCraft PR 29 (`script.rs`, `delimit_directive`; it also stops `#delimit;` reading as `cr`), then
+  `cargo xtask sync-statcraft-lang` at b7d392e. Only `script.rs` changed in `crates/statatr`; the other seven files
+  differ by the commit in their header.
+- **Shares:** packages **94.0%** (3,996 translated, 253 not, 1,352 known only when run; was 87.8%: 3,750 and 522).
+  6J6BAW's `# delimit ;` lines now translate; 53 of its lines are still refused (mmodes, outtable and the like). Probes
+  77.5% (22,439 of 28,946 judged lines of 544 do-files). 94.0% is the package figure from now on; the old reader's
+  94.9% counted 6J6BAW as one line.

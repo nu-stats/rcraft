@@ -1,4 +1,4 @@
-// Vendored from StatCraft crates/core/src/datetime/mod.rs at 7f1724005070. Do not edit: run
+// Vendored from StatCraft crates/core/src/datetime/mod.rs at b7d392e87dcc. Do not edit: run
 // `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Dates and times.
 //!

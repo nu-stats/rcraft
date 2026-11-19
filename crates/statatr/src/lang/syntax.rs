@@ -1,4 +1,4 @@
-// Vendored from StatCraft crates/lang/src/syntax.rs at 7f1724005070. Do not edit: run
+// Vendored from StatCraft crates/lang/src/syntax.rs at b7d392e87dcc. Do not edit: run
 // `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Standard command syntax: `[varlist] [=exp] [if exp] [in range] [, options]`.
 //!

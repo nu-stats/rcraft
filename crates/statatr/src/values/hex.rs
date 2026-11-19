@@ -1,4 +1,4 @@
-// Vendored from StatCraft crates/core/src/hex.rs at 7f1724005070. Do not edit: run
+// Vendored from StatCraft crates/core/src/hex.rs at b7d392e87dcc. Do not edit: run
 // `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! The `%21x` hexadecimal format, which shows a double exactly:
 //! `+1.921fb54442d18X+001` is `(1 + 0x921fb54442d18 / 2^52) * 2^1`.

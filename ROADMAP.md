@@ -553,12 +553,12 @@ Command families:
 
 Coverage and matching milestones (the share is of the lines a dry run judges, each source
 line once; **two measures count equally** for the 95% minimum: probe lines and replication-package lines.
-Last measured 2026-11-18 (`main` at c1185f6 plus pwmean): probes 77.4% (543 do-files, 22,397 of 28,929 judged lines),
-packages 87.8% (3,750 of 4,272 judged source lines of the 46 replication do-files). It was 94.9% (3,715 of 3,915) with
-the old reader, which saw one CR-only package file (6J6BAW, 572 lines with no LF) as a single line; the resynced
-reader splits it into its real lines, 322 of which are not translated yet (P2C.12am). The other 45 do-files are
-unchanged at 94.9%. Each milestone is closed by measuring again and writing the figure into
-`docs/stata-coverage.md`:
+Last measured 2026-11-19 (`main` at 271f164 plus the `#delimit` resync): probes 77.5% (544 do-files, 22,439 of 28,946
+judged lines), packages 94.0% (3,996 of 4,249 judged source lines of the 46 replication do-files). Packages were 94.9%
+(3,715 of 3,915) with the old reader, which saw one CR-only file (6J6BAW, 572 lines with no LF) as a single line, then
+87.8% (3,750 of 4,272) with the resynced reader, whose 322 `# delimit ;` lines of that file did not translate until the
+reader took the blank after the `#` (P2C.12am). 253 package lines are still not translated. Each milestone is closed
+by measuring again and writing the figure into `docs/stata-coverage.md`:
 
 - P2C.12af Probes 80% of lines translated (not started)
 - P2C.12ag Probes 90% of lines translated (not started)
@@ -572,13 +572,13 @@ unchanged at 94.9%. Each milestone is closed by measuring again and writing the 
   on 2026-11-01, the rest `_natscale`; not measured again since) (not started)
 - P2C.12al Replication packages: the 46 do-files of the 11 public packages to 100% of
   their lines translated, and every compared result matching; 95% of source lines is the
-  user's minimum, equal to the probes' (P2C.12ah) (not started; 87.8% of source lines on
-  2026-11-18 with the resynced reader, 94.9% with the old one that read 6J6BAW as one line)
-- P2C.12am `# delimit ;` with a blank after the `#`: the reader takes `#delimit` and `#d` but not `# delimit`, so the
-  322 lines of 6J6BAW (CR-only, run in `;` mode) read as one command each and do not translate. Probed on Stata 19
-  2026-11-19: it accepts blanks or a tab after the `#`, and `#d`/`# d`, `# delim`, with or without a blank before
-  the `;`, and `# delimit cr`/`# d cr`; all switch the delimiter as `#delimit` does. Next: the rule in StatCraft's
-  `script.rs` (the reader allows blanks between `#` and the word), then a resync of the vendored copy (not started)
+  user's minimum, equal to the probes' (P2C.12ah) (not started; 94.0% of source lines on
+  2026-11-19; 87.8% on 2026-11-18 while the resynced reader still missed `# delimit ;`, 94.9% with the old one that
+  read 6J6BAW as one line)
+- P2C.12am `# delimit ;` with a blank after the `#` (done 2026-11-19): the reader took `#delimit` and `#d` but not
+  `# delimit`, so 322 lines of 6J6BAW (CR-only, run in `;` mode) did not translate. Stata 19 accepts blanks or a tab
+  after the `#`, any abbreviation from `#d`, and `#delimit;` (StatCraft probe 754); StatCraft PR 29 fixed the reader and
+  the vendored copy was resynced (b7d392e). Packages 87.8% -> 94.0% (3,750 -> 3,996 translated, 522 -> 253 not).
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

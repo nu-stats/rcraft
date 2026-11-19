@@ -1,4 +1,4 @@
-// Vendored from StatCraft crates/lang/src/expr.rs at 7f1724005070. Do not edit: run
+// Vendored from StatCraft crates/lang/src/expr.rs at b7d392e87dcc. Do not edit: run
 // `cargo xtask sync-statcraft-lang` (see the `lib.rs` of this crate).
 //! Expressions: lexing and parsing into a tree.
 //!
