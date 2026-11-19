@@ -61,3 +61,16 @@ display "@ k_n " _N
 forvalues i = 1/3 {
     display "@ k_`i' " %24.17g m[`i']
 }
+* a replication that stops with an error leaves a row of missing values
+program define simfail, rclass
+    generate z = rnormal()
+    summarize z
+    return scalar m = r(mean)
+end
+clear
+set obs 5
+simulate m=r(m), reps(4) seed(5) nodots: simfail
+display "@ f_n " _N
+forvalues i = 1/4 {
+    display "@ f_`i' " %24.17g m[`i']
+}

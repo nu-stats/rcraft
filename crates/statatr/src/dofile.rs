@@ -951,6 +951,10 @@ impl<'f> Run<'f> {
             .map(|f| f.prefixes.clone())
             .unwrap_or_default();
         prefixes.append(&mut c2.prefixes);
+        // what the runner put on the line itself (a replication of simulate or permute)
+        if c.prefixes.contains(&Prefix::Replication) && !prefixes.contains(&Prefix::Replication) {
+            prefixes.push(Prefix::Replication);
+        }
         c2.prefixes = prefixes;
         self.run_command(&c2, depth, written)
     }

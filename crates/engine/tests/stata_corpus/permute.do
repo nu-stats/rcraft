@@ -227,3 +227,24 @@ forvalues i = 1/4 {
     display "@ pl_`i' " %24.17g yb_b_x[`i'] " " %24.17g yb_b_cons[`i']
 }
 capture erase permute_12.dta
+* a replication that stops with an error is missing, and n counts the others
+program define permfail, rclass
+    tempvar w
+    generate double `w' = x * 8^(id - 1)
+    summarize `w', meanonly
+    if x[1] == 3 {
+        error 459
+    }
+    return scalar code = r(sum)
+end
+clear
+set obs 6
+generate id = _n
+generate x = _n - 1
+permute x code=r(code), reps(12) seed(3041) saving(permute_13, replace double) nodots: permfail
+display "@ pf " el(r(n), 1, 1) " " el(r(c_lower), 1, 1) " " el(r(c_upper), 1, 1)
+use permute_13, clear
+forvalues i = 1/12 {
+    display "@ pf_`i' " %24.17g code[`i']
+}
+capture erase permute_13.dta

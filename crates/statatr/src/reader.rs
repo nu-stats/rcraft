@@ -55,6 +55,10 @@ pub enum Prefix {
     Capture,
     Quietly,
     Noisily,
+    /// A line of one replication of `simulate` or `permute`, put on by the
+    /// do-file runner (never read from a do-file): an error ends the
+    /// replication, whose results are then missing, as Stata's do.
+    Replication,
 }
 
 /// A macro a line refers to: `` `name' `` or `$name` / `${name}`.

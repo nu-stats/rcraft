@@ -320,7 +320,7 @@ impl Session {
             out.package("haven");
         }
         out.line(format!(
-            "stata_pm_full <- {d}\nstata_pm_begin({d}, {}, {}, {}, {}{}, level = {})",
+            "stata_rep_failed <- FALSE\nstata_pm_full <- {d}\nstata_pm_begin({d}, {}, {}, {}, {}{}, level = {})",
             super::r_text(&l.permvar),
             l.strata
                 .as_ref()
@@ -368,7 +368,10 @@ impl Session {
                 if eclass { ", esample = stata_esample" } else { "" }
             ));
         } else {
-            out.line(format!("stata_pm_row({vec})"));
+            out.line(format!(
+                "stata_pm_row(if (isTRUE(get0(\"stata_rep_failed\"))) NULL else {vec})
+stata_rep_failed <- FALSE"
+            ));
         }
         Ok(())
     }
@@ -454,7 +457,8 @@ impl Session {
             out.package("haven");
         }
         out.line(format!(
-            "stata_sm_begin({}, {}, c({}), c({}), {}{})",
+            "stata_rep_failed <- FALSE
+stata_sm_begin({}, {}, c({}), c({}), {}{})",
             l.reps,
             super::stats::r_logical(l.nodots),
             r_names(&names),
@@ -478,7 +482,10 @@ impl Session {
             }
         }
         let vec = self.loop_values(&l, self.prev_eclass, "_sim_", out)?;
-        out.line(format!("stata_sm_row(stata_sb_f({vec}))"));
+        out.line(format!(
+            "stata_sm_row(if (isTRUE(get0(\"stata_rep_failed\"))) NULL else stata_sb_f({vec}))
+stata_rep_failed <- FALSE"
+        ));
         Ok(())
     }
 

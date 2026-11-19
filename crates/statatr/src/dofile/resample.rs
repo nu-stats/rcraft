@@ -81,10 +81,19 @@ impl Run<'_> {
                 }
                 let program = reader::read(&text);
                 let mut items = program.items;
-                // every line stands for the one the do-file has
+                // every line stands for the one the do-file has; each replication's run of
+                // the command ends at an error, which leaves its results missing (permute's
+                // run on the data as they are stops the line, as in Stata)
+                let mut runs = 0;
                 for item in &mut items {
                     if let Item::Command(cmd) = item {
                         cmd.span = c.span;
+                        if !cmd.name.starts_with("_rcraft_") {
+                            runs += 1;
+                            if !(permute && runs == 1) {
+                                cmd.prefixes.push(Prefix::Replication);
+                            }
+                        }
                     }
                 }
                 self.frames.push(Frame {

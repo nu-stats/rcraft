@@ -2958,6 +2958,16 @@ impl Session {
                 "stata_rc <- tryCatch({{\n{body}\n0\n}}, error = function(e) stata_captured(e, {noisily}))"
             )];
         }
+        if c.prefixes.contains(&Prefix::Replication) && !out.code.is_empty() {
+            // a replication that stopped with an error runs no more of its lines
+            let body = out.code.join("
+");
+            out.code = vec![format!(
+                "if (!isTRUE(get0(\"stata_rep_failed\"))) tryCatch({{
+{body}
+}}, error = function(e) stata_rep_failed <<- TRUE)"
+            )];
+        }
         // the R helpers the line's expressions call
         for h in std::mem::take(&mut out.helpers) {
             self.helpers.insert(h);
@@ -3339,6 +3349,18 @@ impl Session {
             "_rcraft_program_begin" => self.program_begin(c, out),
             "_rcraft_program_end" => self.program_end(c, out),
             // a line the runner knows fails in Stata, under capture: `code message`
+            // error #: Stata stops with that return code (error 0 does nothing)
+            "error" => match c.parts.main.trim().parse::<u32>() {
+                Ok(0) => Ok(()),
+                Ok(k) => {
+                    out.line(format!(
+                        "stop({}, call. = FALSE)",
+                        r_text(&format!("error {k} (Stata: r({k}))"))
+                    ));
+                    Ok(())
+                }
+                Err(_) => Err(no("error with an expression is not translated yet")),
+            },
             "_rcraft_fail" => {
                 let (code, msg) = first_word(&c.parts.main);
                 out.line(format!(

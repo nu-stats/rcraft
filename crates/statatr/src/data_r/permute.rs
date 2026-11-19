@@ -196,10 +196,19 @@ stata_pm_row <- function(vals) {
   st <- stata_pm_st
   if (!is.null(st$err)) return(invisible(NULL))
   st$done <- st$done + 1L
+  # a replication that stopped with an error: its results are missing
+  failed <- is.null(vals)
+  if (failed) {
+    vals <- rep(NA_real_, length(st$obs))
+    st$failed <- TRUE
+  }
   st$vals <- rbind(st$vals, vals)
   if (!st$nodots) {
-    cat(if (st$done %% 10L == 0L) st$done else ".")
-    if (st$done == st$reps) cat(" done\n")
+    cat(if (failed) "x" else if (st$done %% 10L == 0L) st$done else ".")
+    if (st$done == st$reps) {
+      cat(" done\n")
+      if (isTRUE(st$failed)) cat("x: Error occurred when permute executed ", st$cmdname, ".\n", sep = "")
+    }
   }
   invisible(NULL)
 }
@@ -348,6 +357,7 @@ pub(super) const SIMULATE_HELPER: &str = r##"stata_sm_begin <- function(reps, no
   st$reps <- reps
   st$nodots <- nodots
   st$res <- vector("list", reps)
+  st$cmdname <- strsplit(trimws(command), "[ ,]")[[1]][1]
   st$i <- 0L
   st$err <- NULL
   if (!is.null(saving) && !replace && file.exists(saving)) st$err <- paste0("file ", saving, " already exists (Stata: r(602))")
@@ -362,11 +372,15 @@ pub(super) const SIMULATE_HELPER: &str = r##"stata_sm_begin <- function(reps, no
 stata_sm_row <- function(v) {
   st <- stata_sm_st
   st$i <- st$i + 1L
-  if (!is.null(v)) st$res[st$i] <- list(v)
+  # a replication that stopped with an error leaves a row of missing values
+  if (!is.null(v)) st$res[st$i] <- list(v) else st$failed <- TRUE
   if (!st$nodots) {
-    cat(if (st$i %% 10L == 0L) st$i else ".")
+    cat(if (is.null(v)) "x" else if (st$i %% 10L == 0L) st$i else ".")
     if (st$i %% 50L == 0L && st$i < st$reps) cat("\n")
-    if (st$i == st$reps) cat(" done\n")
+    if (st$i == st$reps) {
+      cat(" done\n")
+      if (isTRUE(st$failed)) cat("x: Error occurred when simulate executed ", st$cmdname, ".\n", sep = "")
+    }
   }
   invisible(NULL)
 }
