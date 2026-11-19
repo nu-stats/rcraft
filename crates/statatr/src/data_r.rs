@@ -132,6 +132,7 @@ mod xt;
 mod xtdpd;
 mod xtregar;
 mod xtsum;
+mod xtunitroot;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -840,6 +841,7 @@ const HARMLESS: &[&str] = &[
 ];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "xtunitroot",
     "dfuller",
     "pperron",
     "dfgls",
@@ -1597,6 +1599,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_pperron" => tstests::PPERRON_HELPER,
         "stata_corrgram" | "stata_wntestq" => tstests::CORRGRAM_HELPER,
         "stata_dfgls" => tstests::DFGLS_HELPER,
+        "stata_xtunitroot" => xtunitroot::XTUNITROOT_HELPER,
         "stata_tsappend" => xtsum::TSAPPEND_HELPER,
         "stata_ts" => ts::TS_HELPER,
         "stata_rows_replace" => ts::ROWS_REPLACE_HELPER,
@@ -3205,6 +3208,7 @@ impl Session {
             "xttab" => self.xttab(c, &opts, out),
             "tsreport" => self.tsreport(c, &opts, out),
             "dfuller" | "pperron" | "dfgls" | "corrgram" | "wntestq" => self.tstest(c, &opts, out),
+            "xtunitroot" => self.xtunitroot(c, &opts, out),
             "tsappend" => self.tsappend(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
             "xtregar" => self.xtregar(c, &opts, out),

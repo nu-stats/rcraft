@@ -335,6 +335,7 @@ pub const COMMANDS: &[&str] = &[
     "xtregar",
     "xtset",
     "xtsum",
+    "xtunitroot",
     "xttab",
 ];
 

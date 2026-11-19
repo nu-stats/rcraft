@@ -2180,6 +2180,7 @@ impl Session {
                             || (which == "r" && cmd == "dstdize" && (name == "by" || super::descr::dstdize_names(name)))
                             || (tabstat && super::tabstat::tabstat_text(name))
                             || (which == "r" && cmd == "tsreport" && super::xtsum::tsreport_name(name) == Some(1))
+                            || (which == "r" && cmd == "xtunitroot" && super::xtunitroot::text_name(name))
                             || (which == "e" && self.e_text.contains(name));
                         let get = if which == "e" { "stata_eget" } else { "stata_rget" };
                         Ok((

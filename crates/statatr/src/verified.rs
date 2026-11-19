@@ -372,6 +372,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("xtset", &["likelihood", "panel", "xtreg_r2"]),
     ("xtsum", &["xtpanel"]),
     ("xttab", &["xtpanel"]),
+    ("xtunitroot", &["xtunitroot"]),
 ];
 
 /// Each Verified function, with the corpus files that check it (the
