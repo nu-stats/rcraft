@@ -563,8 +563,10 @@ unchanged at 94.9%. Each milestone is closed by measuring again and writing the 
   user's minimum, equal to the probes' (P2C.12ah) (not started; 87.8% of source lines on
   2026-11-18 with the resynced reader, 94.9% with the old one that read 6J6BAW as one line)
 - P2C.12am `# delimit ;` with a blank after the `#`: the reader takes `#delimit` and `#d` but not `# delimit`, so the
-  322 lines of 6J6BAW (CR-only, run in `;` mode) read as one command each and do not translate. Needs a Stata 19
-  probe that the blank form is accepted, then the rule in StatCraft's `script.rs` and a resync (not started)
+  322 lines of 6J6BAW (CR-only, run in `;` mode) read as one command each and do not translate. Probed on Stata 19
+  2026-11-19: it accepts blanks or a tab after the `#`, and `#d`/`# d`, `# delim`, with or without a blank before
+  the `;`, and `# delimit cr`/`# d cr`; all switch the delimiter as `#delimit` does. Next: the rule in StatCraft's
+  `script.rs` (the reader allows blanks between `#` and the word), then a resync of the vendored copy (not started)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.
