@@ -431,9 +431,10 @@ Command families:
   `functions_f.do` and `noncentral.do`). Refused: `cofc()` in lower case (Stata: unknown function).
   Second round 2026-11-19: `nt()` and `nttail()` with a noncentrality parameter above 37.62 (integrated, to
   1e-13 of Stata), `invnchi2()`, `invnchi2tail()`, `invnt()`, `invnttail()`, `substr()` and `usubstr()` with
-  any start and length (corpus `noncentral2.do`, `substr.do`), and `A[i,j]` outside the matrix is `.`. Not done:
-  `invnF()`, `invnFtail()` and the `np` solvers (`npnt()`, `npnF()`, `npnchi2()`): no probe uses them and Stata's
-  missing values there follow no rule found. `plan/stata/functions-f.md`.
+  any start and length (corpus `noncentral2.do`, `substr.do`), and `A[i,j]` outside the matrix is `.`. Third round
+  2026-11-19: `invnF()`, `invnFtail()` and the `np` solvers `npnt()`, `npnF()`, `npnchi2()`, with Stata's edges found
+  by bisection and the noncentral F summed as a Poisson mixture of betas (R's `pf` with `ncp` is good only to 1e-9;
+  corpus `noncentral3.do`). `plan/stata/functions-f.md`.
   Probes 22,397 -> 22,430 translated lines (77.5%); packages not re-run (87.8%).
   `rpoisson()` and `rbeta()` with equal shapes stay with P2C.11.)
 - P2C.12e Single-equation models

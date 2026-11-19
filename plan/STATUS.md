@@ -5855,3 +5855,16 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
   label, and `problems` with `length()`; `compare` of a number with a string; `ds` with storage types, `format`, `char`, `detail`,
   `varwidth()`, `skip()` and `vallab` with a pattern; `misstable patterns`, `tree`, `nested` and `generate()`.
 - **Shares:** A2 alone added 49 translated probe lines (measured on its own before the rebase: 22,397 -> 22,446). On main with batches F and H: probes **77.8%** (22,513 of 30,040 source lines); packages **94.0%** (3,996 of 5,601), unchanged by A2.
+
+## P2C.12d, third round of batch F: the noncentral F's inverses and the np solvers, 2026-11-19
+
+- **Done:** `invnF()`, `invnFtail()`, `npnF()`, `npnchi2()` and `npnt()` (corpus `noncentral3.do`, 612 lines of results, 1e-6;
+  5 functions added to `VERIFIED_FUNCTIONS`). Round 2's "no rule" came from reading a grid: bisecting each edge from a point
+  where Stata gives a number gives clean limits (df 1e-6 .. 1e6, p up to 1 - 2^-12, np to 1e4 or 1000, p from 1e-8, 1e-14 or
+  2^-30, the root at most 1e4 or within 1000 of 0), written out in `plan/stata/functions-f.md`. Stata's values there are good
+  to about 1e-14 in the cdf; R's `pf()` with a noncentrality only to about 1e-9 (its `pnbeta` series), which is why Stata
+  looked coarse. RCraft sums the noncentral F as the Poisson mixture of betas for these five and finds the roots on it.
+- **Not matched (Stata's own search, listed in the note):** roots past what a double holds on Stata's beta scale, `invnFtail`
+  below p of about 1e-6 and with degrees of freedom of 1e4 or more, p within 1e-10 of 1, and `npnt` near its p limits.
+- **Not changed:** `nF()` and `nFtail()` still use R's `pf()`, so their values below about 1e-3 still agree only to a few
+  digits; the series used here could replace it.

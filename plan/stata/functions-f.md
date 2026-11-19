@@ -94,15 +94,36 @@ again on Stata 19 here. Translated in `crates/statatr/src/expr_r/strfn.rs` (stri
   1e-8 or above 1 - 1e-8; `invnt()` with np of 0 is the central t from p of 7.07e-151. Stata's own search stops at about
   1e-10 in the cdf, so within about a factor of 100 of those p limits its values are only that good (the
   corpus keeps to p of .001 to .999, where both agree to 1e-7 or better).
-- Not done: `invnF()` and `invnFtail()` (Stata gives missing in patterns that depend on p, np and both degrees
-  of freedom in ways a grid of 7,000 cases did not reduce to a rule: p limits near 1e-8, 1e-14 and 1 - 2.4e-4 for
-  one pair of degrees of freedom, df of 0 gives numbers, and values only to about 1e-8), and the np solvers `npnt()`,
-  `npnF()`, `npnchi2()` (p of 1e-10 is missing and the values of `npnt` differ from the exact root at 1e-8: Stata's
-  solver is coarser than R's); no probe uses them.
+- `invnF()`, `invnFtail()`, `npnF()`, `npnchi2()`, `npnt()` (round 3, 2026-11-19). Round 2 read a grid and found no
+  rule; bisecting each edge from a point Stata gives a number at finds clean ones. The values: Stata's are good to
+  about 1e-14 in the cdf (checked against the noncentral F summed as a Poisson mixture of betas); R's `pf()` with a
+  noncentrality is good only to about 1e-9 absolute (its `pnbeta` series), which is what made Stata look coarse in
+  round 2. RCraft sums the noncentral F the same way and finds the roots on it (`noncentral3.do`, 612 lines, 1e-6).
+  - `invnF(a, b, np, p)`: missing for a or b outside 1e-6 .. 1e6, np outside 0 .. 1e4, p outside 0 .. 1 - 2^-12
+    (.999755859375, also for np of 0); p of 0 is 0; np of 0 is the central F; for np above 0, p from 1e-8. Up to np of
+    1000 Stata gives missing where the root passes x = b / a 99999972.96 (its search on y = a x / (a x + b) stops
+    at 1 - 1.00000026e-8); above np of 1000 it gives at most b / a 2^52.
+  - `invnFtail(a, b, np, p)`: no limit on the degrees of freedom, np at most 1000, p from 1e-14; p of 1 gives 0
+    whatever a and b are, missing ones too (np missing or above 1000 still gives missing). Stata solves nF() = 1 - p,
+    so below one half the tail it reaches is 1 - (1 - p); its result stops at b / a 2^53.
+  - `npnchi2(df, x, p)`: df 2e-10 .. 1e6, x above 0, p from 2^-30 below 1. `npnF(a, b, x, p)`: a 2e-10 .. 1e6, b up
+    to 1e6, x above 0, p from 1e-8 below 1. Both: missing for p above the central cdf at x, 0 at it, and the root at
+    most 1e4 (a root a hair above it, `npnchi2(1, 1e4, .5)`, gives 1e4). `npnchi2` agrees with R's `pchisq` roots to 2e-11.
+  - `npnt(df, t, p)`: df up to 1e8, p from 1e-8 to 1 - 1e-8, the root within -1000 .. 1000 (on `nt()` above); t of 0
+    gives -invnormal(p).
+  - Not matched (Stata's own search, not a rule): a root past what y holds in a double (Stata's last point, from
+    b / a 2^52 to 2^54 by np, and for `invnF` with np above 1000 sometimes missing; RCraft gives the bound);
+    `invnFtail` below p of about 1e-6 (Stata stops within about 5e-15 of 1 - p in nF(), so its tail is p within
+    5e-15); `invnFtail` with a large degree of freedom (Stata's values drift from the series as it grows: about
+    1e-6 at 1e4, 1e-4 at 1e6, 5% at 1e9, where they stop depending on np); `invnFtail` with p within 1e-10 of 1
+    (Stata's search gives missing for some df and np, not others); a root below the smallest double
+    (`invnFtail(1e-12, 5, 1, .5)`: Stata a denormal, RCraft another number) or denormal and near-overflow results
+    at the df limits (the corpus checks only that they are numbers); `invnF` with np of 1e4 near p of .999 (Stata
+    about 1e-6); `npnt` within a factor of 100 of its p limits (Stata stops at about 1e-10 in the cdf, as `invnt`).
 
 ## Open and refused
 
-- `cofc()`; `invnF()`, `invnFtail()`, `npnt()`, `npnF()`, `npnchi2()` (above).
+- `cofc()`.
 - `regexs()` after a `regexm()` of an earlier command (see above); `ustrregexm()` and its `ustrregexs()`
   are not touched (`ustrregexm` is `grepl`, `ustrregexs` is not translated).
 - `strpos()` and `strreverse()` of a string with bytes that are not UTF-8 work on bytes; R shows the

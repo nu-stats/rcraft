@@ -16,7 +16,10 @@
 //!
 //! Batch F (`plan/stata/functions-f.md`) adds the noncentral `nt()`, `nttail()`, `nchi2()`,
 //! `nchi2tail()`, `nF()` and `nFtail()` (R's `pt`, `pchisq` and `pf` with `ncp`, and the limits past
-//! which Stata gives missing) and the old names `chiprob()`, `fprob()` and `invfprob()`.
+//! which Stata gives missing) and the old names `chiprob()`, `fprob()` and `invfprob()`. Its third
+//! round adds `invnF()`, `invnFtail()`, `npnF()`, `npnchi2()` and `npnt()`: root-finding on a
+//! noncentral F summed as a Poisson mixture of betas (R's `pf` with `ncp` is good only to 1e-9),
+//! with the edges past which Stata gives missing, found by bisection on Stata 19.
 
 use super::*;
 
@@ -50,6 +53,8 @@ pub(super) const FUNCTIONS: &[(&str, &[usize])] = &[
     ("invgammaptail", &[2]),
     ("invibeta", &[3]),
     ("invibetatail", &[3]),
+    ("invnF", &[4]),
+    ("invnFtail", &[4]),
     ("invnchi2", &[3]),
     ("invnchi2tail", &[3]),
     ("invnt", &[3]),
@@ -65,6 +70,9 @@ pub(super) const FUNCTIONS: &[(&str, &[usize])] = &[
     ("nchi2", &[3]),
     ("nchi2tail", &[3]),
     ("normalden", &[1, 2, 3]),
+    ("npnF", &[4]),
+    ("npnchi2", &[3]),
+    ("npnt", &[3]),
     ("nt", &[3]),
     ("nttail", &[3]),
     ("poisson", &[2]),
@@ -246,7 +254,113 @@ stata_d_invnttail <- function(d, np, p) stata_d_invnt_(d, np, p, TRUE)
 
 stata_d_nFok <- function(a, b, np, top, hi) stata_d_pos(a, hi) & stata_d_pos(b, hi) & !is.na(np) & np >= 0 & np <= top
 stata_d_nF <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np)), stata_d_nFok(a, b, np, 1e4, 1e8))
-stata_d_nFtail <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np, lower.tail = FALSE)), stata_d_nFok(a, b, np, 1e3, Inf))"##;
+stata_d_nFtail <- function(a, b, np, x) stata_d_keep(stata_d_run(stats::pf(x, a, b, np, lower.tail = FALSE)), stata_d_nFok(a, b, np, 1e3, Inf))
+# the noncentral F's inverses and the noncentrality solvers (third round). Stata's values are good to about
+# 1e-14 in the cdf, R's pf() with a noncentrality only to about 1e-9 (its pnbeta series), so the noncentral F
+# is summed here as the Poisson mixture of betas, which keeps its digits in both tails
+stata_d_root <- function(g, lo, hi) {
+  glo <- g(lo)
+  ghi <- g(hi)
+  if (!is.finite(glo) || !is.finite(ghi) || sign(glo) == sign(ghi)) return(NA_real_)
+  if (glo == 0) return(lo)
+  if (ghi == 0) return(hi)
+  tryCatch(stats::uniroot(g, c(lo, hi), f.lower = glo, f.upper = ghi, tol = 1e-15, maxiter = 2000L)$root,
+    error = function(e) NA_real_)
+}
+stata_d_nFs <- function(a, b, np, x, upper) {
+  if (x <= 0) return(as.numeric(upper))
+  r <- b / a / x
+  if (r == 0) return(as.numeric(!upper))
+  y <- if (is.finite(r)) 1 / (1 + r) else 0
+  y1 <- if (is.finite(r)) r / (1 + r) else 1
+  m <- np / 2
+  j <- 0:ceiling(m + 12 * sqrt(m) + 40)
+  w <- stats::dpois(j, m)
+  j <- j[w > 0]
+  w <- w[w > 0]
+  sum(w * (if (upper) stats::pbeta(y1, b / 2, a / 2 + j) else stats::pbeta(y, a / 2 + j, b / 2)))
+}
+# x where the noncentral F's cdf (upper: its tail) is q, found on log x
+stata_d_Froot <- function(a, b, np, q, upper) {
+  g <- function(lx) {
+    v <- stata_d_nFs(a, b, np, exp(lx), upper) - q
+    if (upper) -v else v
+  }
+  x0 <- tryCatch(suppressWarnings(stats::qf(q, a, b, np, lower.tail = !upper)), error = function(e) NA_real_)
+  y0 <- if (is.finite(x0) && x0 > 0) log(x0) else 0
+  lo <- y0 - 1
+  hi <- y0 + 1
+  for (k in 1:80) if (lo > -745 && is.finite(g(lo)) && g(lo) > 0) lo <- max(lo - 2^(k / 2), -745) else break
+  for (k in 1:80) if (hi < 709 && is.finite(g(hi)) && g(hi) < 0) hi <- min(hi + 2^(k / 2), 709) else break
+  exp(stata_d_root(g, lo, hi))
+}
+# the central F's quantile through the beta, on the side of one half that keeps its digits
+stata_d_qF <- function(a, b, p, upper) {
+  y <- stats::qbeta(p, a / 2, b / 2, lower.tail = !upper)
+  if (y < .5) return(b / a * y / (1 - y))
+  z <- stats::qbeta(p, b / 2, a / 2, lower.tail = upper)
+  b / a * (1 - z) / z
+}
+# invnF(): df 1e-6 to 1e6, np 0 to 1e4, p 0 to 1 - 2^-12 (p of 0 is 0), and for np above 0 p from 1e-8; up to
+# np 1000 missing past x = b / a 99999972.96 (Stata's search on y = a x / (a x + b) stops there), above it
+# b / a 2^52 at most
+stata_d_invnF1 <- function(a, b, np, p) {
+  if (anyNA(c(a, b, np, p)) || a < 1e-6 || a > 1e6 || b < 1e-6 || b > 1e6 || np < 0 || np > 1e4 ||
+    p < 0 || p > 1 - 2^-12) return(NA_real_)
+  if (p == 0) return(0)
+  if (np == 0) return(stata_d_qF(a, b, p, FALSE))
+  if (p < 1e-8) return(NA_real_)
+  if (np <= 1000 && p > stata_d_nFs(a, b, np, b / a * 99999972.962401286, FALSE)) return(NA_real_)
+  if (np > 1000 && stata_d_nFs(a, b, np, b / a * 2^52, FALSE) < p) return(b / a * 2^52)
+  stata_d_Froot(a, b, np, p, FALSE)
+}
+# invnFtail(): any df, np 0 to 1000, p from 1e-14; p of 1 is 0 whatever a and b are; Stata solves nF() = 1 - p
+# (below one half the tail it reaches is 1 - (1 - p)) and stops at x = b / a 2^53
+stata_d_invnFtail1 <- function(a, b, np, p) {
+  if (is.na(np) || is.na(p) || np > 1000) return(NA_real_)
+  if (p == 1) return(0)
+  if (is.na(a) || is.na(b) || a <= 0 || b <= 0 || np < 0 || p < 1e-14 || p > 1) return(NA_real_)
+  if (np == 0) return(stata_d_qF(a, b, p, TRUE))
+  if (stata_d_nFs(a, b, np, b / a * 2^53, TRUE) > p) return(b / a * 2^53)
+  if (p <= .5) stata_d_Froot(a, b, np, 1 - (1 - p), TRUE) else stata_d_Froot(a, b, np, 1 - p, FALSE)
+}
+# np for a cdf that falls as np grows, on 0 .. 1e4: missing above the central cdf, 0 at it (within 1e-14,
+# as Stata takes npnF(3, 5, 1, F(3, 5, 1)) and not 1e-12 above it), 1e4 just past it
+stata_d_np0 <- function(cdf, c0, p) {
+  if (p > c0 + 1e-14) return(NA_real_)
+  if (p >= c0 - 1e-14) return(0)
+  min(stata_d_root(function(np) cdf(np) - p, 0, 1e4 * (1 + 1e-13)), 1e4)
+}
+# npnchi2(): df 2e-10 to 1e6, x above 0, p from 2^-30 below 1
+stata_d_npnchi21 <- function(d, x, p) {
+  if (anyNA(c(d, x, p)) || d < 2e-10 || d > 1e6 || x <= 0 || p < 2^-30 || p >= 1) return(NA_real_)
+  stata_d_np0(function(np) stats::pchisq(x, d, np), stats::pchisq(x, d), p)
+}
+# npnF(): df1 2e-10 to 1e6, df2 to 1e6, x above 0, p from 1e-8 below 1
+stata_d_npnF1 <- function(a, b, x, p) {
+  if (anyNA(c(a, b, x, p)) || a < 2e-10 || a > 1e6 || b <= 0 || b > 1e6 || x <= 0 || p < 1e-8 || p >= 1) {
+    return(NA_real_)
+  }
+  stata_d_np0(function(np) stata_d_nFs(a, b, np, x, FALSE), stata_d_nFs(a, b, 0, x, FALSE), p)
+}
+# npnt(): df to 1e8, p from 1e-8 to 1 - 1e-8, np between -1000 and 1000
+stata_d_npnt1 <- function(d, t, p) {
+  if (anyNA(c(d, t, p)) || d <= 0 || d > 1e8 || p < 1e-8 || p > 1 - 1e-8) return(NA_real_)
+  if (t == 0) return(-stats::qnorm(p))
+  stata_d_root(function(np) stata_d_nt(d, np, t) - p, -1000, 1000)
+}
+stata_d_vec <- function(f, ...) {
+  args <- lapply(list(...), as.numeric)
+  if (any(lengths(args) == 0L)) return(numeric(0))
+  n <- max(lengths(args))
+  args <- lapply(args, rep_len, n)
+  vapply(seq_len(n), function(i) do.call(f, lapply(args, `[`, i)), 0)
+}
+stata_d_invnF <- function(a, b, np, p) stata_d_keep(stata_d_vec(stata_d_invnF1, a, b, np, p), TRUE)
+stata_d_invnFtail <- function(a, b, np, p) stata_d_keep(stata_d_vec(stata_d_invnFtail1, a, b, np, p), TRUE)
+stata_d_npnchi2 <- function(d, x, p) stata_d_keep(stata_d_vec(stata_d_npnchi21, d, x, p), TRUE)
+stata_d_npnF <- function(a, b, x, p) stata_d_keep(stata_d_vec(stata_d_npnF1, a, b, x, p), TRUE)
+stata_d_npnt <- function(d, t, p) stata_d_keep(stata_d_vec(stata_d_npnt1, d, t, p), TRUE)"##;
 
 impl Translator<'_> {
     /// A distribution function: its R helper on the arguments' numbers.
@@ -324,6 +438,10 @@ mod tests {
         assert_eq!(
             code("nF(3, 10, np, x)").map(|r| r.0),
             Ok("stata_d_nF(3, 10, np, x)".to_string())
+        );
+        assert_eq!(
+            code("invnFtail(3, 10, np, .05) + npnt(df, t, .5)").map(|r| r.0),
+            Ok("(stata_d_invnFtail(3, 10, np, 0.05) + stata_d_npnt(df, t, 0.5))".to_string())
         );
         assert_eq!(
             code("chiprob(3, 7.81)").map(|r| r.0),
