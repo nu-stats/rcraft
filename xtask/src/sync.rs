@@ -146,7 +146,7 @@ fn sync() -> Result {
     }
     let manifest_path = root().join(MANIFEST);
     fs::write(&manifest_path, manifest).map_err(|e| format!("{}: {e}", manifest_path.display()))?;
-    println!("sync-statcraft-lang: {} files at {}", ITEMS.len(), &commit);
+    println!("sync-statcraft-lang: {} files at {}", ITEMS.len(), commit);
     Ok(())
 }
 

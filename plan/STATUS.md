@@ -5670,3 +5670,20 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **dstdize agrees to about 1e-7**, not 8 digits: Stata keeps adj and se as floats and lands one float step away in
   some cases.
 - **Refused, not guessed:** dstdize with several by()/strata variables and its other options.
+
+## P0.3: the vendored StatCraft parser resynced by script, 2026-11-18
+
+- **Done:** `cargo xtask sync-statcraft-lang` copies StatCraft's `lang` and `core` parser files (8 files, from
+  `origin/main` 7f17240) into `crates/statatr`, rewrites the paths, drops the `display` part, formats them with the
+  workspace's rustfmt and writes `crates/statatr/src/lang/SYNC_MANIFEST` (the commit and a SHA-256 per file).
+  `cargo xtask ci` re-hashes the files and fails if one was edited by hand; `--diff` compares with StatCraft on a
+  machine that has it (StatCraft is private, so CI itself checks the manifest only). `lang/commands.rs` (the
+  command table) and the two `mod.rs` files stay RCraft's own.
+- **Brought in:** the `+` sign rule (`1 + +2`, `1++2`, `!+3`, `~+3` now give Stata's errors), `!` binding as tight as
+  unary minus, Stata's wording for expression errors, blanks dropped inside parentheses, CR and lone-CR line ends,
+  backslashes as written, `dofC()` in a leap second, compound strings with an inner quote (StatCraft PR 28, found by
+  this resync through corpus `fileread.do`). RCraft's own `_coef[` edit in `expr.rs` is gone; nothing in the corpus uses it.
+- **Shares:** probes 77.3% before and after (22,370 -> 22,383 translated). Packages **87.8%** (3,750 translated, 522
+  not, 1,272 known only when run) against **94.9%** (3,715, 200) before: the old reader read the CR-only file 6J6BAW
+  (572 lines, no LF) as one line, the new one reads its 357 distinct lines, 322 not translated (`# delimit ;`, with a
+  blank after the `#`; P2C.12am). The other 45 do-files are unchanged. 87.8% is the package figure from now on.

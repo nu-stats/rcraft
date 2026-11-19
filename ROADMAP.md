@@ -538,9 +538,11 @@ Command families:
 
 Coverage and matching milestones (the share is of the lines a dry run judges, each source
 line once; **two measures count equally** for the 95% minimum: probe lines and replication-package lines.
-Last measured 2026-11-18 (`main` at 5646f8c plus batch C): probes 77.3% (542 do-files), packages 94.9% (3,715 of 3,915
-judged source lines of the 46 replication do-files, 5 short of 95%; 98.6% by lines run, the
-older view). Each milestone is closed by measuring again and writing the figure into
+Last measured 2026-11-18 (`main` at 592a1ce plus the parser resync of P0.3): probes 77.3% (542 do-files),
+packages 87.8% (3,750 of 4,272 judged source lines of the 46 replication do-files). It was 94.9% (3,715 of 3,915) with
+the old reader, which saw one CR-only package file (6J6BAW, 572 lines with no LF) as a single line; the resynced
+reader splits it into its real lines, 322 of which are not translated yet (P2C.12am). The other 45 do-files are
+unchanged at 94.9%. Each milestone is closed by measuring again and writing the figure into
 `docs/stata-coverage.md`:
 
 - P2C.12af Probes 80% of lines translated (not started)
@@ -555,8 +557,11 @@ older view). Each milestone is closed by measuring again and writing the figure 
   on 2026-11-01, the rest `_natscale`; not measured again since) (not started)
 - P2C.12al Replication packages: the 46 do-files of the 11 public packages to 100% of
   their lines translated, and every compared result matching; 95% of source lines is the
-  user's minimum, equal to the probes' (P2C.12ah) (not started; 94.9% of source lines on
-  2026-11-18, 98.6% of run lines)
+  user's minimum, equal to the probes' (P2C.12ah) (not started; 87.8% of source lines on
+  2026-11-18 with the resynced reader, 94.9% with the old one that read 6J6BAW as one line)
+- P2C.12am `# delimit ;` with a blank after the `#`: the reader takes `#delimit` and `#d` but not `# delimit`, so the
+  322 lines of 6J6BAW (CR-only, run in `;` mode) read as one command each and do not translate. Needs a Stata 19
+  probe that the blank form is accepted, then the rule in StatCraft's `script.rs` and a resync (not started)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.
