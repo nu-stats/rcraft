@@ -353,10 +353,21 @@ stata_d_np0 <- function(cdf, c0, p) {
   if (p >= c0 - 1e-14) return(0)
   min(stata_d_root(function(np) cdf(np) - p, 0, 1e4 * (1 + 1e-13)), 1e4)
 }
+# the noncentral chi-square's cdf as the Poisson mixture of central ones. R's pchisq() with a noncentrality is
+# good only to about 1e-12 there, as large as the step the search in npnchi2() looks for at np 1e4 (x = 1e4, df 1,
+# p one half), where its sign came out differently from one platform to another
+stata_d_ncs <- function(d, x, np) {
+  m <- np / 2
+  j <- 0:ceiling(m + 12 * sqrt(m) + 40)
+  w <- stats::dpois(j, m)
+  j <- j[w > 0]
+  w <- w[w > 0]
+  sum(w * stats::pchisq(x, d + 2 * j))
+}
 # npnchi2(): df 2e-10 to 1e6, x above 0, p from 2^-30 below 1
 stata_d_npnchi21 <- function(d, x, p) {
   if (anyNA(c(d, x, p)) || d < 2e-10 || d > 1e6 || x <= 0 || p < 2^-30 || p >= 1) return(NA_real_)
-  stata_d_np0(function(np) stats::pchisq(x, d, np), stats::pchisq(x, d), p)
+  stata_d_np0(function(np) stata_d_ncs(d, x, np), stats::pchisq(x, d), p)
 }
 # npnF(): df1 2e-10 to 1e6, df2 to 1e6, x above 0, p from 1e-8 below 1
 stata_d_npnF1 <- function(a, b, x, p) {
