@@ -502,10 +502,14 @@ Command families:
   in panel and time order, a `%tc` time, a missing panel value, `plan/stata/tsreport.md`.
   `dfuller`, `pperron`, `dfgls`, `corrgram`, `wntestq`, `varsoc` and `xtunitroot` (`ips`, `ht`,
   `breitung`, `fisher`, `hadri`) Verified 2026-11-19, batch G of the StatCraft port (`tstests.do`,
-  `varsoc.do`, `xtunitroot.do`, all to 1e-8); refused: `xtunitroot llc`, `breitung` with `robust`
-  or `lags()`, `varsoc, noconstant`, `ac` and `pac` (graphs), see `plan/stata/{tstests,xtunitroot}.md`;
-  measured: probes 77.8% -> 78.0% (22,513 -> 22,588 of 30,040 source lines), packages 94.0% unchanged.
-  Not started: `arch` (Stata stops short of the optimum and its path is not decoded), `var`,
+  `varsoc.do`, `xtunitroot.do`, all to 1e-8); second round the same day: `xtunitroot llc` decoded
+  black box and Verified (`xtunitroot_llc.do`, 146 results, 1e-8: the adjustment table, the
+  per-panel bandwidth, late-starting samples, `lags()`, `kernel()`); refused: `llc` with
+  `lags(aic|bic|hqic)` or `kernel(nwest)`, `breitung` with `robust` or `lags()` (tried, not
+  reproduced), `varsoc, noconstant`, `ac` and `pac` (graphs), see `plan/stata/{tstests,xtunitroot}.md`;
+  measured: probes 77.8% -> 78.0% (22,513 -> 22,590 of 30,040 source lines), packages 94.0% unchanged.
+  Not started: `arch` (probed: Stata's path is BHHH 5 then BFGS 10 with a step-forward search, but its
+  numerical scores are not reproduced, so 8 digits fail by one; see `plan/stata/tstests.md`), `var`,
   `vargranger`, `irf`, `forecast`, `ucm`, `sspace`.)
 - P2C.12s Systems and multivariate models
   (part done: `pca`, `factor`, `rotate` and `mvtest` Verified. Not started: `sureg`,

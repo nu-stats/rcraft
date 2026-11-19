@@ -5904,3 +5904,18 @@ From the commit messages of the core-statistics session (its own worktree; 4af96
 - **Not matched:** Stata's `nF()` below about 1e-20 with np of 100 or more (Stata sums only part of the series) and `nFtail()`
   below about 1e-7 (the rounding of Stata's 1 - nF()). The inverses keep the exact series: Stata's form of nF() there made
   no case closer.
+
+## P2C.12r: xtunitroot llc (batch G, second round), 2026-11-19
+
+- **Translated and Verified:** `xtunitroot llc` (`data_r/xtunitroot.rs`; corpus `xtunitroot_llc.do`, 146 results, 1e-8, errors with
+  their return codes). Decoded black box against Stata 19 SE on made-up data: the adjustment table by the number of periods
+  (Stata's own values at every `ttilde`), the long-run variance of `D.y` (demeaned, detrended or as it is) with the Bartlett or
+  Parzen kernel, the bandwidth of each panel from the rows it has in the data, the late-starting sample that reads one period
+  before it, and r(). `lags()`, `kernel(bartlett # | parzen # | ... llc)`, `noconstant`, `trend` and `demean` work; unbalanced
+  panels stop with r(498). `stata_rget` returns `.` for an r() text name that is absent (Stata's expression does; the macro does not).
+- **Refused, tried:** `breitung` with `robust` or `lags()` (about 100 prewhitening, scaling and base variants for `lags()`; for
+  `robust` the one-panel case is the plain pooled t statistic but several panels follow neither a GLS nor a sandwich form) and
+  `arch` (BHHH for 5 iterations, then BFGS for 10, with Stata's step-forward line search; start values and the first step
+  match to 4e-9, but its numerical scores differ from the exact ones in the 7th digit, so 8 digits fail by one). `llc` with
+  `lags(aic|bic|hqic)` and `kernel(... nwest)` are not decoded. Notes in `plan/stata/{xtunitroot,tstests}.md`.
+- **Shares:** probes **78.0%** (22,590 of 30,040 source lines; was 22,588): only the `llc` lines of probe 330 turn; packages unchanged.

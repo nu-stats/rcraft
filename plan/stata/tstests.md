@@ -46,8 +46,21 @@ our own: corpus `tstests.do` (dfuller, pperron, dfgls, corrgram, wntestq; 1e-8) 
 
 ## Open (refused or not done)
 
-- `arch`: Stata stops short of the optimum (its estimates differ from the maximum in the fifth digit), and StatCraft matches
-  it only to 2e-3; the path of Stata's optimizer is not decoded. Refused as "not translated yet".
+- `arch` (second round, 2026-11-19: probed, not translated). What Stata 19 does, seen with `trace gradient showstep` on made-up
+  data (`arch y, arch(1)`, 300 observations): `e(tech)` is `technique(bhhh 5 bfgs 10)` (BHHH for 5 iterations, then BFGS for 10,
+  cycling), `e(ml_method)` is `rdu0`, the standard errors are OPG. Start values: the mean of `y` (or the OLS fit), then the OLS of
+  the squared residuals on their first lags: the constant and the ARCH coefficient (matched to 9 digits, as are the
+  log likelihood at the start, with the presample `e^2` the mean squared residual, and the first BHHH step to 4e-9). The first
+  iteration takes the full BHHH step `inv(sum s s') * sum s` and prints "initial step good"; it then steps forward by 1/8 of the
+  step, and doubles the extra step each time (1/4, ...) while the log likelihood rises, and "ignores the last step" at the
+  first fall (the point kept is the last good one). It stops when the log likelihood or the parameters have stopped moving and
+  `g inv(H) g'` is under 1e-5 (2.3e-7 after 2 iterations here). So the path is plain; what is missing is the numerical score:
+  Stata's gradient differs from the exact one in the 7th digit (-.3834467 against -.3834473 at the start), which moves the
+  first iterate by 2e-9 relative (.0880127224804 for the exact-score .0880127241657): 8 digits fail by one. Central
+  differences with fixed or relative steps from 1e-2 to 1e-8, and the adaptive-step rule found for spregress (a change of the
+  total log likelihood between 1e-4 and 1e-3), do not reproduce it; a fit puts the steps near 4e-5, 1.5e-5 and 5.7e-5 for the
+  three parameters, which follow no relation to the parameters tried. The rest of the path (the BFGS stage, `garch()`,
+  `iterate()`) was not decoded. Refused: `arch` is "not translated yet".
 - `ac`, `pac` (graphs) and `corrgram` after `var`-style estimation are not translated; `varsoc` without a varlist (after `var`),
   `noconstant` (Stata's lag-0 statistics and later rows differ from the plain formula, not decoded), `varsoc` after `xtset`.
 - A sample too small for the regression (Stata shows a missing statistic, `.`) is refused for dfuller, pperron and dfgls.
