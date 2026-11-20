@@ -653,6 +653,32 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   `svydescribe` for later stages, `single`, `generate()`; a stratum sampled completely; `e(V_srs)` and the other SRS matrices.
   Measured on top of P2C.12ao (probes only; the probe folder is StatCraft's `observe/dofiles` at b7d392e): 80.2% -> 80.5% (23,278 -> 23,343 translated
   source lines of 29,018 judged; 5,733 -> 5,668 not translated); packages unchanged at 94.7%.)
+- P2C.12ap Small forms (fix batch 4 of the StatCraft port, 2026-11-19)
+  (done: several `runiform()` in one expression (`yo = 1 + (runiform() < .5) + (runiform() < invlogit(x1))`): a row takes its
+  draws in turn, operands read left to right (observed in Stata 19; `generate`, `replace`, `keep`, `drop`, `display`, `scalar`,
+  `local`); `egen cut()` with `at()` (points, ranges, commas), `group()`, `icodes`, `label`, `double`, the value read as single
+  precision, errors with their return codes; `frame dir`, `frame copy` (with `replace`, onto the frame in use), `frame rename`,
+  `frame put`, `frame create` with variables, `cwf`, `frames reset`, `clear all` with frames, `c(frame)`, `frame name: command`
+  and `frame name { }`. Corpus `runiform_turns.do` (97), `egen_cut.do` (699), `frames_more.do` (23), all Stata 19's; notes
+  `plan/stata/{egen-cut,frames-more,random-numbers}.md`.
+  Measured: probes 80.2% -> 80.8% (23,278 -> 23,452 of 29,018 judged source lines), packages 94.7% unchanged. Refused then (the
+  frames, `egen cut()` and `describe` ones followed in P2C.12ar): two draws that are not plain `runiform()`s or two among the
+  arguments of one function (Stata reads them last to first), a draw in both the value and the `if`, `frame` commands inside a
+  frame prefix.)
+- P2C.12ar frlink, frget, frval(), egen cut by and types, describe with no data (2026-11-19, on top of P2C.12ap)
+  (done: `frlink 1:1` and `m:1` (one or more keys, other names for the linked frame's keys, `generate()`): the linked frame is
+  sorted by its keys, the link holds row numbers, Stata's three notes; `frget` (`prefix()`, `suffix()`, `newvar = var`, the
+  match variables skipped, label and format kept, Stata's missing-value and copied notes); `frval(link, var [, default])` in
+  expressions; the link is followed through the do-file, and a `frget` or `frval()` after a line that may have changed the
+  linked frame is refused (Stata stops with r(459) or r(5) there); `frame dir` after them (the frame in use is unsaved);
+  `egen cut()` with `by` (r(190), in Stata's order of checks) and with `byte`, `int`, `long` (the type holds whole values that
+  fit, fractions make a float or double); `describe` with no data (r(N) = r(k) = 0). Corpus `frlink.do` (116) and the
+  `egen_cut.do` additions (79), Stata 19's; notes `plan/stata/{frlink,egen-cut,random-numbers}.md`.
+  Measured: probes 80.8% -> 80.9% (23,452 -> 23,468 of 29,018 judged source lines; probe 233 translates whole), packages 94.7%
+  unchanged. Still refused: `frlink` and `frget` under `capture` (a failed `frlink` leaves the linked frame sorted with tied
+  rows in no set order: probe 234 lines 20 and 21), `1:m`, `rebuild`, `describe`, `frget _all`, of value-labelled variables;
+  two draws that are not plain `runiform()`s or two among the arguments of one function; a draw in both the value and the `if`
+  (decoded, needs a row-by-row loop: `random-numbers.md`); `frame` commands inside a frame prefix.)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.
