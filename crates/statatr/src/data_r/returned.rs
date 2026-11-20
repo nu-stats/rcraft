@@ -888,6 +888,10 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
 /// and why. Anything else not in `stata_e` is missing, as in Stata.
 fn e_not_kept(cmd: &str, model: &str) -> &'static [&'static str] {
     match (cmd, model) {
+        // survey estimates: the SRS variances, named where Stata has them
+        ("svy_mean" | "svy_total" | "svy_ratio" | "svy_proportion", _) => {
+            &["V_srs", "V_srssub and V_srswr (where Stata lists them)"]
+        }
         ("regress", _) => &["beta", "V_modelbased"],
         ("logit" | "probit", _) => &[
             "ic",
@@ -1054,6 +1058,25 @@ fn e_refused(cmd: &str, model: &str, name: &str) -> bool {
 
 /// The `e()` and `r()` names that are macros (text) in Stata.
 const TEXT_NAMES: &[&str] = &[
+    // svyset
+    "settings",
+    "singleunit",
+    "wvar",
+    "strata1",
+    "strata2",
+    "strata3",
+    "strata4",
+    "strata5",
+    "su1",
+    "su2",
+    "su3",
+    "su4",
+    "su5",
+    "fpc1",
+    "fpc2",
+    "fpc3",
+    "fpc4",
+    "fpc5",
     "panelvar",
     "timevar",
     "tsfmt",

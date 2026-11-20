@@ -123,6 +123,8 @@ mod sureg;
 mod survival;
 mod survwgt;
 mod svy;
+mod svydesc;
+mod svydesign;
 mod table;
 mod tables;
 mod tabm;
@@ -882,6 +884,8 @@ const HARMLESS: &[&str] = &[
 ];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "svyset",
+    "svydescribe",
     "xtunitroot",
     "varsoc",
     "dfuller",
@@ -1597,6 +1601,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_cluster2" => cluster2::CLUSTER2_HELPER,
         "stata_asclogit" => clogit::ASCLOGIT_HELPER,
         "stata_svy" => svy::SVY_HELPER,
+        "stata_svy_vlin" => svy::SVYVLIN_HELPER,
+        "stata_svydescribe" => svydesc::SVYDESCRIBE_HELPER,
         "stata_survwgt" => survwgt::SURVWGT_HELPER,
         "stata_isid" => more::ISID_HELPER,
         "stata_contract" => contract::CONTRACT_HELPER,
@@ -1786,9 +1792,9 @@ struct Session {
     /// After asclogit: its variables, alternatives variable and cluster, for estat summarize.
     asclogit_vars: Option<(Vec<String>, String, Option<String>)>,
     /// svyset: the PSU variable ("" for each row its own) and the pweight variable.
-    svy_design: Option<(String, String)>,
+    svy_design: Option<svydesign::SvyDesign>,
     /// While svy: runs its model: the design, the line as Stata keeps it, the model alone.
-    svy_call: Option<((String, String), String, String)>,
+    svy_call: Option<svy::SvyCall>,
     /// The model in e() was fitted under svy (margins weight its rows).
     svy_fit: bool,
     /// The storage types of the numeric variables `generate` made, so a
@@ -3427,7 +3433,8 @@ impl Session {
             "asclogit" => self.asclogit(c, &opts, out),
             "drawnorm" => self.drawnorm(c, &opts, out),
             "_pctile" => self.pctile_r(c, &opts, out),
-            "svyset" => self.svyset(c, &opts, out),
+            "svyset" => self.svyset(c, out),
+            "svydescribe" => self.svydescribe(c, out),
             "svy" => self.svy(c, out),
             "outreg2" => self.outreg2(c, &opts, out),
             "fre" => self.fre(c, &opts, out),

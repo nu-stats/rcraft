@@ -1,0 +1,44 @@
+* Stata 19.0's results for svy_design.do, recorded by cargo xtask stata-record
+@ r1 1 strata psu linearized missing w pweight
+@ set1 psu [pweight= w], strata(strata) singleunit(missing) vce(linearized)
+@ r1b 1 strata psu = w
+@ r2 1 strata psu fpc1
+@ set2 psu [pweight= w], strata(strata) fpc(fpc1) singleunit(missing) vce(linearized)
+@ r3 2 strata psu fpc1 ssu fpc2
+@ set3 psu [pweight= w], strata(strata) fpc(fpc1) || ssu, fpc(fpc2) singleunit(missing) vce(linearized)
+@ r4 3 ssu fpc2
+@ set4 psu [pweight= w], strata(strata) fpc(fpc1) || ssu, fpc(fpc2) || _n, singleunit(missing) vce(linearized)
+@ r5 2 ssu
+@ set5 psu [pweight= w], strata(strata) fpc(fpc1) || ssu, singleunit(missing) vce(linearized)
+@ r6 1
+@ set6 psu [pweight= w], strata(strata) singleunit(missing) vce(linearized)
+@ r7 3 strata
+@ set7 psu [pweight= w], strata(strata) fpc(fpc1) || ssu, fpc(fpc2) || _n, strata(strata) singleunit(missing) vce(linearized)
+@ r8 1 certainty
+@ set8 psu, strata(strata) singleunit(certainty) vce(linearized)
+@ r9 1 scaled  fpc1
+@ set9 psu [pweight= w], fpc(fpc1) singleunit(scaled) vce(linearized)
+@ r10 1 centered  iweight
+@ set10 _n [iweight= w], strata(strata) singleunit(centered) vce(linearized)
+@ r11 1
+@ set11 _n [pweight= w], singleunit(missing) vce(linearized)
+@ r12 sname
+@ d1 120 15 3 0 0 0 0
+@ d2 120 15 3 0 0 0 1
+@ d3 120 15 3 0 0 1 9
+@ d4 120 15 3 0 0 1 10
+@ d5 120 15 3 0
+@ d6 120 15 3 10
+@ d7 48 15 3 0
+@ d8 48 15 3 4
+@ d9 90 12 3 0
+@ d10 101 13 3 5
+@ d11 48 15 3 4
+@ d12 120 15 3
+@ d13 120 15 3
+@ d14 120 15 3 1
+@ d15 120 120 3
+@ d16 120 15 1 1 9
+@ d17 120 15 3
+@ d18 120 15 3 1
+@ c1 , clear .

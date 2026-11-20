@@ -309,6 +309,7 @@ pub const COMMANDS: &[&str] = &[
     "sureg",
     "survwgt",
     "svy",
+    "svydescribe",
     "svyset",
     "svmat",
     "swilk",

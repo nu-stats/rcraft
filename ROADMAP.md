@@ -643,6 +643,16 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   floor(q (N + 1))-th value, and r(498) `VCE computation failed; try a different bandwidth` is exactly q -/+ h outside (0, 1). **Not reproduced:** Stata's cycling
   (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data, and the three e(b) endings above; the log can differ on heavily tied data.
   Measured: probes 80.2% and packages 94.7% unchanged (the probe lines already ran `nolog` or fit continuous data).
+- P2C.12aq Survey design (batch 5 of the StatCraft port, done 2026-11-19, in part)
+  (`svyset` with `strata()`, `fpc()`, `singleunit()`, later stages, `[iweight=]`, no PSU, `svyset, clear` and bare `svyset`, with the r()
+  it leaves; `svydescribe` (stage 1 with and without a varlist, `finalstage`, `if`/`in`, r()); `svy: mean`, `total`, `ratio` and `proportion` with
+  the stratified linearized variance, fpc, the four `singleunit()` rules, `subpop()` as a variable or an `if`, `level()`, `over()` of one variable,
+  the design header and e() as Stata's; the one-stage designs also reach `svy: clogit`'s tests as before) Verified (corpus `svy_design.do`, `svy_mean.do`; note `plan/stata/svy.md`).
+  Still refused: `svy: regress`, `logit`, `probit`, `poisson` (the F header and R-squared, the iteration log, the adjusted Wald `test`); `svy:` under
+  a design with later stages; `over()` of several variables or with ratio, proportion or `subpop()`; replicate-weight variances and poststrata in `svyset`;
+  `svydescribe` for later stages, `single`, `generate()`; a stratum sampled completely; `e(V_srs)` and the other SRS matrices.
+  Measured on top of P2C.12ao (probes only; the probe folder is StatCraft's `observe/dofiles` at b7d392e): 80.2% -> 80.5% (23,278 -> 23,343 translated
+  source lines of 29,018 judged; 5,733 -> 5,668 not translated); packages unchanged at 94.7%.)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

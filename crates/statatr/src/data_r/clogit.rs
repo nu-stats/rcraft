@@ -310,14 +310,18 @@ impl Session {
             return Err(no("svy: clogit with vce() is not allowed (Stata: r(198))"));
         }
         let design = match &svy {
-            Some(((psu, w), _, _)) => {
+            Some(call) => {
                 self.helpers.insert("stata_svy");
+                let psu = call.psu();
                 let p = if psu.is_empty() {
                     String::new()
                 } else {
-                    format!(", psu = {}", r_text(psu))
+                    format!(", psu = {}", r_text(&psu))
                 };
-                format!(", weights = {}{p}", r_text(w))
+                format!(
+                    ", weights = {}{p}",
+                    r_text(&call.wvar().unwrap_or_default())
+                )
             }
             None => String::new(),
         };
@@ -362,13 +366,13 @@ impl Session {
         };
         let vce = if svy.is_some() { "linearized" } else { vce };
         let mut args = super::returned::e_args(&spec.dep, vce, cluster.as_deref(), &None);
-        if let Some(((psu, w), line, command)) = &svy {
+        if let Some(call) = &svy {
             args.push_str(&format!(
                 ", extra = list(svy = TRUE, psu = {}, wvar = {}, svy_cmdline = {}, command = {})",
-                r_text(psu),
-                r_text(w),
-                r_text(line),
-                r_text(command)
+                r_text(&call.psu()),
+                r_text(&call.wvar().unwrap_or_default()),
+                r_text(&call.line),
+                r_text(&call.command)
             ));
         }
         self.keep_e(c, out, &args, "");
