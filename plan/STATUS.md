@@ -6111,4 +6111,4 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   logit's log starts at 0 and the header is the Wald one. areg omits a regressor the absorbed groups make collinear wherever it stands, then the later
   of a collinear set. Notes `plan/stata/{constraint,logistic,areg}.md`.
 - **Still refused:** ROADMAP P2C.12ao round 4.
-- **Shares:** probes **80.5%** (23,345 translated, 5,666 not, 1,104 known only when run, of 30,115 source lines; was 23,343); packages **94.7%** (4,025 of 4,249), unchanged.
+- **Shares:** probes **80.5%** (23,358 translated, 5,653 not, 1,104 known only when run, of 30,115 source lines; was 23,356 with nlsur); packages **94.7%** (4,025 of 4,249), unchanged.
