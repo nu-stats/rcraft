@@ -78,11 +78,43 @@ pub struct RExpr {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Untranslated {
     pub reason: String,
+    /// Stata's return code when Stata itself rejects the text (an expression it
+    /// cannot read): under `capture` the line stops with it and the do-file goes on.
+    pub stata_rc: Option<u16>,
 }
 
 fn no(reason: impl Into<String>) -> Untranslated {
     Untranslated {
         reason: reason.into(),
+        stata_rc: None,
+    }
+}
+
+/// An expression Stata itself would not read: why, and the return code Stata
+/// stops with (the parser's, from StatCraft's observations of Stata 19).
+pub(crate) fn rejected(e: crate::lang::expr::ExprError) -> Untranslated {
+    Untranslated {
+        reason: format!("Stata would not read it: {}", e.message),
+        stata_rc: rejected_code(&e),
+    }
+}
+
+/// The return code to give an expression the reader refused, when it is one
+/// Stata gives for text it cannot read: 198 (invalid syntax or name), 132
+/// (parentheses that do not pair) and 133 for a + sign before `(` or a
+/// function (observed, probe 752). An unknown function is not claimed: the
+/// reader's table may lack a function Stata has.
+pub(crate) fn rejected_code(e: &crate::lang::expr::ExprError) -> Option<u16> {
+    match e.code {
+        198 | 132 => Some(e.code),
+        133 if e
+            .message
+            .strip_prefix("unknown function ")
+            .is_some_and(|w| w.starts_with(['+', '('])) =>
+        {
+            Some(133)
+        }
+        _ => None,
     }
 }
 
@@ -192,7 +224,7 @@ pub fn translate_drawing(
     tags: bool,
 ) -> Result<RExpr, Untranslated> {
     let hidden = hide_at(text);
-    let tree = parse(&hidden).map_err(|e| no(format!("Stata would not read it: {}", e.message)))?;
+    let tree = parse(&hidden).map_err(rejected)?;
     let tagged = has_extended(&tree);
     let mut t = Translator {
         kind_of,
@@ -323,6 +355,12 @@ const DATE_READERS: &[(&str, &str)] = &[
 
 /// datetime/C, which counts leap seconds: not translated yet.
 const LEAP_SECOND_FUNCTIONS: &[&str] = &[];
+
+/// Functions Stata gives r(198) when called with no argument at all.
+const NEEDS_AN_ARGUMENT: &[&str] = &[
+    "abs", "sqrt", "ln", "log", "log10", "exp", "int", "floor", "ceil", "max", "min", "round",
+    "string", "real", "substr",
+];
 
 /// The name a random draw goes by in an expression's R until it is placed.
 const DRAW: &str = ".stata_draw";
@@ -778,7 +816,13 @@ impl Translator<'_> {
             if args.len() == n {
                 Ok(())
             } else {
-                Err(no(format!("{name}() takes {n} arguments here")))
+                // a function that needs an argument, called with none: Stata's r(198)
+                // (observed for abs, sqrt, ln, max, round, string and substr)
+                let mut u = no(format!("{name}() takes {n} arguments here"));
+                if args.is_empty() && NEEDS_AN_ARGUMENT.contains(&name) {
+                    u.stata_rc = Some(198);
+                }
+                Err(u)
             }
         };
         let arg = |i: usize| -> Result<&Expr, Untranslated> {
@@ -920,7 +964,9 @@ impl Translator<'_> {
             }
             "max" | "min" => {
                 if args.is_empty() {
-                    return Err(no(format!("{name}() needs values")));
+                    let mut u = no(format!("{name}() needs values (Stata stops: r(198))"));
+                    u.stata_rc = Some(198);
+                    return Err(u);
                 }
                 for a in args {
                     let (c, k) = self.expr(a)?;

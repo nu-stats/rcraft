@@ -6006,3 +6006,19 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   new `spearman.do` 36; `spearman` added to `VERIFIED`.
 - **Shares:** probes **78.7%** (22,817 of 30,103, with batch K); packages **94.0%** (3,996 of 5,601), unchanged.
 
+
+## P2C.12an: expressions Stata does not read, fix batch 2, 2026-11-19
+
+- **Done** (checked in Stata 19 on made-up data; the cases are StatCraft's error probes 704, 705 and 752): a line whose expression Stata
+  rejects stops with Stata's return code under `capture` (r(198): an operator at the end, a token left after the expression, a text the
+  reader cannot name, a function called with no argument, `+x`; r(132): unpaired parentheses or brackets; r(133): `+(2)`; r(101):
+  `generate y = x [2]`), `_rc` says so, the data, scalars and macros stay as they were and the do-file goes on. In `display`, `scalar`,
+  `generate`, `replace`, `assert`, `count if`, `list if`, `local` and `global`; `display` shows the items before the bad one first, and
+  `display 3 = 4` and `display = 4` (the `=` dropped) now translate. The messages are RCraft's own words, never Stata's text.
+- **How:** `Untranslated.stata_rc` carries the reader's code (198, 132 and the observed 133 only); `Session::command` runs the line on a
+  copy of its state and, on a code, translates it again as `_rcraft_fail`. Lines not under `capture` are refused as before (Stata ends
+  the do-file there). Note `plan/stata/expression-errors.md`.
+- **Corpus:** new `expression_errors.do`, 187 return codes (704 and 705 line by line, plus what a rejected line leaves behind and the 752 `+`
+  forms), tolerance 0.
+- **Shares:** probes **79.8%** (23,159 of 29,018 judged source lines; was 22,823, 78.7%), packages **94.7%** (4,025 of 4,249) unchanged.
+  Of the three probes' lines two stay refused (`x[1] + +2`, r(303); `"a" * +2`).
