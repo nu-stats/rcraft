@@ -631,7 +631,7 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   xbd), `sureg` and `mvreg` (two-step GLS, `isure`, `small`, `dfk`, `corr`, fw/aw, `predict` with `equation()`, `test`
   across equations), `qreg` (`nolog`, any quantile, fweights, the iid variance, `predict`), `logistic` and `xi` (round 2, 2026-11-19: `xi: cmd`, `xi i.g`, `prefix()`, `i.g*i.h`, `i.g*x`, `i.g|x`, the omit characteristics) Verified (corpus
   `cnsreg.do`, `areg.do`, `sureg.do`, `qreg.do`, `logistic.do`, `xi.do`; notes `plan/stata/{constraint,areg,sureg,qreg,logistic,xi}.md`).
-  `nlsur` and the `qreg` ties and iteration log were built in round 3, the `nlsur` gaps in round 4 (below).
+  `nlsur` and the `qreg` ties and iteration log were built in round 3, the `nlsur` gaps in rounds 4 and 5 (below).
   Still refused: `xi` with a factor in two terms or `|` between factors (round 5, below: other levels and `noomit` are built); `constraints()` of other models;
   `areg` with regressors the absorbed groups make collinear; `logistic, noconstant`.
   Measured on top of P2C.12an: probes 79.8% -> 80.2% (23,159 -> 23,278 translated source lines of 29,018 judged); with `xi` the 7 probe lines move from refused to known only when run (the dry run cannot ask R for the levels; the corpus shows them translating): 23,278 translated, 5,733 not, 1,104 when run; packages 94.7% unchanged (4,025 of 4,249).)
@@ -684,6 +684,17 @@ Round 5 (2026-11-20, `xi`): factors whose values are not whole numbers from 0 up
   `margins` and other `estat` after `nlsur`, clusters with missing values; e() after a captured r(430) is not kept.
   Measured: probes 80.5% (23,356 translated of 30,115 source lines, 5,655 not; round 3 had 23,291 and 5,720, before
   the svy batch also landed).)
+- P2C.12ao round 5: what round 4 left in `nlsur` (done 2026-11-20)
+  (iweights (as fweights, `(obs = N)`; with `vce(robust)` Stata's r(101)), `vce(cluster v)` with v missing on some rows
+  (left out), a linear combination written twice (the same parameters), `parameters()` without the evaluator form (Stata's
+  r(198)), e() kept after a captured r(430), `margins` after nlsur (Stata's predictive margin of an equation's fitted
+  values with delta-method errors; `dydx()`, `at()` and `predict(residuals)` are its r(322) and r(498)), `estat summarize`,
+  `estat vce` in Stata's layout, lincom's table without a variable over it, and the function-evaluator form
+  (`nlsur name @ varlist, parameters() neq()`: the do-file's program `nlsurname` runs at each step, compiled by the runner
+  into an R function from its lines) Verified (corpus `nlsur.do`, 853 results to 1e-6, 173 new; note
+  `plan/stata/nlsur.md`). Still refused: `hasconstants()`, `nparameters()`, the evaluator form with weights,
+  `variables()` or `noconstant` and `predict`/`margins` after it, `margins` with terms, `over()` or `post`.
+  Measured: probes 80.5% unchanged (23,356 translated of 30,115 source lines; the probe do-files have none of these forms).)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

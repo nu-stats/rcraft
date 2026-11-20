@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12ao, batch E on-hold item): made-up data; Stata 19's results are in nlsur.recorded
 * commands: nlsur
-* (nlsur: NLS, FGNLS and iterated FGNLS on two and three equations, shared parameters, a start where parameters stay constrained, noconstant, if and in, initial(), eps(), level(), one equation, e() and predict with equation(#k); round 4: fweights, aweights, pweights, vce(robust), vce(cluster), nls with shared parameters, delta(), {xb: varlist}, variables(), iterate() under ifgnls, a run that stops at iterate(), test, lincom, nlcom and _b[/a]; the iteration log is compared by eye, not here)
+* (nlsur: NLS, FGNLS and iterated FGNLS on two and three equations, shared parameters, a start where parameters stay constrained, noconstant, if and in, initial(), eps(), level(), one equation, e() and predict with equation(#k); round 4: fweights, aweights, pweights, vce(robust), vce(cluster), nls with shared parameters, delta(), {xb: varlist}, variables(), iterate() under ifgnls, a run that stops at iterate(), test, lincom, nlcom and _b[/a]; round 5: iweights, clusters with a missing value, a linear combination written twice, parameters() refused, e() after r(430), margins and estat summarize; the iteration log is compared by eye, not here)
 * tolerance: 1e-6
 version 19
 set linesize 255
@@ -20,6 +20,8 @@ generate double aw = 0.5 + mod(_n * 3, 7) / 3
 generate g = 1 + mod(_n * 11, 13)
 generate double x4 = x3 if _n != 5
 generate double y4 = 1 + 0.8 * x1 - 0.5 * x3 + e1
+generate double y5 = 2 + 0.3 * x1 + 0.4 * x3 + e2
+generate gm = g if _n != 7
 program define shwnl
     display "@ s " %24.17g e(N) " " %24.17g e(k) " " %24.17g e(rank) " " %24.17g e(ll) " " e(converged) " " e(n_eq) " " e(k_eq) " " e(k_eq_model)
     forvalues i = 1/`=e(n_eq)' {
@@ -180,3 +182,81 @@ display "@ n2 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),2,2) " " %24.17g el(r(V
 display "@ bb " %24.17g _b[/a1] " " %24.17g _se[/b2] " " %24.17g _b[c:_cons]
 estat ic
 estat vce
+* round 5
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)) [iw=w], nls
+shwnl
+display "@ m13 " (e(wtype) == "iweight") " " (e(wexp) == "= w")
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)) [iw=w]
+shwnl
+capture noisily nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)) [iw=w], vce(robust)
+display "@ rc3 " _rc
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), vce(cluster gm) nolog
+shwnl
+display "@ m14 " e(N_clust)
+nlsur (y4 = {xb: x1 x3} + {a1=1}) (y5 = {xb: x1 x3} + {a2=1})
+shwnl
+display "@ m15 " (e(params) == "xb_x1 xb_x3 a1 a2") " " (e(params_2) == "xb_x1 xb_x3 a2") " " (e(sexp_2) == "({xb_x1} *x1 + {xb_x3} *x3) + {a2}")
+capture noisily nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), parameters(a1 b1 a2 b2 c)
+display "@ rc4 " _rc
+capture noisily nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), iterate(2)
+display "@ rc5 " _rc
+shwnl
+capture noisily nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), iterate(2) nls
+display "@ rc6 " _rc
+shwnl
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), nolog
+margins
+display "@ g1 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1) " " r(N)
+margins if x1 > 3
+display "@ g2 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1) " " r(N)
+margins in 1/50, predict(yhat)
+display "@ g3 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1) " " r(N)
+margins, predict(equation(#2)) level(90)
+display "@ g4 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1) " " r(level)
+capture noisily margins, dydx(x1)
+display "@ rc7 " _rc
+capture noisily margins, at(x2=(2 3))
+display "@ rc8 " _rc
+capture noisily margins, predict(residuals)
+display "@ rc9 " _rc
+estat summarize
+capture noisily estat gof
+display "@ rc10 " _rc
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {A=1} * x1^{p=.5}) (y3 = {K=4} / (1 + exp(-{r=1} * (x3 - {m=2})))), nolog
+margins, predict(equation(#3))
+display "@ g5 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1)
+margins, predict(equation(#2))
+display "@ g6 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1)
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)) [fw=w], nolog
+margins, predict(equation(#2))
+display "@ g7 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1) " " r(N)
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)) [aw=aw], nolog
+margins, predict(equation(#2))
+display "@ g8 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1) " " r(N)
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), vce(robust) nolog
+margins
+display "@ g9 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1) " " r(N)
+estat vce, correlation
+program nlsurmy
+    version 19
+    syntax varlist(min=4 max=4) [if], at(name)
+    tokenize `varlist'
+    args y1 y2 x1 x2
+    tempname a1 b1 a2 b2 c
+    scalar `a1' = `at'[1,1]
+    scalar `b1' = `at'[1,2]
+    scalar `a2' = `at'[1,3]
+    scalar `b2' = `at'[1,4]
+    scalar `c' = `at'[1,5]
+    quietly replace `y1' = `a1' + `b1'*`x1' `if'
+    quietly replace `y2' = `a2' + `b2'*exp(`c'*`x2') `if'
+end
+nlsur my @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5)
+shwnl
+display "@ m16 " (e(type) == "3") " " (e(funcprog) == "nlsurmy") " " (e(rhs) == "x1 x2") " " (e(constants) == ". .") " " (e(depvar) == "y1 y2")
+nlsur my @ y1 y2 x1 x2 if x3 > 2, parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5) nls
+shwnl
+nlsur my @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5) ifgnls nolog vce(robust)
+shwnl
+test /a1 = 1
+display "@ t4 " %24.17g r(chi2)

@@ -482,7 +482,7 @@ impl Session {
             return Err(no("margins after margins, post is not translated yet"));
         }
         if est.fit == Fit::Nlsur {
-            return Err(no("margins after nlsur is not translated yet"));
+            return self.nlsur_margins(c, opts, out);
         }
         if let Some(o) = opts.other(&[
             ("dydx", 4),

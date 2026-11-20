@@ -921,7 +921,7 @@ impl Session {
             r_text(&s)
         } else if self.xtregar_active() {
             "stata_e[[\"depvar\"]]".to_string()
-        } else if est.fit == Fit::Margins && !self.after_nlcom_post() {
+        } else if (est.fit == Fit::Margins && !self.after_nlcom_post()) || est.fit == Fit::Nlsur {
             r_text("")
         } else {
             r_text(&est.dep)
@@ -1045,7 +1045,38 @@ impl Session {
                 out.line("stata_nlsur_ic(stata_e)");
                 return Ok(());
             }
+            if sub.len() >= 2 && "summarize".starts_with(sub) && rest.is_empty() {
+                if let Some(o) = opts.other(&[]) {
+                    return Err(no(format!(
+                        "estat summarize with the option {o} is not translated yet"
+                    )));
+                }
+                return self.nlsur_summarize(out);
+            }
+            if sub == "vce" && rest.is_empty() {
+                if let Some(o) = opts.other(&[("correlation", 4), ("covariance", 3)]) {
+                    return Err(no(format!(
+                        "estat vce after nlsur with the option {o} is not translated yet"
+                    )));
+                }
+                self.helpers.insert("stata_nlsur");
+                let call = format!(
+                    "stata_nlsur_vce(stata_e, correlation = {})",
+                    r_logical(opts.has("correlation", 4))
+                );
+                out.line(if self.quiet(c) {
+                    format!("invisible(utils::capture.output({call}))")
+                } else {
+                    call
+                });
+                return Ok(());
+            }
+            // Stata 19 has ic, summarize and vce after nlsur; the others are its r(321)
             if sub != "vce" {
+                if sub == "gof" {
+                    super::sureg::eq_stop(out, &format!("estat {sub} not valid (Stata: r(321))"));
+                    return Ok(());
+                }
                 return Err(no(format!("estat {sub} after nlsur is not translated yet")));
             }
         }

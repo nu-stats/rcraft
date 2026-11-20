@@ -22,6 +22,7 @@ mod dyndoc;
 mod eval;
 pub(crate) mod format;
 pub(crate) mod macros;
+mod nlsur_eval;
 mod progsyntax;
 mod resample;
 mod scan;
@@ -448,6 +449,10 @@ pub struct Run<'f> {
     rs_marks: Vec<(usize, usize)>,
     /// The lines of one replication of that line, as written out.
     rs_unit: Option<String>,
+    /// Where the lines of nlsur's evaluator program start: the line and the asks.
+    nl_mark: Option<(usize, usize)>,
+    /// Why nlsur's evaluator could not be made into a function, for the fit line after it.
+    nl_failed: Option<String>,
     /// A line before that was not translated runs a program or an add-on,
     /// which may set any global; the globals the do-file has not set are not
     /// known after it.
@@ -520,6 +525,8 @@ impl<'f> Run<'f> {
             asks: 0,
             rs_marks: Vec::new(),
             rs_unit: None,
+            nl_mark: None,
+            nl_failed: None,
             globals_unknown: None,
             one_line_if: None,
             captured_files: Vec::new(),
@@ -1554,6 +1561,10 @@ impl<'f> Run<'f> {
             "permute" | "simulate" => self.resample_loop(c, &rest, depth, written),
             "_rcraft_rs_mark" => self.resample_mark(depth),
             "_rcraft_rs_compile" => self.resample_compile(c, &rest, depth, written),
+            "nlsur" if c.parts.main.contains('@') => self.nlsur_eval(c, &rest, depth, written),
+            "_rcraft_nlsur_mark" => self.nlsur_mark(depth),
+            "_rcraft_nlsur_compile" => self.nlsur_compile(c, depth, written),
+            "_rcraft_nlsur_fit" => self.nlsur_fit(c, &rest, depth, written),
             name if self.programs.contains_key(name) => {
                 self.done_item(depth);
                 let Some(def) = self.programs.get(name).cloned() else {

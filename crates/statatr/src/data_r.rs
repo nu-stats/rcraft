@@ -586,6 +586,7 @@ const WEIGHTED: &[&str] = &[
     "areg",
     "qreg",
     "nlsur",
+    "_rcraft_nlsur_fit",
     "mvreg",
     "ltable",
     "dfuller",
@@ -675,6 +676,7 @@ const NAME_TABLES: &[&str] = &[
 const MODELS: &[&str] = &[
     "ivprobit",
     "nlsur",
+    "_rcraft_nlsur_fit",
     "npregress",
     "xtabond",
     "xtdpdsys",
@@ -1827,6 +1829,8 @@ struct Session {
     fit_fweight: bool,
     /// The weight the model last fitted had, as written (lroc reads its variable).
     fit_weight: Option<crate::lang::syntax::Weight>,
+    /// nlsur's function-evaluator form between its begin and fit lines (`data_r::nlsur`).
+    nlsur_eval: Option<nlsur::NlEval>,
     /// The last regress was plain: no robust, clustered or weighted errors.
     plain_regress: bool,
     /// Set while the command under `stepwise:` is translated.
@@ -3233,7 +3237,10 @@ impl Session {
             "rreg" => self.rreg(c, &opts, out),
             "medeff" => self.medeff(c, &opts, out),
             "nl" => self.nl(c, &opts, out),
-            "nlsur" => self.nlsur(c, &opts, out),
+            "nlsur" | "_rcraft_nlsur_fit" => self.nlsur(c, &opts, out),
+            "_rcraft_nlsur_begin" => self.nlsur_eval_begin(c, &opts, out),
+            "_rcraft_nlsur_at" => self.nlsur_eval_at(out),
+            "_rcraft_nlsur_collect" => self.nlsur_eval_collect(c, out),
             "constraint" => self.constraint(c, out),
             "cnsreg" => self.cnsreg(c, &opts, out),
             "logistic" => self.logistic(c, &opts, out),
