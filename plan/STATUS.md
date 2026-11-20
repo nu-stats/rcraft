@@ -6050,6 +6050,18 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   (byte, labelled `g==#`), `i.g*i.h`, `i.g*x`, `i.g|x`; the omitted level from `char _dta[omit] prevalent` and `char g[omit]`; the term lines, e(cmdline) with the stubs
   (`regress y _Ig_* x`); an earlier run's variables of the same prefix dropped. The dummies' names depend on the levels of the data, so the do-file runner
   asks R for them (`Translator::xi_question`); a dry run leaves the line as known only when run. Note `plan/stata/xi.md`.
-- **On hold, to be built:** `nlsur` (7 probe lines; Stata's own Gauss-Newton iteration log, the step rule not decoded) and `qreg` where the minimum is not
+- **On hold, to be built:** `nlsur` (7 probe lines; Stata's own Gauss-Newton iteration log, the step rule not decoded) and (done in round 3 below) `qreg` where the minimum is not
   unique (Stata's choice among optimal vertices not reproduced; these fits stop with a message).
 - **Shares:** probes **80.2%** (23,278 translated, 5,733 not, 1,104 known only when run; the 7 `xi` lines moved from refused to when-run); packages **94.7%** (4,025 of 4,249), unchanged.
+
+## P2C.12ao round 3: qreg ties and the iteration log, 2026-11-19
+
+- **Done** (corpus `qreg.do`, 234 results to 1e-8, was 51): `qreg` where the minimum is not unique (dummies, rounded data, fweights) and `qreg` without `nolog`.
+  Stata's path rebuilt from its iteration log (note `plan/stata/qreg.md`): a weighted least squares step, the k rows with the smallest weighted deviation as the first vertex,
+  a descent over vertices priced per unit of the basic row's weight, breakpoints passed until the slope reaches zero, zero-residual rows keeping a side. The log and
+  `note: alternate solutions exist.` print as Stata's do. e(q_v) is the floor(q (N + 1))-th value; r(498) bandwidth error exactly when q -/+ h leaves (0, 1).
+- **Measured on 140 Stata runs, 10 data sets, 84 held out:** WLS value 140/140; final e(b) 123 of 126 where Stata finishes; logged sequence 114/140 (all 14 continuous
+  runs); notes in the right place 128/140.
+- **Not matched:** Stata cycles (r(430) `convergence not achieved`, r(498) `try increasing the maximum number of iterations`) on data with two integer dummies and heavy
+  ties, where RCraft prints a fit; three e(b) endings on a flat face (rounding noise in Stata); on heavily tied data the log can differ.
+- **Shares:** probes **80.2%** and packages **94.7%**, unchanged.
