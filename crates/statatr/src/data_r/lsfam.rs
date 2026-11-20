@@ -239,7 +239,7 @@ stata_cnsreg <- function(d, dep, xs, cns, noconst = FALSE, wvar = NULL, wtype = 
     Nn <- n
     wn <- w
   }
-  if (!is.null(wtype) && wtype == "a" && show) cat("(sum of wgt is ", stata_fmt(sum(w), "%9.0gc", trim = TRUE), ")\n", sep = "")
+  if (!is.null(wtype) && wtype == "a" && show) cat("(sum of wgt is ", stata_fmt(sum(w), "%18.0g", trim = TRUE), ")\n", sep = "")
   if (!is.null(wtype) && wtype == "p") robust <- TRUE
   if (k - m < 1) stop("RCraft: cnsreg with every coefficient fixed by the constraints is not translated yet", call. = FALSE)
   b0 <- drop(t(R) %*% solve(R %*% t(R), rhs))

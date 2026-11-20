@@ -6022,3 +6022,24 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   forms), tolerance 0.
 - **Shares:** probes **79.8%** (23,159 of 29,018 judged source lines; was 22,823, 78.7%), packages **94.7%** (4,025 of 4,249) unchanged.
   Of the three probes' lines two stay refused (`x[1] + +2`, r(303); `"a" * +2`).
+
+## P2C.12ao: the least squares family (batch E of the StatCraft port), 2026-11-19
+
+- **Done** (each checked in Stata 19 on made-up data, corpus results to 1e-8): `constraint` (define, list, dir, get, free, drop; the
+  text kept in R so branches and loops behave) and `cnsreg` (restricted least squares by projection; equal constraints
+  once, r(111)/r(131)/r(303) notes, r(412); aweights, fweights, pweights (not scaled), robust and clustered errors with
+  e(p) on the residual degrees of freedom; the F test that goes when the constraints contradict the slopes; e(Cns)); `areg`
+  (df_r = N - k - G, the F test of the absorbed indicators, robust and clustered, weights, factor variables with a base
+  column in e(b), `predict` xb, residuals, d, xbd); `sureg` and `mvreg` (two-step GLS, isure, small, dfk, corr with
+  Stata's widths, weights, `predict, equation()`, `test [y1]x1 = [y2]x1`); `qreg` (StatCraft's vertex descent written in R,
+  the iid variance, level() in the bandwidth, fweights); `logistic` (logit's odds ratios without a log).
+- **Corpus:** `cnsreg.do` 253 results, `sureg.do` 240, `areg.do` 77, `qreg.do` 51 (1e-8), `logistic.do` 24 (1e-6); the
+  commands are in `VERIFIED`. `RCRAFT_CORPUS_SHOW=1` makes the corpus test print what R printed, to compare with Stata's log.
+- **Found:** `predict, residuals` after `cnsreg` is y - float(xb); `cnsreg` clustered prints Prob > F on G - 1 degrees of
+  freedom but leaves e(p) on N - (k - m); pweights are not scaled in cnsreg's sums of squares; `sureg` has no `noconstant`;
+  with fweights `sureg` prints one more blank line; `areg` clustered has e(rank) = k and, off the absorbed variable, no
+  e(sum_w). R's `quantreg` did not match Stata where `qreg`'s minimum is not unique, and neither did StatCraft's descent on
+  two of four such fits, so those fits stop with a message.
+- **Still refused:** see ROADMAP P2C.12ao. `nlsur` and `xi` are not started (7 probe lines each).
+- **Shares:** probes **80.2%** (23,278 of the 29,018 lines a dry run judges; was 79.8%, 23,159, with the expression-error batch; 78.7% before both); packages **94.7%** (4,025 of
+  4,249), unchanged.

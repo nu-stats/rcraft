@@ -12,6 +12,7 @@ generate double x3 = mod(_n * 11, 23) / 4
 generate double y = 2 + .5 * x1 + .3 * x2 - .2 * x3 + mod(_n * 7, 11) / 5
 generate int g = 1 + mod(_n, 4)
 generate int w = 1 + mod(_n, 3)
+generate double w2 = .5 + mod(_n * 7, 13) / 10
 program define shwcns
     display "@ s " %24.17g e(N) " " %24.17g e(df_r) " " %24.17g e(rmse) " " %24.17g e(ll) " " e(rank)
     display "@ f " %24.17g e(df_m) " " %24.17g e(F) " " %24.17g e(p)
@@ -42,6 +43,8 @@ shwcns
 cnsreg y x1 x2 x3, constraints(1/2)
 shwcns
 cnsreg y x1 x2 x3 [aweight = w], constraints(1)
+shwcns
+cnsreg y x1 x2 x3 [aweight = w2], constraints(1)
 shwcns
 cnsreg y x1 x2 x3 [fweight = w], constraints(1)
 shwcns

@@ -246,6 +246,22 @@ impl Session {
                 "qreg with the option {o} is not translated yet"
             )));
         }
+        let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
+        match &w {
+            Some((W::F, _)) | None => {}
+            Some((k, _)) => {
+                let word = match k {
+                    W::A => "aweights",
+                    W::P => "pweights",
+                    _ => "iweights",
+                };
+                out.line(format!(
+                    "stop({}, call. = FALSE)",
+                    r_text(&format!("{word} not allowed (Stata: r(101))"))
+                ));
+                return Ok(());
+            }
+        }
         if !opts.has("nolog", 3) && !self.quiet(c) {
             return Err(no(
                 "qreg without nolog prints Stata's own simplex path (its iteration log), which is not translated; use nolog",
@@ -280,22 +296,6 @@ impl Session {
             return Err(no(
                 "qreg with interactions, ib. bases or operators is not translated yet",
             ));
-        }
-        let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
-        match &w {
-            Some((W::F, _)) | None => {}
-            Some((k, _)) => {
-                let word = match k {
-                    W::A => "aweights",
-                    W::P => "pweights",
-                    _ => "iweights",
-                };
-                out.line(format!(
-                    "stop({}, call. = FALSE)",
-                    r_text(&format!("{word} not allowed (Stata: r(101))"))
-                ));
-                return Ok(());
-            }
         }
         let level = level(opts)?;
         let rows = self.rows_for(c, out)?;
