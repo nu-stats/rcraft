@@ -6151,3 +6151,15 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Still refused:** `hasconstants()`, `nparameters()`, the evaluator form with weights, `variables()` or `noconstant`,
   `predict` and `margins` after it, `margins` with terms, `over()` or `post`, iweights whose sum is not whole.
 - **Shares:** probes **80.5%** unchanged (23,356 translated, 5,655 not, of 30,115 source lines; the probes use none of these forms).
+
+## P2C.12ao round 6: what nlsur still refused after round 5, 2026-11-20
+
+- **Done** (corpus `nlsur.do`, 978 results to 1e-6, 125 new; the printed lines compared with Stata 19's log, line for
+  line): the evaluator form's `nparameters()`, `hasconstants()`, weights, `variables()` and `noconstant`; `predict` and
+  `margins` after the evaluator form (its program run again on the data as they are); `margins` terms as Stata's errors
+  (r(452) for a fractional variable, r(322) otherwise), `margins, over()` (one or more variables) and `margins, post`
+  with Stata 19's e() (k_by, by#, predict1_opts, model_vcetype, e(_N), e(error), e(Jacobian)). Note `plan/stata/nlsur.md`.
+- **Still refused** (none seen in Stata): `hasconstants()` that names no constant for an equation, `over()` with value
+  labels, missing or negative values, `margins, post` after `vce(cluster)`, several margins terms whose first is a
+  whole-number variable.
+- **Shares:** probes **80.5%** unchanged (the probes use none of these forms).

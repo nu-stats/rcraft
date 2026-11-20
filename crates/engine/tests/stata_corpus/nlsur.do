@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12ao, batch E on-hold item): made-up data; Stata 19's results are in nlsur.recorded
 * commands: nlsur
-* (nlsur: NLS, FGNLS and iterated FGNLS on two and three equations, shared parameters, a start where parameters stay constrained, noconstant, if and in, initial(), eps(), level(), one equation, e() and predict with equation(#k); round 4: fweights, aweights, pweights, vce(robust), vce(cluster), nls with shared parameters, delta(), {xb: varlist}, variables(), iterate() under ifgnls, a run that stops at iterate(), test, lincom, nlcom and _b[/a]; round 5: iweights, clusters with a missing value, a linear combination written twice, parameters() refused, e() after r(430), margins and estat summarize; the iteration log is compared by eye, not here)
+* (nlsur: NLS, FGNLS and iterated FGNLS on two and three equations, shared parameters, a start where parameters stay constrained, noconstant, if and in, initial(), eps(), level(), one equation, e() and predict with equation(#k); round 4: fweights, aweights, pweights, vce(robust), vce(cluster), nls with shared parameters, delta(), {xb: varlist}, variables(), iterate() under ifgnls, a run that stops at iterate(), test, lincom, nlcom and _b[/a]; round 5: iweights, clusters with a missing value, a linear combination written twice, parameters() refused, e() after r(430), margins and estat summarize, the function-evaluator form; round 6: hasconstants(), nparameters(), the evaluator form with weights, variables() and noconstant, predict and margins after it, margins terms, over() and post; the iteration log is compared by eye, not here)
 * tolerance: 1e-6
 version 19
 set linesize 255
@@ -22,6 +22,9 @@ generate double x4 = x3 if _n != 5
 generate double y4 = 1 + 0.8 * x1 - 0.5 * x3 + e1
 generate double y5 = 2 + 0.3 * x1 + 0.4 * x3 + e2
 generate gm = g if _n != 7
+generate grp = 1 + mod(_n, 3)
+generate g2 = 10 * (1 + mod(_n, 2))
+generate double x5 = x3 if _n != 9
 program define shwnl
     display "@ s " %24.17g e(N) " " %24.17g e(k) " " %24.17g e(rank) " " %24.17g e(ll) " " e(converged) " " e(n_eq) " " e(k_eq) " " e(k_eq_model)
     forvalues i = 1/`=e(n_eq)' {
@@ -260,3 +263,64 @@ nlsur my @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 
 shwnl
 test /a1 = 1
 display "@ t4 " %24.17g r(chi2)
+* round 6
+nlsur my @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5) hasconstants(a1 a2) nolog
+shwnl
+display "@ m17 " (e(constants) == "a1 a2")
+nlsur my @ y1 y2 x1 x2, nparameters(5) neq(2) initial(b1 1 b2 1 b3 1 b4 1 b5 .5) nolog
+shwnl
+display "@ m18 " (e(params) == "b1 b2 b3 b4 b5")
+nlsur my @ y1 y2 x1 x2 [fw=w], parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5) nolog
+shwnl
+nlsur my @ y1 y2 x1 x2 [aw=aw], parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5) nolog
+shwnl
+nlsur my @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5) variables(x5) nolog
+shwnl
+nlsur my @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5) noconstant nolog
+shwnl
+display "@ m19 " (e(constants) == " . .")
+nlsur my @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) initial(a1 1 b1 1 a2 1 b2 1 c .5) nolog
+predict ep1
+predict ep2, equation(#2)
+predict er2, equation(#2) residuals
+predict ep1b if x1 > 3
+summarize ep1
+display "@ e1 " %24.17g r(sum) " " r(N)
+summarize ep2
+display "@ e2 " %24.17g r(sum) " " r(N)
+generate double er2q = er2^2
+summarize er2q
+display "@ e3 " %24.17g r(sum)
+summarize ep1b
+display "@ e4 " %24.17g r(sum) " " r(N)
+margins
+display "@ h1 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1)
+margins, predict(equation(#2))
+display "@ h2 " %24.17g el(r(b),1,1) " " %24.17g el(r(V),1,1)
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), nolog
+capture noisily margins x1
+display "@ rc11 " _rc
+capture noisily margins grp
+display "@ rc12 " _rc
+capture noisily margins x1 grp
+display "@ rc13 " _rc
+margins, over(grp)
+display "@ h3 " %24.17g el(r(b),1,1) " " %24.17g el(r(b),1,2) " " %24.17g el(r(b),1,3) " " %24.17g el(r(V),1,1) " " %24.17g el(r(V),1,2) " " %24.17g el(r(V),3,3) " " r(N)
+margins in 1/100, over(grp) predict(equation(#2)) level(90)
+display "@ h4 " %24.17g el(r(b),1,2) " " %24.17g el(r(V),2,2) " " %24.17g el(r(V),1,3) " " r(N)
+margins, over(grp g2)
+display "@ h5 " %24.17g el(r(b),1,1) " " %24.17g el(r(b),1,6) " " %24.17g el(r(V),2,2) " " %24.17g el(r(V),1,6)
+capture noisily margins, over(x1)
+display "@ rc14 " _rc
+margins, post
+display "@ h6 " %24.17g _b[_cons] " " %24.17g _se[_cons] " " e(N) " " e(k_by) " " e(k_at) " " e(k_predict) " " e(k_margins)
+display "@ m20 " (e(cmdline) == "margins , post") " " (e(expression) == "predict()") " " (e(predict1_label) == "Equation 1 fitted values") " " (e(model_vce) == "gnr") " " (e(est_cmd) == "nlsur") " " (e(vce) == "delta") " " (e(title) == "Predictive margins")
+display "@ h7 " %24.17g el(e(Jacobian),1,1) " " %24.17g el(e(Jacobian),1,2) " " el(e(_N),1,1) " " el(e(error),1,1)
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), nolog vce(robust)
+margins, predict(equation(#2)) post
+display "@ h8 " %24.17g _b[_cons] " " %24.17g _se[_cons] " " %24.17g el(e(Jacobian),1,4) " " %24.17g el(e(Jacobian),1,5)
+display "@ m21 " (e(model_vce) == "robust") " " (e(model_vcetype) == "Robust") " " (e(predict1_opts) == "equation(#2)") " " (e(cmdline) == "margins , predict(equation(#2)) post")
+nlsur (y1 = {a1=1} + {b1=1}*x1) (y2 = {a2=1} + {b2=1}*exp({c=.5}*x2)), nolog
+margins if x1 > 3, over(g2) post
+display "@ h9 " %24.17g _b[10.g2] " " %24.17g _se[20.g2] " " e(N) " " e(k_by) " " el(e(_N),1,1) " " el(e(_N),1,2)
+display "@ m22 " (e(by1) == "10.g2") " " (e(by2) == "20.g2") " " (e(over) == "g2") " " (e(by) == "g2") " " (e(cmdline) == "margins if x1 > 3, over(g2) post")

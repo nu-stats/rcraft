@@ -3745,18 +3745,20 @@ pub const GUIDES: &[Guide] = &[
                  the final estimates; clusters times G/(G-1) (N-1)/(N-k); a row with v missing left out) and \
                  variables() are taken; a linear combination written twice is the same parameters. A run that runs \
                  out of steps prints its table and keeps e(), then stops with r(430). The function-evaluator form \
-                 (nlsur name @ varlist, parameters() neq()) runs the do-file's program nlsurname at each step, as \
-                 Stata calls it. The iteration log, the equation table, the z table and e() follow Stata's; predict \
-                 gives yhat and residuals with equation(#k); test, lincom and nlcom read /a, [a]_cons and _b[/a]; \
-                 margins gives the predictive margin of an equation's fitted values (dydx() and at() are Stata's \
-                 r(322)); estat ic, estat summarize and estat vce are translated.",
+                 (nlsur name @ varlist, parameters() or nparameters(), neq(), hasconstants(), weights, variables(), \
+                 noconstant) runs the do-file's program nlsurname at each step, as Stata calls it, and again for \
+                 predict and margins. The iteration log, the equation table, the z table and e() follow Stata's; \
+                 predict gives yhat and residuals with equation(#k); test, lincom and nlcom read /a, [a]_cons and \
+                 _b[/a]; margins gives the predictive margin of an equation's fitted values, by over() groups, and \
+                 post makes them e() as Stata's (terms, dydx() and at() are Stata's errors, the model having no \
+                 covariates); estat ic, estat summarize and estat vce are translated.",
             ),
             p(
                 "Not yet",
-                "hasconstants() and nparameters(); the evaluator form with weights, variables() or noconstant, and \
-                 predict or margins after it (a program line that is not translated, or needs a value from R while \
-                 it is translated, refuses the fit); margins with terms, over() or post. Where a parameter is near \
-                 zero the log can take other steps than Stata's (the estimates agree to about 1e-8).",
+                "An evaluator program with a line that is not translated, or that needs a value from R while it is \
+                 translated, refuses the fit. margins, over() with value labels or missing values, and post after \
+                 vce(cluster), are refused. Where a parameter is near zero the log can take other steps than \
+                 Stata's (the estimates agree to about 1e-8).",
             ),
         ],
     },

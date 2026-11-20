@@ -587,6 +587,7 @@ const WEIGHTED: &[&str] = &[
     "qreg",
     "nlsur",
     "_rcraft_nlsur_fit",
+    "_rcraft_nlsur_begin",
     "mvreg",
     "ltable",
     "dfuller",

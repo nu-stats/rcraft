@@ -1,13 +1,14 @@
-# nlsur (2026-11-19, round 4 and round 5 2026-11-20)
+# nlsur (2026-11-19, rounds 4 to 6 2026-11-20)
 
-Observed on Stata 19 SE with made-up data (corpus `nlsur.do`, 853 results to 1e-6; the iteration log compared by eye
+Observed on Stata 19 SE with made-up data (corpus `nlsur.do`, 978 results to 1e-6; the iteration log compared by eye
 on scratch do-files, line for line, and the corpus run's printed lines against Stata's log). StatCraft's note (probe
 537; ported from statcraft@b7d392e) had the step rule and the formulas; what changed here is the derivative step, the
 stopping rule, which variance matrix Stata keeps, the constant, the rows used, the `nls` pass and the layout details
 below. Round 4 added weights, `vce(robust)`, `vce(cluster)`, the hidden `nls` pass, the iteration cap, the table of a run
 that runs out of steps, `{name: varlist}`, `variables()` and postestimation; round 5 iweights, clusters with missing
 values, a linear combination written twice, e() after r(430), margins, `estat summarize` and `estat vce`'s layout, and
-the function-evaluator form. Translated in
+the function-evaluator form; round 6 its options (`hasconstants()`, `nparameters()`, weights, `variables()`,
+`noconstant`), `predict` and `margins` after it, and margins' terms, `over()` and `post`. Translated in
 `crates/statatr/src/data_r/nlsur.rs`.
 
 Stata's log is the Gauss-Newton path itself, so it reproduces exactly once the step and the stopping rule are right.
@@ -131,6 +132,19 @@ with predict()'s text as typed (`predict()` when none), a blank line, then the z
 `Margin   std. err.` and the row `_cons`. r(b), r(V), r(N), r(level). `dydx()` and its kind are r(322) ("invalid dydx()
 option; x1 not found in list of covariates"), `at()` r(322) ("model contains no indepvars"), `predict(residuals)`
 r(498) ("prediction is a function of possibly stochastic quantities other than e(b)").
+**margins terms, over() and post.** A term is always Stata's error, the model having no covariates: `margins x1`
+with a fractional x1 is r(452) ("x1:  factor variables may not contain noninteger values"), `margins grp` with whole
+numbers r(322) ("factor grp not found in list of covariates"); `margins x1 grp` stops on x1. `over(v)` gives one margin
+for each value of v among the rows (`Over:       v` after the Expression line; the table's first row `v |`, then each
+level right in 11 and two spaces before the bar), r(b) named `1.grp`, `2.grp`, ... and their covariances; `over(v w)`
+crosses them (`grp#g2`, rows `1 10`, names `1.grp#10.g2`, in order of v then w). A fractional over() variable is r(198)
+("only integer values are allowed in over() and within() variables"). `post` makes the margins e(b) and e(V) (row
+`y1`), with e() in this order: scalars k_at (0), k_by (the number of margins), k_predict (1), k_margins (0), N; macros cmd
+(`margins`), title (`Predictive margins`), model_vce (the fit's e(vce)), model_vcetype (when the fit has one), vce
+(`delta`), vcetype (`Delta-method`), expression, predict1_label (`Equation k fitted values`), predict1_opts (predict()'s
+text, when given), by, over, by1, by2, ... (under over()), emptycells (`strict`), est_cmd, est_cmdline, cmdline (`margins`
+and what followed it as typed, so `margins , post` for `margins, post`), properties; matrices b, V, _N (each margin's
+count), error (0s) and Jacobian (the derivatives of each margin by the parameters, columns `a1:_cons` ...).
 
 **The function-evaluator form.** `nlsur name @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) [initial(a1 1 ...)]` calls
 the program `nlsurname` with the first neq() variables to fill with fitted values (copies), the others, `if` the
@@ -142,6 +156,13 @@ e(k_i), e(params_i) or e(sexp_i). RCraft runs the program's lines once, at the s
 variables, and makes the same R the function each step calls; a program line that is not translated, or that needs a
 value from R while it is translated, refuses the fit. `parameters()` without the evaluator form is r(198)
 ("parameters(a1 b1 a2 b2 c) not allowed").
+
+**The evaluator form's options.** `nparameters(#)` names the parameters `b1`, `b2`, ... . `hasconstants(a1 a2)` names
+the equations' constants: each equation's is the named parameter whose derivative is the same, and not zero, on its rows,
+so R-squared is centred and the column shows it (e(constants) `a1 a2`). Weights work as in the substitutable form
+(`(sum of wgt is #)`); `variables()` leaves out the rows where one of them is missing (149 with one); `noconstant` makes
+e(constants) ` . .`. `predict` (yhat, residuals, equation(#k), if/in) and `margins` call the program again on the data
+as they are then.
 
 ## Cases
 
@@ -155,11 +176,13 @@ value from R while it is translated, refuses the fit. `parameters()` without the
 
 ## Open
 
-- Refused, with a message: `hasconstants()` and `nparameters()`; the evaluator form with weights, `variables()`,
-  `noconstant`, `predict` or `margins` after it; a linear combination over other variables under a name already used;
-  factor variables; a parameter named as a variable; `vce()` other than gnr, robust and cluster; iweights whose sum is
-  not a whole number (the `(obs = #)` line not seen); `margins` with terms, `over()` or `post`; `estat` subcommands not
-  seen in Stata (only `gof` was probed as r(321)).
+- Refused, with a message: `hasconstants()` where an equation has none of the named constants (not seen in Stata);
+  margins with several terms whose first is a whole-number variable, `over()` with value labels, missing or negative
+  values or levels wider than the column, and `post` after `vce(cluster)` (none probed); a linear combination over
+  other variables under a name already used; factor variables; a parameter named as a variable; `vce()` other than gnr,
+  robust and cluster; iweights whose sum is not a whole number (the `(obs = #)` line not seen); `estat` subcommands
+  not seen in Stata (only `gof` was probed as r(321)); `neq()`, `nparameters()` or `hasconstants()` outside the
+  evaluator form; an evaluator program with a line that is not translated or needs a value from R.
 - `eps()` far below the default: with `eps(1e-300)` Stata printed `(none)` and an uncentred R-squared for an equation
   whose constant it finds at the default; the constant check seems to use a tolerance tied to eps(); not decoded.
 - Noise-level paths: a parameter whose true value is about 0 (`{xb: x1 x3}` on y1, where x3's coefficient is -0.001)
