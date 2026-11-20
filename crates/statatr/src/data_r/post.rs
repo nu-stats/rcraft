@@ -351,6 +351,9 @@ impl Session {
         if matches!(&self.e_ret, super::returned::Returned::Program { cmd, .. } if cmd == "lasso") {
             return self.lasso_predict(c, opts, out);
         }
+        if self.areg_active() {
+            return self.areg_predict(c, opts, out);
+        }
         if self.sureg_active().is_some()
             && self
                 .estimates
@@ -391,7 +394,7 @@ impl Session {
             ],
             Fit::Ivregress => &[("xb", 2), ("residuals", 1)],
             Fit::Cnsreg => &[("xb", 2), ("residuals", 1)],
-            Fit::Sureg | Fit::Mvreg => &[],
+            Fit::Sureg | Fit::Mvreg | Fit::Areg => &[],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("scores", 2)],

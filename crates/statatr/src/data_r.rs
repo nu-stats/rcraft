@@ -28,6 +28,7 @@
 mod alpha;
 mod anova;
 mod anovaplot;
+mod areg;
 mod center;
 mod centile;
 mod ci;
@@ -563,6 +564,7 @@ const BY_EACH: &[&str] = &[
 const WEIGHTED: &[&str] = &[
     "cnsreg",
     "sureg",
+    "areg",
     "mvreg",
     "ltable",
     "dfuller",
@@ -1500,6 +1502,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_nl" => nl::NL_HELPER,
         "stata_lsfam" => lsfam::LSFAM_HELPER,
         "stata_sureg" => sureg::SUREG_HELPER,
+        "stata_areg" => areg::AREG_HELPER,
         "stata_est_mark" => returned::EST_MARK_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
@@ -3200,6 +3203,7 @@ impl Session {
             "constraint" => self.constraint(c, out),
             "cnsreg" => self.cnsreg(c, &opts, out),
             "sureg" => self.sureg(c, &opts, out),
+            "areg" => self.areg(c, &opts, out),
             "mvreg" => self.mvreg(c, &opts, out),
             "marginsplot" => self.marginsplot(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),

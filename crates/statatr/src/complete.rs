@@ -58,6 +58,7 @@ pub const COMMANDS: &[&str] = &[
     "anova",
     "anovaplot",
     "append",
+    "areg",
     "asclogit",
     "assert",
     "avplot",
@@ -375,6 +376,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
         ],
     ),
     ("drawnorm", &["clear", "cov(", "double", "means(", "n("]),
+    ("areg", &["absorb(", "cluster(", "level(", "robust", "vce("]),
     (
         "cnsreg",
         &["constraints(", "level(", "noconstant", "robust", "vce("],
@@ -2088,6 +2090,8 @@ mod tests {
             "mvreg" => format!("mvreg y y2 = x1 x2, {o}"),
             "sureg" if name == "isure" => "sureg (y x1) (y2 x2), isure nolog".to_string(),
             "sureg" => format!("sureg (y x1) (y2 x2), {o}"),
+            "areg" if name == "absorb" => "areg y x, absorb(g)".to_string(),
+            "areg" => format!("areg y x, absorb(g) {o}"),
             "cnsreg" if name == "constraints" => format!(
                 "constraint 1 x1 = x2
 cnsreg y x1 x2 x3, {o}"

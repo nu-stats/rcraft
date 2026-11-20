@@ -869,7 +869,7 @@ impl Session {
             Fit::Clogit => return self.clogit(c, opts, out),
             Fit::Robreg => return self.robreg(c, opts, out),
             Fit::Glm => return self.glm(c, opts, out),
-            Fit::Cnsreg | Fit::Sureg | Fit::Mvreg => {
+            Fit::Cnsreg | Fit::Sureg | Fit::Mvreg | Fit::Areg => {
                 return Err(no("this model is not fitted here"))
             }
             Fit::Reghdfe => return self.reghdfe(c, opts, out),
@@ -1085,6 +1085,7 @@ impl Session {
             | Fit::Cnsreg
             | Fit::Sureg
             | Fit::Mvreg
+            | Fit::Areg
             | Fit::Reghdfe
             | Fit::Cluster2
             | Fit::Asclogit
@@ -1168,6 +1169,7 @@ impl Session {
             | Fit::Cnsreg
             | Fit::Sureg
             | Fit::Mvreg
+            | Fit::Areg
             | Fit::Reghdfe
             | Fit::Cluster2
             | Fit::Asclogit

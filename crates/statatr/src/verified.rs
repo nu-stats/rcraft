@@ -16,6 +16,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("alpha", &["alpha"]),
     ("anova", &["panel"]),
     ("append", &["replication"]),
+    ("areg", &["areg"]),
     ("asclogit", &["asclogit"]),
     ("assert", &["checks"]),
     ("bitest", &["bitest"]),
