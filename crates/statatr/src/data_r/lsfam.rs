@@ -640,11 +640,6 @@ impl Session {
         if opts.has("or", 2) {
             return Err(no("logistic with the option or: Stata does not allow it"));
         }
-        if opts.has("noconstant", 5) {
-            return Err(no(
-                "logistic, noconstant is not translated: Stata leaves e(ll_0) missing and a Wald chi2 there",
-            ));
-        }
         let coef = opts.has("coef", 4);
         let mut c2 = c.clone();
         c2.name = "logit".into();

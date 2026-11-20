@@ -582,6 +582,18 @@ impl Session {
                     est.dep, "\n"
                 ));
             }
+            // logit's, probit's and poisson's default, as Stata says it (probe 2026-11-20)
+            if c.options.is_empty() && !self.quiet(c) {
+                match fit {
+                    Fit::Logit | Fit::Probit => {
+                        out.line(format!("cat(\"(option pr assumed; Pr({}))\\n\")", est.dep))
+                    }
+                    Fit::Poisson => {
+                        out.line("cat(\"(option n assumed; predicted number of events)\\n\")")
+                    }
+                    _ => {}
+                }
+            }
             let v = match fit {
                 _ if stat.is_some() => format!(
                     "unname(stata_predict_stat(stata_estimates, {d}, {}))",

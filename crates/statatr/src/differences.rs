@@ -43,6 +43,18 @@ const LAYOUT_R: Point = p(
     "Printing",
     "The results are printed in R's layout, not Stata's table; the numbers are Stata's.",
 );
+const ML_CNS: Point = p(
+    "constraints()",
+    "logit, probit, poisson and logistic take constraints(numlist) as Stata 19 does: the \
+     likelihood over what the constraints leave free, by Stata's Newton-Raphson from its usual \
+     start projected onto them (its iteration log too), the variance on the constraints (a fixed \
+     coefficient shows `(constrained)` with a variance of 0), the Wald test of the slopes they \
+     leave free in place of the LR test and pseudo R2, the constraint lines as `[y]x1 - [y]x2 = 0`, \
+     and e(Cns). logit and probit with noconstant (constraints() or not) print Stata's same Wald \
+     header, with no e(ll_0) or pseudo R2, and its log from 0. constraints() with exposure(), \
+     offset(), iweights, a regressor omitted for collinearity, or poisson with noconstant is not \
+     translated yet.",
+);
 const ML_SE: Point = p(
     "Standard errors",
     "From the observed information (the Hessian), as Stata's. R's summary() uses the \
@@ -1836,6 +1848,7 @@ pub const GUIDES: &[Guide] = &[
                  fit, with Stata's steps and stopping rule) when the model has a constant and no \
                  offset, so its estimates are Stata's to the last digits there.",
             ),
+            ML_CNS,
             ML_SE,
             ML_TABLE,
             ML_ROBUST,
@@ -2118,6 +2131,7 @@ pub const GUIDES: &[Guide] = &[
                  keeps it (as for nbreg); Stata's errors stop it as in Stata: an exposure not \
                  above 0, both options, a variable not there, two variables, a string.",
             ),
+            ML_CNS,
             ML_SE,
             ML_TABLE,
             ML_ROBUST,
@@ -3771,12 +3785,12 @@ pub const GUIDES: &[Guide] = &[
                  (the pooled fit against this one) is printed unless the errors are robust; e() holds Stata's \
                  scalars (e(F_absorb), e(ll_0) the within data's constant-only likelihood, e(rank) that of \
                  the slopes and constant, one less after clusters) and e(b) and e(V) with a zero column for a \
-                 factor's base level. i.g factor variables are taken. predict gives xb (the default), \
+                 factor's base level. i.g factor variables are taken. A regressor the absorbed groups make collinear (constant within each group), wherever it stands, and then the later of a collinear set are omitted as Stata omits them: `note: u omitted because of collinearity.`, a `0  (omitted)` row and an o. column of zeros in e(b) and e(V), the residual degrees of freedom counting only the slopes kept. predict gives xb (the default), \
                  residuals, d (the absorbed effect of the group) and xbd; test works after it.",
             ),
             p(
                 "Not yet",
-                "Regressors the absorbed groups make collinear (Stata omits them with a note), \
+                "A factor level omitted for collinearity, every regressor omitted, \
                  interactions and ib. bases, iweights (stopped as Stata stops, r(101)), e(datasignature) \
                  and predict's other statistics.",
             ),
@@ -3814,12 +3828,11 @@ pub const GUIDES: &[Guide] = &[
                 "logistic y x... is logit that shows odds ratios (coef shows the coefficients) and prints no \
                  iteration log, with `Note: _cons estimates baseline odds.`; the estimates, e() and the header are \
                  logit's, with e(cmd) logistic and e(predict) logistic_p. level(), vce(), robust, if, in and \
-                 weights are logit's; predict and test work after it.",
+                 weights are logit's; noconstant is too (the Wald header, no e(ll_0)), and constraints(); predict and test work after it.",
             ),
             p(
                 "Not yet",
-                "noconstant (Stata leaves e(ll_0) missing and a Wald chi2 there) and the options logit has \
-                 not been translated with.",
+                "The options logit has not been translated with.",
             ),
         ],
     },

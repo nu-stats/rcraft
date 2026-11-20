@@ -56,15 +56,38 @@ pub(super) const AREG_HELPER: &str = r##"stata_areg <- function(d, dep, terms, a
     s[gi]
   }
   wm <- function(v) sum(wn * v) / sum(wn)
-  Xs <- vapply(seq_len(k), function(j) X[, j] - gm(X[, j]) + wm(X[, j]), numeric(n))
-  Xs <- matrix(Xs, n, k)
+  within <- function(M) matrix(vapply(seq_len(ncol(M)), function(j) M[, j] - gm(M[, j]) + wm(M[, j]), numeric(n)), n, ncol(M))
+  # collinear regressors, as Stata 19 omits them (probe 2026-11-20): one the absorbed groups make
+  # collinear (constant within each group, or constant), wherever it stands, then the later of a
+  # collinear set, in the order written; each with a note, an o. column of zeros in e(b) and e(V)
+  Xall <- X
+  nmall <- nmx
+  kept <- rep(TRUE, k)
+  if (k > 0) {
+    Xd0 <- within(X)
+    Xd0 <- Xd0 - matrix(colSums(wn * Xd0) / sum(wn), n, k, byrow = TRUE)
+    sw <- sqrt(wn)
+    Q <- matrix(0, n, 0)
+    for (j in seq_len(k)) {
+      ref <- sqrt(sum(wn * (X[, j] - wm(X[, j]))^2))
+      v <- Xd0[, j] * sw
+      if (ref > 0 && sqrt(sum(v^2)) <= 1e-7 * ref) { kept[j] <- FALSE; next }
+      if (ncol(Q)) v <- v - drop(Q %*% crossprod(Q, v))
+      nv <- sqrt(sum(v^2))
+      if (!(ref > 0) || nv <= 1e-7 * ref) kept[j] <- FALSE else Q <- cbind(Q, v / nv)
+    }
+  }
+  if (any(!kept & grepl("^factor\\(", colnames(X)))) {
+    stop("RCraft: areg with a factor level omitted for collinearity is not translated yet", call. = FALSE)
+  }
+  if (k > 0 && !any(kept)) stop("RCraft: areg with every regressor omitted for collinearity is not translated yet", call. = FALSE)
+  if (show) for (v in nmx[!kept]) cat("note: ", v, " omitted because of collinearity.\n", sep = "")
+  X <- X[, kept, drop = FALSE]
+  nmx <- nmx[kept]
+  k <- ncol(X)
+  Xs <- within(X)
   ys <- y - gm(y) + wm(y)
   Z <- cbind(Xs, `_cons` = 1)
-  # regressors the groups make collinear are not translated
-  Xd <- Xs - matrix(colSums(wn * Xs) / sum(wn), n, k, byrow = TRUE)
-  if (k > 0 && qr(Xd * sqrt(wn), tol = 1e-9)$rank < k) {
-    stop("RCraft: areg with regressors the absorbed groups make collinear is not translated yet", call. = FALSE)
-  }
   A <- crossprod(Z * wn, Z)
   Ainv <- solve(A)
   b <- drop(Ainv %*% crossprod(Z * wn, ys))
@@ -127,14 +150,14 @@ pub(super) const AREG_HELPER: &str = r##"stata_areg <- function(d, dep, terms, a
   put(depvar = dep, properties = "b V", model = "ols", absvar = absorb)
   # a factor's base level is a column of its own in e(b) and e(V), zero
   full <- character()
-  for (j in seq_along(nmx)) {
-    cj <- colnames(X)[j]
+  for (j in seq_along(nmall)) {
+    cj <- colnames(Xall)[j]
     fv <- if (grepl("^factor\\(", cj)) sub("^(factor\\([^)]*\\)).*$", "\\1", cj) else NA_character_
-    if (!is.na(fv) && (j == 1 || !startsWith(colnames(X)[j - 1], fv))) {
+    if (!is.na(fv) && (j == 1 || !startsWith(colnames(Xall)[j - 1], fv))) {
       v <- sub("^factor\\((.*)\\)$", "\\1", fv)
       full <- c(full, paste0(xlev[[fv]][1], "b.", v))
     }
-    full <- c(full, nmx[j])
+    full <- c(full, if (kept[j]) nmall[j] else paste0("o.", nmall[j]))
   }
   full <- c(full, "_cons")
   bf <- stats::setNames(numeric(length(full)), full)
@@ -147,7 +170,7 @@ pub(super) const AREG_HELPER: &str = r##"stata_areg <- function(d, dep, terms, a
   rname[seq_len(k)] <- colnames(X)
   attr(e, "stata_b") <- stats::setNames(b, rname)
   attr(e, "stata_V") <- { Vn <- V; dimnames(Vn) <- list(rname, rname); Vn }
-  attr(e, "stata_areg") <- list(fo = fo, xlev = xlev, dg = dg, absorb = absorb, nm = nm, k = k, nmx = nmx)
+  attr(e, "stata_areg") <- list(fo = fo, xlev = xlev, dg = dg, absorb = absorb, nm = nm, k = k, nmx = nmx, cols = colnames(X))
   attr(e, "stata_robust") <- robust || !is.null(cluster)
   attr(e, "stata_rows_used") <- rows
   if (show && !is.null(wtype) && wtype %in% c("a", "p")) cat("(sum of wgt is ", stata_fmt(sum(w), "%18.0g", trim = TRUE), ")\n", sep = "")
@@ -225,7 +248,8 @@ stata_areg_predict <- function(e, d, what) {
   nm <- colnames(b)
   mf <- stats::model.frame(a$fo, d, xlev = a$xlev, na.action = stats::na.pass)
   X <- stats::model.matrix(a$fo, mf)
-  X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
+  # the columns kept (one omitted for collinearity is not in the prediction)
+  X <- X[, a$cols, drop = FALSE]
   xb <- drop(X %*% b[1, a$nmx]) + b[1, "_cons"]
   g <- as.character(d[[a$absorb]])
   dd <- unname(a$dg[g])
