@@ -121,3 +121,44 @@ capture egen e11 = cut(v) if v > 1000, group(2)
 display "@ e11 " _rc
 capture egen e12 = cut(v) if v > 1000, at(1 5)
 display "@ e12 " _rc
+* a byte, int or long holds the values when they fit; fractions make a byte or int a float and a long a double
+clear
+set obs 40
+generate age = 18 + mod(13 * _n, 50)
+generate g = 1 + mod(_n, 3)
+generate x = age / 10
+egen byte t1 = cut(age), at(18 30 50 70)
+egen int t2 = cut(age), at(18 30 50 70)
+egen long t3 = cut(age), at(18 30 50 70) icodes
+egen byte t4 = cut(age), group(4)
+egen byte t5 = cut(x), at(1.2 2.5 3.1 4 5 8)
+egen int t6 = cut(x), at(1.2 2.5 3.1 4 5 8)
+egen long t7 = cut(x), at(1.2 2.5 3.1 4 5 8)
+egen byte t8 = cut(age), at(-200 30 50 70)
+egen byte t9 = cut(age), at(18 30 50 70) label
+forvalues i = 1/8 {
+    display "@ t1_`i' " %24.17g t1[`i']
+    display "@ t2_`i' " %24.17g t2[`i']
+    display "@ t3_`i' " %24.17g t3[`i']
+    display "@ t4_`i' " %24.17g t4[`i']
+    display "@ t5_`i' " %24.17g t5[`i']
+    display "@ t6_`i' " %24.17g t6[`i']
+    display "@ t7_`i' " %24.17g t7[`i']
+    display "@ t8_`i' " %24.17g t8[`i']
+    display "@ t9_`i' " %24.17g t9[`i']
+}
+* cut() may not be combined with by (r(190)); other errors come first
+capture bysort g: egen u1 = cut(age), at(18 30 50 70)
+display "@ by1 " _rc
+capture bysort g: egen u2 = cut(age), group(3)
+display "@ by2 " _rc
+capture egen u3 = cut(age), at(18 30 50 70) by(g)
+display "@ by3 " _rc
+capture bysort g: egen u4 = cut(age)
+display "@ by4 " _rc
+capture bysort g: egen u5 = cut(age), at(18 30) group(3)
+display "@ by5 " _rc
+capture bysort g: egen u6 = cut(age), at(70 30)
+display "@ by6 " _rc
+capture bysort g: egen t1 = cut(age), at(18 30 50 70)
+display "@ by7 " _rc

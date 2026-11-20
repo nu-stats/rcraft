@@ -53,6 +53,7 @@ mod esttable;
 mod factor;
 mod filefilter;
 mod files;
+mod framelink;
 mod frames;
 mod fre;
 mod glm;
@@ -1687,6 +1688,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_fmt" => returned::FORMAT_HELPER,
         "stata_cut" => cut::CUT_HELPER,
         "stata_frame_dir" => frames::FRAME_DIR_HELPER,
+        "stata_frlink" => framelink::FRLINK_HELPER,
+        "stata_frget_col" => framelink::FRGET_HELPER,
+        "stata_frval" => framelink::FRVAL_HELPER,
         "stata_ereturn" => returned::ERETURN_HELPER,
         "stata_eclass" => eclass::ECLASS_HELPER,
         "stata_ttest_r" => returned::TTEST_R_HELPER,
@@ -1909,6 +1913,9 @@ struct Session {
     /// The frames other than the current one (`frame create`), each with what
     /// the translator follows of its data, kept in R in `stata_frames`.
     frames: BTreeMap<String, Preserved>,
+    /// The link variables `frlink` made, by the frame that holds one and its
+    /// name, while the frame they point to is as `frlink` left it.
+    links: BTreeMap<(String, String), framelink::Link>,
     /// What `preserve` kept in a frame other than the current one (preserve
     /// is a frame's own), in R in `stata_frames_preserved`.
     frame_preserved: BTreeMap<String, Box<Preserved>>,
@@ -2877,6 +2884,7 @@ impl Session {
             .err()
             .is_some_and(|e| e.reason.contains(crate::dofile::KNOWN_WHEN_RUN));
         self.track_returned(c, done.is_ok(), later, r_left);
+        self.links_after(c, done.is_ok());
         if !c.name.starts_with("_rcraft_") {
             self.saved_now = statsby::saved_after(c, done.is_ok(), self.saved_now);
             self.prev_eclass = self.e_new;
@@ -3185,6 +3193,8 @@ impl Session {
             "which" => self.which(c, &opts, out),
             "frame" | "cwf" | "pwf" => self.frame_cmd(c, &opts, out),
             "frames" => self.frames_cmd(c, &opts, out),
+            "frlink" => self.frlink(c, &opts, out),
+            "frget" => self.frget(c, &opts, out),
             "revrs" => self.revrs(c, &opts, out),
             "tabm" => self.tabm(c, &opts, out),
             "tabstat" => self.tabstat(c, &opts, out),
@@ -4708,7 +4718,6 @@ impl Session {
     }
 
     fn describe(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
-        let d = self.data()?;
         let opts = Opts(&c.options);
         if c.using.is_some() {
             return Err(no("describe using a file is not translated yet"));
@@ -4719,6 +4728,29 @@ impl Session {
             )));
         }
         let main = c.parts.main.trim();
+        // no data in memory (none read, or cleared): Stata describes an empty
+        // data set (0 observations, 0 variables); with names it stops, r(111)
+        if self.data.is_none() && self.data_lost.is_none() && main.is_empty() {
+            let varlist = opts.has("varlist", 7);
+            out.line(format!(
+                "stata_r <- list(k = 0L, N = 0L{})",
+                if varlist { ", varlist = \"\"" } else { "" }
+            ));
+            self.r_new = Some((
+                if varlist {
+                    returned::R_DESCRIBE_VARLIST
+                } else {
+                    returned::R_DESCRIBE
+                },
+                "describe".into(),
+            ));
+            if !self.quiet(c) && !opts.has("simple", 2) {
+                out.line("cat(\"observations:\", 0L, \" variables:\", 0L, \"\\n\")");
+                out.caveat("printed in R's layout, not Stata's");
+            }
+            return Ok(());
+        }
+        let d = self.data()?;
         // the variables chosen (all without a varlist), in the data's order; a name not
         // there stops as Stata's does (probe 2026-11-15: r(k) stays the data's count)
         let chosen = if main.is_empty() {
@@ -6055,10 +6087,16 @@ stata_chars_write(\"results.dta\", study_hours)"
         assert!(out[5].contains("x > 1"), "{out:?}");
         assert!(out[6].contains("(Stata: r(198))"), "{out:?}");
         assert!(out[7].contains("(Stata: r(124))"), "{out:?}");
+        // a byte holds the values when they fit: translated as a float's values
         assert!(
-            out[8].starts_with("NOT: egen byte newvar = cut()"),
+            out[8].contains("stata_float(stata_cut(x, TRUE, at = c(1, 3)"),
             "{out:?}"
         );
+        // by stops with r(190) after the name and the order of at() are checked
+        let out = r("set obs 5\ngenerate x = _n\ngenerate g = 1\nbysort g: egen a = cut(x), at(1 3)\negen b = cut(x), group(2) by(g)\nbysort g: egen c = cut(x), at(3 1)");
+        assert!(out[3].contains("(Stata: r(190))"), "{out:?}");
+        assert!(out[4].contains("(Stata: r(190))"), "{out:?}");
+        assert!(out[5].contains("(Stata: r(124))"), "{out:?}");
         // a label made when the data run cannot be added to here
         let out = r("set obs 5\ngenerate x = _n\negen g = cut(x), group(2) label\nlabel define g 9 \"nine\", add");
         assert!(out[3].starts_with("NOT: label define g"), "{out:?}");
@@ -6116,6 +6154,74 @@ stata_chars_write(\"results.dta\", study_hours)"
             out[4].starts_with("NOT: frame dir marks the frames"),
             "{out:?}"
         );
+    }
+
+    #[test]
+    fn frlink_frget_and_frval_follow_the_link_while_the_linked_frame_is_as_left() {
+        let head = "clear\nset obs 4\ngenerate k = _n\nframe create t\nframe t: set obs 3\nframe t: generate k = _n\nframe t: generate v = 10 * k\n";
+        let out = r(&format!(
+            "{head}frlink m:1 k, frame(t)\nfrget v, from(t) prefix(a_)\ngenerate w = frval(t, v, -1)\nframe dir"
+        ));
+        assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
+        // the link is made by one helper call, which sorts the linked frame and makes the column
+        assert!(
+            out[7].contains("stata_fl <- stata_frlink(data, stata_frames[[\"t\"]], c(\"k\"), c(\"k\"), FALSE, \"default\", FALSE)")
+                && out[7].contains("stata_frames[[\"t\"]] <- stata_fl$there")
+                && out[7].contains("data[[\"t\"]] <- stata_fl$link"),
+            "{out:?}"
+        );
+        assert!(
+            out[8].contains(
+                "data[[\"a_v\"]] <- stata_frget_col(stata_frames[[\"t\"]][[\"v\"]], data[[\"t\"]])"
+            ) && out[8].contains("copied from linked frame"),
+            "{out:?}"
+        );
+        assert!(
+            out[9].contains("stata_frval(t, stata_frames[[\"t\"]][[\"v\"]], -1)"),
+            "{out:?}"
+        );
+        // frlink and frget unsave the data, so the star of frame dir is known
+        assert!(
+            out[10].contains("c(\"*\", \"*\")") || out[10].contains("c(\"*\", \" \")"),
+            "{out:?}"
+        );
+        // a line that may have changed the linked frame: the link is not trusted
+        let out = r(&format!(
+            "{head}frlink m:1 k, frame(t)\nframe t: replace v = 0\nfrget v, from(t) prefix(a_)\ngenerate w = frval(t, v)"
+        ));
+        assert!(out[9].starts_with("NOT: frget from(t)"), "{out:?}");
+        assert!(out[10].starts_with("NOT: frval(t, v)"), "{out:?}");
+        // read-only commands and a change of this frame's rows leave it
+        let out = r(&format!(
+            "{head}frlink m:1 k, frame(t)\nframe t: summarize v\nsort k\ndrop if k == 2\nfrget v, from(t)"
+        ));
+        assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
+        // another frlink to the frame on other keys makes the first link stale
+        let out = r(&format!(
+            "{head}frame t: generate w = k\nfrlink m:1 k, frame(t)\nfrlink m:1 k, frame(t w) generate(l2)\nfrget v, from(t)\nfrget v, from(l2)"
+        ));
+        assert!(out[10].starts_with("NOT: frget from(t)"), "{out:?}");
+        assert!(!out[11].starts_with("NOT"), "{out:?}");
+        // under capture, and a frame that is not there
+        let out = r(&format!("{head}capture frlink m:1 k, frame(t)"));
+        assert!(out[7].starts_with("NOT: frlink under capture"), "{out:?}");
+        let out = r(&format!("{head}frlink m:1 k, frame(nosuch)"));
+        assert!(
+            out[7].contains("frame nosuch not found (Stata: r(111))"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn describe_with_no_data_describes_an_empty_data_set() {
+        let out = r("clear\ndescribe, short\ndisplay r(N)");
+        assert!(
+            out[1].contains("stata_r <- list(k = 0L, N = 0L)"),
+            "{out:?}"
+        );
+        assert!(!out[1].starts_with("NOT"), "{out:?}");
+        let out = r("describe x");
+        assert!(out[0].starts_with("NOT: no data is in memory"), "{out:?}");
     }
 
     /// Forms found in published replication packages (P2C.9).

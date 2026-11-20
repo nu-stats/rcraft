@@ -2133,6 +2133,7 @@ impl Session {
         match which {
             "ts" => self.ts_code(name).map(|code| (code, Kind::Number)),
             "c" if name == "frame" => Ok(self.c_frame()),
+            "frval" => self.frval_value(name),
             // el(e(V), i, j): the matrix itself, as matrix list takes it
             // a matrix the do-file made
             "m#matrix" => self.user_matrix(name).map(|m| (m, Kind::Number)),

@@ -33,13 +33,13 @@ fn stop_text(msg: &str) -> String {
 
 impl Session {
     /// The current frame's name.
-    fn current_frame(&self) -> String {
+    pub(super) fn current_frame(&self) -> String {
         self.frame.clone().unwrap_or_else(|| "default".into())
     }
 
     /// The R that reads a frame's data frame: the one in memory for the
     /// current frame, else the one kept in `stata_frames`.
-    fn frame_data_expr(&self, name: &str) -> Option<String> {
+    pub(super) fn frame_data_expr(&self, name: &str) -> Option<String> {
         if name == self.current_frame() {
             self.data.clone()
         } else {
@@ -51,7 +51,7 @@ impl Session {
     }
 
     /// The translator's view of a frame (the current one's is made now).
-    fn frame_state(&self, name: &str) -> Option<Preserved> {
+    pub(super) fn frame_state(&self, name: &str) -> Option<Preserved> {
         if name == self.current_frame() {
             Some(self.data_state())
         } else {
@@ -360,6 +360,7 @@ impl Session {
         }
         out.line(code.join("\n"));
         self.frames.clear();
+        self.links.clear();
         self.frame = None;
         self.chars_lost = None;
         self.data_lost = None;

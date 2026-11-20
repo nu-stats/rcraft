@@ -94,14 +94,19 @@ impl Session {
         var: &str,
         args: &str,
     ) -> Result<(), Untranslated> {
-        if let Some(o) = opts.other(&[("at", 2), ("group", 5), ("icodes", 6), ("label", 5)]) {
+        if let Some(o) = opts.other(&[
+            ("at", 2),
+            ("group", 5),
+            ("icodes", 6),
+            ("label", 5),
+            ("by", 2),
+        ]) {
             return Err(no(format!(
                 "egen cut() with the option {o} is not translated yet"
             )));
         }
-        if c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. })) {
-            return Err(no("egen cut() with by is not translated yet"));
-        }
+        // cut() may not be combined with by (r(190)), as a prefix or as by()
+        let by = opts.has("by", 2) || c.prefixes.iter().any(|p| matches!(p, Prefix::By { .. }));
         let stop = |out: &mut Out, msg: &str| {
             out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
         };
@@ -132,6 +137,10 @@ impl Session {
             None if self.type_double => Storage::Double,
             None | Some("float") => Storage::Float,
             Some("double") => Storage::Double,
+            // the type asked for holds the values when they fit (whole numbers in
+            // its range); fractions make a byte or int a float and a long a double
+            Some("byte" | "int") => Storage::Float,
+            Some("long") => Storage::Double,
             Some(t) => {
                 return Err(no(format!(
                     "egen {t} newvar = cut() is not translated (float and double are)"
@@ -145,6 +154,14 @@ impl Session {
             r_text(var)
         );
         let at = match (&at_text, group) {
+            (None, None) | (Some(_), Some(_)) if by => {
+                out.line(exists);
+                stop(
+                    out,
+                    "egen cut() may not be combined with by (Stata: r(190))",
+                );
+                return Ok(());
+            }
             (None, None) => {
                 out.line(exists);
                 stop(
@@ -172,7 +189,23 @@ impl Session {
                     stop(out, "at() is not in ascending order (Stata: r(124))");
                     return Ok(());
                 }
+                if by {
+                    out.line(exists);
+                    stop(
+                        out,
+                        "egen cut() may not be combined with by (Stata: r(190))",
+                    );
+                    return Ok(());
+                }
                 Some(pts)
+            }
+            (None, Some(_)) if by => {
+                out.line(exists);
+                stop(
+                    out,
+                    "egen cut() may not be combined with by (Stata: r(190))",
+                );
+                return Ok(());
             }
             (None, Some(_)) => None,
         };
@@ -230,7 +263,12 @@ impl Session {
             out.line(format!("stata_gen_note({d}[[{col}]])"));
         }
         self.kinds.insert(var.to_string(), Kind::Number);
-        self.storage.insert(var.to_string(), storage);
+        if matches!(ty, Some("byte" | "int" | "long")) {
+            // the type it ends as depends on the values
+            self.storage.remove(var);
+        } else {
+            self.storage.insert(var.to_string(), storage);
+        }
         Ok(())
     }
 }

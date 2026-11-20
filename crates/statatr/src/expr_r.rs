@@ -955,6 +955,34 @@ impl Translator<'_> {
             // c(): the constants of Stata's storage types (read off Stata 19
             // in %21x; the same on every machine). Settings and the session's
             // own values (c(N), c(pwd), c(rngstate), ...) are not translated.
+            // frval(link, var [, default]): a variable of the frame a link
+            // variable points to; the names are those of variables, the
+            // default an expression
+            "frval" => {
+                if !(2..=3).contains(&args.len()) {
+                    return Err(no(
+                        "frval() takes a link variable, a variable and, optionally, a default",
+                    ));
+                }
+                let (Some(Expr::Name(l)), Some(Expr::Name(v))) = (args.first(), args.get(1)) else {
+                    return Err(no("frval() takes the names of variables"));
+                };
+                let (value, kind) = (self.returned)("frval", &format!("{l}\u{1}{v}"))?;
+                self.helpers.push("stata_frval");
+                match args.get(2) {
+                    None => Ok((value, kind)),
+                    Some(d) => {
+                        let (dr, dk) = self.expr(d)?;
+                        if dk != kind {
+                            return Err(no(
+                                "frval() with a default of another type than the variable stops in Stata (r(109))",
+                            ));
+                        }
+                        let (full, _) = (self.returned)("frval", &format!("{l}\u{1}{v}\u{1}{dr}"))?;
+                        Ok((full, kind))
+                    }
+                }
+            }
             "c" => {
                 want(1)?;
                 let Some(Expr::Name(what)) = args.first() else {

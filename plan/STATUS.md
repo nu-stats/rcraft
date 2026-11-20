@@ -6095,3 +6095,17 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Corpus:** new `runiform_turns.do` 97, `egen_cut.do` 699 (group() checksums for six sizes by six group counts, in double and float), `frames_more.do` 23.
 - **Shares:** probes **80.8%** (23,452 of the 29,018 lines a dry run judges; was 80.2%, 23,278, with batch E; 79.8% before it); packages **94.7%** (4,025 of 4,249), unchanged.
 - **Still refused:** `frlink`, `frget`, `frval()` (probes 233 and 234), `frame dir` after a line whose effect on the unsaved mark is not followed, `describe, short` with no data.
+
+## P2C.12aq: frlink, frget, frval(), egen cut by and types, describe with no data, 2026-11-19
+
+- **Done** (checked in Stata 19 on made-up data, `plan/stata/frlink.md`, `egen-cut.md`):
+  - `frlink 1:1` and `m:1`, `frget` and `frval()`: the linked frame is sorted by its keys, the link holds row numbers, Stata's
+    notes are printed; the link is followed through the do-file and a `frget` or `frval()` after a line that may have changed the
+    linked frame is refused; `frame dir` stars the frame in use after them;
+  - `egen cut()` with `by` (r(190), after r(110) and r(124)) and `byte`/`int`/`long`;
+  - `describe` with no data.
+- **Corpus:** new `frlink.do` 116; `egen_cut.do` 699 -> 778.
+- **Shares:** probes **80.9%** (23,468 of the 29,018 lines a dry run judges; was 80.8%, 23,452, after P2C.12ap); packages **94.7%** (4,025 of 4,249), unchanged.
+- **Still refused:** `frlink` and `frget` under `capture` (tied rows after a failed `frlink` come in no set order), `1:m`, `frlink rebuild`,
+  `frget _all` and value-labelled variables; a draw in both the value and the `if` (the order is decoded in `random-numbers.md`, needs a
+  row-by-row loop); two draws that are not plain `runiform()`s or two among a function's arguments; `frame` commands inside a frame prefix.

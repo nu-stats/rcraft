@@ -2,7 +2,7 @@
 
 Written 2026-11-19. `egen [type] newvar = cut(exp) [if] [in], at(numlist) | group(#) [icodes label]`. Code:
 `crates/statatr/src/data_r/cut.rs` (the translator and the R helper `stata_cut`). Checked by
-`crates/engine/tests/stata_corpus/egen_cut.do` (699 results, tolerance 1e-9). Ported from the decoding in
+`crates/engine/tests/stata_corpus/egen_cut.do` (778 results, tolerance 1e-9). Ported from the decoding in
 statcraft's `plan/stata/egen.md` (probe 581), then checked and extended on Stata 19 SE with made-up data.
 
 ## Rules
@@ -43,7 +43,16 @@ statcraft's `plan/stata/egen.md` (probe 581), then checked and extended on Stata
 On `age = 18 + mod(13n, 50)` with n = 40: at(18 30 50 70) gives 9, 18 and 13 rows; at(20(10)60) leaves seven
 missing; group(4) gives 10 rows in each group with cut points 19, 30.5, 42, 55 (and 68 as the last label).
 
+## by and the integer types (added the same day)
+
+- **`by`:** `bysort g: egen x = cut(...)` and `egen x = cut(...), by(g)` stop with r(190). The checks run in this order:
+  a name in use r(110), `at()` out of order r(124), then by r(190) (before neither-or-both, group() and the data).
+- **`egen byte|int|long`:** the type asked for holds the result when the values are whole numbers that fit it
+  (`byte` -127 to 100, `int` to 32,740: a `byte` with a result of -200 became an `int`, one with `at(18 300 400)` and
+  every value 18 stayed a `byte`); a fraction makes a `byte` or `int` a `float` (the point as a single-precision number)
+  and a `long` a `double` (the point itself). Whole numbers are the same in every type. `label` and `icodes` give a byte.
+  RCraft does not follow which type the variable ends as (its storage is left unknown).
+
 ## RCraft refuses
 
-`by`, `by()`, other options, `byte`, `int`, `long` and string types, a numlist form other than the three above,
-a group() that is a macro or a word.
+Other options, string types, a numlist form other than the three above, a group() that is a macro or a word.

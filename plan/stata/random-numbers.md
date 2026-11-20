@@ -275,3 +275,13 @@ Read off Stata 19 SE with made-up data (`set seed 7`, a first column of the stre
   `uniform()` with no arguments (the others take a varying number of uniforms).
 - RCraft: the R helper `stata_runiform_k(rows, k)` draws k columns for the selected rows at once, a row's k draws side
   by side; the translated expression reads column j for the j-th draw in reading order. `runiform_turns.do` in the corpus.
+
+### A draw in both the value and the `if` (read off Stata 19, 2026-11-19; not built)
+
+`replace v = runiform() if runiform() < .5` and `generate w = runiform() if runiform() < .5` (also with `+ 1000`):
+**a row draws its condition first and, only when the row is selected, then its value.** With `set seed 7` and the stream
+.754 .949 .117 .892 .141 .055 .833 .901 .257 .718 .756 ...: row 1 reads .754 (not selected), row 2 .949 (no), row 3 .117 (yes,
+and takes .892 as its value), row 4 .141 (yes, value .055), rows 5 and 6 no, row 7 .257 (yes, value .718), row 8 .756 (no). The
+position of each row's condition draw depends on how many earlier rows were selected, so the column-at-a-time helper
+cannot do it; it needs a row-by-row loop (for a condition of the form `runiform() < p`, `p` a number or a column, the
+loop runs over the stream alone). Still refused.

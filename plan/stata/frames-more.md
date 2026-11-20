@@ -3,7 +3,7 @@
 Written 2026-11-19. Beside `which-frames.md` (create, change, drop, pwf). Code: `crates/statatr/src/data_r/frames.rs`
 (the R helper `stata_frame_dir`, `frame_dir`, `frame_copy`, `frame_rename`, `frame_put`, `frame_create_vars`, `frames_reset`,
 `in_frame`), the dispatch in `data_r.rs` `frame_cmd`, and the block in `dofile.rs` (`Opener::Frame`). Checked by
-`crates/engine/tests/stata_corpus/frames_more.do` (24 results, tolerance 1e-9). Observed on Stata 19 SE with made-up data.
+`crates/engine/tests/stata_corpus/frames_more.do` (23 results, tolerance 1e-9). Observed on Stata 19 SE with made-up data.
 
 ## Rules
 
@@ -36,5 +36,4 @@ Written 2026-11-19. Beside `which-frames.md` (create, change, drop, pwf). Code: 
 - Refused in a frame prefix: `frame`, `frames`, `cwf`, `pwf`, `clear`, `preserve` and `restore`. Refused: `frame copy`
   or `frames reset` while a `preserve` is pending, a variable list with wildcards in `frame put`, renaming `default`,
   `frame create` with types other than byte, int, long, float, double and str#.
-- Not done (probes 233 and 234 still refuse them): `frlink`, `frget`, the function `frval()`, `frame dir` after one of those
-  (the star is not known), `describe, short` with no data.
+- `frlink`, `frget` and `frval()` followed the same day (`frlink.md`); not done: `frame dir` after a line whose effect on the unsaved mark is not followed.
