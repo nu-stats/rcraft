@@ -6091,6 +6091,7 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   finds a path for 137 of 140 runs, so what is left is rounding noise deciding which of several tied rows enters.
 - **Not reproduced:** Stata's give-up (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data: R's paths equal Stata's (88 of 90 logs on one data set) but R does not stop
   where Stata does (no rule found); 16 of 140 logs and 2 of 126 e(b) (one dummy q = .1, two dummies and a continuous regressor q = .6).
+- **Check on 560 more Stata fits (8 data sets):** final e(b) 476 of 476, whole log 479 of 560 (misses are tied-order steps, mostly two sets of a continuous x and a rounded y); one give-up in 560.
 - **Shares:** unchanged (probes 80.2%, packages 94.7%).
 
 

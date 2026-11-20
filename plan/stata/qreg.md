@@ -83,6 +83,15 @@ already at a residual of zero) with 7 or 10 rows at zero; no step with fewer tha
 or more zero rows finished, and nothing tried separates them: the number of kinks at t = 0, how far down the group the crossing is, the steepness or the
 edge picked, the sides of the zero rows, re-entering a row that just left (basis revisits: none in any run). Not a rule R can use.
 
+**Eight more data sets, 70 quantiles each (560 Stata fits, unweighted, `quantile((i + .37) / 71.3)`; these have a unique optimum but many rows at zero).**
+Final e(b): **476 of 476** fits where Stata finished (the 84 fits Stata gave up on or that a `float` y made differ were not counted: Stata's `import delimited`
+stores a y with one decimal as `float`, which moves e(b) by 1e-7, so that data set was compared at 5e-6). Whole log: 479 of 560. By data set: one dummy,
+small n and one regressor 70 of 70, three dummies and a continuous 69, one regressor with ties 68, three levels 66, 2x2 cells 59, and the two sets with a
+continuous x and a rounded y (many duplicated points) 39 and 38. All 81 other misses are tied-order steps, 62 of them in those two sets, and the
+e(b) was right in every one. Only **one** of the 560 fits made Stata give up (a continuous x and a rounded y, q = .0613: seven iterations, the last
+four the same value, then `convergence not achieved.`; R takes one more degenerate step and finishes). So the give-up is rare outside the
+two-integer-dummy design and the 14 on that design remain the only data to find a rule from.
+
 ## Stata's errors
 
 - **`VCE computation failed; try a different bandwidth or bsqreg` (r(498))** exactly when q - h <= 0 or q + h >= 1 (n = 18 at q = .1, .25,
