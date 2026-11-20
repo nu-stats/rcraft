@@ -247,6 +247,7 @@ impl Session {
                     | Fit::Clogit
                     | Fit::Stcox
                     | Fit::Mlogit
+                    | Fit::Nlsur
             )
         {
             return Err(no(format!(
@@ -307,6 +308,9 @@ impl Session {
             texts.join(", "),
             if self.xtregar_active() {
                 "stata_e[[\"depvar\"]]".to_string()
+            } else if est.fit == Fit::Nlsur {
+                // nlsur's table has no dependent variable over it
+                "\"\"".to_string()
             } else {
                 r_text(&est.dep)
             },
@@ -406,6 +410,7 @@ impl Session {
                     | Fit::Clogit
                     | Fit::Stcox
                     | Fit::Mlogit
+                    | Fit::Nlsur
             )
         {
             return Err(no(format!(
