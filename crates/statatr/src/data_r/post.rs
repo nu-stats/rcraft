@@ -357,6 +357,9 @@ impl Session {
         if self.areg_active() {
             return self.areg_predict(c, opts, out);
         }
+        if self.nlsur_active() {
+            return self.nlsur_predict(c, opts, out);
+        }
         if self.sureg_active().is_some()
             && self
                 .estimates

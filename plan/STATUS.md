@@ -6040,7 +6040,7 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   with fweights `sureg` prints one more blank line; `areg` clustered has e(rank) = k and, off the absorbed variable, no
   e(sum_w). R's `quantreg` did not match Stata where `qreg`'s minimum is not unique, and neither did StatCraft's descent on
   two of four such fits, so those fits stop with a message.
-- **Still refused:** see ROADMAP P2C.12ao. `nlsur` is on hold (7 probe lines); `xi` followed in round 2.
+- **Still refused:** see ROADMAP P2C.12ao. `nlsur` and `xi` followed in rounds 2 and 3.
 - **Shares:** probes **80.2%** (23,278 of the 29,018 lines a dry run judges; was 79.8%, 23,159, with the expression-error batch; 78.7% before both); packages **94.7%** (4,025 of
   4,249), unchanged.
 
@@ -6050,7 +6050,7 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   (byte, labelled `g==#`), `i.g*i.h`, `i.g*x`, `i.g|x`; the omitted level from `char _dta[omit] prevalent` and `char g[omit]`; the term lines, e(cmdline) with the stubs
   (`regress y _Ig_* x`); an earlier run's variables of the same prefix dropped. The dummies' names depend on the levels of the data, so the do-file runner
   asks R for them (`Translator::xi_question`); a dry run leaves the line as known only when run. Note `plan/stata/xi.md`.
-- **On hold, to be built:** `nlsur` (7 probe lines; Stata's own Gauss-Newton iteration log, the step rule not decoded) and (done in round 3 below) `qreg` where the minimum is not
+- **On hold, to be built (both done in round 3 below):** `nlsur` and `qreg` where the minimum is not
   unique (Stata's choice among optimal vertices not reproduced; these fits stop with a message).
 - **Shares:** probes **80.2%** (23,278 translated, 5,733 not, 1,104 known only when run; the 7 `xi` lines moved from refused to when-run); packages **94.7%** (4,025 of 4,249), unchanged.
 
@@ -6092,3 +6092,21 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Not reproduced:** Stata's give-up (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data: R's paths equal Stata's but R does not stop
   where Stata does (no rule found); 16 of 140 logs and 2 of 126 e(b) (one dummy q = .1, two dummies and a continuous regressor q = .6).
 - **Shares:** unchanged (probes 80.2%, packages 94.7%).
+
+
+## P2C.12ao round 3: nlsur, 2026-11-19
+
+- **Done** (corpus `nlsur.do`, 279 results to 1e-6, the log compared line by line with Stata 19 on four scratch do-files): `nlsur` with
+  NLS, FGNLS and `ifgnls`, `nolog`, `level()`, `iterate()`, `eps()`, `noconstant`, `initial()`, if and in, shared parameters, one to
+  three equations, `predict` (yhat, residuals, `equation(#k)`), e() and `ereturn list`. StatCraft's decoding of the Gauss-Newton step
+  was the start (probe 537); found here: the stopping rule is `|db| / |b|` (the `+ 1` form stopped one step early on one fit), the
+  FGNLS variance uses the Jacobian at the start of the last step and the NLS one the Jacobian at the final estimates, the constant is
+  the first parameter with a constant non-zero derivative at the final estimates, e(Sigma) is diagonal under `nls` and the final
+  residuals' under `ifgnls`, a right-hand-side missing value is r(480) (only the dependent variables drop rows), and the equation-table
+  row is wider when R-squared is negative. Note `plan/stata/nlsur.md`.
+- **Still refused:** weights, `vce()`, `variables()`, the evaluator form, `{name: varlist}`, `delta()`, `nls` with a shared parameter (Stata's
+  estimates there are each equation weighted by its variance, not the stacked least squares; the variance not decoded), `ifgnls` with
+  `iterate()`, runs that have not converged (the log, then a message). `test`, `lincom`, `margins` and `estat` after `nlsur`. The cap on
+  iterations (100) is an assumption.
+- **Shares:** probes **80.3%** (23,291 translated, 5,720 not, 1,104 known only when run, of 30,115 source lines; was 23,278 / 5,733); packages
+  **94.7%** (4,025 of 4,249), unchanged.
