@@ -13,8 +13,9 @@ use super::weights::W;
 use super::*;
 
 pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, vars, w = NULL, wtype = "f", over = NULL, level = 95,
-                          ratios = NULL, rnames = NULL, show = TRUE, cmdline = "", wexp = "") {
+                          ratios = NULL, rnames = NULL, show = TRUE, cmdline = "", wexp = "", svy = NULL) {
   num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
+  if (!is.null(svy) && show) cat("(running ", kind, " on estimation sample)\n", sep = "")
   # importance weights count as frequency weights (Stata 19: the same N and errors)
   wlab <- wtype
   if (identical(wtype, "i")) wtype <- "f"
@@ -26,6 +27,15 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
   keep <- stats::complete.cases(as.data.frame(lapply(d[used], num)))
   wv <- if (is.null(w)) rep(1, nrow(d)) else num(w)
   keep <- keep & !is.na(wv)
+  # svy: the design variables must be present too; a subpop() variable too
+  if (!is.null(svy)) {
+    miss <- function(x) is.na(x) | (is.character(x) & x == "")
+    for (v in c(svy$strata, svy$psu, svy$fpc, svy$subvar)) {
+      if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+      keep <- keep & !miss(unclass(d[[v]]))
+    }
+    if (any(wv[keep] < 0)) stop("negative weights encountered (Stata stops)", call. = FALSE)
+  }
   if (!any(keep)) stop("no observations (Stata: r(2000))", call. = FALSE)
   n <- sum(keep)
   wv <- wv[keep]
@@ -34,6 +44,13 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
   nobs <- if (!is.null(w) && wtype == "f") sum(wv) else n
   lin <- !is.null(w) && wtype == "p"
   col <- function(v) num(d[[v]])[keep]
+  # the subpopulation (svy, subpop()): rows outside it keep their place in the design
+  subp <- rep(TRUE, n)
+  if (!is.null(svy) && !is.null(svy$subvar)) {
+    sv <- num(d[[svy$subvar]])[keep]
+    if (any(!sv %in% c(0, 1))) stop("subpop() with values other than 0 and 1 is not translated yet", call. = FALSE)
+    subp <- sv != 0
+  }
   labs_of <- function(v, lv) {
     vl <- attr(d[[v]], "labels", exact = TRUE)
     vapply(lv, function(u) {
@@ -66,12 +83,12 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
   add <- function(e) est[[length(est) + 1]] <<- e
   if (kind %in% c("mean", "total")) {
     for (v in vars) for (j in seq_along(ol)) {
-      add(list(sel = ov == ol[j], y = col(v), x = NULL, var = v, j = j,
+      add(list(sel = (ov == ol[j]) & subp, y = col(v), x = NULL, var = v, j = j,
                name = if (is.null(over)) v else paste0("c.", v, "@", oname(j))))
     }
   } else if (kind == "ratio") {
     for (r in seq_along(ratios)) for (j in seq_along(ol)) {
-      add(list(sel = ov == ol[j], y = col(ratios[[r]][1]), x = col(ratios[[r]][2]), var = rnames[r], j = j,
+      add(list(sel = (ov == ol[j]) & subp, y = col(ratios[[r]][1]), x = col(ratios[[r]][2]), var = rnames[r], j = j,
                name = if (is.null(over)) rnames[r] else paste0("c.", rnames[r], "@", oname(j))))
     }
   } else {
@@ -80,7 +97,7 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
       if (any(yv < 0 | yv != floor(yv))) stop(v, ": proportion takes values that are nonnegative integers (Stata: r(452))", call. = FALSE)
       lv <- sort(unique(yv))
       for (k in seq_along(lv)) for (j in seq_along(ol)) {
-        add(list(sel = ov == ol[j], y = as.numeric(yv == lv[k]), x = NULL, var = v, j = j, k = k, val = lv[k],
+        add(list(sel = (ov == ol[j]) & subp, y = as.numeric(yv == lv[k]), x = NULL, var = v, j = j, k = k, val = lv[k],
                  name = paste0(lev_name(lv[k], k == 1), v, if (!is.null(over)) paste0("@", oname(j)))))
       }
     }
@@ -98,7 +115,22 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
     b[i] <- if (kind == "ratio") sum(wv[s] * e$y[s]) / sum(wv[s] * e$x[s]) else sum(wv[s] * e$y[s]) / Wg[i]
   }
   V <- matrix(0, K, K)
-  if (lin || kind == "ratio") {
+  design <- NULL
+  if (!is.null(svy)) {
+    raw <- function(v) { x <- unclass(d[[v]]); attributes(x) <- NULL; x[keep] }
+    st <- if (is.null(svy$strata)) rep(1, n) else raw(svy$strata)
+    pu <- if (is.null(svy$psu)) seq_len(n) else raw(svy$psu)
+    fp <- if (is.null(svy$fpc)) NULL else as.numeric(raw(svy$fpc))
+    Z <- vapply(seq_len(K), function(i) {
+      e <- est[[i]]
+      s <- e$sel
+      if (kind == "ratio") wv * s * (e$y - b[i] * e$x) / sum(wv[s] * e$x[s])
+      else if (kind == "total") wv * s * e$y
+      else wv * s * (e$y - b[i]) / Wg[i]
+    }, numeric(n))
+    design <- stata_svy_vlin(matrix(Z, n), st, pu, fp, svy$singleunit)
+    V <- design$V
+  } else if (lin || kind == "ratio") {
     # linearized: z_i of each estimate, V = n/(n-1) sum z z' (frequency weights count rows)
     Z <- vapply(seq_len(K), function(i) {
       e <- est[[i]]
@@ -145,13 +177,13 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
     }
   }
   if (kind == "total") {
-    V <- V * outer(Wg, Wg)
+    if (is.null(svy)) V <- V * outer(Wg, Wg)
     b <- b * Wg
   }
   nm <- vapply(est, `[[`, "", "name")
   dimnames(V) <- list(nm, nm)
-  se <- sqrt(pmax(diag(V), 0))
-  dfr <- nobs - 1
+  se <- if (isTRUE(design$na)) rep(NA_real_, K) else sqrt(pmax(diag(V), 0))
+  dfr <- if (is.null(svy)) nobs - 1 else design$npsu - design$nstrata
   tq <- stats::qt(1 - (100 - level) / 200, dfr)
   if (kind == "proportion") {
     lg <- log(b / (1 - b))
@@ -172,7 +204,7 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
   # e() in Stata 19's order: ratio with frequency weights puts N before N_over
   e <- if (kind == "ratio" && !is.null(w) && wtype == "f") list(df_r = dfr, N = nobs, N_over = length(ol))
        else list(df_r = dfr, N_over = length(ol), N = nobs)
-  e <- c(e, list(k_eq = 1, rank = qr(V)$rank, cmdline = cmdline, cmd = kind,
+  e <- c(e, list(k_eq = 1, rank = if (anyNA(V) || isTRUE(design$na)) 0 else qr(V)$rank, cmdline = cmdline, cmd = kind,
                  vce = if (kind == "ratio") "linearized" else if (lin) "robust" else "analytic"))
   if (kind == "ratio") e$vcetype <- "Linearized"
   e$title <- paste(title, "estimation")
@@ -208,19 +240,93 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
   # one estimate: its row named as its column (Stata 19)
   e$`_N` <- matrix(Ng, 1, dimnames = list(if (K == 1) nm else "r1", nm))
   e$error <- matrix(0, 1, K, dimnames = list("r1", nm))
+  if (!is.null(svy)) {
+    # e() under svy: Stata 19's names and order
+    npsub <- if (is.null(svy$subvar)) NA else length(unique(paste(st[subp], pu[subp])))
+    has_sub <- !is.na(npsub)
+    sc <- list(df_r = dfr)
+    if (has_sub) sc$N_subpsu <- npsub
+    sc <- c(sc, list(N_strata_omit = 0, singleton = design$single, census = 0))
+    if (has_sub) sc <- c(sc, list(N_subpop = sum(wv[subp]), N_sub = sum(subp)))
+    sc <- c(sc, list(N_pop = sum(wv), N_psu = design$npsu, N_strata = design$nstrata, N_over = length(ol),
+                     N = n, stages = 1, k_eq = 1, rank = if (isTRUE(design$na)) 0 else qr(V)$rank))
+    vl <- if (kind == "ratio") paste(unlist(ratios), collapse = " ") else e$varlist
+    spec <- if (kind == "ratio") paste(sprintf("(%s:%s/%s)", rnames, vapply(ratios, `[`, "", 1), vapply(ratios, `[`, "", 2)), collapse = " ") else vl
+    e2 <- c(sc, list(cmdline = svy$line, cmd = kind, prefix = "svy", cmdname = kind,
+                     command = paste0(kind, " ", spec, ",", if (!is.null(over)) paste0(" over(", paste(over, collapse = " "), ")") else ""),
+                     title = paste0("Survey: ", title, " estimation"), vcetype = "Linearized", vce = "linearized"))
+    if (kind == "ratio") e2$namelist <- paste(rnames, collapse = " ")
+    e2$estat_cmd <- "svy_estat"
+    e2$varlist <- vl
+    e2$marginsnotok <- "_ALL"
+    if (!is.null(w)) {
+      e2$wtype <- "pweight"
+      e2$wvar <- svy$w
+      e2$wexp <- paste("=", svy$w)
+    }
+    e2$singleunit <- svy$singleunit
+    if (!is.null(svy$psu)) e2$su1 <- svy$psu
+    if (!is.null(svy$strata)) e2$strata1 <- svy$strata
+    if (!is.null(svy$fpc)) e2$fpc1 <- svy$fpc
+    if (!is.null(over)) e2$over <- paste(over, collapse = " ")
+    if (has_sub) e2$subpop <- svy$subtext
+    e2$properties <- "b V"
+    e2$b <- e$b
+    e2$V <- V
+    if (!is.null(over)) {
+      cellpsu <- vapply(est, function(x) length(unique(paste(st[ov == ol[x$j]], pu[ov == ol[x$j]]))), 0)
+      cellstr <- vapply(est, function(x) length(unique(st[ov == ol[x$j]])), 0)
+      e2$`_N_overpsu` <- matrix(cellpsu, 1, dimnames = list("r1", nm))
+      e2$`_N_overstrata` <- matrix(cellstr, 1, dimnames = list("r1", nm))
+    }
+    if (kind == "proportion") e2$freq <- e$freq
+    e2$`_N_subp` <- matrix(Wg, 1, dimnames = list(if (K == 1) nm else "r1", nm))
+    e2$`_N` <- e$`_N`
+    e2$error <- e$error
+    one <- function(v) matrix(v, 1, 1, dimnames = list("r1", "c1"))
+    e2$`_N_strata_certain` <- one(0)
+    e2$`_N_strata_single` <- one(design$single)
+    e2$`_N_strata` <- one(design$nstrata)
+    e <- e2
+  }
   out <- list(e = e, b = stats::setNames(b, nm), V = V, df = dfr, r = list(table = tab))
   if (!show) return(out)
   g <- function(v) if (is.na(v)) "." else stata_fmt(v, "%9.0g", trim = TRUE)
-  rhs <- paste0("Number of obs = ", stata_fmt(nobs, "%20.0fc", trim = TRUE))
-  cat("\n", formatC(e$title, width = -(62 - nchar(rhs))), rhs, "\n", sep = "")
+  if (!is.null(svy)) {
+    cat("\n", e$title, "\n\n", sep = "")
+    fm <- function(x) format(x, big.mark = ",", scientific = FALSE, trim = TRUE)
+    left <- list(c("Number of strata", fm(design$nstrata)), c("Number of PSUs  ", fm(design$npsu)))
+    right <- list(c("Number of obs  ", fm(n)), c("Population size", fm(sum(wv))))
+    if (has_sub) {
+      left[[3]] <- c("Subpop. no. PSUs", fm(npsub))
+      right <- c(right, list(c("Subpop. no. obs", fm(sum(subp))), c("Subpop. size   ", fm(sum(wv[subp])))))
+    }
+    right[[length(right) + 1]] <- c("Design df      ", fm(dfr))
+    wl <- max(nchar(vapply(left, `[`, "", 2)))
+    wr <- max(nchar(vapply(right, `[`, "", 2)))
+    lw <- 19 + wl
+    rw <- 18 + wr
+    for (i in seq_along(right)) {
+      l <- if (i <= length(left)) sprintf("%s = %*s", left[[i]][1], wl, left[[i]][2]) else ""
+      cat(formatC(l, width = -lw), strrep(" ", 62 - lw - rw), sprintf("%s = %*s", right[[i]][1], wr, right[[i]][2]), "\n", sep = "")
+    }
+    vce <- "linearized"
+    if (kind == "ratio") {
+      cat("\n")
+      for (r in seq_along(ratios)) cat(sprintf("%13s: %s/%s", rnames[r], ratios[[r]][1], ratios[[r]][2]), "\n", sep = "")
+    }
+  } else
   if (kind == "ratio") {
     cat("\n")
     for (r in seq_along(ratios)) cat(sprintf("%13s: %s/%s", rnames[r], ratios[[r]][1], ratios[[r]][2]), "\n", sep = "")
   }
   rule <- paste0(strrep("-", 62), "\n")
   cat("\n", rule, sep = "")
-  if (kind == "proportion") cat("             |                                   Logit\n")
-  if (vce == "linearized") cat("             |             Linearized\n")
+  if (!is.null(svy) && kind == "proportion") cat("             |             Linearized            Logit\n")
+  else {
+    if (kind == "proportion") cat("             |                                   Logit\n")
+    if (vce == "linearized") cat("             |             Linearized\n")
+  }
   cat(sprintf("             |%11s%s     [%s%% conf. interval]", title,
               if (vce == "linearized") "   std. err." else "   Std. err.", stata_fmt(level, "%9.0g", trim = TRUE)), "\n", sep = "")
   cat("-------------+", strrep("-", 48), "\n", sep = "")
@@ -249,6 +355,7 @@ pub(super) const MEANEST_HELPER: &str = r##"stata_meanest <- function(kind, d, v
     cat(sprintf("%11s  |%11s%11s%14s%12s", lab, g(b[i]), g(se[i]), g(lb[i]), g(ub[i])), "\n", sep = "")
   }
   cat(rule)
+  if (!is.null(svy) && !is.null(design$note)) cat(paste(strwrap(design$note, width = 63, exdent = 6), collapse = "\n"), "\n", sep = "")
   out
 }"##;
 
@@ -271,7 +378,11 @@ impl Session {
                 "{kind} with the option {o} is not translated yet"
             )));
         }
-        let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
+        let svy = self.svy_call.clone();
+        let w = match &svy {
+            Some(call) => call.wvar().map(|v| (W::P, v)),
+            None => self.weight_of(c, &[W::F, W::A, W::P, W::I])?,
+        };
         match (&w, kind) {
             // Stata 19: total, proportion and ratio take no analytic weights (an error as the
             // line runs, which capture takes)
@@ -297,7 +408,18 @@ impl Session {
                 Some(vs)
             }
         };
-        let level = match opts.arg("level", 1) {
+        let level_text = match (
+            opts.arg("level", 1),
+            svy.as_ref().and_then(|s| s.level.clone()),
+        ) {
+            (Some(_), Some(_)) => {
+                return Err(no(
+                    "level() both in the svy prefix and in the command is not translated",
+                ))
+            }
+            (a, b) => a.or(b),
+        };
+        let level = match level_text {
             None => "95".to_string(),
             Some(l) => {
                 let v: f64 = l
@@ -362,12 +484,67 @@ impl Session {
             }
             (vars, None)
         };
+        if let Some(call) = &svy {
+            if over.is_some() && (!matches!(kind, "mean" | "total") || vars.len() != 1) {
+                return Err(no(
+                    "svy: over() is translated for mean and total of one variable",
+                ));
+            }
+            if over.as_ref().is_some_and(|o| o.len() != 1) {
+                return Err(no(
+                    "svy: over() with more than one variable is not translated yet",
+                ));
+            }
+            if over.is_some() && call.subpop.is_some() {
+                return Err(no(
+                    "svy: over() together with subpop() is not translated yet",
+                ));
+            }
+        }
         let mut rows = self.rows_for(c, out)?;
         if w.is_some() {
-            rows = self.weighted_rows(rows, &w);
+            if svy.is_none() {
+                rows = self.weighted_rows(rows, &w);
+            }
             out.line(format!("stata_rows <- {rows}"));
             rows = "stata_rows".into();
-            out.caveat(super::weights::weight_caveat(&w));
+            if svy.is_none() {
+                out.caveat(super::weights::weight_caveat(&w));
+            }
+        }
+        let mut svy_arg = String::new();
+        if let Some(call) = &svy {
+            let mut sub = String::new();
+            match &call.subpop {
+                Some(super::svy::SubPop::Var(v)) => {
+                    sub = format!(", subvar = {}, subtext = {}", r_text(v), r_text(v));
+                }
+                Some(super::svy::SubPop::Cond(t)) => {
+                    let e = t.trim().trim_start_matches("if").trim();
+                    // a value: a row where it is missing is left out, as with a variable
+                    let value = self.expr(e, Use::Value, out)?;
+                    out.package("dplyr");
+                    out.line(format!(
+                        "stata_rows <- dplyr::mutate({rows}, stata_subpop = as.numeric({value}))"
+                    ));
+                    rows = "stata_rows".into();
+                    sub = format!(", subvar = \"stata_subpop\", subtext = {}", r_text(t));
+                }
+                None => {}
+            }
+            let first = call.design.stages.first();
+            let opt = |v: Option<&String>| v.map_or("NULL".to_string(), |s| r_text(s));
+            svy_arg = format!(
+                ", svy = list(strata = {}, psu = {}, fpc = {}, w = {}, singleunit = {}, line = {}{sub})",
+                opt(first.and_then(|s| s.strata.as_ref())),
+                opt(first.and_then(|s| s.su.as_ref())),
+                opt(first.and_then(|s| s.fpc.as_ref())),
+                opt(call.wvar().as_ref()),
+                r_text(&call.design.singleunit),
+                r_text(&call.line),
+            );
+            self.helpers.insert("stata_svy_vlin");
+            out.caveat("printed in Stata 19's layout for survey estimates: the design on the left, the counts on the right");
         }
         let wargs = super::weights::w_args(&rows, &w);
         for h in [
@@ -393,7 +570,7 @@ impl Session {
             ),
         };
         out.line(format!(
-            "stata_me <- stata_meanest({}, {rows}, c({}){wargs}{}, level = {level}{ratio_args}{}, cmdline = {}{})",
+            "stata_me <- stata_meanest({}, {rows}, c({}){wargs}{}, level = {level}{ratio_args}{}, cmdline = {}{}{svy_arg})",
             r_text(kind),
             q(&vars),
             over.as_ref()
@@ -414,13 +591,26 @@ impl Session {
         out.line("stata_e <- stata_me$e");
         out.line("stata_r <- stata_me$r");
         out.line("rm(stata_me)");
-        self.estimates = Some(Estimates {
-            fit: Fit::Margins,
-            dep: String::new(),
-            factors: Default::default(),
-        });
+        self.estimates = if svy.is_some() {
+            None
+        } else {
+            Some(Estimates {
+                fit: Fit::Margins,
+                dep: String::new(),
+                factors: Default::default(),
+            })
+        };
         self.e_new = true;
         for t in [
+            "prefix",
+            "cmdname",
+            "command",
+            "wvar",
+            "singleunit",
+            "su1",
+            "strata1",
+            "fpc1",
+            "subpop",
             "cmd",
             "vce",
             "vcetype",
@@ -438,7 +628,11 @@ impl Session {
             self.e_text.insert(t.to_string());
         }
         self.e_ret = super::returned::Returned::Kept {
-            cmd: kind.into(),
+            cmd: if svy.is_some() {
+                format!("svy_{kind}")
+            } else {
+                kind.into()
+            },
             // what test and lincom can read: plain names, not factor levels
             model: if over.is_some() || kind == "proportion" {
                 "levels".into()

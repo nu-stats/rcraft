@@ -322,6 +322,7 @@ const MODELS: &[&str] = &[
     "stset",
     "sureg",
     "svy",
+    "svydescribe",
     "svyset",
     "teffects",
     "tnbreg",

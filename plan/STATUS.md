@@ -6065,3 +6065,19 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Not matched:** Stata cycles (r(430) `convergence not achieved`, r(498) `try increasing the maximum number of iterations`) on data with two integer dummies and heavy
   ties, where RCraft prints a fit; three e(b) endings on a flat face (rounding noise in Stata); on heavily tied data the log can differ.
 - **Shares:** probes **80.2%** and packages **94.7%**, unchanged.
+## P2C.12aq: survey design (batch 5 of the StatCraft port), 2026-11-19
+
+- **Done** (each checked in Stata 19 on made-up data, corpus results to 1e-8): `svyset` with strata, fpc, singleunit, later stages, iweight, no PSU,
+  `, clear` and the bare form, with its r(); `svydescribe` (stage 1, with and without a varlist, `finalstage`, `if`/`in`, r(); every table compared
+  with Stata's log line by line); `svy: mean`, `total`, `ratio`, `proportion` (stratified linearized variance, fpc, the four singleunit rules,
+  `subpop()`, `level()`, `over()` of one variable, the header with the design and counts, the notes, e() and its matrices). `svy: clogit` now reads the
+  design through the same struct and still refuses strata, fpc, later stages and singleunit.
+- **Corpus:** `svy_design.do` (44 results, 1e-8) and `svy_mean.do` (182 results, 1e-8). `RCRAFT_CORPUS_SHOW=1` printed what R printed; compared with the
+  Stata log, the tables, notes and `ereturn list` agree except for the `V_srs`, `V_srssub` and `V_srswr` matrices, which are not kept (the list says so).
+- **Found:** a stratum with one PSU makes `e(V)` 0 (not missing) under singleunit(missing) while the table shows missing errors; `e(rank)` is then 0.
+  `subpop(if exp)` leaves out a row where the expression is missing, as `subpop(var)` does. A multi-stage `svyset` whose stage has no fpc drops the stages
+  after it. The design's df count stays the sample's under `subpop()`. Details in `plan/stata/svy.md`.
+- **Still refused:** see ROADMAP P2C.12aq. The probe files 194 to 196 keep about 25 refused lines: `svy: regress`/`logit`/`probit`/`poisson` and what follows
+  them (`test`, `ereturn list`), designs with a second stage under `svy:`, and `over()` of two variables.
+- **Shares:** probes **80.5%** (23,343 translated, 5,668 not, 1,104 known only when run, of 30,115 source lines; was 23,278 / 5,733 with batch E, 80.2%);
+  packages **94.7%** (4,025 of 4,249), unchanged (no package uses `svyset` with strata).

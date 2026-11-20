@@ -1,0 +1,183 @@
+* Stata 19.0's results for svy_mean.do, recorded by cargo xtask stata-record
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1       5.1062434141201249     .0043680932901613324     .0043680932901613324
+@ t mean svy mean linearized Linearized pweight w = w psu strata   missing svy_estat _ALL b V
+@ c [svy : mean y] [mean y,] [y] [Survey: Mean estimation]
+@ ns 0 0 3
+@ nj1 1898 119 0
+@ n 119 1898 15 3 12 1 2 0 0 0 1 1
+@ b1       5.1062434141201249     .0043680932901613324     .0043680932901613324
+@ b2       2.4994994731296107     .0025810105467867733     .0032162372030391036
+@ n 119 1898 15 3 12 1 2 0 0 0 1 1
+@ b1       9691.6499999999978       43896.917499999952       43896.917499999952
+@ b2       4744.0500000000002       14991.257500000012       24294.197499999998
+@ t total svy total linearized Linearized pweight w = w psu strata   missing svy_estat _ALL b V
+@ c [svy : total y x] [total y x,] [y x] [Survey: Total estimation]
+@ ns 0 0 3
+@ nj1 1898 119 0
+@ nj2 1898 119 0
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1        .7298753624279849    .00014119363351407674    .00014119363351407674
+@ t ratio svy ratio linearized Linearized pweight w = w psu strata   missing svy_estat _ALL b V _ratio_1
+@ c [svy : ratio y/z] [ratio (_ratio_1:y/z),] [y z] [Survey: Ratio estimation]
+@ ns 0 0 3
+@ nj1 1898 119 0
+@ n 119 1898 15 3 12 1 2 0 0 0 1 1
+@ b1       .72987536242798501     .0001411936335140768     .0001411936335140768
+@ b2       .35727303535790944   .000065511215654913906   .000091478076507021659
+@ t ratio svy ratio linearized Linearized pweight w = w psu strata   missing svy_estat _ALL b V r1 r2
+@ c [svy : ratio (r1: y/z) (r2: x/z)] [ratio (r1:y/z) (r2:x/z),] [y z x z] [Survey: Ratio estimation]
+@ ns 0 0 3
+@ nj1 1898 119 0
+@ nj2 1898 119 0
+@ n 119 1898 15 3 12 3 3 0 0 0 1 1
+@ b1       5.2584890965732081      .083893811612132246      .083893811612132246
+@ b2       5.1252012882447673      .086021686543917536     -.045295728760504222
+@ b3       4.9337795275590555       .13362653712238493     -.029755615470803468
+@ t mean svy mean linearized Linearized pweight w = w psu strata   missing svy_estat _ALL b V  grp
+@ c [svy : mean y, over(grp)] [mean y, over(grp)] [y] [Survey: Mean estimation]
+@ ns 0 0 3
+@ nj1 642 40 0
+@ nj2 621 39 0
+@ nj3 635 40 0
+@ over 15 15 3
+@ n 119 1898 15 3 12 3 3 0 0 0 1 1
+@ b1       3375.9499999999994       79728.132499999978       79728.132499999978
+@ b2       3182.7500000000005       78775.801250000019      -25680.146250000016
+@ b3       3132.9499999999998       70475.238750000019      -27040.790624999987
+@ n 120 1918 15 3 12 1 2 0 0 0 1 1
+@ b1       .33472367049009383    .00040140292871677252    .00040140292871677252
+@ b2       .33420229405630864    .00030049683277511517   -.00023213300668125557
+@ b3       .33107403545359748    .00023763374812937641   -.00016926992203551683
+@ t proportion svy proportion linearized Linearized pweight w = w psu strata   missing svy_estat _ALL b V
+@ c [svy : proportion grp] [proportion 1.grp 2.grp 3.grp,] [1.grp 2.grp 3.grp] [Survey: Proportion estimation]
+@ ns 0 0 3
+@ nj1 1918 120 0
+@ nj2 1918 120 0
+@ nj3 1918 120 0
+@ freq 642 641 635
+@ n 119 1898 15 3 12 1 2 0 0 0 1 1
+@ b1       5.1062434141201241     .0043680932901613333     .0043680932901613333
+@ b2       2.4994994731296107     .0025810105467867737      .003216237203039104
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1       5.1062434141201249     .0043680932901613316     .0043680932901613316
+@ n 79 1256 15 3 12 1 1 0 0 0 1 1
+@ b1       5.0284235668789812      .026695136155847916      .026695136155847916
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1        5.040189873417722     .0091108011099283043     .0091108011099283043
+@ t mean svy mean linearized Linearized pweight w = w psu strata  sub missing svy_estat _ALL b V
+@ c [svy , subpop(sub): mean y] [mean y,] [y] [Survey: Mean estimation]
+@ ns 0 0 3
+@ nj1 1422 89 0
+@ sub 89 1422 15
+@ n 119 1898 15 3 12 1 2 0 0 0 1 1
+@ b1       5.1252012882447673      .086021686543917536      .086021686543917536
+@ b2       2.5097423510466985      .096320570066294353      .090104962944634076
+@ t mean svy mean linearized Linearized pweight w = w psu strata  if grp == 2 missing svy_estat _ALL b V
+@ c [svy , subpop(if grp == 2): mean y x] [mean y x,] [y x] [Survey: Mean estimation]
+@ ns 0 0 3
+@ nj1 621 39 0
+@ nj2 621 39 0
+@ sub 39 621 15
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1       7167.1499999999996       48964.852500000015       48964.852500000015
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1       .71539152567749664    .00045875994243558112    .00045875994243558112
+@ n 120 1918 15 3 12 1 2 0 0 0 1 1
+@ b1       .32732316227461861    .00012832290719971571    .00012832290719971571
+@ b2       .33633841886269072    .00011477581530481296  -.000053558783751707012
+@ b3       .33633841886269072    .00013598115500111467  -.000074764123448008724
+@ t proportion svy proportion linearized Linearized pweight w = w psu strata  sub missing svy_estat _ALL b V
+@ c [svy , subpop(sub): proportion grp] [proportion 1.grp 2.grp 3.grp,] [1.grp 2.grp 3.grp] [Survey: Proportion estimation]
+@ ns 0 0 3
+@ nj1 1442 90 0
+@ nj2 1442 90 0
+@ nj3 1442 90 0
+@ sub 90 1442 15
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1        5.040189873417722     .0091108011099283025     .0091108011099283025
+@ n 70 1099 15 3 12 1 1 0 0 0 1 1
+@ b1       6.1181195516811959     .0084544866302059714     .0084544866302059714
+@ sub 52 803 15
+@ n 120 1918 15 3 12 1 1 0 0 0 1 1
+@ b1       2.5031543274244004     .0025719504406200746     .0025719504406200746
+@ n 119 1898 15 3 12 1 2 0 0 0 1 1
+@ b1       5.1062434141201249     .0036400777418011104     .0036400777418011104
+@ b2       2.4994994731296103     .0021508421223223107     .0026801976691992534
+@ t mean svy mean linearized Linearized pweight w = w psu strata fpc1  missing svy_estat _ALL b V
+@ c [svy : mean y x] [mean y x,] [y x] [Survey: Mean estimation]
+@ ns 0 0 3
+@ nj1 1898 119 0
+@ nj2 1898 119 0
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1       9691.6499999999978       36580.764583333323       36580.764583333323
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1       5.1062434141201249     .0032760699676209993     .0032760699676209993
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1       5.1062434141201249     .0030276440359451881     .0030276440359451881
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1       9691.6499999999978       33481.550989583302       33481.550989583302
+@ n 119 1898 15 3 12 1 1 0 0 0 1 1
+@ b1        .7298753624279849    .00010102163632265451    .00010102163632265451
+@ n 119 1898 15 4 11 1 0 1 0 0 1 1
+@ b1       5.1062434141201249                        0                        0
+@ t mean svy mean linearized Linearized pweight w = w psu s2   missing svy_estat _ALL b V
+@ c [svy : mean y] [mean y,] [y] [Survey: Mean estimation]
+@ ns 0 1 4
+@ nj1 1898 119 0
+@ n 119 1898 15 4 11 1 0 1 0 0 1 1
+@ b1       9691.6499999999978                        0                        0
+@ n 119 1898 15 4 11 1 1 1 0 0 1 1
+@ b1       5.1062434141201258     .0043157804350737313     .0043157804350737313
+@ t mean svy mean linearized Linearized pweight w = w psu s2   certainty svy_estat _ALL b V
+@ c [svy : mean y] [mean y,] [y] [Survey: Mean estimation]
+@ ns 0 1 4
+@ nj1 1898 119 0
+@ n 119 1898 15 4 11 1 1 1 0 0 1 1
+@ b1       9691.6499999999978       43136.858749999992       43136.858749999992
+@ n 119 1898 15 4 11 1 1 1 0 0 1 1
+@ b1       5.1062434141201258      .005754373913431643      .005754373913431643
+@ t mean svy mean linearized Linearized pweight w = w psu s2   scaled svy_estat _ALL b V
+@ c [svy : mean y] [mean y,] [y] [Survey: Mean estimation]
+@ ns 0 1 4
+@ nj1 1898 119 0
+@ n 119 1898 15 4 11 1 1 1 0 0 1 1
+@ b1       9691.6499999999978       57515.811666666646       57515.811666666646
+@ n 119 1898 15 4 11 1 1 1 0 0 1 1
+@ b1       5.1062434141201249     .0044096432118273183     .0044096432118273183
+@ n 119 1898 15 4 11 1 2 1 0 0 1 1
+@ b1       9691.6499999999978        44439.34684999998        44439.34684999998
+@ b2       4744.0500000000011       15130.710649999999       24553.274616666662
+@ n 119 1898 15 4 11 1 1 1 0 0 1 1
+@ b1       .72987536242798501    .00014198646568825877    .00014198646568825877
+@ n 119 1898 15 1 14 1 1 0 0 0 1 1
+@ b1       5.1062434141201249     .0038834669012391479     .0038834669012391479
+@ t mean svy mean linearized Linearized pweight w = w psu    missing svy_estat _ALL b V
+@ c [svy : mean y] [mean y,] [y] [Survey: Mean estimation]
+@ ns 0 0 1
+@ nj1 1898 119 0
+@ n 79 1256 15 1 14 1 1 0 0 0 1 1
+@ b1       5.0284235668789812       .02466662267111637       .02466662267111637
+@ n 119 119 15 3 12 1 1 0 0 0 1 1
+@ b1       5.1121848739495794     .0039705304769859871     .0039705304769859871
+@ t mean svy mean linearized Linearized    psu strata   missing svy_estat _ALL b V
+@ c [svy : mean y] [mean y,] [y] [Survey: Mean estimation]
+@ ns 0 0 3
+@ nj1 119 119 0
+@ n 119 119 15 1 14 1 1 0 0 0 1 1
+@ b1       5.1121848739495803     .0036709807439510448     .0036709807439510448
+@ t mean svy mean linearized Linearized    psu    missing svy_estat _ALL b V
+@ c [svy : mean y] [mean y,] [y] [Survey: Mean estimation]
+@ ns 0 0 1
+@ nj1 119 119 0
+@ n 119 1898 119 1 118 1 1 0 0 0 1 1
+@ b1       5.1062434141201249       .02029759749248394       .02029759749248394
+@ n 119 1898 119 1 118 1 1 0 0 0 1 1
+@ b1       9691.6499999999978       112626.41364406784       112626.41364406784
+@ miss1 118 88 1404 1880
+@ miss2 118 1879
+@ miss3 117 1858 15
+@ miss4 116 1836 15 3
+@ miss5 115 85 1342 1818
+@ zero 116 1816
+@ quiet 116
