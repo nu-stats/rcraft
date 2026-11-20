@@ -285,7 +285,10 @@ impl Session {
         }
         Some(format!(
             "cat(local({{\n{CHAR_HELPER}\n{XI_PLAN}\nstata_xi_plan({d}, c({}))\n}}))",
-            vars.iter().map(|v| r_text(v)).collect::<Vec<_>>().join(", ")
+            vars.iter()
+                .map(|v| r_text(v))
+                .collect::<Vec<_>>()
+                .join(", ")
         ))
     }
 
@@ -332,7 +335,8 @@ impl Session {
         let level_of = |v: &str| plan.get(v);
         // the names of a factor's dummies (the omitted level has none)
         let dummies = |v: &str| -> Result<Vec<(String, String)>, Untranslated> {
-            let pl = level_of(v).ok_or_else(|| no(format!("xi: the levels of {v} are not known")))?;
+            let pl =
+                level_of(v).ok_or_else(|| no(format!("xi: the levels of {v} are not known")))?;
             Ok(pl
                 .levels
                 .iter()
@@ -353,29 +357,26 @@ impl Session {
                 r_text(a),
                 la,
                 r_text(b),
-                if lb.is_empty() { "NA".to_string() } else { lb.to_string() }
+                if lb.is_empty() {
+                    "NA".to_string()
+                } else {
+                    lb.to_string()
+                }
             )
         };
         let head = |term: &str, stub: &str, note: &str| {
-            format!(
-                "c({}, {}, {})",
-                r_text(term),
-                r_text(stub),
-                r_text(note)
-            )
+            format!("c({}, {}, {})", r_text(term), r_text(stub), r_text(note))
         };
         let main_head = |v: &str| -> Result<String, Untranslated> {
-            let pl = level_of(v).ok_or_else(|| no(format!("xi: the levels of {v} are not known")))?;
+            let pl =
+                level_of(v).ok_or_else(|| no(format!("xi: the levels of {v} are not known")))?;
             let (Some(first), Some(last)) = (pl.levels.first(), pl.levels.last()) else {
                 return Err(no("xi: a variable without levels"));
             };
             Ok(head(
                 &format!("i.{v}"),
                 &format!("{prefix}{v}_{first}-{last}"),
-                &format!(
-                    "(naturally coded; {prefix}{v}_{} omitted)",
-                    pl.omit
-                ),
+                &format!("(naturally coded; {prefix}{v}_{} omitted)", pl.omit),
             ))
         };
         for (word, t) in &terms {
@@ -392,10 +393,18 @@ impl Session {
                     }
                 }
                 Term::Cross(a, b) => {
-                    wild_here.extend([format!("{prefix}{a}_*"), format!("{prefix}{b}_*"), format!("{prefix}{a}X{b}_*")]);
+                    wild_here.extend([
+                        format!("{prefix}{a}_*"),
+                        format!("{prefix}{b}_*"),
+                        format!("{prefix}{a}X{b}_*"),
+                    ]);
                     headers.push(main_head(a)?);
                     headers.push(main_head(b)?);
-                    headers.push(head(word, &format!("{prefix}{a}X{b}_#_#"), "(coded as above)"));
+                    headers.push(head(
+                        word,
+                        &format!("{prefix}{a}X{b}_#_#"),
+                        "(coded as above)",
+                    ));
                     for v in [a, b] {
                         for (n, l) in dummies(v)? {
                             specs.push(spec("dummy", &n, v, &l, "", ""));
@@ -418,7 +427,11 @@ impl Session {
                     }
                     wild_here.extend([x.clone(), format!("{prefix}{f}X{x}_*")]);
                     headers.push(main_head(f)?);
-                    headers.push(head(word, &format!("{prefix}{f}X{x}_#"), "(coded as above)"));
+                    headers.push(head(
+                        word,
+                        &format!("{prefix}{f}X{x}_#"),
+                        "(coded as above)",
+                    ));
                     for (n, l) in dummies(f)? {
                         specs.push(spec("dummy", &n, f, &l, "", ""));
                         made.push((n.clone(), true));
@@ -464,8 +477,10 @@ impl Session {
         ));
         for (n, byte) in &made {
             self.kinds.insert(n.clone(), Kind::Number);
-            self.storage
-                .insert(n.clone(), if *byte { Storage::Byte } else { Storage::Float });
+            self.storage.insert(
+                n.clone(),
+                if *byte { Storage::Byte } else { Storage::Float },
+            );
             self.xi_made.push(n.clone());
         }
         let Some(inner) = &p.inner else {

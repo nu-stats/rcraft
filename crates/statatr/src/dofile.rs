@@ -1875,7 +1875,10 @@ impl<'f> Run<'f> {
                 }
                 // xi: the levels of its factor variables, which only R knows
                 if let Some(code) = self.t.xi_question(&c) {
-                    match self.ask(Need::R(code, "the levels xi's factor variables take".into())) {
+                    match self.ask(Need::R(
+                        code,
+                        "the levels xi's factor variables take".into(),
+                    )) {
                         Err(Stop::Ask(need)) => return Flow::Ask(need),
                         Ok(text) => self.t.xi_answer(Ok(text)),
                         Err(Stop::Later(why)) => self.t.xi_answer(Err(why)),
