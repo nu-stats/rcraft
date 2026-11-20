@@ -585,6 +585,7 @@ const WEIGHTED: &[&str] = &[
     "sureg",
     "areg",
     "qreg",
+    "nlsur",
     "mvreg",
     "ltable",
     "dfuller",

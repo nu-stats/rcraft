@@ -481,6 +481,9 @@ impl Session {
         if est.fit == Fit::Margins {
             return Err(no("margins after margins, post is not translated yet"));
         }
+        if est.fit == Fit::Nlsur {
+            return Err(no("margins after nlsur is not translated yet"));
+        }
         if let Some(o) = opts.other(&[
             ("dydx", 4),
             ("eyex", 4),
