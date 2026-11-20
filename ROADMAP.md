@@ -703,6 +703,17 @@ Round 5 (2026-11-20, `xi`): factors whose values are not whole numbers from 0 up
   e(Jacobian))) Verified (corpus `nlsur.do`, 978 results to 1e-6, 125 new; note `plan/stata/nlsur.md`). Still refused,
   none of them seen in Stata: `hasconstants()` naming no constant for an equation, `over()` with value labels or missing
   values, `margins, post` after `vce(cluster)`. Probes unchanged at 80.5%.)
+
+- P2C.12av Post-estimation (batch L of the StatCraft port, done 2026-11-20, in part)
+  (`contrast` and `pwcompare` (after regress, anova, logit, probit, poisson and xtreg: plain, `r.`, `ar.`, `a.`, `gw.`, `g.`, `g#h`, `g@h`, `r.g@h`, several terms,
+  `effects`, `mcompare(bonferroni sidak scheffe)`, `level()`, `cimargins`, `(not testable)` / `(not estimable)` where the design cannot tell the margins apart, weights and robust
+  or clustered variances; r(b), r(V), r(table), r(F)/r(chi2), r(df), r(p), r(df2) and for `pwcompare` the `_vs` set), `hausman` (stored results or `.`, `constant`, `sigmamore`, `sigmaless`, a negative chi2),
+  `lrtest` (nested logit, probit, poisson and regress fits), `predictnl` (`_b[]`, `xb()`, `predict()`, `if`, `se() variance() wald() p() ci() level()`, `double`)) Verified (corpus `contrast.do`,
+  `contrast_glm.do`, `contrast_omitted.do`, `hausman.do`, `lrtest.do`, `predictnl.do`; note `plan/stata/postest.md`).
+  **On hold** (listed, to be built): `manovatest` (3 probe lines; needs `manova`, batch MV), `tebalance` (1; needs `teffects`, batch CA), `contrast`/`pwcompare` after `areg` and `xtregar`, `hausman`/`predictnl` after `xtregar` (their results are not held as a model).
+  Still refused: `contrast` with `post`, `noestimcheck`, `pveffects`, `cieffects`, `groups`, `tukey`, `snk`, `duncan`, `dunnett`; `gw.` after a weighted model; `lrtest` after a robust model.
+  Measured on top of P2C.12aq (probes only; the probe folder is StatCraft's `observe/dofiles` at b7d392e): 80.5% -> 80.7% (23,343 -> 23,399 translated source lines of 29,018 judged; 5,668 -> 5,612 not translated);
+  packages unchanged at 94.7% (4,025 of 4,249; none of these commands is in the 46 do-files).)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

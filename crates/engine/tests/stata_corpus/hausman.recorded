@@ -1,0 +1,7 @@
+* Stata 19.0's results for hausman.do, recorded by cargo xtask stata-record
+@ plain      -200.42313603374549 2 2                        1
+@ more       40.203121137332388 2   1.8621007172338316e-09
+@ less       51.935913806284326 2   5.2754512081093657e-12
+@ const      -277.88563110821144 3                        1
+@ one      -66.719838641807186 1 1                        1
+@ rc 111

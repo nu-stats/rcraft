@@ -90,6 +90,7 @@ mod pdslasso;
 mod permute;
 mod permute_run;
 mod post;
+mod postest;
 mod postfile;
 mod power;
 mod prtest;
@@ -975,6 +976,8 @@ const LEAVE_DATA_ALONE: &[&str] = &[
     "estat",
     "lroc",
     "margins",
+    "contrast",
+    "pwcompare",
     "predict",
     "generate",
     "sort",
@@ -1518,6 +1521,10 @@ fn helper_code(name: &str) -> &'static str {
         "stata_centile" => centile::CENTILE_HELPER,
         "stata_nlcom" => nlcom::NLCOM_HELPER,
         "stata_testnl" => nlcom::TESTNL_HELPER,
+        "stata_contrast" => postest::CONTRAST_HELPER,
+        "stata_hausman" => postest::HAUSMAN_HELPER,
+        "stata_lrtest" => postest::LRTEST_HELPER,
+        "stata_predictnl" => postest::PREDICTNL_HELPER,
         "stata_sktest" => sktest::SKTEST_HELPER,
         "stata_testparm" => testparm::TESTPARM_HELPER,
         "stata_prtest" => prtest::PRTEST_HELPER,
@@ -3195,6 +3202,10 @@ impl Session {
             "centile" => self.centile(c, &opts, out),
             "nlcom" => self.nlcom(c, &opts, out),
             "testnl" => self.testnl(c, &opts, out),
+            "contrast" | "pwcompare" => self.contrast_cmd(c, &opts, out),
+            "hausman" => self.hausman_cmd(c, &opts, out),
+            "lrtest" => self.lrtest_cmd(c, &opts, out),
+            "predictnl" => self.predictnl_cmd(c, &opts, out),
             // prop is proportion (Stata 19; propo and the like are not)
             "mean" | "total" | "proportion" | "prop" | "ratio" => {
                 let kind = if c.name == "prop" {

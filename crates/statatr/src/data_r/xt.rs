@@ -317,6 +317,8 @@ pub(super) const XTREG_HELPER: &str = r#"stata_xtreg <- function(formula, data, 
   }
   if (type != "fe" && length(collinear)) out$omitted <- collinear
   if (type == "re") out$theta <- theta
+  # hausman, sigmamore and sigmaless take the root MSE of the quasi-demeaned regression
+  if (type == "re") out$rmse_gls <- sqrt(sum(fr$e^2) / (N - ncol(Zr)))
   # what predict and estat need afterwards: the rows used, each panel's u_i
   # (fe: ybar_i - xbar_i b - _cons; re: the BLUP), and fe's log likelihood
   out$rows <- rows[keep]
