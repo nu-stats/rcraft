@@ -183,6 +183,7 @@ pub const COMMANDS: &[&str] = &[
     "local",
     "lookfor",
     "log",
+    "logistic",
     "logit",
     "lowess",
     "lroc",
@@ -759,6 +760,7 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
             "table",
         ],
     ),
+    ("logistic", &["coef", "level(", "robust", "vce("]),
     (
         "logit",
         &[
@@ -2259,7 +2261,7 @@ gettoken a b : s, {o}"
                 format!("regress y x\n{what}, {o}")
             }
             "matrix" => format!("regress y x\nmatrix list e(b), {o}"),
-            "logit" | "probit" => format!("{cmd} d x, {o}"),
+            "logit" | "probit" | "logistic" => format!("{cmd} d x, {o}"),
             "poisson" | "nbreg" => format!("{cmd} c x, {o}"),
             "ologit" | "oprobit" | "mlogit" => format!("{cmd} o x, {o}"),
             "lowess" | "pwcorr" | "correlate" | "regress" | "tab2" | "oneway" => {

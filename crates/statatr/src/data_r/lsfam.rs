@@ -626,3 +626,46 @@ impl Session {
         Ok(())
     }
 }
+
+impl Session {
+    /// `logistic depvar indepvars [if] [in] [weight] [, coef level() vce() robust noconstant]`:
+    /// `logit` that shows odds ratios (`coef` the coefficients) and prints no iteration log; e()
+    /// is logit's with `e(cmd)` `logistic` (checked in Stata 19, `plan/stata/logistic.md`).
+    pub(super) fn logistic(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if opts.has("or", 2) {
+            return Err(no("logistic with the option or: Stata does not allow it"));
+        }
+        if opts.has("noconstant", 5) {
+            return Err(no(
+                "logistic, noconstant is not translated: Stata leaves e(ll_0) missing and a Wald chi2 there",
+            ));
+        }
+        let coef = opts.has("coef", 4);
+        let mut c2 = c.clone();
+        c2.name = "logit".into();
+        c2.options.retain(|o| !o.is("coef", 4));
+        if !coef {
+            c2.options.push(crate::lang::syntax::Opt {
+                name: "or".into(),
+                arg: None,
+                raw: None,
+            });
+        }
+        if !c2.options.iter().any(|o| o.is("nolog", 5)) {
+            c2.options.push(crate::lang::syntax::Opt {
+                name: "nolog".into(),
+                arg: None,
+                raw: None,
+            });
+        }
+        let o2 = super::Opts(&c2.options);
+        self.ml(&c2, &o2, out, Fit::Logit)?;
+        out.line("stata_e[[\"cmd\"]] <- \"logistic\"; stata_e[[\"predict\"]] <- \"logistic_p\"");
+        Ok(())
+    }
+}

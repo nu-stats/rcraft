@@ -165,6 +165,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
         &["lincom_post", "panel", "regress", "xtregar_tests"],
     ),
     ("local", &["control"]),
+    ("logistic", &["logistic"]),
     ("logit", &["collinear", "interactions", "likelihood"]),
     ("lookfor", &["lookfor"]),
     ("lroc", &["lroc"]),

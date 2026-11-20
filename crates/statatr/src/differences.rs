@@ -3768,6 +3768,24 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "logistic",
+        about: "Logistic regression, reporting odds ratios",
+        points: &[
+            p(
+                "As Stata 19",
+                "logistic y x... is logit that shows odds ratios (coef shows the coefficients) and prints no \
+                 iteration log, with `Note: _cons estimates baseline odds.`; the estimates, e() and the header are \
+                 logit's, with e(cmd) logistic and e(predict) logistic_p. level(), vce(), robust, if, in and \
+                 weights are logit's; predict and test work after it.",
+            ),
+            p(
+                "Not yet",
+                "noconstant (Stata leaves e(ll_0) missing and a Wald chi2 there) and the options logit has \
+                 not been translated with.",
+            ),
+        ],
+    },
+    Guide {
         command: "cnsreg",
         about: "Constrained linear regression",
         points: &[

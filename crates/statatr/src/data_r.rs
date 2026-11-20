@@ -564,6 +564,7 @@ const BY_EACH: &[&str] = &[
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
     "cnsreg",
+    "logistic",
     "sureg",
     "areg",
     "qreg",
@@ -681,6 +682,7 @@ const MODELS: &[&str] = &[
     "reghdfe",
     "regress",
     "logit",
+    "logistic",
     "probit",
     "poisson",
     "nbreg",
@@ -3205,6 +3207,7 @@ impl Session {
             "nl" => self.nl(c, &opts, out),
             "constraint" => self.constraint(c, out),
             "cnsreg" => self.cnsreg(c, &opts, out),
+            "logistic" => self.logistic(c, &opts, out),
             "sureg" => self.sureg(c, &opts, out),
             "areg" => self.areg(c, &opts, out),
             "qreg" => self.qreg(c, &opts, out),
