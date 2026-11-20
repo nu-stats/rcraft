@@ -70,6 +70,19 @@ breakpoint ties (0 to 1e-6: same). A depth-first search over every pricing, ente
 for 137 of 140 runs, so the skeleton is right; the leftovers are which of several rows at the same breakpoint enters, which in Stata depends on
 rounding noise in its own arithmetic (row 17 against three duplicated rows at one breakpoint, where Stata must put the duplicates first).
 
+**Arithmetic emulation (2026-11-20, no gain).** Rebuilt the descent as an exchange tableau (stage 1: Gauss-Jordan pivots on `[y | X]` in sort
+order, columns by index or by largest pivot; each later pivot in the standard update forms `c (r/p)`, `(c/p) r`, `(c r)/p`): sequence 118-123
+of 140, e(b) 123-124 of 126, no better than recomputing from the basis (124 and 124). Of 446 steps with two or more rows at one breakpoint, the order
+used (exact t, then first-sort place) enters a row that a path matching Stata's log accepts in 417 (93.5%); taking the last row of the group instead
+agrees in 164, so Stata is mostly "first" with about one step in twenty going the other way, the size of rounding noise in a different arithmetic.
+
+**Stata's give-up, mapped on 90 quantiles of one data set (two dummies, integer y, n = 50, `qreg y d1 d2, quantile(q)` for q = .015 ... .99).** R's log is
+Stata's in 88 of 90 (the two others are tied-order misses). Stata gives up (`convergence not achieved.`) at 14 of them, always at the step right after
+its last printed iteration, which R then continues for 1 to 5 more steps. In all 14 the failing step is a pivot at t = 0 (an entering row among rows
+already at a residual of zero) with 7 or 10 rows at zero; no step with fewer than 7 zero rows failed (53 of them did not). But 57 of the 71 steps with 7
+or more zero rows finished, and nothing tried separates them: the number of kinks at t = 0, how far down the group the crossing is, the steepness or the
+edge picked, the sides of the zero rows, re-entering a row that just left (basis revisits: none in any run). Not a rule R can use.
+
 ## Stata's errors
 
 - **`VCE computation failed; try a different bandwidth or bsqreg` (r(498))** exactly when q - h <= 0 or q + h >= 1 (n = 18 at q = .1, .25,

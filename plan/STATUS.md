@@ -6089,7 +6089,7 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   Corpus `qreg.do` 344 results to 1e-8 (was 234).
 - **Tried and not better** (note `plan/stata/qreg.md`): other tie orders, other sums, a pivoted tableau, a zero-slope tolerance. A search over every pricing, entering and stop choice
   finds a path for 137 of 140 runs, so what is left is rounding noise deciding which of several tied rows enters.
-- **Not reproduced:** Stata's give-up (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data: R's paths equal Stata's but R does not stop
+- **Not reproduced:** Stata's give-up (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data: R's paths equal Stata's (88 of 90 logs on one data set) but R does not stop
   where Stata does (no rule found); 16 of 140 logs and 2 of 126 e(b) (one dummy q = .1, two dummies and a continuous regressor q = .6).
 - **Shares:** unchanged (probes 80.2%, packages 94.7%).
 
