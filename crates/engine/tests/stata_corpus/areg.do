@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12, batch E): made-up data; Stata 19's results are in areg.recorded
 * commands: areg
-* (areg: absorbing the indicators of one variable; the fit with plain and factor regressors, robust and clustered errors, fweights, aweights and pweights, if, level(), the F test of the absorbed indicators, e() scalars, e(b) and e(V), predict xb, residuals, d and xbd, test after it, regressors omitted for collinearity, and the errors with their return codes)
+* (areg: absorbing the indicators of one variable; the fit with plain and factor regressors, robust and clustered errors, fweights, aweights and pweights, if, level(), the F test of the absorbed indicators, e() scalars, e(b) and e(V), predict xb, residuals, d and xbd, test after it, regressors omitted for collinearity, interactions and ib. bases, and the errors with their return codes)
 * tolerance: 1e-8
 version 19
 set linesize 255
@@ -100,3 +100,27 @@ summarize dc1
 display "@ dc1 " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
 test x
 display "@ tc1 " %24.17g r(F) " " r(df) " " r(df_r) " " %24.17g r(p)
+* interactions and ib. bases: e(b) with Stata's base-level columns, the table as Stata lays it out
+generate byte hb = mod(_n * 5, 2)
+areg y x ib2.g, absorb(id)
+shwareg
+areg y x i.g#c.z, absorb(id)
+shwareg
+areg y x c.z##i.hb, absorb(id)
+shwareg
+areg y x i.g#i.hb, absorb(id)
+shwareg
+areg y x c.x#c.z, absorb(id)
+shwareg
+areg y x i.g##c.z, absorb(id) vce(robust)
+shwareg
+areg y x c.z##i.hb [fweight = fw], absorb(id)
+shwareg
+predict double pi1
+predict double ri1, residuals
+summarize pi1
+display "@ pi1 " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+summarize ri1
+display "@ ri1 " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+test 1.hb
+display "@ ti1 " %24.17g r(F) " " r(df) " " r(df_r) " " %24.17g r(p)
