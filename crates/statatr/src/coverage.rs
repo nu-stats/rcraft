@@ -333,6 +333,7 @@ const MODELS: &[&str] = &[
     "tsset",
     "ucm",
     "var",
+    "xi",
     "xporegress",
     "xtabond",
     "xtcloglog",

@@ -1873,6 +1873,15 @@ impl<'f> Run<'f> {
                         Err(_) => {}
                     }
                 }
+                // xi: the levels of its factor variables, which only R knows
+                if let Some(code) = self.t.xi_question(&c) {
+                    match self.ask(Need::R(code, "the levels xi's factor variables take".into())) {
+                        Err(Stop::Ask(need)) => return Flow::Ask(need),
+                        Ok(text) => self.t.xi_answer(Ok(text)),
+                        Err(Stop::Later(why)) => self.t.xi_answer(Err(why)),
+                        Err(_) => self.t.xi_answer(Err(KNOWN_WHEN_RUN.to_string())),
+                    }
+                }
                 let c = &c;
                 self.done_item(depth);
                 if c.name == "clear" && matches!(rest.trim(), "all" | "*") {

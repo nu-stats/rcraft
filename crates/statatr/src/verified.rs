@@ -372,6 +372,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("while", &["control"]),
     ("winsor", &["winsor"]),
     ("wntestq", &["tstests"]),
+    ("xi", &["xi"]),
     ("xporegress", &["lasso_infer"]),
     ("xpose", &["made"]),
     ("xtabond", &["xtdpd"]),

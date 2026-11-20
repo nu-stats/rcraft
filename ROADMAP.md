@@ -629,14 +629,12 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   (`constraint`, `cnsreg` (constraints by projection, weights, robust and clustered errors, `predict`, `test`), `areg` (the
   within fit with the grand means, N - k - G, robust, clustered, fw/aw/pw, factor variables, `predict` xb, residuals, d,
   xbd), `sureg` and `mvreg` (two-step GLS, `isure`, `small`, `dfk`, `corr`, fw/aw, `predict` with `equation()`, `test`
-  across equations), `qreg` (`nolog`, any quantile, fweights, the iid variance, `predict`) and `logistic` Verified (corpus
-  `cnsreg.do`, `areg.do`, `sureg.do`, `qreg.do`, `logistic.do`; notes `plan/stata/{constraint,areg,sureg,qreg,logistic}.md`).
-  Still refused: `qreg` where the minimum is not unique (often with dummies at the median: Stata ends at one of several
-  optimal vertices by a path that is not reproduced; the descent matched Stata on two of four such fits) and without `nolog`;
-  `nlsur` (7 probe lines: its iteration log is Stata's own Gauss-Newton path, not decoded; needs a decode of the step
-  rule); `xi` (7 lines: needs a reader prefix and the `_I` variables with their labels); `constraints()` of other models;
+  across equations), `qreg` (`nolog`, any quantile, fweights, the iid variance, `predict`), `logistic` and `xi` (round 2, 2026-11-19: `xi: cmd`, `xi i.g`, `prefix()`, `i.g*i.h`, `i.g*x`, `i.g|x`, the omit characteristics) Verified (corpus
+  `cnsreg.do`, `areg.do`, `sureg.do`, `qreg.do`, `logistic.do`, `xi.do`; notes `plan/stata/{constraint,areg,sureg,qreg,logistic,xi}.md`).
+  **On hold** (listed, to be built): `nlsur` (7 probe lines: its iteration log is Stata's own Gauss-Newton path, the step rule not decoded; needs Opus-level work) and `qreg` where the minimum is not unique (Stata ends at one of several optimal vertices by a path not reproduced; the descent matched Stata on two of four such fits, `quantreg` on fewer).
+  Still refused: `qreg` without `nolog`, `xi` with a factor in two terms, `|` between factors or `noomit`; `constraints()` of other models;
   `areg` with regressors the absorbed groups make collinear; `logistic, noconstant`.
-  Measured on top of P2C.12an: probes 79.8% -> 80.2% (23,159 -> 23,278 translated source lines of 29,018 judged); packages 94.7% unchanged (4,025 of 4,249).)
+  Measured on top of P2C.12an: probes 79.8% -> 80.2% (23,159 -> 23,278 translated source lines of 29,018 judged); with `xi` the 7 probe lines move from refused to known only when run (the dry run cannot ask R for the levels; the corpus shows them translating): 23,278 translated, 5,733 not, 1,104 when run; packages 94.7% unchanged (4,025 of 4,249).)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.
