@@ -651,6 +651,7 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   line; `areg.do`, 137 results, was 77; notes `plan/stata/{constraint,areg,logistic}.md`). Still refused: `constraints()` with offset/exposure, iweights or a
   regressor omitted for collinearity; poisson with `constraints()` and `noconstant`; areg with a factor level omitted.
   Measured on top of round 3 (nlsur): probes 80.5% (23,356 -> 23,358 translated; the two `constraints()` probe lines), packages 94.7% unchanged.
+Round 6 (2026-11-20, the factor-variable leftovers): `areg` with interactions (`i.g#c.z`, `c.z##i.h`, `i.g#i.h`, `c.x#c.z`) and `ib.` bases, `cnsreg` with factor variables (the base level a fixed column and the first rows of e(Cns), `1.g` reading `1b.g`, a coefficient fixed at 0 printed omitted, a plain `x = 0` too). Verified (corpus `areg.do` 205 results, `cnsreg.do` 523 results, printed output line for line; notes `plan/stata/{areg,constraint}.md`). Still refused: `cnsreg` with interactions, noconstant or collinear factors; `areg` with powers or a factor level omitted for collinearity.
 - P2C.12aq Survey design (batch 5 of the StatCraft port, done 2026-11-19, in part)
   (`svyset` with `strata()`, `fpc()`, `singleunit()`, later stages, `[iweight=]`, no PSU, `svyset, clear` and bare `svyset`, with the r()
   it leaves; `svydescribe` (stage 1 with and without a varlist, `finalstage`, `if`/`in`, r()); `svy: mean`, `total`, `ratio` and `proportion` with

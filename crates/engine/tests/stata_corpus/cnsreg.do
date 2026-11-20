@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12, batch E): made-up data; Stata 19's results are in cnsreg.recorded
 * commands: constraint cnsreg
-* (constraint define, list, get, free and drop; cnsreg with one and several constraints, constraints on the constant, weights, robust and clustered errors, if, level(), noconstant, a bare cnsreg to show it again, predict and test after it, e(b), e(V), e(Cns), the F test that goes when the constraints contradict the slopes, and the errors with their return codes)
+* (constraint define, list, get, free and drop; cnsreg with one and several constraints, constraints on the constant, weights, robust and clustered errors, if, level(), noconstant, a bare cnsreg to show it again, predict and test after it, e(b), e(V), e(Cns), the F test that goes when the constraints contradict the slopes, factor variables (the base level a fixed column, 1.g as 1b.g, fixed-at-0 shown as omitted), and the errors with their return codes)
 * tolerance: 1e-8
 version 19
 set linesize 255
@@ -127,3 +127,50 @@ constraint list
 constraint drop _all
 constraint get 1
 display "@ g4 " r(defined)
+* factor variables: the base level is a column fixed at 0 (a row of e(Cns), not a line of the header), 1.g reads 1b.g,
+* a coefficient fixed at 0 shows as omitted, one fixed elsewhere as constrained
+generate byte hh = mod(floor(_n / 3), 2)
+generate byte cg = 1 + mod(floor((_n - 1) / 4), 10)
+constraint define 11 2.g = 3.g
+constraint define 12 1.g = 0
+constraint define 13 _b[2.g] = .5
+constraint define 14 x1 = 0
+constraint define 15 1.g = 2.g
+constraint define 16 2.g + 3.g = 1
+constraint define 17 x2 = 2*x3
+cnsreg y x1 i.g, constraints(11)
+shwcns
+display "@ r4 " (e(cmdline) == "cnsreg y x1 i.g, constraints(11)")
+cnsreg y x1 i.g, constraints(12)
+shwcns
+cnsreg y x1 i.g, constraints(13)
+shwcns
+cnsreg y x1 x2 i.g, constraints(14)
+shwcns
+cnsreg y x1 x2, constraints(14)
+shwcns
+cnsreg y x1 ib2.g, constraints(11)
+shwcns
+cnsreg y x1 i.g, constraints(15)
+shwcns
+cnsreg y x1 x3 i.g, constraints(17 16)
+shwcns
+cnsreg y x1 i.g i.hh, constraints(11)
+shwcns
+cnsreg y x1 i.g [aweight = w], constraints(11)
+shwcns
+cnsreg y x1 i.g, constraints(11) vce(robust)
+shwcns
+cnsreg y x1 i.g, constraints(11) vce(cluster cg)
+shwcns
+predict double pf1
+predict double rf1, residuals
+summarize pf1
+display "@ pf1 " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+summarize rf1
+display "@ rf1 " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+test x1
+display "@ tf1 " %24.17g r(F) " " r(df) " " r(df_r) " " %24.17g r(p)
+cnsreg y x1 i.g, constraints(11)
+test 2.g
+display "@ tf2 " %24.17g r(F) " " r(df) " " r(df_r) " " %24.17g r(p)

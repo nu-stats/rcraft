@@ -3791,8 +3791,9 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "Not yet",
                 "A factor level omitted for collinearity, every regressor omitted, \
-                 interactions and ib. bases, iweights (stopped as Stata stops, r(101)), e(datasignature) \
-                 and predict's other statistics.",
+                 powers (I(x^2)), iweights (stopped as Stata stops, r(101)), e(datasignature) \
+                 and predict's other statistics. Interactions (i.g#c.z, c.z##i.h, i.g#i.h, c.x#c.z) \
+                 and ib. bases are taken, with e(b) as Stata names it (1b.g#c.z, 2b.g).",
             ),
         ],
     },
@@ -3881,9 +3882,18 @@ pub const GUIDES: &[Guide] = &[
             ),
             p(
                 "Not yet",
-                "Factor variables and operators in the model, iweights, collinear, mse1, and \
+                "Interactions and operators in the model, factor variables with noconstant or with \
+                 regressors omitted for collinearity, iweights, collinear, mse1, and \
                  constraints with more than one =, products or powers of coefficients (Stata: r(131)) \
                  beyond the error, or the [eq]x form beyond its r(303).",
+            ),
+            p(
+                "Factor variables",
+                "i.g and ib#.g are taken: the base level is a column of e(b) fixed at 0 by a constraint of its \
+                 own (the first rows of e(Cns), not lines of the header; 1.g in a constraint reads the base \
+                 1b.g), the degrees of freedom count it, and the table hides the base row. A coefficient the \
+                 constraints fix at 0 prints `0  (omitted)` (a plain variable too), one fixed elsewhere \
+                 `(constrained)`. The residual after predict is in double with factor variables.",
             ),
         ],
     },

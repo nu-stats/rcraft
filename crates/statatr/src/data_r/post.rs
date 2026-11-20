@@ -655,6 +655,11 @@ impl Session {
                     r_name(&est.dep)
                 ),
                 Fit::Ivregress => format!("unname(stata_iv_xb(stata_estimates, {d}))"),
+                // with factor variables Stata's residual is in double (probe 2026-11-20)
+                Fit::Cnsreg if opts.has("residuals", 1) && !est.factors.is_empty() => {
+                    self.helpers.insert("stata_lsfam");
+                    format!("{} - stata_ls_xb(stata_e, {d})", r_name(&est.dep))
+                }
                 Fit::Cnsreg if opts.has("residuals", 1) => {
                     self.helpers.insert("stata_lsfam");
                     self.helpers.insert("stata_float");

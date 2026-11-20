@@ -27,6 +27,11 @@ ported from statcraft@b7d392e) had the rules; the layout, e() and the cluster qu
   and e(V). df_r = N - k - G and e(rank) count only the slopes kept; e(df_m) too. Checked by sequential projection of
   the within columns, tolerance 1e-7 of the column's norm.
 
+- **Interactions and ib. bases** (2026-11-20, corpus `areg.do` now 205 results): `i.g#c.z`, `c.z##i.h`, `i.g#i.h`, `c.x#c.z` and
+  `ib2.g` are fitted as before and named through `regress`'s e(b) code (a fitted `lm` of the terms gives the layout):
+  `1b.g#c.z` base columns, `2b.g`, `0b.h#co.z`, cells `1b.g#0b.h`. The table is Stata's, the base rows hidden; predict (xb,
+  residuals) and test work. Powers (`I(x^2)`) stay refused.
+
 ## Open
 
 Refused: a factor level omitted for collinearity, every regressor omitted, interactions, `ib.` bases,

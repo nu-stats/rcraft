@@ -320,7 +320,11 @@ impl Session {
             ));
         }
         // interactions and ib. bases go through regress's naming of e(b); other operators do not
-        if spec.terms.iter().any(|t| t.contains("I(") || t.contains('^')) {
+        if spec
+            .terms
+            .iter()
+            .any(|t| t.contains("I(") || t.contains('^'))
+        {
             return Err(no("areg with operators is not translated yet"));
         }
         self.helpers_for(&spec);

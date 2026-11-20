@@ -6128,3 +6128,13 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   of a collinear set. Notes `plan/stata/{constraint,logistic,areg}.md`.
 - **Still refused:** ROADMAP P2C.12ao round 4b.
 - **Shares:** probes **80.5%** (23,358 translated, 5,653 not, 1,104 known only when run, of 30,115 source lines; was 23,356 with nlsur); packages **94.7%** (4,025 of 4,249), unchanged.
+
+## P2C.12ao round 6: areg interactions and ib. bases, cnsreg factor variables, 2026-11-20
+
+- **Done** (Stata 19 on made-up data; corpus `areg.do` 205 results, `cnsreg.do` 523 results to 1e-8, the printed tables compared with Stata's log line for line):
+  `areg` with `i.g#c.z`, `c.z##i.h`, `i.g#i.h`, `c.x#c.z` and `ib2.g` (e(b) named through `regress`'s code on a fitted layout); `cnsreg` with `i.g` and `ib#.g`
+  (the base level a fixed column and the first rows of e(Cns), `1.g` reading `1b.g`, the table hiding the base row, a coefficient fixed at 0 printed `0  (omitted)`,
+  which also corrects a plain `x = 0` that printed `(constrained)`; residuals in double with factors). Notes `plan/stata/{areg,constraint}.md`.
+- **Still refused:** `cnsreg` with interactions, noconstant, or a factor collinear with another (Stata adds a constraint row of its own); `areg` with powers or an omitted
+  factor level.
+- **Shares:** unchanged by this round (no probe or package line uses these forms).

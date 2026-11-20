@@ -71,8 +71,30 @@ Refused: constraints() with exposure(), offset(), noconstant, iweights, or a reg
 that leave no constraint, are redundant or fix every coefficient. Not checked: the log with pweights in poisson
 (started from the fit, so the log is left out).
 
+
+## cnsreg with factor variables (2026-11-20)
+
+Observed on Stata 19 SE (corpus `cnsreg.do`, 523 results to 1e-8, and the printed output line for line). Translated in
+`crates/statatr/src/data_r/lsfam.rs`.
+
+- `i.g` and `ib#.g` are taken. The columns are Stata's (regress's e(b) code names them on a fitted layout): the base level
+  is a column of e(b) and e(V), zero, and a constraint of its own, `1b.g = 0`, comes **first** in e(Cns) (one row per
+  base level, in column order, before the user's rows). It is not a line of the header; it counts in the degrees of freedom
+  (df_r = N - (k - m) with k the columns including the base ones, m all the rows) and in e(rank) = k - m.
+- A constraint may name `1.g` for the base level: it reads `1b.g` (so `1.g = 0` is the base constraint again, equal rows count
+  once and Stata prints nothing for it), and with `ib2.g` the constraint `2.g = 3.g` reads `2b.g - 3.g = 0`, which fixes 3.g at 0.
+  `_b[2.g]` works; the header shows the name as written in the column (`2b.g - 3.g = 0`).
+- A coefficient the constraints fix **at 0** prints `0  (omitted)` (a level, and a plain variable too: `x = 0`), one fixed at
+  another value `(constrained)`. The table hides the base row.
+- The residual after predict is in double with factor variables (plain cnsreg's is `y - float(xb)`).
+- A factor collinear with another (hh a function of g) makes Stata add a constraint row of its own for the omitted column; not
+  translated (the corpus avoids it). Clustering on the factor's own variable gives a rank-limited variance whose e(rank) and
+  F differ; not matched.
+
+Refused: noconstant with factor variables (Stata prints no base row and no header then), interactions and powers.
+
 ## Open
 
-Refused: factor variables and operators in the model, iweights, `collinear`, `mse1`, a constraint with more than one `=` or
+Refused: interactions and operators in the model, factor variables with noconstant or collinear with another, iweights, `collinear`, `mse1`, a constraint with more than one `=` or
 `==` (Stata reads `x1 = x2 = 2` as `x1 - x2 = 0` and `x1 x2 = 0` as `x1 = 0` with x1 omitted: odd, not followed),
 every coefficient fixed, numbers above 1999, and the `constraints()` option of other models (sspace, spregress; logit, probit and poisson: above).
