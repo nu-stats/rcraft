@@ -164,6 +164,10 @@ const KEEP_SAVED: &[&str] = &[
     "estimates",
     "preserve",
     "restore",
+    "frame",
+    "frames",
+    "cwf",
+    "pwf",
 ];
 
 /// Commands that leave the data changed since they were saved (checked as above).

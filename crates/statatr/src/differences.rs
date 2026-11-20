@@ -143,7 +143,8 @@ pub const GUIDES: &[Guide] = &[
                  its stream exactly Stata's. rpoisson(), rbeta() with equal shapes above 1, \
                  rbinomial(), rnbinomial() and \
                  rhypergeometric() past the ranges whose method is known (they stop with the \
-                 reason), simulate and permute, two draws in one expression and version 13 or \
+                 reason), simulate and permute, two draws in one expression other than plain \
+                 runiform()s (several of those are Stata's, a row at a time) and version 13 or \
                  earlier are refused.",
             ),
             p(

@@ -2316,14 +2316,24 @@ impl<'f> Run<'f> {
                 self.push(line, What::Command, None, text);
                 Flow::Line
             }
+            // `frame name { ... }` runs each command inside as `frame name: command`
             Opener::Frame { name } => {
-                let written = format!("frame {name} {{");
-                self.refuse_block(
-                    g,
-                    depth,
-                    written,
-                    &Stop::Not("frames (frame name { }) are not translated yet".into()),
-                )
+                self.done_item(depth);
+                let mut prefixes = prefixes;
+                prefixes.push(Prefix::Frame(name.clone()));
+                self.push_control(
+                    g.span,
+                    format!("frame {name} {{"),
+                    format!("each command in the block runs in the frame {name}"),
+                    format!("frame {name} {{"),
+                );
+                self.frames.push(Frame {
+                    items: Rc::new(g.body.clone()),
+                    at: 0,
+                    kind: Kind::Body,
+                    prefixes,
+                });
+                Flow::Line
             }
         }
     }

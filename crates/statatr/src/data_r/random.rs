@@ -154,6 +154,13 @@ stata_runiform <- function(rows, a = 0, b = 1) {
   out[need] <- a[need] + (b[need] - a[need]) * stata_rng_u(stata_rng_words(sum(need)))
   stata_rng_out(out)
 }
+stata_runiform_k <- function(rows, k) {
+  sel <- stata_rng_rows(rows)
+  out <- matrix(NA_real_, length(sel), k)
+  m <- sum(sel)
+  if (m > 0) out[sel, ] <- matrix(stata_rng_u(stata_rng_words(m * k)), nrow = m, ncol = k, byrow = TRUE)
+  out
+}
 stata_rnormal <- function(rows, m = 0, s = 1) {
   sel <- stata_rng_rows(rows)
   n <- length(sel)

@@ -64,8 +64,12 @@ What (a) costs:
 
 ## Refused, with the reason
 
-- Two random draws in one expression (`runiform() + rnormal()`), or in both the value and the `if`. Stata takes
-  them in turn for each row.
+- Two random draws in one expression other than plain `runiform()` or `uniform()` (`runiform() + rnormal()`,
+  `runiform(0, 1) + runiform()`), or in both the value and the `if`, or two among the arguments of one function
+  (`max(runiform(), 5 * runiform())`: Stata reads a function's arguments from the last to the first; `max` and
+  `cond` were seen, not the others). The `if` and the value of one `generate` take their draws per row, the
+  condition first and the value only for a row it selects (`gen w = 1000*runiform() if runiform() < .8`), which
+  needs a row-by-row loop, so it stays refused.
 - A draw in an `if` together with `in` (not observed).
 - Draws anywhere else (`summarize if runiform() < .5`, `egen`, the models' `if`).
 - The other random functions (`runiformint()`, `rbinomial()`, `rpoisson()`, `rt()`, `rbeta()`, ...).
@@ -112,7 +116,6 @@ Windows.
   several exactly (`plan/stata/random-numbers.md` there). `stata_rng_words()` already gives the raw 64-bit
   outputs that `runiformint()` needs.
 - `c(rngstate)` and `set rngstate`, `set rng`, `set sortseed`. KISS32 under `version` 13 or earlier.
-- Two draws in one expression: they would need a row-by-row helper.
 - `bsample`, `bootstrap`, `simulate`: they draw, and they are not translated.
 
 ## `bsample` (P2C.16)
@@ -254,3 +257,21 @@ draw took, against the mt64 stream RCraft already reproduces.
 - `rpoisson()`: not looked at again; StatCraft's notes above stand. The manual names Kemp and Kemp
   (1990, a composition-search algorithm for low means; 1991) and Kachitvichyanukul (1982), which fits
   StatCraft's two-stage search below a mean of about 10 and its change of method further up.
+
+## Several `runiform()` in one expression (P2C.12ap, 2026-11-19)
+
+Read off Stata 19 SE with made-up data (`set seed 7`, a first column of the stream to compare, 12 rows):
+- **A row takes its draws in turn**, not a column at a time: with `a = runiform() + 1000*runiform()`, row 1 is draw 1 plus
+  1000 times draw 2, row 2 draws 3 and 4, and so on; the next `runiform()` after 4 rows of 2 draws is the 9th.
+- **Operands go left to right, as written**, for `+`, `-`, `*`, `/` and `^` (`runiform() - 1000*runiform()`,
+  `1000*runiform() + runiform()`), comparisons (`(runiform() < .5) + 10*(runiform() < .5)`), nested single-argument
+  functions (`invnormal(runiform())`) and three draws.
+- **The arguments of a function are read from the last to the first**: `max(runiform(), 5*runiform())` gives the second
+  its first draw; `cond(c, a, b)` takes all three arguments' draws, last first. Refused in RCraft when two draws sit
+  among the arguments of one function.
+- **The same in `generate`, `replace ... if` (only the selected rows draw), `keep if`, `drop if`, `display`, `scalar`
+  and `local`.**
+- `runiform(0, 1)` drew the same as `runiform()`; RCraft takes several draws in one expression only for `runiform()` and
+  `uniform()` with no arguments (the others take a varying number of uniforms).
+- RCraft: the R helper `stata_runiform_k(rows, k)` draws k columns for the selected rows at once, a row's k draws side
+  by side; the translated expression reads column j for the j-th draw in reading order. `runiform_turns.do` in the corpus.
