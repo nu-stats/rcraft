@@ -1,11 +1,13 @@
-# nlsur (2026-11-19, round 4 2026-11-20)
+# nlsur (2026-11-19, round 4 and round 5 2026-11-20)
 
-Observed on Stata 19 SE with made-up data (corpus `nlsur.do`, 680 results to 1e-6; the iteration log compared by eye
+Observed on Stata 19 SE with made-up data (corpus `nlsur.do`, 853 results to 1e-6; the iteration log compared by eye
 on scratch do-files, line for line, and the corpus run's printed lines against Stata's log). StatCraft's note (probe
 537; ported from statcraft@b7d392e) had the step rule and the formulas; what changed here is the derivative step, the
 stopping rule, which variance matrix Stata keeps, the constant, the rows used, the `nls` pass and the layout details
 below. Round 4 added weights, `vce(robust)`, `vce(cluster)`, the hidden `nls` pass, the iteration cap, the table of a run
-that runs out of steps, `{name: varlist}`, `variables()` and postestimation. Translated in
+that runs out of steps, `{name: varlist}`, `variables()` and postestimation; round 5 iweights, clusters with missing
+values, a linear combination written twice, e() after r(430), margins, `estat summarize` and `estat vce`'s layout, and
+the function-evaluator form. Translated in
 `crates/statatr/src/data_r/nlsur.rs`.
 
 Stata's log is the Gauss-Newton path itself, so it reproduces exactly once the step and the stopping rule are right.
@@ -18,7 +20,9 @@ kept in order of first appearance (not sorted, unlike `nl`), and the start is 0 
 expression with a space before each `{` and after each `}`, runs of spaces made one.
 
 **Linear combinations.** `{xb: x1 x3}` is the parameters `xb_x1` and `xb_x3` (start 0, in that place in the order), and
-the stored expression has `({xb_x1} *x1 + {xb_x3} *x3)` in its place (no space after the parenthesis).
+the stored expression has `({xb_x1} *x1 + {xb_x3} *x3)` in its place (no space after the parenthesis). Written again
+with the same variables (in the same or another equation) it is the same parameters: e(params) lists them once and
+e(params_2) has them too. (`{xb:}` with no variables is not Stata's syntax: "too few variables specified", r(102).)
 
 **Gauss-Newton, as Stata takes it.** Residuals stacked equation by equation, each row times the square root of its
 weight, whitened by Sigma (the identity in the NLS stage). Derivatives are forward differences, each parameter moved by
@@ -37,7 +41,7 @@ paths and stops one iteration early on others (found on a fit whose last step wa
 `iterate()` caps the steps per stage; **the default is 300** (seen with `eps(1e-300)`: Iteration 0 to 299 in each stage).
 Running out of steps in a stage does not stop the next stage; at the end of `nls` or `fgnls` the table is printed as
 usual (same variance rule as below, matched on `iterate(2)` to 4e-8) and the command ends with r(430) and **no message**
-(e(converged) = 0; Stata keeps e(), RCraft does not). Under `ifgnls`, `iterate()` caps each stage's steps but running
+(e(converged) = 0; e() is kept, the table's results, and RCraft keeps it too). Under `ifgnls`, `iterate()` caps each stage's steps but running
 out is not an error: the rounds go on until their own rule holds (`iterate(1)`: five rounds of one step each, r(0),
 e(converged) = 1).
 
@@ -59,7 +63,9 @@ FGNLS rule with that diagonal Sigma, e(Sigma) the diagonal. Checked to 1e-9 on t
 covariances are 0** (round 3 printed them from the full Sigma; corrected).
 
 **Weights.** fweights are copies: N is their sum (the Obs column and e(N) too), Sigma divides by it. aweights and
-pweights are scaled to sum to the rows; N is the rows. pweights imply `vce(robust)`. Weighted, the first line is
+pweights are scaled to sum to the rows; N is the rows. pweights imply `vce(robust)`. iweights are taken as they are,
+as fweights (N their sum, printed `(obs = N)`, not the sum-of-weights line); `vce(robust)` with them is r(101), "robust
+variances not available with iweights", before the log. Weighted otherwise, the first line is
 `(sum of wgt is #)` with the sum of the weights as given, `%12.0gc` (`225.6666667`, `2,256,666.7`, `.0002256667`,
 `2.25667e+11`, `150,000`), in place of `(obs = N)`. rss, mss and R-squared are weighted (mss against the weighted mean),
 RMSE sqrt(rss/N). e(wtype), e(wexp) (`= w`) after e(estat_cmd).
@@ -74,7 +80,8 @@ with Sigma_final the full matrix from the final residuals (also under `nls`).
 at the **final** estimates (A from the start of the last step, scores from the end: 3e-9 on the diagonal; the other
 combinations are 1e-6 to 1e-2 off). No small-sample factor for robust. Frequency weights count each copy's score once
 (w_i s s', not (w s)(w s)'). Clusters: the scores summed within each cluster, times G/(G-1) (N-1)/(N-k) (k the
-parameters); the table has `(Std. err. adjusted for G clusters in v)` and the `Robust` header. e(vcetype) `Robust`, e(vce)
+parameters); a row whose cluster variable is missing is left out (obs = 149 with one missing); the table has
+`(Std. err. adjusted for G clusters in v)` and the `Robust` header. e(vcetype) `Robust`, e(vce)
 `robust` or `cluster`, e(clustvar), e(N_clust) (after k_eq_model; with clusters the scalars end converged, k_eq, rank).
 Off-diagonal entries that are small beside the diagonal agree only to about 1e-6 (derivative noise); the corpus checks
 the diagonal and the larger ones.
@@ -108,28 +115,54 @@ k (default 1); a bare `predict` prints `(option yhat assumed; fitted values)`. `
 
 **Postestimation.** `test`, `lincom` and `nlcom` work on e(b) and e(V) with z: `/a1`, `[a1]_cons`, `_b[/a1]` and
 `_b[a1:_cons]` all name the parameter, and the lines show `[a1]_cons` (`test /a1 = 1` prints `( 1)  [a1]_cons = 1`).
-nlcom's table has no variable over it. `estat ic`: N = e(N), ll(null) `.`, df = e(rank). `estat vce` the usual table.
+lincom's and nlcom's tables have no variable over them. `estat ic`: N = e(N), ll(null) `.`, df = e(rank).
+`estat summarize`: `  Estimation sample nlsur` and `Number of obs = ` (`%10s`, commas) on one line, then the dependent
+variables' mean, std. dev., min and max over e(sample) (`%9.0g` in fields of 13, 14, 13, 13 after the bar; the table
+indented by 2, 67 wide). `estat vce` (and `, correlation`, `%8.4f`): each parameter its own equation, a header row of the
+names (left in 10, after a space) and a row of `_cons`, then for each parameter a rule, its name row and its `_cons` row
+of the lower triangle (`%10.0g` right in 10 between single spaces); the rules and name rows end one column short.
+Other subcommands are Stata's own error (`estat gof not valid`, r(321)).
+
+**margins.** The model has no covariates: `margins` is the predictive margin, the mean fitted value of equation k
+(`predict(equation(#k))`, yhat by default) over e(sample) and the rows if/in keep (weighted as the fit was: fweights in N),
+with the delta-method variance from e(V). Layout: a blank line, `Predictive margins` with `Number of obs = N` ending at
+column 78, `Model VCE: GNR` (`Robust` after vce(robust)), a blank line, `Expression: Equation k fitted values, predict(...)`
+with predict()'s text as typed (`predict()` when none), a blank line, then the z table with `Delta-method` over
+`Margin   std. err.` and the row `_cons`. r(b), r(V), r(N), r(level). `dydx()` and its kind are r(322) ("invalid dydx()
+option; x1 not found in list of covariates"), `at()` r(322) ("model contains no indepvars"), `predict(residuals)`
+r(498) ("prediction is a function of possibly stochastic quantities other than e(b)").
+
+**The function-evaluator form.** `nlsur name @ y1 y2 x1 x2, parameters(a1 b1 a2 b2 c) neq(2) [initial(a1 1 ...)]` calls
+the program `nlsurname` with the first neq() variables to fill with fitted values (copies), the others, `if` the
+estimation rows and `at()` a row vector of the parameters. The rows are those with every variable of the varlist present
+(and if/in). The fit is the same Gauss-Newton path as the substitutable form (the log and the estimates agree with the
+expressions written out, to every digit); the table's Parms column is `.`, no equation has a constant (uncentred R-squared
+with `*`, `(none)`), e(constants) `. .`, e(type) `3`, e(rhs) the other variables, e(funcprog) the program; there are no
+e(k_i), e(params_i) or e(sexp_i). RCraft runs the program's lines once, at the starting values on copies of the dependent
+variables, and makes the same R the function each step calls; a program line that is not translated, or that needs a
+value from R while it is translated, refuses the fit. `parameters()` without the evaluator form is r(198)
+("parameters(a1 b1 a2 b2 c) not allowed").
 
 ## Cases
 
 - Zero starts on `{a2} + {b2}*exp({c}*x2)`: the b2 and c columns are zero or dependent at the start, only a2 moves,
   b2 and c end as `(constrained)` at 0, e(rank) = 3, Sigma's off-diagonal is the NLS one.
 - Shared parameters under FGNLS (default): the NLS stage is the stacked least squares; FGNLS with the full Sigma follows.
-- `iterate(2)`: both stages stop after two steps, the table is printed, then r(430) with no message.
+- `iterate(2)`: both stages stop after two steps, the table is printed, then r(430) with no message; e() holds that fit.
 - `ifgnls, iterate(1)`: five rounds of one step, r(0), e(converged) = 1.
 - Two equations with the same dependent variable work (the table is headed `y1`).
-- fweights 1-4 on 150 rows: `(sum of wgt is 375)`, Obs 375, e(N) 375.
+- fweights 1-4 on 150 rows: `(sum of wgt is 375)`, Obs 375, e(N) 375; the same as iweights: `(obs = 375)`.
 
 ## Open
 
-- Refused, with a message: iweights, `parameters()` (Stata: "not allowed" outside the evaluator form),
-  `hasconstants()`, the function-evaluator form, a linear combination named twice (`{xb:}` reused), factor variables,
-  a parameter named as a variable, `vce(cluster v)` with missing values of v (not probed), `vce()` other than gnr,
-  robust and cluster, `margins` and `estat` other than ic and vce after `nlsur`.
-- After r(430) Stata keeps e() (the table's results); RCraft's run stops in R, so e() and `_b[]` after a captured
-  unconverged `nlsur` are not R's.
+- Refused, with a message: `hasconstants()` and `nparameters()`; the evaluator form with weights, `variables()`,
+  `noconstant`, `predict` or `margins` after it; a linear combination over other variables under a name already used;
+  factor variables; a parameter named as a variable; `vce()` other than gnr, robust and cluster; iweights whose sum is
+  not a whole number (the `(obs = #)` line not seen); `margins` with terms, `over()` or `post`; `estat` subcommands not
+  seen in Stata (only `gof` was probed as r(321)).
 - `eps()` far below the default: with `eps(1e-300)` Stata printed `(none)` and an uncentred R-squared for an equation
   whose constant it finds at the default; the constant check seems to use a tolerance tied to eps(); not decoded.
 - Noise-level paths: a parameter whose true value is about 0 (`{xb: x1 x3}` on y1, where x3's coefficient is -0.001)
   takes 8 steps in Stata and 6 here, the estimate agreeing to 7e-9 absolute (6e-6 relative); the last `ifgnls` round's
-  changes (about 1e-6) can differ in the third digit. e() scalars carry the last 1e-11 of noise (rss, ll).
+  changes (about 1e-6) can differ in the third digit; a printed standard error can differ in its seventh digit. e()
+  scalars carry the last 1e-11 of noise (rss, ll). `estat ic` prints R's table, as after every model in RCraft.

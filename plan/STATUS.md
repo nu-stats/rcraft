@@ -6136,3 +6136,18 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Left, listed:** `areg` with interactions and `ib.` bases and `cnsreg` with factor variables (the e(b) names with base-level columns, `1b.g#c.z`, `2.g` constraints and
   `(omitted)` rows, are `regress`'s machinery); `xi` with a factor in two terms or `|` between factors. A `regress` limit seen here: with every dummy of two factors in a model
   Stata and RCraft omit different columns.
+
+## P2C.12ao round 5: what nlsur still refused, 2026-11-20
+
+- **Done** (corpus `nlsur.do`, 853 results to 1e-6, 173 new; the printed lines compared with Stata 19's log): iweights
+  (taken as they are, N their sum, `(obs = N)`; robust with them is Stata's r(101)), clusters with a missing value (the row
+  left out), a linear combination written twice (the same parameters), `parameters()` without the evaluator form (r(198)),
+  e() kept after a captured r(430), `margins` after nlsur (the predictive margin of one equation's fitted values;
+  `dydx()`, `at()` are r(322), `predict(residuals)` r(498)), `estat summarize`, `estat vce` in Stata's multi-equation
+  layout (and `, correlation`), `estat gof` as Stata's r(321), lincom's table with no variable over it, and the
+  function-evaluator form: the runner (`dofile/nlsur_eval.rs`) runs the do-file's `nlsurname` program once on copies of
+  the dependent variables and makes its R the function each Gauss-Newton step calls; e(type) 3, e(rhs), e(funcprog), no
+  constants, Parms `.`. Note `plan/stata/nlsur.md`.
+- **Still refused:** `hasconstants()`, `nparameters()`, the evaluator form with weights, `variables()` or `noconstant`,
+  `predict` and `margins` after it, `margins` with terms, `over()` or `post`, iweights whose sum is not whole.
+- **Shares:** probes **80.5%** unchanged (23,356 translated, 5,655 not, of 30,115 source lines; the probes use none of these forms).

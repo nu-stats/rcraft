@@ -1681,6 +1681,9 @@ const LEAVE_R_ALONE: &[&str] = &[
     "_rcraft_sm_collect",
     "_rcraft_sm_end",
     "_rcraft_sm_loop",
+    "_rcraft_nlsur_begin",
+    "_rcraft_nlsur_at",
+    "_rcraft_nlsur_collect",
     // marginsplot draws the margins and leaves their r() (Stata 19)
     "marginsplot",
     // putexcel set and its writes leave r() (Stata 19)
@@ -1751,6 +1754,9 @@ const LEAVE_E_ALONE: &[&str] = &[
     "_rcraft_sm_collect",
     "_rcraft_sm_end",
     "_rcraft_sm_loop",
+    "_rcraft_nlsur_begin",
+    "_rcraft_nlsur_at",
+    "_rcraft_nlsur_collect",
     "frame",
     "return",
     "parmest",
