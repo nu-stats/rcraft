@@ -137,6 +137,7 @@ mod tstests;
 mod ttest;
 mod weights;
 mod winsor;
+mod xi;
 mod xport;
 mod xt;
 mod xtdpd;
@@ -328,6 +329,19 @@ impl Translator {
     /// saved in the .dta (panel, time and delta, by tabs; nothing when none),
     /// when this do-file did not save the file itself. Stata puts them back
     /// when it reads the file.
+    /// For `xi`: the R that prints the levels of its factor variables, which only R knows.
+    pub fn xi_question(&self, c: &Command) -> Option<String> {
+        self.s.xi_question(c)
+    }
+
+    /// What R printed for [`Translator::xi_question`], or None when it could not say.
+    pub fn xi_answer(&mut self, text: Result<String, String>) {
+        self.s.xi_plan = Some(match text {
+            Ok(t) => t,
+            Err(why) => format!("\u{1}{why}"),
+        });
+    }
+
     pub fn saved_ts_question(&self, c: &Command) -> Option<String> {
         // `use varlist using f` may leave the panel or time out
         if c.name != "use" || c.using.is_some() || c.parts.main.trim().is_empty() {
@@ -1508,6 +1522,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_sureg" => sureg::SUREG_HELPER,
         "stata_areg" => areg::AREG_HELPER,
         "stata_qreg" => qreg::QREG_HELPER,
+        "stata_xi" => xi::XI_HELPER,
         "stata_est_mark" => returned::EST_MARK_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
         "stata_read_delim" => READ_DELIM_HELPER,
@@ -1897,6 +1912,9 @@ struct Session {
     /// The command being translated asked whether it is quiet, so it hides
     /// its own output.
     quiet_asked: std::cell::Cell<bool>,
+    /// xi: the levels R gave for the line about to be translated, and the variables xi made.
+    xi_plan: Option<String>,
+    xi_made: Vec<String>,
     /// The command being translated takes Stata's random draws.
     drew: std::cell::Cell<bool>,
     /// Why the generator's state is not Stata's: a line that may have drawn
@@ -3211,6 +3229,7 @@ impl Session {
             "sureg" => self.sureg(c, &opts, out),
             "areg" => self.areg(c, &opts, out),
             "qreg" => self.qreg(c, &opts, out),
+            "xi" => self.xi(c, out),
             "mvreg" => self.mvreg(c, &opts, out),
             "marginsplot" => self.marginsplot(c, &opts, out),
             "estadd" => self.estadd(c, &opts, out),

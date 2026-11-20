@@ -6040,6 +6040,16 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   with fweights `sureg` prints one more blank line; `areg` clustered has e(rank) = k and, off the absorbed variable, no
   e(sum_w). R's `quantreg` did not match Stata where `qreg`'s minimum is not unique, and neither did StatCraft's descent on
   two of four such fits, so those fits stop with a message.
-- **Still refused:** see ROADMAP P2C.12ao. `nlsur` and `xi` are not started (7 probe lines each).
+- **Still refused:** see ROADMAP P2C.12ao. `nlsur` is on hold (7 probe lines); `xi` followed in round 2.
 - **Shares:** probes **80.2%** (23,278 of the 29,018 lines a dry run judges; was 79.8%, 23,159, with the expression-error batch; 78.7% before both); packages **94.7%** (4,025 of
   4,249), unchanged.
+
+## P2C.12ao round 2: xi, 2026-11-19
+
+- **Done** (checked in Stata 19 on made-up data, corpus `xi.do`, 54 results to 1e-8): `xi: cmd`, `xi terms`, `xi, prefix(): cmd`; `i.g` dummies
+  (byte, labelled `g==#`), `i.g*i.h`, `i.g*x`, `i.g|x`; the omitted level from `char _dta[omit] prevalent` and `char g[omit]`; the term lines, e(cmdline) with the stubs
+  (`regress y _Ig_* x`); an earlier run's variables of the same prefix dropped. The dummies' names depend on the levels of the data, so the do-file runner
+  asks R for them (`Translator::xi_question`); a dry run leaves the line as known only when run. Note `plan/stata/xi.md`.
+- **On hold, to be built:** `nlsur` (7 probe lines; Stata's own Gauss-Newton iteration log, the step rule not decoded) and `qreg` where the minimum is not
+  unique (Stata's choice among optimal vertices not reproduced; these fits stop with a message).
+- **Shares:** probes **80.2%** (23,278 translated, 5,733 not, 1,104 known only when run; the 7 `xi` lines moved from refused to when-run); packages **94.7%** (4,025 of 4,249), unchanged.
