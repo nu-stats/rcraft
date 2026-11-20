@@ -869,9 +869,17 @@ impl Session {
             Fit::Clogit => return self.clogit(c, opts, out),
             Fit::Robreg => return self.robreg(c, opts, out),
             Fit::Glm => return self.glm(c, opts, out),
-            Fit::Cnsreg | Fit::Sureg | Fit::Mvreg | Fit::Areg | Fit::Qreg => {
-                return Err(no("this model is not fitted here"))
-            }
+            Fit::Cnsreg
+            | Fit::Sureg
+            | Fit::Mvreg
+            | Fit::Areg
+            | Fit::Qreg
+            | Fit::Tobit
+            | Fit::Intreg
+            | Fit::Truncreg
+            | Fit::Cloglog
+            | Fit::Hetprobit
+            | Fit::Heckman => return Err(no("this model is not fitted here")),
             Fit::Reghdfe => return self.reghdfe(c, opts, out),
             Fit::Cluster2 => return self.cluster2(c, opts, out),
             Fit::Asclogit => return self.asclogit(c, opts, out),
@@ -1087,6 +1095,12 @@ impl Session {
             | Fit::Mvreg
             | Fit::Areg
             | Fit::Qreg
+            | Fit::Tobit
+            | Fit::Intreg
+            | Fit::Truncreg
+            | Fit::Cloglog
+            | Fit::Hetprobit
+            | Fit::Heckman
             | Fit::Reghdfe
             | Fit::Cluster2
             | Fit::Asclogit
@@ -1172,6 +1186,12 @@ impl Session {
             | Fit::Mvreg
             | Fit::Areg
             | Fit::Qreg
+            | Fit::Tobit
+            | Fit::Intreg
+            | Fit::Truncreg
+            | Fit::Cloglog
+            | Fit::Hetprobit
+            | Fit::Heckman
             | Fit::Reghdfe
             | Fit::Cluster2
             | Fit::Asclogit

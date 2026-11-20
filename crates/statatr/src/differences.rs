@@ -3805,6 +3805,95 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "tobit",
+        about: "Censored (tobit) regression",
+        points: &[
+            p(
+                "As Stata 19",
+                "tobit y x..., ll(#) ul(#) as Stata fits it: its gsem-style log (Refining starting values, Grid node 0, \
+                 Fitting full model), the least squares start with sigma^2 as the parameter, ml's Newton steps, the \
+                 header with the censoring counts and limits, the LR test (F with robust, pweights or clusters, on N - k \
+                 degrees of freedom), var(e.y) with its interval, e(). fweights, pweights, iweights, vce(robust), \
+                 vce(cluster), level(), nolog, factor variables, replay. predict gives xb, stdp, stdf, pr(a,b), e(a,b), \
+                 ystar(a,b); estat ic is in R's layout.",
+            ),
+            p(
+                "Not yet",
+                "aweights (each row's own variance), from(), iterate(), noconstant, interactions and ib. bases, \
+                 stepwise and nestreg with tobit, estat other than ic, margins.",
+            ),
+        ],
+    },
+    Guide {
+        command: "intreg",
+        about: "Interval regression",
+        points: &[
+            p(
+                "As Stata 19",
+                "intreg lo hi x...: missing lo is left-censored, missing hi right-censored, equal values exact. Olsen's \
+                 parameters with both logs (constant-only and full), LR or Wald test, /lnsigma and sigma, fweights, \
+                 pweights, iweights, robust, clustered, factor variables, replay, predict (xb, stdp, stdf, pr, e, ystar).",
+            ),
+            p("Not yet", "aweights, from(), iterate(), het(), interactions, estat other than ic."),
+        ],
+    },
+    Guide {
+        command: "truncreg",
+        about: "Truncated regression",
+        points: &[
+            p(
+                "As Stata 19",
+                "truncreg y x..., ll(#) ul(#): the rows outside the limits are dropped and counted, sigma is a parameter, \
+                 the Wald test, fweights, aweights (rescaled to the rows), pweights, iweights, robust, clustered, replay, \
+                 predict xb and stdp. Stata's derivatives are numerical and ours exact, so estimates agree to about 1e-7.",
+            ),
+            p("Not yet", "factor variables, from(), noconstant, other predict statistics."),
+        ],
+    },
+    Guide {
+        command: "cloglog",
+        about: "Complementary log-log regression",
+        points: &[
+            p(
+                "As Stata 19",
+                "cloglog y x...: Newton steps from the logit fit one iteration before its end (Stata's own start), \
+                 the iteration count, LR or Wald test, e(ll_0), eform, fweights, pweights, iweights (aweights stop as \
+                 Stata stops, r(101)), robust, clustered, replay, predict pr and xb.",
+            ),
+            p("Not yet", "factor variables, from(), offset, noconstant."),
+        ],
+    },
+    Guide {
+        command: "hetprobit",
+        about: "Heteroskedastic probit",
+        points: &[
+            p(
+                "As Stata 19",
+                "hetprobit y x..., het(z...): its probit fit first (Fitting probit model), then the full model from it, \
+                 the Wald test of the slopes and the LR (Wald with robust) test of lnsigma = 0, fweights, pweights, \
+                 iweights, robust, clustered, replay, predict pr, xb, stdp and sigma.",
+            ),
+            p("Not yet", "factor variables, from(), noconstant, offset."),
+        ],
+    },
+    Guide {
+        command: "heckman",
+        about: "Heckman selection model",
+        points: &[
+            p(
+                "As Stata 19",
+                "heckman y x..., select([s =] z...) by maximum likelihood from the two-step start, or twostep: the \
+                 iteration log, the equations, /athrho, /lnsigma, rho, sigma, lambda, the LR (Wald with robust) test of \
+                 independence, fweights, pweights, iweights, robust, clustered, replay. predict gives xb, xbsel, psel, \
+                 mills, ycond and yexp.",
+            ),
+            p(
+                "Not yet",
+                "factor variables (also in select()), mills() and the other options, from(), noconstant, constraints.",
+            ),
+        ],
+    },
+    Guide {
         command: "logistic",
         about: "Logistic regression, reporting odds ratios",
         points: &[

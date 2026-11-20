@@ -39,7 +39,7 @@ impl W {
             W::I => "i",
         }
     }
-    fn word(self) -> &'static str {
+    pub(super) fn word(self) -> &'static str {
         match self {
             W::F => "fweights",
             W::A => "aweights",

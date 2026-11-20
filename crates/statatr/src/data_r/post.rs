@@ -354,6 +354,9 @@ impl Session {
         if self.qreg_active() {
             return self.qreg_predict(c, opts, out);
         }
+        if self.censored_active().is_some() {
+            return self.censored_predict(c, opts, out);
+        }
         if self.areg_active() {
             return self.areg_predict(c, opts, out);
         }
@@ -400,7 +403,16 @@ impl Session {
             ],
             Fit::Ivregress => &[("xb", 2), ("residuals", 1)],
             Fit::Cnsreg => &[("xb", 2), ("residuals", 1)],
-            Fit::Sureg | Fit::Mvreg | Fit::Areg | Fit::Qreg => &[],
+            Fit::Sureg
+            | Fit::Mvreg
+            | Fit::Areg
+            | Fit::Qreg
+            | Fit::Tobit
+            | Fit::Intreg
+            | Fit::Truncreg
+            | Fit::Cloglog
+            | Fit::Hetprobit
+            | Fit::Heckman => &[],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("scores", 2)],
@@ -998,6 +1010,9 @@ impl Session {
         }
         if self.xtdpd_active().is_some() {
             return self.xtdpd_estat(c, opts, out);
+        }
+        if let Some(cmd) = self.censored_active() {
+            return self.censored_estat(c, opts, out, cmd);
         }
         {
             let (s, _) = first_word(&c.parts.main);
