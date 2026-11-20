@@ -250,6 +250,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
             "pwmean_tukey",
         ],
     ),
+    ("qreg", &["qreg"]),
     ("ranksum", &["ranktests"]),
     ("ratio", &["meanest"]),
     ("recast", &["contract"]),

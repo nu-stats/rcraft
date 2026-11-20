@@ -58,6 +58,7 @@ pub(super) enum Fit {
     Sureg,
     Mvreg,
     Areg,
+    Qreg,
 }
 
 impl Fit {
@@ -86,6 +87,7 @@ impl Fit {
             Fit::Sureg => "sureg",
             Fit::Mvreg => "mvreg",
             Fit::Areg => "areg",
+            Fit::Qreg => "qreg",
         }
     }
 

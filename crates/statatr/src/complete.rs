@@ -251,6 +251,7 @@ pub const COMMANDS: &[&str] = &[
     "pwd",
     "pwmean",
     "qnorm",
+    "qreg",
     "quietly",
     "ranksum",
     "ratio",
@@ -1852,7 +1853,7 @@ mod tests {
             options("ta", VARS),
             names(&["tab1", "tab2", "table", "tabm", "tabodds", "tabstat", "tabulate"])
         );
-        assert_eq!(options("q", VARS), names(&["qnorm", "quietly"]));
+        assert_eq!(options("q", VARS), names(&["qnorm", "qreg", "quietly"]));
         assert_eq!(options("quietly regr", VARS), names(&["regress"]));
         assert_eq!(options("qui: reg", VARS), names(&["reghdfe", "regress"]));
         assert_eq!(options("by sex: summ", VARS), names(&["summarize"]));
@@ -2087,6 +2088,7 @@ mod tests {
             "cii" if name == "sd" => format!("cii variances 20 4, {o}"),
             "cii" => format!("cii proportions 20 5, {o}"),
             "clogit" => format!("clogit y x, group(g) {o}"),
+            "qreg" => format!("qreg y x, nolog {o}"),
             "mvreg" => format!("mvreg y y2 = x1 x2, {o}"),
             "sureg" if name == "isure" => "sureg (y x1) (y2 x2), isure nolog".to_string(),
             "sureg" => format!("sureg (y x1) (y2 x2), {o}"),
