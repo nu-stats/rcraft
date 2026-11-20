@@ -1116,9 +1116,21 @@ predict p, e(0, 1)");
         );
         assert!(out[3].contains("select() required"), "{out:?}");
         assert!(out[4].contains("het() required"), "{out:?}");
-        assert!(out[5].starts_with("NOT: tobit with analytic weights"), "{out:?}");
-        assert!(out[6].starts_with("NOT: tobit with the option from"), "{out:?}");
-        assert!(out[7].starts_with("NOT: tobit with interactions"), "{out:?}");
-        assert!(out[8].starts_with("NOT: truncreg with interactions"), "{out:?}");
+        assert!(
+            out[5].starts_with("NOT: tobit with analytic weights"),
+            "{out:?}"
+        );
+        assert!(
+            out[6].starts_with("NOT: tobit with the option from"),
+            "{out:?}"
+        );
+        assert!(
+            out[7].starts_with("NOT: tobit with interactions"),
+            "{out:?}"
+        );
+        assert!(
+            out[8].starts_with("NOT: truncreg with interactions"),
+            "{out:?}"
+        );
     }
 }

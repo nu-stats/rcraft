@@ -1058,16 +1058,17 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     (
         "tobit",
-        &["cluster(", "level(", "ll(", "nolog", "robust", "ul(", "vce("],
+        &[
+            "cluster(", "level(", "ll(", "nolog", "robust", "ul(", "vce(",
+        ],
     ),
     (
         "truncreg",
-        &["cluster(", "level(", "ll(", "nolog", "robust", "ul(", "vce("],
+        &[
+            "cluster(", "level(", "ll(", "nolog", "robust", "ul(", "vce(",
+        ],
     ),
-    (
-        "intreg",
-        &["cluster(", "level(", "nolog", "robust", "vce("],
-    ),
+    ("intreg", &["cluster(", "level(", "nolog", "robust", "vce("]),
     (
         "cloglog",
         &["cluster(", "eform", "level(", "nolog", "robust", "vce("],
