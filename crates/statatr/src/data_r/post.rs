@@ -339,6 +339,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "predict")?;
+        if self.arima_active() {
+            return self.arima_predict(c, opts, out);
+        }
         if self.ivprobit_active() {
             return self.ivprobit_predict(c, opts, out);
         }
@@ -1756,7 +1759,7 @@ stata_bnames <- function() {
     if (length(m)) return(paste(rep(m[2], as.integer(m[3])), collapse = "#"))
     p
   }
-  multi <- inherits(stata_estimates, "multinom")
+  multi <- inherits(stata_estimates, c("multinom", "stata_arima"))
   vapply(names(stata_b), function(n) {
     eq <- ""
     if (multi) {

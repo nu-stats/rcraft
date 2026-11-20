@@ -6136,3 +6136,14 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Left, listed:** `areg` with interactions and `ib.` bases and `cnsreg` with factor variables (the e(b) names with base-level columns, `1b.g#c.z`, `2.g` constraints and
   `(omitted)` rows, are `regress`'s machinery); `xi` with a factor in two terms or `|` between factors. A `regress` limit seen here: with every dummy of two factors in a model
   Stata and RCraft omit different columns.
+
+## P2C.12as: arima (batch AR of the StatCraft port), 2026-11-20
+
+- **Done** (each checked in Stata 19 on made-up data): `arima` with `ar()`, `ma()`, `arima(p,d,q)`, `mar()`, `mma()`, `sarima(P,0,Q,s)`, regressors, `noconstant`, `level()`,
+  `iterate()` and the tolerance options; `predict` after it (`xb`, `y`, `residuals`, `yresiduals`, `mse`, `structural`, `dynamic()`). The likelihood, Stata's starting values and its
+  BHHH-then-BFGS path are StatCraft's decoding, rewritten in R (`data_r/arima/arima.R`); e() carries Stata's equation names, so `_b[ARMA:L.ma]`, `_se[sigma:_cons]` and `matrix list e(b)` read as in Stata.
+- **Corpus:** `arima.do` (tight tolerances, predict, 3e-5), `arima_path.do` (default paths, 2e-4), `arima_more.do` (seasonal terms, several AR lags with MA, MA lag 2; 1e-5).
+  The AR paths (starts, every `iterate(k)`, `e(ic)`, the stop) agree to 1e-6; the MA(1) and ARMA(1,1) default stops to 2e-4 (Stata's line search past the full step is not decoded).
+  e(p) is missing in Stata, as in StatCraft's note.
+- **Still refused / on hold:** see ROADMAP P2C.12as and `plan/stata/arima.md`. `sspace`, `ucm` and `dfactor` are the next piece of this batch.
+- **Shares:** probes **80.9%** (23,464 translated, 5,547 not, 1,104 known only when run, of 30,115 source lines; was 23,343 / 5,668, 80.5%); packages **94.7%** (4,025 of 4,249), unchanged (no package uses arima).

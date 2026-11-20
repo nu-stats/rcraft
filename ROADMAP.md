@@ -684,6 +684,17 @@ Round 5 (2026-11-20, `xi`): factors whose values are not whole numbers from 0 up
   `margins` and other `estat` after `nlsur`, clusters with missing values; e() after a captured r(430) is not kept.
   Measured: probes 80.5% (23,356 translated of 30,115 source lines, 5,655 not; round 3 had 23,291 and 5,720, before
   the svy batch also landed).)
+- P2C.12as arima (batch AR of the StatCraft port, arima done 2026-11-20; sspace, ucm and dfactor follow)
+  (`arima depvar [indepvars], ar() ma() arima(p,d,q) mar() mma() sarima(P,0,Q,s) noconstant level() nolog trace gradient tolerance() ltolerance()
+  nrtolerance() iterate()`: the exact likelihood by the Kalman filter, Stata's starting values (least squares; AR by least squares of the residuals;
+  MA by Hannan and Rissanen's two regressions), its BHHH-then-BFGS path and `ml` stopping rule, OPG standard errors, e() with Stata's equation names, `_b[ARMA:L.ar]`;
+  `predict` with `xb`, `y`, `residuals`, `yresiduals`, `mse`, `structural` and `dynamic(t)`) Verified (corpus `arima.do`, `arima_path.do`, `arima_more.do`; note `plan/stata/arima.md`).
+  Agreement with Stata 19: tight tolerances to 3e-5 (OPG chi2 to 4e-7); every AR path step, `e(ic)` and stop to 1e-6; MA(1) and ARMA(1,1) default stops to 2e-4
+  (Stata's line search past the full step is not decoded); `ar(1 2) ma(1)` and `ma(2)` reach the optimum, their paths are not Stata's.
+  Still refused: time-series operators in the varlist, weights, `constraints()`, `vce()`, seasonal differencing, gaps or missing values inside the sample, collinear
+  regressors, `predict, stdp` and `t0()`, forecasts beyond the data, `estat` and the other post-estimation commands.
+  Measured on top of P2C.12aq (probes only; the probe folder is StatCraft's `observe/dofiles` at b7d392e): 80.5% -> 80.9% (23,343 -> 23,464 translated source lines of 29,011
+  judged; 5,668 -> 5,547 not translated); packages unchanged at 94.7% (none uses arima).)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.
