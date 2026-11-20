@@ -94,20 +94,6 @@ stata_cx_nfit <- function(lo, hi, mid, X, w, fwk, kind, maxit, from = NULL) {
   m$ll_start <- ll_start; m$ll_0 <- cfit$ll; m$cfit <- cfit; m$mu <- mu
   m
 }
-# the design columns of a command's terms for the rows kept
-stata_cx_setup <- function(d, dep, terms, extra = character(), wvar = NULL, cluster = NULL) {
-  tv <- stata_cx_vars(terms)
-  vars <- unique(c(dep, tv, extra, wvar, cluster))
-  stata_cx_check(d, vars)
-  ok <- stats::complete.cases(d[vars])
-  if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
-  rows <- which(ok)
-  mf <- d[rows, , drop = FALSE]
-  des <- stata_cx_design(mf, terms)
-  X1 <- cbind(des$X, 1)
-  if (qr(X1)$rank < ncol(X1)) stop("RCraft: a model with collinear regressors is not translated yet", call. = FALSE)
-  list(rows = rows, mf = mf, des = des, X = des$X, n = nrow(mf))
-}
 # tobit y x, ll(#) ul(#)
 stata_tobit <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wtype = NULL, robust = FALSE, cluster = NULL,
                         level = 95, nolog = FALSE, maxit = 300, cmdline = "", show = TRUE) {

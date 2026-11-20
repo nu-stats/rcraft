@@ -364,6 +364,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("tobit", &["tobit"]),
     ("tokenize", &["made"]),
     ("total", &["meanest"]),
+    ("truncreg", &["truncreg"]),
     ("tsappend", &["tspanel"]),
     ("tsreport", &["tspanel"]),
     ("tsset", &["timeseries"]),

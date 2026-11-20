@@ -147,3 +147,17 @@ stata_cx_rule2 <- function() cat(strrep("-", 13), "+", strrep("-", 64), "\n", se
 stata_cx_head_right <- function(label, value) sprintf("%-18s= %6s", label, value)
 stata_cx_head_count <- function(label, n) sprintf("%17s = %6s", label, n)
 stata_cx_note_clusters <- function(G, v) if (!is.null(G)) cat(formatC(sprintf("(Std. err. adjusted for %s clusters in %s)", format(G, big.mark = ","), v), width = 78), "\n", sep = "")
+# the design columns of a command's terms for the rows kept
+stata_cx_setup <- function(d, dep, terms, extra = character(), wvar = NULL, cluster = NULL) {
+  tv <- stata_cx_vars(terms)
+  vars <- unique(c(dep, tv, extra, wvar, cluster))
+  stata_cx_check(d, vars)
+  ok <- stats::complete.cases(d[vars])
+  if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
+  rows <- which(ok)
+  mf <- d[rows, , drop = FALSE]
+  des <- stata_cx_design(mf, terms)
+  X1 <- cbind(des$X, 1)
+  if (qr(X1)$rank < ncol(X1)) stop("RCraft: a model with collinear regressors is not translated yet", call. = FALSE)
+  list(rows = rows, mf = mf, des = des, X = des$X, n = nrow(mf))
+}

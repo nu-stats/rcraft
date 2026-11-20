@@ -10,6 +10,7 @@ use super::*;
 
 pub(super) const CX_HELPER: &str = include_str!("censored/cx.R");
 pub(super) const TOBIT_HELPER: &str = include_str!("censored/tobit.R");
+pub(super) const TRUNC_HELPER: &str = include_str!("censored/trunc.R");
 
 /// What every command of the batch reads from its line.
 struct Line {
@@ -73,6 +74,7 @@ impl Session {
         let cmd = match fit {
             Fit::Tobit => "tobit",
             Fit::Intreg => "intreg",
+            Fit::Truncreg => "truncreg",
             _ => return None,
         };
         matches!(
@@ -104,9 +106,13 @@ impl Session {
             }
             hi = Some(h);
         }
+        let factors_ok = matches!(name, "tobit" | "intreg");
         let plain = |t: &str| {
             is_name(t)
-                || (t.starts_with("factor(") && t.ends_with(')') && is_name(&t[7..t.len() - 1]))
+                || (factors_ok
+                    && t.starts_with("factor(")
+                    && t.ends_with(')')
+                    && is_name(&t[7..t.len() - 1]))
         };
         if !is_name(&spec.dep) || spec.terms.is_empty() || spec.terms.iter().any(|t| !plain(t)) {
             return Err(no(format!(
@@ -389,6 +395,94 @@ impl Session {
         Ok(())
     }
 
+    /// `truncreg depvar indepvars [if] [in] [weight] [, ll(#) ul(#) vce() level() nolog]`, or a replay.
+    pub(super) fn truncreg(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[
+            ("ll", 2),
+            ("ul", 2),
+            ("robust", 1),
+            ("vce", 3),
+            ("cluster", 2),
+            ("level", 3),
+            ("nolog", 3),
+        ]) {
+            return Err(no(format!(
+                "truncreg with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.main.trim().is_empty() {
+            return self.cx_replay(c, opts, out, "truncreg");
+        }
+        let l = self.cx_line(c, opts, out, &[W::F, W::A, W::P, W::I], "truncreg")?;
+        let ll = limit(opts, "ll")?;
+        let ul = limit(opts, "ul")?;
+        for h in [
+            "stata_cx",
+            "stata_trunc",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+            "stata_eclass",
+        ] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_e <- stata_truncreg({}, {}, {}, ll = {ll}, ul = {ul}{}, robust = {}{}, level = {}, nolog = {}, cmdline = {}, show = {})",
+            l.src,
+            r_text(&l.spec.dep),
+            names(&l.spec.terms),
+            l.wargs(),
+            super::stats::r_logical(l.robust),
+            l.cluster_arg(),
+            r_number(l.level),
+            super::stats::r_logical(opts.has("nolog", 3)),
+            r_text(&super::returned::cmdline(c)),
+            super::stats::r_logical(l.show)
+        ));
+        self.cx_after(
+            c,
+            &l,
+            Fit::Truncreg,
+            "truncreg",
+            &[
+                "cmdline",
+                "cmd",
+                "llopt",
+                "ulopt",
+                "marginsok",
+                "predict",
+                "chi2type",
+                "deriv_useminbound",
+                "opt",
+                "wtype",
+                "wexp",
+                "vcetype",
+                "clustvar",
+                "vce",
+                "title",
+                "user",
+                "ml_method",
+                "technique",
+                "which",
+                "depvar",
+                "properties",
+            ],
+            out,
+        )?;
+        if l.w.is_some() {
+            out.caveat(super::weights::weight_caveat(&l.w));
+        }
+        out.caveat(
+            "truncreg as Stata 19 fits it (least squares start on the rows kept, sigma as a parameter; Newton from exact derivatives where Stata's are numerical, so its later iterations can differ in the last digits)",
+        );
+        Ok(())
+    }
+
     /// `predict [type] newvar [if] [in] [, xb stdp pr(a,b) e(a,b) ystar(a,b)]` after the batch's models.
     pub(super) fn censored_predict(
         &mut self,
@@ -452,6 +546,11 @@ impl Session {
             r_text(w)
         ));
         let (stat, arg) = what.clone().unwrap_or(("xb", None));
+        if cmd == "truncreg" && !matches!(stat, "xb" | "stdp") {
+            return Err(no(format!(
+                "predict, {stat} after truncreg is not translated yet (xb and stdp are)"
+            )));
+        }
         if what.is_none() && !self.quiet(c) {
             out.line("cat(\"(option xb assumed; fitted values)\\n\")");
         }
