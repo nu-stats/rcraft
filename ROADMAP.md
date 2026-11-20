@@ -631,7 +631,7 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   xbd), `sureg` and `mvreg` (two-step GLS, `isure`, `small`, `dfk`, `corr`, fw/aw, `predict` with `equation()`, `test`
   across equations), `qreg` (`nolog`, any quantile, fweights, the iid variance, `predict`), `logistic` and `xi` (round 2, 2026-11-19: `xi: cmd`, `xi i.g`, `prefix()`, `i.g*i.h`, `i.g*x`, `i.g|x`, the omit characteristics) Verified (corpus
   `cnsreg.do`, `areg.do`, `sureg.do`, `qreg.do`, `logistic.do`, `xi.do`; notes `plan/stata/{constraint,areg,sureg,qreg,logistic,xi}.md`).
-  **On hold** (listed, to be built): `nlsur` (7 probe lines: its iteration log is Stata's own Gauss-Newton path, the step rule not decoded; needs Opus-level work). `qreg` ties and the iteration log were built in round 3 (below).
+  `nlsur` and the `qreg` ties and iteration log were built in round 3 (below).
   Still refused: `xi` with a factor in two terms, `|` between factors or `noomit`; `constraints()` of other models;
   `areg` with regressors the absorbed groups make collinear; `logistic, noconstant`.
   Measured on top of P2C.12an: probes 79.8% -> 80.2% (23,159 -> 23,278 translated source lines of 29,018 judged); with `xi` the 7 probe lines move from refused to known only when run (the dry run cannot ask R for the levels; the corpus shows them translating): 23,278 translated, 5,733 not, 1,104 when run; packages 94.7% unchanged (4,025 of 4,249).)
@@ -653,6 +653,19 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   `svydescribe` for later stages, `single`, `generate()`; a stratum sampled completely; `e(V_srs)` and the other SRS matrices.
   Measured on top of P2C.12ao (probes only; the probe folder is StatCraft's `observe/dofiles` at b7d392e): 80.2% -> 80.5% (23,278 -> 23,343 translated
   source lines of 29,018 judged; 5,733 -> 5,668 not translated); packages unchanged at 94.7%.)
+
+- P2C.12ao round 3: `nlsur` (done 2026-11-19, the on-hold item of batch E)
+  (`nlsur (y1 = {a} + {b}*x) (y2 = ...)` with `{name}` and `{name = #}` parameters: NLS, FGNLS and `ifgnls`, Stata's Gauss-Newton
+  log line for line (forward differences, step halving, stop at 1e-5 relative to the old size), the equation table with
+  constants and uncentred R-squared, the z table with `(constrained)` rows, e(), `predict` with `equation(#k)`; options
+  `nolog`, `level()`, `iterate()`, `eps()`, `noconstant`, `initial()`, if and in) Verified (corpus `nlsur.do`, 279 results to 1e-6;
+  note `plan/stata/nlsur.md`, which also records what was found beyond StatCraft's decoding: the stopping rule, the
+  Jacobian Stata's variance keeps, the constant, and that a right-hand-side missing value is r(480), not a dropped row).
+  Still refused: weights, `vce()`, `variables()`, the evaluator form, `{name: varlist}`, `delta()`, `nls` with a parameter
+  shared by two equations (Stata's estimates there are not the stacked least squares), `ifgnls` with `iterate()`; a run
+  that has not converged stops with a message after its log (Stata prints a table, then r(430)). The cap on steps
+  (100) is an assumption. Measured: probes 80.2% -> 80.3% (23,278 -> 23,291 translated of 30,115 source lines, 5,733 -> 5,720 not);
+  packages 94.7% unchanged (4,025 of 4,249).)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

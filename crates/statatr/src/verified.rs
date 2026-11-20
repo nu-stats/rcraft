@@ -200,6 +200,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
             "xtregar_tests",
         ],
     ),
+    ("nlsur", &["nlsur"]),
     ("note", &["notes"]),
     ("notes", &["notes"]),
     ("npregress", &["npregress"]),

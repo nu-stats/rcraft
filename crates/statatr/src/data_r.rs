@@ -78,6 +78,7 @@ mod natscale;
 mod nestreg;
 mod nl;
 mod nlcom;
+mod nlsur;
 mod npregress;
 mod oneway;
 mod outfiles;
@@ -672,6 +673,7 @@ const NAME_TABLES: &[&str] = &[
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
     "ivprobit",
+    "nlsur",
     "npregress",
     "xtabond",
     "xtdpdsys",
@@ -1522,6 +1524,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_rreg" => rreg::RREG_HELPER,
         "stata_medeff" => medeff::MEDEFF_HELPER,
         "stata_nl" => nl::NL_HELPER,
+        "stata_nlsur" => nlsur::NLSUR_HELPER,
         "stata_lsfam" => lsfam::LSFAM_HELPER,
         "stata_sureg" => sureg::SUREG_HELPER,
         "stata_areg" => areg::AREG_HELPER,
@@ -3229,6 +3232,7 @@ impl Session {
             "rreg" => self.rreg(c, &opts, out),
             "medeff" => self.medeff(c, &opts, out),
             "nl" => self.nl(c, &opts, out),
+            "nlsur" => self.nlsur(c, &opts, out),
             "constraint" => self.constraint(c, out),
             "cnsreg" => self.cnsreg(c, &opts, out),
             "logistic" => self.logistic(c, &opts, out),

@@ -210,6 +210,7 @@ pub const COMMANDS: &[&str] = &[
     "newey",
     "nl",
     "nlcom",
+    "nlsur",
     "note",
     "notes",
     "npregress",
@@ -842,6 +843,20 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     ),
     ("newey", &["lag(", "level(", "noconstant"]),
     ("nl", &["iterate(", "level(", "nolog", "variables("]),
+    (
+        "nlsur",
+        &[
+            "eps(",
+            "fgnls",
+            "ifgnls",
+            "initial(",
+            "iterate(",
+            "level(",
+            "nls",
+            "noconstant",
+            "nolog",
+        ],
+    ),
     (
         "nbreg",
         &[
@@ -2112,6 +2127,9 @@ cnsreg y x1 x2 x3, constraints(1) {o}"
             "coefplot" => format!("regress y x\ncoefplot, {o}"),
             "nlcom" => format!("regress y x\nnlcom _b[x], {o}"),
             "nl" => format!("nl (y = {{a = 1}} * exp({{b = 0.1}} * x)), {o}"),
+            "nlsur" => format!(
+                "nlsur (y = {{a = 1}} + {{b = 0.5}} * x) (z = {{c = 1}} + {{d = 0.5}} * x), {o}"
+            ),
             "collapse" => format!("collapse (mean) y, {o}"),
             "contract" if name == "format" => format!("contract g, percent(p) {o}"),
             "contract" => format!("contract g, {o}"),

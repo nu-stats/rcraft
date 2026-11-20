@@ -3726,6 +3726,36 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "nlsur",
+        about: "Systems of nonlinear equations",
+        points: &[
+            p(
+                "As Stata 19",
+                "nlsur (y1 = <expression>) (y2 = <expression>) with {name} and {name = #} parameters (in order of first \
+                 appearance, shared between equations by name; unset starts are 0) is Gauss-Newton on the stacked \
+                 equations, as Stata takes it: forward-difference derivatives, each step halved while it raises the \
+                 criterion, done when no parameter moves by more than eps() (1e-5, relative to |b|); a parameter whose \
+                 derivative column is zero or a combination of earlier ones' stays put and shows (constrained). NLS \
+                 comes first (log: Residual SS), then FGNLS with Sigma from its residuals (Scaled RSS); ifgnls goes \
+                 round again until the parameters and Sigma each change by at most 1e-5 (the Parameter change and \
+                 Covariance matrix change lines). The iteration log, the equation table (RMSE, R-sq with the equation's \
+                 constant, or uncentered with a star), the z table and e() (rss, mss, r2, rmse and k per equation, ll, \
+                 rank, converged, params, constants, sexp, b, V, init, Sigma) follow Stata's; nolog, level(), iterate(), \
+                 eps(), noconstant, initial(), if and in are taken, and predict gives yhat and residuals with \
+                 equation(#k). Failed runs stop as Stata does (an unevaluable start, missing values on the right-hand \
+                 side: r(480)).",
+            ),
+            p(
+                "Not yet",
+                "Weights, vce(), variables(), parameters() and the function-evaluator form, delta(), {name: varlist} \
+                 linear combinations, nls when a parameter is shared by two equations (Stata's estimates there are not \
+                 the stacked least squares), ifgnls with iterate(), and the table of a run that has not converged \
+                 (RCraft stops with a message after the log). The cap on iterations (100) is an assumption. test, \
+                 lincom and margins after nlsur are not translated; _b[a:_cons] works.",
+            ),
+        ],
+    },
+    Guide {
         command: "areg",
         about: "Linear regression absorbing the indicators of one variable",
         points: &[
