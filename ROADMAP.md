@@ -650,7 +650,7 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   and `(option n assumed; ...)` notes after logit, probit and poisson. Verified (corpus `ml_cns.do`, 263 results to 1e-6 and the printed output line for
   line; `areg.do`, 137 results, was 77; notes `plan/stata/{constraint,areg,logistic}.md`). Still refused: `constraints()` with offset/exposure, iweights or a
   regressor omitted for collinearity; poisson with `constraints()` and `noconstant`; areg with a factor level omitted.
-  Measured: probes 80.5% (23,343 -> 23,345 translated; the two `constraints()` probe lines), packages 94.7% unchanged.
+  Measured on top of round 3 (nlsur): probes 80.5% (23,356 -> 23,358 translated; the two `constraints()` probe lines), packages 94.7% unchanged.
 - P2C.12aq Survey design (batch 5 of the StatCraft port, done 2026-11-19, in part)
   (`svyset` with `strata()`, `fpc()`, `singleunit()`, later stages, `[iweight=]`, no PSU, `svyset, clear` and bare `svyset`, with the r()
   it leaves; `svydescribe` (stage 1 with and without a varlist, `finalstage`, `if`/`in`, r()); `svy: mean`, `total`, `ratio` and `proportion` with
