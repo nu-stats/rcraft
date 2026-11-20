@@ -32,7 +32,7 @@ data. Only the files it wrote were read, never its code. RCraft's files were com
 
 ## Not matched yet
 
-- Its own number format without bdec() and tdec() (`0.000887`, `(7.83e-05)`, `-1,011`, `(994.5)`).
+- (Done 2026-11-20: its own number format, below.)
 - `se` with `tex(fragment)`, `lab`, `ctitle()`, `addtext()`, `addstat()`: done on 2026-11-06, below.
 
 ## import delimited
@@ -78,3 +78,38 @@ without it (onecol puts the equations of a model of several in one column; these
 after those three models (corpus `outreg2_onecol.do`) and refuses it after the others. The package's own lines stay
 refused for other reasons: they follow `tobit`, and they have neither `tstat` nor `se` (outreg2's own layout) nor
 `tdec()`, and write `tex(frag)`.
+
+## Its own layout, number format, stats(), word, tex alone (2026-11-20, batch N)
+
+Observed in Stata 19 with made-up data and the files compared byte for byte (corpus `outreg2_layout.do`, each file
+read back whole). Ported from the behaviour StatCraft matches (probe 136), not from the package's code.
+
+- **No `tstat`, no `se`**: the standard errors, as with `se`. `bdec(#)` alone: the coefficient has # decimals and the
+  standard error 3; `sdec(#)` sets the standard error's decimals; `tdec()` is for `tstat` only (with `se` it is ignored).
+- **Own number format** (no `bdec()`/`sdec()`/`tdec()`; also the p value, the confidence limits and a t statistic
+  without `tdec()`), by the size of the number: 1000 up to a million without decimals, with commas
+  (999,999.6 is `1,000,000`); 100 up, 1 decimal; 10 up, 2; 1 up, 3 (so 4 significant digits from 1 up); below 1 three
+  significant digits, i.e. 3 decimals from 0.1, 4 from 0.01, 5 from 0.001, 6 from 0.0001; e-notation with 3 decimals from
+  a million (`1.000e+06`) and with 2 below 0.0001 (`9.90e-05`); under about 5e-11 the number is written with no
+  decimals (`0`, and `-0` for a tiny negative). The size is taken before rounding (9.9996 is `10.000`).
+- **After logit, probit and poisson** the names are the plain ones (no equation name), `Constant`, and no R-squared
+  (only Observations).
+- **`nocons`**: no Constant row. **`noobs`**, **`nor2`**: no Observations row, no R-squared rows. **`noaster`**: no stars
+  and only the first note under the table. **`alpha(a, b, c)` with `symbol(s, t, u)`**: the first symbol for the smallest
+  level; the note lists them as typed (`** p<0.01, * p<0.05`). Taken with `replace` and a .txt or word only.
+- **`stats(...)`**: `coef` alone: one line per variable; `coef se`: the same as the default; `coef tstat`, `coef pval`,
+  `coef ci`: two lines (ci is `(low - high)`, 95%, in the own number format); `coef se tstat pval`: four lines, the
+  standard error and the p value in parentheses, the t statistic not. The table has a row with the dependent
+  variable's name above the variables, as tall as a variable (so no such row for `coef se`). The note names what is in
+  parentheses (`pval in parentheses`, `se pval in parentheses`, `t-statistics in parentheses`, `ci in parentheses`).
+  With `tstat` or `se` too Stata stops (r(198)). `beta` is not translated.
+- **`tex`** alone: a whole document (`\documentclass[]{article}`, a `\setlength` line, `\begin{document}`, the tabular,
+  `\end{document}`) in a .tex file (added when the name has no extension). `tex(frag)` is `tex(fragment)`. `tex(pretty)` is not
+  translated.
+- **`word`**: Rich Text in a .rtf (a name without extension gets .rtf; `.doc` is the same text), and the .txt as ever.
+  A row per line of the .txt; the first row and the VARIABLES row ruled; the last row ruled below; the cell widths are
+  144 twips per character of the longest cell plus one (the VARIABLES cell does not count for the first column); the
+  notes follow; no line end after the last `}`.
+- **Names**: `outreg2 using f.txt` writes f.txt and prints only `dir : seeout`; the name of the file is printed for
+  .xls, .tex and word.
+- Not translated: `label` with word, stats() with bdec/sdec/tdec, `beta`, the new options with `append`, with .xls or .tex.
