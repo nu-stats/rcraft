@@ -361,6 +361,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("testparm", &["mlogit_tests", "testparm", "testparm_models"]),
     ("tetrachoric", &["tetrachoric"]),
     ("tokenize", &["made"]),
+    ("tobit", &["tobit"]),
     ("total", &["meanest"]),
     ("tsappend", &["tspanel"]),
     ("tsreport", &["tspanel"]),
