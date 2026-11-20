@@ -5332,6 +5332,10 @@ pub fn for_line(line: &str) -> Option<&'static Guide> {
         match full(&word).as_str() {
             "quietly" | "capture" | "noisily" => {
                 rest = after.trim_start_matches(':').trim_start();
+                // a block (`quietly {`): the page of the prefix itself
+                if rest.is_empty() || rest.starts_with('{') {
+                    return guide(&word).or_else(|| guide("capture"));
+                }
             }
             "by" | "bysort" => {
                 // the command after the colon
@@ -5374,6 +5378,10 @@ fn full(word: &str) -> String {
         .find(|(n, min)| crate::lang::syntax::abbrev(word, n, *min))
     {
         return (*name).to_string();
+    }
+    // the other names for frame commands
+    if matches!(word, "cwf" | "pwf" | "frames") {
+        return "frame".to_string();
     }
     // the other names Stata takes for bootstrap
     if matches!(word, "bs" | "bstrap") {

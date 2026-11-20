@@ -41,7 +41,6 @@ mod coefplot;
 mod contract;
 mod cut;
 mod dates;
-mod frames;
 mod descr;
 mod dyndoc;
 mod eclass;
@@ -54,6 +53,7 @@ mod esttable;
 mod factor;
 mod filefilter;
 mod files;
+mod frames;
 mod fre;
 mod glm;
 mod graph;
@@ -5983,8 +5983,14 @@ stata_chars_write(\"results.dta\", study_hours)"
             out[1].contains(".stata_draw[, 1]") && out[1].contains(".stata_draw[, 2]"),
             "{out:?}"
         );
-        assert!(out[2].contains("stata_runiform_k(dplyr::n(), 2)"), "{out:?}");
-        assert!(out[3].contains("stata_runiform_k(dplyr::n(), 2)"), "{out:?}");
+        assert!(
+            out[2].contains("stata_runiform_k(dplyr::n(), 2)"),
+            "{out:?}"
+        );
+        assert!(
+            out[3].contains("stata_runiform_k(dplyr::n(), 2)"),
+            "{out:?}"
+        );
         assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
         // what is not translated says why
         for (src, why) in [
@@ -6049,7 +6055,10 @@ stata_chars_write(\"results.dta\", study_hours)"
         assert!(out[5].contains("x > 1"), "{out:?}");
         assert!(out[6].contains("(Stata: r(198))"), "{out:?}");
         assert!(out[7].contains("(Stata: r(124))"), "{out:?}");
-        assert!(out[8].starts_with("NOT: egen byte newvar = cut()"), "{out:?}");
+        assert!(
+            out[8].starts_with("NOT: egen byte newvar = cut()"),
+            "{out:?}"
+        );
         // a label made when the data run cannot be added to here
         let out = r("set obs 5\ngenerate x = _n\negen g = cut(x), group(2) label\nlabel define g 9 \"nine\", add");
         assert!(out[3].starts_with("NOT: label define g"), "{out:?}");
@@ -6079,16 +6088,34 @@ stata_chars_write(\"results.dta\", study_hours)"
             out[8].contains("stata_frames[[\"d\"]] <- stata_frames[[\"c\"]]"),
             "{out:?}"
         );
-        assert!(out[9].contains("dplyr::filter(") && out[9].contains("stata_frames[[\"p\"]]"), "{out:?}");
-        assert!(out[10].contains("c(\"default\", \"b\", \"d\", \"p\")"), "{out:?}");
+        assert!(
+            out[9].contains("dplyr::filter(") && out[9].contains("stata_frames[[\"p\"]]"),
+            "{out:?}"
+        );
+        assert!(
+            out[10].contains("c(\"default\", \"b\", \"d\", \"p\")"),
+            "{out:?}"
+        );
         assert!(out[11].contains("\"default\""), "{out:?}");
-        assert!(out[12].contains("frame nosuch not found (Stata: r(111))"), "{out:?}");
-        assert!(out[13].contains("frame b already defined (Stata: r(110))"), "{out:?}");
+        assert!(
+            out[12].contains("frame nosuch not found (Stata: r(111))"),
+            "{out:?}"
+        );
+        assert!(
+            out[13].contains("frame b already defined (Stata: r(110))"),
+            "{out:?}"
+        );
         assert!(out[14].contains("rm(stata_frames)"), "{out:?}");
-        assert!(out[15].contains("c(\"default\"), c(\" \"), c(\"\"), c(0), c(0)"), "{out:?}");
+        assert!(
+            out[15].contains("c(\"default\"), c(\" \"), c(\"\"), c(0), c(0)"),
+            "{out:?}"
+        );
         // a line that changes the data in a way not followed: whether the frame is unsaved is not known
         let out = r("clear\nset obs 3\ngenerate x = _n\nreplace x = 2\nframe dir");
-        assert!(out[4].starts_with("NOT: frame dir marks the frames"), "{out:?}");
+        assert!(
+            out[4].starts_with("NOT: frame dir marks the frames"),
+            "{out:?}"
+        );
     }
 
     /// Forms found in published replication packages (P2C.9).
@@ -6608,7 +6635,7 @@ restore, not");
             .collect();
         assert_eq!(hidden, [true, true, false, true, false, false], "{out:?}");
         // a line that changes the data and is not translated: the data after it is not known
-        let out = r("use a\nframe copy default other\ndisplay _N\nuse b\ndisplay _N");
+        let out = r("use a\ncross using other\ndisplay _N\nuse b\ndisplay _N");
         assert!(
             out[2].starts_with("NOT: the data in memory is not known here"),
             "{out:?}"

@@ -6081,3 +6081,17 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   them (`test`, `ereturn list`), designs with a second stage under `svy:`, and `over()` of two variables.
 - **Shares:** probes **80.5%** (23,343 translated, 5,668 not, 1,104 known only when run, of 30,115 source lines; was 23,278 / 5,733 with batch E, 80.2%);
   packages **94.7%** (4,025 of 4,249), unchanged (no package uses `svyset` with strata).
+
+
+## P2C.12ap: small forms, fix batch 4, 2026-11-19
+
+- **Done** (checked in Stata 19 on made-up data):
+  - several `runiform()` in one expression: each row takes its draws in turn, operands left to right (`plan/stata/random-numbers.md`);
+    two draws among the arguments of one function stay refused (Stata reads them last to first);
+  - `egen cut()` with `at()` or `group()`, `icodes`, `label` (`plan/stata/egen-cut.md`); the value is read as a single-precision number and
+    group() cuts at the smallest value and the j/k percentiles;
+  - `frame dir`, `frame copy` (`replace`), `frame rename`, `frame put`, `frame create` with variables, `cwf`, `frames reset`, `clear all` with
+    frames, `c(frame)`, `frame name: command` and `frame name { }` (`plan/stata/frames-more.md`).
+- **Corpus:** new `runiform_turns.do` 97, `egen_cut.do` 699 (group() checksums for six sizes by six group counts, in double and float), `frames_more.do` 23.
+- **Shares:** probes **80.8%** (23,452 of the 29,018 lines a dry run judges; was 80.2%, 23,278, with batch E; 79.8% before it); packages **94.7%** (4,025 of 4,249), unchanged.
+- **Still refused:** `frlink`, `frget`, `frval()` (probes 233 and 234), `frame dir` after a line whose effect on the unsaved mark is not followed, `describe, short` with no data.

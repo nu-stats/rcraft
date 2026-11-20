@@ -1127,7 +1127,12 @@ fn a_frame_block_runs_each_line_in_that_frame() {
     let lines = &d.translation.lines;
     let not: Vec<String> = lines
         .iter()
-        .filter_map(|l| l.result.as_ref().err().map(|e| format!("{}: {}", l.stata, e.reason)))
+        .filter_map(|l| {
+            l.result
+                .as_ref()
+                .err()
+                .map(|e| format!("{}: {}", l.stata, e.reason))
+        })
         .collect();
     assert!(not.is_empty(), "{not:?}");
     // the block's lines go to frame b and back: the data in b are 2 x 1
@@ -1135,13 +1140,23 @@ fn a_frame_block_runs_each_line_in_that_frame() {
         .iter()
         .position(|l| l.stata.starts_with("set obs 2"))
         .expect("the block's first line");
-    let code = lines[at].result.as_ref().map(|r| r.code.clone()).unwrap_or_default();
-    assert!(code.contains("stata_frames") && code.contains("set_obs"), "{code}");
+    let code = lines[at]
+        .result
+        .as_ref()
+        .map(|r| r.code.clone())
+        .unwrap_or_default();
+    assert!(
+        code.contains("stata_frames") && code.contains("set_obs"),
+        "{code}"
+    );
     let dir = lines
         .iter()
         .find(|l| l.stata == "frame dir")
         .and_then(|l| l.result.as_ref().ok())
         .map(|r| r.code.clone())
         .unwrap_or_default();
-    assert!(dir.contains("c(\"b\", \"default\")") || dir.contains("\"b\""), "{dir}");
+    assert!(
+        dir.contains("c(\"b\", \"default\")") || dir.contains("\"b\""),
+        "{dir}"
+    );
 }

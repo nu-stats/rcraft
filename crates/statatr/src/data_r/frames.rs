@@ -125,10 +125,14 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         if let Some(o) = opts.other(&[("replace", 7)]) {
-            return Err(no(format!("frame copy with the option {o} is not translated yet")));
+            return Err(no(format!(
+                "frame copy with the option {o} is not translated yet"
+            )));
         }
         let [from, to] = words else {
-            return Err(no("frame copy takes the frame to copy and the name of the copy"));
+            return Err(no(
+                "frame copy takes the frame to copy and the name of the copy",
+            ));
         };
         let (from, to) = (from.to_string(), to.to_string());
         for n in [&from, &to] {
@@ -140,11 +144,15 @@ impl Session {
         let current = self.current_frame();
         let exists = |s: &Self, n: &str| n == current || s.frames.contains_key(n);
         if !exists(self, &from) {
-            out.line(stop_text(&format!("frame {from} not found (Stata: r(111))")));
+            out.line(stop_text(&format!(
+                "frame {from} not found (Stata: r(111))"
+            )));
             return Ok(());
         }
         if exists(self, &to) && !replace {
-            out.line(stop_text(&format!("frame {to} already defined (Stata: r(110))")));
+            out.line(stop_text(&format!(
+                "frame {to} already defined (Stata: r(110))"
+            )));
             return Ok(());
         }
         if from == to {
@@ -223,11 +231,15 @@ impl Session {
             return Ok(());
         }
         if exists(self, &new) {
-            out.line(stop_text(&format!("frame {new} already defined (Stata: r(110))")));
+            out.line(stop_text(&format!(
+                "frame {new} already defined (Stata: r(110))"
+            )));
             return Ok(());
         }
         if old == "default" {
-            return Err(no("frame rename of the default frame is not translated yet"));
+            return Err(no(
+                "frame rename of the default frame is not translated yet",
+            ));
         }
         if old == current {
             self.frame = Some(new);
@@ -273,7 +285,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         if let Some(o) = opts.other(&[("into", 4)]) {
-            return Err(no(format!("frame put with the option {o} is not translated yet")));
+            return Err(no(format!(
+                "frame put with the option {o} is not translated yet"
+            )));
         }
         let Some(into) = opts.arg("into", 4).map(|s| s.trim().to_string()) else {
             return Err(no("frame put needs into(newname)"));
@@ -284,7 +298,9 @@ impl Session {
         let d = self.data()?;
         let current = self.current_frame();
         if into == current || self.frames.contains_key(&into) {
-            out.line(stop_text(&format!("frame {into} already defined (Stata: r(110))")));
+            out.line(stop_text(&format!(
+                "frame {into} already defined (Stata: r(110))"
+            )));
             return Ok(());
         }
         let vars: Vec<&str> = rest.split_whitespace().collect();
@@ -441,7 +457,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         if let Some(o) = opts.other(&[]) {
-            return Err(no(format!("frames with the option {o} is not translated yet")));
+            return Err(no(format!(
+                "frames with the option {o} is not translated yet"
+            )));
         }
         match c.parts.main.trim() {
             "reset" => self.frames_reset(out),
@@ -470,7 +488,9 @@ impl Session {
             return Err(no(format!("frame create: {name} is not a frame name")));
         }
         if *name == self.current_frame() || self.frames.contains_key(*name) {
-            out.line(stop_text(&format!("frame {name} already defined (Stata: r(110))")));
+            out.line(stop_text(&format!(
+                "frame {name} already defined (Stata: r(110))"
+            )));
             return Ok(());
         }
         let mut kinds = BTreeMap::new();
@@ -504,7 +524,9 @@ impl Session {
                     "long" => Storage::Long,
                     "double" => Storage::Double,
                     t if text => {
-                        if let Some(width) = t.strip_prefix("str").and_then(|n| n.parse::<usize>().ok()) {
+                        if let Some(width) =
+                            t.strip_prefix("str").and_then(|n| n.parse::<usize>().ok())
+                        {
                             after.push(format!(
                                 "attr(d[[{}]], \"format.stata\") <- \"%{width}s\"",
                                 r_text(w)

@@ -43,7 +43,12 @@ stata_cut_labels <- function(cuts) {
 
 /// A numlist of plain numbers, `a(d)b` and `a/b`, commas as blanks.
 fn cut_points(text: &str) -> Result<Vec<f64>, Untranslated> {
-    let bad = || no(format!("egen cut() with at({}) is not translated", text.trim()));
+    let bad = || {
+        no(format!(
+            "egen cut() with at({}) is not translated",
+            text.trim()
+        ))
+    };
     let text = text.replace(',', " ");
     let mut out = Vec::new();
     let num = |s: &str| s.trim().parse::<f64>().ok().filter(|v| v.is_finite());
@@ -162,7 +167,7 @@ impl Session {
             }
             (Some(t), None) => {
                 let pts = cut_points(t)?;
-                if pts.windows(2).any(|w| w[0] >= w[1]) {
+                if pts.windows(2).any(|w| matches!(w, [a, b] if a >= b)) {
                     out.line(exists);
                     stop(out, "at() is not in ascending order (Stata: r(124))");
                     return Ok(());
