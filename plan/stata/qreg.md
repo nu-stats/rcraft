@@ -84,7 +84,7 @@ or more zero rows finished, and nothing tried separates them: the number of kink
 edge picked, the sides of the zero rows, re-entering a row that just left (basis revisits: none in any run). Not a rule R can use.
 
 **Eight more data sets, 70 quantiles each (560 Stata fits, unweighted, `quantile((i + .37) / 71.3)`; these have a unique optimum but many rows at zero).**
-Final e(b): **476 of 476** fits where Stata finished (the 84 fits Stata gave up on or that a `float` y made differ were not counted: Stata's `import delimited`
+Final e(b): **476 of 476** fits where Stata finished (the other 84 ended in an error such as r(498) at the ends of the range, so have no e(b); one data set was compared at 5e-6 because Stata's `import delimited`
 stores a y with one decimal as `float`, which moves e(b) by 1e-7, so that data set was compared at 5e-6). Whole log: 479 of 560. By data set: one dummy,
 small n and one regressor 70 of 70, three dummies and a continuous 69, one regressor with ties 68, three levels 66, 2x2 cells 59, and the two sets with a
 continuous x and a rounded y (many duplicated points) 39 and 38. All 81 other misses are tied-order steps, 62 of them in those two sets, and the
