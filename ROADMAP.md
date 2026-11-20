@@ -643,6 +643,11 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   floor(q (N + 1))-th value, and r(498) `VCE computation failed; try a different bandwidth` is exactly q -/+ h outside (0, 1). **Not reproduced:** Stata's cycling
   (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data, and the three e(b) endings above; the log can differ on heavily tied data.
   Measured: probes 80.2% and packages 94.7% unchanged (the probe lines already ran `nolog` or fit continuous data).
+  Round 4 (2026-11-20, closer match on tied data): ties in the breakpoint order go by the row's place in the first sort (smallest weighted deviation under the WLS fit), not
+  row number: on the 140 Stata runs the logged sequence 114 -> 124, the notes 128 -> 134, final e(b) 123 -> 124 of 126 (tuned on all 140: no longer held out). Corpus `qreg.do`
+  344 results (was 234), 115 more with quantiles at the ends of flat pieces. Tried and not better, with the numbers, in `plan/stata/qreg.md`; checked by running Stata at the q +/- h of
+  the failing fits that R's paths are Stata's (5 of 6 logs identical). **Still not reproduced:** Stata's give-up (r(430), r(498) `increasing the maximum number of iterations`) on
+  two-integer-dummy data, and the tied-breakpoint order that rounding noise decides (16 of 140 logs, 2 of 126 e(b)).
 Round 5 (2026-11-20, `xi`): factors whose values are not whole numbers from 0 up (negative, fractional, strings) are named by rank with Stata's header and `g==label` labels, `char s[omit]` for strings, `noomit` (before the terms or the colon), the product's type for `i.g*x`. Verified (corpus `xi.do`, 126 results to 1e-8, was 54; note `plan/stata/xi.md`). Still refused: a factor in two terms, `|` between factors, other options. Left for later and listed: `areg` with interactions and `ib.` bases, `cnsreg` with factor variables (both need `regress`'s e(b) naming and the base-level columns), `constraints()` of sspace and spregress.
 - P2C.12aq Survey design (batch 5 of the StatCraft port, done 2026-11-19, in part)
   (`svyset` with `strata()`, `fpc()`, `singleunit()`, later stages, `[iweight=]`, no PSU, `svyset, clear` and bare `svyset`, with the r()
