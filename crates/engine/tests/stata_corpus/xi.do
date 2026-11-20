@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12, batch E): made-up data; Stata 19's results are in xi.recorded
 * commands: xi
-* (xi: i.g dummies and the omitted level (lowest, prevalent, char g[omit]), i.g*i.h, i.g*x and i.g|x, xi alone, prefix(), the variables an earlier run made dropped, the models run on the dummies)
+* (xi: i.g dummies and the omitted level (lowest, prevalent, char g[omit]), i.g*i.h, i.g*x and i.g|x, xi alone, prefix(), the variables an earlier run made dropped, the models run on the dummies; levels that are negative, fractional or strings named by rank, labels as g==label, noomit, the product's type and format)
 * tolerance: 1e-8
 version 19
 set linesize 255
@@ -63,3 +63,58 @@ xi: logit h i.g x
 display "@ l1 " %24.17g e(ll) " " e(N)
 xi: regress y i.g x if x > 2, robust
 shwxi
+* levels that are not whole numbers from 0 up are named by rank; strings; noomit; the product's type
+char h[omit]
+generate int m = -1 + mod(_n * 11, 3)
+generate double q = 1.5 * (1 + mod(_n * 13, 3))
+generate str5 s = word("lo mid hi", 1 + mod(_n * 7, 3))
+generate long big = cond(mod(_n, 3) == 0, 0, cond(mod(_n, 3) == 1, 40000, 1000000))
+generate float xf = mod(_n * 37, 101) / 20
+replace s = "" in 5
+program define shlab
+    args v lab
+    display "@ lab " (("`: variable label `v''") == "`lab'")
+end
+xi: regress y i.m x
+shwxi
+display "@ r1 " (e(cmdline) == "regress y _Im_* x")
+shlab _Im_2 m==0
+shlab _Im_3 m==1
+xi: regress y i.q x
+shwxi
+shlab _Iq_2 q==3
+shlab _Iq_3 q==4.5
+xi: regress y i.s x
+shwxi
+shlab _Is_2 s==lo
+shlab _Is_3 s==mid
+summarize _Is_2
+display "@ v9 " r(N) " " r(sum)
+xi: regress y i.m*i.h
+shwxi
+shlab _ImXh_2_1 "m==0 & h==1"
+shlab _ImXh_3_1 "m==1 & h==1"
+xi: regress y i.s*x
+shwxi
+shlab _IsXx_2 "(s==lo)*x"
+xi: regress y i.g*xf
+shwxi
+xi: regress y i.g*x
+xi: regress y i.big
+shwxi
+display "@ r2 " (e(cmdline) == "regress y _Ibig_*")
+shlab _Ibig_40000 big==40000
+char s[omit] lo
+xi: regress y i.s x
+shwxi
+shlab _Is_1 s==hi
+shlab _Is_3 s==mid
+char s[omit]
+xi, noomit: regress y i.g, noconstant
+shwxi
+display "@ r3 " (e(cmdline) == "regress y _Ig_*, noconstant")
+xi, noomit: regress y i.h*x, noconstant
+shwxi
+xi, noomit i.g
+summarize _Ig_1
+display "@ v10 " r(N) " " r(sum)
