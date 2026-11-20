@@ -22,7 +22,7 @@ pub(super) const QREG_HELPER: &str = r##"# Stata's qreg path, reproduced from it
 # for the check loss (weights 1/|OLS residual| and 0 where that is zero, which also leaves the row out of the linear term (2q - 1) X'w), then the k rows that step fits
 # best (smallest weighted deviation) as the first vertex, and a descent over the vertices of the linear
 # programme: the edge with the steepest slope per unit of its basic row's weight, along it past every breakpoint
-# until the slope reaches zero (the rows are weighted, ties go to the last edge, the lowest row, and a row at a
+# until the slope reaches zero (the rows are weighted, ties go to the last edge, the row that sorted first, and a row at a
 # residual of zero keeps the side it was last seen on, positive at the start).
 stata_qreg_ir <- function(X, y, w, q) {
   b <- solve(crossprod(X * w, X), crossprod(X * w, y))
@@ -87,7 +87,7 @@ stata_qreg_solve <- function(X, y, w, q, maxit = 1000) {
     t <- abs(rr[kinks]) / abs(cd[kinks])
     add <- 2 * wr[kinks] * abs(cd[kinks])
     idx <- nb[kinks]
-    o <- order(t, idx)
+    o <- order(t, match(idx, ord))
     slope <- gs[m]
     pos <- NA_integer_
     for (ii in seq_along(o)) {

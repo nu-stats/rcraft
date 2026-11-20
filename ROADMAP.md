@@ -643,6 +643,11 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   floor(q (N + 1))-th value, and r(498) `VCE computation failed; try a different bandwidth` is exactly q -/+ h outside (0, 1). **Not reproduced:** Stata's cycling
   (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data, and the three e(b) endings above; the log can differ on heavily tied data.
   Measured: probes 80.2% and packages 94.7% unchanged (the probe lines already ran `nolog` or fit continuous data).
+  Round 4 (2026-11-20, closer match on tied data): ties in the breakpoint order go by the row's place in the first sort (smallest weighted deviation under the WLS fit), not
+  row number: on the 140 Stata runs the logged sequence 114 -> 124, the notes 128 -> 134, final e(b) 123 -> 124 of 126 (tuned on all 140: no longer held out). Corpus `qreg.do`
+  344 results (was 234), 115 more with quantiles at the ends of flat pieces. Tried and not better, with the numbers, in `plan/stata/qreg.md`; checked by running Stata at the q +/- h of
+  the failing fits that R's paths are Stata's (5 of 6 logs identical). **Still not reproduced:** Stata's give-up (r(430), r(498) `increasing the maximum number of iterations`) on
+  two-integer-dummy data, and the tied-breakpoint order that rounding noise decides (16 of 140 logs, 2 of 126 e(b)).
 - P2C.12aq Survey design (batch 5 of the StatCraft port, done 2026-11-19, in part)
   (`svyset` with `strata()`, `fpc()`, `singleunit()`, later stages, `[iweight=]`, no PSU, `svyset, clear` and bare `svyset`, with the r()
   it leaves; `svydescribe` (stage 1 with and without a varlist, `finalstage`, `if`/`in`, r()); `svy: mean`, `total`, `ratio` and `proportion` with

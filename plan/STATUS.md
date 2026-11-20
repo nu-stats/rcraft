@@ -6081,3 +6081,14 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   them (`test`, `ereturn list`), designs with a second stage under `svy:`, and `over()` of two variables.
 - **Shares:** probes **80.5%** (23,343 translated, 5,668 not, 1,104 known only when run, of 30,115 source lines; was 23,278 / 5,733 with batch E, 80.2%);
   packages **94.7%** (4,025 of 4,249), unchanged (no package uses `svyset` with strata).
+
+## P2C.12ao round 4: qreg closer on tied data, 2026-11-20
+
+- **Done:** tied breakpoints enter in the row's place in the first sort (smallest weighted deviation under the WLS fit), not in row order. On the 140 Stata runs (all used
+  to tune it): logged sequence 114 -> 124, notes 128 -> 134, final e(b) 123 -> 124 of 126; the main-fit logs of the two-integer-dummy data where Stata gives up now match too.
+  Corpus `qreg.do` 344 results to 1e-8 (was 234).
+- **Tried and not better** (note `plan/stata/qreg.md`): other tie orders, other sums, a pivoted tableau, a zero-slope tolerance. A search over every pricing, entering and stop choice
+  finds a path for 137 of 140 runs, so what is left is rounding noise deciding which of several tied rows enters.
+- **Not reproduced:** Stata's give-up (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data: R's paths equal Stata's but R does not stop
+  where Stata does (no rule found); 16 of 140 logs and 2 of 126 e(b) (one dummy q = .1, two dummies and a continuous regressor q = .6).
+- **Shares:** unchanged (probes 80.2%, packages 94.7%).

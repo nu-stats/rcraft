@@ -136,3 +136,68 @@ foreach q in .4 .5 .6 {
 }
 capture noisily qreg y x, quantile(.1) nolog
 display "@ e3 " _rc
+* more quantiles on the same kinds of data (the path decides the vertex at the ends of flat pieces)
+clear
+set obs 60
+generate byte d = mod(_n, 3) == 0
+generate double y = round(3 + 2 * d + 2 * sin(_n * 1.9) + cos(_n * .8), .5)
+generate int fw = 1 + mod(_n * 5, 3)
+qreg y d, quantile(.9) nolog
+shwq
+foreach q in .1 .9 {
+    qreg y d [fweight = fw], quantile(`q') nolog
+    shwq
+}
+clear
+set obs 70
+generate byte d1 = mod(_n, 2) == 0
+generate byte d2 = mod(_n, 5) < 2
+generate double x = sin(_n * 1.1) + mod(_n, 4) / 3
+generate double y = round(1 + d1 + .5 * d2 + x + sin(_n * 2.3) * 1.5, .1)
+foreach q in .25 .9 {
+    qreg y d1 d2 x, quantile(`q') nolog
+    shwq
+}
+clear
+set obs 90
+generate byte d = mod(_n, 4) == 0
+generate double x = round(sin(_n * 1.3) * 3, .5)
+generate double y = round(2 + d + .6 * x + 2 * cos(_n * 2.7), 1)
+generate int fw = 1 + mod(_n * 7, 5)
+foreach q in .1 .4 {
+    qreg y d x, quantile(`q') nolog
+    shwq
+    qreg y d x [fweight = fw], quantile(`q') nolog
+    shwq
+}
+clear
+set obs 100
+generate byte a = mod(_n, 3) == 1
+generate byte b = mod(_n, 3) == 2
+generate double y = round(4 + 2 * a - b + 3 * sin(_n * 1.1) + cos(_n * .45), .5)
+foreach q in .1 .9 {
+    qreg y a b, quantile(`q') nolog
+    shwq
+}
+clear
+set obs 80
+generate byte d1 = mod(_n, 2) == 0
+generate byte d2 = mod(_n, 3) == 0
+generate byte d3 = d1 * d2
+generate double y = round(5 + d1 + 2 * d2 - d3 + 2 * sin(_n * 1.9), .25)
+foreach q in .1 .25 .9 {
+    qreg y d1 d2 d3, quantile(`q') nolog
+    shwq
+}
+clear
+set obs 64
+generate byte d = mod(_n, 4) < 1
+generate double x = mod(_n * 3, 8) / 2
+generate double y = round(2 + d + .5 * x + 2 * sin(_n * 1.5), .5)
+generate int fw = 1 + mod(_n * 3, 2)
+foreach q in .1 .25 .4 {
+    qreg y d x, quantile(`q') nolog
+    shwq
+}
+qreg y d x [fweight = fw], quantile(.25) nolog
+shwq
