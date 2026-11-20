@@ -1011,6 +1011,9 @@ impl Session {
         if self.xtdpd_active().is_some() {
             return self.xtdpd_estat(c, opts, out);
         }
+        if let Some(cmd) = self.censored_active() {
+            return self.censored_estat(c, opts, out, cmd);
+        }
         {
             let (s, _) = first_word(&c.parts.main);
             if s.len() >= 4 && "bootstrap".starts_with(s) {

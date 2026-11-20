@@ -79,6 +79,7 @@ pub const COMMANDS: &[&str] = &[
     "cii",
     "clear",
     "clogit",
+    "cloglog",
     "clonevar",
     "cluster2",
     "cmclogit",
@@ -149,6 +150,8 @@ pub const COMMANDS: &[&str] = &[
     "graph",
     "grstyle",
     "gsort",
+    "heckman",
+    "hetprobit",
     "histogram",
     "icc",
     "import",
@@ -156,6 +159,7 @@ pub const COMMANDS: &[&str] = &[
     "input",
     "inspect",
     "insheet",
+    "intreg",
     "ir",
     "iri",
     "isid",
@@ -329,11 +333,13 @@ pub const COMMANDS: &[&str] = &[
     "testnl",
     "testparm",
     "tetrachoric",
+    "tobit",
     "tokenize",
     "tostring",
     "total",
     "tsappend",
     "tsreport",
+    "truncreg",
     "tsset",
     "ttest",
     "ttesti",
@@ -1049,6 +1055,32 @@ pub const OPTIONS: &[(&str, &[&str])] = &[
     (
         "ivprobit",
         &["first", "iterate(", "level(", "nolog", "twostep", "vce("],
+    ),
+    (
+        "tobit",
+        &["cluster(", "level(", "ll(", "nolog", "robust", "ul(", "vce("],
+    ),
+    (
+        "truncreg",
+        &["cluster(", "level(", "ll(", "nolog", "robust", "ul(", "vce("],
+    ),
+    (
+        "intreg",
+        &["cluster(", "level(", "nolog", "robust", "vce("],
+    ),
+    (
+        "cloglog",
+        &["cluster(", "eform", "level(", "nolog", "robust", "vce("],
+    ),
+    (
+        "hetprobit",
+        &["cluster(", "het(", "level(", "nolog", "robust", "vce("],
+    ),
+    (
+        "heckman",
+        &[
+            "cluster(", "level(", "nolog", "robust", "select(", "twostep", "vce(",
+        ],
     ),
     (
         "contract",
@@ -2042,6 +2074,7 @@ mod tests {
         let arg = match name {
             "vce" if cmd == "svyset" => "linearized",
             "level" => "90",
+            "ll" | "ul" => "0",
             "df" => "30",
             "iterate" => "50",
             "vce" => "robust",
@@ -2267,6 +2300,13 @@ gettoken a b : s, {o}"
             "ivregress" => format!("ivregress 2sls y (x = w), {o}"),
             "joinby" => format!("joinby k using t, {o}"),
             "ivprobit" => format!("ivprobit d y (x = w), {o}"),
+            "tobit" | "truncreg" => format!("{cmd} y x, {o}"),
+            "intreg" => format!("intreg y y2 x, {o}"),
+            "cloglog" => format!("cloglog d x, {o}"),
+            "hetprobit" if name == "het" => format!("hetprobit d x, {o}"),
+            "hetprobit" => format!("hetprobit d x, het(x) {o}"),
+            "heckman" if name == "select" => format!("heckman y x, {o}"),
+            "heckman" => format!("heckman y x, select(x) {o}"),
             "label" => format!("label define l 1 \"a\", {o}"),
             // what predict can make depends on the model: hr after stcox, pr after
             // logit, outcome() after mlogit

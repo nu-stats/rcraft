@@ -162,3 +162,13 @@ stata_cx_setup <- function(d, dep, terms, extra = character(), wvar = NULL, clus
   if (qr(X1)$rank < ncol(X1)) stop("RCraft: a model with collinear regressors is not translated yet", call. = FALSE)
   list(rows = rows, mf = mf, des = des, X = des$X, n = nrow(mf))
 }
+# estat ic after the batch's models: N, ll(null) where the model has one, ll(model), df = e(rank), AIC, BIC
+stata_cx_estat_ic <- function(e) {
+  k <- e$rank; n <- e$N; ll <- e$ll
+  tab <- data.frame(N = n, "ll(null)" = if (is.null(e$ll_0)) NA_real_ else e$ll_0, "ll(model)" = ll, df = k,
+                    AIC = -2 * ll + 2 * k, BIC = -2 * ll + log(n) * k, check.names = FALSE)
+  if (is.null(e$ll_0)) tab[["ll(null)"]] <- NULL
+  rownames(tab) <- "."
+  print(tab, digits = 8)
+  invisible(tab)
+}

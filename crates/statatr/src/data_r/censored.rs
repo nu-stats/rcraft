@@ -105,7 +105,9 @@ impl Session {
         let mut hi = None;
         if name == "intreg" {
             if spec.terms.len() < 2 {
-                return Err(no("intreg needs two outcome variables and at least one regressor"));
+                return Err(no(
+                    "intreg needs two outcome variables and at least one regressor",
+                ));
             }
             let h = spec.terms.remove(0);
             if !is_name(&h) {
@@ -241,13 +243,7 @@ impl Session {
         if c.parts.main.trim().is_empty() {
             return self.tobit_replay(c, opts, out);
         }
-        let l = self.cx_line(
-            c,
-            opts,
-            out,
-            &[W::F, W::A, W::P, W::I],
-            "tobit",
-        )?;
+        let l = self.cx_line(c, opts, out, &[W::F, W::A, W::P, W::I], "tobit")?;
         if matches!(l.w, Some((W::A, _))) {
             return Err(no(
                 "tobit with analytic weights is not translated yet (each row has its own variance, not reproduced)",
@@ -255,7 +251,14 @@ impl Session {
         }
         let ll = limit(opts, "ll")?;
         let ul = limit(opts, "ul")?;
-        for h in ["stata_cx", "stata_tobit", "stata_fmt", "stata_tables", "stata_returned", "stata_eclass"] {
+        for h in [
+            "stata_cx",
+            "stata_tobit",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+            "stata_eclass",
+        ] {
             self.helpers.insert(h);
         }
         out.line(format!(
@@ -331,7 +334,9 @@ impl Session {
         cmd: &str,
     ) -> Result<(), Untranslated> {
         if opts.0.iter().any(|o| !o.is("level", 3)) {
-            return Err(no(format!("{cmd}'s replay is translated with level() only")));
+            return Err(no(format!(
+                "{cmd}'s replay is translated with level() only"
+            )));
         }
         let lvl = level(opts)? * 100.0;
         if self.censored_active() != Some(cmd) {
@@ -377,7 +382,14 @@ impl Session {
             ));
         }
         let hi = l.hi.clone().unwrap_or_default();
-        for h in ["stata_cx", "stata_tobit", "stata_fmt", "stata_tables", "stata_returned", "stata_eclass"] {
+        for h in [
+            "stata_cx",
+            "stata_tobit",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+            "stata_eclass",
+        ] {
             self.helpers.insert(h);
         }
         out.line(format!(
@@ -541,8 +553,14 @@ impl Session {
         }
         let eform = opts.has("eform", 2);
         if c.parts.main.trim().is_empty() {
-            if opts.0.iter().any(|o| !(o.is("level", 3) || o.is("eform", 2))) {
-                return Err(no("cloglog's replay is translated with level() and eform only"));
+            if opts
+                .0
+                .iter()
+                .any(|o| !(o.is("level", 3) || o.is("eform", 2)))
+            {
+                return Err(no(
+                    "cloglog's replay is translated with level() and eform only",
+                ));
             }
             let lvl = level(opts)? * 100.0;
             if self.censored_active() != Some("cloglog") {
@@ -550,7 +568,13 @@ impl Session {
                     "cloglog with no variables repeats the last cloglog, which is not known here",
                 ));
             }
-            for h in ["stata_cx", "stata_tobit", "stata_bin", "stata_fmt", "stata_tables"] {
+            for h in [
+                "stata_cx",
+                "stata_tobit",
+                "stata_bin",
+                "stata_fmt",
+                "stata_tables",
+            ] {
                 self.helpers.insert(h);
             }
             if !self.quiet(c) {
@@ -760,7 +784,9 @@ impl Session {
             return Ok(());
         };
         if twostep && l.w.is_some() {
-            out.line("stop(\"weights not allowed with option twostep (Stata: r(198))\", call. = FALSE)");
+            out.line(
+                "stop(\"weights not allowed with option twostep (Stata: r(198))\", call. = FALSE)",
+            );
             return Ok(());
         }
         let (seldep, vars) = match sel.split_once('=') {
@@ -842,6 +868,28 @@ impl Session {
         out.caveat(
             "heckman as Stata 19 fits it (Newton from the two-step estimates, exact derivatives; select() without factor variables)",
         );
+        Ok(())
+    }
+
+    /// `estat ic` after the batch's models (the rest of estat is not translated after them).
+    pub(super) fn censored_estat(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+        cmd: &str,
+    ) -> Result<(), Untranslated> {
+        let sub = c.parts.main.trim();
+        if sub.len() < 2 || !"ic".starts_with(sub) || !opts.0.is_empty() {
+            return Err(no(format!(
+                "estat {sub} after {cmd} is not translated yet (estat ic is)"
+            )));
+        }
+        self.helpers.insert("stata_cx");
+        if !self.quiet(c) {
+            out.line("stata_cx_estat_ic(stata_e)");
+        }
+        out.caveat("printed in R's layout, not Stata's table");
         Ok(())
     }
 
@@ -991,5 +1039,86 @@ impl Session {
         self.kinds.insert(w.to_string(), Kind::Number);
         self.storage.insert(w.to_string(), st);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::data_r::translate;
+    use crate::reader::read;
+
+    fn r(source: &str) -> Vec<String> {
+        translate(&read(source))
+            .lines
+            .into_iter()
+            .map(|l| match l.result {
+                Ok(r) => r.code,
+                Err(e) => format!("NOT: {}", e.reason),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_six_commands_fit_replay_and_predict() {
+        let out = r("use d
+tobit y x1 x2, ll(0) ul(5) vce(cluster g)
+tobit
+predict p, pr(0, .)
+intreg lo hi x1 [pw = w]
+truncreg y x1, ll(0) nolog
+cloglog d x1 x2, eform
+hetprobit d x1, het(z)
+heckman y x1, select(s = z1 z2) twostep
+estat ic");
+        assert!(
+            out[1].contains("stata_tobit(")
+                && out[1].contains("ll = 0, ul = 5")
+                && out[1].contains("cluster = \"g\""),
+            "{out:?}"
+        );
+        assert!(out[2].contains("stata_tobit_replay("), "{out:?}");
+        assert!(
+            out[3].contains("stata_tobit_predict(") && out[3].contains("a = 0, b = NULL"),
+            "{out:?}"
+        );
+        assert!(
+            out[4].contains("stata_intreg(")
+                && out[4].contains("\"lo\", \"hi\"")
+                && out[4].contains("wtype = \"p\"")
+                && out[4].contains("robust = TRUE"),
+            "{out:?}"
+        );
+        assert!(out[5].contains("stata_truncreg("), "{out:?}");
+        assert!(out[6].contains("eform = TRUE"), "{out:?}");
+        assert!(out[7].contains("stata_hetprobit("), "{out:?}");
+        assert!(
+            out[8].contains("seldep = \"s\"") && out[8].contains("twostep = TRUE"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn statas_errors_are_kept_and_the_rest_refused() {
+        let out = r("use d
+cloglog d x1 [aw = w]
+heckman y x1 [fw = w], select(z) twostep
+heckman y x1
+hetprobit d x1
+tobit y x1 [aw = w]
+tobit y x1, from(b)
+tobit y i.g##c.x1
+truncreg y i.g
+predict p, e(0, 1)");
+        assert!(out[1].contains("aweights not allowed"), "{out:?}");
+        assert!(
+            out[2].contains("weights not allowed with option twostep"),
+            "{out:?}"
+        );
+        assert!(out[3].contains("select() required"), "{out:?}");
+        assert!(out[4].contains("het() required"), "{out:?}");
+        assert!(out[5].starts_with("NOT: tobit with analytic weights"), "{out:?}");
+        assert!(out[6].starts_with("NOT: tobit with the option from"), "{out:?}");
+        assert!(out[7].starts_with("NOT: tobit with interactions"), "{out:?}");
+        assert!(out[8].starts_with("NOT: truncreg with interactions"), "{out:?}");
     }
 }

@@ -879,9 +879,7 @@ impl Session {
             | Fit::Truncreg
             | Fit::Cloglog
             | Fit::Hetprobit
-            | Fit::Heckman => {
-                return Err(no("this model is not fitted here"))
-            }
+            | Fit::Heckman => return Err(no("this model is not fitted here")),
             Fit::Reghdfe => return self.reghdfe(c, opts, out),
             Fit::Cluster2 => return self.cluster2(c, opts, out),
             Fit::Asclogit => return self.asclogit(c, opts, out),
