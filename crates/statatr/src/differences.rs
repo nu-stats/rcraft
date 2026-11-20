@@ -3732,26 +3732,27 @@ pub const GUIDES: &[Guide] = &[
             p(
                 "As Stata 19",
                 "nlsur (y1 = <expression>) (y2 = <expression>) with {name} and {name = #} parameters (in order of first \
-                 appearance, shared between equations by name; unset starts are 0) is Gauss-Newton on the stacked \
-                 equations, as Stata takes it: forward-difference derivatives, each step halved while it raises the \
-                 criterion, done when no parameter moves by more than eps() (1e-5, relative to |b|); a parameter whose \
-                 derivative column is zero or a combination of earlier ones' stays put and shows (constrained). NLS \
-                 comes first (log: Residual SS), then FGNLS with Sigma from its residuals (Scaled RSS); ifgnls goes \
-                 round again until the parameters and Sigma each change by at most 1e-5 (the Parameter change and \
-                 Covariance matrix change lines). The iteration log, the equation table (RMSE, R-sq with the equation's \
-                 constant, or uncentered with a star), the z table and e() (rss, mss, r2, rmse and k per equation, ll, \
-                 rank, converged, params, constants, sexp, b, V, init, Sigma) follow Stata's; nolog, level(), iterate(), \
-                 eps(), noconstant, initial(), if and in are taken, and predict gives yhat and residuals with \
-                 equation(#k). Failed runs stop as Stata does (an unevaluable start, missing values on the right-hand \
-                 side: r(480)).",
+                 appearance, shared between equations by name; unset starts are 0) and {name: varlist} linear \
+                 combinations (parameters name_x1, name_x2) is Gauss-Newton on the stacked equations, as Stata takes \
+                 it: forward-difference derivatives with the step delta (|b| + delta) (delta() 4e-7), each step halved \
+                 while it raises the criterion, done when no parameter moves by more than eps() (1e-5, relative to |b|), \
+                 at most iterate() (300) steps a stage; a parameter whose derivative column is zero or a combination of \
+                 earlier ones' stays put and shows (constrained). NLS comes first (log: Residual SS), then FGNLS with \
+                 Sigma from its residuals (Scaled RSS); ifgnls goes round again until the parameters and Sigma each \
+                 change by at most 1e-5; nls ends with a pass, not logged, that weights each equation by its variance \
+                 (it moves the estimates only when a parameter is shared). fweights, aweights and pweights (sum of wgt \
+                 line, pweights robust), vce(robust) and vce(cluster v) (scores at the final estimates; clusters times \
+                 G/(G-1) (N-1)/(N-k)) and variables() are taken. A run that runs out of steps prints its table, then \
+                 stops with r(430). The iteration log, the equation table, the z table and e() follow Stata's; predict \
+                 gives yhat and residuals with equation(#k); test, lincom and nlcom read /a, [a]_cons and _b[/a]; \
+                 estat ic and estat vce are translated.",
             ),
             p(
                 "Not yet",
-                "Weights, vce(), variables(), parameters() and the function-evaluator form, delta(), {name: varlist} \
-                 linear combinations, nls when a parameter is shared by two equations (Stata's estimates there are not \
-                 the stacked least squares), ifgnls with iterate(), and the table of a run that has not converged \
-                 (RCraft stops with a message after the log). The cap on iterations (100) is an assumption. test, \
-                 lincom and margins after nlsur are not translated; _b[a:_cons] works.",
+                "iweights, parameters() and the function-evaluator form, a linear combination used twice, \
+                 vce(cluster v) with missing values of v, margins and other estat subcommands after nlsur. After a run \
+                 that has not converged, Stata keeps e(); RCraft does not. Where a first step is ill-conditioned or a \
+                 parameter is near zero, the log can differ from Stata's in the sixth digit (the estimates agree).",
             ),
         ],
     },
@@ -3832,15 +3833,15 @@ pub const GUIDES: &[Guide] = &[
                  variable _Ig_# for each level of g but the omitted one (the lowest; the most frequent with char \
                  _dta[omit] prevalent; # with char g[omit] #), labelled g==#, and run the command on them. \
                  i.g*i.h adds both sets and _IgXh_#_# (g==2 & h==1), i.g*x the dummies and the float _IgXx_# \
-                 ((g==2)*x), i.g|x the same with the dummies left out of the command. Each run drops the variables \
+                 ((g==2)*x, of x's type), i.g|x the same with the dummies left out of the command. noomit makes every level's dummy and prints no line for the plain factors. A factor that is not whole numbers from 0 up (negative, fractional or a string) is named by rank, `_Im_1-3  (_Im_1 for m==-1 omitted)`, with the dummies labelled by value (`m==0`, `s==lo`). Each run drops the variables \
                  an earlier run made with the same prefix, prints a line per term (`i.g  _Ig_1-3  (naturally coded; \
                  _Ig_1 omitted)`) and leaves e(cmdline) with the stubs (`regress y _Ig_* x`). The levels are asked \
                  of R when the do-file runs, so a dry run shows the line as known only when run.",
             ),
             p(
                 "Not yet",
-                "A factor in two terms, three or more parts in a term, | between two factors, noomit and the other \
-                 options, noninteger or negative levels, names over 32 characters and tied most-frequent levels.",
+                "A factor in two terms, three or more parts in a term, | between two factors, the other options, \
+                 names over 32 characters and tied most-frequent levels.",
             ),
         ],
     },

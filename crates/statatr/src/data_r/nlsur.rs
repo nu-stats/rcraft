@@ -1,27 +1,32 @@
-//! `nlsur (y1 = <expression with {b0 = #} parameters>) (y2 = ...) [if] [in] [, nls fgnls ifgnls
-//! nolog level() iterate() eps() noconstant initial()]`: systems of nonlinear
-//! equations as Stata 19 runs them (`plan/stata/nlsur.md`).
+//! `nlsur (y1 = <expression with {b0 = #} parameters>) (y2 = ...) [if] [in] [weight] [, nls fgnls
+//! ifgnls nolog level() iterate() eps() delta() noconstant initial() variables() vce()]`: systems
+//! of nonlinear equations as Stata 19 runs them (`plan/stata/nlsur.md`).
 //!
 //! The iteration log is the Gauss-Newton path itself (ported from StatCraft's probe 537, then
 //! checked against Stata on made-up data here):
 //!
-//! - Each step works on the residuals whitened by Sigma (the identity for NLS), with forward
-//!   differences d = 4e-7 |b| (4e-7 itself at 0), the step halved
-//!   while it raises the criterion and never stepped further, stopping once no parameter moved by
-//!   more than eps() (1e-5, relative to its old size |b|). A parameter whose derivative column is zero or a
+//! - Each step works on the residuals weighted (the square root of each row's weight) and
+//!   whitened by Sigma (the identity for NLS), with forward differences d = delta (|b| + delta),
+//!   delta = 4e-7 by default, the step halved while it raises the criterion and never stepped
+//!   further, stopping once no parameter moved by more than eps() (1e-5, relative to its old size
+//!   |b|), at most iterate() (300) steps a stage. A parameter whose derivative column is zero or a
 //!   combination of earlier ones' does not move in that step; those still dependent at the end
 //!   show as `(constrained)`.
-//! - NLS first (the log says "Residual SS"), then FGNLS with Sigma = R'R/N from the NLS residuals
-//!   ("Scaled RSS"); `ifgnls` goes round again with Sigma from the last residuals until the
-//!   parameters and Sigma each change by at most 1e-5.
-//! - Variances: FGNLS (J'(Sigma^-1 kron I)J)^-1; NLS the sandwich (J'J)^-1 J'(Sigma kron I)J
-//!   (J'J)^-1.
+//! - NLS first (the log says "Residual SS", "Scaled RSS" with weights), then FGNLS with
+//!   Sigma = R'WR/N from the NLS residuals; `ifgnls` goes round again with Sigma from the last
+//!   residuals until the parameters and Sigma each change by at most 1e-5. `nls` ends with a
+//!   pass not logged, weighted by the diagonal of the NLS Sigma.
+//! - Variances: the inverse of the last step's J'(Sigma^-1 kron W)J; robust and clustered, that
+//!   around the scores at the final estimates (clusters times G/(G-1) (N-1)/(N-k)).
 
+use super::model::{Estimates, Fit};
+use super::weights::W;
 use super::*;
 
 /// The fit, its log, Stata's tables and e().
 pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, level = 95, method = "fgnls", nolog = FALSE, noconst = FALSE,
-                        iterate = 100L, eps = 1e-5, delta = 4e-7, cmdline = "", show = TRUE) {
+                        iterate = 300L, eps = 1e-5, delta = 4e-7, cmdline = "", show = TRUE,
+                        wvar = NULL, wtype = NULL, wexp = NULL, robust = FALSE, cluster = NULL, markout = NULL) {
   M <- length(eqs)
   pn <- names(init)
   k <- length(pn)
@@ -35,10 +40,33 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
   vars <- unique(c(deps, intersect(syms, names(d))))
   for (v in vars) if (is.character(d[[v]])) stop(v, ": string variable, type mismatch (Stata: r(109))", call. = FALSE)
   num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
-  rows <- which(stats::complete.cases(d[deps]))
+  for (v in markout) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  rows <- which(stats::complete.cases(d[unique(c(deps, markout))]))
+  if (!is.null(cluster)) {
+    if (!cluster %in% names(d)) stop("variable ", cluster, " not found (Stata: r(111))", call. = FALSE)
+    if (anyNA(d[[cluster]][rows]) || (is.character(d[[cluster]]) && any(d[[cluster]][rows] == ""))) {
+      stop("RCraft: nlsur, vce(cluster ", cluster, ") with missing values of ", cluster, " is not translated yet", call. = FALSE)
+    }
+  }
   n <- length(rows)
-  if (show) cat("(obs = ", stata_tab_count(n), ")\n\n", sep = "")
-  if (n * M < k) stop("cannot have fewer observations than parameters (Stata: r(2001))", call. = FALSE)
+  # the weights: frequency weights count as copies of the row; analytic and sampling weights are
+  # scaled to sum to the number of rows
+  w <- rep(1, n)
+  if (!is.null(wtype)) {
+    w <- num(d[[wvar]][rows])
+    if (wtype != "f") w <- w * n / sum(w)
+  }
+  N <- if (identical(wtype, "f")) sum(w) else n
+  if (!is.null(wtype) && wtype == "p") robust <- TRUE
+  if (show) {
+    if (is.null(wtype)) {
+      cat("(obs = ", stata_tab_count(n), ")\n\n", sep = "")
+    } else {
+      cat("(sum of wgt is ", stata_fmt(sum(num(d[[wvar]][rows])), "%12.0gc", trim = TRUE), ")\n\n", sep = "")
+    }
+  }
+  if (N * M < k) stop("cannot have fewer observations than parameters (Stata: r(2001))", call. = FALSE)
+  sw <- rep(sqrt(w), M)
   base <- lapply(d[rows, vars, drop = FALSE], num)
   evq <- function(q, b) {
     r <- num(eqs[[q]]$f(c(base, as.list(b))))
@@ -47,12 +75,16 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
   ev <- function(b) unlist(lapply(seq_len(M), function(q) evq(q, b)), use.names = FALSE)
   y <- unlist(lapply(deps, function(v) base[[v]]), use.names = FALSE)
   b0 <- init
-  wh <- function(v, Linv) if (is.null(Linv)) v else as.vector(matrix(v, n, M) %*% t(Linv))
+  # a stacked column whitened: each row times the square root of its weight, then by Sigma^-1/2
+  wh <- function(v, Linv) {
+    v <- v * sw
+    if (is.null(Linv)) v else as.vector(matrix(v, n, M) %*% t(Linv))
+  }
   jac <- function(b) {
     f0 <- ev(b)
     matrix(vapply(seq_len(k), function(j) {
       bj <- b[[j]]
-      dj <- if (bj == 0) delta else delta * abs(bj)
+      dj <- delta * (abs(bj) + delta)
       up <- b
       up[j] <- bj + dj
       dj <- up[[j]] - bj
@@ -77,6 +109,7 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
     free
   }
   mreldif <- function(a, b) max(abs(a - b) / (abs(b) + 1))
+  whj <- function(J, Linv) matrix(vapply(seq_len(k), function(j) wh(J[, j], Linv), numeric(nrow(J))), nrow(J), k)
   gn <- function(b, Linv) {
     crit <- function(b) {
       s <- sum(wh(y - ev(b), Linv)^2)
@@ -90,7 +123,7 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
       if (!is.finite(cur)) cur <- Inf
       J <- jac(b)
       Jl <- J
-      Jw <- if (is.null(Linv)) J else matrix(vapply(seq_len(k), function(j) wh(J[, j], Linv), numeric(nrow(J))), nrow(J), k)
+      Jw <- whj(J, Linv)
       A <- crossprod(Jw)
       g <- as.vector(crossprod(Jw, r))
       free <- independent(A)
@@ -119,8 +152,12 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
     }
     list(b = b, log = log, converged = conv, J = Jl)
   }
-  sigma_of <- function(r) crossprod(matrix(r, n, M)) / n
-  linv <- function(S) solve(t(chol(S)))
+  sigma_of <- function(r) crossprod(matrix(r, n, M) * sqrt(w)) / N
+  linv <- function(S) {
+    L <- tryCatch(chol(S), error = function(e) NULL)
+    if (is.null(L) || any(diag(L) <= 0)) stop("RCraft: nlsur where the residuals' covariance matrix is singular is not translated yet", call. = FALSE)
+    solve(t(L))
+  }
   logs <- function(label, v) {
     for (i in seq_along(v)) {
       cat(sprintf("%-13s %s = %8s\n", paste0("Iteration ", i - 1L, ":"), label, trimws(stata_fmt(v[i], "%9.0g"))))
@@ -135,13 +172,23 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
     }
   }
   nls <- gn(b0, NULL)
-  if (show && !nolog) logs("Residual SS", nls$log)
+  if (show && !nolog) logs(if (is.null(wtype)) "Residual SS" else "Scaled RSS", nls$log)
   b <- nls$b
   lastgn <- nls
   conv <- nls$converged
   Sigma <- sigma_of(y - ev(b))
   Linv <- NULL
-  if (method != "nls") {
+  if (method == "nls") {
+    # after the stacked fit (the one the log shows), a pass not logged that weights each equation
+    # by 1/variance of the stacked fit's residuals; with no parameter shared by two equations it
+    # leaves the estimates where they are
+    Sigma <- diag(diag(Sigma), nrow = M)
+    Linv <- linv(Sigma)
+    hid <- gn(b, Linv)
+    b <- hid$b
+    lastgn <- hid
+    conv <- hid$converged
+  } else {
     if (show && !nolog) cat("\n")
     calc("FGNLS")
     Linv <- linv(Sigma)
@@ -161,7 +208,8 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
         nx <- gn(b, Linv)
         after <- sigma_of(y - ev(nx$b))
         pch <- max(abs(nx$b - b) / (abs(nx$b) + 1))
-        cch <- mreldif(as.vector(after), as.vector(Sigma))
+        # relative to the new Sigma, as the parameter change is to the new estimates
+        cch <- mreldif(as.vector(Sigma), as.vector(after))
         if (show && !nolog) {
           logs("Scaled RSS", nx$log)
           cat("Parameter change         = ", sci(pch), "\n", sep = "")
@@ -176,26 +224,48 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
       }
     }
   }
-  J <- if (method == "nls") jac(b) else lastgn$J
-  free <- independent(crossprod(J))
+  # the variance: the inverse of the last Gauss-Newton step's J'(Sigma^-1 kron W)J, with J taken
+  # at the start of that step and the Sigma it used (diagonal for nls); robust and clustered, that
+  # matrix around the sum of the scores w_i J_i' Sigma^-1 r_i, with J and r at the final estimates
+  Jw <- whj(lastgn$J, Linv)
+  A <- crossprod(Jw)
+  free <- independent(A)
   fr <- function(m) m[free, free, drop = FALSE]
   V <- matrix(0, k, k)
-  if (length(free)) {
-    small <- if (method == "nls") {
-      bread <- solve(fr(crossprod(J)))
-      L <- t(chol(Sigma))
-      LJ <- matrix(vapply(seq_len(k), function(j) as.vector(matrix(J[, j], n, M) %*% L), numeric(nrow(J))), nrow(J), k)
-      bread %*% fr(crossprod(LJ)) %*% bread
-    } else {
-      Jw <- matrix(vapply(seq_len(k), function(j) wh(J[, j], Linv), numeric(nrow(J))), nrow(J), k)
-      solve(fr(crossprod(Jw)))
-    }
-    V[free, free] <- small
-  }
   fit <- ev(b)
   res <- y - fit
   Sf <- sigma_of(res)
-  ll <- -n / 2 * (M * (1 + log(2 * pi)) + as.numeric(determinant(Sf, logarithm = TRUE)$modulus))
+  nclust <- NULL
+  if (length(free)) {
+    Ai <- solve(fr(A))
+    small <- if (robust) {
+      Jf <- jac(b)
+      Si <- crossprod(Linv)
+      sc <- matrix(0, n, k)
+      for (q in seq_len(M)) {
+        ix <- (q - 1L) * n + seq_len(n)
+        rq <- 0
+        for (l in seq_len(M)) rq <- rq + Si[q, l] * res[(l - 1L) * n + seq_len(n)]
+        sc <- sc + Jf[ix, , drop = FALSE] * (w * rq)
+      }
+      sc <- sc[, free, drop = FALSE]
+      if (is.null(cluster)) {
+        # frequency weights are copies of the row: each copy's score counts once
+        if (identical(wtype, "f")) sc <- sc / sqrt(w)
+        Ai %*% crossprod(sc) %*% Ai
+      } else {
+        g <- d[[cluster]][rows]
+        G <- length(unique(g))
+        if (G < 2L) stop("RCraft: nlsur, vce(cluster) with one cluster is not translated yet", call. = FALSE)
+        nclust <- G
+        Ai %*% crossprod(rowsum(sc, match(g, unique(g)))) %*% Ai * (G / (G - 1)) * ((N - 1) / (N - k))
+      }
+    } else {
+      Ai
+    }
+    V[free, free] <- small
+  }
+  ll <- -N / 2 * (M * (1 + log(2 * pi)) + as.numeric(determinant(Sf, logarithm = TRUE)$modulus))
   # each equation's constant: the first parameter whose derivative is the same, and not zero, on
   # every row (at the final estimates)
   const <- rep(NA_character_, M)
@@ -214,13 +284,12 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
   }
   stat <- lapply(seq_len(M), function(q) {
     ix <- (q - 1L) * n + seq_len(n)
-    rss <- sum(res[ix]^2)
-    tss <- if (is.na(const[q])) sum(y[ix]^2) else sum((y[ix] - mean(y[ix]))^2)
+    rss <- sum(w * res[ix]^2)
+    tss <- if (is.na(const[q])) sum(w * y[ix]^2) else sum(w * (y[ix] - sum(w * y[ix]) / sum(w))^2)
     mss <- tss - rss
     if (abs(mss) <= 1e-12 * tss) mss <- 0
-    list(rss = rss, mss = mss, r2 = if (tss > 0) mss / tss else 0, rmse = sqrt(rss / n), k = length(eqs[[q]]$params))
+    list(rss = rss, mss = mss, r2 = if (tss > 0) mss / tss else 0, rmse = sqrt(rss / N), k = length(eqs[[q]]$params))
   })
-  if (!conv) stop("convergence not achieved (Stata: r(430)); RCraft stops here without the table, whose standard errors Stata computes in a way not reproduced for runs that have not converged", call. = FALSE)
   nm <- paste0("/", pn)
   se <- sqrt(pmax(diag(V), 0))
   if (show) {
@@ -232,18 +301,20 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
     for (q in seq_len(M)) {
       s <- stat[[q]]
       txt <- paste0(sprintf("%.4f", s$r2), if (is.na(const[q])) "*" else "")
-      w <- max(12L, 19L - nchar(txt))
-      cat(sprintf("%2d%13s |%11s%8d%11s    %s%s\n", q, stata_tab_abbrev(deps[q]), stata_tab_count(n), s$k,
+      cw <- max(12L, 19L - nchar(txt))
+      cat(sprintf("%2d%13s |%11s%8d%11s    %s%s\n", q, stata_tab_abbrev(deps[q]), stata_tab_count(N), s$k,
                   trimws(stata_fmt(s$rmse, "%9.0g")), txt,
-                  formatC(if (is.na(const[q])) "(none)" else const[q], width = w)))
+                  formatC(if (is.na(const[q])) "(none)" else const[q], width = cw)))
     }
     cat(strrep("-", 71), "\n", sep = "")
     if (any(is.na(const))) cat("* Uncentered R-sq\n")
     cat("\n")
     stata_ls_table(nm, b, se, Inf, level, if (length(unique(deps)) == 1L) deps[1] else "",
-                   constr = !(seq_len(k) %in% free))
+                   constr = !(seq_len(k) %in% free), robust = robust, clusters = nclust, clustvar = cluster)
   }
-  e <- list(N = n)
+  # a run that ran out of steps: Stata prints the table, then ends with r(430) and no message
+  if (!conv) stop("convergence not achieved (Stata: r(430))", call. = FALSE)
+  e <- list(N = N)
   for (q in seq_len(M)) {
     s <- stat[[q]]
     e[[paste0("rss_", q)]] <- s$rss
@@ -256,14 +327,28 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
   e$n_eq <- M
   e$k <- k
   e$k_eq_model <- 0
-  e$converged <- as.numeric(conv)
-  e$rank <- length(free)
-  e$k_eq <- M
+  if (is.null(nclust)) {
+    e$converged <- as.numeric(conv)
+    e$rank <- length(free)
+    e$k_eq <- M
+  } else {
+    # with clusters Stata keeps k_eq before rank
+    e$N_clust <- nclust
+    e$converged <- as.numeric(conv)
+    e$k_eq <- M
+    e$rank <- length(free)
+  }
   e$cmdline <- cmdline
   e$cmd <- "nlsur"
   e$predict <- "nlsur_p"
   e$estat_cmd <- "nlsur_estat"
-  e$vce <- "gnr"
+  if (!is.null(wtype)) {
+    e$wexp <- wexp
+    e$wtype <- c(f = "fweight", a = "aweight", p = "pweight")[[wtype]]
+  }
+  if (!is.null(nclust)) e$clustvar <- cluster
+  if (robust) e$vcetype <- "Robust"
+  e$vce <- if (!is.null(nclust)) "cluster" else if (robust) "robust" else "gnr"
   e$method <- method
   e$constants <- if (noconst) " . ." else paste(ifelse(is.na(const), ".", const), collapse = " ")
   e$type <- "1"
@@ -287,9 +372,21 @@ pub(super) const NLSUR_HELPER: &str = r##"stata_nlsur <- function(d, eqs, init, 
   attr(e, "stata_b") <- stats::setNames(as.vector(b), cn)
   attr(e, "stata_V") <- V
   attr(e, "stata_df") <- Inf
+  attr(e, "stata_live_b") <- TRUE
   attr(e, "stata_eqs") <- eqs
   attr(e, "stata_pars") <- b
   e
+}
+# estat ic: N, the log likelihood and the free parameters, as Stata counts them
+stata_nlsur_ic <- function(e) {
+  n <- e$N
+  ll <- e$ll
+  k <- e$rank
+  tab <- data.frame(N = n, "ll(model)" = ll, df = k, AIC = -2 * ll + 2 * k,
+                    BIC = -2 * ll + log(n) * k, check.names = FALSE)
+  rownames(tab) <- "."
+  print(tab, digits = 8)
+  invisible(tab)
 }
 # the fitted values (or residuals) of equation k on every row of d
 stata_nlsur_pred <- function(e, d, k, resid = FALSE) {
@@ -384,13 +481,33 @@ impl Session {
             ("eps", 3),
             ("noconstant", 3),
             ("initial", 4),
+            ("vce", 3),
+            ("delta", 5),
+            ("variables", 9),
         ]) {
             return Err(no(format!(
                 "nlsur with the option {o} is not translated yet"
             )));
         }
-        if c.parts.weight.is_some() {
-            return Err(no("nlsur with weights is not translated yet"));
+        let weight = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
+        if let Some((W::I, _)) = &weight {
+            return Err(no("nlsur with iweights is not translated yet"));
+        }
+        // vce(gnr) is the default; vce(robust) and vce(cluster v) as Stata takes them
+        let (robust, cluster) = match opts.arg("vce", 3).map(|v| v.trim().to_string()) {
+            Some(v) if v == "gnr" => (false, None),
+            Some(v) if v == "ols" || v == "oim" => {
+                return Err(no(format!("nlsur, vce({v}) is not translated yet")))
+            }
+            Some(_) => super::model::vce(opts)?,
+            None => (false, None),
+        };
+        if let Some(v) = &cluster {
+            if !self.kinds.contains_key(v) {
+                return Err(no(format!(
+                    "nlsur, vce(cluster {v}): only a variable named in full is translated"
+                )));
+            }
         }
         let kinds_given = [
             opts.has("nls", 3),
@@ -411,11 +528,6 @@ impl Session {
         } else {
             "fgnls"
         };
-        if method == "ifgnls" && opts.has("iterate", 4) {
-            return Err(no(
-                "nlsur, ifgnls with iterate() is not translated yet (Stata ends the rounds by its own rule)",
-            ));
-        }
         let texts = equations(c.parts.main.trim())?;
         if texts.is_empty() {
             return Err(no("nlsur needs at least one equation in parentheses"));
@@ -447,10 +559,39 @@ impl Session {
                     .find('}')
                     .ok_or_else(|| no("nlsur: a { without its }"))?;
                 let body = tail.get(1..close).unwrap_or("").trim();
-                if body.contains(':') {
-                    return Err(no(
-                        "nlsur with a linear combination ({xb: x1 x2}) is not translated yet",
-                    ));
+                // {xb: x1 x2}: the parameters xb_x1 and xb_x2 (starting at 0), as
+                // ({xb_x1} *x1 + {xb_x2} *x2)
+                if let Some((lc, vars)) = body.split_once(':') {
+                    let lc = lc.trim();
+                    let vars: Vec<&str> = vars.split_whitespace().collect();
+                    if !is_name(lc) || vars.is_empty() {
+                        return Err(no(format!(
+                            "nlsur with {{{body}}} is not translated yet (a linear combination {{name: varlist}} is)"
+                        )));
+                    }
+                    let mut r_terms = Vec::new();
+                    let mut s_terms = Vec::new();
+                    for v in &vars {
+                        if !is_name(v) || !self.kinds.contains_key(*v) {
+                            return Err(no(format!(
+                                "nlsur, {{{body}}}: only variables named in full are translated"
+                            )));
+                        }
+                        let p = format!("{lc}_{v}");
+                        if pars.iter().any(|(n, _)| *n == p) {
+                            return Err(no(format!(
+                                "nlsur with the linear combination {lc} used twice is not translated yet"
+                            )));
+                        }
+                        pars.push((p.clone(), 0.0));
+                        used.push(p.clone());
+                        r_terms.push(format!("{p}*{v}"));
+                        s_terms.push(format!("{{{p}}} *{v}"));
+                    }
+                    text.push_str(&format!("({})", r_terms.join(" + ")));
+                    stored.push_str(&format!(" ({}) ", s_terms.join(" + ")));
+                    rest = tail.get(close + 1..).unwrap_or("");
+                    continue;
                 }
                 let (name, init) = match body.split_once('=') {
                     Some((n, v)) => (n.trim(), Some(v.trim())),
@@ -487,18 +628,6 @@ impl Session {
                 return Err(no("nlsur needs a {parameter} in every equation"));
             }
             parsed.push((dep.to_string(), text, stored, used));
-        }
-        // a parameter in two equations under nls: Stata's estimates are not the stacked least
-        // squares then (they match each equation weighted by its residual variance), and how
-        // that weighting reaches the variance is not decoded
-        if method == "nls"
-            && pars
-                .iter()
-                .any(|(n, _)| parsed.iter().filter(|p| p.3.iter().any(|u| u == n)).count() > 1)
-        {
-            return Err(no(
-                "nlsur, nls with a parameter shared by two equations is not translated yet",
-            ));
         }
         // initial(a 1 b 2): starting values beside the {name = #} ones
         if let Some(a) = opts.arg("initial", 4) {
@@ -576,11 +705,46 @@ impl Session {
                 .trim()
                 .parse::<u32>()
                 .map_err(|_| no(format!("nlsur, iterate({i}) needs a whole number")))?,
-            None => 100,
+            None => 300,
         };
         let eps = num_opt("eps", 3, 1e-5)?;
+        let delta = num_opt("delta", 5, 4e-7)?;
+        if !(delta > 0.0 && delta.is_finite()) {
+            return Err(no("nlsur, delta() needs a positive number"));
+        }
+        // variables(): rows with one of them missing are left out as well
+        let mut markout = Vec::new();
+        if let Some(vs) = opts.arg("variables", 9) {
+            for v in vs.split_whitespace() {
+                if !is_name(v) || !self.kinds.contains_key(v) {
+                    return Err(no(format!(
+                        "nlsur, variables(): only variables named in full are translated ({v})"
+                    )));
+                }
+                markout.push(r_text(v));
+            }
+        }
         let rows = self.rows_for(c, out)?;
-        let src = self.weighted_rows(rows, &None);
+        let src = self.weighted_rows(rows, &weight);
+        let wargs = match &weight {
+            Some((k, v)) => format!(
+                ", wvar = {}, wtype = {}, wexp = {}",
+                r_text(v),
+                r_text(k.code()),
+                r_text(&format!("= {v}"))
+            ),
+            None => String::new(),
+        };
+        let vargs = match &cluster {
+            Some(v) => format!(", robust = TRUE, cluster = {}", r_text(v)),
+            None if robust => ", robust = TRUE".to_string(),
+            None => String::new(),
+        };
+        let margs = if markout.is_empty() {
+            String::new()
+        } else {
+            format!(", markout = c({})", markout.join(", "))
+        };
         for h in [
             "stata_fmt",
             "stata_tables",
@@ -615,12 +779,13 @@ impl Session {
             .join(", ");
         let show = !self.quiet(c);
         out.line(format!(
-            "stata_e <- stata_nlsur({src}, list({eq_list}), c({init}), level = {}, method = {}, nolog = {}, noconst = {}, iterate = {iterate}L, eps = {}, cmdline = {}, show = {})",
+            "stata_e <- stata_nlsur({src}, list({eq_list}), c({init}), level = {}, method = {}, nolog = {}, noconst = {}, iterate = {iterate}L, eps = {}, delta = {}{wargs}{vargs}{margs}, cmdline = {}, show = {})",
             r_number(level * 100.0),
             r_text(method),
             super::stats::r_logical(opts.has("nolog", 5)),
             super::stats::r_logical(opts.has("noconstant", 3)),
             r_number(eps),
+            r_number(delta),
             r_text(&super::returned::cmdline(c)),
             super::stats::r_logical(show)
         ));
@@ -639,27 +804,35 @@ impl Session {
         self.esample_new = true;
         self.fit_robust = false;
         self.fit_cluster = false;
-        self.estimates = None;
-        self.estimates_lost =
-            Some("test, lincom and margins are not translated after nlsur yet".into());
+        // test, lincom and nlcom read e(b) and e(V) (z, as Stata's); margins is refused
+        self.estimates = Some(Estimates {
+            fit: Fit::Nlsur,
+            dep: eqs.first().map(|q| q.dep.clone()).unwrap_or_default(),
+            factors: std::collections::BTreeMap::new(),
+        });
+        self.estimates_lost = None;
         self.active_store = None;
         self.e_text.clear();
         self.e_new = true;
-        let mut texts: Vec<String> = [
-            "cmdline",
-            "cmd",
-            "predict",
-            "estat_cmd",
-            "vce",
-            "method",
-            "constants",
-            "type",
-            "params",
-            "depvar",
-        ]
-        .iter()
-        .map(|s| s.to_string())
-        .collect();
+        let mut texts: Vec<String> = ["cmdline", "cmd", "predict", "estat_cmd"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        if weight.is_some() {
+            texts.push("wexp".into());
+            texts.push("wtype".into());
+        }
+        if cluster.is_some() {
+            texts.push("clustvar".into());
+        }
+        if robust || cluster.is_some() || matches!(weight, Some((W::P, _))) {
+            texts.push("vcetype".into());
+        }
+        texts.extend(
+            ["vce", "method", "constants", "type", "params", "depvar"]
+                .iter()
+                .map(|s| s.to_string()),
+        );
         for q in (1..=eqs.len()).rev() {
             texts.push(format!("params_{q}"));
             texts.push(format!("depvar_{q}"));
@@ -672,6 +845,9 @@ impl Session {
             cmd: "nlsur".into(),
             texts,
         };
+        if weight.is_some() {
+            out.caveat(super::weights::weight_caveat(&weight));
+        }
         out.caveat(
             "nlsur as Stata 19 runs it: Gauss-Newton on the stacked equations with forward-difference derivatives, \
              NLS then FGNLS (Sigma from the NLS residuals), its log and stopping rule matched to its output",

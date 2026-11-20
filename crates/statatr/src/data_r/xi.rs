@@ -15,64 +15,101 @@
 use super::meta::CHAR_HELPER;
 use super::*;
 
-/// The levels of each factor variable and the level xi leaves out, one line `v|1,2,3|1`.
-const XI_PLAN: &str = r##"stata_xi_plan <- function(d, vars) {
-  num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
+/// A factor variable's levels as Stata's xi reads them (probes 2026-11-20): the sorted values
+/// (a string variable's non-empty ones, in byte order), their labels as `g==label` writes them
+/// (a number with up to 16 digits and no leading zero), and the names' tokens: the values
+/// where all are whole numbers from 0 up ("naturally coded"), else 1, 2, 3 ... by rank.
+macro_rules! xi_levels {
+    () => {
+        r##"stata_xi_levels <- function(d, v) {
+  x <- d[[v]]
+  if (is.null(x)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  if (is.character(x)) {
+    lv <- sort(unique(x[!is.na(x) & x != ""]), method = "radix")
+    lab <- lv
+    natural <- FALSE
+  } else {
+    xn <- unclass(x)
+    attributes(xn) <- NULL
+    xn <- as.numeric(xn)
+    lv <- sort(unique(xn[!is.na(xn)]))
+    lab <- vapply(lv, function(z) sub("^(-?)0[.]", "\\1.", format(z, digits = 16, scientific = FALSE, trim = TRUE)), "")
+    natural <- length(lv) > 0 && all(lv == floor(lv) & lv >= 0)
+  }
+  list(values = lv, labels = lab, tokens = if (natural) lab else as.character(seq_along(lv)), natural = natural)
+}
+"##
+    };
+}
+
+/// The levels of each factor variable and the level xi leaves out, one line per variable:
+/// `v`, the name tokens, the labels, the omitted level's place and whether the coding is natural,
+/// separated by tabs (the tokens and labels by the unit separator).
+const XI_PLAN: &str = concat!(
+    xi_levels!(),
+    r##"stata_xi_plan <- function(d, vars) {
   for (v in vars) {
-    if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
-    x <- num(d[[v]])
-    lv <- sort(unique(x[!is.na(x)]))
-    if (length(lv) < 2) stop("RCraft: xi of a variable with fewer than two values is not translated yet", call. = FALSE)
-    if (any(lv != floor(lv)) || any(lv < 0)) stop("RCraft: xi with noninteger or negative levels is not translated yet", call. = FALSE)
+    lv <- stata_xi_levels(d, v)
+    if (length(lv$values) < 2) stop("RCraft: xi of a variable with fewer than two values is not translated yet", call. = FALSE)
     om <- stata_char_get(d, v, "omit")
     if (nzchar(om)) {
-      o <- suppressWarnings(as.numeric(om))
-      if (is.na(o) || !o %in% lv) stop("RCraft: char ", v, "[omit] names a level the variable does not have, which is not translated yet", call. = FALSE)
+      idx <- if (is.character(lv$values)) match(om, lv$values) else match(suppressWarnings(as.numeric(om)), lv$values)
+      if (is.na(idx)) stop("RCraft: char ", v, "[omit] names a level the variable does not have, which is not translated yet", call. = FALSE)
     } else if (identical(stata_char_get(d, "_dta", "omit"), "prevalent")) {
-      tb <- table(x)
-      top <- as.numeric(names(tb)[tb == max(tb)])
-      if (length(top) > 1) stop("RCraft: xi, prevalent with two equally frequent levels is not translated yet", call. = FALSE)
-      o <- top
+      x <- d[[v]]
+      if (!is.character(x)) { x <- unclass(x); attributes(x) <- NULL }
+      tb <- tabulate(match(x, lv$values), length(lv$values))
+      idx <- which(tb == max(tb))
+      if (length(idx) > 1) stop("RCraft: xi, prevalent with two equally frequent levels is not translated yet", call. = FALSE)
     } else {
-      o <- lv[1]
+      idx <- 1L
     }
-    cat(v, "|", paste(format(lv, scientific = FALSE, trim = TRUE), collapse = ","), "|", format(o, scientific = FALSE, trim = TRUE), "\n", sep = "")
+    cat(v, "\t", paste(lv$tokens, collapse = "\x1f"), "\t", paste(lv$labels, collapse = "\x1f"), "\t", idx, "\t", as.integer(lv$natural), "\n", sep = "")
   }
-}"##;
+}"##
+);
 
 /// Makes the variables, prints the term lines, and keeps the names made.
-pub(super) const XI_HELPER: &str = r##"stata_xi_make <- function(d, prefix, headers, vars, show = TRUE) {
+pub(super) const XI_HELPER: &str = concat!(
+    xi_levels!(),
+    r##"stata_xi_make <- function(d, prefix, headers, vars, show = TRUE) {
   num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
+  val <- function(u) if (is.character(u)) u else num(u)
+  gone <- function(u) if (is.character(u)) is.na(u) | u == "" else is.na(u)
   made <- get0("stata_xi_made", ifnotfound = character())
   for (n in intersect(made, names(d))) if (startsWith(n, prefix)) d[[n]] <- NULL
   made <- made[made %in% names(d)]
   if (show) for (h in headers) cat(sprintf("%-18s%-20s%s\n", h[[1]], h[[2]], h[[3]]))
   for (s in vars) {
     if (s$name %in% names(d)) stop("variable ", s$name, " already defined (Stata: r(110))", call. = FALSE)
-    xa <- num(d[[s$a]])
+    la <- stata_xi_levels(d, s$a)
+    xa <- val(d[[s$a]])
+    va <- la$values[s$ia]
     if (s$kind == "dummy") {
-      col <- as.numeric(xa == s$la)
-      lab <- paste0(s$a, "==", s$la)
+      col <- as.numeric(xa == va)
+      lab <- paste0(s$a, "==", la$labels[s$ia])
       fmt <- "%8.0g"
     } else if (s$kind == "ff") {
-      xb <- num(d[[s$b]])
-      col <- ifelse(is.na(xb), NA_real_, as.numeric(xa == s$la & xb == s$lb))
-      lab <- paste0(s$a, "==", s$la, " & ", s$b, "==", s$lb)
+      lb <- stata_xi_levels(d, s$b)
+      xb <- val(d[[s$b]])
+      col <- ifelse(gone(xb), NA_real_, as.numeric(xa == va & xb == lb$values[s$ib]))
+      lab <- paste0(s$a, "==", la$labels[s$ia], " & ", s$b, "==", lb$labels[s$ib])
       fmt <- "%8.0g"
     } else {
       xx <- num(d[[s$b]])
-      col <- as.numeric(xa == s$la) * xx
-      lab <- paste0("(", s$a, "==", s$la, ")*", s$b)
-      fmt <- "%9.0g"
+      col <- as.numeric(xa == va) * xx
+      lab <- paste0("(", s$a, "==", la$labels[s$ia], ")*", s$b)
+      fmt <- s$fmt
     }
-    col[is.na(xa)] <- NA_real_
+    col[gone(xa)] <- NA_real_
     attr(col, "label") <- lab
     attr(col, "format.stata") <- fmt
     d[[s$name]] <- col
     made <- c(made, s$name)
   }
   list(d = d, made = made)
-}"##;
+}"##
+);
 
 /// One `i.` term of a command, as typed.
 #[derive(Debug, Clone, PartialEq)]
@@ -145,6 +182,7 @@ fn term_of(w: &str) -> Result<Option<Term>, Untranslated> {
 /// their terms, and the command after the colon, if any.
 struct Parsed {
     prefix: String,
+    noomit: bool,
     words: Vec<String>,
     inner: Option<String>,
 }
@@ -176,9 +214,27 @@ fn parse(rest: &str) -> Result<Parsed, Untranslated> {
         Some((m, o)) => (m.trim(), o.trim()),
         None => (head.trim(), ""),
     };
+    // `xi, noomit i.g`: the terms may follow the options when there is no colon
+    let mut tail_terms: Vec<String> = Vec::new();
+    let opts = if inner.is_none() {
+        let mut keep: Vec<String> = Vec::new();
+        for w in words_of(opts) {
+            if w.starts_with("i.") || w.starts_with("I.") {
+                tail_terms.push(w);
+            } else {
+                keep.push(w);
+            }
+        }
+        keep.join(" ")
+    } else {
+        opts.to_string()
+    };
     let mut prefix = "_I".to_string();
-    for o in crate::lang::syntax::options(opts) {
-        if o.is("prefix", 3) {
+    let mut noomit = false;
+    for o in crate::lang::syntax::options(&opts) {
+        if o.is("noomit", 3) {
+            noomit = true;
+        } else if o.is("prefix", 3) {
             let p = o.arg();
             let p = p.trim();
             if p.is_empty() || !is_name(p) {
@@ -198,10 +254,14 @@ fn parse(rest: &str) -> Result<Parsed, Untranslated> {
         }
         Vec::new()
     } else {
-        main.split_whitespace().map(str::to_string).collect()
+        main.split_whitespace()
+            .map(str::to_string)
+            .chain(tail_terms)
+            .collect()
     };
     Ok(Parsed {
         prefix,
+        noomit,
         words,
         inner,
     })
@@ -236,20 +296,32 @@ fn words_of(inner: &str) -> Vec<String> {
 /// The levels of a factor and the one left out, from R's plan line.
 #[derive(Debug, Clone)]
 struct Plan {
+    /// the name tokens (the values where naturally coded, else 1, 2, 3 ...)
     levels: Vec<String>,
-    omit: String,
+    /// each level as `g==label` writes it
+    labels: Vec<String>,
+    /// the place (1-based) of the level left out
+    omit: usize,
+    natural: bool,
 }
 
 fn read_plan(text: &str) -> BTreeMap<String, Plan> {
     let mut m = BTreeMap::new();
     for line in text.lines() {
-        let mut p = line.split('|');
-        if let (Some(v), Some(l), Some(o)) = (p.next(), p.next(), p.next()) {
+        let mut p = line.split('\t');
+        if let (Some(v), Some(l), Some(lab), Some(o), Some(n)) =
+            (p.next(), p.next(), p.next(), p.next(), p.next())
+        {
+            let Ok(omit) = o.trim().parse::<usize>() else {
+                continue;
+            };
             m.insert(
                 v.trim().to_string(),
                 Plan {
-                    levels: l.split(',').map(|s| s.trim().to_string()).collect(),
-                    omit: o.trim().to_string(),
+                    levels: l.split('\u{1f}').map(str::to_string).collect(),
+                    labels: lab.split('\u{1f}').map(str::to_string).collect(),
+                    omit,
+                    natural: n.trim() == "1",
                 },
             );
         }
@@ -334,34 +406,34 @@ impl Session {
         let prefix = &p.prefix;
         let level_of = |v: &str| plan.get(v);
         // the names of a factor's dummies (the omitted level has none)
-        let dummies = |v: &str| -> Result<Vec<(String, String)>, Untranslated> {
+        // each as (name, place among the levels), the omitted one left out unless noomit
+        let dummies = |v: &str| -> Result<Vec<(String, usize)>, Untranslated> {
             let pl =
                 level_of(v).ok_or_else(|| no(format!("xi: the levels of {v} are not known")))?;
             Ok(pl
                 .levels
                 .iter()
-                .filter(|l| **l != pl.omit)
-                .map(|l| (format!("{prefix}{v}_{l}"), l.clone()))
+                .enumerate()
+                .filter(|(i, _)| p.noomit || i + 1 != pl.omit)
+                .map(|(i, l)| (format!("{prefix}{v}_{l}"), i + 1))
                 .collect())
         };
         let mut headers: Vec<String> = Vec::new();
         let mut specs: Vec<String> = Vec::new();
-        let mut made: Vec<(String, bool)> = Vec::new();
+        let mut made: Vec<(String, Storage)> = Vec::new();
         let mut repl: Vec<(String, String)> = Vec::new();
         let mut wild: Vec<(String, String)> = Vec::new();
-        let spec = |kind: &str, name: &str, a: &str, la: &str, b: &str, lb: &str| {
+        // la and lb are places among the levels (1-based); fmt the format of an `i.g*x` column
+        let spec = |kind: &str, name: &str, a: &str, ia: usize, b: &str, ib: usize, fmt: &str| {
             format!(
-                "list(kind = {}, name = {}, a = {}, la = {}, b = {}, lb = {})",
+                "list(kind = {}, name = {}, a = {}, ia = {}L, b = {}, ib = {}L, fmt = {})",
                 r_text(kind),
                 r_text(name),
                 r_text(a),
-                la,
+                ia,
                 r_text(b),
-                if lb.is_empty() {
-                    "NA".to_string()
-                } else {
-                    lb.to_string()
-                }
+                ib,
+                r_text(fmt)
             )
         };
         let head = |term: &str, stub: &str, note: &str| {
@@ -376,7 +448,24 @@ impl Session {
             Ok(head(
                 &format!("i.{v}"),
                 &format!("{prefix}{v}_{first}-{last}"),
-                &format!("(naturally coded; {prefix}{v}_{} omitted)", pl.omit),
+                &if pl.natural {
+                    format!(
+                        "(naturally coded; {prefix}{v}_{} omitted)",
+                        pl.levels
+                            .get(pl.omit.saturating_sub(1))
+                            .map_or("", |s| s.as_str())
+                    )
+                } else {
+                    format!(
+                        "({prefix}{v}_{} for {v}=={} omitted)",
+                        pl.levels
+                            .get(pl.omit.saturating_sub(1))
+                            .map_or("", |s| s.as_str()),
+                        pl.labels
+                            .get(pl.omit.saturating_sub(1))
+                            .map_or("", |s| s.as_str())
+                    )
+                },
             ))
         };
         for (word, t) in &terms {
@@ -385,10 +474,12 @@ impl Session {
             match t {
                 Term::Factor(v) => {
                     wild_here.push(format!("{prefix}{v}_*"));
-                    headers.push(main_head(v)?);
-                    for (n, l) in dummies(v)? {
-                        specs.push(spec("dummy", &n, v, &l, "", ""));
-                        made.push((n.clone(), true));
+                    if !p.noomit {
+                        headers.push(main_head(v)?);
+                    }
+                    for (n, i) in dummies(v)? {
+                        specs.push(spec("dummy", &n, v, i, "", 0, ""));
+                        made.push((n.clone(), Storage::Byte));
                         words_here.push(n);
                     }
                 }
@@ -398,25 +489,33 @@ impl Session {
                         format!("{prefix}{b}_*"),
                         format!("{prefix}{a}X{b}_*"),
                     ]);
-                    headers.push(main_head(a)?);
-                    headers.push(main_head(b)?);
+                    if !p.noomit {
+                        headers.push(main_head(a)?);
+                        headers.push(main_head(b)?);
+                    }
                     headers.push(head(
                         word,
                         &format!("{prefix}{a}X{b}_#_#"),
                         "(coded as above)",
                     ));
                     for v in [a, b] {
-                        for (n, l) in dummies(v)? {
-                            specs.push(spec("dummy", &n, v, &l, "", ""));
-                            made.push((n.clone(), true));
+                        for (n, i) in dummies(v)? {
+                            specs.push(spec("dummy", &n, v, i, "", 0, ""));
+                            made.push((n.clone(), Storage::Byte));
                             words_here.push(n);
                         }
                     }
-                    for (_, la) in dummies(a)? {
-                        for (_, lb) in dummies(b)? {
-                            let n = format!("{prefix}{a}X{b}_{la}_{lb}");
-                            specs.push(spec("ff", &n, a, &la, b, &lb));
-                            made.push((n.clone(), true));
+                    for (_, ia) in dummies(a)? {
+                        for (_, ib) in dummies(b)? {
+                            let (Some(ta), Some(tb)) = (
+                                level_of(a).and_then(|pl| pl.levels.get(ia - 1)),
+                                level_of(b).and_then(|pl| pl.levels.get(ib - 1)),
+                            ) else {
+                                return Err(no("xi: a level is missing from the plan"));
+                            };
+                            let n = format!("{prefix}{a}X{b}_{ta}_{tb}");
+                            specs.push(spec("ff", &n, a, ia, b, ib, ""));
+                            made.push((n.clone(), Storage::Byte));
                             words_here.push(n);
                         }
                     }
@@ -426,29 +525,40 @@ impl Session {
                         wild_here.push(format!("{prefix}{f}_*"));
                     }
                     wild_here.extend([x.clone(), format!("{prefix}{f}X{x}_*")]);
-                    headers.push(main_head(f)?);
+                    if !p.noomit {
+                        headers.push(main_head(f)?);
+                    }
                     headers.push(head(
                         word,
                         &format!("{prefix}{f}X{x}_#"),
                         "(coded as above)",
                     ));
-                    for (n, l) in dummies(f)? {
-                        specs.push(spec("dummy", &n, f, &l, "", ""));
-                        made.push((n.clone(), true));
+                    // the product has x's type: a double keeps %10.0g, a float %9.0g
+                    let (xfmt, xstore) = match self.storage.get(x.as_str()) {
+                        Some(Storage::Double) => ("%10.0g", Storage::Double),
+                        _ => ("%9.0g", Storage::Float),
+                    };
+                    for (n, i) in dummies(f)? {
+                        specs.push(spec("dummy", &n, f, i, "", 0, ""));
+                        made.push((n.clone(), Storage::Byte));
                         if *star {
                             words_here.push(n);
                         }
                     }
                     words_here.push(x.clone());
-                    for (_, l) in dummies(f)? {
-                        let n = format!("{prefix}{f}X{x}_{l}");
-                        specs.push(spec("fx", &n, f, &l, x, ""));
-                        made.push((n.clone(), false));
+                    for (_, i) in dummies(f)? {
+                        let Some(tok) = level_of(f).and_then(|pl| pl.levels.get(i - 1)) else {
+                            return Err(no("xi: a level is missing from the plan"));
+                        };
+                        let n = format!("{prefix}{f}X{x}_{tok}");
+                        specs.push(spec("fx", &n, f, i, x, 0, xfmt));
+                        made.push((n.clone(), xstore));
                         words_here.push(n);
                     }
                 }
             }
             repl.push((word.clone(), words_here.join(" ")));
+
             wild.push((word.clone(), wild_here.join(" ")));
         }
         if let Some((n, _)) = made.iter().find(|(n, _)| n.chars().count() > 32) {
@@ -475,12 +585,9 @@ impl Session {
         out.line(format!(
             "{d} <- stata_xi_r$d; stata_xi_made <- stata_xi_r$made; rm(stata_xi_r)"
         ));
-        for (n, byte) in &made {
+        for (n, store) in &made {
             self.kinds.insert(n.clone(), Kind::Number);
-            self.storage.insert(
-                n.clone(),
-                if *byte { Storage::Byte } else { Storage::Float },
-            );
+            self.storage.insert(n.clone(), *store);
             self.xi_made.push(n.clone());
         }
         let Some(inner) = &p.inner else {

@@ -400,7 +400,7 @@ impl Session {
             ],
             Fit::Ivregress => &[("xb", 2), ("residuals", 1)],
             Fit::Cnsreg => &[("xb", 2), ("residuals", 1)],
-            Fit::Sureg | Fit::Mvreg | Fit::Areg | Fit::Qreg => &[],
+            Fit::Sureg | Fit::Mvreg | Fit::Areg | Fit::Qreg | Fit::Nlsur => &[],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Nbreg => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("scores", 2)],
@@ -1033,6 +1033,22 @@ impl Session {
                 )))
             }
         };
+        // after nlsur: ic (from e(ll), e(rank) and e(N)) and vce
+        if est.fit == Fit::Nlsur {
+            if sub == "ic" && rest.is_empty() {
+                if let Some(o) = opts.other(&[]) {
+                    return Err(no(format!(
+                        "estat ic with the option {o} is not translated yet"
+                    )));
+                }
+                self.helpers.insert("stata_nlsur");
+                out.line("stata_nlsur_ic(stata_e)");
+                return Ok(());
+            }
+            if sub != "vce" {
+                return Err(no(format!("estat {sub} after nlsur is not translated yet")));
+            }
+        }
         // after asclogit: summarize (its own layout), and vce
         if est.fit == Fit::Asclogit {
             if sub.len() >= 2 && "summarize".starts_with(sub) && rest.is_empty() {
@@ -1305,6 +1321,8 @@ enum Names {
     Mlogit,
     /// sureg and mvreg: `[eq]x`, the first equation when none is named
     Equations(String),
+    /// nlsur: each parameter its own equation, `/a` and `[a]_cons` both shown `[a]_cons`
+    Params,
 }
 
 fn names_of(est: &Estimates) -> Option<Names> {
@@ -1321,6 +1339,7 @@ fn names_of(est: &Estimates) -> Option<Names> {
         | Fit::Clogit => Some(Names::Equation(est.dep.clone())),
         Fit::Mlogit => Some(Names::Mlogit),
         Fit::Sureg | Fit::Mvreg => Some(Names::Equations(est.dep.clone())),
+        Fit::Nlsur => Some(Names::Params),
         _ => None,
     }
 }
@@ -1412,6 +1431,11 @@ fn shown_name(t: &str, style: &Names) -> Option<String> {
         (Names::Equation(d), Some(e)) if e == *d => Some(format!("[{d}]{name}")),
         (Names::Equations(d), None) => Some(format!("[{d}]{name}")),
         (Names::Equations(_), Some(e)) if !e.is_empty() => Some(format!("[{e}]{name}")),
+        (Names::Params, None) => name
+            .strip_prefix('/')
+            .filter(|p| is_name(p))
+            .map(|p| format!("[{p}]_cons")),
+        (Names::Params, Some(e)) if is_name(&e) => Some(format!("[{e}]{name}")),
         (Names::Mlogit, None) => Some(format!("[stata:first]{name}")),
         (Names::Mlogit, Some(e)) if !e.is_empty() && !e.starts_with('#') => {
             Some(format!("[{e}]{name}"))
@@ -1557,6 +1581,22 @@ fn coef_name(t: &str, est: &Estimates) -> Result<String, Untranslated> {
                 })
         })
     };
+    // nlsur: e(b) is named a:_cons for each parameter a, which Stata also takes as /a
+    if est.fit == Fit::Nlsur {
+        if let Some(p) = t.strip_prefix('/') {
+            if is_name(p.trim()) {
+                return Ok(format!("{}:_cons", p.trim()));
+            }
+        }
+        return match t.split_once(':') {
+            Some((eq, name)) if is_name(eq.trim()) && name.trim() == "_cons" => {
+                Ok(format!("{}:_cons", eq.trim()))
+            }
+            _ => Err(no(format!(
+                "{t}: after nlsur a parameter is named /a or [a]_cons"
+            ))),
+        };
+    }
     if matches!(est.fit, Fit::Sureg | Fit::Mvreg) {
         return Ok(if t.contains(':') {
             t.to_string()
@@ -1862,6 +1902,29 @@ mod tests {
         // an interaction is looked up among R's coefficients once the model has run
         assert_eq!(coef_name("1.g#c.x", &e).as_deref(), Ok("stata:1.g#c.x"));
         assert!(coef_name("[2]x", &e).is_err(), "regress has one equation");
+    }
+
+    #[test]
+    fn nlsur_parameters_are_named_as_stata_names_them() {
+        let e = Estimates {
+            fit: Fit::Nlsur,
+            dep: "y1".into(),
+            factors: BTreeMap::new(),
+        };
+        assert_eq!(coef_name("/a1", &e).as_deref(), Ok("a1:_cons"));
+        assert_eq!(coef_name("_b[/a1]", &e).as_deref(), Ok("a1:_cons"));
+        assert_eq!(coef_name("[a1]_cons", &e).as_deref(), Ok("a1:_cons"));
+        assert_eq!(coef_name("a1:_cons", &e).as_deref(), Ok("a1:_cons"));
+        assert!(coef_name("a1", &e).is_err(), "a bare name is no parameter");
+        assert!(coef_name("[a1]x1", &e).is_err());
+        assert_eq!(
+            shown_name("/a1", &Names::Params).as_deref(),
+            Some("[a1]_cons")
+        );
+        assert_eq!(
+            shown_name("[b2]_cons", &Names::Params).as_deref(),
+            Some("[b2]_cons")
+        );
     }
 
     #[test]

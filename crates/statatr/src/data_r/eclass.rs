@@ -71,10 +71,14 @@ stata_eput <- function(e, name, value) {
 stata_bpost <- function(key, se = FALSE) {
   b <- if (exists("stata_e")) stata_e[["b"]] else NULL
   if (is.null(b)) stop("_b not allowed when e(b) is not present", call. = FALSE)
+  # nlsur keeps stata_b as its e(b), so that nlcom's derivatives (which move stata_b) reach _b[]
+  if (isTRUE(attr(stata_e, "stata_live_b")) && exists("stata_b")) b <- matrix(stata_b, 1, dimnames = list(NULL, names(stata_b)))
   nm <- colnames(b)
   i <- match(key, nm)
   # _b[/ln_p]: an ancillary parameter, the equation named / in e(b)
   if (is.na(i) && startsWith(key, "/") && !startsWith(key, "/:")) i <- match(paste0("/:", substring(key, 2)), nm)
+  # _b[/a] after nlsur: the parameter a, named a:_cons in e(b)
+  if (is.na(i) && startsWith(key, "/") && !startsWith(key, "/:")) i <- match(paste0(substring(key, 2), ":_cons"), nm)
   # a name without an equation is the first equation's
   if (is.na(i) && !grepl(":", key, fixed = TRUE) && grepl(":", nm[1], fixed = TRUE)) {
     i <- match(paste0(sub(":.*$", "", nm[1]), ":", key), nm)

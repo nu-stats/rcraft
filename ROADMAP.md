@@ -631,8 +631,8 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   xbd), `sureg` and `mvreg` (two-step GLS, `isure`, `small`, `dfk`, `corr`, fw/aw, `predict` with `equation()`, `test`
   across equations), `qreg` (`nolog`, any quantile, fweights, the iid variance, `predict`), `logistic` and `xi` (round 2, 2026-11-19: `xi: cmd`, `xi i.g`, `prefix()`, `i.g*i.h`, `i.g*x`, `i.g|x`, the omit characteristics) Verified (corpus
   `cnsreg.do`, `areg.do`, `sureg.do`, `qreg.do`, `logistic.do`, `xi.do`; notes `plan/stata/{constraint,areg,sureg,qreg,logistic,xi}.md`).
-  `nlsur` and the `qreg` ties and iteration log were built in round 3 (below).
-  Still refused: `xi` with a factor in two terms, `|` between factors or `noomit`; `constraints()` of other models;
+  `nlsur` and the `qreg` ties and iteration log were built in round 3, the `nlsur` gaps in round 4 (below).
+  Still refused: `xi` with a factor in two terms or `|` between factors (round 5, below: other levels and `noomit` are built); `constraints()` of other models;
   `areg` with regressors the absorbed groups make collinear; `logistic, noconstant`.
   Measured on top of P2C.12an: probes 79.8% -> 80.2% (23,159 -> 23,278 translated source lines of 29,018 judged); with `xi` the 7 probe lines move from refused to known only when run (the dry run cannot ask R for the levels; the corpus shows them translating): 23,278 translated, 5,733 not, 1,104 when run; packages 94.7% unchanged (4,025 of 4,249).)
   Round 3 (2026-11-19, the on-hold `qreg` item): `qreg` where the minimum is not unique and `qreg` without `nolog` Verified (corpus `qreg.do`, 234 results to 1e-8, was 51; note
@@ -648,6 +648,7 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   344 results (was 234), 115 more with quantiles at the ends of flat pieces. Tried and not better, with the numbers, in `plan/stata/qreg.md`; checked by running Stata at the q +/- h of
   the failing fits that R's paths are Stata's (5 of 6 logs identical). **Still not reproduced:** Stata's give-up (r(430), r(498) `increasing the maximum number of iterations`) on
   two-integer-dummy data, and the tied-breakpoint order that rounding noise decides (16 of 140 logs, 2 of 126 e(b)).
+Round 5 (2026-11-20, `xi`): factors whose values are not whole numbers from 0 up (negative, fractional, strings) are named by rank with Stata's header and `g==label` labels, `char s[omit]` for strings, `noomit` (before the terms or the colon), the product's type for `i.g*x`. Verified (corpus `xi.do`, 126 results to 1e-8, was 54; note `plan/stata/xi.md`). Still refused: a factor in two terms, `|` between factors, other options. Left for later and listed: `areg` with interactions and `ib.` bases, `cnsreg` with factor variables (both need `regress`'s e(b) naming and the base-level columns), `constraints()` of sspace and spregress.
 - P2C.12aq Survey design (batch 5 of the StatCraft port, done 2026-11-19, in part)
   (`svyset` with `strata()`, `fpc()`, `singleunit()`, later stages, `[iweight=]`, no PSU, `svyset, clear` and bare `svyset`, with the r()
   it leaves; `svydescribe` (stage 1 with and without a varlist, `finalstage`, `if`/`in`, r()); `svy: mean`, `total`, `ratio` and `proportion` with
@@ -671,6 +672,18 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   that has not converged stops with a message after its log (Stata prints a table, then r(430)). The cap on steps
   (100) is an assumption. Measured: probes 80.2% -> 80.3% (23,278 -> 23,291 translated of 30,115 source lines, 5,733 -> 5,720 not);
   packages 94.7% unchanged (4,025 of 4,249).)
+- P2C.12ao round 4: `nlsur` gaps (done 2026-11-20)
+  (fweights, aweights and pweights with `(sum of wgt is #)`, `vce(robust)` and `vce(cluster v)` (scores at the final
+  estimates, clusters times G/(G-1) (N-1)/(N-k)), `nls` with a parameter shared by two equations (Stata's hidden pass
+  weighted by each equation's variance, decoded; it also makes the cross-equation covariances 0, which round 3 printed
+  from the full Sigma), `delta()` and the derivative step d = delta (|b| + delta) (the round-3 rule missed nonlinear zero
+  starts and larger deltas), the default cap of 300 steps, the table of a run that runs out of steps then r(430),
+  `ifgnls` with `iterate()`, `{name: varlist}` (`xb_x1`), `variables()`, the covariance change against the new Sigma;
+  `test`, `lincom`, `nlcom` with `/a`, `[a]_cons`, `_b[/a]`; `estat ic`, `estat vce`) Verified (corpus `nlsur.do`, 680
+  results to 1e-6, 401 new; note `plan/stata/nlsur.md`). Still refused: iweights, the evaluator form, `parameters()`,
+  `margins` and other `estat` after `nlsur`, clusters with missing values; e() after a captured r(430) is not kept.
+  Measured: probes 80.5% (23,356 translated of 30,115 source lines, 5,655 not; round 3 had 23,291 and 5,720, before
+  the svy batch also landed).)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

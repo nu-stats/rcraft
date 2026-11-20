@@ -6111,3 +6111,28 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   iterations (100) is an assumption.
 - **Shares:** probes **80.3%** (23,291 translated, 5,720 not, 1,104 known only when run, of 30,115 source lines; was 23,278 / 5,733); packages
   **94.7%** (4,025 of 4,249), unchanged.
+
+## P2C.12ao round 4: nlsur gaps, 2026-11-20
+
+- **Done** (corpus `nlsur.do`, 680 results to 1e-6, 401 new; the printed lines compared with Stata 19's log): fweights,
+  aweights and pweights (`(sum of wgt is #)` as `%12.0gc`), `vce(robust)` and `vce(cluster v)`, `nls` with a parameter shared
+  by two equations, `delta()`, the table of a run that runs out of steps (then r(430)), `ifgnls` with `iterate()`,
+  `{name: varlist}`, `variables()`, `test`, `lincom`, `nlcom`, `_b[/a]`, `estat ic` and `estat vce`. Decoded here: the
+  derivative step is d = delta (|b| + delta) (the round-3 rule missed nonlinear zero starts and larger deltas); `nls` ends
+  with a pass, not logged, weighted by each equation's variance (so its cross-equation covariances are 0, which round 3
+  printed wrongly); robust scores are taken at the final estimates around the last step's matrix, clusters times
+  G/(G-1) (N-1)/(N-k); frequency weights count each copy's score once; the default cap is 300 steps a stage; the
+  covariance change is relative to the new Sigma. Note `plan/stata/nlsur.md`.
+- **Still refused:** iweights, the evaluator form, `parameters()`, `hasconstants()`, a linear combination used twice,
+  clusters with missing values, `margins` and other `estat` after `nlsur`. After a captured r(430) Stata keeps e(), RCraft
+  does not. Paths at noise level (a parameter near 0) can take a different number of steps.
+- **Shares:** probes **80.5%** (23,356 translated, 5,655 not, 1,104 known only when run, of 30,115 source lines).
+
+## P2C.12ao round 5: xi, other levels and noomit, 2026-11-20
+
+- **Done** (Stata 19 on made-up data; corpus `xi.do`, 126 results to 1e-8, was 54, labels and e(cmdline) compared): factors that are negative, fractional or strings
+  (named by rank, `(_Im_1 for m==-1 omitted)`, labels `s==lo`, `r==.3333333333333333`), `char s[omit]` for them, `noomit` (every level, no line for plain factors),
+  the product's type for `i.g*x` (double `%10.0g`, float `%9.0g`), `xi, noomit i.g` (terms after the options). Note `plan/stata/xi.md`.
+- **Left, listed:** `areg` with interactions and `ib.` bases and `cnsreg` with factor variables (the e(b) names with base-level columns, `1b.g#c.z`, `2.g` constraints and
+  `(omitted)` rows, are `regress`'s machinery); `xi` with a factor in two terms or `|` between factors. A `regress` limit seen here: with every dummy of two factors in a model
+  Stata and RCraft omit different columns.
