@@ -591,6 +591,7 @@ impl<'f> Run<'f> {
                             }),
                             None => Err(crate::expr_r::Untranslated {
                                 reason: "there is no data in memory".into(),
+                                stata_rc: None,
                             }),
                         },
                         Need::R(code, _) => Ok(ValueCode {
@@ -977,6 +978,26 @@ impl<'f> Run<'f> {
         match c.name.as_str() {
             "local" | "global" => {
                 let global = c.name == "global";
+                // under capture, an expression Stata does not read stops the line with its
+                // return code and the macro stays as it was (plan/stata/expression-errors.md)
+                if c.prefixes.contains(&Prefix::Capture) {
+                    if let Some(e) = macro_expression_error(&rest) {
+                        let mut fail = self.internal(
+                            c.span,
+                            &format!(
+                                "_rcraft_fail {} {}",
+                                e.code,
+                                crate::data_r::rejection_words(e.code)
+                            ),
+                        );
+                        fail.prefixes = c.prefixes.clone();
+                        fail.text = c.text.clone();
+                        let line = self.t.command(&fail);
+                        self.done_item(depth);
+                        self.push(line, What::Command, None, written);
+                        return Flow::Line;
+                    }
+                }
                 match self.define(&rest, global) {
                     Err(Stop::Ask(need)) => Flow::Ask(need),
                     Ok(info) => {
@@ -3441,6 +3462,23 @@ fn rounds_info(values: &[String]) -> String {
 }
 
 /// The text after the command word (`local`, `loc`) in a line.
+/// The return code of the expression of `local name = exp` (or `global`) when
+/// Stata would not read it, else `None`.
+fn macro_expression_error(rest: &str) -> Option<RejectedMacro> {
+    let rest = rest.trim_start();
+    let len = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+        .count();
+    let exp = rest.get(len..)?.trim_start().strip_prefix('=')?;
+    let e = crate::lang::expr::parse(exp).err()?;
+    crate::expr_r::rejected_code(&e).map(|code| RejectedMacro { code })
+}
+
+struct RejectedMacro {
+    code: u16,
+}
+
 fn after_word(text: &str, written: &str) -> String {
     let mut search = 0;
     while let Some(rel) = text.get(search..).and_then(|t| t.find(written)) {

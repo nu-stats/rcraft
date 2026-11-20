@@ -955,6 +955,7 @@ const LEAVE_DATA_ALONE: &[&str] = &[
 fn no(reason: impl Into<String>) -> Untranslated {
     Untranslated {
         reason: reason.into(),
+        stata_rc: None,
     }
 }
 
@@ -1890,6 +1891,24 @@ struct Session {
     rng_old: Option<String>,
 }
 
+/// The commands whose expression Stata's reader may refuse, which under
+/// `capture` stop with the reader's return code (the others keep their refusal
+/// until the way Stata reads their text is observed).
+const REJECTS_EXPRESSIONS: &[&str] = &[
+    "generate", "gen", "replace", "scalar", "assert", "count", "list",
+];
+
+/// What a line says when Stata rejects its expression: RCraft's own words for
+/// the return code, not Stata's.
+pub(crate) fn rejection_words(rc: u16) -> &'static str {
+    match rc {
+        101 => "weights are not allowed",
+        132 => "unbalanced parentheses or brackets",
+        133 => "unknown function",
+        _ => "the expression is not valid",
+    }
+}
+
 /// Whether a line prints nothing, as Stata decides: the innermost of
 /// quietly, noisily and capture (which is quiet) wins, so capture noisily
 /// prints and noisily quietly does not.
@@ -2680,7 +2699,45 @@ impl Session {
         Ok(())
     }
 
+    /// A command, with this: under `capture`, a line whose expression Stata
+    /// itself would not read stops with Stata's return code, `_rc` says so and
+    /// the do-file goes on (plan/stata/expression-errors.md). Without `capture`
+    /// the line is refused as before: Stata ends the do-file there.
     fn command(&mut self, c: &Command) -> Result<RCode, Untranslated> {
+        // a `[` after a blank is a weight to Stata, which generate does not take (r(101));
+        // for the other commands that is not observed, so they are not converted
+        let weighty = c.text.contains(" [");
+        let generate = matches!(c.name.as_str(), "generate" | "gen");
+        if c.prefixes.contains(&Prefix::Capture)
+            && REJECTS_EXPRESSIONS.contains(&c.name.as_str())
+            && (!weighty || generate)
+        {
+            let mut trial = self.clone();
+            let done = trial.command_inner(c);
+            let rc = match &done {
+                Err(_) if generate && (weighty || c.parts.weight.is_some()) => Some(101),
+                Err(Untranslated { stata_rc, .. }) if !weighty => stata_rc.as_ref().copied(),
+                _ => None,
+            };
+            return match rc {
+                Some(rc) => {
+                    let mut fail = c.clone();
+                    fail.name = "_rcraft_fail".to_string();
+                    fail.parts = Default::default();
+                    fail.options = Vec::new();
+                    fail.parts.main = format!("{rc} {}", rejection_words(rc));
+                    self.command_inner(&fail)
+                }
+                None => {
+                    *self = trial;
+                    done
+                }
+            };
+        }
+        self.command_inner(c)
+    }
+
+    fn command_inner(&mut self, c: &Command) -> Result<RCode, Untranslated> {
         // a variable another command makes again: its storage is not known
         if !matches!(c.name.as_str(), "generate" | "replace") {
             for v in new_vars(c) {
@@ -3783,9 +3840,11 @@ impl Session {
 
     fn generate(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
         if let Some(o) = opts.other(&[("before", 3), ("after", 1)]) {
-            return Err(no(format!(
-                "generate with the option {o} is not translated yet"
-            )));
+            // an option generate does not have: Stata's r(198), the line changes nothing
+            return Err(Untranslated {
+                reason: format!("generate has no option {o} (Stata stops: r(198))"),
+                stata_rc: Some(198),
+            });
         }
         let (lhs, rhs) = c
             .parts
@@ -4459,6 +4518,13 @@ impl Session {
     fn list(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
         let d = self.data()?;
         if self.quiet(c) {
+            // a list nothing shows still reads its if: Stata stops on an expression it rejects
+            let mut scratch = Out::default();
+            if let Err(e) = self.condition(c, &mut scratch) {
+                if e.stata_rc.is_some() {
+                    return Err(e);
+                }
+            }
             return Ok(());
         }
         if let Some(o) = opts.other(&[
@@ -6241,6 +6307,43 @@ capture drop x
 display _rc");
         assert!(out[2].starts_with("NOT: _rc is not known"), "{out:?}");
         assert!(out[4].contains("stata_rc"), "{out:?}");
+    }
+
+    #[test]
+    fn an_expression_stata_rejects_stops_with_its_code_under_capture() {
+        let out = r("use s
+capture noisily generate y = x +
+display _rc
+capture generate z = (x
+capture noisily display \"a\" 4 \\ 5
+capture noisily display 5-
+capture display +x
+display _rc");
+        // the stop carries Stata's return code, in RCraft's own words
+        assert!(out[1].contains("stop("), "{out:?}");
+        assert!(out[1].contains("(Stata: r(198))"), "{out:?}");
+        assert!(out[1].ends_with("stata_captured(e, TRUE))"), "{out:?}");
+        assert!(out[2].contains("stata_rc"), "{out:?}");
+        assert!(out[3].contains("(Stata: r(132))"), "{out:?}");
+        // the items before the bad one are shown first
+        assert!(
+            out[4].contains("stata_display(list(\"text\", \"a\")"),
+            "{out:?}"
+        );
+        assert!(out[4].contains("(Stata: r(198))"), "{out:?}");
+        assert!(out[5].contains("(Stata: r(198))"), "{out:?}");
+        assert!(out[6].contains("(Stata: r(198))"), "{out:?}");
+        // not under capture the line is refused: Stata ends the do-file there
+        let out = r("use s
+generate y = x +");
+        assert!(
+            out[1].starts_with("NOT: Stata would not read it"),
+            "{out:?}"
+        );
+        // a form Stata reads (the = before an expression is dropped) is not an error
+        let out = r("use s
+capture display 3 = 4");
+        assert!(!out[1].contains("stop("), "{out:?}");
     }
 
     #[test]

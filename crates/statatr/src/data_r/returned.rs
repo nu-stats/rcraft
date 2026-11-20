@@ -13,7 +13,7 @@
 use super::{no, Out, Session};
 use crate::expr_r::{r_text, Kind, Untranslated, Use};
 use crate::lang::expr::{parse_prefix, Expr};
-use crate::reader::Command;
+use crate::reader::{Command, Prefix};
 
 /// Reading `stata_e`, `stata_r`, `_b[]` and `_se[]` in R, and the lists.
 pub(super) const RETURNED_HELPER: &str = r##"stata_eget <- function(name, text = FALSE) {
@@ -2327,6 +2327,28 @@ impl Session {
         };
     }
 
+    /// Stata stops at a display item it rejects, with `code`: the items before
+    /// it are shown, the do-file goes on only under capture (the caller checks).
+    fn display_stops(
+        &mut self,
+        out: &mut Out,
+        pieces: &[String],
+        code: u16,
+    ) -> Result<(), Untranslated> {
+        if !pieces.is_empty() {
+            self.helpers.insert("stata_fmt");
+            out.line(format!("stata_display({})", pieces.join(", ")));
+        }
+        out.line(format!(
+            "stop({}, call. = FALSE)",
+            r_text(&format!(
+                "{} (Stata: r({code}))",
+                super::rejection_words(code)
+            ))
+        ));
+        Ok(())
+    }
+
     /// `display`: text, expressions, formats and the column directives.
     pub(super) fn display(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
         // over()'s names (_b[c.y@0.b]) past the expression reader, which takes no @
@@ -2447,13 +2469,52 @@ impl Session {
                 out.caveat("as/in colours are left out: R prints plain text");
                 continue;
             }
+            // `display 3 = 4` and `display = 4`: the = is dropped before an expression
+            // (observed; `= =` is an error, left to the reader)
+            if ch == '=' {
+                let after = text_of(&chars, i + 1, chars.len());
+                if after.trim_start().chars().next().is_some_and(|n| n != '=') {
+                    i += 1;
+                    continue;
+                }
+            }
             // an expression, as far as it goes
             let text = text_of(&chars, i, chars.len());
-            let (_, used) = parse_prefix(&text)
-                .map_err(|e| no(format!("display: Stata would not read it: {}", e.message)))?;
+            let (_, used) = match parse_prefix(&text) {
+                Ok(r) => r,
+                // under capture the items before it are shown, then Stata stops with
+                // its code, _rc says so and the do-file goes on
+                Err(e) => match crate::expr_r::rejected_code(&e) {
+                    // `display = exp` and `3 = 4` are not errors in Stata (the = is dropped):
+                    // not claimed
+                    Some(code)
+                        if c.prefixes.contains(&Prefix::Capture)
+                            && (!text.trim_start().starts_with('=')
+                                || text
+                                    .trim_start()
+                                    .get(1..)
+                                    .is_some_and(|t| t.trim_start().starts_with('='))) =>
+                    {
+                        return self.display_stops(out, &pieces, code);
+                    }
+                    _ => {
+                        let mut u = crate::expr_r::rejected(e);
+                        u.reason = format!("display: {}", u.reason);
+                        return Err(u);
+                    }
+                },
+            };
             let used_chars = used;
             let e = text_of(&chars, i, i + used_chars);
-            let (code, kind) = self.display_value(e.trim(), out)?;
+            let (code, kind) = match self.display_value(e.trim(), out) {
+                Ok(v) => v,
+                Err(Untranslated {
+                    stata_rc: Some(rc), ..
+                }) if c.prefixes.contains(&Prefix::Capture) => {
+                    return self.display_stops(out, &pieces, rc);
+                }
+                Err(u) => return Err(u),
+            };
             let f = fmt.take().unwrap_or_default();
             if kind == Kind::Text && !f.is_empty() && !f.ends_with('s') {
                 return Err(no(format!(

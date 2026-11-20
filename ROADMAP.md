@@ -572,6 +572,14 @@ Command families:
   measured: probes 78.0% -> 78.4% (22,588 -> 22,734 translated source lines) before batch K; 78.7% (22,817) with K and round 3;
   packages 94.0% unchanged (3,996 of 5,601).
   Not started: `bca` and `vce(bootstrap)`.)
+- P2C.12an Expressions Stata does not read (fix batch 2 of the StatCraft port, 2026-11-19)
+  (done: under `capture`, a line whose expression Stata rejects (an operator at the end, a token left after the expression,
+  unpaired parentheses, `+x`, a function with no argument, `generate y = x , 2`, `generate y = x [2]`) stops with Stata's
+  r(198), r(132), r(133) or r(101); `_rc` is set, nothing else changes and the do-file goes on. `display`, `scalar`, `generate`,
+  `replace`, `assert`, `count if`, `list if`, `local` and `global`; `display` shows the items before the bad one. Corpus
+  `expression_errors.do` (187 return codes, all Stata 19's); note `plan/stata/expression-errors.md`. Messages are RCraft's own words.
+  Measured: probes 78.7% -> 79.8% (22,823 -> 23,159 of 29,018 judged source lines), packages 94.7% unchanged. Still refused: `x[1] + +2`
+  (r(303)), `"a" * +2`, and the same errors outside `capture` (Stata ends the do-file).)
 - P2C.12ab Multiple imputation
   (not started: `mi`.)
 - P2C.12ac Treatment effects and difference in differences
