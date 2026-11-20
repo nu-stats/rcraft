@@ -6136,3 +6136,26 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Left, listed:** `areg` with interactions and `ib.` bases and `cnsreg` with factor variables (the e(b) names with base-level columns, `1b.g#c.z`, `2.g` constraints and
   `(omitted)` rows, are `regress`'s machinery); `xi` with a factor in two terms or `|` between factors. A `regress` limit seen here: with every dummy of two factors in a model
   Stata and RCraft omit different columns.
+
+## P2C.12as: arima (batch AR of the StatCraft port), 2026-11-20
+
+- **Done** (each checked in Stata 19 on made-up data): `arima` with `ar()`, `ma()`, `arima(p,d,q)`, `mar()`, `mma()`, `sarima(P,0,Q,s)`, regressors, `noconstant`, `level()`,
+  `iterate()` and the tolerance options; `predict` after it (`xb`, `y`, `residuals`, `yresiduals`, `mse`, `structural`, `dynamic()`). The likelihood, Stata's starting values and its
+  BHHH-then-BFGS path are StatCraft's decoding, rewritten in R (`data_r/arima/arima.R`); e() carries Stata's equation names, so `_b[ARMA:L.ma]`, `_se[sigma:_cons]` and `matrix list e(b)` read as in Stata.
+- **Corpus:** `arima.do` (tight tolerances, predict, 3e-5), `arima_path.do` (default paths, 2e-4), `arima_more.do` (seasonal terms, several AR lags with MA, MA lag 2; 1e-5).
+  The AR paths (starts, every `iterate(k)`, `e(ic)`, the stop) agree to 1e-6; the MA(1) and ARMA(1,1) default stops to 2e-4 (Stata's line search past the full step is not decoded).
+  e(p) is missing in Stata, as in StatCraft's note.
+- **Still refused / on hold:** see ROADMAP P2C.12as and `plan/stata/arima.md`. `sspace`, `ucm` and `dfactor` are the next piece of this batch.
+- **Shares:** probes **80.9%** (23,464 translated, 5,547 not, 1,104 known only when run, of 30,115 source lines; was 23,343 / 5,668, 80.5%); packages **94.7%** (4,025 of 4,249), unchanged (no package uses arima).
+
+## P2C.12at: sspace, ucm and dfactor (batch AR of the StatCraft port, part 2), 2026-11-20
+
+- **Done** (each checked in Stata 19 on made-up data): `sspace` with first-order state equations, observation equations with states, a constant and exogenous variables and `constraints()` of the form `[eq]term = #`; `ucm` with `llevel`, `rwalk` and
+  `lltrend` and regressors; `dfactor` with one AR(1) factor (or none) behind several series and with `ar(1)` on the observation equations; `predict` after them (`xb`, `states, equation()`, `trend`, `factors`, `smethod(onestep|filter)`).
+  The likelihood (exact Kalman filter, diffuse start for a unit root) and the standard errors are StatCraft's decoding, rewritten in R (`data_r/sspace/sspace.R`); the search is RCraft's own (BFGS, then Newton) and ends at Stata's optimum.
+  e() carries Stata's names (`/state:var(u)`, `/:var(level)`, `/observable:var(e.y1)`), so `_b[...]`, `_se[...]` and `matrix list e(b)` read as in Stata.
+- **Corpus:** `sspace.do`, `ucm.do`, `dfactor.do` (1e-5; estimates, standard errors, log likelihood and predictions agree to 3e-7). Probes 549, 550 and 551 translate in full; their `e(p)` agrees to 2e-6 (chi2 of 100 and 300).
+  Not reproduced: Stata's iteration log, `e(ic)`, `e(tech_steps)`, `e(technique)`, `e(ilog)`, `e(gradient)`, `e(gamma)`, `e(Cns)`, the data signature.
+- **Still refused / on hold:** see ROADMAP P2C.12at and `plan/stata/sspace.md` (state equations with constants or exogenous variables, lags beyond the first, covstate(), cycles and seasonals, more than one factor, `estat` and the other post-estimation commands,
+  a variance at zero, which Stata prints with no standard error).
+- **Shares:** probes **81.0%** (23,498 translated, 5,513 not, 1,104 known only when run, of 30,115 source lines; was 23,477 / 5,534, 80.9%); packages **94.7%** (4,025 of 4,249), unchanged (no package uses them).

@@ -29,6 +29,7 @@ mod alpha;
 mod anova;
 mod anovaplot;
 mod areg;
+mod arima;
 mod center;
 mod centile;
 mod ci;
@@ -114,6 +115,7 @@ mod sdtest;
 mod sktest;
 mod snapshot;
 mod spatial;
+mod sspace;
 mod st;
 mod stats;
 mod statsby;
@@ -1665,6 +1667,8 @@ fn helper_code(name: &str) -> &'static str {
         "stata_xtset" => xt::XTSET_HELPER,
         "stata_xtreg" => xt::XTREG_HELPER,
         "stata_xtregar" => xtregar::XTREGAR_HELPER,
+        "stata_arima" => arima::ARIMA_HELPER,
+        "stata_sspace" => sspace::SSPACE_HELPER,
         "stata_xtdpd" => xtdpd::XTDPD_HELPER,
         "stata_npregress" => npregress::NPREGRESS_HELPER,
         "stata_ivprobit" => ivprobit::IVPROBIT_HELPER,
@@ -3395,6 +3399,10 @@ impl Session {
             "tsappend" => self.tsappend(c, &opts, out),
             "xtreg" => self.xtreg(c, &opts, out),
             "xtregar" => self.xtregar(c, &opts, out),
+            "arima" => self.arima(c, &opts, out),
+            "sspace" => self.sspace(c, &opts, out),
+            "ucm" => self.ucm(c, &opts, out),
+            "dfactor" => self.dfactor(c, &opts, out),
             "xtabond" | "xtdpdsys" | "xtdpd" => self.xtdpd(c, &opts, out),
             "npregress" => self.npregress(c, &opts, out),
             "ivprobit" => self.ivprobit(c, &opts, out),
