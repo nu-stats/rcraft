@@ -631,10 +631,18 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   xbd), `sureg` and `mvreg` (two-step GLS, `isure`, `small`, `dfk`, `corr`, fw/aw, `predict` with `equation()`, `test`
   across equations), `qreg` (`nolog`, any quantile, fweights, the iid variance, `predict`), `logistic` and `xi` (round 2, 2026-11-19: `xi: cmd`, `xi i.g`, `prefix()`, `i.g*i.h`, `i.g*x`, `i.g|x`, the omit characteristics) Verified (corpus
   `cnsreg.do`, `areg.do`, `sureg.do`, `qreg.do`, `logistic.do`, `xi.do`; notes `plan/stata/{constraint,areg,sureg,qreg,logistic,xi}.md`).
-  **On hold** (listed, to be built): `nlsur` (7 probe lines: its iteration log is Stata's own Gauss-Newton path, the step rule not decoded; needs Opus-level work) and `qreg` where the minimum is not unique (Stata ends at one of several optimal vertices by a path not reproduced; the descent matched Stata on two of four such fits, `quantreg` on fewer).
-  Still refused: `qreg` without `nolog`, `xi` with a factor in two terms, `|` between factors or `noomit`; `constraints()` of other models;
+  **On hold** (listed, to be built): `nlsur` (7 probe lines: its iteration log is Stata's own Gauss-Newton path, the step rule not decoded; needs Opus-level work). `qreg` ties and the iteration log were built in round 3 (below).
+  Still refused: `xi` with a factor in two terms, `|` between factors or `noomit`; `constraints()` of other models;
   `areg` with regressors the absorbed groups make collinear; `logistic, noconstant`.
   Measured on top of P2C.12an: probes 79.8% -> 80.2% (23,159 -> 23,278 translated source lines of 29,018 judged); with `xi` the 7 probe lines move from refused to known only when run (the dry run cannot ask R for the levels; the corpus shows them translating): 23,278 translated, 5,733 not, 1,104 when run; packages 94.7% unchanged (4,025 of 4,249).)
+  Round 3 (2026-11-19, the on-hold `qreg` item): `qreg` where the minimum is not unique and `qreg` without `nolog` Verified (corpus `qreg.do`, 234 results to 1e-8, was 51; note
+  `plan/stata/qreg.md`). Stata's own path rebuilt from its iteration log: one weighted least squares step (check-loss weights, zero residuals dropped), the k rows
+  with the smallest weighted deviation as the first vertex, a descent over vertices priced per unit of the basic row's weight, breakpoints passed until the slope
+  reaches zero, zero-residual rows keeping a side; the log prints (`Iteration k:` lines, `note: alternate solutions exist.`). On 140 Stata runs over 10 data
+  sets (84 held out): WLS value 140/140, final e(b) 123 of the 126 Stata finishes, logged sequence 114/140 (all 14 continuous runs). Also found: e(q_v) is the
+  floor(q (N + 1))-th value, and r(498) `VCE computation failed; try a different bandwidth` is exactly q -/+ h outside (0, 1). **Not reproduced:** Stata's cycling
+  (r(430), r(498) `try increasing the maximum number of iterations`) on two-integer-dummy data, and the three e(b) endings above; the log can differ on heavily tied data.
+  Measured: probes 80.2% and packages 94.7% unchanged (the probe lines already ran `nolog` or fit continuous data).
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

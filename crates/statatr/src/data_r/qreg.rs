@@ -1,12 +1,14 @@
 //! `qreg depvar indepvars [if] [in] [fweight], [quantile(#)] nolog`: quantile regression as
 //! Stata 19 reports it (`plan/stata/qreg.md`).
 //!
-//! - The estimates minimise the sum of q (r > 0) and (1 - q) (-r) (r < 0) over the residuals,
-//!   found by the Barrodale-Roberts simplex in R's `quantreg` (a separate R process, never
-//!   linked); where the minimum is not unique Stata's own path may end at another vertex, which
-//!   is why Stata's iteration log is not reproduced and only `nolog` is translated.
-//! - Header: `Raw sum of deviations` about the sample quantile (the smallest y with at least
-//!   the share q at or below it), `Min sum of deviations`, `Pseudo R2` = 1 - min/raw.
+//! - The estimates minimise the sum of q (r > 0) and (1 - q) (-r) (r < 0) over the residuals.
+//!   They are found by Stata's own path, rebuilt from its iteration log: one weighted least
+//!   squares step, then a descent over the vertices of the linear programme in R (a separate R
+//!   process, never linked). Where the minimum is not unique that path decides which vertex is
+//!   reported, and the log (`Iteration k:` lines, `note: alternate solutions exist.`) is printed
+//!   when `nolog` is absent.
+//! - Header: `Raw sum of deviations` about the sample quantile (the floor of q (N + 1)-th smallest y, where
+//!   weights count), `Min sum of deviations`, `Pseudo R2` = 1 - min/raw.
 //! - V = q (1 - q) s^2 (X'WX)^-1, with the sparsity s = xbar'(b(q + h) - b(q - h))/(2h) and
 //!   Hall and Sheather's bandwidth h = n^(-1/3) z^(2/3) [1.5 phi(Phi^-1(q))^2 /
 //!   (2 Phi^-1(q)^2 + 1)]^(1/3); t tests on N - k degrees of freedom (k with the constant).
@@ -16,14 +18,31 @@ use super::weights::W;
 use super::*;
 
 /// The fit, its table and the predictions.
-pub(super) const QREG_HELPER: &str = r##"# the minimum of sum w rho_q(y - X b) by descending the edges of the linear programme's vertices (each
-# fits k rows exactly): from the k rows least squares fits best, along the steepest edge to the first
-# residual that turns the slope up. Where the optimum is not unique this ends where Stata's does.
-stata_qreg_solve <- function(X, y, w, q) {
+pub(super) const QREG_HELPER: &str = r##"# Stata's qreg path, reproduced from its iteration log (plan/stata/qreg.md): one weighted least squares step
+# for the check loss (weights 1/|OLS residual| and 0 where that is zero, which also leaves the row out of the linear term (2q - 1) X'w), then the k rows that step fits
+# best (smallest weighted deviation) as the first vertex, and a descent over the vertices of the linear
+# programme: the edge with the steepest slope per unit of its basic row's weight, along it past every breakpoint
+# until the slope reaches zero (the rows are weighted, ties go to the last edge, the lowest row, and a row at a
+# residual of zero keeps the side it was last seen on, positive at the start).
+stata_qreg_ir <- function(X, y, w, q) {
+  b <- solve(crossprod(X * w, X), crossprod(X * w, y))
+  r <- drop(y - X %*% b)
+  live <- abs(r) >= 1e-10 * max(1, max(abs(y)))
+  ww <- ifelse(live, w / abs(r), 0)
+  drop(solve(crossprod(X * ww, X), crossprod(X * ww, y) + (2 * q - 1) * crossprod(X, w * live)))
+}
+stata_qreg_dsum <- function(v) {
+  s <- 0
+  for (x in v) s <- s + x
+  s
+}
+stata_qreg_solve <- function(X, y, w, q, maxit = 1000) {
   n <- nrow(X)
   k <- ncol(X)
-  ls <- solve(crossprod(X * w, X), crossprod(X * w, y))
-  ord <- order(abs(y - drop(X %*% ls)))
+  rho <- function(r) ifelse(r > 0, q * r, (1 - q) * -r)
+  ls <- stata_qreg_ir(X, y, w, q)
+  wls <- sum(w * rho(y - drop(X %*% ls)))
+  ord <- order(rho(y - drop(X %*% ls)))
   h <- integer()
   for (r in ord) {
     trial <- c(h, r)
@@ -31,57 +50,74 @@ stata_qreg_solve <- function(X, y, w, q) {
     if (length(h) == k) break
   }
   if (length(h) < k) stop("RCraft: qreg with collinear regressors is not translated yet", call. = FALSE)
-  for (iter in seq_len(50 * n + 100)) {
+  zt <- 1e-9 * max(1, max(abs(y)))
+  sgn <- rep(1, n)
+  trace <- numeric()
+  notes <- integer()
+  for (iter in seq_len(maxit + 1)) {
     inv <- solve(X[h, , drop = FALSE])
     b <- drop(inv %*% y[h])
     resid <- y - drop(X %*% b)
+    resid[abs(resid) < zt] <- 0
+    trace <- c(trace, sum(w * rho(resid)))
     Cm <- X %*% inv
     nb <- setdiff(seq_len(n), h)
     rr <- resid[nb]
     wr <- w[nb]
+    sr <- ifelse(rr > 0, 1, ifelse(rr < 0, -1, sgn[nb]))
     gs <- numeric(2 * k)
     for (j in seq_len(k)) {
       for (s in 1:2) {
         sg <- if (s == 1) 1 else -1
         cj <- sg * Cm[nb, j]
-        term <- ifelse(rr > 1e-12, -q * cj, ifelse(rr < -1e-12, (1 - q) * cj, pmax(-q * cj, (1 - q) * cj)))
-        gs[2 * (j - 1) + s] <- 2 * (w[h[j]] * (if (sg > 0) 1 - q else q) + sum(wr * term))
+        term <- ifelse(sr > 0, -q * cj, (1 - q) * cj)
+        gs[2 * (j - 1) + s] <- 2 * (w[h[j]] * (if (sg > 0) 1 - q else q) + stata_qreg_dsum(wr * term))
       }
     }
     cand <- which(gs < -1e-10)
-    if (!length(cand)) {
-      # an edge along which the objective stays flat: the optimum is not unique
-      if (any(abs(gs) < 1e-10)) {
-        stop("RCraft: qreg where the minimum is not unique is not translated: Stata ends at one of several optimal vertices by its own path, which is not reproduced", call. = FALSE)
-      }
-      return(b)
-    }
-    m <- cand[which.min(gs[cand])]
+    if (!length(cand)) return(list(b = b, trace = trace, notes = notes, wls = wls))
+    if (iter > maxit) stop("convergence not achieved (Stata: r(430))", call. = FALSE)
+    gp <- gs / rep(w[h], each = 2)
+    tied <- cand[gp[cand] <= min(gp[cand]) + 1e-9]
+    m <- tied[length(tied)]
     j <- (m + 1) %/% 2
     sg <- if (m %% 2 == 1) 1 else -1
-    g <- gs[m]
-    d <- sg * inv[, j]
-    cd <- drop(X[nb, , drop = FALSE] %*% d)
-    t <- rr / cd
-    keep <- which(abs(cd) > 1e-14 & t > -1e-12)
-    t <- pmax(t[keep], 0)
-    add <- 2 * wr[keep] * abs(cd[keep])
-    o <- order(t)
-    slope <- g
-    enter <- NA_integer_
-    for (i in o) {
-      slope <- slope + add[i]
-      if (slope >= -1e-12) {
-        enter <- nb[keep[i]]
+    cd <- drop(X[nb, , drop = FALSE] %*% (sg * inv[, j]))
+    kinks <- which(abs(cd) > 1e-14 & -cd * sr < 0)
+    t <- abs(rr[kinks]) / abs(cd[kinks])
+    add <- 2 * wr[kinks] * abs(cd[kinks])
+    idx <- nb[kinks]
+    o <- order(t, idx)
+    slope <- gs[m]
+    pos <- NA_integer_
+    for (ii in seq_along(o)) {
+      slope <- slope + add[o[ii]]
+      if (slope >= 0) {
+        pos <- ii
         break
       }
     }
-    if (is.na(enter)) stop("RCraft: qreg did not find an optimum", call. = FALSE)
-    h[j] <- enter
+    if (is.na(pos)) stop("RCraft: qreg did not find an optimum", call. = FALSE)
+    if (abs(slope) < 1e-9) notes <- c(notes, length(trace))
+    crossed <- idx[o[seq_len(pos - 1)]]
+    sgn2 <- sgn
+    sgn2[nb] <- sr
+    sgn2[h[j]] <- -sg
+    sgn2[crossed] <- -sr[match(crossed, nb)]
+    sgn <- sgn2
+    h[j] <- idx[o[pos]]
   }
-  stop("RCraft: qreg did not settle", call. = FALSE)
+  stop("convergence not achieved (Stata: r(430))", call. = FALSE)
 }
-stata_qreg <- function(d, dep, terms, q = 0.5, wvar = NULL, wtype = NULL, level = 95, cmdline = "", show = TRUE) {
+stata_qreg_log <- function(sol) {
+  g <- function(v) formatC(stata_fmt(v, "%10.0g", trim = TRUE), width = 10)
+  cat("\n", sprintf("%-13s WLS sum of weighted deviations = %s\n", "Iteration 1:", g(sol$wls)), "\n", sep = "")
+  for (i in seq_along(sol$trace)) {
+    cat(sprintf("%-13s Sum of abs. weighted deviations = %s\n", paste0("Iteration ", i, ":"), g(sol$trace[i])))
+    if (i %in% sol$notes) cat("note: alternate solutions exist.\n")
+  }
+}
+stata_qreg <- function(d, dep, terms, q = 0.5, wvar = NULL, wtype = NULL, level = 95, cmdline = "", show = TRUE, log = FALSE) {
   num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
   tvars <- setdiff(unique(unlist(regmatches(terms, gregexpr("[A-Za-z_][A-Za-z0-9_]*", terms)))), "factor")
   for (v in unique(c(dep, tvars, wvar))) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
@@ -103,22 +139,29 @@ stata_qreg <- function(d, dep, terms, q = 0.5, wvar = NULL, wtype = NULL, level 
   w <- if (is.null(wvar)) rep(1, n) else num(mf[[wvar]])
   N <- sum(w)
   if (qr(X1 * sqrt(w))$rank < k + 1) stop("RCraft: qreg with collinear regressors is not translated yet", call. = FALSE)
-  fit <- function(tau) stats::setNames(stata_qreg_solve(X1, y, w, tau), nm)
-  b <- fit(q)
+  sol <- stata_qreg_solve(X1, y, w, q)
+  b <- stats::setNames(sol$b, nm)
+  if (log && show) stata_qreg_log(sol)
+  fit <- function(tau) {
+    s <- tryCatch(stata_qreg_solve(X1, y, w, tau), error = function(e) NULL)
+    if (is.null(s)) stop("VCE computation failed; try increasing the maximum number of iterations or try bsqreg (Stata: r(498))", call. = FALSE)
+    stats::setNames(s$b, nm)
+  }
   res <- y - drop(X1 %*% b)
   rho <- function(r) ifelse(r > 0, q * r, (1 - q) * (-r))
   mins <- sum(w * rho(res))
-  # the sample quantile: the smallest y with at least the share q at or below it
+  # the sample quantile: the smallest y whose cumulative weight passes q (N + 1) - 1, the floor of q (N + 1)-th value
   o <- order(y)
-  cw <- cumsum(w[o]) / N
-  qv <- y[o][which(cw >= q - 1e-12)[1]]
+  cw <- cumsum(w[o])
+  qv <- y[o][which(cw > q * (N + 1) - 1 + 1e-9)[1]]
   raw <- sum(w * rho(y - qv))
   z <- stats::qnorm(1 - (100 - level) / 200)
   qn <- stats::qnorm(q)
   h <- N^(-1/3) * z^(2/3) * (1.5 * stats::dnorm(qn)^2 / (2 * qn^2 + 1))^(1/3)
   xbar <- colSums(w * X1) / N
-  hi <- min(q + h, 1 - 1e-9)
-  lo <- max(q - h, 1e-9)
+  if (q - h <= 0 || q + h >= 1) stop("VCE computation failed; try a different bandwidth or bsqreg (Stata: r(498))", call. = FALSE)
+  hi <- q + h
+  lo <- q - h
   spars <- sum(xbar * (fit(hi) - fit(lo))) / (hi - lo)
   A <- crossprod(X1 * w, X1)
   V <- q * (1 - q) * spars^2 * solve(A)
@@ -262,11 +305,6 @@ impl Session {
                 return Ok(());
             }
         }
-        if !opts.has("nolog", 3) && !self.quiet(c) {
-            return Err(no(
-                "qreg without nolog prints Stata's own simplex path (its iteration log), which is not translated; use nolog",
-            ));
-        }
         let q = match opts.arg("quantile", 1) {
             None => 0.5,
             Some(t) => {
@@ -315,8 +353,9 @@ impl Session {
             None => String::new(),
         };
         let show = !self.quiet(c);
+        let log = show && !opts.has("nolog", 3);
         out.line(format!(
-            "stata_e <- stata_qreg({src}, {}, c({}), q = {}{wargs}, level = {}, cmdline = {}, show = {})",
+            "stata_e <- stata_qreg({src}, {}, c({}), q = {}{wargs}, level = {}, cmdline = {}, show = {}, log = {})",
             r_text(&spec.dep),
             spec.terms
                 .iter()
@@ -326,7 +365,8 @@ impl Session {
             r_number(q),
             r_number(level * 100.0),
             r_text(&super::returned::cmdline(c)),
-            super::stats::r_logical(show)
+            super::stats::r_logical(show),
+            super::stats::r_logical(log)
         ));
         out.line("stata_b <- attr(stata_e, \"stata_b\")");
         out.line("stata_vcov <- attr(stata_e, \"stata_V\")");
@@ -367,8 +407,9 @@ impl Session {
             .collect(),
         };
         out.caveat(
-            "qreg as Stata 19 reports it: the estimates from R's quantreg (simplex), the sparsity from fits at q +/- h \
-             (Hall and Sheather's bandwidth), V = q(1 - q) s^2 (X'WX)^-1; where the minimum is not unique Stata's vertex can differ",
+            "qreg as Stata 19 reports it: Stata's own path (a weighted least squares start, then a descent over the vertices), \
+             the sparsity from fits at q +/- h (Hall and Sheather's bandwidth), V = q(1 - q) s^2 (X'WX)^-1; where the minimum is \
+             not unique the path is emulated, and Stata's iteration log can differ on heavily tied data",
         );
         Ok(())
     }
