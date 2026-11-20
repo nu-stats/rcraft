@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12, batch E): made-up data; Stata 19's results are in areg.recorded
 * commands: areg
-* (areg: absorbing the indicators of one variable; the fit with plain and factor regressors, robust and clustered errors, fweights, aweights and pweights, if, level(), the F test of the absorbed indicators, e() scalars, e(b) and e(V), predict xb, residuals, d and xbd, test after it, and the errors with their return codes)
+* (areg: absorbing the indicators of one variable; the fit with plain and factor regressors, robust and clustered errors, fweights, aweights and pweights, if, level(), the F test of the absorbed indicators, e() scalars, e(b) and e(V), predict xb, residuals, d and xbd, test after it, regressors omitted for collinearity, and the errors with their return codes)
 * tolerance: 1e-8
 version 19
 set linesize 255
@@ -69,3 +69,34 @@ capture noisily areg y x z [iw = w], absorb(id)
 display "@ e2 " _rc
 capture noisily areg y x z if x > 100, absorb(id)
 display "@ e3 " _rc
+* regressors the absorbed groups or the others make collinear: omitted with a note, an o. column in e(b)
+generate double x2 = 2 * x
+generate double xz = x + z
+generate double cst = 3
+areg y x u z, absorb(id)
+shwareg
+areg y u x z, absorb(id)
+shwareg
+areg y x x2 z, absorb(id)
+shwareg
+areg y x z xz, absorb(id)
+shwareg
+areg y x cst z, absorb(id)
+shwareg
+areg y x u, absorb(id) vce(robust)
+shwareg
+areg y x u, absorb(id) vce(cluster id)
+shwareg
+areg y x i.g u [fweight = fw], absorb(id)
+shwareg
+predict double pc1
+predict double rc1, residuals
+predict double dc1, d
+summarize pc1
+display "@ pc1 " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+summarize rc1
+display "@ rc1 " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+summarize dc1
+display "@ dc1 " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+test x
+display "@ tc1 " %24.17g r(F) " " r(df) " " r(df_r) " " %24.17g r(p)

@@ -6099,3 +6099,16 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   iterations (100) is an assumption.
 - **Shares:** probes **80.3%** (23,291 translated, 5,720 not, 1,104 known only when run, of 30,115 source lines; was 23,278 / 5,733); packages
   **94.7%** (4,025 of 4,249), unchanged.
+
+## P2C.12ao round 4: constraints() in logit/probit/poisson, logit noconstant, areg collinear, 2026-11-20
+
+- **Done** (Stata 19 on made-up data; corpus `ml_cns.do`, 263 results to 1e-6, and its printed output compared with Stata's log line for line;
+  `areg.do`, 137 results to 1e-8, was 77): `constraints()` in `logit`, `probit`, `poisson` and `logistic`; `logit`, `probit` and `logistic` with
+  `noconstant`; `areg` with collinear regressors; predict's default-option notes after logit, probit and poisson.
+- **Found:** Stata's start under constraints is its usual start projected onto them (logit/probit: the constant-only fit; poisson: the least-squares
+  start after one Newton step, weighted with fweights), to every digit of iteration 0. One halved step is not marked in Stata's log (no `(backed up)`).
+  The Wald test leaves out the directions the constraints fix (chi2 on the rank left), even where all slopes 0 contradicts them. Without the constant,
+  logit's log starts at 0 and the header is the Wald one. areg omits a regressor the absorbed groups make collinear wherever it stands, then the later
+  of a collinear set. Notes `plan/stata/{constraint,logistic,areg}.md`.
+- **Still refused:** ROADMAP P2C.12ao round 4.
+- **Shares:** probes **80.5%** (23,345 translated, 5,666 not, 1,104 known only when run, of 30,115 source lines; was 23,343); packages **94.7%** (4,025 of 4,249), unchanged.

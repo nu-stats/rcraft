@@ -1579,6 +1579,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_slice" => model::SLICE_HELPER,
         "stata_fit_rows" => model::FIT_ROWS_HELPER,
         "stata_glm_vcov" => ml::GLM_VCOV_HELPER,
+        "stata_ml_cns" => ml::ML_CNS_HELPER,
         "stata_nbreg_vcov" => ml::NBREG_VCOV_HELPER,
         "stata_ml_header" => ml::ML_HEADER_HELPER,
         "stata_multinom_b" => ml::MULTINOM_B_HELPER,
