@@ -666,6 +666,12 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   that has not converged stops with a message after its log (Stata prints a table, then r(430)). The cap on steps
   (100) is an assumption. Measured: probes 80.2% -> 80.3% (23,278 -> 23,291 translated of 30,115 source lines, 5,733 -> 5,720 not);
   packages 94.7% unchanged (4,025 of 4,249).)
+- P2C.12ar Censored and selection models (batch J of the StatCraft port, done 2026-11-20, in part)
+  (`tobit`, `intreg`, `truncreg`, `cloglog`, `hetprobit`, `heckman`: Stata's logs and starts, fw/pw/iw weights where Stata takes them, robust and clustered errors, replay, predict, `estat ic`) Verified
+  (corpus `tobit.do`, `intreg.do`, `truncreg.do`, `cloglog.do`, `hetprobit.do`, `heckman.do`; note `plan/stata/censored.md`; R in `data_r/censored/`).
+  **On hold** (listed, to be built): `stepwise` and `nestreg` with tobit, `from()`, tobit/intreg with aweights, tobit with interactions, factor variables in truncreg, cloglog, hetprobit and heckman,
+  `iterate()`, `noconstant`, margins after these models.
+  Measured: probes 80.2% -> 80.5% (23,278 -> 23,343 translated source lines of 30,115 judged), packages 94.7% -> 94.8% (4,025 -> 4,028; the `tobit` lines of 6J6BAW).
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.
