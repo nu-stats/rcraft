@@ -116,6 +116,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("gettoken", &["made"]),
     ("global", &["control"]),
     ("gsort", &["data", "extended_missing_commands"]),
+    ("heckman", &["heckman"]),
     ("hetprobit", &["hetprobit"]),
     ("icc", &["icc"]),
     (

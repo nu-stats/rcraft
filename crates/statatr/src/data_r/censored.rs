@@ -12,6 +12,7 @@ pub(super) const CX_HELPER: &str = include_str!("censored/cx.R");
 pub(super) const TOBIT_HELPER: &str = include_str!("censored/tobit.R");
 pub(super) const TRUNC_HELPER: &str = include_str!("censored/trunc.R");
 pub(super) const BIN_HELPER: &str = include_str!("censored/bin.R");
+pub(super) const HECKMAN_HELPER: &str = include_str!("censored/heckman.R");
 
 /// What every command of the batch reads from its line.
 struct Line {
@@ -80,6 +81,7 @@ impl Session {
             Fit::Truncreg => "truncreg",
             Fit::Cloglog => "cloglog",
             Fit::Hetprobit => "hetprobit",
+            Fit::Heckman => "heckman",
             _ => return None,
         };
         matches!(
@@ -725,6 +727,124 @@ impl Session {
         Ok(())
     }
 
+    /// `heckman depvar indepvars [if] [in] [weight], select([depvar_s =] varlist) [twostep vce() level() nolog]`.
+    pub(super) fn heckman(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[
+            ("select", 3),
+            ("twostep", 3),
+            ("robust", 1),
+            ("vce", 3),
+            ("cluster", 2),
+            ("level", 3),
+            ("nolog", 3),
+        ]) {
+            return Err(no(format!(
+                "heckman with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.main.trim().is_empty() {
+            return self.cx_replay(c, opts, out, "heckman");
+        }
+        let twostep = opts.has("twostep", 3);
+        let l = self.cx_line(c, opts, out, &[W::F, W::P, W::I], "heckman")?;
+        if l.stopped {
+            return Ok(());
+        }
+        let Some(sel) = opts.arg("select", 3) else {
+            out.line("stop(\"option select() required (Stata: r(198))\", call. = FALSE)");
+            return Ok(());
+        };
+        if twostep && l.w.is_some() {
+            out.line("stop(\"weights not allowed with option twostep (Stata: r(198))\", call. = FALSE)");
+            return Ok(());
+        }
+        let (seldep, vars) = match sel.split_once('=') {
+            Some((d, v)) => (Some(d.trim().to_string()), v.to_string()),
+            None => (None, sel.clone()),
+        };
+        let vars: Vec<String> = vars.split_whitespace().map(str::to_string).collect();
+        if vars.is_empty()
+            || vars.iter().any(|v| !is_name(v))
+            || seldep.as_deref().is_some_and(|d| !is_name(d))
+        {
+            return Err(no(
+                "heckman's select() is translated with plain variable names (no factor variables)",
+            ));
+        }
+        for h in [
+            "stata_cx",
+            "stata_bin",
+            "stata_heckman",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+            "stata_eclass",
+        ] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_e <- stata_heckman({}, {}, {}, {}, seldep = {}, twostep = {}{}, robust = {}{}, level = {}, nolog = {}, cmdline = {}, show = {})",
+            l.src,
+            r_text(&l.spec.dep),
+            names(&l.spec.terms),
+            names(&vars),
+            seldep.as_deref().map_or("NULL".to_string(), r_text),
+            super::stats::r_logical(twostep),
+            l.wargs(),
+            super::stats::r_logical(l.robust),
+            l.cluster_arg(),
+            r_number(l.level),
+            super::stats::r_logical(opts.has("nolog", 3)),
+            r_text(&super::returned::cmdline(c)),
+            super::stats::r_logical(l.show)
+        ));
+        self.cx_after(
+            c,
+            &l,
+            Fit::Heckman,
+            "heckman",
+            &[
+                "cmdline",
+                "marginsok",
+                "marginsnotok",
+                "cmd",
+                "predict",
+                "method",
+                "title2",
+                "chi2_ct",
+                "depvar",
+                "wtype",
+                "wexp",
+                "chi2type",
+                "deriv_useminbound",
+                "opt",
+                "vcetype",
+                "clustvar",
+                "vce",
+                "rhometh",
+                "title",
+                "user",
+                "ml_method",
+                "technique",
+                "which",
+                "properties",
+            ],
+            out,
+        )?;
+        if l.w.is_some() {
+            out.caveat(super::weights::weight_caveat(&l.w));
+        }
+        out.caveat(
+            "heckman as Stata 19 fits it (Newton from the two-step estimates, exact derivatives; select() without factor variables)",
+        );
+        Ok(())
+    }
+
     /// `predict [type] newvar [if] [in] [, xb stdp pr(a,b) e(a,b) ystar(a,b)]` after the batch's models.
     pub(super) fn censored_predict(
         &mut self,
@@ -749,6 +869,16 @@ impl Session {
                 Some("ystar")
             } else if o.is("sigma", 5) {
                 Some("sigma")
+            } else if o.is("xbsel", 5) {
+                Some("xbsel")
+            } else if o.is("psel", 4) {
+                Some("psel")
+            } else if o.is("mills", 5) {
+                Some("mills")
+            } else if o.is("ycond", 5) {
+                Some("ycond")
+            } else if o.is("yexp", 4) {
+                Some("yexp")
             } else {
                 None
             };
@@ -797,6 +927,7 @@ impl Session {
             "truncreg" => &["xb", "stdp"],
             "cloglog" => &["xb", "pr"],
             "hetprobit" => &["xb", "pr", "stdp", "sigma"],
+            "heckman" => &["xb", "xbsel", "psel", "mills", "ycond", "yexp"],
             _ => &["xb", "stdp", "stdf", "pr", "e", "ystar"],
         };
         if !known.contains(&stat) {
@@ -835,12 +966,13 @@ impl Session {
         } else {
             String::new()
         };
-        for h in ["stata_cx", "stata_tobit", "stata_bin"] {
+        for h in ["stata_cx", "stata_tobit", "stata_bin", "stata_heckman"] {
             self.helpers.insert(h);
         }
         let call = match cmd {
             "cloglog" => format!("stata_cloglog_predict(stata_e, {base}, {})", r_text(stat)),
             "hetprobit" => format!("stata_hetprobit_predict(stata_e, {base}, {})", r_text(stat)),
+            "heckman" => format!("stata_heckman_predict(stata_e, {base}, {})", r_text(stat)),
             _ => format!(
                 "stata_tobit_predict(stata_e, {base}, {}{limits})",
                 r_text(stat)
