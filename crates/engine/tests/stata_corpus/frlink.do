@@ -1,4 +1,4 @@
-* RCraft's Stata corpus (P2C.12aq): made-up data; Stata 19's results are in frlink.recorded
+* RCraft's Stata corpus (P2C.12ar): made-up data; Stata 19's results are in frlink.recorded
 * (frlink 1:1 and m:1 with one or two keys and other names for the keys, generate(); frget with prefix(), suffix(), newvar = var; frval() with and without a default; describe with no data)
 * tolerance: 1e-9
 version 19

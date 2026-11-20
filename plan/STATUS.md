@@ -6096,7 +6096,7 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - **Shares:** probes **80.8%** (23,452 of the 29,018 lines a dry run judges; was 80.2%, 23,278, with batch E; 79.8% before it); packages **94.7%** (4,025 of 4,249), unchanged.
 - **Still refused:** `frlink`, `frget`, `frval()` (probes 233 and 234), `frame dir` after a line whose effect on the unsaved mark is not followed, `describe, short` with no data.
 
-## P2C.12aq: frlink, frget, frval(), egen cut by and types, describe with no data, 2026-11-19
+## P2C.12ar: frlink, frget, frval(), egen cut by and types, describe with no data, 2026-11-19
 
 - **Done** (checked in Stata 19 on made-up data, `plan/stata/frlink.md`, `egen-cut.md`):
   - `frlink 1:1` and `m:1`, `frget` and `frval()`: the linked frame is sorted by its keys, the link holds row numbers, Stata's
