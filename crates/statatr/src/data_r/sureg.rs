@@ -338,7 +338,7 @@ stata_ls_eq <- function(e, spec = "") {
 }"##;
 
 /// Equation names a model gives its coefficients in `e(b)`.
-fn eq_stop(out: &mut Out, msg: &str) {
+pub(super) fn eq_stop(out: &mut Out, msg: &str) {
     out.line(format!("stop({}, call. = FALSE)", r_text(msg)));
 }
 
