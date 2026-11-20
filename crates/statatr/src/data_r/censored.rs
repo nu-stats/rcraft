@@ -14,6 +14,8 @@ pub(super) const TOBIT_HELPER: &str = include_str!("censored/tobit.R");
 /// What every command of the batch reads from its line.
 struct Line {
     spec: Spec,
+    /// intreg: the upper bound, the first word after the lower one
+    hi: Option<String>,
     w: Weighting,
     level: f64,
     robust: bool,
@@ -70,6 +72,7 @@ impl Session {
         let fit = self.estimates.as_ref()?.fit;
         let cmd = match fit {
             Fit::Tobit => "tobit",
+            Fit::Intreg => "intreg",
             _ => return None,
         };
         matches!(
@@ -89,7 +92,18 @@ impl Session {
         name: &str,
     ) -> Result<Line, Untranslated> {
         self.no_by(c, name)?;
-        let spec = Spec::read(c, name)?;
+        let mut spec = Spec::read(c, name)?;
+        let mut hi = None;
+        if name == "intreg" {
+            if spec.terms.len() < 2 {
+                return Err(no("intreg needs two outcome variables and at least one regressor"));
+            }
+            let h = spec.terms.remove(0);
+            if !is_name(&h) {
+                return Err(no(format!("intreg: {h} is not a variable name")));
+            }
+            hi = Some(h);
+        }
         let plain = |t: &str| {
             is_name(t)
                 || (t.starts_with("factor(") && t.ends_with(')') && is_name(&t[7..t.len() - 1]))
@@ -108,6 +122,7 @@ impl Session {
         let show = !self.quiet(c);
         Ok(Line {
             spec,
+            hi,
             w,
             level: lvl,
             robust,
@@ -129,7 +144,11 @@ impl Session {
     ) -> Result<(), Untranslated> {
         out.line("stata_b <- attr(stata_e, \"stata_b\")");
         out.line("stata_vcov <- attr(stata_e, \"stata_V\")");
-        out.line("stata_df <- stata_e$df_r");
+        out.line(if fit == Fit::Tobit {
+            "stata_df <- stata_e$df_r"
+        } else {
+            "stata_df <- Inf"
+        });
         out.line("stata_estimates <- list(rows = attr(stata_e, \"stata_rows\"))");
         out.line(self.keep_rows(&l.src, "stata_estimates$rows"));
         let d = self.data()?;
@@ -257,22 +276,116 @@ impl Session {
         opts: &Opts,
         out: &mut Out,
     ) -> Result<(), Untranslated> {
+        self.cx_replay(c, opts, out, "tobit")
+    }
+
+    /// A bare command or one with `level()` only: the last fit of that command again.
+    fn cx_replay(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+        cmd: &str,
+    ) -> Result<(), Untranslated> {
         if opts.0.iter().any(|o| !o.is("level", 3)) {
-            return Err(no("tobit's replay is translated with level() only"));
+            return Err(no(format!("{cmd}'s replay is translated with level() only")));
         }
         let lvl = level(opts)? * 100.0;
-        if self.censored_active() != Some("tobit") {
-            return Err(no(
-                "tobit with no variables repeats the last tobit, which is not known here",
-            ));
+        if self.censored_active() != Some(cmd) {
+            return Err(no(format!(
+                "{cmd} with no variables repeats the last {cmd}, which is not known here"
+            )));
         }
         for h in ["stata_cx", "stata_tobit", "stata_fmt", "stata_tables"] {
             self.helpers.insert(h);
         }
         if !self.quiet(c) {
-            out.line(format!("stata_tobit_replay(level = {})", r_number(lvl)));
+            out.line(format!("stata_{cmd}_replay(level = {})", r_number(lvl)));
         }
         self.e_kept = true;
+        Ok(())
+    }
+
+    /// `intreg lo hi indepvars [if] [in] [weight] [, vce() level() nolog]`, or a replay.
+    pub(super) fn intreg(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[
+            ("robust", 1),
+            ("vce", 3),
+            ("cluster", 2),
+            ("level", 3),
+            ("nolog", 3),
+        ]) {
+            return Err(no(format!(
+                "intreg with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.main.trim().is_empty() {
+            return self.cx_replay(c, opts, out, "intreg");
+        }
+        let l = self.cx_line(c, opts, out, &[W::F, W::A, W::P, W::I], "intreg")?;
+        if matches!(l.w, Some((W::A, _))) {
+            return Err(no(
+                "intreg with analytic weights is not translated yet (each row has its own variance, not reproduced)",
+            ));
+        }
+        let hi = l.hi.clone().unwrap_or_default();
+        for h in ["stata_cx", "stata_tobit", "stata_fmt", "stata_tables", "stata_returned", "stata_eclass"] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_e <- stata_intreg({}, {}, {}, {}{}, robust = {}{}, level = {}, nolog = {}, cmdline = {}, show = {})",
+            l.src,
+            r_text(&l.spec.dep),
+            r_text(&hi),
+            names(&l.spec.terms),
+            l.wargs(),
+            super::stats::r_logical(l.robust),
+            l.cluster_arg(),
+            r_number(l.level),
+            super::stats::r_logical(opts.has("nolog", 3)),
+            r_text(&super::returned::cmdline(c)),
+            super::stats::r_logical(l.show)
+        ));
+        self.cx_after(
+            c,
+            &l,
+            Fit::Intreg,
+            "intreg",
+            &[
+                "cmdline",
+                "cmd",
+                "ml_score",
+                "depvar",
+                "title",
+                "marginsok",
+                "predict",
+                "wexp",
+                "wtype",
+                "chi2type",
+                "deriv_useminbound",
+                "opt",
+                "vcetype",
+                "clustvar",
+                "vce",
+                "user",
+                "ml_method",
+                "technique",
+                "which",
+                "properties",
+            ],
+            out,
+        )?;
+        if l.w.is_some() {
+            out.caveat(super::weights::weight_caveat(&l.w));
+        }
+        out.caveat(
+            "intreg as Stata 19 fits it (Olsen's parameters, ml's Newton steps from least squares on the midpoints)",
+        );
         Ok(())
     }
 
@@ -290,6 +403,8 @@ impl Session {
                 Some("xb")
             } else if o.is("stdp", 3) {
                 Some("stdp")
+            } else if o.is("stdf", 4) {
+                Some("stdf")
             } else if o.is("pr", 2) {
                 Some("pr")
             } else if o.is("e", 1) {

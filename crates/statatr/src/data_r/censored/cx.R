@@ -130,9 +130,9 @@ stata_cx_rows <- function(nm, b, se, test, df, level, data, eform = FALSE) {
   }
 }
 # a row with no test: a name right-aligned in 13, estimate, standard error, interval (var(e.y), sigma, rho)
-stata_cx_plain <- function(name, est, se, lo, hi) {
+stata_cx_plain <- function(name, est, se, lo, hi, wide = TRUE) {
   g9 <- stata_cx_g9
-  cat(sprintf("%13s|%11s%11s%17s%13s%12s\n", name, g9(est), g9(se), "", g9(lo), g9(hi)))
+  cat(sprintf(if (wide) "%13s|%11s%11s%17s%13s%12s\n" else "%12s |%11s%11s%17s%13s%12s\n", name, g9(est), g9(se), "", g9(lo), g9(hi)))
 }
 # a row with a test, name right-aligned in 13 (/lnsigma, /athrho)
 stata_cx_aux <- function(name, est, se, test, df, level) {
@@ -140,7 +140,7 @@ stata_cx_aux <- function(name, est, se, test, df, level) {
   crit <- if (test == "t") stats::qt((1 + level / 100) / 2, df) else stats::qnorm((1 + level / 100) / 2)
   st <- est / se
   p <- if (test == "t") 2 * stats::pt(-abs(st), df) else 2 * stats::pnorm(-abs(st))
-  cat(sprintf("%13s|%11s%11s%9.2f%8.3f%13s%12s\n", name, g9(est), g9(se), st, p, g9(est - crit * se), g9(est + crit * se)))
+  cat(sprintf("%12s |%11s%11s%9.2f%8.3f%13s%12s\n", name, g9(est), g9(se), st, p, g9(est - crit * se), g9(est + crit * se)))
 }
 stata_cx_rule <- function() cat(strrep("-", 78), "\n", sep = "")
 stata_cx_rule2 <- function() cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
