@@ -57,7 +57,8 @@ stata_bget <- function(key, se = FALSE) {
     key <- paste0(eq, ":", key)
   } else if (inherits(stata_estimates, "stata_arima")) {
     # arima names its columns y:x, ARMA:L.ar, sigma:_cons; a bare name is the first equation's
-    key <- paste0(if (eq == "") stata_estimates$y else eq, ":", key)
+    # (sspace's variances are /state:var(u), ucm's /:var(level): a key that starts with / is whole)
+    if (!startsWith(key, "/")) key <- paste0(if (eq == "") stata_estimates$y else eq, ":", key)
   } else if (eq != "") {
     stop("equation [", eq, "] not found")
   }

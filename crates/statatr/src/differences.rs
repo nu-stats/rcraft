@@ -3782,6 +3782,71 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "sspace",
+        about: "Linear state-space models by maximum likelihood, and predict after them",
+        points: &[
+            p(
+                "As Stata 19",
+                "sspace (u L.u, state noconstant) (y u, noconstant), constraints(1): first-order state equations and \
+                 observation equations with states, a constant and exogenous variables; constraints of the form \
+                 [eq]term = #. The exact likelihood by the Kalman filter (stationary start, or the exact diffuse start \
+                 when constraints fix a unit root, each diffuse step adding -ln(2 pi)/2), the observed-information \
+                 standard errors, the Wald test, e() and _b[/state:var(u)] as Stata names them. predict has xb and \
+                 states with equation() and smethod(onestep|filter) (StatCraft's decoding of Stata 19).",
+            ),
+            p(
+                "Differences",
+                "RCraft finds the optimum by a search of its own (BFGS, then Newton), so Stata's iteration log and \
+                 e(ic), e(tech_steps), e(technique), e(ilog), e(gradient) and the data signature are not reproduced; \
+                 the estimates, the log likelihood, the standard errors and the Wald test agree with Stata to about \
+                 1e-6 (the p-value of a large chi2 to 2e-6). The table is printed in R's layout. Constants or exogenous variables in state equations, lags \
+                 beyond the first, covstate() and the other covariance options, from(), technique(), estat, \
+                 smethod(smooth), and gaps in the sample are not translated yet.",
+            ),
+        ],
+    },
+    Guide {
+        command: "ucm",
+        about: "Unobserved-components models (local level, random walk, local linear trend), and predict after them",
+        points: &[
+            p(
+                "As Stata 19",
+                "ucm y [x], model(llevel | rwalk | lltrend): the components' variances and the noise by the diffuse \
+                 Kalman filter, regressors as coefficients, e(), _b[/:var(level)] and the Wald test of the regressors. \
+                 predict has xb (the one-step prediction, regressors included) and trend (the level, with \
+                 smethod(onestep) or smethod(filter)); the first period, or the first two for lltrend, is missing \
+                 where the filter is diffuse.",
+            ),
+            p(
+                "Differences",
+                "As for sspace: Stata's own iteration log and e(ic) are not reproduced; estimates, standard errors \
+                 and the log likelihood agree to about 1e-6. Other models, cycles, seasonals, vce(), from(), \
+                 model() left out, estat and smoothing are not translated yet.",
+            ),
+        ],
+    },
+    Guide {
+        command: "dfactor",
+        about: "Dynamic-factor models, and predict after them",
+        points: &[
+            p(
+                "As Stata 19",
+                "dfactor (y1 y2 y3 = , noconstant) (f = , ar(1)): one factor with unit variance, an AR(1) factor or none, \
+                 diagonal observation errors; dfactor (y1 y2 = , noconstant ar(1)) with autoregressive errors and no \
+                 factor. The exact likelihood, observed-information standard errors, Wald test, e() and \
+                 _b[/observable:var(e.y1)]. predict has factors (smethod(onestep|filter)) and xb (the regression on \
+                 the exogenous variables alone: 0 here).",
+            ),
+            p(
+                "Differences",
+                "As for sspace: Stata's iteration log and e(ic) are not reproduced; estimates, standard errors and \
+                 the log likelihood agree to about 1e-6. Constants and exogenous variables in the equations, \
+                 more than one factor, ar() above 1, a factor with ar() on the errors, covariance(), constraints(), \
+                 estat and smoothing are not translated yet.",
+            ),
+        ],
+    },
+    Guide {
         command: "areg",
         about: "Linear regression absorbing the indicators of one variable",
         points: &[

@@ -695,6 +695,20 @@ Round 5 (2026-11-20, `xi`): factors whose values are not whole numbers from 0 up
   regressors, `predict, stdp` and `t0()`, forecasts beyond the data, `estat` and the other post-estimation commands.
   Measured on top of P2C.12aq (probes only; the probe folder is StatCraft's `observe/dofiles` at b7d392e): 80.5% -> 80.9% (23,343 -> 23,464 translated source lines of 29,011
   judged; 5,668 -> 5,547 not translated); packages unchanged at 94.7% (none uses arima).)
+- P2C.12at sspace, ucm and dfactor (batch AR of the StatCraft port, part 2, done 2026-11-20)
+  (`sspace (state eqs) (observation eqs), constraints()`: first-order state equations (`state noconstant`), observation equations with states, a constant and
+  exogenous variables, `[eq]term = #` constraints; `ucm y [x], model(llevel | rwalk | lltrend)`; `dfactor (y1 y2 y3 = , noconstant) (f = , ar(1))` and
+  `dfactor (y1 y2 = , noconstant ar(1))`; the exact Kalman likelihood (stationary start, or the exact diffuse start for a unit root, each diffuse step adding
+  -ln(2 pi)/2), a BFGS-then-Newton search of RCraft's own, observed-information standard errors by Richardson second differences, the Wald test, e() and
+  `_b[/state:var(u)]`, `_b[/:var(level)]` as Stata names them; `predict` with `xb`, `states, equation()`, `trend` and `factors`, `smethod(onestep|filter)`)
+  Verified (corpus `sspace.do`, `ucm.do`, `dfactor.do`; note `plan/stata/sspace.md`). Agreement with Stata 19: estimates, standard errors, log likelihood, chi2
+  and predictions to 3e-7 (corpus tolerance 1e-5); the p-value of a very large chi2 to 2e-6. Stata's iteration log and `e(ic)`, `e(tech_steps)`,
+  `e(technique)`, `e(ilog)`, `e(gradient)`, the data signature are not reproduced.
+  Still refused: constants or exogenous variables in state equations, lags beyond the first, `covstate()`, `covobserved()`, `from()`, `technique()`, `ucm` cycles,
+  seasonals and other models, `dfactor` with constants, exogenous variables, more than one factor or `ar()` above 1, gaps in the sample, `estat` and the other
+  post-estimation commands, `predict` with smoothing, `rmse()`, `dynamic()`; a variance at zero stops with r(430) (Stata prints it with no standard error).
+  Measured on top of P2C.12as (probes only; the probe folder is StatCraft's `observe/dofiles` at origin/main): 80.9% -> 81.0% (23,477 -> 23,498 translated
+  source lines of 29,011 judged; 5,534 -> 5,513 not translated; probes 549, 550 and 551 now translate in full); packages unchanged at 94.7% (4,025 of 4,249).)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

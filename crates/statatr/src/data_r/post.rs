@@ -342,6 +342,9 @@ impl Session {
         if self.arima_active() {
             return self.arima_predict(c, opts, out);
         }
+        if let Some((cmd, model)) = self.ss_active() {
+            return self.ss_predict(c, opts, out, &cmd, &model);
+        }
         if self.ivprobit_active() {
             return self.ivprobit_predict(c, opts, out);
         }
