@@ -11,6 +11,7 @@ use super::*;
 pub(super) const CX_HELPER: &str = include_str!("censored/cx.R");
 pub(super) const TOBIT_HELPER: &str = include_str!("censored/tobit.R");
 pub(super) const TRUNC_HELPER: &str = include_str!("censored/trunc.R");
+pub(super) const BIN_HELPER: &str = include_str!("censored/bin.R");
 
 /// What every command of the batch reads from its line.
 struct Line {
@@ -23,6 +24,8 @@ struct Line {
     cluster: Option<String>,
     src: String,
     show: bool,
+    /// the line stopped as Stata stops it (a weight kind the command does not take): nothing more to do
+    stopped: bool,
 }
 
 impl Line {
@@ -75,6 +78,8 @@ impl Session {
             Fit::Tobit => "tobit",
             Fit::Intreg => "intreg",
             Fit::Truncreg => "truncreg",
+            Fit::Cloglog => "cloglog",
+            Fit::Hetprobit => "hetprobit",
             _ => return None,
         };
         matches!(
@@ -119,6 +124,35 @@ impl Session {
                 "{name} with interactions, ib. bases, operators or no independent variable is not translated yet"
             )));
         }
+        if let Some(wt) = &c.parts.weight {
+            use crate::lang::syntax::WeightKind;
+            let kind = match wt.kind {
+                WeightKind::Frequency => Some(W::F),
+                WeightKind::Analytic => Some(W::A),
+                WeightKind::Sampling => Some(W::P),
+                WeightKind::Importance => Some(W::I),
+                WeightKind::Unspecified => None,
+            };
+            if let Some(k) = kind {
+                if !allowed.contains(&k) {
+                    out.line(format!(
+                        "stop({}, call. = FALSE)",
+                        r_text(&format!("{} not allowed (Stata: r(101))", k.word()))
+                    ));
+                    return Ok(Line {
+                        spec,
+                        hi,
+                        w: None,
+                        level: 95.0,
+                        robust: false,
+                        cluster: None,
+                        src: String::new(),
+                        show: false,
+                        stopped: true,
+                    });
+                }
+            }
+        }
         let w = self.weight_of(c, allowed)?;
         let lvl = level(opts)? * 100.0;
         let (robust, cluster) = vce(opts)?;
@@ -135,6 +169,7 @@ impl Session {
             cluster,
             src,
             show,
+            stopped: false,
         })
     }
 
@@ -483,6 +518,213 @@ impl Session {
         Ok(())
     }
 
+    /// `cloglog depvar indepvars [if] [in] [weight] [, eform vce() level() nolog]`, or a replay.
+    pub(super) fn cloglog(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[
+            ("eform", 2),
+            ("robust", 1),
+            ("vce", 3),
+            ("cluster", 2),
+            ("level", 3),
+            ("nolog", 3),
+        ]) {
+            return Err(no(format!(
+                "cloglog with the option {o} is not translated yet"
+            )));
+        }
+        let eform = opts.has("eform", 2);
+        if c.parts.main.trim().is_empty() {
+            if opts.0.iter().any(|o| !(o.is("level", 3) || o.is("eform", 2))) {
+                return Err(no("cloglog's replay is translated with level() and eform only"));
+            }
+            let lvl = level(opts)? * 100.0;
+            if self.censored_active() != Some("cloglog") {
+                return Err(no(
+                    "cloglog with no variables repeats the last cloglog, which is not known here",
+                ));
+            }
+            for h in ["stata_cx", "stata_tobit", "stata_bin", "stata_fmt", "stata_tables"] {
+                self.helpers.insert(h);
+            }
+            if !self.quiet(c) {
+                out.line(format!(
+                    "stata_cloglog_replay(level = {}, eform = {})",
+                    r_number(lvl),
+                    super::stats::r_logical(eform)
+                ));
+            }
+            self.e_kept = true;
+            return Ok(());
+        }
+        let l = self.cx_line(c, opts, out, &[W::F, W::P, W::I], "cloglog")?;
+        if l.stopped {
+            return Ok(());
+        }
+        for h in [
+            "stata_cx",
+            "stata_bin",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+            "stata_eclass",
+        ] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_e <- stata_cloglog({}, {}, {}{}, robust = {}{}, level = {}, nolog = {}, eform = {}, cmdline = {}, show = {})",
+            l.src,
+            r_text(&l.spec.dep),
+            names(&l.spec.terms),
+            l.wargs(),
+            super::stats::r_logical(l.robust),
+            l.cluster_arg(),
+            r_number(l.level),
+            super::stats::r_logical(opts.has("nolog", 3)),
+            super::stats::r_logical(eform),
+            r_text(&super::returned::cmdline(c)),
+            super::stats::r_logical(l.show)
+        ));
+        self.cx_after(
+            c,
+            &l,
+            Fit::Cloglog,
+            "cloglog",
+            &[
+                "cmdline",
+                "cmd",
+                "predict",
+                "marginsok",
+                "marginsnotok",
+                "chi2type",
+                "wtype",
+                "wexp",
+                "deriv_useminbound",
+                "opt",
+                "vcetype",
+                "clustvar",
+                "vce",
+                "title",
+                "user",
+                "ml_method",
+                "technique",
+                "which",
+                "depvar",
+                "properties",
+            ],
+            out,
+        )?;
+        if l.w.is_some() {
+            out.caveat(super::weights::weight_caveat(&l.w));
+        }
+        out.caveat(
+            "cloglog as Stata 19 fits it (Newton steps from the logit fit one iteration before its end; e(ll_0) at the constant-only estimate rounded to float)",
+        );
+        Ok(())
+    }
+
+    /// `hetprobit depvar indepvars [if] [in] [weight], het(varlist) [vce() level() nolog]`, or a replay.
+    pub(super) fn hetprobit(
+        &mut self,
+        c: &Command,
+        opts: &Opts,
+        out: &mut Out,
+    ) -> Result<(), Untranslated> {
+        if let Some(o) = opts.other(&[
+            ("het", 3),
+            ("robust", 1),
+            ("vce", 3),
+            ("cluster", 2),
+            ("level", 3),
+            ("nolog", 3),
+        ]) {
+            return Err(no(format!(
+                "hetprobit with the option {o} is not translated yet"
+            )));
+        }
+        if c.parts.main.trim().is_empty() {
+            return self.cx_replay(c, opts, out, "hetprobit");
+        }
+        let l = self.cx_line(c, opts, out, &[W::F, W::P, W::I], "hetprobit")?;
+        if l.stopped {
+            return Ok(());
+        }
+        let Some(het) = opts.arg("het", 3) else {
+            out.line("stop(\"option het() required (Stata: r(198))\", call. = FALSE)");
+            return Ok(());
+        };
+        let het: Vec<String> = het.split_whitespace().map(str::to_string).collect();
+        if het.is_empty() || het.iter().any(|v| !is_name(v)) {
+            return Err(no(
+                "hetprobit's het() is translated with plain variable names only",
+            ));
+        }
+        for h in [
+            "stata_cx",
+            "stata_bin",
+            "stata_fmt",
+            "stata_tables",
+            "stata_returned",
+            "stata_eclass",
+        ] {
+            self.helpers.insert(h);
+        }
+        out.line(format!(
+            "stata_e <- stata_hetprobit({}, {}, {}, {}{}, robust = {}{}, level = {}, nolog = {}, cmdline = {}, show = {})",
+            l.src,
+            r_text(&l.spec.dep),
+            names(&l.spec.terms),
+            names(&het),
+            l.wargs(),
+            super::stats::r_logical(l.robust),
+            l.cluster_arg(),
+            r_number(l.level),
+            super::stats::r_logical(opts.has("nolog", 3)),
+            r_text(&super::returned::cmdline(c)),
+            super::stats::r_logical(l.show)
+        ));
+        self.cx_after(
+            c,
+            &l,
+            Fit::Hetprobit,
+            "hetprobit",
+            &[
+                "cmdline",
+                "cmd",
+                "predict",
+                "method",
+                "chi2_ct",
+                "chi2type",
+                "wtype",
+                "wexp",
+                "deriv_useminbound",
+                "opt",
+                "vcetype",
+                "clustvar",
+                "vce",
+                "title",
+                "user",
+                "ml_method",
+                "technique",
+                "which",
+                "depvar",
+                "properties",
+            ],
+            out,
+        )?;
+        if l.w.is_some() {
+            out.caveat(super::weights::weight_caveat(&l.w));
+        }
+        out.caveat(
+            "hetprobit as Stata 19 fits it (from its own probit fit with the variance coefficients at zero; exact derivatives)",
+        );
+        Ok(())
+    }
+
     /// `predict [type] newvar [if] [in] [, xb stdp pr(a,b) e(a,b) ystar(a,b)]` after the batch's models.
     pub(super) fn censored_predict(
         &mut self,
@@ -505,6 +747,8 @@ impl Session {
                 Some("e")
             } else if o.is("ystar", 5) {
                 Some("ystar")
+            } else if o.is("sigma", 5) {
+                Some("sigma")
             } else {
                 None
             };
@@ -545,17 +789,30 @@ impl Session {
             "if ({} %in% names({base})) stop(\"variable {w} already defined (Stata: r(110))\", call. = FALSE)",
             r_text(w)
         ));
-        let (stat, arg) = what.clone().unwrap_or(("xb", None));
-        if cmd == "truncreg" && !matches!(stat, "xb" | "stdp") {
+        let binary = matches!(cmd, "cloglog" | "hetprobit");
+        let (stat, arg) = what
+            .clone()
+            .unwrap_or((if binary { "pr" } else { "xb" }, None));
+        let known: &[&str] = match cmd {
+            "truncreg" => &["xb", "stdp"],
+            "cloglog" => &["xb", "pr"],
+            "hetprobit" => &["xb", "pr", "stdp", "sigma"],
+            _ => &["xb", "stdp", "stdf", "pr", "e", "ystar"],
+        };
+        if !known.contains(&stat) {
             return Err(no(format!(
-                "predict, {stat} after truncreg is not translated yet (xb and stdp are)"
+                "predict, {stat} after {cmd} is not translated yet"
             )));
         }
         if what.is_none() && !self.quiet(c) {
-            out.line("cat(\"(option xb assumed; fitted values)\\n\")");
+            out.line(if binary {
+                "cat(\"(option pr assumed; Pr(y))\\n\")"
+            } else {
+                "cat(\"(option xb assumed; fitted values)\\n\")"
+            });
         }
         // pr(a,b), e(a,b), ystar(a,b): each limit a number, a variable or . for none
-        let limits = if matches!(stat, "pr" | "e" | "ystar") {
+        let limits = if !binary && matches!(stat, "pr" | "e" | "ystar") {
             let a = arg.unwrap_or_default();
             let Some((lo, hi)) = a.split_once(',') else {
                 return Err(no(format!("{stat}(a,b) needs two limits")));
@@ -578,10 +835,12 @@ impl Session {
         } else {
             String::new()
         };
-        for h in ["stata_cx", "stata_tobit"] {
+        for h in ["stata_cx", "stata_tobit", "stata_bin"] {
             self.helpers.insert(h);
         }
         let call = match cmd {
+            "cloglog" => format!("stata_cloglog_predict(stata_e, {base}, {})", r_text(stat)),
+            "hetprobit" => format!("stata_hetprobit_predict(stata_e, {base}, {})", r_text(stat)),
             _ => format!(
                 "stata_tobit_predict(stata_e, {base}, {}{limits})",
                 r_text(stat)

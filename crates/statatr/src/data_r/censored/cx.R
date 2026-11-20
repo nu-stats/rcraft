@@ -61,7 +61,8 @@ stata_cx_max <- function(llf, derivs, b, maxit = 300) {
     prev <- list(b = b, ll = d$ll); b <- pt; d <- derivs(b); ci <- cinv(d$negH)
   }
   inv <- if (ci$nc) solve(d$negH) else ci$inv
-  list(b = b, ll = d$ll, log = lg, flags = fl, converged = conv, g = d$g, negH = d$negH, inv = inv, scores = d$scores)
+  list(b = b, ll = d$ll, log = lg, flags = fl, converged = conv, g = d$g, negH = d$negH, inv = inv, scores = d$scores,
+       prev = if (is.null(prev)) NULL else prev$b)
 }
 # the variance: (-H)^-1, or the sandwich over the weighted scores (a frequency-weighted row once with its
 # score over w, N/(N - 1); with clusters the scores summed within them, G/(G - 1))

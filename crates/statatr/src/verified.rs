@@ -31,6 +31,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("ci", &["ci"]),
     ("cii", &["ci"]),
     ("clogit", &["clogit"]),
+    ("cloglog", &["cloglog"]),
     ("clonevar", &["clonevar"]),
     ("cluster2", &["cluster2"]),
     ("cmclogit", &["cmclogit"]),
@@ -115,6 +116,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("gettoken", &["made"]),
     ("global", &["control"]),
     ("gsort", &["data", "extended_missing_commands"]),
+    ("hetprobit", &["hetprobit"]),
     ("icc", &["icc"]),
     (
         "import",
