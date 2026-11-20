@@ -4705,6 +4705,98 @@ pub const GUIDES: &[Guide] = &[
         ],
     },
     Guide {
+        command: "contrast",
+        about: "Contrasts of marginal linear predictions (contrast g, contrast r.g#h, contrast g@h)",
+        points: &[
+            p(
+                "In R",
+                "stata_contrast takes the balanced margins (the other factors averaged with equal \
+                 weights, covariates at zero) from R's own model matrix and tests plain, r., ar., a., \
+                 gw. and g. contrasts, g#h and g@h, with F after the linear models and chi2 after \
+                 the others, a generalized inverse for the rank, mcompare(bonferroni, sidak, \
+                 scheffe), effects and level(); a contrast the design cannot estimate is (not \
+                 testable). Tables and r() are Stata 19's: r(b), r(V), r(table), r(F) or r(chi2), \
+                 r(df), r(p), r(df2).",
+            ),
+            p(
+                "Not yet",
+                "After models other than regress, anova, xtreg, logit, probit and poisson (areg, \
+                 xtregar among them), post, noestimcheck, pveffects, cieffects, tukey and the \
+                 other multiple-comparison methods, gw. after a weighted model, r(L).",
+            ),
+        ],
+    },
+    Guide {
+        command: "pwcompare",
+        about: "Pairwise comparisons of marginal linear predictions (pwcompare g, effects)",
+        points: &[
+            p(
+                "In R",
+                "The same machinery as contrast: every pair of cells of g or g#h, with effects, \
+                 cimargins, level() and mcompare(bonferroni, sidak, scheffe); (not estimable) rows \
+                 where the design cannot tell the margins apart; r(b_vs), r(V_vs), r(table_vs) for \
+                 the comparisons and r(b), r(V), r(table) for the margins.",
+            ),
+            p(
+                "Not yet",
+                "tukey, snk, duncan, dunnett, groups, sort, post; r(groups#), r(L), r(M).",
+            ),
+        ],
+    },
+    Guide {
+        command: "hausman",
+        about: "Hausman specification test (hausman fe re, sigmamore)",
+        points: &[
+            p(
+                "In R",
+                "stata_hausman compares the coefficients two stored results (or . ) have, the \
+                 constant only with constant, with V_b - V_B inverted by Gauss-Jordan and its rank \
+                 as df; a negative chi2 prints Stata's warning with p = 1; sigmamore and sigmaless \
+                 rescale by the models' root MSEs. r(rank), r(chi2), r(df), r(p).",
+            ),
+            p(
+                "Not yet",
+                "alleqs, equations(), df(), tconsistent, rhs; results after xtregar and the \
+                 models other than regress, xtreg, ivregress, logit, probit and poisson.",
+            ),
+        ],
+    },
+    Guide {
+        command: "lrtest",
+        about: "Likelihood-ratio test of nested models (lrtest full small)",
+        points: &[
+            p(
+                "In R",
+                "stata_lrtest takes twice the difference of e(ll) on the difference of e(rank) for \
+                 two stored fits (one name: the other is the active fit) of logit, probit, poisson \
+                 or regress, with Stata's stops for the same model twice and for equal degrees of \
+                 freedom. r(p), r(chi2), r(df).",
+            ),
+            p(
+                "Not yet",
+                "Robust or weighted fits, stats, force, using, and models of other commands.",
+            ),
+        ],
+    },
+    Guide {
+        command: "predictnl",
+        about: "Nonlinear predictions with delta-method errors (predictnl p = invlogit(xb()), se(s))",
+        points: &[
+            p(
+                "In R",
+                "stata_predictnl works the expression out at each row (data variables, _b[], xb(), \
+                 predict()), with the standard error by the delta method on numerical derivatives \
+                 of the coefficients, and se(), variance(), wald(), p(), ci() and level(); new \
+                 variables are float unless double; Stata's notes and warnings.",
+            ),
+            p(
+                "Not yet",
+                "After models other than regress, logit, probit and poisson, predict() types other \
+                 than xb, pr and n, force, iterate() and g().",
+            ),
+        ],
+    },
+    Guide {
         command: "testnl",
         about: "Wald test of nonlinear restrictions (testnl _b[x]/_b[z] = 1, testnl (exp = exp) (exp = exp))",
         points: &[
