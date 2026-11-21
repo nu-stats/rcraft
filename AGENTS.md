@@ -164,7 +164,7 @@ concatenation in the UI.
 - Update `plan/STATUS.md` when a task finishes. Exception: a batch or feature
   PR does not edit `ROADMAP.md` or `plan/STATUS.md`, because every PR that does
   conflicts with the next merge. It adds its rows in a new file,
-  `plan/rows/<sub-id>.md` (for example `plan/rows/P2C.12at.md`), with the
+  `plan/status.d/<sub-id>.md` (for example `plan/status.d/P2C.12at.md`), with the
   ROADMAP rows under a `## ROADMAP` heading and the STATUS section under
   `## STATUS`, each written as it would go into that file. No other PR touches
   that file. A separate bookkeeping PR folds the row files into `ROADMAP.md`
