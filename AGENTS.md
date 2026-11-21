@@ -161,7 +161,15 @@ concatenation in the UI.
 - After changing the catalog, run `cargo xtask coverage` and commit
   `docs/coverage.md` with it.
 - One task id per commit, for example `P3.2: Use my file, xlsx`.
-- Update `plan/STATUS.md` when a task finishes.
+- Update `plan/STATUS.md` when a task finishes. Exception: a batch or feature
+  PR does not edit `ROADMAP.md` or `plan/STATUS.md`, because every PR that does
+  conflicts with the next merge. It adds its rows in a new file,
+  `plan/status.d/<sub-id>.md` (for example `plan/status.d/P2C.12at.md`), with the
+  ROADMAP rows under a `## ROADMAP` heading and the STATUS section under
+  `## STATUS`, each written as it would go into that file. No other PR touches
+  that file. A separate bookkeeping PR folds the row files into `ROADMAP.md`
+  and `plan/STATUS.md` and deletes them.
+- Pick a sub-id that no open or merged PR uses (`gh pr list --state all`).
 - Parallel agents edit only the crates they own.
 
 ### Build folders
