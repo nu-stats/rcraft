@@ -68,11 +68,41 @@ New variables are float unless `double`. Messages, in order: `(# missing values 
 over observations; perhaps you meant to run nlcom.`, `note: confidence intervals calculated using Z critical values.`,
 `note: p-values are with respect to the chi-squared(1) distribution.` An old name: `variable p already defined`, r(110).
 
+## After areg and xtregar (batch L holds, 2026-11-21)
+
+Corpus `contrast_areg.do`, `contrast_xtregar.do`, `postest_xtregar.do` (Stata 19 SE, made-up data).
+
+- `areg`: contrast and pwcompare take its formula, factor levels and absorbed variable as a model of the `xtreg, fe` kind: each
+  absorbed group is an indicator in the design for the estimability check, the Denominator is e(df_r) (N - k - G; G_c - 1
+  with `vce(cluster)`). A margin carries the constant, which after `areg` and `xtreg, fe` is the mean of the group effects: its
+  weight is spread over the group indicators by their share of the rows, so `pwcompare h, cimargins` shows margins (after
+  `xtreg, fe` they printed `.` before; both give the same table in Stata).
+- `xtregar` takes factor variables (`i.g`; plain factors only: no interactions, `ib.`, time-series operators). A factor that is
+  constant within the panels is omitted by fe (`note: 1.g omitted because of collinearity.`) and its columns stay in e(b) and
+  e(V) as zeros; under re it is estimated.
+- Unlike `xtreg, fe`, `xtregar, fe` puts no panel indicators in the design, so a contrast of the omitted factor is estimable
+  in the design sense: `contrast g` prints `(not testable)` (r(F) missing, r(df) 0, the Denominator kept: N - groups - k), and
+  `pwcompare g` prints `0  (omitted)` instead of `.  (not estimable)`, as does every row built only of omitted columns
+  (`g#k`: `(1 0) vs (0 0)`; `g@k` is all `(not testable)`). r(table_vs) of such a row holds b = 0, the rest missing, df and
+  crit kept. A row with an estimated column shows its estimate (`(1 1) vs (0 0)` is the k difference). With a copy of the
+  factor beside it (`i.g i.h`) the design is collinear: `(not testable)` and `.  (not estimable)` as after regress, for fe
+  and re alike.
+- `hausman` after `xtregar` reads e(b) and e(V) of the stored sets (`obtained from xtregar.`). `sigmamore` and `sigmaless`
+  work between two fe fits (e(rmse) = sqrt(rss / (N - k - 1))) and stop with `Estimators do not save e(sigma) or e(rmse),`
+  and `sigma option not allowed` (r(198)) when a set is a re fit. When V_b - V_B is not positive definite and chi2 is not
+  negative, the line `(V_b-V_B is not positive definite)` follows the p-value (seen with `constant`, where the constant's
+  variance difference is negative).
+- `predictnl` after `xtregar`: the expression over every row that has its covariates, not only e(sample) (112 rows after a
+  fit on 96); `predict(xb)` is the linear prediction with the constant; the standard error by the delta method.
+- Stata keeps xtregar's transform in single precision, so its tables agree to about 5e-8: these corpus files use 1e-6.
+
 ## Open (refused here)
 
-- `areg` and `xtregar` as the model (their results are not held as a model here), so probes 418 and 443 lines for them stay
-  refused; contrast after other models; `post`, `noestimcheck`, `atequal`, `asobserved`, `pveffects`, `cieffects`,
+- `areg` with a factor level omitted for collinearity (probe 443: `areg y x i.g, absorb(id)` with g constant within id, then
+  contrast g and pwcompare g, which print `(not testable)` and `.  (not estimable)`): areg itself refuses it, so those lines
+  stay refused (areg is batch E's); contrast after other models; `post`, `noestimcheck`, `atequal`, `asobserved`, `pveffects`, `cieffects`,
   `groups`, `tukey`, `snk`, `duncan`, `dunnett` (as for `pwmean` in StatCraft, not decoded).
 - `manovatest` needs `manova` (batch MV), `tebalance` needs `teffects` (batch CA): on hold.
 - `lrtest`: `stats`, `force`, `using`, `lrtest` of models with different numbers of observations beyond the df rule.
-- `hausman`: `alleqs`, `equations()`, `df()`, `tconsistent`, `rhs`; sets other than regress, xtreg, ivregress, logit, probit, poisson.
+- `hausman`: `alleqs`, `equations()`, `df()`, `tconsistent`, `rhs`; sets other than regress, xtreg, xtregar, ivregress, logit, probit, poisson.
+- `xtregar` with interactions, `ib.` bases or time-series operators.
