@@ -6163,3 +6163,10 @@ packages. Each checked on Stata 19.0 SE with made-up data.
   labels, missing or negative values, `margins, post` after `vce(cluster)`, several margins terms whose first is a
   whole-number variable.
 - **Shares:** probes **80.5%** unchanged (the probes use none of these forms).
+## P2C.12av: post-estimation (batch L of the StatCraft port), 2026-11-20
+
+- `contrast` and `pwcompare`, `hausman`, `lrtest` and `predictnl` Verified against Stata 19 (corpus `contrast`, `contrast_glm`, `contrast_omitted`, `hausman`, `lrtest`, `predictnl`; note `plan/stata/postest.md`).
+  The printed tables of probes 316 and 442 match Stata's log character for character (checked by eye against the log).
+- Probes 80.5% -> 80.7% (23,343 -> 23,399 translated source lines of 29,018 judged; 5,668 -> 5,612 not translated); packages unchanged at 94.7% (4,025 of 4,249).
+- **On hold:** `manovatest` (needs `manova`), `tebalance` (needs `teffects`), `contrast`/`pwcompare` after `areg` and `xtregar`, `hausman`/`predictnl` after `xtregar`.
+- Code: `data_r/postest.rs`; small additive edits in `data_r.rs` (registration, `LEAVE_DATA_ALONE`), `verified.rs`, and `xt.rs` (`rmse_gls` of `xtreg, re`).

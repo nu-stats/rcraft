@@ -49,6 +49,10 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("confirm", &["strings"]),
     ("constraint", &["cnsreg"]),
     ("contract", &["contract", "extended_missing_groups"]),
+    (
+        "contrast",
+        &["contrast", "contrast_glm", "contrast_omitted"],
+    ),
     ("correlate", &["descriptives"]),
     ("corrgram", &["tstests"]),
     ("count", &["control", "descriptives", "extended_missing"]),
@@ -115,6 +119,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("gettoken", &["made"]),
     ("global", &["control"]),
     ("gsort", &["data", "extended_missing_commands"]),
+    ("hausman", &["hausman"]),
     ("icc", &["icc"]),
     (
         "import",
@@ -169,6 +174,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("logit", &["collinear", "interactions", "likelihood"]),
     ("lookfor", &["lookfor"]),
     ("lroc", &["lroc"]),
+    ("lrtest", &["lrtest"]),
     ("ltable", &["survival"]),
     ("margins", &["cmclogit", "regress"]),
     ("marginsplot", &["marginsplot"]),
@@ -233,6 +239,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("pperron", &["tstests"]),
     ("prais", &["arpanel"]),
     ("predict", &["regress"]),
+    ("predictnl", &["predictnl"]),
     ("preserve", &["made", "restore_r"]),
     ("probit", &["collinear", "likelihood", "perfect_predict"]),
     ("program", &["programs"]),
@@ -241,6 +248,10 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("putdocx", &["putdocx"]),
     ("putexcel", &["marginsplot", "putexcel"]),
     ("putpdf", &["putdocx"]),
+    (
+        "pwcompare",
+        &["contrast", "contrast_glm", "contrast_omitted"],
+    ),
     ("pwcorr", &["descriptives"]),
     (
         "pwmean",
