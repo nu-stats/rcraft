@@ -703,7 +703,6 @@ Round 5 (2026-11-20, `xi`): factors whose values are not whole numbers from 0 up
   e(Jacobian))) Verified (corpus `nlsur.do`, 978 results to 1e-6, 125 new; note `plan/stata/nlsur.md`). Still refused,
   none of them seen in Stata: `hasconstants()` naming no constant for an equation, `over()` with value labels or missing
   values, `margins, post` after `vce(cluster)`. Probes unchanged at 80.5%.)
-
 - P2C.12av Post-estimation (batch L of the StatCraft port, done 2026-11-20, in part)
   (`contrast` and `pwcompare` (after regress, anova, logit, probit, poisson and xtreg: plain, `r.`, `ar.`, `a.`, `gw.`, `g.`, `g#h`, `g@h`, `r.g@h`, several terms,
   `effects`, `mcompare(bonferroni sidak scheffe)`, `level()`, `cimargins`, `(not testable)` / `(not estimable)` where the design cannot tell the margins apart, weights and robust
