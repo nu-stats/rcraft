@@ -582,6 +582,18 @@ impl Session {
                     est.dep, "\n"
                 ));
             }
+            // logit's, probit's and poisson's default, as Stata says it (probe 2026-11-20)
+            if c.options.is_empty() && !self.quiet(c) {
+                match fit {
+                    Fit::Logit | Fit::Probit => {
+                        out.line(format!("cat(\"(option pr assumed; Pr({}))\\n\")", est.dep))
+                    }
+                    Fit::Poisson => {
+                        out.line("cat(\"(option n assumed; predicted number of events)\\n\")")
+                    }
+                    _ => {}
+                }
+            }
             let v = match fit {
                 _ if stat.is_some() => format!(
                     "unname(stata_predict_stat(stata_estimates, {d}, {}))",
@@ -643,6 +655,11 @@ impl Session {
                     r_name(&est.dep)
                 ),
                 Fit::Ivregress => format!("unname(stata_iv_xb(stata_estimates, {d}))"),
+                // with factor variables Stata's residual is in double (probe 2026-11-20)
+                Fit::Cnsreg if opts.has("residuals", 1) && !est.factors.is_empty() => {
+                    self.helpers.insert("stata_lsfam");
+                    format!("{} - stata_ls_xb(stata_e, {d})", r_name(&est.dep))
+                }
                 Fit::Cnsreg if opts.has("residuals", 1) => {
                     self.helpers.insert("stata_lsfam");
                     self.helpers.insert("stata_float");

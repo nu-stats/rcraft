@@ -43,8 +43,58 @@ errors below were decoded here by running Stata. Translated in `crates/statatr/s
 - `predict` (xb, residuals) and `test` work. **Residuals are y - float(xb)** (Stata's `tobit_p` takes the stored
   float prediction), so `predict r, residuals` differs from a double xb by 1e-8 relative.
 
+
+## constraints() in logit, probit, poisson and logistic (2026-11-20)
+
+Observed on Stata 19 SE with made-up data (corpus `ml_cns.do`, 232 results to 1e-6, and the printed output line
+for line: iteration logs, header, constraint lines, table). StatCraft's note (`constraints.md`, probe 530) had the fit
+and the header; the starts, the Wald test's degrees of freedom and the e() changes were decoded here. Translated in
+`crates/statatr/src/data_r/ml.rs` (`stata_ml_cns`).
+
+- The constraints are read as for cnsreg; `[y]x` with the outcome's name is the coefficient x. The fit is the
+  likelihood over a in b = b0 + T a, by Stata's Newton-Raphson (`stata_ml_path`), the variance T (T'(-H)T)^-1 T'
+  (robust and clustered: the usual sandwich around it). A fixed coefficient has a variance of exactly 0.
+- **Start:** the unconstrained start projected onto the constraints, b0 + T T'(s - b0). logit and probit: the
+  constant-only fit (iteration 0 is its likelihood; `_cons = 2` gives -53.07712 on the corpus data). poisson: its
+  least-squares start after one full Newton step (as without constraints), weighted for fweights.
+- One halved step is **not** marked in Stata's log (`constraints(5)`: iteration 2 at half the step, no `(backed up)`);
+  the log is printed then, and left out where a step was halved twice or -H was not concave.
+- Header: `Wald chi2(q)` with `Log likelihood = ` beside `Prob > chi2`, no pseudo R2; a blank line, then
+  ` ( 1)  [b]x1 - [b]x2 = 0` (as `test` writes them, with the equation), then the table. A fixed coefficient's row
+  is its value and `(constrained)` (with `or`/`irr` its exp).
+- The Wald test is of the slopes on their variance with the fixed directions left out: q is the rank left
+  (`x1 = x2` with `x3 = -.2`: chi2(1)), even where the slopes all zero contradicts the constraints (unlike cnsreg's F).
+- e(): rank k - m, df_m q, chi2 and p the Wald test, chi2type `Wald`; no e(ll_0); logit and probit no e(r2_p),
+  poisson e(r2_p) missing; e(Cns) after e(V) (columns `b:x1 ... b:_cons _Cns:_r`).
+
+Refused: constraints() with exposure(), offset(), noconstant, iweights, or a regressor omitted for collinearity; those
+that leave no constraint, are redundant or fix every coefficient. Not checked: the log with pweights in poisson
+(started from the fit, so the log is left out).
+
+
+## cnsreg with factor variables (2026-11-20)
+
+Observed on Stata 19 SE (corpus `cnsreg.do`, 523 results to 1e-8, and the printed output line for line). Translated in
+`crates/statatr/src/data_r/lsfam.rs`.
+
+- `i.g` and `ib#.g` are taken. The columns are Stata's (regress's e(b) code names them on a fitted layout): the base level
+  is a column of e(b) and e(V), zero, and a constraint of its own, `1b.g = 0`, comes **first** in e(Cns) (one row per
+  base level, in column order, before the user's rows). It is not a line of the header; it counts in the degrees of freedom
+  (df_r = N - (k - m) with k the columns including the base ones, m all the rows) and in e(rank) = k - m.
+- A constraint may name `1.g` for the base level: it reads `1b.g` (so `1.g = 0` is the base constraint again, equal rows count
+  once and Stata prints nothing for it), and with `ib2.g` the constraint `2.g = 3.g` reads `2b.g - 3.g = 0`, which fixes 3.g at 0.
+  `_b[2.g]` works; the header shows the name as written in the column (`2b.g - 3.g = 0`).
+- A coefficient the constraints fix **at 0** prints `0  (omitted)` (a level, and a plain variable too: `x = 0`), one fixed at
+  another value `(constrained)`. The table hides the base row.
+- The residual after predict is in double with factor variables (plain cnsreg's is `y - float(xb)`).
+- A factor collinear with another (hh a function of g) makes Stata add a constraint row of its own for the omitted column; not
+  translated (the corpus avoids it). Clustering on the factor's own variable gives a rank-limited variance whose e(rank) and
+  F differ; not matched.
+
+Refused: noconstant with factor variables (Stata prints no base row and no header then), interactions and powers.
+
 ## Open
 
-Refused: factor variables and operators in the model, iweights, `collinear`, `mse1`, a constraint with more than one `=` or
+Refused: interactions and operators in the model, factor variables with noconstant or collinear with another, iweights, `collinear`, `mse1`, a constraint with more than one `=` or
 `==` (Stata reads `x1 = x2 = 2` as `x1 - x2 = 0` and `x1 x2 = 0` as `x1 = 0` with x1 omitted: odd, not followed),
-every coefficient fixed, numbers above 1999, and the `constraints()` option of other models (logit, poisson, sspace).
+every coefficient fixed, numbers above 1999, and the `constraints()` option of other models (sspace, spregress; logit, probit and poisson: above).

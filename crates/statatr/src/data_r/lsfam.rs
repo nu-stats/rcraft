@@ -32,7 +32,8 @@ stata_ls_header <- function(left, items, extra = character(), width = 78L) {
 }
 # Stata's coefficient table for plain names; `constr` marks the coefficients the constraints fix
 stata_ls_table <- function(nm, b, se, df, level, dep, constr = rep(FALSE, length(nm)), robust = FALSE,
-                           clusters = NULL, clustvar = NULL, omitted = rep(FALSE, length(nm))) {
+                           clusters = NULL, clustvar = NULL, omitted = rep(FALSE, length(nm)),
+                           layout = FALSE, data = NULL) {
   pad <- stata_tab_pad
   if (!is.null(clusters)) {
     cat(pad(sprintf("(Std. err. adjusted for %s clusters in %s)", stata_tab_count(clusters), clustvar), 78), "\n", sep = "")
@@ -43,8 +44,27 @@ stata_ls_table <- function(nm, b, se, df, level, dep, constr = rep(FALSE, length
   cat(pad(stata_tab_abbrev(dep), 12), " | Coefficient  ", if (robust) "std. err." else "Std. err.",
       if (is.finite(df)) "      t    P>|t|" else "      z    P>|z|", "     [", format(level), "% conf. interval]\n", sep = "")
   cat(strrep("-", 13), "+", strrep("-", 64), "\n", sep = "")
-  for (i in seq_along(nm)) {
-    label <- pad(stata_tab_abbrev(nm[i]), 12)
+  rows <- if (layout) stata_coef_rows(nm, data) else lapply(seq_along(nm), function(i) list(kind = "row", label = nm[i], col = nm[i], idx = i))
+  if (is.null(rows)) stop("RCraft: a table layout that was not checked is not translated yet", call. = FALSE)
+  for (r in rows) {
+    if (r$kind == "blank") {
+      cat(strrep(" ", 13), "|\n", sep = "")
+      next
+    }
+    if (r$kind == "head") {
+      cat(pad(stata_tab_abbrev(r$label), 12), " |\n", sep = "")
+      next
+    }
+    if (r$kind == "wrap") {
+      cat(pad(r$label, 11), " #|\n", sep = "")
+      next
+    }
+    label <- if (r$kind == "level") paste0(pad(r$label, 11), " ") else pad(stata_tab_abbrev(r$label), 12)
+    if (!is.null(r$note)) {
+      cat(label, " |", pad("0", 11), "  ", r$note, "\n", sep = "")
+      next
+    }
+    i <- if (!is.null(r$idx)) r$idx else match(r$col, nm)
     if (omitted[i]) {
       cat(label, " |", pad(stata_tab_g(0), 11), "  (omitted)\n", sep = "")
     } else if (constr[i]) {
@@ -61,6 +81,12 @@ stata_ls_table <- function(nm, b, se, df, level, dep, constr = rep(FALSE, length
 }
 # the linear prediction of a plain-names model from e(b), on every row of d
 stata_ls_xb <- function(e, d, which = NULL) {
+  cm <- attr(e, "stata_cnsmodel")
+  if (!is.null(cm)) {
+    mf <- stats::model.frame(cm$fo, d, xlev = cm$xlev, na.action = stats::na.pass)
+    X <- stats::model.matrix(cm$fo, mf)
+    return(drop(X[, names(cm$rb), drop = FALSE] %*% cm$rb))
+  }
   b <- e$b
   if (!is.null(which)) b <- b[, grepl(paste0("^", which, ":"), colnames(b)), drop = FALSE]
   nm <- sub("^[^:]*:", "", colnames(b))
@@ -122,14 +148,27 @@ stata_constraint <- function(cns, what, arg = "", text = "") {
 }
 # one constraint as a linear equation in the coefficients `nm`: a vector of coefficients and the
 # right-hand side, or the return code Stata reports for it
-stata_cns_parse <- function(text, nm) {
+stata_cns_parse <- function(text, nm, alias = NULL) {
   rc <- function(n) structure(n, class = "stata_cns_rc")
   bad <- function(n) stop(structure(class = c("stata_cns_bad", "error", "condition"), list(message = "", call = NULL, rc = n)))
   txt <- trimws(text)
   if (grepl("[", txt, fixed = TRUE)) {
-    # _b[name] is the coefficient; an equation name ([y]x) is Stata's r(303) here
-    txt <- gsub("_b[[]([A-Za-z_][A-Za-z0-9_]*)[]]", "\\1", txt)
+    # _b[name] is the coefficient (2.g too); an equation name ([y]x) is Stata's r(303) here
+    txt <- gsub("_b[[]([^]]+)[]]", "\\1", txt)
     if (grepl("[", txt, fixed = TRUE)) return(rc(303L))
+  }
+  # coefficient names that are not plain (2.g, 1b.g, ...) stand as placeholders; `alias` names the
+  # same column another way (1.g for the base level 1b.g)
+  plain <- grepl("^[A-Za-z_][A-Za-z0-9_]*$", nm)
+  if (!all(plain)) {
+    safe <- ifelse(plain, nm, paste0("cns_v", seq_along(nm)))
+    from <- c(nm[!plain], names(alias))
+    to <- c(safe[!plain], safe[match(alias, nm)])
+    for (i in order(-nchar(from))) {
+      esc <- gsub("([.#])", "[\\1]", from[i])
+      txt <- gsub(paste0("(?<![A-Za-z0-9_.#])", esc, "(?![A-Za-z0-9_.#])"), to[i], txt, perl = TRUE)
+    }
+    nm <- safe
   }
   eq <- gregexpr("=", txt, fixed = TRUE)[[1]]
   if (eq[1] < 0) return(rc(111L))
@@ -185,16 +224,45 @@ stata_cns_line <- function(a, rhs, nm) {
 }
 stata_cnsreg <- function(d, dep, xs, cns, noconst = FALSE, wvar = NULL, wtype = NULL, robust = FALSE,
                          cluster = NULL, level = 95, cmdline = "", show = TRUE, cns_list = NULL) {
-  for (v in c(dep, xs, wvar, cluster)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
+  # factor variables and ib. bases: the terms are R's, the columns Stata's (a base level is a column)
+  fac <- any(!grepl("^[A-Za-z_][A-Za-z0-9_]*$", xs))
+  xv <- if (fac) setdiff(unique(unlist(regmatches(xs, gregexpr("[A-Za-z_][A-Za-z0-9_]*", xs)))), c("factor", "stata_ib")) else xs
+  for (v in c(dep, xv, wvar, cluster)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
   num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
-  for (v in c(dep, xs, wvar)) if (is.character(d[[v]])) stop(v, ": string variable, type mismatch (Stata: r(109))", call. = FALSE)
-  ok <- stats::complete.cases(d[unique(c(dep, xs, wvar, cluster))])
+  for (v in c(dep, if (!fac) xs, wvar)) if (is.character(d[[v]])) stop(v, ": string variable, type mismatch (Stata: r(109))", call. = FALSE)
+  ok <- stats::complete.cases(d[unique(c(dep, xv, wvar, cluster))])
   if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
   rows <- which(ok)
   y <- num(d[[dep]])[rows]
-  X <- vapply(xs, function(v) num(d[[v]])[rows], numeric(length(rows)))
-  X <- matrix(X, length(rows), length(xs), dimnames = list(NULL, xs))
-  if (!noconst) X <- cbind(X, `_cons` = 1)
+  srcv <- NULL
+  model <- NULL
+  if (fac) {
+    if (noconst) stop("RCraft: cnsreg with factor variables and noconstant is not translated yet", call. = FALSE)
+    mfm <- d[rows, , drop = FALSE]
+    fo <- stats::as.formula(paste("~", paste(xs, collapse = " + ")))
+    X0 <- stats::model.matrix(fo, mfm)
+    Rn <- colnames(X0)
+    # Stata's column names (base levels included) and the R column each one is (0: none), through
+    # the code regress uses for e(b), on a model fitted for its layout only
+    lay <- stats::lm(stats::as.formula(paste0("`", dep, "` ~ ", paste(xs, collapse = " + "))), data = mfm)
+    old <- get0("stata_estimates", envir = globalenv(), inherits = FALSE)
+    assign("stata_estimates", lay, envir = globalenv())
+    Vp <- diag(length(Rn))
+    dimnames(Vp) <- list(Rn, Rn)
+    eb <- tryCatch(stata_eb(stats::setNames(as.numeric(seq_along(Rn)), Rn), Vp, "cnsreg", dep), finally = {
+      if (is.null(old)) rm("stata_estimates", envir = globalenv()) else assign("stata_estimates", old, envir = globalenv())
+    })
+    if (!is.null(attr(eb$b, "stata_names"))) stop("RCraft: cnsreg with terms whose e(b) layout is not rebuilt yet is not translated", call. = FALSE)
+    snm <- colnames(eb$b)
+    srcv <- as.integer(eb$b[1, ])
+    X <- matrix(0, length(rows), length(snm), dimnames = list(NULL, snm))
+    for (j in which(srcv > 0)) X[, j] <- X0[, srcv[j]]
+    model <- list(fo = fo, xlev = stats::.getXlevels(stats::terms(fo), stats::model.frame(fo, mfm)), Rn = Rn, srcv = srcv, mf = mfm)
+  } else {
+    X <- vapply(xs, function(v) num(d[[v]])[rows], numeric(length(rows)))
+    X <- matrix(X, length(rows), length(xs), dimnames = list(NULL, xs))
+    if (!noconst) X <- cbind(X, `_cons` = 1)
+  }
   nm <- colnames(X)
   k <- length(nm)
   n <- length(y)
@@ -204,10 +272,23 @@ stata_cnsreg <- function(d, dep, xs, cns, noconst = FALSE, wvar = NULL, wtype = 
   cns_list <- get0("stata_cns", ifnotfound = list())
   rowsR <- list()
   rhs <- numeric()
+  # a base level is fixed at 0 first (it is a row of e(Cns), not a line of the header); 1.g reads 1b.g
+  alias <- NULL
+  if (fac) {
+    for (j in which(srcv == 0)) {
+      a <- numeric(k)
+      a[j] <- 1
+      rowsR[[length(rowsR) + 1]] <- a
+      rhs <- c(rhs, 0)
+    }
+    bj <- grepl("^[0-9]+b[.]", nm)
+    alias <- stats::setNames(nm[bj], sub("^([0-9]+)b[.]", "\\1.", nm[bj]))
+  }
+  nauto <- length(rowsR)
   for (i in cns) {
     t <- cns_list[[as.character(i)]]
     if (is.null(t)) next
-    p <- stata_cns_parse(t, nm)
+    p <- stata_cns_parse(t, nm, alias)
     if (inherits(p, "stata_cns_rc")) {
       cat("(note: constraint number ", i, " caused error r(", unclass(p), "))\n", sep = "")
       next
@@ -316,9 +397,20 @@ stata_cnsreg <- function(d, dep, xs, cns, noconst = FALSE, wvar = NULL, wtype = 
   put(b = bm, V = V, Cns = Cns)
   if (robust || !is.null(cl)) put(V_modelbased = Vm)
   attr(e, "stata_rows") <- rows
-  attr(e, "stata_b") <- stats::setNames(b, sub("^_cons$", "(Intercept)", nm))
-  attr(e, "stata_V") <- { Vn <- V; dimnames(Vn) <- list(sub("^_cons$", "(Intercept)", nm), sub("^_cons$", "(Intercept)", nm)); Vn }
+  if (fac) {
+    # R's names for _b[], predict and test; the model for predict
+    ix <- which(srcv > 0)
+    rnm <- model$Rn[srcv[ix]]
+    attr(e, "stata_b") <- stats::setNames(b[ix], rnm)
+    attr(e, "stata_V") <- { Vn <- V[ix, ix, drop = FALSE]; dimnames(Vn) <- list(rnm, rnm); Vn }
+    model$rb <- stats::setNames(b[ix], rnm)
+    attr(e, "stata_cnsmodel") <- model
+  } else {
+    attr(e, "stata_b") <- stats::setNames(b, sub("^_cons$", "(Intercept)", nm))
+    attr(e, "stata_V") <- { Vn <- V; dimnames(Vn) <- list(sub("^_cons$", "(Intercept)", nm), sub("^_cons$", "(Intercept)", nm)); Vn }
+  }
   attr(e, "stata_constr") <- constr
+  attr(e, "stata_nauto") <- nauto
   if (show) stata_cnsreg_show(e, level)
   e
 }
@@ -337,9 +429,17 @@ stata_cnsreg_show <- function(e, level = 95) {
                     if (is.finite(Fv)) list(list(sprintf("F(%d, %d)", as.integer(e$df_m), as.integer(e$df_r)), sprintf("%.2f", Fv)),
                                             list("Prob > F", sprintf("%.4f", stats::pf(Fv, e$df_m, e$df_r, lower.tail = FALSE)))),
                     list(list("Root MSE", sprintf("%.4f", e$rmse)))))
-  cat(paste0(sprintf(" (%2d)  ", seq_len(m)), vapply(seq_len(m), function(i) stata_cns_line(R[i, ], rhs[i], nm), ""), "\n"), sep = "")
-  stata_ls_table(nm, b, sqrt(diag(e$V)), e$df_r, level, e$depvar, attr(e, "stata_constr"), robust = robust,
-                 clusters = cl, clustvar = e[["clustvar"]])
+  # the base levels' own constraints are rows of e(Cns) but not lines of the header
+  na <- if (is.null(attr(e, "stata_nauto"))) 0L else attr(e, "stata_nauto")
+  shown <- setdiff(seq_len(m), seq_len(na))
+  cat(paste0(sprintf(" (%2d)  ", seq_along(shown)), vapply(shown, function(i) stata_cns_line(R[i, ], rhs[i], nm), ""), "\n"), sep = "")
+  fixed <- attr(e, "stata_constr")
+  # a coefficient the constraints fix at 0 is shown as omitted, one fixed elsewhere as constrained
+  zero <- fixed & abs(b) < 1e-10
+  cm <- attr(e, "stata_cnsmodel")
+  stata_ls_table(nm, b, sqrt(diag(e$V)), e$df_r, level, e$depvar, fixed & !zero, robust = robust,
+                 clusters = cl, clustvar = e[["clustvar"]], omitted = zero,
+                 layout = !is.null(cm), data = if (is.null(cm)) NULL else cm$mf)
   invisible(NULL)
 }
 stata_cnsreg_replay <- function(e, level = 95) {
@@ -476,10 +576,32 @@ impl Session {
             return self.cnsreg_replay(c, opts, out);
         }
         let spec = Spec::read(c, "cnsreg")?;
-        if !is_name(&spec.dep) || spec.terms.is_empty() || spec.terms.iter().any(|t| !is_name(t)) {
+        if !is_name(&spec.dep) || spec.terms.is_empty() {
             return Err(no(
-                "cnsreg with factor variables, operators or no independent variable is not translated yet",
+                "cnsreg with operators or no independent variable is not translated yet",
             ));
+        }
+        // plain factor variables (i.g, ib2.g) are taken, through regress's naming of e(b); interactions,
+        // powers and the other forms are not
+        let factor_term = |t: &str| {
+            (t.starts_with("factor(") || t.starts_with("stata_ib("))
+                && !t.contains([':', '*'])
+                && !t.contains("I(")
+        };
+        let factors_in = spec.terms.iter().any(|t| !is_name(t));
+        if spec.terms.iter().any(|t| !is_name(t) && !factor_term(t)) {
+            return Err(no(
+                "cnsreg with interactions or operators is not translated yet",
+            ));
+        }
+        if factors_in && opts.has("noconstant", 5) {
+            return Err(no(
+                "cnsreg with factor variables and noconstant is not translated yet",
+            ));
+        }
+        if factors_in {
+            self.helpers_for(&spec);
+            self.helpers.insert("stata_eb");
         }
         let Some(list) = opts.arg("constraints", 1) else {
             stop(out, "constraints() required (Stata: r(198))");
@@ -526,7 +648,7 @@ impl Session {
             r_text(&super::returned::cmdline(c)),
             super::stats::r_logical(show)
         ));
-        self.cnsreg_after(c, &spec.dep, &src, out)?;
+        self.cnsreg_after(c, &spec.dep, spec.factors.clone(), &src, out)?;
         if w.is_some() {
             out.caveat(super::weights::weight_caveat(&w));
         }
@@ -543,6 +665,7 @@ impl Session {
         &mut self,
         c: &Command,
         dep: &str,
+        factors: BTreeMap<String, String>,
         src: &str,
         out: &mut Out,
     ) -> Result<(), Untranslated> {
@@ -564,7 +687,7 @@ impl Session {
         self.estimates = Some(Estimates {
             fit: Fit::Cnsreg,
             dep: dep.to_string(),
-            factors: BTreeMap::new(),
+            factors,
         });
         self.e_new = true;
         self.e_ret = super::returned::Returned::Program {
@@ -639,11 +762,6 @@ impl Session {
     ) -> Result<(), Untranslated> {
         if opts.has("or", 2) {
             return Err(no("logistic with the option or: Stata does not allow it"));
-        }
-        if opts.has("noconstant", 5) {
-            return Err(no(
-                "logistic, noconstant is not translated: Stata leaves e(ll_0) missing and a Wald chi2 there",
-            ));
         }
         let coef = opts.has("coef", 4);
         let mut c2 = c.clone();

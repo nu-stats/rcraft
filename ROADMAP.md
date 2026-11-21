@@ -632,8 +632,8 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   across equations), `qreg` (`nolog`, any quantile, fweights, the iid variance, `predict`), `logistic` and `xi` (round 2, 2026-11-19: `xi: cmd`, `xi i.g`, `prefix()`, `i.g*i.h`, `i.g*x`, `i.g|x`, the omit characteristics) Verified (corpus
   `cnsreg.do`, `areg.do`, `sureg.do`, `qreg.do`, `logistic.do`, `xi.do`; notes `plan/stata/{constraint,areg,sureg,qreg,logistic,xi}.md`).
   `nlsur` and the `qreg` ties and iteration log were built in round 3, the `nlsur` gaps in rounds 4 to 6 (below).
-  Still refused: `xi` with a factor in two terms or `|` between factors (round 5, below: other levels and `noomit` are built); `constraints()` of other models;
-  `areg` with regressors the absorbed groups make collinear; `logistic, noconstant`.
+  Still refused: `xi` with a factor in two terms or `|` between factors (round 5, below: other levels and `noomit` are built); `constraints()` of sspace and spregress
+  (`constraints()` of logit, probit and poisson, `areg` with collinear regressors and `logistic, noconstant` were built in round 4b, below).
   Measured on top of P2C.12an: probes 79.8% -> 80.2% (23,159 -> 23,278 translated source lines of 29,018 judged); with `xi` the 7 probe lines move from refused to known only when run (the dry run cannot ask R for the levels; the corpus shows them translating): 23,278 translated, 5,733 not, 1,104 when run; packages 94.7% unchanged (4,025 of 4,249).)
   Round 3 (2026-11-19, the on-hold `qreg` item): `qreg` where the minimum is not unique and `qreg` without `nolog` Verified (corpus `qreg.do`, 234 results to 1e-8, was 51; note
   `plan/stata/qreg.md`). Stata's own path rebuilt from its iteration log: one weighted least squares step (check-loss weights, zero residuals dropped), the k rows
@@ -649,6 +649,15 @@ by measuring again and writing the figure into `docs/stata-coverage.md`:
   the failing fits that R's paths are Stata's (5 of 6 logs identical). **Still not reproduced:** Stata's give-up (r(430), r(498) `increasing the maximum number of iterations`) on
   two-integer-dummy data, and the tied-breakpoint order that rounding noise decides (16 of 140 logs, 2 of 126 e(b)).
 Round 5 (2026-11-20, `xi`): factors whose values are not whole numbers from 0 up (negative, fractional, strings) are named by rank with Stata's header and `g==label` labels, `char s[omit]` for strings, `noomit` (before the terms or the colon), the product's type for `i.g*x`. Verified (corpus `xi.do`, 126 results to 1e-8, was 54; note `plan/stata/xi.md`). Still refused: a factor in two terms, `|` between factors, other options. Left for later and listed: `areg` with interactions and `ib.` bases, `cnsreg` with factor variables (both need `regress`'s e(b) naming and the base-level columns), `constraints()` of sspace and spregress.
+  Round 4b (2026-11-20, the batch E leftovers): `constraints()` in `logit`, `probit`, `poisson` and `logistic` (Stata's Newton-Raphson over what the
+  constraints leave free from its usual start projected onto them, the iteration log, the Wald header and constraint lines, `(constrained)` rows,
+  e(Cns), robust, clustered, fw, pw, `or`/`irr`, `if`); `logit`/`probit`/`logistic` with `noconstant` (the same Wald header, the log from 0, no e(ll_0));
+  `areg` with regressors the absorbed groups or the others make collinear (omitted with Stata's note and an o. column); `predict`'s `(option pr assumed; ...)`
+  and `(option n assumed; ...)` notes after logit, probit and poisson. Verified (corpus `ml_cns.do`, 263 results to 1e-6 and the printed output line for
+  line; `areg.do`, 137 results, was 77; notes `plan/stata/{constraint,areg,logistic}.md`). Still refused: `constraints()` with offset/exposure, iweights or a
+  regressor omitted for collinearity; poisson with `constraints()` and `noconstant`; areg with a factor level omitted.
+  Measured on top of round 3 (nlsur): probes 80.5% (23,356 -> 23,358 translated; the two `constraints()` probe lines), packages 94.7% unchanged.
+Round 6 (2026-11-20, the factor-variable leftovers): `areg` with interactions (`i.g#c.z`, `c.z##i.h`, `i.g#i.h`, `c.x#c.z`) and `ib.` bases, `cnsreg` with factor variables (the base level a fixed column and the first rows of e(Cns), `1.g` reading `1b.g`, a coefficient fixed at 0 printed omitted, a plain `x = 0` too). Verified (corpus `areg.do` 205 results, `cnsreg.do` 523 results, printed output line for line; notes `plan/stata/{areg,constraint}.md`). Still refused: `cnsreg` with interactions, noconstant or collinear factors; `areg` with powers or a factor level omitted for collinearity.
 - P2C.12aq Survey design (batch 5 of the StatCraft port, done 2026-11-19, in part)
   (`svyset` with `strata()`, `fpc()`, `singleunit()`, later stages, `[iweight=]`, no PSU, `svyset, clear` and bare `svyset`, with the r()
   it leaves; `svydescribe` (stage 1 with and without a varlist, `finalstage`, `if`/`in`, r()); `svy: mean`, `total`, `ratio` and `proportion` with

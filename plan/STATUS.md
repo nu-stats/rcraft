@@ -6170,3 +6170,26 @@ packages. Each checked on Stata 19.0 SE with made-up data.
 - Probes 80.5% -> 80.7% (23,343 -> 23,399 translated source lines of 29,018 judged; 5,668 -> 5,612 not translated); packages unchanged at 94.7% (4,025 of 4,249).
 - **On hold:** `manovatest` (needs `manova`), `tebalance` (needs `teffects`), `contrast`/`pwcompare` after `areg` and `xtregar`, `hausman`/`predictnl` after `xtregar`.
 - Code: `data_r/postest.rs`; small additive edits in `data_r.rs` (registration, `LEAVE_DATA_ALONE`), `verified.rs`, and `xt.rs` (`rmse_gls` of `xtreg, re`).
+
+## P2C.12ao round 4b: constraints() in logit/probit/poisson, logit noconstant, areg collinear, 2026-11-20
+
+- **Done** (Stata 19 on made-up data; corpus `ml_cns.do`, 263 results to 1e-6, and its printed output compared with Stata's log line for line;
+  `areg.do`, 137 results to 1e-8, was 77): `constraints()` in `logit`, `probit`, `poisson` and `logistic`; `logit`, `probit` and `logistic` with
+  `noconstant`; `areg` with collinear regressors; predict's default-option notes after logit, probit and poisson.
+- **Found:** Stata's start under constraints is its usual start projected onto them (logit/probit: the constant-only fit; poisson: the least-squares
+  start after one Newton step, weighted with fweights), to every digit of iteration 0. One halved step is not marked in Stata's log (no `(backed up)`).
+  The Wald test leaves out the directions the constraints fix (chi2 on the rank left), even where all slopes 0 contradicts them. Without the constant,
+  logit's log starts at 0 and the header is the Wald one. areg omits a regressor the absorbed groups make collinear wherever it stands, then the later
+  of a collinear set. Notes `plan/stata/{constraint,logistic,areg}.md`.
+- **Still refused:** ROADMAP P2C.12ao round 4b.
+- **Shares:** probes **80.5%** (23,358 translated, 5,653 not, 1,104 known only when run, of 30,115 source lines; was 23,356 with nlsur); packages **94.7%** (4,025 of 4,249), unchanged.
+
+## P2C.12ao round 6: areg interactions and ib. bases, cnsreg factor variables, 2026-11-20
+
+- **Done** (Stata 19 on made-up data; corpus `areg.do` 205 results, `cnsreg.do` 523 results to 1e-8, the printed tables compared with Stata's log line for line):
+  `areg` with `i.g#c.z`, `c.z##i.h`, `i.g#i.h`, `c.x#c.z` and `ib2.g` (e(b) named through `regress`'s code on a fitted layout); `cnsreg` with `i.g` and `ib#.g`
+  (the base level a fixed column and the first rows of e(Cns), `1.g` reading `1b.g`, the table hiding the base row, a coefficient fixed at 0 printed `0  (omitted)`,
+  which also corrects a plain `x = 0` that printed `(constrained)`; residuals in double with factors). Notes `plan/stata/{areg,constraint}.md`.
+- **Still refused:** `cnsreg` with interactions, noconstant, or a factor collinear with another (Stata adds a constraint row of its own); `areg` with powers or an omitted
+  factor level.
+- **Shares:** unchanged by this round (no probe or package line uses these forms).

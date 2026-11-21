@@ -20,7 +20,19 @@ ported from statcraft@b7d392e) had the rules; the layout, e() and the cluster qu
 - predict: xb (default, `(option xb assumed; fitted values)`), residuals (y - xb - d), `d` (ybar_g - xbar_g b - _cons) and `xbd`.
 - iweights stop with r(101); no absorb() is r(198).
 
+- **Collinear regressors** (2026-11-20, corpus `areg.do` now 137 results): a regressor the absorbed groups make collinear
+  (constant within each group, or constant) is omitted wherever it stands (`areg y u x z` omits u, the first); then the
+  later of a collinear set, in the order written (x2 = 2 x after x, xz = x + z after both). Each prints
+  `note: u omitted because of collinearity.` before the header, a `0  (omitted)` row, and an `o.u` column of zeros in e(b)
+  and e(V). df_r = N - k - G and e(rank) count only the slopes kept; e(df_m) too. Checked by sequential projection of
+  the within columns, tolerance 1e-7 of the column's norm.
+
+- **Interactions and ib. bases** (2026-11-20, corpus `areg.do` now 205 results): `i.g#c.z`, `c.z##i.h`, `i.g#i.h`, `c.x#c.z` and
+  `ib2.g` are fitted as before and named through `regress`'s e(b) code (a fitted `lm` of the terms gives the layout):
+  `1b.g#c.z` base columns, `2b.g`, `0b.h#co.z`, cells `1b.g#0b.h`. The table is Stata's, the base rows hidden; predict (xb,
+  residuals) and test work. Powers (`I(x^2)`) stay refused.
+
 ## Open
 
-Refused: regressors the absorbed groups make collinear (Stata omits them with a note), interactions, `ib.` bases,
+Refused: a factor level omitted for collinearity, every regressor omitted, interactions, `ib.` bases,
 e(datasignature), predict's other statistics.
