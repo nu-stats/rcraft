@@ -1280,6 +1280,11 @@ impl StoredFit {
         self.estimates.as_ref()
     }
 
+    /// Whether these results are the ones of command `cmd`, kept as coefficients and variance only.
+    pub(super) fn is_kept(&self, cmd: &str) -> bool {
+        matches!(&self.e_ret, Returned::Kept { cmd: c, .. } if c == cmd)
+    }
+
     pub(super) fn robust_or_weighted(&self) -> bool {
         self.fit_robust || self.fit_cluster || self.weighted_fit
     }

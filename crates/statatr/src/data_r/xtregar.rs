@@ -288,8 +288,12 @@ pub(super) const XTREGAR_HELPER: &str = r##"stata_xtregar <- function(d, y, x, p
     if (fe) cat(sprintf("F test that all u_i=0: F(%d,%s) = %.2f\n", df_a, format(df), F_f))
     if (lbi) cat(sprintf("modified Bhargava et al. Durbin-Watson = %.7f\nBaltagi-Wu LBI = %.7f\n", lbi_v[1], lbi_v[2]))
   }
+  # what the post-estimation commands read off an lm: its terms and coefficients (the plain variables,
+  # as xtregar takes them), and for contrast the kind of effects and the panel variable
+  tf <- stats::terms(stats::as.formula(paste("~", paste(ifelse(make.names(x) == x, x, sprintf("`%s`", x)), collapse = " + "))))
   out <- list(b = b, vcov = V, df = if (small) df else Inf, rows = rows, e = sc, fe = fe, rhotype = rhotype,
-              panel = panel, time = time, depvar = y)
+              panel = panel, time = time, depvar = y, terms = tf, xlevels = list(), coefficients = b[!is.na(b)],
+              type = if (fe) "fe" else "re")
   invisible(out)
 }
 # e() after xtregar: the scalars in Stata's order, then the macros, b and V

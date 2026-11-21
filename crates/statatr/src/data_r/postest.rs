@@ -742,7 +742,12 @@ pub(super) const HAUSMAN_HELPER: &str = r##"stata_hausman <- function(s1, s2, n1
   }
   if (!length(common)) stop("no coefficients in common; specify equations (Stata: r(498))", call. = FALSE)
   ratio <- if (nzchar(sig)) {
-    if (is.null(a$rmse) || is.null(z$rmse)) stop("sigmamore and sigmaless need e(rmse), which is not kept here", call. = FALSE)
+    if (is.null(a$rmse) || is.null(z$rmse)) {
+      # Stata keeps no e(rmse) after xtregar re, logit, probit and poisson
+      if (any(c(cmd1, cmd2) %in% c("xtregar", "logit", "probit", "poisson"))) stop("Estimators do not save e(sigma) or e(rmse),
+sigma option not allowed (Stata: r(198))", call. = FALSE)
+      stop("sigmamore and sigmaless need e(rmse), which is not kept here", call. = FALSE)
+    }
     (z$rmse / a$rmse)^2
   } else 1
   w1 <- if (sig == "sigmamore") ratio else 1
@@ -802,6 +807,7 @@ pub(super) const HAUSMAN_HELPER: &str = r##"stata_hausman <- function(s1, s2, n1
     cat("\nWarning: chi2 < 0 ==> model fitted on these data\n         fails to meet the asymptotic assumptions\n         of the Hausman test; see suest for a\n         generalized test.\n")
   } else {
     cat(sprintf("Prob > chi2 = %6.4f\n", p))
+    if (any(eigen(Vd, symmetric = TRUE, only.values = TRUE)$values <= 0)) cat("(V_b-V_B is not positive definite)\n")
   }
   invisible(r)
 }"##;
@@ -874,6 +880,51 @@ impl Session {
         }
     }
 
+    /// Whether the results under `name` (`.` for the active ones) are an `xtregar` fit, whose
+    /// coefficients and variance are all that is kept of it.
+    fn is_xtregar(&self, name: &str) -> bool {
+        let kept = |r: &super::returned::Returned| {
+            matches!(r, super::returned::Returned::Kept { cmd, .. } if cmd == "xtregar")
+        };
+        if name == "." {
+            kept(&self.e_ret) && self.estimates.is_none()
+        } else {
+            self.stored_fit(name).is_some_and(|f| f.is_kept("xtregar"))
+        }
+    }
+
+    /// One set of results for `hausman`: its R expression and the command that made it.
+    fn hausman_set(
+        &self,
+        name: &str,
+        out: &mut Out,
+    ) -> Result<Option<(String, String)>, Untranslated> {
+        if self.is_xtregar(name) {
+            let expr = if name == "." {
+                "list(stata_b = stata_b, stata_vcov = stata_vcov, stata_e = if (exists(\"stata_e\")) stata_e else list())".to_string()
+            } else {
+                format!("stata_stored[[{}]]", r_text(name))
+            };
+            return Ok(Some((expr, "xtregar".into())));
+        }
+        let Some((expr, f)) = self.stored_or_active("hausman", name, out)? else {
+            return Ok(None);
+        };
+        let ok = matches!(
+            f,
+            Fit::Xtreg
+                | Fit::Regress
+                | Fit::Ivregress
+                | Fit::Logit
+                | Fit::Probit
+                | Fit::Poisson
+        );
+        if !ok {
+            return Err(no(format!("hausman after {} is not translated yet", f.name())));
+        }
+        Ok(Some((expr, f.name().to_string())))
+    }
+
     /// `hausman consistent [efficient] [, constant sigmamore sigmaless]`.
     pub(super) fn hausman_cmd(
         &mut self,
@@ -903,30 +954,12 @@ impl Session {
                 return Err(no(format!("hausman {n}: not a name of stored results")));
             }
         }
-        let Some((s1, f1)) = self.stored_or_active("hausman", a, out)? else {
+        let Some((s1, n1)) = self.hausman_set(a, out)? else {
             return Ok(());
         };
-        let Some((s2, f2)) = self.stored_or_active("hausman", b, out)? else {
+        let Some((s2, n2)) = self.hausman_set(b, out)? else {
             return Ok(());
         };
-        let ok = |f: Fit| {
-            matches!(
-                f,
-                Fit::Xtreg
-                    | Fit::Regress
-                    | Fit::Ivregress
-                    | Fit::Logit
-                    | Fit::Probit
-                    | Fit::Poisson
-            )
-        };
-        if !ok(f1) || !ok(f2) {
-            return Err(no(format!(
-                "hausman after {} and {} is not translated yet",
-                f1.name(),
-                f2.name()
-            )));
-        }
         let sig = if opts.has("sigmamore", 6) {
             "sigmamore"
         } else if opts.has("sigmaless", 6) {
@@ -940,8 +973,8 @@ impl Session {
             "stata_r <- stata_hausman({s1}, {s2}, {}, {}, {}, {}, constant = {}, sig = {}{})",
             r_text(a),
             r_text(b),
-            r_text(f1.name()),
-            r_text(f2.name()),
+            r_text(&n1),
+            r_text(&n2),
             super::stats::r_logical(opts.has("constant", 4)),
             r_text(sig),
             if self.quiet(c) { ", show = FALSE" } else { "" }
@@ -1158,16 +1191,22 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "predictnl")?;
-        let est = self.estimates_for("predictnl")?;
-        if !matches!(
-            est.fit,
-            Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson
-        ) {
-            return Err(no(format!(
-                "predictnl after {} is not translated yet",
-                est.fit.name()
-            )));
-        }
+        // after xtregar the linear prediction is the coefficients on the plain variables
+        let fit = if self.is_xtregar(".") {
+            Fit::Regress
+        } else {
+            let est = self.estimates_for("predictnl")?;
+            if !matches!(
+                est.fit,
+                Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson
+            ) {
+                return Err(no(format!(
+                    "predictnl after {} is not translated yet",
+                    est.fit.name()
+                )));
+            }
+            est.fit
+        };
         if self.svy_fit {
             return Err(no("predictnl after a svy: model is not translated yet"));
         }
@@ -1224,7 +1263,7 @@ impl Session {
             ci = true;
         }
         let d = self.data()?;
-        let (text, preds) = pnl_substitute(rhs.trim(), est.fit)?;
+        let (text, preds) = pnl_substitute(rhs.trim(), fit)?;
         for (n, _, _) in &news {
             out.line(format!(
                 "if ({} %in% names({d})) stop(\"variable {n} already defined\")",
@@ -1253,7 +1292,7 @@ impl Session {
         if value.contains("stata_v = ") {
             return Err(no("predictnl: this expression is not translated yet"));
         }
-        let link = match est.fit {
+        let link = match fit {
             Fit::Logit => "logit",
             Fit::Probit => "probit",
             Fit::Poisson => "log",
