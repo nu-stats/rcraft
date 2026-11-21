@@ -1262,6 +1262,7 @@ pub(super) struct StoredFit {
     plain_regress: bool,
     fit_robust: bool,
     fit_cluster: bool,
+    xtregar_factors: std::collections::BTreeMap<String, String>,
     /// Its `stata_esample` still marks the rows, and its copy of the
     /// estimation sample is still the data's; a line since that moves the
     /// rows or changes the data clears these, as it does for the model held.
@@ -1496,6 +1497,7 @@ impl Session {
                 plain_regress: self.plain_regress,
                 fit_robust: self.fit_robust,
                 fit_cluster: self.fit_cluster,
+                xtregar_factors: self.xtregar_factors.clone(),
                 esample: self.esample,
                 changed_since_fit: self.changed_since_fit,
             },
@@ -1570,6 +1572,7 @@ impl Session {
         self.plain_regress = f.plain_regress;
         self.fit_robust = f.fit_robust;
         self.fit_cluster = f.fit_cluster;
+        self.xtregar_factors = f.xtregar_factors;
         self.esample = f.esample;
         self.changed_since_fit = f.changed_since_fit;
         self.active_store = Some(name.to_string());

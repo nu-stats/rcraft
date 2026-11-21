@@ -22,17 +22,39 @@ use crate::reader::Command;
 pub(super) const XTREGAR_HELPER: &str = r##"stata_xtregar <- function(d, y, x, panel, time, delta = 1, fe = FALSE, rhotype = "dw", rhof = NULL,
                           twostep = FALSE, lbi = FALSE, level = 0.95, show = TRUE) {
   stop_ <- function(...) stop(..., call. = FALSE)
-  vars <- c(y, x, panel, time)
+  # x holds the terms: plain variables and factor(g) for a factor variable
+  terms_in <- x
+  tv <- setdiff(unique(unlist(regmatches(x, gregexpr("[A-Za-z_][A-Za-z0-9_]*", x)))), "factor")
+  vars <- c(y, tv, panel, time)
   miss <- setdiff(vars, names(d))
   if (length(miss)) stop_("variable ", miss[1], " not found (Stata: r(111))")
   num <- function(v) { v <- unclass(v); attributes(v) <- NULL; as.numeric(v) }
+  shown <- function(s) ifelse(grepl("^factor\\(", s), sub("^factor\\(([^)]*)\\)(.*)$", "\\2.\\1", s), s)
   rows <- which(stats::complete.cases(as.data.frame(lapply(d[vars], num))))
   rows <- rows[order(num(d[[panel]])[rows], num(d[[time]])[rows], rows)]
   m <- length(rows)
   if (m == 0) stop_("no observations (Stata: r(2000))")
   Y <- num(d[[y]])[rows]
-  X <- vapply(x, function(v) num(d[[v]])[rows], numeric(m))
-  if (!is.matrix(X)) X <- matrix(X, m, dimnames = list(NULL, x))
+  xlev <- list()
+  cols <- list()
+  xn <- character()
+  for (tm_ in terms_in) {
+    if (grepl("^factor\\(", tm_)) {
+      v <- sub("^factor\\((.*)\\)$", "\\1", tm_)
+      f <- factor(num(d[[v]])[rows])
+      xlev[[tm_]] <- levels(f)
+      M <- stats::model.matrix(~ f)[, -1, drop = FALSE]
+      for (l in seq_len(ncol(M))) {
+        cols[[length(cols) + 1]] <- M[, l]
+        xn <- c(xn, paste0(tm_, levels(f)[l + 1]))
+      }
+    } else {
+      cols[[length(cols) + 1]] <- num(d[[tm_]])[rows]
+      xn <- c(xn, tm_)
+    }
+  }
+  X <- matrix(unlist(cols), m, length(cols), dimnames = list(NULL, xn))
+  x <- xn
   id <- num(d[[panel]])[rows]
   tm <- num(d[[time]])[rows] / delta
   newp <- c(TRUE, id[-1] != id[-m])
@@ -80,7 +102,7 @@ pub(super) const XTREGAR_HELPER: &str = r##"stata_xtregar <- function(d, y, x, p
   keep_w <- independent(Xw)
   keep <- if (fe) keep_w else independent(X, list(rep(1, m)))
   dropped <- setdiff(seq_along(x), keep)
-  if (show) for (j in dropped) cat("note: ", x[j], " omitted because of collinearity.\n", sep = "")
+  if (show) for (j in dropped) cat("note: ", shown(x[j]), " omitted because of collinearity.\n", sep = "")
   kk <- length(keep)
   if (kk == 0) stop_("xtregar with no regressor left is not translated yet")
   Xk <- X[, keep, drop = FALSE]
@@ -283,17 +305,22 @@ pub(super) const XTREGAR_HELPER: &str = r##"stata_xtregar <- function(d, y, x, p
     else cat(sprintf("Wald chi2(%d) = %.2f\n", kk + 1, chi2))
     cat("\n")
     ok <- !is.na(b)
-    stata_coefs(b[ok], V[ok, ok, drop = FALSE], if (small) df else Inf, level)
+    bs_ <- b[ok]
+    Vs_ <- V[ok, ok, drop = FALSE]
+    names(bs_) <- shown(names(bs_))
+    dimnames(Vs_) <- list(names(bs_), names(bs_))
+    stata_coefs(bs_, Vs_, if (small) df else Inf, level)
     cat(sprintf("rho_ar = %.8f   sigma_u = %.8f   sigma_e = %.8f   rho_fov = %.8f\n", rho, sigma_u, sigma_e, rho_fov))
     if (fe) cat(sprintf("F test that all u_i=0: F(%d,%s) = %.2f\n", df_a, format(df), F_f))
     if (lbi) cat(sprintf("modified Bhargava et al. Durbin-Watson = %.7f\nBaltagi-Wu LBI = %.7f\n", lbi_v[1], lbi_v[2]))
   }
   # what the post-estimation commands read off an lm: its terms and coefficients (the plain variables,
   # as xtregar takes them), and for contrast the kind of effects and the panel variable
-  tf <- stats::terms(stats::as.formula(paste("~", paste(ifelse(make.names(x) == x, x, sprintf("`%s`", x)), collapse = " + "))))
+  bt <- function(s) ifelse(make.names(s) == s | grepl("[()]", s), s, sprintf("`%s`", s))
+  tf <- stats::terms(stats::as.formula(paste(bt(y), "~", paste(bt(terms_in), collapse = " + "))))
   out <- list(b = b, vcov = V, df = if (small) df else Inf, rows = rows, e = sc, fe = fe, rhotype = rhotype,
-              panel = panel, time = time, depvar = y, terms = tf, xlevels = list(), coefficients = b[!is.na(b)],
-              type = if (fe) "fe" else "re")
+              panel = panel, time = time, depvar = y, terms = tf, xlevels = xlev, coefficients = b[!is.na(b)],
+              type = "xtregar")
   invisible(out)
 }
 # e() after xtregar: the scalars in Stata's order, then the macros, b and V
@@ -361,9 +388,24 @@ impl Session {
                 _ => return Err(no("|rho|<1, specify a valid rho (Stata: r(198))")),
             },
         };
-        let vars = names(&c.parts.main).map_err(|e| {
-            no(format!("{} (factor variables and time-series operators with xtregar are not translated yet)", e.reason))
-        })?;
+        // plain variables, or factor variables (i.g, as R's factor(g)) among them
+        let (vars, factors) = match names(&c.parts.main) {
+            Ok(v) => (v, std::collections::BTreeMap::new()),
+            Err(e) => {
+                let why = format!("{} (interactions, ib. bases and time-series operators with xtregar are not translated yet)", e.reason);
+                let spec = super::model::Spec::read(c, "xtregar").map_err(|_| no(why.clone()))?;
+                let plain = |t: &str| {
+                    is_name(t)
+                        || (t.starts_with("factor(") && t.ends_with(')') && is_name(&t[7..t.len() - 1]))
+                };
+                if !is_name(&spec.dep) || spec.terms.iter().any(|t| !plain(t)) {
+                    return Err(no(why));
+                }
+                let mut v = vec![spec.dep.clone()];
+                v.extend(spec.terms.iter().cloned());
+                (v, spec.factors)
+            }
+        };
         let Some((dep, regs)) = vars.split_first() else {
             return Err(no("varlist required (Stata: r(100))"));
         };
@@ -429,6 +471,7 @@ impl Session {
         out.line("stata_b <- stata_estimates$b");
         out.line("stata_vcov <- stata_estimates$vcov");
         out.line("stata_df <- stata_estimates$df");
+        out.line(self.keep_rows(&src, "stata_estimates$rows"));
         out.line(format!(
             "stata_e <- stata_xtregar_e(stata_estimates, {})",
             r_text(&super::returned::cmdline(c))
@@ -440,6 +483,7 @@ impl Session {
             &src,
             "stata_estimates$rows",
         ));
+        self.xtregar_factors = factors;
         self.esample_new = true;
         self.e_new = true;
         self.e_ret = super::returned::Returned::Kept {

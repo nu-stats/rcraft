@@ -677,6 +677,7 @@ const NAME_TABLES: &[&str] = &[
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
     "areg",
+    "xtregar",
     "ivprobit",
     "nlsur",
     "_rcraft_nlsur_fit",
@@ -978,6 +979,8 @@ const LEAVE_DATA_ALONE: &[&str] = &[
     "lroc",
     "margins",
     "contrast",
+    "hausman",
+    "lrtest",
     "pwcompare",
     "predict",
     "generate",
@@ -1812,6 +1815,8 @@ struct Session {
     svy_call: Option<svy::SvyCall>,
     /// The model in e() was fitted under svy (margins weight its rows).
     svy_fit: bool,
+    /// The factor variables of the xtregar fit held (variable and the R that makes it), for contrast.
+    xtregar_factors: BTreeMap<String, String>,
     /// The storage types of the numeric variables `generate` made, so a
     /// `replace` stores as Stata does (a float stays a float).
     storage: BTreeMap<String, Storage>,
