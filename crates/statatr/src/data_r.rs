@@ -677,6 +677,7 @@ const NAME_TABLES: &[&str] = &[
 
 /// The commands that fit a model.
 const MODELS: &[&str] = &[
+    "areg",
     "ivprobit",
     "nlsur",
     "_rcraft_nlsur_fit",

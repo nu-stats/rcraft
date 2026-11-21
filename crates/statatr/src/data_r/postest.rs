@@ -81,9 +81,16 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
   sv <- svd(crossprod(Xe))
   keep <- sv$d > max(sv$d) * 1e-10
   H <- sv$v[, keep, drop = FALSE] %*% t(sv$v[, keep, drop = FALSE])
-  estimable <- function(L) {
+  # a margin carries the constant, which after xtreg, fe and areg is the panels' mean effect:
+  # the panel indicators carry it too, by their share of the rows (the intercept equals their sum)
+  pshare <- if (ncol(Xe) > ncol(X)) colMeans(Xe[, ncol(X) + seq_len(ncol(Xe) - ncol(X)), drop = FALSE]) else NULL
+  estimable <- function(L, margin = FALSE) {
     L <- matrix(L, ncol = length(fn))
     L <- cbind(L, matrix(0, nrow(L), ncol(Xe) - ncol(X)))
+    ic <- match("(Intercept)", fn)
+    if (margin && !is.null(pshare) && !is.na(ic)) {
+      L[, ncol(X) + seq_along(pshare)] <- outer(L[, ic], pshare)
+    }
     all(vapply(seq_len(nrow(L)), function(i) {
       l <- L[i, ]
       max(abs(l - drop(l %*% H))) <= 1e-8 * max(abs(l), 1e-300)
@@ -313,7 +320,7 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
     crit0 <- if (small) stats::qt(1 - alpha / 2, df) else stats::qnorm(1 - alpha / 2)
     mt <- vapply(seq_len(nrow(Mall)), function(i) {
       l <- Mall[i, ]
-      if (!estimable(l)) return(rep(NA_real_, 9))
+      if (!estimable(l, margin = TRUE)) return(rep(NA_real_, 9))
       m <- sum(l * bb)
       se <- sqrt(max(drop(l %*% VV %*% l), 0))
       st <- m / se
@@ -536,7 +543,7 @@ impl Session {
         let est = self.estimates_for(name)?;
         if !matches!(
             est.fit,
-            Fit::Regress | Fit::Xtreg | Fit::Logit | Fit::Probit | Fit::Poisson
+            Fit::Regress | Fit::Xtreg | Fit::Areg | Fit::Logit | Fit::Probit | Fit::Poisson
         ) {
             return Err(no(format!(
                 "{name} after {} is not translated yet",
@@ -673,13 +680,19 @@ impl Session {
         for h in ["stata_contrast", "stata_fmt"] {
             self.helpers.insert(h);
         }
-        let eq = if matches!(est.fit, Fit::Regress | Fit::Xtreg) {
+        let eq = if matches!(est.fit, Fit::Regress | Fit::Xtreg | Fit::Areg) {
             String::new()
         } else {
             est.dep.clone()
         };
+        // areg keeps no lm: its formula, factor levels and absorbed variable stand in, as for xtreg, fe
+        let fit_r = if est.fit == Fit::Areg {
+            "list(terms = stats::terms(attr(stata_e, \"stata_areg\")$fo), xlevels = attr(stata_e, \"stata_areg\")$xlev, panel = attr(stata_e, \"stata_areg\")$absorb, type = \"fe\")"
+        } else {
+            "stata_estimates"
+        };
         out.line(format!(
-            "stata_r <- stata_contrast({}, stata_estimates, {rows}, stata_b, stata_vcov, stata_df, list({}), c({}), effects = {}, cimargins = {}, mcomp = {}, level = {}, eq = {}, cmdline = {}, est_cmd = {}, est_cmdline = if (exists(\"stata_e\")) stata_e$cmdline else \"\"{})",
+            "stata_r <- stata_contrast({}, {fit_r}, {rows}, stata_b, stata_vcov, stata_df, list({}), c({}), effects = {}, cimargins = {}, mcomp = {}, level = {}, eq = {}, cmdline = {}, est_cmd = {}, est_cmdline = if (exists(\"stata_e\")) stata_e$cmdline else \"\"{})",
             r_text(name),
             terms_r.join(", "),
             factors.join(", "),
