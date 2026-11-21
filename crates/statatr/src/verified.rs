@@ -17,6 +17,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("anova", &["panel"]),
     ("append", &["replication"]),
     ("areg", &["areg"]),
+    ("arima", &["arima", "arima_more", "arima_path"]),
     ("asclogit", &["asclogit"]),
     ("assert", &["checks"]),
     ("bitest", &["bitest"]),
@@ -241,7 +242,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ),
     ("pperron", &["tstests"]),
     ("prais", &["arpanel"]),
-    ("predict", &["regress"]),
+    ("predict", &["arima", "regress"]),
     ("predictnl", &["predictnl"]),
     ("preserve", &["made", "restore_r"]),
     (
