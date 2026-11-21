@@ -59,6 +59,7 @@ pub const COMMANDS: &[&str] = &[
     "anovaplot",
     "append",
     "areg",
+    "arima",
     "asclogit",
     "assert",
     "avplot",

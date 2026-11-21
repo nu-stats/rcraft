@@ -722,6 +722,17 @@ Round 6 (2026-11-20, the factor-variable leftovers): `areg` with interactions (`
   Still refused: `contrast` with `post`, `noestimcheck`, `pveffects`, `cieffects`, `groups`, `tukey`, `snk`, `duncan`, `dunnett`; `gw.` after a weighted model; `lrtest` after a robust model.
   Measured on top of P2C.12aq (probes only; the probe folder is StatCraft's `observe/dofiles` at b7d392e): 80.5% -> 80.7% (23,343 -> 23,399 translated source lines of 29,018 judged; 5,668 -> 5,612 not translated);
   packages unchanged at 94.7% (4,025 of 4,249; none of these commands is in the 46 do-files).)
+- P2C.12as arima (batch AR of the StatCraft port, arima done 2026-11-20; sspace, ucm and dfactor follow)
+  (`arima depvar [indepvars], ar() ma() arima(p,d,q) mar() mma() sarima(P,0,Q,s) noconstant level() nolog trace gradient tolerance() ltolerance()
+  nrtolerance() iterate()`: the exact likelihood by the Kalman filter, Stata's starting values (least squares; AR by least squares of the residuals;
+  MA by Hannan and Rissanen's two regressions), its BHHH-then-BFGS path and `ml` stopping rule, OPG standard errors, e() with Stata's equation names, `_b[ARMA:L.ar]`;
+  `predict` with `xb`, `y`, `residuals`, `yresiduals`, `mse`, `structural` and `dynamic(t)`) Verified (corpus `arima.do`, `arima_path.do`, `arima_more.do`; note `plan/stata/arima.md`).
+  Agreement with Stata 19: tight tolerances to 3e-5 (OPG chi2 to 4e-7); every AR path step, `e(ic)` and stop to 1e-6; MA(1) and ARMA(1,1) default stops to 2e-4
+  (Stata's line search past the full step is not decoded); `ar(1 2) ma(1)` and `ma(2)` reach the optimum, their paths are not Stata's.
+  Still refused: time-series operators in the varlist, weights, `constraints()`, `vce()`, seasonal differencing, gaps or missing values inside the sample, collinear
+  regressors, `predict, stdp` and `t0()`, forecasts beyond the data, `estat` and the other post-estimation commands.
+  Measured on top of P2C.12aq (probes only; the probe folder is StatCraft's `observe/dofiles` at b7d392e): 80.5% -> 80.9% (23,343 -> 23,464 translated source lines of 29,011
+  judged; 5,668 -> 5,547 not translated); packages unchanged at 94.7% (none uses arima).)
 - P2C.13 Collinear regressors as Stata omits them
   (done 2026-11-01:
   - `regress` sweeps the largest column left first, so the smallest of a collinear set goes.

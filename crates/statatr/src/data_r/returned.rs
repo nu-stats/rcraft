@@ -55,6 +55,9 @@ stata_bget <- function(key, se = FALSE) {
       return(0)
     }
     key <- paste0(eq, ":", key)
+  } else if (inherits(stata_estimates, "stata_arima")) {
+    # arima names its columns y:x, ARMA:L.ar, sigma:_cons; a bare name is the first equation's
+    key <- paste0(if (eq == "") stata_estimates$y else eq, ":", key)
   } else if (eq != "") {
     stop("equation [", eq, "] not found")
   }
@@ -2244,6 +2247,7 @@ impl Session {
                             || (which == "r" && cmd == "tsreport" && super::xtsum::tsreport_name(name) == Some(1))
                             || (which == "r" && cmd == "xtunitroot" && super::xtunitroot::text_name(name))
                             || (which == "r" && cmd == "varsoc" && super::tstests::varsoc_text(name))
+                            || (which == "e" && cmd == "arima" && ["ar", "ma", "covariates", "seasons", "tmaxs", "tmins"].contains(&name))
                             || (which == "e" && self.e_text.contains(name));
                         let get = if which == "e" { "stata_eget" } else { "stata_rget" };
                         Ok((
