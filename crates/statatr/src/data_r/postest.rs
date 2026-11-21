@@ -905,9 +905,7 @@ impl Session {
     /// Whether the results under `name` (`.` for the active ones) are an `xtregar` fit, whose
     /// coefficients and variance are all that is kept of it.
     fn is_xtregar(&self, name: &str) -> bool {
-        let kept = |r: &super::returned::Returned| {
-            matches!(r, super::returned::Returned::Kept { cmd, .. } if cmd == "xtregar")
-        };
+        let kept = |r: &super::returned::Returned| matches!(r, super::returned::Returned::Kept { cmd, .. } if cmd == "xtregar");
         if name == "." {
             kept(&self.e_ret) && self.estimates.is_none()
         } else {
@@ -934,15 +932,13 @@ impl Session {
         };
         let ok = matches!(
             f,
-            Fit::Xtreg
-                | Fit::Regress
-                | Fit::Ivregress
-                | Fit::Logit
-                | Fit::Probit
-                | Fit::Poisson
+            Fit::Xtreg | Fit::Regress | Fit::Ivregress | Fit::Logit | Fit::Probit | Fit::Poisson
         );
         if !ok {
-            return Err(no(format!("hausman after {} is not translated yet", f.name())));
+            return Err(no(format!(
+                "hausman after {} is not translated yet",
+                f.name()
+            )));
         }
         Ok(Some((expr, f.name().to_string())))
     }
