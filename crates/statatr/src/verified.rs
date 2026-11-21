@@ -16,7 +16,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("alpha", &["alpha"]),
     ("anova", &["panel"]),
     ("append", &["replication"]),
-    ("areg", &["areg"]),
+    ("areg", &["areg", "contrast_areg"]),
     ("asclogit", &["asclogit"]),
     ("assert", &["checks"]),
     ("bitest", &["bitest"]),
@@ -51,7 +51,13 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("contract", &["contract", "extended_missing_groups"]),
     (
         "contrast",
-        &["contrast", "contrast_glm", "contrast_omitted"],
+        &[
+            "contrast",
+            "contrast_areg",
+            "contrast_glm",
+            "contrast_omitted",
+            "contrast_xtregar",
+        ],
     ),
     ("correlate", &["descriptives"]),
     ("corrgram", &["tstests"]),
@@ -87,7 +93,7 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("estat", &["estat_fit", "estat_tests"]),
     (
         "estimates",
-        &["estimates", "marginsplot", "sdtest", "suest"],
+        &["estimates", "marginsplot", "postest_xtregar", "sdtest", "suest"],
     ),
     ("estpost", &["esttab2"]),
     ("eststo", &["estout", "marginsplot"]),
@@ -119,7 +125,10 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("gettoken", &["made"]),
     ("global", &["control"]),
     ("gsort", &["data", "extended_missing_commands"]),
-    ("hausman", &["hausman"]),
+    (
+        "hausman",
+        &["contrast_xtregar", "hausman", "postest_xtregar"],
+    ),
     ("icc", &["icc"]),
     (
         "import",
@@ -239,7 +248,10 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("pperron", &["tstests"]),
     ("prais", &["arpanel"]),
     ("predict", &["regress"]),
-    ("predictnl", &["predictnl"]),
+    (
+        "predictnl",
+        &["contrast_xtregar", "postest_xtregar", "predictnl"],
+    ),
     ("preserve", &["made", "restore_r"]),
     ("probit", &["collinear", "likelihood", "perfect_predict"]),
     ("program", &["programs"]),
@@ -250,7 +262,13 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("putpdf", &["putdocx"]),
     (
         "pwcompare",
-        &["contrast", "contrast_glm", "contrast_omitted"],
+        &[
+            "contrast",
+            "contrast_areg",
+            "contrast_glm",
+            "contrast_omitted",
+            "contrast_xtregar",
+        ],
     ),
     ("pwcorr", &["descriptives"]),
     (
@@ -403,7 +421,10 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
             "xtreg_r2",
         ],
     ),
-    ("xtregar", &["arpanel"]),
+    (
+        "xtregar",
+        &["arpanel", "contrast_xtregar", "postest_xtregar"],
+    ),
     ("xtset", &["likelihood", "panel", "xtreg_r2"]),
     ("xtsum", &["xtpanel"]),
     ("xttab", &["xtpanel"]),
