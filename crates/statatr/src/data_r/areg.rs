@@ -21,7 +21,7 @@ pub(super) const AREG_HELPER: &str = r##"stata_areg <- function(d, dep, terms, a
                        level = 95, cmdline = "", show = TRUE) {
   num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
   tvars <- unique(unlist(regmatches(terms, gregexpr("[A-Za-z_][A-Za-z0-9_]*", terms))))
-  tvars <- setdiff(tvars, "factor")
+  tvars <- setdiff(tvars, c("factor", "stata_ib", "stata_ibn", "stata_cells"))
   for (v in unique(c(dep, tvars, absorb, wvar, cluster))) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
   ok <- stats::complete.cases(d[unique(c(dep, tvars, absorb, wvar, cluster))])
   if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
@@ -33,7 +33,9 @@ pub(super) const AREG_HELPER: &str = r##"stata_areg <- function(d, dep, terms, a
   X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
   xlev <- stats::.getXlevels(stats::terms(fo), stats::model.frame(fo, mf))
   rn <- function(s) ifelse(grepl("^factor\\(", s), sub("^factor\\(([^)]*)\\)(.*)$", "\\2.\\1", s), s)
-  nmx <- rn(colnames(X))
+  # interactions, bases (ib.) and the like: names and base-level columns as regress gives them
+  complex <- any(!grepl("^[A-Za-z_][A-Za-z0-9_]*$", terms) & !grepl("^factor\\([A-Za-z_][A-Za-z0-9_]*\\)$", terms))
+  nmx <- if (complex) colnames(X) else rn(colnames(X))
   y <- num(mf[[dep]])
   g <- as.character(mf[[absorb]])
   w <- if (is.null(wvar)) rep(1, n) else num(mf[[wvar]])
@@ -56,15 +58,38 @@ pub(super) const AREG_HELPER: &str = r##"stata_areg <- function(d, dep, terms, a
     s[gi]
   }
   wm <- function(v) sum(wn * v) / sum(wn)
-  Xs <- vapply(seq_len(k), function(j) X[, j] - gm(X[, j]) + wm(X[, j]), numeric(n))
-  Xs <- matrix(Xs, n, k)
+  within <- function(M) matrix(vapply(seq_len(ncol(M)), function(j) M[, j] - gm(M[, j]) + wm(M[, j]), numeric(n)), n, ncol(M))
+  # collinear regressors, as Stata 19 omits them (probe 2026-11-20): one the absorbed groups make
+  # collinear (constant within each group, or constant), wherever it stands, then the later of a
+  # collinear set, in the order written; each with a note, an o. column of zeros in e(b) and e(V)
+  Xall <- X
+  nmall <- nmx
+  kept <- rep(TRUE, k)
+  if (k > 0) {
+    Xd0 <- within(X)
+    Xd0 <- Xd0 - matrix(colSums(wn * Xd0) / sum(wn), n, k, byrow = TRUE)
+    sw <- sqrt(wn)
+    Q <- matrix(0, n, 0)
+    for (j in seq_len(k)) {
+      ref <- sqrt(sum(wn * (X[, j] - wm(X[, j]))^2))
+      v <- Xd0[, j] * sw
+      if (ref > 0 && sqrt(sum(v^2)) <= 1e-7 * ref) { kept[j] <- FALSE; next }
+      if (ncol(Q)) v <- v - drop(Q %*% crossprod(Q, v))
+      nv <- sqrt(sum(v^2))
+      if (!(ref > 0) || nv <= 1e-7 * ref) kept[j] <- FALSE else Q <- cbind(Q, v / nv)
+    }
+  }
+  if (any(!kept & grepl("^factor\\(", colnames(X)))) {
+    stop("RCraft: areg with a factor level omitted for collinearity is not translated yet", call. = FALSE)
+  }
+  if (k > 0 && !any(kept)) stop("RCraft: areg with every regressor omitted for collinearity is not translated yet", call. = FALSE)
+  if (show) for (v in nmx[!kept]) cat("note: ", v, " omitted because of collinearity.\n", sep = "")
+  X <- X[, kept, drop = FALSE]
+  nmx <- nmx[kept]
+  k <- ncol(X)
+  Xs <- within(X)
   ys <- y - gm(y) + wm(y)
   Z <- cbind(Xs, `_cons` = 1)
-  # regressors the groups make collinear are not translated
-  Xd <- Xs - matrix(colSums(wn * Xs) / sum(wn), n, k, byrow = TRUE)
-  if (k > 0 && qr(Xd * sqrt(wn), tol = 1e-9)$rank < k) {
-    stop("RCraft: areg with regressors the absorbed groups make collinear is not translated yet", call. = FALSE)
-  }
   A <- crossprod(Z * wn, Z)
   Ainv <- solve(A)
   b <- drop(Ainv %*% crossprod(Z * wn, ys))
@@ -125,16 +150,32 @@ pub(super) const AREG_HELPER: &str = r##"stata_areg <- function(d, dep, terms, a
       marginsnotok = "Residuals SCore D XBD", vce = if (!is.null(cluster)) "cluster" else if (robust) "robust" else "ols")
   if (!is.null(cluster)) put(clustvar = cluster)
   put(depvar = dep, properties = "b V", model = "ols", absvar = absorb)
+  if (complex) {
+    # Stata's names through the same code as regress, on a model fitted for its layout only
+    Rn <- c(nmall, "(Intercept)")
+    bR <- stats::setNames(rep(NA_real_, length(Rn)), Rn)
+    bR[c(nmall[kept], "(Intercept)")] <- b
+    VR <- V
+    dimnames(VR) <- list(c(nmall[kept], "(Intercept)"), c(nmall[kept], "(Intercept)"))
+    lay <- stats::lm(stats::as.formula(paste0("`", dep, "` ~ ", paste(terms, collapse = " + "))), data = mf)
+    old <- get0("stata_estimates", envir = globalenv(), inherits = FALSE)
+    assign("stata_estimates", lay, envir = globalenv())
+    eb <- tryCatch(stata_eb(bR, VR, "areg", dep), finally = {
+      if (is.null(old)) rm("stata_estimates", envir = globalenv()) else assign("stata_estimates", old, envir = globalenv())
+    })
+    if (!is.null(attr(eb$b, "stata_names"))) stop("RCraft: areg with terms whose e(b) layout is not rebuilt yet is not translated", call. = FALSE)
+    put(b = eb$b, V = eb$V)
+  } else {
   # a factor's base level is a column of its own in e(b) and e(V), zero
   full <- character()
-  for (j in seq_along(nmx)) {
-    cj <- colnames(X)[j]
+  for (j in seq_along(nmall)) {
+    cj <- colnames(Xall)[j]
     fv <- if (grepl("^factor\\(", cj)) sub("^(factor\\([^)]*\\)).*$", "\\1", cj) else NA_character_
-    if (!is.na(fv) && (j == 1 || !startsWith(colnames(X)[j - 1], fv))) {
+    if (!is.na(fv) && (j == 1 || !startsWith(colnames(Xall)[j - 1], fv))) {
       v <- sub("^factor\\((.*)\\)$", "\\1", fv)
       full <- c(full, paste0(xlev[[fv]][1], "b.", v))
     }
-    full <- c(full, nmx[j])
+    full <- c(full, if (kept[j]) nmall[j] else paste0("o.", nmall[j]))
   }
   full <- c(full, "_cons")
   bf <- stats::setNames(numeric(length(full)), full)
@@ -142,12 +183,14 @@ pub(super) const AREG_HELPER: &str = r##"stata_areg <- function(d, dep, terms, a
   Vf <- matrix(0, length(full), length(full), dimnames = list(full, full))
   Vf[nm, nm] <- V
   put(b = matrix(bf, 1, length(bf), dimnames = list("y1", full)), V = Vf)
+  }
   attr(e, "stata_rows") <- rows
   rname <- sub("^_cons$", "(Intercept)", nm)
   rname[seq_len(k)] <- colnames(X)
   attr(e, "stata_b") <- stats::setNames(b, rname)
   attr(e, "stata_V") <- { Vn <- V; dimnames(Vn) <- list(rname, rname); Vn }
-  attr(e, "stata_areg") <- list(fo = fo, xlev = xlev, dg = dg, absorb = absorb, nm = nm, k = k, nmx = nmx)
+  attr(e, "stata_areg") <- list(fo = fo, xlev = xlev, dg = dg, absorb = absorb, nm = nm, k = k, nmx = nmx, cols = colnames(X),
+                                  rb = if (complex) stats::setNames(c(unname(b[seq_len(k)]), b[["_cons"]]), c(colnames(X), "(Intercept)")))
   attr(e, "stata_robust") <- robust || !is.null(cluster)
   attr(e, "stata_rows_used") <- rows
   if (show && !is.null(wtype) && wtype %in% c("a", "p")) cat("(sum of wgt is ", stata_fmt(sum(w), "%18.0g", trim = TRUE), ")\n", sep = "")
@@ -225,8 +268,9 @@ stata_areg_predict <- function(e, d, what) {
   nm <- colnames(b)
   mf <- stats::model.frame(a$fo, d, xlev = a$xlev, na.action = stats::na.pass)
   X <- stats::model.matrix(a$fo, mf)
-  X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
-  xb <- drop(X %*% b[1, a$nmx]) + b[1, "_cons"]
+  # the columns kept (one omitted for collinearity is not in the prediction)
+  X <- X[, a$cols, drop = FALSE]
+  xb <- if (!is.null(a$rb)) drop(X %*% a$rb[a$cols]) + a$rb[["(Intercept)"]] else drop(X %*% b[1, a$nmx]) + b[1, "_cons"]
   g <- as.character(d[[a$absorb]])
   dd <- unname(a$dg[g])
   switch(what, xb = xb, d = dd, xbd = xb + dd,
@@ -275,16 +319,16 @@ impl Session {
                 "areg with operators or no independent variable is not translated yet",
             ));
         }
-        // plain variables and factor variables (i.g), as R's factor(g)
-        let plain = |t: &str| {
-            is_name(t)
-                || (t.starts_with("factor(") && t.ends_with(')') && is_name(&t[7..t.len() - 1]))
-        };
-        if spec.terms.iter().any(|t| !plain(t)) {
-            return Err(no(
-                "areg with interactions, ib. bases or operators is not translated yet",
-            ));
+        // interactions and ib. bases go through regress's naming of e(b); other operators do not
+        if spec
+            .terms
+            .iter()
+            .any(|t| t.contains("I(") || t.contains('^'))
+        {
+            return Err(no("areg with operators is not translated yet"));
         }
+        self.helpers_for(&spec);
+        self.helpers.insert("stata_eb");
         let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
         if let Some((W::I, _)) = &w {
             out.line("stop(\"iweights not allowed (Stata: r(101))\", call. = FALSE)");

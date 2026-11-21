@@ -73,7 +73,10 @@ pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robu
   } else {
     w <- me^2 / fam$variance(mu)
   }
-  V <- solve(crossprod(X * (w * pw), X))
+  # constraints(): the variance on what they leave free
+  cn <- fit$stata_cns
+  V <- if (is.null(cn)) solve(crossprod(X * (w * pw), X)) else
+    cn$T %*% solve(t(cn$T) %*% crossprod(X * (w * pw), X) %*% cn$T, t(cn$T))
   if (robust) {
     r <- (y - mu) * me / fam$variance(mu)
     s <- X * (pw * r)
@@ -87,11 +90,165 @@ pub(super) const GLM_VCOV_HELPER: &str = r#"stata_glm_vcov <- function(fit, robu
       V <- V %*% crossprod(sg) %*% V * G / (G - 1)
     }
   }
+  # a coefficient the constraints fix has exactly zero variance, as in Stata's e(V)
+  if (!is.null(cn)) V[cn$constr, ] <- V[, cn$constr] <- 0
   dimnames(V) <- list(colnames(X), colnames(X))
   if (length(full) == ncol(X)) return(V)
   out <- matrix(0, length(full), length(full), dimnames = list(full, full))
   out[colnames(X), colnames(X)] <- V
   out
+}"#;
+
+/// `constraints()` of logit, probit and poisson (Stata 19, `plan/stata/constraint.md`): the
+/// fit over a in b = b0 + T a (b0 the smallest b meeting the constraints, T an orthonormal
+/// basis of what they leave free), by Stata's Newton-Raphson from its usual start projected
+/// onto the constraints (logit and probit: the constant-only fit; poisson: its least-squares
+/// start after one Newton step), the variance T (T'(-H)T)^-1 T'. The fit is moved there and
+/// keeps `stata_cns` (what the variance, the header, e() and the table read).
+pub(super) const ML_CNS_HELPER: &str = r#"stata_ml_cns <- function(fit, kind, cns, dep, wtype = "") {
+  X <- stats::model.matrix(fit)
+  if (anyNA(stats::coef(fit))) stop("RCraft: constraints() with a regressor omitted for collinearity is not translated yet", call. = FALSE)
+  off <- fit$offset
+  if (!is.null(off) && any(off != 0)) stop("RCraft: constraints() with an offset is not translated yet", call. = FALSE)
+  nm <- sub("^\\(Intercept\\)$", "_cons", colnames(X))
+  k <- length(nm)
+  cns_list <- get0("stata_cns", ifnotfound = list())
+  rowsR <- list()
+  rhs <- numeric()
+  for (i in cns) {
+    t <- cns_list[[as.character(i)]]
+    if (is.null(t)) next
+    # the equation is the outcome: [b]x1 is x1
+    t <- gsub(paste0("[[]", dep, "[]]"), "", t)
+    p <- stata_cns_parse(t, nm)
+    if (inherits(p, "stata_cns_rc")) {
+      cat("(note: constraint number ", i, " caused error r(", unclass(p), "))\n", sep = "")
+      next
+    }
+    rowsR[[length(rowsR) + 1]] <- p$a
+    rhs <- c(rhs, p$rhs)
+  }
+  if (length(cns) && !length(rowsR)) stop("RCraft: constraints() that leave no constraint are not translated yet", call. = FALSE)
+  if (!length(cns)) {
+    # no constraints: logit and probit without the constant (Stata's Wald header and log)
+    R <- matrix(0, 0, k)
+    rhs <- numeric()
+    m <- 0L
+    b0 <- numeric(k)
+    Tm <- diag(k)
+  } else {
+    R <- do.call(rbind, rowsR)
+    keep <- !duplicated(cbind(R, rhs))
+    R <- R[keep, , drop = FALSE]
+    rhs <- rhs[keep]
+    m <- nrow(R)
+    sv <- svd(R, nu = 0, nv = k)
+    if (m >= k || sum(sv$d > 1e-10 * max(sv$d, 1)) < m || any(rowSums(abs(R)) == 0)) {
+      stop("RCraft: constraints() that are redundant, inconsistent or fix every coefficient are not translated yet", call. = FALSE)
+    }
+    b0 <- drop(t(R) %*% solve(R %*% t(R), rhs))
+    Tm <- sv$v[, seq(m + 1, k), drop = FALSE]
+  }
+  y <- fit$y
+  pw <- fit$prior.weights
+  if (is.null(pw)) pw <- rep(1, length(y))
+  pos <- y != 0
+  ll <- function(b) {
+    z <- drop(X %*% b)
+    switch(kind,
+      logit = sum(pw * ifelse(pos, stats::plogis(z, log.p = TRUE), stats::plogis(z, lower.tail = FALSE, log.p = TRUE))),
+      probit = sum(pw * ifelse(pos, stats::pnorm(z, log.p = TRUE), stats::pnorm(z, lower.tail = FALSE, log.p = TRUE))),
+      poisson = sum(pw * (y * z - exp(z) - lgamma(y + 1))))
+  }
+  deriv <- function(b) {
+    z <- drop(X %*% b)
+    if (kind == "logit") {
+      p <- stats::plogis(z)
+      list(ll = ll(b), g = colSums(X * (pw * (pos - p))), nh = crossprod(X * (pw * p * (1 - p)), X))
+    } else if (kind == "probit") {
+      lam <- ifelse(pos, exp(stats::dnorm(z, log = TRUE) - stats::pnorm(z, log.p = TRUE)),
+                    -exp(stats::dnorm(z, log = TRUE) - stats::pnorm(z, lower.tail = FALSE, log.p = TRUE)))
+      list(ll = ll(b), g = colSums(X * (pw * lam)), nh = crossprod(X * (pw * lam * (lam + z)), X))
+    } else {
+      mu <- exp(z)
+      list(ll = ll(b), g = colSums(X * (pw * (y - mu))), nh = crossprod(X * (pw * mu), X))
+    }
+  }
+  ic <- nm == "_cons"
+  # Stata's usual start (NULL where it is not known: no constant, weighted poisson)
+  start <- NULL
+  if (sum(ic) == 0 && kind != "poisson") {
+    # without the constant: every coefficient 0 (iteration 0 is n ln(1/2) unweighted)
+    start <- numeric(k)
+  } else if (sum(ic) == 1 && kind != "poisson") {
+    pbar <- sum(pw * pos) / sum(pw)
+    start <- replace(numeric(k), ic, if (kind == "logit") stats::qlogis(pbar) else stats::qnorm(pbar))
+  } else if (sum(ic) == 1 && (all(pw == 1) || identical(wtype, "f")) && sum(pw * y) > 0) {
+    # frequency weights: the same start in weighted means and weighted least squares
+    ybar <- sum(pw * y) / sum(pw)
+    Xs <- X[, !ic, drop = FALSE]
+    sw <- sqrt(pw)
+    sl <- if (ncol(Xs)) qr.coef(qr(sweep(Xs, 2, colSums(Xs * pw) / sum(pw)) * sw), (y - ybar) * sw) / ybar else numeric()
+    if (!anyNA(sl)) {
+      start <- numeric(k)
+      start[!ic] <- sl
+      start[ic] <- log(sum(pw * y) / sum(pw * exp(drop(Xs %*% sl))))
+      d0 <- deriv(start)
+      start <- start + drop(solve(d0$nh, d0$g))
+    }
+  }
+  known <- !is.null(start)
+  if (!known) start <- stats::coef(fit)
+  a0 <- drop(crossprod(Tm, start - b0))
+  lla <- function(a) ll(b0 + drop(Tm %*% a))
+  deriva <- function(a) {
+    d <- deriv(b0 + drop(Tm %*% a))
+    list(ll = d$ll, g = drop(crossprod(Tm, d$g)), nh = t(Tm) %*% d$nh %*% Tm)
+  }
+  path <- tryCatch(stata_ml_path(lla, deriva, a0), error = function(e) NULL)
+  if (is.null(path) || !path$converged) stop("RCraft: this constrained fit did not converge along Stata's path; not translated yet", call. = FALSE)
+  b <- b0 + drop(Tm %*% path$b)
+  eta <- drop(X %*% b)
+  fit$coefficients[] <- b
+  fit$linear.predictors[] <- eta
+  fit$fitted.values[] <- fit$family$linkinv(eta)
+  if (kind == "poisson") fit$aic <- -2 * ll(b) + 2 * fit$rank
+  # in Stata's column order, the constant last
+  ord <- c(which(!ic), which(ic))
+  Cns <- if (m) cbind(R[, ord, drop = FALSE], rhs) else NULL
+  if (m) dimnames(Cns) <- list(paste0("r", seq_len(m)), c(paste0(dep, ":", nm[ord]), "_Cns:_r"))
+  fit$stata_cns <- list(T = Tm, R = R, rhs = rhs, nm = nm, dep = dep, Cns = Cns,
+                        constr = rowSums(abs(Tm)) < 1e-12,
+                        # one halving in a step is not marked in Stata's log (probes, 2026-11-20)
+                        lls = if (known && !path$nc && path$halves <= 1) path$lls else NULL)
+  fit
+}
+# the Wald test of the slopes Stata prints after constraints(): on the slopes' variance, the
+# directions the constraints fix left out (chi2 on the rank that is left)
+stata_ml_cns_wald <- function(b, V, nm) {
+  S <- which(nm != "_cons")
+  if (!length(S)) return(c(chi2 = NA_real_, df = 0))
+  ev <- eigen(as.matrix(V)[S, S, drop = FALSE], symmetric = TRUE)
+  ok <- ev$values > 1e-10 * max(ev$values, 0)
+  if (!any(ok)) return(c(chi2 = NA_real_, df = 0))
+  u <- drop(t(ev$vectors[, ok, drop = FALSE]) %*% b[S])
+  c(chi2 = sum(u^2 / ev$values[ok]), df = sum(ok))
+}
+# e() after constraints(): Stata's Wald test, no e(ll_0) (nor pseudo R2: poisson keeps it
+# missing), the rank left by the constraints, e(Cns) after e(V)
+stata_ml_cns_e <- function(e, fit) {
+  cn <- fit$stata_cns
+  if (is.null(cn)) return(e)
+  w <- stata_ml_cns_wald(as.vector(e$b), e$V, sub("^[^:]*:", "", colnames(e$b)))
+  e$rank <- length(cn$nm) - nrow(cn$R)
+  e$ll_0 <- NULL
+  e$df_m <- w[["df"]]
+  e$chi2 <- w[["chi2"]]
+  e$p <- stats::pchisq(w[["chi2"]], w[["df"]], lower.tail = FALSE)
+  if (identical(e$cmd, "poisson")) e$r2_p <- NA_real_ else e$r2_p <- NULL
+  e$chi2type <- "Wald"
+  rest <- e[!names(e) %in% c("b", "V")]
+  c(rest, list(b = e$b, V = e$V), if (!is.null(cn$Cns)) list(Cns = cn$Cns))
 }"#;
 
 /// The variance of nbreg's coefficients and `ln(alpha)` together, from the
@@ -230,6 +387,9 @@ stata_ml_path <- function(ll, deriv, b, max_iter = 300) {
   # -H was not concave (which Stata marks in its log)
   lls <- numeric()
   odd <- ci$nc
+  # the most halvings in one step, and whether -H was ever not concave
+  halves <- 0
+  nc <- ci$nc
   repeat {
     iter <- iter + 1
     lls <- c(lls, d$ll)
@@ -245,12 +405,15 @@ stata_ml_path <- function(ll, deriv, b, max_iter = 300) {
     t <- 1
     nxt <- ll(b + t * step)
     halved <- FALSE
+    nh <- 0
     while ((is.nan(nxt) || nxt < d$ll) && t > 1e-15) {
       halved <- TRUE
       odd <- TRUE
+      nh <- nh + 1
       t <- t / 2
       nxt <- ll(b + t * step)
     }
+    halves <- max(halves, nh)
     if (!halved) {
       ex <- 0.125
       repeat {
@@ -266,9 +429,9 @@ stata_ml_path <- function(ll, deriv, b, max_iter = 300) {
     b <- b + t * step
     d <- deriv(b)
     ci <- concave_inv(d$nh)
-    if (ci$nc) odd <- TRUE
+    if (ci$nc) odd <- nc <- TRUE
   }
-  list(b = b, converged = converged, lls = lls, odd = odd)
+  list(b = b, converged = converged, lls = lls, odd = odd, halves = halves, nc = nc)
 }"#;
 
 /// mlogit's coefficients as one named vector, in the order of `vcov()`.
@@ -326,6 +489,8 @@ stata_ml_header <- function(fit, robust = FALSE, nobs = NULL) {
 # the base. NULL when the model has no constant (logit, probit, mlogit) or an offset, or a
 # step was halved or -H not concave (marked in Stata's log, not checked)
 stata_ml_iterations <- function(fit, kind) {
+  # constraints(): the path stata_ml_cns followed
+  if (!is.null(fit$stata_cns)) return(fit$stata_cns$lls)
   if (kind %in% c("ologit", "oprobit", "mlogit")) {
     m <- stata_ml_exact(fit, kind)
     if (is.null(m) || m$odd || !m$converged) return(NULL)
@@ -647,8 +812,15 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
     if (is.null(blocks[[k]]$rows)) return(FALSE)
   }
   n <- if (is.null(nobs)) NROW(stats::fitted(fit)) else nobs
+  cn <- fit$stata_cns
   if (!is.null(glm)) {
     # glm: its own header (stata_glm_header)
+  } else if (kind == "single" && !is.null(cn)) {
+    # constraints(): e()'s Wald test and likelihood, no pseudo R2
+    ll <- e$ll
+    q <- e$df_m
+    stat <- e$chi2
+    r2p <- NA_real_
   } else if (kind == "single") {
     l <- stata_ml_ll(fit)
     ll <- l[["ll"]]
@@ -691,14 +863,26 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
   vals <- c(stata_tab_count(n), if (is.na(stat)) "." else sprintf("%.2f", stat),
             if (q == 0 || is.na(stat)) "." else sprintf("%.4f", stats::pchisq(stat, q, lower.tail = FALSE)),
             sprintf("%.4f", r2p))
+  if (!is.null(cn)) vals <- vals[1:3]
   wv <- max(6, nchar(vals))
   row <- function(left, label, value) cat(formatC(left, width = -(56 - (wv - 6)), flag = "-"), formatC(label, width = -13, flag = "-"), " = ", pad(value, wv), "\n", sep = "")
+  llrow <- paste0(if (robust) "Log pseudolikelihood = " else "Log likelihood = ", trimws(stata_fmt(ll, "%10.0g")))
+  if (!is.null(cn)) {
+    # Number of obs, Wald chi2, the likelihood beside Prob > chi2; then the constraints
+    row(title, "Number of obs", vals[1])
+    row("", sprintf("Wald chi2(%d)", q), vals[2])
+    row(llrow, "Prob > chi2", vals[3])
+    cat("\n")
+    if (nrow(cn$R)) cat(paste0(sprintf(" (%2d)  ", seq_len(nrow(cn$R))),
+               vapply(seq_len(nrow(cn$R)), function(i) stata_cns_line(cn$R[i, ], cn$rhs[i], paste0("[", cn$dep, "]", cn$nm)), ""),
+               "\n"), sep = "")
+  } else {
   row(title, "Number of obs", vals[1])
   row("", sprintf(if (robust) "Wald chi2(%d)" else "LR chi2(%d)", q), vals[2])
   row(if (kind == "nbreg") "Dispersion: mean" else "", "Prob > chi2", vals[3])
-  row(paste0(if (robust) "Log pseudolikelihood = " else "Log likelihood = ", trimws(stata_fmt(ll, "%10.0g"))),
-      "Pseudo R2", vals[4])
+  row(llrow, "Pseudo R2", vals[4])
   cat("\n")
+  }
   }
   if (!is.null(e[["N_clust"]])) {
     cat(pad(sprintf("(Std. err. adjusted for %s clusters in %s)", stata_tab_count(e$N_clust), e$clustvar), 78), "\n", sep = "")
@@ -761,6 +945,11 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
       }
       bi <- bl$b[[r$col]]
       si <- bl$se[[r$col]]
+      # a coefficient the constraints fix: its value only
+      if (!is.null(cn) && isTRUE(cn$constr[match(if (is.character(r$col)) r$col else names(bl$b)[r$col], cn$nm)])) {
+        cat(lab, " |", pad(stata_tab_g(if (eform) exp(bi) else bi), 11), "  (constrained)\n", sep = "")
+        next
+      }
       z <- bi / si
       p <- 2 * stats::pnorm(-abs(z))
       lo <- bi - qz * si
@@ -876,11 +1065,40 @@ impl Session {
             Fit::Cluster2 => return self.cluster2(c, opts, out),
             Fit::Asclogit => return self.asclogit(c, opts, out),
         }
+        // constraints(): logit, probit and poisson (logistic too, which is logit here)
+        let cns = if matches!(fit, Fit::Logit | Fit::Probit | Fit::Poisson) {
+            known.push(("constraints", 1));
+            opts.arg("constraints", 1)
+        } else {
+            None
+        };
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
                 "{name} with the option {o} is not translated yet"
             )));
         }
+        let with_offset = opts.has("exposure", 3) || opts.has("offset", 6);
+        if cns.is_some() && with_offset {
+            return Err(no(format!(
+                "{name} with constraints() and exposure() or offset() is not translated yet"
+            )));
+        }
+        if cns.is_some() && fit == Fit::Poisson && opts.has("noconstant", 5) {
+            return Err(no(
+                "poisson with constraints() and noconstant is not translated yet",
+            ));
+        }
+        // logit and probit without the constant: the same fit with no constraints, for
+        // Stata's Wald header and its log from 0 (probe 2026-11-20)
+        let cns = match cns {
+            None if matches!(fit, Fit::Logit | Fit::Probit)
+                && opts.has("noconstant", 5)
+                && !with_offset =>
+            {
+                Some(String::new())
+            }
+            other => other,
+        };
         let spec = Spec::read(c, name)?;
         self.helpers_for(&spec);
         let level = level(opts)?;
@@ -934,6 +1152,11 @@ impl Session {
             | Fit::Mlogit => self.weight_of(c, &[W::F, W::P, W::I])?,
             _ => None,
         };
+        if cns.is_some() && matches!(w, Some((W::I, _))) {
+            return Err(no(format!(
+                "{name} with constraints() and iweights is not translated yet"
+            )));
+        }
         if matches!(w, Some((W::I, _))) && (robust || cluster.is_some()) {
             return Err(no(
                 "robust or clustered errors with iweights are not translated yet",
@@ -1093,12 +1316,41 @@ impl Session {
             | Fit::Asclogit
             | Fit::Suest => {}
         }
+        if let Some(list) = &cns {
+            for h in [
+                "stata_lsfam",
+                "stata_fmt",
+                "stata_tables",
+                "stata_probit_newton",
+                "stata_ml_cns",
+            ] {
+                self.helpers.insert(h);
+            }
+            out.line(format!(
+                "stata_estimates <- stata_ml_cns(stata_estimates, {}, {}, {}, wtype = {})",
+                r_text(name),
+                if list.is_empty() {
+                    "integer(0)".to_string()
+                } else {
+                    format!("stata_numlist({})", r_text(list))
+                },
+                r_text(&spec.dep),
+                r_text(w.as_ref().map(|(k, _)| k.code()).unwrap_or(""))
+            ));
+            out.caveat(if list.is_empty() {
+                "without the constant, as Stata 19: its Newton-Raphson from 0, the Wald test of the \
+                 slopes and no pseudo R2"
+            } else {
+                "constraints() as Stata 19 fits them: Newton-Raphson over what the constraints leave free, \
+                 from Stata's start projected onto them, and the Wald test of the slopes they leave free"
+            });
+        }
         match fit {
             Fit::Logit | Fit::Probit | Fit::Poisson => {
                 self.helpers.insert("stata_glm_vcov");
                 self.fit_robust = (robust || cluster.is_some()) && w.is_none();
                 self.fit_cluster = cluster.is_some() && w.is_none();
-                if fit == Fit::Poisson {
+                if fit == Fit::Poisson && cns.is_none() {
                     self.count_ml(fit, out);
                 }
                 out.line("stata_b <- stats::coef(stata_estimates)");
@@ -1237,6 +1489,9 @@ impl Session {
             args.push_str(&format!(", extra = list(offset = {})", r_text(&shown)));
         }
         self.keep_e(c, out, &args, "");
+        if cns.is_some() {
+            out.line("stata_e <- stata_ml_cns_e(stata_e, stata_estimates)");
+        }
         if self.quiet(c) {
             return Ok(());
         }
