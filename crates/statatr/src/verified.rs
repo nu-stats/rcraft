@@ -93,7 +93,13 @@ pub const VERIFIED: &[(&str, &[&str])] = &[
     ("estat", &["estat_fit", "estat_tests"]),
     (
         "estimates",
-        &["estimates", "marginsplot", "postest_xtregar", "sdtest", "suest"],
+        &[
+            "estimates",
+            "marginsplot",
+            "postest_xtregar",
+            "sdtest",
+            "suest",
+        ],
     ),
     ("estpost", &["esttab2"]),
     ("eststo", &["estout", "marginsplot"]),

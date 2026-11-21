@@ -396,7 +396,9 @@ impl Session {
                 let spec = super::model::Spec::read(c, "xtregar").map_err(|_| no(why.clone()))?;
                 let plain = |t: &str| {
                     is_name(t)
-                        || (t.starts_with("factor(") && t.ends_with(')') && is_name(&t[7..t.len() - 1]))
+                        || (t.starts_with("factor(")
+                            && t.ends_with(')')
+                            && is_name(&t[7..t.len() - 1]))
                 };
                 if !is_name(&spec.dep) || spec.terms.iter().any(|t| !plain(t)) {
                     return Err(no(why));
