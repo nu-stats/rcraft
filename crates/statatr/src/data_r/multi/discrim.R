@@ -49,9 +49,14 @@ stata_discrim <- function(d, vars, group, priors = "equal", notable = FALSE, cmd
   em <- eigen((M + t(M)) / 2, symmetric = TRUE)
   ev <- pmax(em$values[seq_len(q)], 0)
   U <- Q %*% em$vectors[, seq_len(q), drop = FALSE]
+  # LAPACK builds eigenvectors up to a sign that differs by platform: each function is signed so that
+  # its first coefficient is positive, as Stata's are
+  for (j in seq_len(q)) if (U[1, j] < 0) U[, j] <- -U[, j]
   fn <- paste0("function", seq_len(q))
   dimnames(U) <- list(vars, fn)
   ew <- eigen(W, symmetric = TRUE)
+  # the eigenvectors of W: the largest coefficient of each is positive, as Stata's
+  for (j in seq_len(p)) if (ew$vectors[which.max(abs(ew$vectors[, j])), j] < 0) ew$vectors[, j] <- -ew$vectors[, j]
   cum <- cumsum(ev) / sum(ev)
   stat <- t(vapply(seq_len(q), function(j) {
     pp <- p - j + 1; qq <- (G - 1) - j + 1
