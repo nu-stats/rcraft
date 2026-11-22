@@ -805,6 +805,7 @@ cnsreg y x1 x2 x3, constraints(1) {o}"
             ),
             "putexcel" => format!("putexcel set \"a.xlsx\", {o}"),
             "marginsplot" => format!("regress y x\nmargins, at(x=(0 1))\nmarginsplot, {o}"),
+            "lpoly" => format!("lpoly y x, nograph {o}"),
             "winsor" if name == "generate" => format!("winsor y, {o} p(.1)"),
             "winsor" if name == "p" || name == "h" => format!("winsor y, gen(z) {o}"),
             "winsor" => format!("winsor y, gen(z) p(.1) {o}"),
