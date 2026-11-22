@@ -1,1 +1,1 @@
-&["truncreg"]
+&["estat_censored", "truncreg"]

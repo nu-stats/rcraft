@@ -9,6 +9,7 @@ Guide {
              iweights, robust, clustered, replay, predict pr, xb, stdp and sigma.",
         ),
         p("As Stata 19 (options)", "noconstant, offset(), iterate() (the probit fit always runs to convergence)."),
+        p("As Stata 19 (estat)", "estat ic (r(S), n(), df()), estat vce (covariance and correlation, format(), r(V)) and estat summarize (a varlist, equation, labels, noheader, the weights' row, clusters, r(stats)) in Stata's layout; every other estat subcommand stops as Stata stops it (r(321))."),
         p("Not yet", "factor variables, from(), constraints()."),
     ],
 }

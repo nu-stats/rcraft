@@ -1,1 +1,1 @@
-&["cloglog"]
+&["cloglog", "estat_censored"]

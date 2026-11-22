@@ -1,1 +1,1 @@
-&["tobit", "tobit_select"]
+&["estat_censored", "tobit", "tobit_select"]
