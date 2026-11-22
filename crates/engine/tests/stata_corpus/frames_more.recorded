@@ -1,0 +1,25 @@
+* Stata 19.0's results for frames_more.do, recorded by cargo xtask stata-record
+@ pop_sum 9000
+@ in_cities cities
+@ back default
+@ n_default 4
+@ n_cities 3
+@ n_backup 4
+@ copy_again 110
+@ copy_missing 111
+@ n_backup2 3
+@ n_default2 3
+@ renamed_old 111
+@ n_late 3
+@ rename_exists 110
+@ rename_missing 111
+@ n_subset 2
+@ pop_sum2 7000
+@ put_exists 110
+@ prefix_missing 111
+@ n_other 0
+@ n_other2 2
+@ cwf cities
+@ cwf_back default
+@ frame_after_reset default
+@ cities_gone 111

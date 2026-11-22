@@ -164,10 +164,16 @@ const KEEP_SAVED: &[&str] = &[
     "estimates",
     "preserve",
     "restore",
+    "frame",
+    "frames",
+    "cwf",
+    "pwf",
 ];
 
 /// Commands that leave the data changed since they were saved (checked as above).
-const CHANGE_SAVED: &[&str] = &["generate", "label", "format", "import", "insheet", "input"];
+const CHANGE_SAVED: &[&str] = &[
+    "generate", "label", "format", "import", "insheet", "input", "frlink", "frget",
+];
 
 /// Whether Stata counts the data as saved after the command `c` (`None`: not known).
 pub(super) fn saved_after(c: &Command, ok: bool, before: Option<bool>) -> Option<bool> {

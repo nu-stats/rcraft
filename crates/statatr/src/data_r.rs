@@ -40,6 +40,7 @@ mod cm;
 mod codebook;
 mod coefplot;
 mod contract;
+mod cut;
 mod dates;
 mod descr;
 mod dyndoc;
@@ -53,6 +54,8 @@ mod esttable;
 mod factor;
 mod filefilter;
 mod files;
+mod framelink;
+mod frames;
 mod fre;
 mod glm;
 mod graph;
@@ -1706,6 +1709,11 @@ fn helper_code(name: &str) -> &'static str {
         "stata_phtest" => st::PHTEST_HELPER,
         "stata_returned" => returned::RETURNED_HELPER,
         "stata_fmt" => returned::FORMAT_HELPER,
+        "stata_cut" => cut::CUT_HELPER,
+        "stata_frame_dir" => frames::FRAME_DIR_HELPER,
+        "stata_frlink" => framelink::FRLINK_HELPER,
+        "stata_frget_col" => framelink::FRGET_HELPER,
+        "stata_frval" => framelink::FRVAL_HELPER,
         "stata_ereturn" => returned::ERETURN_HELPER,
         "stata_eclass" => eclass::ECLASS_HELPER,
         "stata_ttest_r" => returned::TTEST_R_HELPER,
@@ -1932,6 +1940,9 @@ struct Session {
     /// The frames other than the current one (`frame create`), each with what
     /// the translator follows of its data, kept in R in `stata_frames`.
     frames: BTreeMap<String, Preserved>,
+    /// The link variables `frlink` made, by the frame that holds one and its
+    /// name, while the frame they point to is as `frlink` left it.
+    links: BTreeMap<(String, String), framelink::Link>,
     /// What `preserve` kept in a frame other than the current one (preserve
     /// is a frame's own), in R in `stata_frames_preserved`.
     frame_preserved: BTreeMap<String, Box<Preserved>>,
@@ -2804,6 +2815,13 @@ impl Session {
     }
 
     fn command_inner(&mut self, c: &Command) -> Result<RCode, Untranslated> {
+        // `frame name: command` and the lines of `frame name { }`: run in that frame
+        if let Some(name) = c.prefixes.iter().find_map(|p| match p {
+            Prefix::Frame(n) => Some(n.clone()),
+            _ => None,
+        }) {
+            return self.in_frame(c, &name);
+        }
         // a variable another command makes again: its storage is not known
         if !matches!(c.name.as_str(), "generate" | "replace") {
             for v in new_vars(c) {
@@ -2816,10 +2834,6 @@ impl Session {
             self.track_returned(c, false, why.contains(crate::dofile::KNOWN_WHEN_RUN), None);
             self.lose_estimates(c, &why);
             return Err(no(why));
-        }
-        if c.prefixes.iter().any(|p| matches!(p, Prefix::Frame(_))) {
-            self.rows_unknown();
-            return Err(no("frames (frame name:) are translated in a later step"));
         }
         if c.parts.weight.is_some() && !WEIGHTED.contains(&c.name.as_str()) {
             self.rows_unknown();
@@ -2897,6 +2911,7 @@ impl Session {
             .err()
             .is_some_and(|e| e.reason.contains(crate::dofile::KNOWN_WHEN_RUN));
         self.track_returned(c, done.is_ok(), later, r_left);
+        self.links_after(c, done.is_ok());
         if !c.name.starts_with("_rcraft_") {
             self.saved_now = statsby::saved_after(c, done.is_ok(), self.saved_now);
             self.prev_eclass = self.e_new;
@@ -3203,7 +3218,10 @@ impl Session {
             "esttab" => self.esttab(c, &opts, out),
             "estpost" => self.estpost(c, &opts, out),
             "which" => self.which(c, &opts, out),
-            "frame" => self.frame_cmd(c, &opts, out),
+            "frame" | "cwf" | "pwf" => self.frame_cmd(c, &opts, out),
+            "frames" => self.frames_cmd(c, &opts, out),
+            "frlink" => self.frlink(c, &opts, out),
+            "frget" => self.frget(c, &opts, out),
             "revrs" => self.revrs(c, &opts, out),
             "tabm" => self.tabm(c, &opts, out),
             "tabstat" => self.tabstat(c, &opts, out),
@@ -3310,6 +3328,11 @@ impl Session {
             "_rcraft_rs_fail" => self.rs_fail(c, out),
             "rolling" => self.rolling(c, out),
             "clear" => {
+                // clear all drops every frame but default as well
+                let all = c.parts.main.split_whitespace().any(|w| w == "all" || w == "*");
+                if all && (!self.frames.is_empty() || self.frame.is_some()) {
+                    return self.frames_reset(out);
+                }
                 if let Some(d) = self.data.take() {
                     out.line(format!("rm({d})"));
                 }
@@ -4422,6 +4445,11 @@ impl Session {
                 let set = self.label_sets.entry(name.to_string()).or_default();
                 let add = opts.has("add", 3);
                 let modify = opts.has("modify", 6);
+                if set.iter().any(|(v, _)| v.is_nan()) && (add || modify) {
+                    return Err(no(format!(
+                        "label define {name}: that label's values were made when the data ran (egen cut, label), so they are not known here"
+                    )));
+                }
                 // Stata's error, as it stops there (nothing is changed)
                 if !set.is_empty() && !add && !modify && !opts.has("replace", 7) {
                     out.line(format!(
@@ -4729,7 +4757,6 @@ impl Session {
     }
 
     fn describe(&mut self, c: &Command, out: &mut Out) -> Result<(), Untranslated> {
-        let d = self.data()?;
         let opts = Opts(&c.options);
         if c.using.is_some() {
             return Err(no("describe using a file is not translated yet"));
@@ -4740,6 +4767,29 @@ impl Session {
             )));
         }
         let main = c.parts.main.trim();
+        // no data in memory (none read, or cleared): Stata describes an empty
+        // data set (0 observations, 0 variables); with names it stops, r(111)
+        if self.data.is_none() && self.data_lost.is_none() && main.is_empty() {
+            let varlist = opts.has("varlist", 7);
+            out.line(format!(
+                "stata_r <- list(k = 0L, N = 0L{})",
+                if varlist { ", varlist = \"\"" } else { "" }
+            ));
+            self.r_new = Some((
+                if varlist {
+                    returned::R_DESCRIBE_VARLIST
+                } else {
+                    returned::R_DESCRIBE
+                },
+                "describe".into(),
+            ));
+            if !self.quiet(c) && !opts.has("simple", 2) {
+                out.line("cat(\"observations:\", 0L, \" variables:\", 0L, \"\\n\")");
+                out.caveat("printed in R's layout, not Stata's");
+            }
+            return Ok(());
+        }
+        let d = self.data()?;
         // the variables chosen (all without a varlist), in the data's order; a name not
         // there stops as Stata's does (probe 2026-11-15: r(k) stays the data's count)
         let chosen = if main.is_empty() {
@@ -4931,12 +4981,22 @@ impl Session {
     /// is r(110), one that is not r(111), dropping the current one r(119). Each
     /// error stops in R, so `capture` gives Stata's _rc.
     fn frame_cmd(&mut self, c: &Command, opts: &Opts, out: &mut Out) -> Result<(), Untranslated> {
-        if let Some(o) = opts.other(&[]) {
+        // cwf is frame change, pwf frame pwf
+        let (sub, rest) = match c.name.as_str() {
+            "cwf" => ("change", c.parts.main.trim()),
+            "pwf" => ("pwf", c.parts.main.trim()),
+            _ => first_word(&c.parts.main),
+        };
+        let allowed: &[(&str, usize)] = match sub {
+            "copy" => &[("replace", 7)],
+            "put" => &[("into", 4)],
+            _ => &[],
+        };
+        if let Some(o) = opts.other(allowed) {
             return Err(no(format!(
                 "frame with the option {o} is not translated yet"
             )));
         }
-        let (sub, rest) = first_word(&c.parts.main);
         let words: Vec<&str> = rest.split_whitespace().collect();
         let current = self.frame.clone().unwrap_or_else(|| "default".into());
         let stop = |msg: String| format!("stop({}, call. = FALSE)", r_text(&msg));
@@ -4953,6 +5013,14 @@ impl Session {
                 ));
             }
             return Ok(());
+        }
+        match sub {
+            "dir" if words.is_empty() => return self.frame_dir(c, out),
+            "create" if words.len() > 1 => return self.frame_create_vars(&words, out),
+            "copy" => return self.frame_copy(opts, &words, out),
+            "rename" => return self.frame_rename(&words, out),
+            "put" => return self.frame_put(c, opts, rest, out),
+            _ => {}
         }
         let [name] = words.as_slice() else {
             return Err(no(format!(
@@ -5975,6 +6043,26 @@ stata_chars_write(\"results.dta\", study_hours)"
             "{out:?}"
         );
         assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
+        // several plain runiform() in one expression: a row takes its draws in turn, the
+        // operands read left to right (Stata 19)
+        let out = r("set obs 4\ngenerate yo = 1 + (runiform() < .5) + (runiform() < invlogit(2))\ngenerate z = runiform() - 1000 * runiform()\nkeep if runiform() + runiform() > 1");
+        assert!(
+            out[1].contains("local({.stata_draw <- stata_runiform_k(dplyr::n(), 2);"),
+            "{out:?}"
+        );
+        assert!(
+            out[1].contains(".stata_draw[, 1]") && out[1].contains(".stata_draw[, 2]"),
+            "{out:?}"
+        );
+        assert!(
+            out[2].contains("stata_runiform_k(dplyr::n(), 2)"),
+            "{out:?}"
+        );
+        assert!(
+            out[3].contains("stata_runiform_k(dplyr::n(), 2)"),
+            "{out:?}"
+        );
+        assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
         // what is not translated says why
         for (src, why) in [
             (
@@ -5984,6 +6072,14 @@ stata_chars_write(\"results.dta\", study_hours)"
             (
                 "set obs 2\ngenerate x = runiform() if runiform() < .5",
                 "both the value and the if",
+            ),
+            (
+                "set obs 2\ngenerate x = max(runiform(), 5 * runiform())",
+                "from the last to the first",
+            ),
+            (
+                "set obs 2\ngenerate x = runiform() + runiform(0, 1)",
+                "second random draw",
             ),
             ("set obs 2\nsummarize if runiform() < .5", "not here yet"),
             ("set obs 2\ngenerate x = rgamma(2)", "with 1 arguments"),
@@ -6004,6 +6100,167 @@ stata_chars_write(\"results.dta\", study_hours)"
         let out = r("set obs 2\ngenerate a = rpoisson(2)\ngenerate b = runiform()\nset seed 3\ngenerate c = runiform()");
         assert!(out[2].contains("not Stata's: a line before it that draws was not translated (generate a = rpoisson(2))"), "{out:?}");
         assert!(!out[4].starts_with("NOT"), "{out:?}");
+    }
+
+    /// `egen cut()` with at() and group() (P2C.12ao).
+    #[test]
+    fn egen_cut_bins_by_edges_and_by_counts() {
+        let out = r("set obs 5\ngenerate x = _n\negen a = cut(x), at(1 3 5)\negen double d = cut(x), at(1(2)5) icodes\negen g = cut(x), group(2) label\negen if_ = cut(x) if x > 1, group(2)\ncapture egen q = cut(x)\ncapture egen b = cut(x), at(5 3)\ncapture egen byte c = cut(x), at(1 3)");
+        assert!(
+            out[2].contains("stata_cut(x, TRUE, at = c(1, 3, 5), icodes = FALSE)")
+                && out[2].contains("stata_float(")
+                && out[2].contains("stata_gen_note("),
+            "{out:?}"
+        );
+        assert!(
+            out[3].contains("as.numeric(stata_cut(x, TRUE, at = c(1, 3, 5), icodes = TRUE))"),
+            "{out:?}"
+        );
+        assert!(
+            out[4].contains("stata_cut(x, TRUE, group = 2)")
+                && out[4].contains("label_g <- stata_cut_labels(")
+                && out[4].contains("vallab = \"g\""),
+            "{out:?}"
+        );
+        assert!(out[5].contains("stata_cut(x, "), "{out:?}");
+        assert!(out[5].contains("x > 1"), "{out:?}");
+        assert!(out[6].contains("(Stata: r(198))"), "{out:?}");
+        assert!(out[7].contains("(Stata: r(124))"), "{out:?}");
+        // a byte holds the values when they fit: translated as a float's values
+        assert!(
+            out[8].contains("stata_float(stata_cut(x, TRUE, at = c(1, 3)"),
+            "{out:?}"
+        );
+        // by stops with r(190) after the name and the order of at() are checked
+        let out = r("set obs 5\ngenerate x = _n\ngenerate g = 1\nbysort g: egen a = cut(x), at(1 3)\negen b = cut(x), group(2) by(g)\nbysort g: egen c = cut(x), at(3 1)");
+        assert!(out[3].contains("(Stata: r(190))"), "{out:?}");
+        assert!(out[4].contains("(Stata: r(190))"), "{out:?}");
+        assert!(out[5].contains("(Stata: r(124))"), "{out:?}");
+        // a label made when the data run cannot be added to here
+        let out = r("set obs 5\ngenerate x = _n\negen g = cut(x), group(2) label\nlabel define g 9 \"nine\", add");
+        assert!(out[3].starts_with("NOT: label define g"), "{out:?}");
+    }
+
+    /// `frame dir`, copy, rename, put, a command in another frame, `frames reset` (P2C.12ao).
+    #[test]
+    fn frames_list_copy_rename_and_run_commands_in_turn() {
+        let out = r("clear\nset obs 3\ngenerate x = _n\nframe create b\nframe b: set obs 2\nframe b: generate y = 1\nframe dir\nframe copy default c\nframe rename c d\nframe put x if x > 1, into(p)\nframe dir\ndisplay c(frame)\nframe nosuch: list\ncapture frame copy default b\nframes reset\nframe dir");
+        assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
+        // b is changed to, the command runs, default is changed back to
+        assert!(
+            out[4].contains("stata_frames[[\"default\"]] <- data")
+                && out[4].contains("stata_set_obs")
+                && out[4].contains("data <- stata_frames[[\"default\"]]"),
+            "{out:?}"
+        );
+        // default and b, unsaved data both: stars, no files, rows and columns from R
+        assert!(
+            out[6].contains(
+                "stata_frame_dir(c(\"default\", \"b\"), c(\"*\", \"*\"), c(\"\", \"\"), c(nrow(data), nrow(stata_frames[[\"b\"]])), c(ncol(data), ncol(stata_frames[[\"b\"]])))"
+            ),
+            "{out:?}"
+        );
+        assert!(out[7].contains("stata_frames[[\"c\"]] <- data"), "{out:?}");
+        assert!(
+            out[8].contains("stata_frames[[\"d\"]] <- stata_frames[[\"c\"]]"),
+            "{out:?}"
+        );
+        assert!(
+            out[9].contains("dplyr::filter(") && out[9].contains("stata_frames[[\"p\"]]"),
+            "{out:?}"
+        );
+        assert!(
+            out[10].contains("c(\"default\", \"b\", \"d\", \"p\")"),
+            "{out:?}"
+        );
+        assert!(out[11].contains("\"default\""), "{out:?}");
+        assert!(
+            out[12].contains("frame nosuch not found (Stata: r(111))"),
+            "{out:?}"
+        );
+        assert!(
+            out[13].contains("frame b already defined (Stata: r(110))"),
+            "{out:?}"
+        );
+        assert!(out[14].contains("rm(stata_frames)"), "{out:?}");
+        assert!(
+            out[15].contains("c(\"default\"), c(\" \"), c(\"\"), c(0), c(0)"),
+            "{out:?}"
+        );
+        // a line that changes the data in a way not followed: whether the frame is unsaved is not known
+        let out = r("clear\nset obs 3\ngenerate x = _n\nreplace x = 2\nframe dir");
+        assert!(
+            out[4].starts_with("NOT: frame dir marks the frames"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn frlink_frget_and_frval_follow_the_link_while_the_linked_frame_is_as_left() {
+        let head = "clear\nset obs 4\ngenerate k = _n\nframe create t\nframe t: set obs 3\nframe t: generate k = _n\nframe t: generate v = 10 * k\n";
+        let out = r(&format!(
+            "{head}frlink m:1 k, frame(t)\nfrget v, from(t) prefix(a_)\ngenerate w = frval(t, v, -1)\nframe dir"
+        ));
+        assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
+        // the link is made by one helper call, which sorts the linked frame and makes the column
+        assert!(
+            out[7].contains("stata_fl <- stata_frlink(data, stata_frames[[\"t\"]], c(\"k\"), c(\"k\"), FALSE, \"default\", FALSE)")
+                && out[7].contains("stata_frames[[\"t\"]] <- stata_fl$there")
+                && out[7].contains("data[[\"t\"]] <- stata_fl$link"),
+            "{out:?}"
+        );
+        assert!(
+            out[8].contains(
+                "data[[\"a_v\"]] <- stata_frget_col(stata_frames[[\"t\"]][[\"v\"]], data[[\"t\"]])"
+            ) && out[8].contains("copied from linked frame"),
+            "{out:?}"
+        );
+        assert!(
+            out[9].contains("stata_frval(t, stata_frames[[\"t\"]][[\"v\"]], -1)"),
+            "{out:?}"
+        );
+        // frlink and frget unsave the data, so the star of frame dir is known
+        assert!(
+            out[10].contains("c(\"*\", \"*\")") || out[10].contains("c(\"*\", \" \")"),
+            "{out:?}"
+        );
+        // a line that may have changed the linked frame: the link is not trusted
+        let out = r(&format!(
+            "{head}frlink m:1 k, frame(t)\nframe t: replace v = 0\nfrget v, from(t) prefix(a_)\ngenerate w = frval(t, v)"
+        ));
+        assert!(out[9].starts_with("NOT: frget from(t)"), "{out:?}");
+        assert!(out[10].starts_with("NOT: frval(t, v)"), "{out:?}");
+        // read-only commands and a change of this frame's rows leave it
+        let out = r(&format!(
+            "{head}frlink m:1 k, frame(t)\nframe t: summarize v\nsort k\ndrop if k == 2\nfrget v, from(t)"
+        ));
+        assert!(out.iter().all(|l| !l.starts_with("NOT")), "{out:?}");
+        // another frlink to the frame on other keys makes the first link stale
+        let out = r(&format!(
+            "{head}frame t: generate w = k\nfrlink m:1 k, frame(t)\nfrlink m:1 k, frame(t w) generate(l2)\nfrget v, from(t)\nfrget v, from(l2)"
+        ));
+        assert!(out[10].starts_with("NOT: frget from(t)"), "{out:?}");
+        assert!(!out[11].starts_with("NOT"), "{out:?}");
+        // under capture, and a frame that is not there
+        let out = r(&format!("{head}capture frlink m:1 k, frame(t)"));
+        assert!(out[7].starts_with("NOT: frlink under capture"), "{out:?}");
+        let out = r(&format!("{head}frlink m:1 k, frame(nosuch)"));
+        assert!(
+            out[7].contains("frame nosuch not found (Stata: r(111))"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn describe_with_no_data_describes_an_empty_data_set() {
+        let out = r("clear\ndescribe, short\ndisplay r(N)");
+        assert!(
+            out[1].contains("stata_r <- list(k = 0L, N = 0L)"),
+            "{out:?}"
+        );
+        assert!(!out[1].starts_with("NOT"), "{out:?}");
+        let out = r("describe x");
+        assert!(out[0].starts_with("NOT: no data is in memory"), "{out:?}");
     }
 
     /// Forms found in published replication packages (P2C.9).
@@ -6523,7 +6780,7 @@ restore, not");
             .collect();
         assert_eq!(hidden, [true, true, false, true, false, false], "{out:?}");
         // a line that changes the data and is not translated: the data after it is not known
-        let out = r("use a\nframe copy default other\ndisplay _N\nuse b\ndisplay _N");
+        let out = r("use a\ncross using other\ndisplay _N\nuse b\ndisplay _N");
         assert!(
             out[2].starts_with("NOT: the data in memory is not known here"),
             "{out:?}"

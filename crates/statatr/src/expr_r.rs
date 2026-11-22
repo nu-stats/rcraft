@@ -232,6 +232,7 @@ pub fn translate_drawing(
         caveats: Vec::new(),
         rows,
         draws: 0,
+        draws_plain: true,
         draw_call: None,
         helpers: Vec::new(),
         bytes_ok: false,
@@ -251,10 +252,25 @@ pub fn translate_drawing(
     };
     // the draw is taken once: where the R writes it more than once (the
     // missing rule of a comparison, round()), it is drawn first and named
-    let code = match &t.draw_call {
-        Some(call) if code.matches(DRAW).count() == 1 => code.replace(DRAW, call),
-        Some(call) => format!("local({{{DRAW} <- {call}; {code}}})"),
-        None => code,
+    let code = if t.draws > 1 {
+        // several plain uniforms: each row takes its draws in turn, in the order the
+        // expression is read (operands left to right), one matrix column each
+        let mut code = code;
+        for j in 1..=t.draws {
+            code = code.replace(&draw_token(j), &format!("{DRAW}[, {j}]"));
+        }
+        let at = rows.unwrap_or("1");
+        format!(
+            "local({{{DRAW} <- stata_runiform_k({at}, {}); {code}}})",
+            t.draws
+        )
+    } else {
+        let code = code.replace(&draw_token(1), DRAW);
+        match &t.draw_call {
+            Some(call) if code.matches(DRAW).count() == 1 => code.replace(DRAW, call),
+            Some(call) => format!("local({{{DRAW} <- {call}; {code}}})"),
+            None => code,
+        }
     };
     let mut caveats = t.caveats;
     caveats.dedup();
@@ -274,6 +290,9 @@ struct Translator<'a> {
     caveats: Vec<String>,
     rows: Option<&'a str>,
     draws: usize,
+    /// Every draw so far is a plain `runiform()` or `uniform()`: several of them in
+    /// one expression are taken a row at a time, in turn (observed in Stata 19).
+    draws_plain: bool,
     /// The R of the expression's random draw, written as [`DRAW`] in its code.
     draw_call: Option<String>,
     helpers: Vec<&'static str>,
@@ -364,6 +383,12 @@ const NEEDS_AN_ARGUMENT: &[&str] = &[
 
 /// The name a random draw goes by in an expression's R until it is placed.
 const DRAW: &str = ".stata_draw";
+
+/// What the expression's `n`-th random draw is written as until the whole
+/// expression is read (then a name, or a column of the draws).
+fn draw_token(n: usize) -> String {
+    format!("{DRAW}_{n}_")
+}
 
 const R_RESERVED: &[&str] = &[
     "if",
@@ -811,7 +836,22 @@ impl Translator<'_> {
         Ok((code, Kind::Logical))
     }
 
+    /// A function call. Two random draws among the arguments of one function are
+    /// refused: Stata 19 reads a function's arguments from the last to the first
+    /// (`max(runiform(), 5*runiform())` gives the second its first draw), and only
+    /// `max` and `cond` were observed.
     fn call(&mut self, name: &str, args: &[Expr]) -> Result<(String, Kind), Untranslated> {
+        let before = self.draws;
+        let r = self.call_inner(name, args)?;
+        if args.len() > 1 && self.draws > before + 1 {
+            return Err(no(format!(
+                "{name}() with two random draws among its arguments is not translated: Stata reads a function's arguments from the last to the first"
+            )));
+        }
+        Ok(r)
+    }
+
+    fn call_inner(&mut self, name: &str, args: &[Expr]) -> Result<(String, Kind), Untranslated> {
         let want = |n: usize| -> Result<(), Untranslated> {
             if args.len() == n {
                 Ok(())
@@ -915,11 +955,42 @@ impl Translator<'_> {
             // c(): the constants of Stata's storage types (read off Stata 19
             // in %21x; the same on every machine). Settings and the session's
             // own values (c(N), c(pwd), c(rngstate), ...) are not translated.
+            // frval(link, var [, default]): a variable of the frame a link
+            // variable points to; the names are those of variables, the
+            // default an expression
+            "frval" => {
+                if !(2..=3).contains(&args.len()) {
+                    return Err(no(
+                        "frval() takes a link variable, a variable and, optionally, a default",
+                    ));
+                }
+                let (Some(Expr::Name(l)), Some(Expr::Name(v))) = (args.first(), args.get(1)) else {
+                    return Err(no("frval() takes the names of variables"));
+                };
+                let (value, kind) = (self.returned)("frval", &format!("{l}\u{1}{v}"))?;
+                self.helpers.push("stata_frval");
+                match args.get(2) {
+                    None => Ok((value, kind)),
+                    Some(d) => {
+                        let (dr, dk) = self.expr(d)?;
+                        if dk != kind {
+                            return Err(no(
+                                "frval() with a default of another type than the variable stops in Stata (r(109))",
+                            ));
+                        }
+                        let (full, _) = (self.returned)("frval", &format!("{l}\u{1}{v}\u{1}{dr}"))?;
+                        Ok((full, kind))
+                    }
+                }
+            }
             "c" => {
                 want(1)?;
                 let Some(Expr::Name(what)) = args.first() else {
                     return Err(no("c() takes a name"));
                 };
+                if what == "frame" {
+                    return (self.returned)("c", "frame");
+                }
                 let v = match what.as_str() {
                     "pi" => "pi",
                     "maxbyte" => "100",
@@ -1513,13 +1584,19 @@ impl Translator<'_> {
                  replace, expand, keep, drop, display, scalar and macro values, not here yet"
             )));
         };
-        if self.draws > 0 {
+        // Stata 19 takes several runiform() of one expression row by row, each row its
+        // draws in turn; other draws take a varying number of uniforms and stay refused
+        let plain = matches!(name, "runiform" | "uniform") && args.is_empty();
+        if self.draws > 0 && !(self.draws_plain && plain) {
             return Err(no(format!(
                 "{name}() is a second random draw in one expression: Stata takes them in turn \
-                 for each row; not translated yet"
+                 for each row; translated only for runiform() with no arguments"
             )));
         }
         self.draws += 1;
+        if !plain {
+            self.draws_plain = false;
+        }
         let n = args.len();
         let fits = match name {
             "runiform" => n == 0 || n == 2,
@@ -1556,7 +1633,7 @@ impl Translator<'_> {
             parts.push(number(&c, k)?);
         }
         self.draw_call = Some(format!("{r}({})", parts.join(", ")));
-        Ok((DRAW.to_string(), Kind::Number))
+        Ok((draw_token(self.draws), Kind::Number))
     }
 
     fn text_fn(
