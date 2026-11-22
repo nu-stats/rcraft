@@ -90,7 +90,7 @@ fn limit(opts: &Opts, name: &str) -> Result<String, Untranslated> {
 
 impl Session {
     /// `from(matname [, skip copy])` as R arguments: the matrix, and its flags.
-    fn from_arg(&mut self, opts: &Opts) -> Result<String, Untranslated> {
+    fn start_vector_arg(&mut self, opts: &Opts) -> Result<String, Untranslated> {
         let Some(text) = opts.arg("from", 4) else {
             return Ok(String::new());
         };
@@ -341,7 +341,7 @@ impl Session {
         ] {
             self.helpers.insert(h);
         }
-        let from = self.from_arg(opts)?;
+        let from = self.start_vector_arg(opts)?;
         // under stepwise or nestreg: the terms the search kept, its command line, no log in stepwise
         let (terms_r, cmdline, nolog, stepwise) = match self.sw_cmdline() {
             Some((line, mark)) => (
