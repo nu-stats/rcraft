@@ -76,7 +76,7 @@ first with G/(G-1); a frequency-weighted row counts once with its score over w.
 
 - `constraints()` (the constrained Newton path is not decoded), tobit/intreg with aweights, interactions and `ib.` bases in tobit/intreg, factor variables in truncreg, cloglog, hetprobit, heckman (and `select()`), the refused `noconstant` forms above, margins after these models (see the estat section below).
 
-## estat after the six (2026-11-22, P2C.12az)
+## estat after the six (2026-11-22, P2C.12be)
 
 Observed on Stata 19 SE (corpus `estat_censored.do`, 1e-5, 1,550 recorded values; the printed layouts were also compared line by line with Stata's log, apart from the last digit of truncreg's numerical variances).
 

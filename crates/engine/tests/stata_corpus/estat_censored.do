@@ -1,4 +1,4 @@
-* RCraft's Stata corpus (P2C.12az, estat after the censored models): made-up data; Stata 19's results are in estat_censored.recorded
+* RCraft's Stata corpus (P2C.12be, estat after the censored models): made-up data; Stata 19's results are in estat_censored.recorded
 * commands: cloglog heckman hetprobit intreg tobit truncreg
 * (estat ic, vce and summarize after the six: r(S), r(V), r(stats), n() and df(), weights, robust, clusters, twostep, the refused subcommands)
 * tolerance: 1e-5
