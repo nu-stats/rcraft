@@ -1,0 +1,4 @@
+Command {
+    options: &["short"],
+    ..NONE
+}

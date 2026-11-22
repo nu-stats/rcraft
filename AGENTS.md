@@ -170,6 +170,14 @@ concatenation in the UI.
   that file. A separate bookkeeping PR folds the row files into `ROADMAP.md`
   and `plan/STATUS.md` and deletes them.
 - Pick a sub-id that no open or merged PR uses (`gh pr list --state all`).
+- Batch and feature PRs add files and do not edit shared ones. A command's
+  entries are one small file each: `crates/statatr/src/differences/<command>.rs`
+  (and `<page>.aliases.rs` for names that share a page), `complete/<command>.rs`
+  and `verified/<command>.rs` (`verified/functions/` for a function). `build.rs`
+  gathers them, and each folder's `README.md` gives the format. Never add an
+  entry in `differences.rs`, `complete.rs` or `verified.rs`, and never edit
+  `ROADMAP.md` or `plan/STATUS.md`: put the status rows in
+  `plan/status.d/<sub-id>.md`. The bookkeeping PR runs `cargo xtask status-fold`.
 - Parallel agents edit only the crates they own.
 
 ### Build folders

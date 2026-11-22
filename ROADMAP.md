@@ -806,6 +806,17 @@ Round 6 (2026-11-20, the factor-variable leftovers): `areg` with interactions (`
   - the `bootstrap` prefix (`_b` after regress/logit/probit, `r()`/`e()` statistics, `reps()`, `seed()`, `nodots`, `cluster()`, `level()`) gives Stata's table and standard errors, checked in `bootstrap.do`;
   - `el()` of e()/r() matrices.
   `strata()` (in `bsample` too), `saving()` and `estat bootstrap` followed on 2026-11-05 (`bsopts.do`). Still to come: `bca`, `vce(bootstrap)`.)
+- P2C.12ar Censored and selection models (batch J of the StatCraft port, done 2026-11-20, in part)
+  (`tobit`, `intreg`, `truncreg`, `cloglog`, `hetprobit`, `heckman`: Stata's logs and starts, fw/pw/iw weights where Stata takes them, robust and clustered errors, replay, predict, `estat ic`) Verified
+  (corpus `tobit.do`, `intreg.do`, `truncreg.do`, `cloglog.do`, `hetprobit.do`, `heckman.do`; note `plan/stata/censored.md`; R in `data_r/censored/`).
+  **On hold** (listed, to be built): `stepwise` and `nestreg` with tobit, `from()`, tobit/intreg with aweights, tobit with interactions, factor variables in truncreg, cloglog, hetprobit and heckman,
+  `iterate()`, `noconstant`, margins after these models.
+  Measured: probes 80.2% -> 80.5% (23,278 -> 23,343 translated source lines of 30,115 judged), packages 94.7% -> 94.8% (4,025 -> 4,028; the `tobit` lines of 6J6BAW).
+- P2C.12aw Batch L holds (done 2026-11-21, in part)
+  (`contrast` and `pwcompare` after `areg` (the Denominator is e(df_r), the absorbed groups are indicators in the design for the estimability check; after `vce(robust)` and `vce(cluster)` too) and after `xtregar` with factor variables (`i.g`: fe omits a factor constant within the panels, `contrast` prints `(not testable)`, `pwcompare` prints `0  (omitted)` for rows built only of omitted columns; a copy of a factor gives `(not testable)` / `(not estimable)`; re estimates it), `hausman` between `xtregar` fits (and beside regress; `sigmamore`, `sigmaless`, the `(V_b-V_B is not positive definite)` line) and `predictnl` after `xtregar` (all rows with covariates, `se()`, `ci()`, `variance()`), `pwcompare, cimargins` margins after `xtreg, fe` and `areg` (they printed `.`)) Verified (corpus `contrast_areg.do`, `contrast_xtregar.do`, `postest_xtregar.do`; note `plan/stata/postest.md`).
+  **On hold** (listed, to be built): `contrast`/`pwcompare` after `areg` with a factor level omitted for collinearity (probe 443: areg itself refuses it; needs the batch E areg with omitted factor levels, `1o.g` columns and the `(omitted)` table rows), `manovatest` (needs `manova`, batch MV), `tebalance` (needs `teffects`, batch CA).
+  Still refused: `xtregar` with interactions, `ib.` bases or time-series operators; `contrast` with `post`, `noestimcheck`, `pveffects`, `cieffects`, `groups`, `tukey`, `snk`, `duncan`, `dunnett`.
+  Measured on top of P2C.12av (probes only; `observe/dofiles`): 80.7% -> 80.7% (23,399 -> 23,426 translated source lines of 29,011 judged; 5,612 -> 5,585 not translated); packages unchanged at 94.7% (4,025 of 4,249; none of these lines is in the 46 do-files).)
 
 ## Phase 3: Data
 

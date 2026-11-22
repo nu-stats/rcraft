@@ -1,0 +1,28 @@
+Command {
+    options: &[
+        "cell",
+        "chi2",
+        "column",
+        "freq",
+        "generate(",
+        "lrchi2",
+        "matcell(",
+        "matcol(",
+        "matrow(",
+        "means",
+        "missing",
+        "nofreq",
+        "nokey",
+        "nolabel",
+        "nomeans",
+        "noobs",
+        "nostandard",
+        "obs",
+        "row",
+        "sort",
+        "standard",
+        "summarize(",
+        "wrap",
+    ],
+    ..NONE
+}

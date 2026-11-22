@@ -1,0 +1,12 @@
+&[
+    "power",
+    "power10",
+    "power2",
+    "power3",
+    "power4",
+    "power5",
+    "power6",
+    "power7",
+    "power8",
+    "power9",
+]

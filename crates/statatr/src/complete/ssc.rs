@@ -1,0 +1,4 @@
+Command {
+    subcommands: &["install"],
+    ..NONE
+}
