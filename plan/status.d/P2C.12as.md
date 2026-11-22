@@ -10,7 +10,7 @@
   `mchange` and `mgen` need the delta method of `margins`; note `plan/stata/spost13.md`); `outreg2`'s `stats(... beta)`, `tex(pretty)`, `label` with `word`, and the new options with
   `append`, .xls or .tex; `unique, by()` puts the count on the first of tied rows where Stata's own sort picks another (message); `distinct` with `in` and several variables
   (the add-on counts the later variables oddly); `winsor2` with weights and patterns.
-  Measured on top of origin/main at 54be4ac (probes: StatCraft b7d392e observe/dofiles; packages: the 46 do-files): probes 82.9% (24,038 translated, 4,973 not, 1,104 known only when run, of 30,115 source lines); packages 94.8% (4,028 of 4,247 judged; was 4,025 of 4,249).
+  Measured on this branch (origin/main at 54be4ac plus this batch; the total includes the other batches already on main) (probes: StatCraft b7d392e observe/dofiles; packages: the 46 do-files): probes 82.9% (24,038 translated, 4,973 not, 1,104 known only when run, of 30,115 source lines); packages 94.8% (4,028 of 4,247 judged; was 4,025 of 4,249).
 
 ## STATUS
 
