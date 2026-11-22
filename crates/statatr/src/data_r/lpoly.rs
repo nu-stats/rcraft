@@ -324,7 +324,7 @@ impl Session {
             return Ok(());
         }
         for (v, what) in [(bw, "bwidth"), (pwidth, "pwidth")] {
-            if v.is_some_and(|b| !(b > 0.0)) {
+            if v.is_some_and(|b| b.is_nan() || b <= 0.0) {
                 stata(out, &format!("{what}() must be a positive number"), 198);
                 return Ok(());
             }
