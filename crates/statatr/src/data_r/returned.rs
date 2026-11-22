@@ -507,7 +507,7 @@ pub(super) const ERETURN_HELPER: &str = r##"stata_ereturn <- function(cmd, cmdli
     if (!is.null(ll_0)) l[["ll_0"]] <- ll_0
     q <- sum(slopes)
     chi2 <- if (robust) wald(slopes) else 2 * (l[["ll"]] - l[["ll_0"]])
-    put(rank = sum(!is.na(b)), N = N, k = length(b), k_eq = k_eq, k_dv = 1, converged = 1, rc = 0)
+    put(rank = sum(!is.na(b)), N = N, k = length(b), k_eq = k_eq, k_dv = 1, converged = if (isFALSE(fit[["stata_conv"]])) 0 else 1, rc = 0)
     if (!is.null(G)) put(N_clust = G)
     put(ll = l[["ll"]], k_eq_model = k_eq_model, ll_0 = l[["ll_0"]])
     for (n in names(aux)) e[[n]] <<- aux[[n]]

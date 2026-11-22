@@ -497,7 +497,12 @@ stata_ml_iterations <- function(fit, kind) {
     return(m$lls)
   }
   if (kind == "glm") return(if (isTRUE(fit$stata_odd)) NULL else fit$stata_lls)
-  if (kind %in% c("poisson", "nbreg")) return(stata_ml_count(fit, kind)$lls)
+  if (kind %in% c("poisson", "nbreg")) {
+    r <- stata_ml_count(fit, kind)
+    out <- r$lls
+    if (kind == "poisson" && !is.null(out)) attr(out, "converged") <- r$converged
+    return(out)
+  }
   X <- stats::model.matrix(fit)
   if (!"(Intercept)" %in% colnames(X)) return(NULL)
   off <- fit$offset
@@ -523,9 +528,14 @@ stata_ml_iterations <- function(fit, kind) {
       list(ll = ll(b), g = colSums(X * (pw * lam)), nh = crossprod(X * (pw * lam * (lam + z)), X))
     }
   }
-  path <- tryCatch(stata_ml_path(ll, deriv, b0), error = function(e) NULL)
-  if (is.null(path) || path$odd || !path$converged) return(NULL)
-  path$lls
+  # iterate(#): the path stops there, shown with its convergence flag (stata_maxit)
+  mx <- if (is.null(fit$stata_maxit)) 300 else fit$stata_maxit
+  path <- tryCatch(stata_ml_path(ll, deriv, b0, max_iter = mx), error = function(e) NULL)
+  if (is.null(path) || path$odd || (!path$converged && is.null(fit$stata_maxit))) return(NULL)
+  out <- path$lls
+  attr(out, "converged") <- path$converged
+  attr(out, "b") <- path$b
+  out
 }
 # poisson's start (found on probes, 2026-11-15, to 1e-16): the slopes of the least-squares
 # fit of y on the centred regressors over mean(y), the constant then exactly
@@ -564,9 +574,10 @@ stata_ml_count <- function(fit, kind) {
   b0[ic] <- log(sum(y) / sum(exp(drop(Xs %*% b))))
   d0 <- pois_deriv(b0)
   b0 <- b0 + drop(solve(d0$nh, d0$g))
-  pois <- tryCatch(stata_ml_path(pois_ll, pois_deriv, b0), error = function(e) NULL)
-  if (is.null(pois) || pois$odd || !pois$converged) return(NULL)
-  if (kind == "poisson") return(list(lls = pois$lls, b = pois$b))
+  mx <- if (is.null(fit$stata_maxit)) 300 else fit$stata_maxit
+  pois <- tryCatch(stata_ml_path(pois_ll, pois_deriv, b0, max_iter = mx), error = function(e) NULL)
+  if (is.null(pois) || pois$odd || (!pois$converged && (kind != "poisson" || is.null(fit$stata_maxit)))) return(NULL)
+  if (kind == "poisson") return(list(lls = pois$lls, b = pois$b, converged = pois$converged))
   nb <- function(X) {
     k <- ncol(X)
     ll <- function(p) {
@@ -605,11 +616,32 @@ stata_ml_count <- function(fit, kind) {
                   `Fitting full model:` = full$lls), b = full$b, V = V,
        ll_0 = cons$lls[length(cons$lls)], ll_c = pois$lls[length(pois$lls)])
 }
+# iterate(#) on logit and probit: the path stops after that many steps; the fit moves there when
+# it has not converged (its variance, likelihood and fitted values follow), with the flag for
+# "convergence not achieved" and e(converged)
+stata_ml_cap_fit <- function(fit, kind, n) {
+  fit$stata_maxit <- n
+  lls <- tryCatch(stata_ml_iterations(fit, kind), error = function(e) NULL)
+  if (is.null(lls)) stop("RCraft: iterate() here is not translated: Stata's path could not be followed", call. = FALSE)
+  fit$stata_conv <- attr(lls, "converged")
+  if (isTRUE(fit$stata_conv)) return(fit)
+  b <- attr(lls, "b")
+  X <- stats::model.matrix(fit)
+  eta <- drop(X %*% b)
+  fit$coefficients[] <- b
+  fit$linear.predictors[] <- eta
+  fit$fitted.values[] <- fit$family$linkinv(eta)
+  mu <- fit$fitted.values
+  fit$deviance <- -2 * sum(fit$prior.weights * (fit$y * log(mu) + (1 - fit$y) * log(1 - mu)))
+  fit
+}
 # poisson's and nbreg's fit moved to where Stata's path ends: its estimates, likelihood and
 # fitted values (the variance, robust or not, is then worked out there)
 stata_ml_count_fit <- function(fit, kind) {
   r <- tryCatch(stata_ml_count(fit, kind), error = function(e) NULL)
+  if (!is.null(fit$stata_maxit) && (is.null(r) || kind != "poisson")) stop("RCraft: iterate() here is not translated: Stata's path could not be followed", call. = FALSE)
   if (is.null(r) || anyNA(stats::coef(fit))) return(fit)
+  if (!is.null(fit$stata_maxit)) fit$stata_conv <- r$converged
   X <- stats::model.matrix(fit)
   k <- ncol(X)
   b <- r$b
@@ -847,12 +879,18 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
     stages <- if (is.null(lls)) list() else if (is.list(lls)) lls else list(lls)
     for (s in seq_along(stages)) {
       if (!is.null(names(stages))) cat("\n", names(stages)[s], "\n", sep = "")
-      cat("\n")
+      # poisson with no step at all (iterate(0)) has no blank line before its one line (probe 2026-11-22)
+      if (!(identical(e$cmd, "poisson") && length(stages[[s]]) == 1L && isFALSE(attr(stages[[s]], "converged")))) cat("\n")
       for (i in seq_along(stages[[s]])) {
         cat("Iteration ", i - 1, ":  ", if (robust) "Log pseudolikelihood" else "Log likelihood", " = ",
             stata_fmt(stages[[s]][i], "%10.0g"), "  \n", sep = "")
       }
+      # iterate(#) that stopped the path short
+      if (isFALSE(attr(stages[[s]], "converged"))) cat("convergence not achieved\n")
     }
+  } else if (isFALSE(fit$stata_conv)) {
+    # nolog: no iteration lines, the message still comes before the header
+    cat("convergence not achieved\n")
   }
   if (!is.null(glm)) {
     stata_glm_header(fit, robust)
@@ -975,6 +1013,8 @@ stata_ml_print_body <- function(fit, title, robust = FALSE, nobs = NULL, level =
     cat(formatC(paste0("LR test of alpha=0: chibar2(01) = ", trimws(stata_fmt(chi, "%8.2f"))), width = -55, flag = "-"),
         "Prob >= chibar2 = ", sprintf("%5.3f", 0.5 * stats::pchisq(chi, 1, lower.tail = FALSE)), "\n", sep = "")
   }
+  # iterate(#) that stopped the path short
+  if (isFALSE(fit$stata_conv)) cat("Warning: Convergence not achieved.\n")
   TRUE
 }"#;
 
@@ -1081,6 +1121,28 @@ impl Session {
         } else {
             None
         };
+        // iterate(#): logit, probit and poisson stop Stata's Newton path there
+        let iterate_n: Option<u32> = if matches!(fit, Fit::Logit | Fit::Probit | Fit::Poisson) {
+            known.push(("iterate", 4));
+            match opts.arg("iterate", 4) {
+                Some(v) => match v.trim().parse::<u32>() {
+                    Ok(n) => Some(n),
+                    Err(_) => {
+                        return Err(no(format!(
+                            "{name} with iterate({v}): only a whole number is translated"
+                        )))
+                    }
+                },
+                None => None,
+            }
+        } else {
+            None
+        };
+        if iterate_n.is_some() && cns.is_some() {
+            return Err(no(format!(
+                "{name} with both iterate() and constraints() is not translated yet"
+            )));
+        }
         if let Some(o) = opts.other(&known) {
             return Err(no(format!(
                 "{name} with the option {o} is not translated yet"
@@ -1331,6 +1393,18 @@ impl Session {
             | Fit::Asclogit
             | Fit::Suest => {}
         }
+        if let (Some(n), Fit::Logit | Fit::Probit) = (iterate_n, fit) {
+            for h in ["stata_probit_newton", "stata_ml_header"] {
+                self.helpers.insert(h);
+            }
+            out.line(format!(
+                "stata_estimates <- stata_ml_cap_fit(stata_estimates, {}, {n})",
+                r_text(name)
+            ));
+            out.caveat(
+                "iterate(#) as Stata 19: its Newton-Raphson path stopped after that many steps, with \n                 `convergence not achieved` and the warning when it has not converged",
+            );
+        }
         if let Some(list) = &cns {
             for h in [
                 "stata_lsfam",
@@ -1366,6 +1440,9 @@ impl Session {
                 self.fit_robust = (robust || cluster.is_some()) && w.is_none();
                 self.fit_cluster = cluster.is_some() && w.is_none();
                 if fit == Fit::Poisson && cns.is_none() {
+                    if let Some(n) = iterate_n {
+                        out.line(format!("stata_estimates$stata_maxit <- {n}"));
+                    }
                     self.count_ml(fit, out);
                 }
                 out.line("stata_b <- stats::coef(stata_estimates)");
