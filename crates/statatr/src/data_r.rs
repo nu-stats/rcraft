@@ -30,6 +30,7 @@ mod anova;
 mod anovaplot;
 mod areg;
 mod arima;
+mod censored;
 mod center;
 mod centile;
 mod ci;
@@ -594,6 +595,12 @@ const WEIGHTED: &[&str] = &[
     "nlsur",
     "_rcraft_nlsur_fit",
     "_rcraft_nlsur_begin",
+    "tobit",
+    "intreg",
+    "truncreg",
+    "cloglog",
+    "hetprobit",
+    "heckman",
     "mvreg",
     "ltable",
     "dfuller",
@@ -1549,6 +1556,11 @@ fn helper_code(name: &str) -> &'static str {
         "stata_sureg" => sureg::SUREG_HELPER,
         "stata_areg" => areg::AREG_HELPER,
         "stata_qreg" => qreg::QREG_HELPER,
+        "stata_cx" => censored::CX_HELPER,
+        "stata_tobit" => censored::TOBIT_HELPER,
+        "stata_trunc" => censored::TRUNC_HELPER,
+        "stata_bin" => censored::BIN_HELPER,
+        "stata_heckman" => censored::HECKMAN_HELPER,
         "stata_xi" => xi::XI_HELPER,
         "stata_est_mark" => returned::EST_MARK_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
@@ -3288,6 +3300,12 @@ impl Session {
             "sureg" => self.sureg(c, &opts, out),
             "areg" => self.areg(c, &opts, out),
             "qreg" => self.qreg(c, &opts, out),
+            "tobit" => self.tobit(c, &opts, out),
+            "intreg" => self.intreg(c, &opts, out),
+            "truncreg" => self.truncreg(c, &opts, out),
+            "cloglog" => self.cloglog(c, &opts, out),
+            "hetprobit" => self.hetprobit(c, &opts, out),
+            "heckman" => self.heckman(c, &opts, out),
             "xi" => self.xi(c, out),
             "mvreg" => self.mvreg(c, &opts, out),
             "marginsplot" => self.marginsplot(c, &opts, out),

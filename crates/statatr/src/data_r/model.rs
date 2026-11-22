@@ -60,6 +60,13 @@ pub(super) enum Fit {
     Areg,
     Qreg,
     Nlsur,
+    /// batch J: censored and selection models (`censored`)
+    Tobit,
+    Intreg,
+    Truncreg,
+    Cloglog,
+    Hetprobit,
+    Heckman,
 }
 
 impl Fit {
@@ -90,6 +97,12 @@ impl Fit {
             Fit::Areg => "areg",
             Fit::Qreg => "qreg",
             Fit::Nlsur => "nlsur",
+            Fit::Tobit => "tobit",
+            Fit::Intreg => "intreg",
+            Fit::Truncreg => "truncreg",
+            Fit::Cloglog => "cloglog",
+            Fit::Hetprobit => "hetprobit",
+            Fit::Heckman => "heckman",
         }
     }
 
