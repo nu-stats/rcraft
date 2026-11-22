@@ -1,4 +1,4 @@
-//! `frlink`, `frget` and `frval()` (P2C.12ar), as Stata 19 does them on
+//! `frlink`, `frget` and `frval()` (P2C.12ax), as Stata 19 does them on
 //! made-up data: `plan/stata/frlink.md`.
 //!
 //! A link variable holds, for each row, the row number of the linked frame

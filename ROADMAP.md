@@ -756,10 +756,10 @@ Round 6 (2026-11-20, the factor-variable leftovers): `areg` with interactions (`
   and `frame name { }`. Corpus `runiform_turns.do` (97), `egen_cut.do` (699), `frames_more.do` (23), all Stata 19's; notes
   `plan/stata/{egen-cut,frames-more,random-numbers}.md`.
   Measured: probes 80.2% -> 80.8% (23,278 -> 23,452 of 29,018 judged source lines), packages 94.7% unchanged. Refused then (the
-  frames, `egen cut()` and `describe` ones followed in P2C.12ar): two draws that are not plain `runiform()`s or two among the
+  frames, `egen cut()` and `describe` ones followed in P2C.12ax): two draws that are not plain `runiform()`s or two among the
   arguments of one function (Stata reads them last to first), a draw in both the value and the `if`, `frame` commands inside a
   frame prefix.)
-- P2C.12ar frlink, frget, frval(), egen cut by and types, describe with no data (2026-11-19, on top of P2C.12ap)
+- P2C.12ax frlink, frget, frval(), egen cut by and types, describe with no data (2026-11-19, on top of P2C.12ap)
   (done: `frlink 1:1` and `m:1` (one or more keys, other names for the linked frame's keys, `generate()`): the linked frame is
   sorted by its keys, the link holds row numbers, Stata's three notes; `frget` (`prefix()`, `suffix()`, `newvar = var`, the
   match variables skipped, label and format kept, Stata's missing-value and copied notes); `frval(link, var [, default])` in
