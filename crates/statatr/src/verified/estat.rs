@@ -1,1 +1,1 @@
-&["estat_fit", "estat_tests"]
+&["canon_discrim_mds", "estat_fit", "estat_tests"]
