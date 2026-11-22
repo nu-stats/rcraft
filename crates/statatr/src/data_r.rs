@@ -151,6 +151,7 @@ mod tstests;
 mod ttest;
 mod weights;
 mod winsor;
+mod winsor2;
 mod xi;
 mod xport;
 mod xt;
@@ -1678,6 +1679,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_codebook" => codebook::CODEBOOK_HELPER,
         "stata_center" => center::CENTER_HELPER,
         "stata_winsor" => winsor::WINSOR_HELPER,
+        "stata_winsor2" => winsor2::WINSOR2_HELPER,
         "stata_rangestat" => rangestat::RANGESTAT_HELPER,
         "stata_nsplit" => rangestat::NSPLIT_HELPER,
         "stata_alpha" => alpha::ALPHA_HELPER,
@@ -3014,6 +3016,7 @@ impl Session {
                 | "compress"
                 | "center"
                 | "winsor"
+                | "winsor2"
                 | "rangestat"
                 | "nsplit"
                 | "alpha"
@@ -3425,6 +3428,7 @@ impl Session {
             "codebook" => self.codebook(c, out),
             "center" => self.center(c, &opts, out),
             "winsor" => self.winsor(c, &opts, out),
+            "winsor2" => self.winsor2(c, &opts, out),
             "rangestat" => self.rangestat(c, &opts, out),
             "nsplit" => self.nsplit(c, &opts, out),
             "alpha" => self.alpha(c, &opts, out),
