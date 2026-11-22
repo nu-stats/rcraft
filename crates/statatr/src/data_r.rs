@@ -66,6 +66,7 @@ mod iv;
 mod ivprobit;
 mod kap;
 mod lasso;
+mod lpoly;
 mod lroc;
 mod lsfam;
 mod margins;
@@ -588,6 +589,7 @@ const BY_EACH: &[&str] = &[
 /// (collapse refuses them in its own words).
 const WEIGHTED: &[&str] = &[
     "cnsreg",
+    "lpoly",
     "logistic",
     "sureg",
     "areg",
@@ -963,6 +965,7 @@ const LEAVE_DATA_ALONE: &[&str] = &[
     "anovaplot",
     "histogram",
     "kdensity",
+    "lpoly",
     "qnorm",
     "pnorm",
     "rvfplot",
@@ -1701,6 +1704,7 @@ fn helper_code(name: &str) -> &'static str {
         "stata_sspace" => sspace::SSPACE_HELPER,
         "stata_xtdpd" => xtdpd::XTDPD_HELPER,
         "stata_npregress" => npregress::NPREGRESS_HELPER,
+        "stata_lpoly" => lpoly::LPOLY_HELPER,
         "stata_ivprobit" => ivprobit::IVPROBIT_HELPER,
         "stata_stepwise" => stepwise::STEPWISE_HELPER,
         "stata_nestreg" => nestreg::NESTREG_HELPER,
@@ -3472,6 +3476,7 @@ impl Session {
             "dfactor" => self.dfactor(c, &opts, out),
             "xtabond" | "xtdpdsys" | "xtdpd" => self.xtdpd(c, &opts, out),
             "npregress" => self.npregress(c, &opts, out),
+            "lpoly" => self.lpoly(c, &opts, out),
             "ivprobit" => self.ivprobit(c, &opts, out),
             "spset" => self.spset(c, &opts, out),
             "spmatrix" => self.spmatrix(c, &opts, out),

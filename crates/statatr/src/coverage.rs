@@ -372,6 +372,7 @@ const GRAPHS: &[&str] = &[
     "grstyle",
     "histogram",
     "kdensity",
+    "lpoly",
     "line",
     "lowess",
     "marginsplot",
