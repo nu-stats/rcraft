@@ -68,7 +68,7 @@ stata_cx_nmodel <- function(lo, hi, X1, w, kind, m = 0) {
 }
 # the fit: starting values as Stata's (tobit: least squares with the censored values at their limit,
 # sigma^2 = RSS/N; intreg: Olsen's, from the midpoints), the constant-only model, the full model
-stata_cx_nfit <- function(lo, hi, mid, X, w, fwk, kind, maxit, from = NULL) {
+stata_cx_nfit <- function(lo, hi, mid, X, w, fwk, kind, maxit, cmax = maxit, nocons = FALSE, from = NULL) {
   rows <- length(lo); k <- ncol(X)
   w0 <- if (is.null(w)) rep(1, rows) else w
   ws <- if (fwk || is.null(w)) w0 else w0 * rows / sum(w0)
@@ -76,28 +76,33 @@ stata_cx_nfit <- function(lo, hi, mid, X, w, fwk, kind, maxit, from = NULL) {
   mu <- sum(ws * mid) / n
   ss <- sum(ws * (mid - mu)^2)
   ones <- matrix(1, rows, 1)
-  mc <- if (kind == "tobit") 0 else mu
-  cmod <- stata_cx_nmodel(lo, hi, ones, w0, kind, mc)
-  cstart <- if (kind == "tobit") c(mu, ss / n) else c(0, 1 / sqrt(ss / (n - 1)))
-  cfit <- stata_cx_max(cmod$llf, cmod$derivs, cstart, maxit)
-  X1 <- cbind(X, 1)
+  mc <- if (kind == "tobit" || nocons) 0 else mu
+  cfit <- NULL
+  if (!nocons) {
+    cmod <- stata_cx_nmodel(lo, hi, ones, w0, kind, mc)
+    cstart <- if (kind == "tobit") c(mu, ss / n) else c(0, 1 / sqrt(ss / (n - 1)))
+    cfit <- stata_cx_max(cmod$llf, cmod$derivs, cstart, cmax)
+  }
+  X1 <- if (nocons) X else cbind(X, 1)
   b0 <- tryCatch(as.numeric(solve(crossprod(X1 * ws, X1), crossprod(X1 * ws, mid))), error = function(e) NULL)
   if (is.null(b0)) stop("RCraft: a model with collinear regressors is not translated yet", call. = FALSE)
   rss <- sum(ws * (mid - drop(X1 %*% b0))^2)
-  df <- if (kind == "tobit") n else n - k - 1
+  df <- if (kind == "tobit") n else n - ncol(X1)
   sigma <- sqrt(rss / df)
-  start <- if (kind == "tobit") c(b0, rss / df) else c(b0[seq_len(k)] / sigma, (b0[k + 1] - mu) / sigma, 1 / sigma)
+  start <- if (kind == "tobit") c(b0, rss / df) else if (nocons) c(b0 / sigma, 1 / sigma) else c(b0[seq_len(k)] / sigma, (b0[k + 1] - mu) / sigma, 1 / sigma)
   model <- stata_cx_nmodel(lo, hi, X1, w0, kind, mc)
+  if (!is.null(from)) start <- from(X1, ws, mid, n)
   if (!is.finite(model$llf(start))) stop("initial values not feasible (Stata: r(1400))", call. = FALSE)
   ll_start <- model$llf(start)
   m <- stata_cx_max(model$llf, model$derivs, start, maxit)
-  m$ll_start <- ll_start; m$ll_0 <- cfit$ll; m$cfit <- cfit; m$mu <- mu
+  m$ll_start <- ll_start; m$ll_0 <- if (is.null(cfit)) NULL else cfit$ll; m$cfit <- cfit; m$mu <- if (nocons) 0 else mu
   m
 }
 # tobit y x, ll(#) ul(#)
 stata_tobit <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wtype = NULL, robust = FALSE, cluster = NULL,
-                        level = 95, nolog = FALSE, maxit = 300, cmdline = "", show = TRUE) {
-  s <- stata_cx_setup(d, dep, terms, wvar = wvar, cluster = cluster)
+                        level = 95, nolog = FALSE, maxit = 300, cmdline = "", show = TRUE, offset = NULL, nocons = FALSE,
+                        from = NULL, from_skip = FALSE, from_copy = FALSE, stepwise = FALSE) {
+  s <- stata_cx_setup(d, dep, terms, wvar = wvar, cluster = cluster, offset = offset, nocons = nocons)
   mf <- s$mf; n <- s$n; X <- s$X; des <- s$des
   y <- stata_cx_num(mf[[dep]])
   w <- if (is.null(wvar)) NULL else stata_cx_num(mf[[wvar]])
@@ -111,7 +116,14 @@ stata_tobit <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wtype 
     else if (!is.null(hi_l) && y[i] >= hi_l) { lo[i] <- hi_l; hi[i] <- Inf }
   }
   mid <- ifelse(is.infinite(lo), hi, ifelse(is.infinite(hi), lo, y))
-  f <- stata_cx_nfit(lo, hi, mid, X, w, fwk, "tobit", maxit)
+  # an offset: y - offset is what the regressors explain, the limits move with it
+  if (!is.null(s$off)) { lo <- lo - s$off; hi <- hi - s$off; mid <- mid - s$off }
+  if (!is.null(from) && from_copy) stop("invalid from() option;\noption copy not allowed (Stata: r(198))", call. = FALSE)
+  fromf <- NULL
+  if (!is.null(from)) fromf <- function(X1, ws, mid, n) stata_cx_from(from, des, dep, from_skip, from_copy, X1, ws, mid, n)
+  # the command has begun its output with a blank line when from() makes it stop
+  f <- tryCatch(stata_cx_nfit(lo, hi, mid, X, w, fwk, "tobit", maxit, nocons = nocons, from = fromf),
+                error = function(err) { if (!is.null(from) && show) cat("\n"); stop(err) })
   k <- ncol(X)
   cl <- if (is.null(cluster)) NULL else mf[[cluster]]
   V <- stata_cx_vcov(f, robust, w, fwk, cl)
@@ -141,6 +153,8 @@ stata_tobit <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wtype 
                    p = stats::pf(fstat, k, df_r, lower.tail = FALSE), F = fstat, df_m = k, ll_0 = f$ll_0, r2_p = 1 - f$ll / f$ll_0, df_r = df_r))
   }
   e$cmdline <- cmdline
+  if (stepwise) e$stepwise <- "stepwise"
+  if (!is.null(offset)) { e$offset <- offset; e$offset1 <- offset }
   e$marginsok <- "default XB Pr(passthru) E(passthru) YStar(passthru)"
   if (!is.null(lo_l)) e$llopt <- stata_fmt(lo_l, "%9.0g", trim = TRUE)
   if (!is.null(hi_l)) e$ulopt <- stata_fmt(hi_l, "%9.0g", trim = TRUE)
@@ -171,7 +185,7 @@ stata_tobit <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wtype 
   attr(e, "stata_V") <- { Vn <- V[keep, keep, drop = FALSE]; dimnames(Vn) <- list(rname, rname); Vn }
   attr(e, "stata_areg") <- list(fo = des$fo, xlev = des$xlev, nmx = des$nmx)
   attr(e, "stata_disp") <- list(lo = lo_l, hi = hi_l, N = N, unc = unc, lc = lc, rc = rc, robust = robust, G = G, cluster = cluster,
-                                df_r = df_r, k = k, lr = lr, fstat = fstat, wvar = wvar, full = des$full, nmx = des$nmx)
+                                df_r = df_r, k = k, lr = lr, fstat = fstat, wvar = wvar, full = des$full, nmx = des$nmx, offset = offset)
   if (show) {
     if (!nolog) {
       cat("\n")
@@ -196,7 +210,7 @@ stata_tobit_show <- function(e, level = 95, data = NULL) {
   cat(sprintf("%-52s%s\n", paste0("        Upper = ", formatC(ht, width = w)), stata_cx_head_count("Right-censored", cnt(a$rc))))
   cat("\n")
   k <- a$k
-  if (a$robust) {
+  if (a$robust || isTRUE(a$ftest)) {
     cat(strrep(" ", 52), stata_cx_head_right(sprintf("F(%d, %s)", k, stata_fmt(a$df_r, "%9.0g", trim = TRUE)), sprintf("%.2f", a$fstat)), "\n", sep = "")
     cat(strrep(" ", 52), stata_cx_head_right("Prob > F", sprintf("%.4f", e$p)), "\n", sep = "")
   } else {
@@ -207,20 +221,22 @@ stata_tobit_show <- function(e, level = 95, data = NULL) {
   cat(sprintf("%-52s%s\n", paste0(lab, " = ", stata_fmt(e$ll, "%10.0g", trim = TRUE)), stata_cx_head_right("Pseudo R2", sprintf("%.4f", e$r2_p))))
   cat("\n")
   stata_cx_note_clusters(a$G, a$cluster)
+  if (isTRUE(a$nocons)) cat(" ( 1)  [", dep, "]_cons = 0\n", sep = "")
   stata_cx_rule()
   if (a$robust) cat(strrep(" ", 13), "|               Robust\n", sep = "")
   cat(stata_tab_pad(stata_tab_abbrev(dep, 12), 12), " | Coefficient  ", if (a$robust) "std. err." else "Std. err.", "      t    P>|t|     [",
       stata_fmt(level, "%9.0g", trim = TRUE), "% conf. interval]\n", sep = "")
   stata_cx_rule2()
-  keep <- seq_len(k + 1)
-  nm <- c(a$nmx, "_cons")
+  nm <- if (isTRUE(a$nocons)) a$nmx else c(a$nmx, "_cons")
   b <- attr(e, "stata_b"); V <- attr(e, "stata_V")
-  stata_cx_rows(nm, as.numeric(b), sqrt(diag(V)), "t", a$df_r, level, data)
+  stata_cx_rows(nm, as.numeric(b), sqrt(diag(V)), "t", a$df_r, level, data, offset = a$offset)
+  if (isTRUE(a$nocons)) cat(stata_tab_pad("_cons", 12), " |", stata_tab_pad("0", 11), "  (omitted)\n", sep = "")
   stata_cx_rule2()
   nb <- length(e$b); v <- e$b[1, nb]; se <- sqrt(e$V[nb, nb])
   crit <- stats::qt((1 + level / 100) / 2, a$df_r); half <- crit * se / v
   stata_cx_plain(stata_tab_abbrev(paste0("var(e.", dep, ")"), 13), v, se, v * exp(-half), v * exp(half))
   stata_cx_rule()
+  stata_cx_warn(e)
   invisible(NULL)
 }
 stata_tobit_replay <- function(level = 95, data = NULL) {
@@ -232,8 +248,10 @@ stata_tobit_predict <- function(e, d, what, a = NULL, b = NULL) {
   ar <- attr(e, "stata_areg"); bb <- attr(e, "stata_b")
   mf <- stats::model.frame(ar$fo, d, xlev = ar$xlev, na.action = stats::na.pass)
   X <- stats::model.matrix(ar$fo, mf); X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
-  X1 <- cbind(X, 1)
+  X1 <- if (isTRUE(ar$nocons)) X else cbind(X, 1)
   xb <- drop(X1 %*% bb)
+  of <- if (!is.null(e$offset)) e$offset else e$offset1
+  if (!is.null(of)) xb <- xb + stata_cx_num(d[[of]])
   if (what == "xb") return(xb)
   stdp <- sqrt(rowSums((X1 %*% attr(e, "stata_V")) * X1))
   if (what == "stdp") return(stdp)
@@ -250,31 +268,33 @@ stata_tobit_predict <- function(e, d, what, a = NULL, b = NULL) {
 }
 # intreg lo hi x: lo missing is left-censored at hi, hi missing is right-censored at lo, equal is exact
 stata_intreg <- function(d, lo, hi, terms, wvar = NULL, wtype = NULL, robust = FALSE, cluster = NULL,
-                         level = 95, nolog = FALSE, maxit = 300, cmdline = "", show = TRUE) {
+                         level = 95, nolog = FALSE, maxit = 300, cmdline = "", show = TRUE, offset = NULL, nocons = FALSE) {
   tv <- stata_cx_vars(terms)
-  stata_cx_check(d, c(lo, hi, tv, wvar, cluster))
-  vars <- unique(c(tv, wvar, cluster))
+  stata_cx_check(d, c(lo, hi, tv, wvar, cluster, offset))
+  vars <- unique(c(tv, wvar, cluster, offset))
   ok <- stats::complete.cases(d[vars]) & !(is.na(d[[lo]]) & is.na(d[[hi]]))
   if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
   rows <- which(ok); mf <- d[rows, , drop = FALSE]; n <- nrow(mf)
-  des <- stata_cx_design(mf, terms)
-  if (qr(cbind(des$X, 1))$rank < ncol(des$X) + 1) stop("RCraft: a model with collinear regressors is not translated yet", call. = FALSE)
-  X <- des$X; k <- ncol(X)
+  des <- stata_cx_design(mf, terms, nocons)
+  if (qr(if (nocons) des$X else cbind(des$X, 1))$rank < ncol(des$X) + !nocons) stop("RCraft: a model with collinear regressors is not translated yet", call. = FALSE)
+  X <- des$X; k <- ncol(X); nc <- if (nocons) 0 else 1
   l <- stata_cx_num(mf[[lo]]); h <- stata_cx_num(mf[[hi]])
   if (any(!is.na(l) & !is.na(h) & l > h)) stop(sprintf("observations with %s > %s not allowed (Stata: r(498))", lo, hi), call. = FALSE)
   w <- if (is.null(wvar)) NULL else stata_cx_num(mf[[wvar]])
   fwk <- identical(wtype, "f")
   blo <- ifelse(is.na(l), -Inf, l); bhi <- ifelse(is.na(h), Inf, h)
   mid <- ifelse(is.na(l), h, ifelse(is.na(h), l, (l + h) / 2))
-  f <- stata_cx_nfit(blo, bhi, mid, X, w, fwk, "intreg", maxit)
+  off <- if (is.null(offset)) NULL else stata_cx_num(mf[[offset]])
+  if (!is.null(off)) { blo <- blo - off; bhi <- bhi - off; mid <- mid - off }
+  f <- stata_cx_nfit(blo, bhi, mid, X, w, fwk, "intreg", maxit, nocons = nocons)
   cl <- if (is.null(cluster)) NULL else mf[[cluster]]
   Vo <- stata_cx_vcov(f, robust, w, fwk, cl)
-  m <- f$mu; p <- f$b; tau <- p[k + 2]
+  m <- f$mu; p <- f$b; ns <- k + nc + 1; tau <- p[ns]
   # Olsen's (delta, delta0, tau) back to (beta, constant, ln sigma), the variance by the delta method
-  b <- c(p[seq_len(k)] / tau, p[k + 1] / tau + m, -log(tau))
-  J <- matrix(0, k + 2, k + 2)
-  for (j in 1:(k + 1)) { J[j, j] <- 1 / tau; J[j, k + 2] <- -p[j] / tau^2 }
-  J[k + 2, k + 2] <- -1 / tau
+  b <- c(p[seq_len(k)] / tau, if (!nocons) p[k + 1] / tau + m, -log(tau))
+  J <- matrix(0, ns, ns)
+  for (j in seq_len(k + nc)) { J[j, j] <- 1 / tau; J[j, ns] <- -p[j] / tau^2 }
+  J[ns, ns] <- -1 / tau
   V <- J %*% Vo %*% t(J); Vm <- J %*% f$inv %*% t(J)
   cnt <- function(sel) if (fwk) sum(w[sel]) else sum(sel)
   N <- cnt(rep(TRUE, n)); unc <- cnt(is.finite(blo) & is.finite(bhi) & blo == bhi)
@@ -282,19 +302,23 @@ stata_intreg <- function(d, lo, hi, terms, wvar = NULL, wtype = NULL, robust = F
   G <- if (is.null(cl)) NULL else length(unique(cl))
   kk <- length(des$full) + 1
   nbase <- sum(grepl("[0-9]b\\.", des$full))
-  stat <- if (robust) sum(b[seq_len(k)] * solve(V[seq_len(k), seq_len(k), drop = FALSE], b[seq_len(k)])) else 2 * (f$ll - f$ll_0)
+  wald <- robust || nocons
+  stat <- if (wald) sum(b[seq_len(k)] * solve(V[seq_len(k), seq_len(k), drop = FALSE], b[seq_len(k)])) else 2 * (f$ll - f$ll_0)
   pv <- stats::pchisq(stat, k, lower.tail = FALSE)
-  sigma <- exp(b[k + 2]); sesig <- sigma * sqrt(V[k + 2, k + 2])
+  sigma <- exp(b[ns]); sesig <- sigma * sqrt(V[ns, ns])
   e <- list(rank = kk - nbase, N = N, ic = length(f$log) - 1, k = kk, k_eq = 2, k_dv = 2, converged = as.numeric(f$converged), rc = 0)
   if (!is.null(G)) e$N_clust <- G
-  e <- c(e, list(ll = f$ll, k_eq_model = 1, ll_0 = f$ll_0, rank0 = 2, df_m = k, chi2 = stat, p = pv, N_unc = unc))
+  e <- c(e, list(ll = f$ll, k_eq_model = 1))
+  if (!nocons) e <- c(e, list(ll_0 = f$ll_0, rank0 = 2))
+  e <- c(e, list(df_m = k, chi2 = stat, p = pv, N_unc = unc))
   if (is.null(G)) e$N_lc <- lc
   e <- c(e, list(k_aux = 1, se_sigma = sesig, sigma = sigma, N_int = nint, N_rc = rc))
   if (!is.null(G)) e$N_lc <- lc
   e$cmdline <- cmdline; e$cmd <- "intreg"; e$ml_score <- "intrg_ll2"; e$depvar <- paste(lo, hi); e$title <- "Interval regression"
   e$marginsok <- "default XB Pr(passthru) E(passthru) YStar(passthru)"; e$predict <- "intreg_p"
+  if (!is.null(offset)) e$offset <- offset
   if (!is.null(wvar)) { e$wexp <- paste("=", wvar); e$wtype <- c(f = "fweight", p = "pweight", i = "iweight")[[wtype]] }
-  e$chi2type <- if (robust) "Wald" else "LR"
+  e$chi2type <- if (wald) "Wald" else "LR"
   e$deriv_useminbound <- "off"; e$opt <- "moptimize"
   if (robust) { e$vcetype <- "Robust"; if (!is.null(cluster)) e$clustvar <- cluster }
   e$vce <- if (!is.null(cluster)) "cluster" else if (robust) "robust" else "oim"
@@ -313,13 +337,13 @@ stata_intreg <- function(d, lo, hi, terms, wvar = NULL, wtype = NULL, robust = F
   e$ilog <- matrix(ilog, 1, 20, dimnames = list("r1", paste0("c", 1:20)))
   e$gradient <- matrix(gF, 1, nfull, dimnames = list("r1", cn))
   attr(e, "stata_rows") <- rows
-  rname <- sub("^_cons$", "(Intercept)", c(des$nmx, "_cons"))
-  keep <- seq_len(k + 1)
+  rname <- sub("^_cons$", "(Intercept)", c(des$nmx, if (!nocons) "_cons"))
+  keep <- seq_len(k + nc)
   attr(e, "stata_b") <- stats::setNames(b[keep], rname)
   attr(e, "stata_V") <- { Vn <- V[keep, keep, drop = FALSE]; dimnames(Vn) <- list(rname, rname); Vn }
-  attr(e, "stata_areg") <- list(fo = des$fo, xlev = des$xlev, nmx = des$nmx)
-  attr(e, "stata_disp") <- list(N = N, unc = unc, lc = lc, rc = rc, nint = nint, robust = robust, G = G, cluster = cluster,
-                                k = k, stat = stat, nmx = des$nmx)
+  attr(e, "stata_areg") <- list(fo = des$fo, xlev = des$xlev, nmx = des$nmx, nocons = nocons)
+  attr(e, "stata_disp") <- list(N = N, unc = unc, lc = lc, rc = rc, nint = nint, robust = robust, wald = wald, nocons = nocons, G = G, cluster = cluster,
+                                k = k, stat = stat, nmx = des$nmx, offset = offset)
   if (show) {
     if (!nolog) {
       cat("\nFitting constant-only model:\n\n")
@@ -341,7 +365,7 @@ stata_intreg_show <- function(e, level = 95, data = NULL) {
   cat(strrep(" ", 52), stata_cx_head_count("Right-censored", cnt(a$rc)), "\n", sep = "")
   cat(strrep(" ", 52), stata_cx_head_count("Interval-cens.", cnt(a$nint)), "\n", sep = "")
   cat("\n")
-  cat(strrep(" ", 52), stata_cx_head_right(sprintf("%s chi2(%d)", if (a$robust) "Wald" else "LR", k), sprintf("%.2f", a$stat)), "\n", sep = "")
+  cat(strrep(" ", 52), stata_cx_head_right(sprintf("%s chi2(%d)", if (isTRUE(a$wald)) "Wald" else "LR", k), sprintf("%.2f", a$stat)), "\n", sep = "")
   lab <- if (a$robust) "Log pseudolikelihood" else "Log likelihood"
   cat(sprintf("%-52s%s\n", paste0(lab, " = ", stata_fmt(e$ll, "%10.0g", trim = TRUE)), stata_cx_head_right("Prob > chi2", sprintf("%.4f", e$p))))
   cat("\n")
@@ -352,7 +376,7 @@ stata_intreg_show <- function(e, level = 95, data = NULL) {
       stata_fmt(level, "%9.0g", trim = TRUE), "% conf. interval]\n", sep = "")
   stata_cx_rule2()
   b <- attr(e, "stata_b"); V <- attr(e, "stata_V")
-  stata_cx_rows(c(a$nmx, "_cons"), as.numeric(b), sqrt(diag(V)), "z", Inf, level, data)
+  stata_cx_rows(c(a$nmx, if (!a$nocons) "_cons"), as.numeric(b), sqrt(diag(V)), "z", Inf, level, data, offset = a$offset)
   stata_cx_rule2()
   nb <- length(e$b); ls <- e$b[1, nb]; se <- sqrt(e$V[nb, nb])
   stata_cx_aux("/lnsigma", ls, se, "z", Inf, level)
@@ -360,9 +384,37 @@ stata_intreg_show <- function(e, level = 95, data = NULL) {
   crit <- stats::qnorm((1 + level / 100) / 2)
   stata_cx_plain("sigma", exp(ls), exp(ls) * se, exp(ls - crit * se), exp(ls + crit * se), wide = FALSE)
   stata_cx_rule()
+  stata_cx_warn(e)
   invisible(NULL)
 }
 stata_intreg_replay <- function(level = 95, data = NULL) {
   if (!identical(stata_e$cmd, "intreg")) stop("last estimates not found (Stata: r(301))", call. = FALSE)
   stata_intreg_show(stata_e, level, if (exists("stata_data")) stata_data else data)
+}
+# tobit's from(matrix [, skip copy]): the vector's columns matched to the model's parameters by name (a column with no equation
+# belongs to the first one); parameters it does not name start at 0, except sigma^2, which is the mean squared residual at
+# the given coefficients
+stata_cx_from <- function(m, des, dep, skip, copy, X1, ws, mid, n) {
+  m <- as.matrix(m)
+  vals <- as.numeric(m[1, ])
+  pn <- c(paste0(dep, ":", des$full), paste0("/:var(e.", dep, ")"))
+  isbase <- grepl("[0-9]b\\.", c(des$full, ""))
+  out <- rep(NA_real_, length(pn))
+    out <- rep(NA_real_, length(pn))
+    cn <- colnames(m); if (is.null(cn)) cn <- paste0("c", seq_along(vals))
+    for (j in seq_along(vals)) {
+      nm <- cn[j]
+      full <- if (grepl(":", nm, fixed = TRUE)) nm else paste0(dep, ":", nm)
+      i <- match(full, pn)
+      if (is.na(i)) { if (!skip) stop(sprintf("initial vector: extra parameter %s found\nspecify skip option if necessary (Stata: r(111))", nm), call. = FALSE) }
+      else out[i] <- vals[j]
+    }
+  if (all(is.na(out))) stop("tobit from() naming none of the model's parameters starts at zeros, whose path Stata takes differently (one iteration more here); not translated", call. = FALSE)
+  keep <- which(!isbase)
+  out <- out[keep]
+  nk <- length(out)
+  b <- ifelse(is.na(out[-nk]), 0, out[-nk])
+  v <- out[nk]
+  if (is.na(v)) v <- sum(ws * (mid - drop(X1 %*% b))^2) / n
+  c(b, v)
 }

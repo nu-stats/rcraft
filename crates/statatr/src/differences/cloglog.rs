@@ -8,6 +8,7 @@ Guide {
              the iteration count, LR or Wald test, e(ll_0), eform, fweights, pweights, iweights (aweights stop as \
              Stata stops, r(101)), robust, clustered, replay, predict pr and xb.",
         ),
-        p("Not yet", "factor variables, from(), offset, noconstant."),
+        p("As Stata 19 (options)", "noconstant (a Wald test), offset(), iterate()."),
+        p("Not yet", "factor variables, from(), constraints()."),
     ],
 }

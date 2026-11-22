@@ -40,8 +40,8 @@ stata_cx_truncmodel <- function(y, X1, w, lo, hi) {
   list(llf = llf, derivs = derivs)
 }
 stata_truncreg <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wtype = NULL, robust = FALSE, cluster = NULL,
-                           level = 95, nolog = FALSE, maxit = 300, cmdline = "", show = TRUE) {
-  s <- stata_cx_setup(d, dep, terms, wvar = wvar, cluster = cluster)
+                           level = 95, nolog = FALSE, maxit = 300, cmdline = "", show = TRUE, offset = NULL, nocons = FALSE) {
+  s <- stata_cx_setup(d, dep, terms, wvar = wvar, cluster = cluster, offset = offset, nocons = nocons)
   mf <- s$mf; X <- s$X; des <- s$des
   y <- stata_cx_num(mf[[dep]])
   w0 <- if (is.null(wvar)) rep(1, nrow(mf)) else stata_cx_num(mf[[wvar]])
@@ -57,19 +57,26 @@ stata_truncreg <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wty
   rows_all <- s$rows
   rows <- rows_all[keep]
   mf <- mf[keep, , drop = FALSE]; X <- X[keep, , drop = FALSE]; y <- y[keep]; w0 <- w0[keep]
+  # an offset: y - offset is what the regressors explain, the limits move with it
+  offv <- if (is.null(s$off)) rep(0, length(y)) else s$off[keep]
+  lov <- if (is.null(lo)) NULL else lo - offv
+  hiv <- if (is.null(hi)) NULL else hi - offv
+  y <- y - offv
   cl <- if (is.null(cluster)) NULL else mf[[cluster]]
   w <- if (identical(wtype, "a")) w0 * length(y) / sum(w0) else w0
   if (identical(wtype, "a") && show) cat("(sum of wgt is ", stata_fmt(sum(w0), "%18.0g", trim = TRUE), ")\n", sep = "")
   if (show) cat("(", format(ntrunc, scientific = FALSE), " obs truncated)\n", sep = "")
-  k <- ncol(X); X1 <- cbind(X, 1)
+  k <- ncol(X); nc <- if (nocons) 0 else 1; X1 <- if (nocons) X else cbind(X, 1)
   # the start: least squares on the rows kept, sigma at the root mean squared error
   wn <- sum(w)
   b0 <- tryCatch(as.numeric(solve(crossprod(X1 * w, X1), crossprod(X1 * w, y))), error = function(e) NULL)
   if (is.null(b0)) stop("RCraft: a model with collinear regressors is not translated yet", call. = FALSE)
   rss <- sum(w * (y - drop(X1 %*% b0))^2)
-  start <- c(b0, sqrt(rss / (wn - k - 1)))
-  model <- stata_cx_truncmodel(y, X1, w, lo, hi)
+  start <- c(b0, sqrt(rss / (wn - ncol(X1))))
+  model <- stata_cx_truncmodel(y, X1, w, lov, hiv)
   f <- stata_cx_max(model$llf, model$derivs, start, maxit)
+  # Stata's numerical derivatives and our exact ones agree where the search ends, not on the way there
+  if (!f$converged) stop("truncreg stopped before it converged: Stata's unconverged estimates come from numerical derivatives and are not reproduced (try iterate() larger)", call. = FALSE)
   rob <- robust
   V <- stata_cx_vcov(f, rob, w, fwk, cl)
   Vm <- f$inv
@@ -78,10 +85,10 @@ stata_truncreg <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wty
   nbf <- N + ntrunc
   G <- if (is.null(cl)) NULL else length(unique(cl))
   chi2 <- sum(b[seq_len(k)] * solve(V[seq_len(k), seq_len(k), drop = FALSE], b[seq_len(k)]))
-  e <- list(rank = k + 2, N = N, ic = length(f$log) - 1, k_eq = 2, converged = as.numeric(f$converged), rc = 0)
+  e <- list(rank = k + nc + 1, N = N, ic = length(f$log) - 1, k_eq = 2, converged = as.numeric(f$converged), rc = 0)
   if (!is.null(G)) e$N_clust <- G
   e <- c(e, list(ll = f$ll, k_eq_model = 1, df_m = k, chi2 = chi2, p = stats::pchisq(chi2, k, lower.tail = FALSE), N_bf = nbf,
-                 sigma = b[k + 2], k_aux = 1))
+                 sigma = b[k + nc + 1], k_aux = 1))
   e$cmdline <- cmdline; e$cmd <- "truncreg"
   if (!is.null(lo)) e$llopt <- stata_fmt(lo, "%9.0g", trim = TRUE)
   if (!is.null(hi)) e$ulopt <- stata_fmt(hi, "%9.0g", trim = TRUE)
@@ -90,23 +97,25 @@ stata_truncreg <- function(d, dep, terms, ll = NULL, ul = NULL, wvar = NULL, wty
   if (!is.null(wvar)) { e$wtype <- c(f = "fweight", p = "pweight", i = "iweight", a = "aweight")[[wtype]]; e$wexp <- paste("=", wvar) }
   if (rob) { e$vcetype <- "Robust"; if (!is.null(cluster)) e$clustvar <- cluster }
   e$vce <- if (!is.null(cluster)) "cluster" else if (rob) "robust" else "oim"
-  e$title <- "Truncated regression"; e$user <- "trunc_ll"; e$ml_method <- "lf"; e$technique <- "nr"; e$which <- "max"
+  e$title <- "Truncated regression"; e$user <- "trunc_ll"
+  if (!is.null(offset)) e$offset1 <- offset
+  e$ml_method <- "lf"; e$technique <- "nr"; e$which <- "max"
   e$depvar <- dep; e$properties <- "b V"
-  cn <- c(paste0(dep, ":", c(des$nmx, "_cons")), "sigma:_cons")
-  e$b <- matrix(b, 1, k + 2, dimnames = list("y1", cn)); e$V <- matrix(V, k + 2, k + 2, dimnames = list(cn, cn))
-  if (rob) e$V_modelbased <- matrix(Vm, k + 2, k + 2, dimnames = list(cn, cn))
+  cn <- c(paste0(dep, ":", c(des$nmx, if (!nocons) "_cons")), "sigma:_cons")
+  e$b <- matrix(b, 1, k + nc + 1, dimnames = list("y1", cn)); e$V <- matrix(V, k + nc + 1, k + nc + 1, dimnames = list(cn, cn))
+  if (rob) e$V_modelbased <- matrix(Vm, k + nc + 1, k + nc + 1, dimnames = list(cn, cn))
   e$means <- matrix(colSums(X * w) / sum(w), 1, k, dimnames = list("r1", des$nmx))
   e$dummy <- matrix(0, 1, k, dimnames = list("r1", des$nmx))
   ilog <- numeric(20); mm <- min(20, length(f$log)); ilog[seq_len(mm)] <- f$log[seq_len(mm)]
   e$ilog <- matrix(ilog, 1, 20, dimnames = list("r1", paste0("c", 1:20)))
-  e$gradient <- matrix(f$g, 1, k + 2, dimnames = list("r1", cn))
+  e$gradient <- matrix(f$g, 1, k + nc + 1, dimnames = list("r1", cn))
   attr(e, "stata_rows") <- rows
-  rname <- sub("^_cons$", "(Intercept)", c(des$nmx, "_cons"))
-  keep1 <- seq_len(k + 1)
+  rname <- sub("^_cons$", "(Intercept)", c(des$nmx, if (!nocons) "_cons"))
+  keep1 <- seq_len(k + nc)
   attr(e, "stata_b") <- stats::setNames(b[keep1], rname)
   attr(e, "stata_V") <- { Vn <- V[keep1, keep1, drop = FALSE]; dimnames(Vn) <- list(rname, rname); Vn }
-  attr(e, "stata_areg") <- list(fo = des$fo, xlev = des$xlev, nmx = des$nmx)
-  attr(e, "stata_disp") <- list(lo = lo, hi = hi, N = N, robust = rob, G = G, cluster = cluster, k = k, nmx = des$nmx, chi2 = chi2)
+  attr(e, "stata_areg") <- list(fo = des$fo, xlev = des$xlev, nmx = des$nmx, nocons = nocons)
+  attr(e, "stata_disp") <- list(lo = lo, hi = hi, N = N, robust = rob, G = G, cluster = cluster, k = k, nmx = des$nmx, chi2 = chi2, offset = offset, nocons = nocons)
   if (show) {
     cat("\n")
     if (!nolog) { cat("Fitting full model:\n\n"); stata_cx_log(f, if (rob) "Log pseudolikelihood" else "Log likelihood"); cat("\n") }
@@ -132,11 +141,12 @@ stata_truncreg_show <- function(e, level = 95, data = NULL) {
       stata_fmt(level, "%9.0g", trim = TRUE), "% conf. interval]\n", sep = "")
   stata_cx_rule2()
   b <- attr(e, "stata_b"); V <- attr(e, "stata_V")
-  stata_cx_rows(c(a$nmx, "_cons"), as.numeric(b), sqrt(diag(V)), "z", Inf, level, data)
+  stata_cx_rows(c(a$nmx, if (!isTRUE(a$nocons)) "_cons"), as.numeric(b), sqrt(diag(V)), "z", Inf, level, data, offset = a$offset)
   stata_cx_rule2()
   nb <- length(e$b)
   stata_cx_aux("/sigma", e$b[1, nb], sqrt(e$V[nb, nb]), "z", Inf, level)
   stata_cx_rule()
+  stata_cx_warn(e)
   invisible(NULL)
 }
 stata_truncreg_replay <- function(level = 95, data = NULL) {

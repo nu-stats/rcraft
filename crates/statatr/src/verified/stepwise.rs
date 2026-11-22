@@ -5,4 +5,5 @@
     "stepwise_glm",
     "stepwise_weights",
     "stepwise_weights_glm",
+    "tobit_select",
 ]

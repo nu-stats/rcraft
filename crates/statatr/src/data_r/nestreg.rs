@@ -22,6 +22,16 @@ pub(super) const NESTREG_HELPER: &str = r##"stata_nr_start <- function(d, vars) 
 }
 # after a block's model is fitted: the Wald test of the block's variables in it, and what the tables use
 stata_nr_block <- function(vars_in_model, block_vars, kind) {
+  if (kind == "tobit") {
+    # the block's columns are found by name among e(b)'s; the test is F on e(df_r)
+    b <- stata_b; V <- as.matrix(stata_vcov); e <- stata_e
+    cols <- match(block_vars, names(b))
+    bk <- unname(b[cols])
+    W <- drop(crossprod(bk, solve(unname(V[cols, cols, drop = FALSE]), bk)))
+    stata_nr[[length(stata_nr) + 1]] <<- list(W = W, q = length(cols), df_r = e$df_r, r2 = NA_real_,
+      ll = e$ll, ll0 = e$ll_0, df_m = e$df_m, rank = e$rank, N = e$N)
+    return(invisible(NULL))
+  }
   fit <- stata_estimates
   b <- stata_b
   if (anyNA(b)) stop("nestreg: the variables are collinear, where Stata leaves some out with a note; not translated", call. = FALSE)
@@ -81,6 +91,14 @@ stata_nr_end <- function(kind, show_wald, show_lr, quiet, show) {
                       lapply(seq_len(k), function(i) c(first(i), cell(Fv[i], 8, "%.2f"), cell(q[i], 7, "%d"), cell(df_r[i], 10, "%d"),
                                                        cell(p[i], 9, "%6.4f"), cell(r2[i], 9, "%6.4f"),
                                                        if (i == 1) txt("", 9) else cell(dr2[i], 9, "%6.4f"))))
+    } else if (kind == "tobit") {
+      df_r <- g(function(x) x$df_r); Fv <- W / q; p <- stats::pf(Fv, q, df_r, lower.tail = FALSE)
+      m <- cbind(F = Fv, df_block = q, df_r = df_r, pvalue = p)
+      w <- c(8, 7, 10, 9)
+      out$wald <- box(w, list(c("       ", txt("", 8), txt("Block", 7), txt("Residual", 10), txt("", 9)),
+                              c(" Block ", txt("F", 8), txt("df", 7), txt("df", 10), txt("Pr > F", 9))),
+                      lapply(seq_len(k), function(i) c(first(i), cell(Fv[i], 8, "%.2f"), cell(q[i], 7, "%d"), cell(df_r[i], 10, "%d"),
+                                                       cell(p[i], 9, "%6.4f"))))
     } else {
       p <- stats::pchisq(W, q, lower.tail = FALSE)
       m <- cbind(`Wald chi2` = W, df_block = q, pvalue = p)
@@ -144,7 +162,7 @@ impl Session {
         if kind == "summarize" {
             return self.nr_fail(out, "summarize is not supported by nestreg", 199);
         }
-        if !matches!(kind, "regress" | "logit" | "probit" | "poisson") {
+        if !matches!(kind, "regress" | "logit" | "probit" | "poisson" | "tobit") {
             return Err(no(format!("nestreg with {kind} is not translated")));
         }
         self.no_by(c, "nestreg")?;
@@ -163,7 +181,17 @@ impl Session {
             return self.nr_fail(out, &format!("option {o} not allowed"), 198);
         }
         let opts = Opts(&c.options);
-        let known: &[(&str, usize)] = if kind == "regress" {
+        let known: &[(&str, usize)] = if kind == "tobit" {
+            &[
+                ("level", 3),
+                ("ll", 2),
+                ("ul", 2),
+                ("vce", 3),
+                ("robust", 1),
+                ("cluster", 2),
+                ("nolog", 3),
+            ]
+        } else if kind == "regress" {
             &[("level", 3), ("vce", 3), ("robust", 1), ("cluster", 2)]
         } else {
             &[("level", 3)]
@@ -231,6 +259,10 @@ impl Session {
         };
         for h in ["stata_nestreg", "stata_fmt"] {
             self.helpers.insert(h);
+        }
+        if kind == "tobit" {
+            self.helpers.insert("stata_cx");
+            self.helpers.insert("stata_tobit");
         }
         let mut vars = vec![dep.to_string()];
         vars.extend(flat.iter().map(|v| (*v).to_string()));

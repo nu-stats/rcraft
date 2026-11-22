@@ -1,1 +1,1 @@
-&["nestreg", "nestreg_glm"]
+&["nestreg", "nestreg_glm", "tobit_select"]

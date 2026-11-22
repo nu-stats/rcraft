@@ -1,1 +1,1 @@
-&["tobit"]
+&["tobit", "tobit_select"]

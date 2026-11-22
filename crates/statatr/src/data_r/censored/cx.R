@@ -82,10 +82,14 @@ stata_cx_vcov <- function(m, robust, w = NULL, fw = FALSE, cluster = NULL) {
 stata_cx_log <- function(m, label = "Log likelihood") {
   for (i in seq_along(m$log)) cat(formatC(paste0("Iteration ", i - 1, ":"), width = -13), " ", label, " = ", stata_cx_g10(m$log[i]),
                                   "  ", m$flags[i], "\n", sep = "")
+  if (!isTRUE(m$converged)) cat("convergence not achieved\n")
 }
+stata_cx_warn <- function(e) if (isTRUE(e$converged == 0)) cat("Warning: Convergence not achieved.\n")
+# the offset's row: coefficient fixed at 1
+stata_cx_offrow <- function(offset) if (!is.null(offset)) cat(stata_tab_pad(stata_tab_abbrev(offset, 12), 12), " |", stata_tab_pad("1", 11), "  (offset)\n", sep = "")
 # the explanatory columns: model.matrix of the terms (factor(g) for i.g), Stata's names (1b.g, 2.g), the
 # base-level columns Stata keeps as zeros in e(b)
-stata_cx_design <- function(mf, terms) {
+stata_cx_design <- function(mf, terms, nocons = FALSE) {
   fo <- stats::as.formula(paste("~", paste(terms, collapse = " + ")))
   X <- stats::model.matrix(fo, mf)
   X <- X[, colnames(X) != "(Intercept)", drop = FALSE]
@@ -102,14 +106,14 @@ stata_cx_design <- function(mf, terms) {
     }
     full <- c(full, nmx[j])
   }
-  list(X = X, fo = fo, xlev = xlev, nmx = nmx, full = c(full, "_cons"))
+  list(X = X, fo = fo, xlev = xlev, nmx = nmx, full = if (nocons) full else c(full, "_cons"))
 }
 stata_cx_num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
 # the data's variables the terms use
 stata_cx_vars <- function(terms) setdiff(unique(unlist(regmatches(terms, gregexpr("[A-Za-z_][A-Za-z0-9_]*", terms)))), "factor")
 stata_cx_check <- function(d, vars) for (v in unique(vars)) if (!v %in% names(d)) stop("variable ", v, " not found (Stata: r(111))", call. = FALSE)
 # the rows of coefficients, as stata_coef_rows lays them out; z or t tests, exponentiated with eform
-stata_cx_rows <- function(nm, b, se, test, df, level, data, eform = FALSE) {
+stata_cx_rows <- function(nm, b, se, test, df, level, data, eform = FALSE, offset = NULL) {
   pad <- stata_tab_pad
   rows <- stata_coef_rows(nm, data)
   if (is.null(rows)) stop("RCraft: a model with a term whose table layout was not checked is not translated yet", call. = FALSE)
@@ -129,6 +133,7 @@ stata_cx_rows <- function(nm, b, se, test, df, level, data, eform = FALSE) {
     cat(label, " |", pad(stata_tab_g(bi), 11), pad(stata_tab_g(si), 11), pad(sprintf("%.2f", st), 9),
         pad(sprintf("%.3f", p), 8), pad(stata_tab_g(lo), 13), pad(stata_tab_g(hi), 12), "\n", sep = "")
   }
+  stata_cx_offrow(offset)
 }
 # a row with no test: a name right-aligned in 13, estimate, standard error, interval (var(e.y), sigma, rho)
 stata_cx_plain <- function(name, est, se, lo, hi, wide = TRUE) {
@@ -149,18 +154,19 @@ stata_cx_head_right <- function(label, value) sprintf("%-18s= %6s", label, value
 stata_cx_head_count <- function(label, n) sprintf("%17s = %6s", label, n)
 stata_cx_note_clusters <- function(G, v) if (!is.null(G)) cat(formatC(sprintf("(Std. err. adjusted for %s clusters in %s)", format(G, big.mark = ","), v), width = 78), "\n", sep = "")
 # the design columns of a command's terms for the rows kept
-stata_cx_setup <- function(d, dep, terms, extra = character(), wvar = NULL, cluster = NULL) {
+stata_cx_setup <- function(d, dep, terms, extra = character(), wvar = NULL, cluster = NULL, offset = NULL, nocons = FALSE) {
   tv <- stata_cx_vars(terms)
-  vars <- unique(c(dep, tv, extra, wvar, cluster))
+  vars <- unique(c(dep, tv, extra, wvar, cluster, offset))
   stata_cx_check(d, vars)
   ok <- stats::complete.cases(d[vars])
   if (!any(ok)) stop("no observations (Stata: r(2000))", call. = FALSE)
   rows <- which(ok)
   mf <- d[rows, , drop = FALSE]
-  des <- stata_cx_design(mf, terms)
-  X1 <- cbind(des$X, 1)
+  des <- stata_cx_design(mf, terms, nocons)
+  X1 <- if (nocons) des$X else cbind(des$X, 1)
   if (qr(X1)$rank < ncol(X1)) stop("RCraft: a model with collinear regressors is not translated yet", call. = FALSE)
-  list(rows = rows, mf = mf, des = des, X = des$X, n = nrow(mf))
+  off <- if (is.null(offset)) NULL else stata_cx_num(mf[[offset]])
+  list(rows = rows, mf = mf, des = des, X = des$X, n = nrow(mf), off = off)
 }
 # estat ic after the batch's models: N, ll(null) where the model has one, ll(model), df = e(rank), AIC, BIC
 stata_cx_estat_ic <- function(e) {

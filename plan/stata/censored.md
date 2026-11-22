@@ -64,8 +64,14 @@ first with G/(G-1); a frequency-weighted row counts once with its score over w.
   is against probit + regression (the regression ll counts the whole part of the weights' sum); robust fits use a Wald test.
 - predict: xb, xbsel, psel, mills, ycond, yexp. e(depvar) is `y s` with `select(s = ...)`.
 
+## Round 2 (2026-11-22)
+
+- `iterate(#)`: the search stops after # iterations, `convergence not achieved` follows the log, `Warning: Convergence not achieved.` ends the output (before the LR test line in hetprobit, after it in heckman), e(converged) is 0. In intreg the constant-only fit stops too; in tobit the constant-only fit is limited as well (its ll_0 changes); the probit and logit starts of hetprobit, heckman and cloglog run to convergence.
+- `offset(var)`: the outcome moves by it (limits too), a row `var  1  (offset)` ends the table, e(offset) (e(offset1) in truncreg, hetprobit, heckman and tobit), predict xb adds it. The constant-only models take it.
+- `noconstant`: intreg, cloglog and hetprobit and heckman twostep match to the iteration (no constant-only fit, a Wald test, no ll_0). Not matched, so refused: tobit (the estimates, ll, F test and e(Cns) match, Stata's starting values and so its log do not), truncreg (variances differ by about 1e-3 from the exact Hessian), heckman by maximum likelihood (different start).
+- `from(matname [, skip])` in tobit: columns matched by `eq:name` (no equation means the first), unnamed parameters start at 0 and sigma^2 at the mean squared residual; `copy` stops `invalid from() option; option copy not allowed` r(198); an extra column r(111) with a leading blank line. A vector naming nothing is refused (Stata's path from zeros takes one iteration less).
+- `stepwise` and `nestreg` with tobit (no weights, or fweights in stepwise): F tests on e(df_r) in nestreg (Block F df Residual df), the search tests with F (Wald) or LR; the final model prints without a log in stepwise and with it per block in nestreg.
+
 ## Open (refused, not guessed)
 
-- `from()`, `iterate()`, `noconstant`, `offset`, constraints; tobit/intreg with aweights; interactions and `ib.` bases in
-  tobit/intreg; factor variables in truncreg, cloglog, hetprobit, heckman (and in `select()`); estat after these models other
-  than `ic` (R's layout); `stepwise` and `nestreg` with tobit (on hold: their search runs on R fit objects).
+- `constraints()` (the constrained Newton path is not decoded), tobit/intreg with aweights, interactions and `ib.` bases in tobit/intreg, factor variables in truncreg, cloglog, hetprobit, heckman (and `select()`), the refused `noconstant` forms above, margins and `estat` other than `ic` after these models (they read R fit objects; `estat ic` reads e()).
