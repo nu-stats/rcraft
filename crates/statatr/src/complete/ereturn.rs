@@ -1,0 +1,4 @@
+Command {
+    subcommands: &["list"],
+    ..NONE
+}

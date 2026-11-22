@@ -5,6 +5,7 @@ mod corpus;
 mod coverage;
 mod layers;
 mod matrix;
+mod status;
 mod sync;
 
 use std::path::{Path, PathBuf};
@@ -21,6 +22,9 @@ usage: cargo xtask <task>
   sync-statcraft-lang [--check|--diff]
                        copy StatCraft's parser into crates/statatr (needs the StatCraft checkout),
                        or check the copy against its manifest (ci does) or against StatCraft
+  status-fold [--check]
+                       fold the plan/status.d fragments into ROADMAP.md and plan/STATUS.md and delete them
+                       (--check only checks that they are well formed; ci does)
   stata-record         run the Stata corpus on a licensed Stata and keep its results (P2B.10)
   stata-matrix         write the RCraft and StatCraft command table (C:/pinokio/api/stata-matrix.csv; not committed)";
 
@@ -35,6 +39,7 @@ fn main() -> ExitCode {
         Some("layers") => layers::check(),
         Some("assets") => assets::check(),
         Some("coverage") => coverage::run(rest.iter().any(|a| a == "--check")),
+        Some("status-fold") => status::run(rest),
         Some("stata-record") => corpus::record(),
         Some("stata-matrix") => matrix::run(rest),
         Some("sync-statcraft-lang") => sync::run(rest),
@@ -53,6 +58,7 @@ fn main() -> ExitCode {
 }
 
 fn ci() -> Result {
+    status::run(&["--check".to_string()])?;
     sync::check()?;
     cargo(&["fmt", "--all", "--check"])?;
     cargo(&[
