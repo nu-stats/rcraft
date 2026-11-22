@@ -9,6 +9,16 @@ Guide {
              above 0, both options, a variable not there, two variables, a string.",
         ),
         ML_CNS,
+        p(
+            "iterate(#)",
+            "logit, probit and poisson take iterate(#) as Stata 19 does: its Newton-Raphson path stops \
+             after # steps (iterate(0) shows the start), the log ends with `convergence not achieved` \
+             (also under nolog), the estimates, variance, likelihood and LR or Wald test are those where \
+             the path stopped, `Warning: Convergence not achieved.` follows the table and e(converged) \
+             is 0; a path that has converged inside the cap prints as usual. Not translated: with \
+             weights for poisson, noconstant or an offset, with constraints(), and from(), trace and \
+             showstep.",
+        ),
         ML_SE,
         ML_TABLE,
         ML_ROBUST,
