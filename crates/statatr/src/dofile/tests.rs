@@ -1118,3 +1118,45 @@ fn the_scan_names_the_files_import_and_export_read_and_write() {
         ]
     );
 }
+
+#[test]
+fn a_frame_block_runs_each_line_in_that_frame() {
+    let d = run(
+        "clear\nset obs 3\ngenerate id = _n\nframe create b\nframe b {\n  set obs 2\n  generate y = 7\n}\nframe dir\ndisplay c(frame)",
+    );
+    let lines = &d.translation.lines;
+    let not: Vec<String> = lines
+        .iter()
+        .filter_map(|l| {
+            l.result
+                .as_ref()
+                .err()
+                .map(|e| format!("{}: {}", l.stata, e.reason))
+        })
+        .collect();
+    assert!(not.is_empty(), "{not:?}");
+    // the block's lines go to frame b and back: the data in b are 2 x 1
+    let at = lines
+        .iter()
+        .position(|l| l.stata.starts_with("set obs 2"))
+        .expect("the block's first line");
+    let code = lines[at]
+        .result
+        .as_ref()
+        .map(|r| r.code.clone())
+        .unwrap_or_default();
+    assert!(
+        code.contains("stata_frames") && code.contains("set_obs"),
+        "{code}"
+    );
+    let dir = lines
+        .iter()
+        .find(|l| l.stata == "frame dir")
+        .and_then(|l| l.result.as_ref().ok())
+        .map(|r| r.code.clone())
+        .unwrap_or_default();
+    assert!(
+        dir.contains("c(\"b\", \"default\")") || dir.contains("\"b\""),
+        "{dir}"
+    );
+}

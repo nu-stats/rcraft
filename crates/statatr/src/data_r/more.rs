@@ -641,6 +641,11 @@ impl Session {
                     return Err(no(format!("{name} is not a label name")));
                 }
                 let set = self.label_sets.entry(name.clone()).or_default();
+                if set.iter().any(|(v, _)| v.is_nan()) {
+                    return Err(no(format!(
+                        "recode: the label {name} was made when the data ran (egen cut, label), so its values are not known here"
+                    )));
+                }
                 for (v, t) in &labels {
                     match set.iter_mut().find(|(x, _)| x == v) {
                         Some(slot) => slot.1 = t.clone(),
@@ -772,6 +777,9 @@ impl Session {
             call_parts(rhs).ok_or_else(|| no("egen needs a function, like mean(x)"))?;
         if fname == "concat" {
             return self.egen_concat(c, opts, out, ty, var, args);
+        }
+        if fname == "cut" {
+            return self.egen_cut(c, opts, out, ty, var, args);
         }
         let known: &[(&str, usize)] = &[
             ("by", 2),

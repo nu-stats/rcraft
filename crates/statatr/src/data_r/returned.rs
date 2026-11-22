@@ -2150,6 +2150,8 @@ impl Session {
     ) -> Result<(String, Kind), Untranslated> {
         match which {
             "ts" => self.ts_code(name).map(|code| (code, Kind::Number)),
+            "c" if name == "frame" => Ok(self.c_frame()),
+            "frval" => self.frval_value(name),
             // el(e(V), i, j): the matrix itself, as matrix list takes it
             // a matrix the do-file made
             "m#matrix" => self.user_matrix(name).map(|m| (m, Kind::Number)),
@@ -2816,7 +2818,7 @@ fn mentions_data(e: &str, scalar: &dyn Fn(&str) -> bool) -> bool {
                 false
             }
             Expr::Call(name, args) => {
-                !matches!(name.as_str(), "e" | "r" | "scalar")
+                !matches!(name.as_str(), "e" | "r" | "scalar" | "c")
                     && args.iter().any(|a| walk(a, scalar))
             }
             Expr::Unary(_, a) => walk(a, scalar),
