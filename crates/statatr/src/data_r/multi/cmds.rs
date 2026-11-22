@@ -37,24 +37,24 @@ fn rlog(b: bool) -> &'static str {
 }
 
 impl Session {
-    /// The command whose results are active, when it is `discrim`: predict and estat are
-    /// translated after it.
+    /// The command whose results are active, when it is `discrim`, `mprobit`, `slogit` or
+    /// `nlogit`: predict (and for `discrim` estat) are translated after it.
     pub(in crate::data_r) fn multi_active(&self) -> Option<&'static str> {
         if self.estimates.is_some() {
             return None;
         }
-        match &self.e_ret {
-            super::super::returned::Returned::Kept { cmd, .. }
-                if cmd == "discrim"
+        let super::super::returned::Returned::Kept { cmd, .. } = &self.e_ret else {
+            return None;
+        };
+        ["discrim", "mprobit", "slogit", "nlogit"]
+            .into_iter()
+            .find(|k| {
+                cmd == k
                     && self
                         .estimates_lost
                         .as_deref()
-                        .is_some_and(|w| w.contains("discrim's")) =>
-            {
-                Some("discrim")
-            }
-            _ => None,
-        }
+                        .is_some_and(|w| w.contains(&format!("{k}'s")))
+            })
     }
 
     /// `canon (varlist1) (varlist2) [if] [in] [, lc(#) first(#) stdcoef]`.

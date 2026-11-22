@@ -4,12 +4,21 @@
 
 use super::*;
 
+mod choice_cmds;
+mod clusters;
 mod cmds;
+mod nlogit_cmds;
 
 pub(super) const MANOVA_HELPER: &str = include_str!("multi/manova.R");
 pub(super) const CANON_HELPER: &str = include_str!("multi/canon.R");
 pub(super) const DISCRIM_HELPER: &str = include_str!("multi/discrim.R");
 pub(super) const MDS_HELPER: &str = include_str!("multi/mds.R");
+pub(super) const CLUSTER_HELPER: &str = include_str!("multi/cluster.R");
+pub(super) const CHOICE_HELPER: &str = concat!(
+    include_str!("multi/choice.R"),
+    include_str!("multi/slogit.R")
+);
+pub(super) const NLOGIT_HELPER: &str = include_str!("multi/nlogit.R");
 
 /// What a command leaves as e(): its text names and the r() it clears.
 fn keep_e(s: &mut Session, cmd: &str, texts: &[&str], extra: &[String], why: &str, out: &mut Out) {

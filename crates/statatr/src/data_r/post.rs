@@ -345,8 +345,12 @@ impl Session {
         if let Some((cmd, model)) = self.ss_active() {
             return self.ss_predict(c, opts, out, &cmd, &model);
         }
-        if self.multi_active() == Some("discrim") {
-            return self.discrim_predict(c, opts, out);
+        match self.multi_active() {
+            Some("discrim") => return self.discrim_predict(c, opts, out),
+            Some("mprobit") => return self.choice_predict(c, opts, out, "mprobit"),
+            Some("slogit") => return self.choice_predict(c, opts, out, "slogit"),
+            Some("nlogit") => return self.nlogit_predict(c, opts, out),
+            _ => {}
         }
         if self.ivprobit_active() {
             return self.ivprobit_predict(c, opts, out);
