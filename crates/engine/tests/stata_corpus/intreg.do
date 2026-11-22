@@ -77,3 +77,24 @@ test x1 = x2
 display "@ tt " %24.17g r(chi2) " " %24.17g r(p) " " r(df)
 lincom x1 + x2
 display "@ lc " %24.17g r(estimate) " " %24.17g r(se) " " %24.17g r(z)
+* offset() and iterate()
+generate double off = mod(_n * 13, 7) / 10
+intreg lo hi x1 x2, offset(off) nolog
+shwi
+display "@ o1 " (e(offset) == "off")
+predict double xbo, xb
+quietly summarize xbo
+display "@ po " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+intreg lo hi x1 x2, iterate(1)
+shwi
+intreg
+* noconstant
+intreg lo hi x1 x2, noconstant nolog
+shwi
+predict double xbn, xb
+quietly summarize xbn
+display "@ pn " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+intreg lo hi x1 x2, noconstant vce(robust) nolog
+shwi
+intreg lo hi x1 x2, noconstant offset(off)
+shwi

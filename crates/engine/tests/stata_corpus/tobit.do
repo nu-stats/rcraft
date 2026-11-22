@@ -82,3 +82,40 @@ test x1 = x2
 display "@ tt " %24.17g r(F) " " %24.17g r(p) " " r(df) " " r(df_r)
 lincom x1 + x2
 display "@ lc " %24.17g r(estimate) " " %24.17g r(se) " " %24.17g r(t) " " r(df)
+* offset() and iterate()
+generate double off = mod(_n * 13, 7) / 10
+tobit y x1 x2, ll(0) offset(off) nolog
+shwt
+display "@ o1 " (e(offset) == "off") " " (e(offset1) == "off")
+predict double xbo, xb
+predict double pro, pr(0, .)
+foreach v in xbo pro {
+    quietly summarize `v'
+    display "@ po_`v' " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+}
+tobit y x1 x2, ll(0) offset(off) ul(3) vce(robust) nolog
+shwt
+tobit y x1 x2, ll(0) iterate(1)
+shwt
+tobit, level(80)
+tobit y x1 x2, ll(0) ul(2) iterate(2) nolog
+shwt
+* from()
+quietly tobit y x1 x2, ll(0)
+matrix bb = e(b)
+tobit y x1 x2, ll(0) from(bb)
+shwt
+tobit y x1 x2, ll(0) from(bb) nolog iterate(0)
+shwt
+quietly regress y x1 x2
+matrix rb = e(b)
+tobit y x1 x2, ll(0) from(rb)
+shwt
+capture noisily tobit y x1 x2, ll(0) from(nosuch)
+display "@ r1 " _rc
+matrix q = (1, 2)
+capture noisily tobit y x1 x2, ll(0) from(q, copy)
+display "@ r2 " _rc
+matrix q3 = (1, 2, 3, 4, 5)
+capture noisily tobit y x1 x2, ll(0) from(q3)
+display "@ r3 " _rc

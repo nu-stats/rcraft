@@ -89,3 +89,23 @@ foreach v in p0 p1 p2 p3 p4 p5 p6 {
 display "@ bx " _b[x1] " " _b[x2] " " _se[x2]
 test x1 = x2
 display "@ tt " %24.17g r(chi2) " " %24.17g r(p) " " r(df)
+* offset() and iterate()
+generate double off = mod(_n * 13, 7) / 10
+heckman y x1 x2, select(s = z1 z2 x1) offset(off) nolog
+shwk
+display "@ o1 " (e(offset1) == "off")
+predict double xbo, xb
+predict double yco, ycond
+foreach v in xbo yco {
+    quietly summarize `v'
+    display "@ po_`v' " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+}
+heckman y x1 x2, select(z1 z2 x1) iterate(1)
+shwk
+heckman
+* noconstant (twostep only: Stata's ML start with no constant is not reproduced)
+heckman y x1 x2, select(s = z1 z2 x1) noconstant twostep
+shwt
+predict double xbn, xb
+quietly summarize xbn
+display "@ pn " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)

@@ -65,3 +65,27 @@ foreach v in p0 p1 xb1 sd sg {
 display "@ bx " _b[x1] " " _b[x2] " " _se[x2]
 test x1 = x2
 display "@ tt " %24.17g r(chi2) " " %24.17g r(p) " " r(df)
+* offset() and iterate()
+generate double off = mod(_n * 13, 7) / 10
+hetprobit yb x1 x2, het(z) offset(off) nolog
+shwh
+display "@ o1 " (e(offset1) == "off")
+predict double po1, pr
+predict double xbo, xb
+foreach v in po1 xbo {
+    quietly summarize `v'
+    display "@ po_`v' " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+}
+hetprobit yb x1 x2, het(z) iterate(1)
+shwh
+hetprobit
+* noconstant
+hetprobit yb x1 x2, het(z) noconstant
+shwh
+predict double pn, pr
+quietly summarize pn
+display "@ pn " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+hetprobit yb x1 x2, het(z) noconstant vce(robust) nolog
+shwh
+hetprobit yb x1 x2, het(z) noconstant offset(off) nolog
+shwh

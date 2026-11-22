@@ -27,15 +27,28 @@ struct Line {
     show: bool,
     /// the line stopped as Stata stops it (a weight kind the command does not take): nothing more to do
     stopped: bool,
+    iterate: Option<u32>,
+    offset: Option<String>,
+    nocons: bool,
 }
 
 impl Line {
     /// `, wvar = "w", wtype = "f"`, or nothing.
     fn wargs(&self) -> String {
-        match &self.w {
+        let mut s = match &self.w {
             Some((k, v)) => format!(", wvar = {}, wtype = {}", r_text(v), r_text(k.code())),
             None => String::new(),
+        };
+        if let Some(n) = self.iterate {
+            s.push_str(&format!(", maxit = {n}"));
         }
+        if let Some(o) = &self.offset {
+            s.push_str(&format!(", offset = {}", r_text(o)));
+        }
+        if self.nocons {
+            s.push_str(", nocons = TRUE");
+        }
+        s
     }
 
     fn cluster_arg(&self) -> String {
@@ -58,6 +71,10 @@ fn names(terms: &[String]) -> String {
 }
 
 /// A limit option: `ll`, `ll(#)`, or none. `NULL`, `TRUE` (the smallest or largest value) or the number.
+pub(super) fn limit_arg(opts: &Opts, name: &str) -> Result<String, Untranslated> {
+    limit(opts, name)
+}
+
 fn limit(opts: &Opts, name: &str) -> Result<String, Untranslated> {
     if !opts.has(name, 2) {
         return Ok("NULL".into());
@@ -72,6 +89,37 @@ fn limit(opts: &Opts, name: &str) -> Result<String, Untranslated> {
 }
 
 impl Session {
+    /// `from(matname [, skip copy])` as R arguments: the matrix, and its flags.
+    fn from_arg(&mut self, opts: &Opts) -> Result<String, Untranslated> {
+        let Some(text) = opts.arg("from", 4) else {
+            return Ok(String::new());
+        };
+        let (name, flags) = match text.split_once(',') {
+            Some((n, f)) => (n.trim().to_string(), f.to_string()),
+            None => (text.trim().to_string(), String::new()),
+        };
+        if !is_name(&name) {
+            return Err(no(format!(
+                "from({text}): only a matrix name is translated"
+            )));
+        }
+        let mut skip = false;
+        let mut copy = false;
+        for w in flags.split_whitespace() {
+            match w {
+                "skip" => skip = true,
+                "copy" => copy = true,
+                other => return Err(no(format!("from(): the flag {other} is not translated"))),
+            }
+        }
+        let m = self.user_matrix(&name)?;
+        Ok(format!(
+            ", from = {m}, from_skip = {}, from_copy = {}",
+            super::stats::r_logical(skip),
+            super::stats::r_logical(copy)
+        ))
+    }
+
     /// Which of the batch's commands holds the active results.
     pub(super) fn censored_active(&self) -> Option<&'static str> {
         let fit = self.estimates.as_ref()?.fit;
@@ -153,6 +201,9 @@ impl Session {
                         src: String::new(),
                         show: false,
                         stopped: true,
+                        iterate: None,
+                        offset: None,
+                        nocons: false,
                     });
                 }
             }
@@ -160,6 +211,23 @@ impl Session {
         let w = self.weight_of(c, allowed)?;
         let lvl = level(opts)? * 100.0;
         let (robust, cluster) = vce(opts)?;
+        let iterate = match opts.arg("iterate", 4) {
+            None => None,
+            Some(a) => Some(
+                a.trim()
+                    .parse::<u32>()
+                    .map_err(|_| no(format!("iterate({a}) is not a number")))?,
+            ),
+        };
+        let offset = match opts.arg("offset", 3) {
+            None => None,
+            Some(o) if is_name(o.trim()) => Some(o.trim().to_string()),
+            Some(o) => {
+                return Err(no(format!(
+                    "offset({o}) is translated with a variable name only"
+                )))
+            }
+        };
         let rows = self.rows_for(c, out)?;
         let src = self.weighted_rows(rows, &w);
         let robust = robust || matches!(w, Some((W::P, _)));
@@ -174,6 +242,9 @@ impl Session {
             src,
             show,
             stopped: false,
+            iterate,
+            offset,
+            nocons: opts.has("noconstant", 3),
         })
     }
 
@@ -235,6 +306,10 @@ impl Session {
             ("cluster", 2),
             ("level", 3),
             ("nolog", 3),
+            ("iterate", 4),
+            ("offset", 3),
+            ("noconstant", 3),
+            ("from", 4),
         ]) {
             return Err(no(format!(
                 "tobit with the option {o} is not translated yet"
@@ -249,6 +324,11 @@ impl Session {
                 "tobit with analytic weights is not translated yet (each row has its own variance, not reproduced)",
             ));
         }
+        if l.nocons {
+            return Err(no(
+                "tobit with noconstant is not translated (the estimates, log likelihood and F test were reproduced, but Stata's starting values and so its log and e(ic) were not)",
+            ));
+        }
         let ll = limit(opts, "ll")?;
         let ul = limit(opts, "ul")?;
         for h in [
@@ -261,18 +341,35 @@ impl Session {
         ] {
             self.helpers.insert(h);
         }
+        let from = self.from_arg(opts)?;
+        // under stepwise or nestreg: the terms the search kept, its command line, no log in stepwise
+        let (terms_r, cmdline, nolog, stepwise) = match self.sw_cmdline() {
+            Some((line, mark)) => (
+                "attr(stats::terms(stata_sw_formula), \"term.labels\")".to_string(),
+                line,
+                mark || opts.has("nolog", 3),
+                mark,
+            ),
+            None => (
+                names(&l.spec.terms),
+                super::returned::cmdline(c),
+                opts.has("nolog", 3),
+                false,
+            ),
+        };
         out.line(format!(
-            "stata_e <- stata_tobit({}, {}, {}, ll = {ll}, ul = {ul}{}, robust = {}{}, level = {}, nolog = {}, cmdline = {}, show = {})",
+            "stata_e <- stata_tobit({}, {}, {}, ll = {ll}, ul = {ul}{}{from}, robust = {}{}, level = {}, nolog = {}, cmdline = {}, show = {}, stepwise = {})",
             l.src,
             r_text(&l.spec.dep),
-            names(&l.spec.terms),
+            terms_r,
             l.wargs(),
             super::stats::r_logical(l.robust),
             l.cluster_arg(),
             r_number(l.level),
-            super::stats::r_logical(opts.has("nolog", 3)),
-            r_text(&super::returned::cmdline(c)),
-            super::stats::r_logical(l.show)
+            super::stats::r_logical(nolog),
+            r_text(&cmdline),
+            super::stats::r_logical(l.show),
+            super::stats::r_logical(stepwise)
         ));
         self.cx_after(
             c,
@@ -281,6 +378,8 @@ impl Session {
             "tobit",
             &[
                 "cmdline",
+                "offset",
+                "offset1",
                 "marginsok",
                 "llopt",
                 "ulopt",
@@ -367,6 +466,9 @@ impl Session {
             ("cluster", 2),
             ("level", 3),
             ("nolog", 3),
+            ("iterate", 4),
+            ("offset", 3),
+            ("noconstant", 3),
         ]) {
             return Err(no(format!(
                 "intreg with the option {o} is not translated yet"
@@ -413,6 +515,7 @@ impl Session {
             "intreg",
             &[
                 "cmdline",
+                "offset",
                 "cmd",
                 "ml_score",
                 "depvar",
@@ -459,6 +562,9 @@ impl Session {
             ("cluster", 2),
             ("level", 3),
             ("nolog", 3),
+            ("iterate", 4),
+            ("offset", 3),
+            ("noconstant", 3),
         ]) {
             return Err(no(format!(
                 "truncreg with the option {o} is not translated yet"
@@ -468,6 +574,11 @@ impl Session {
             return self.cx_replay(c, opts, out, "truncreg");
         }
         let l = self.cx_line(c, opts, out, &[W::F, W::A, W::P, W::I], "truncreg")?;
+        if l.nocons {
+            return Err(no(
+                "truncreg with noconstant is not translated (Stata's numerical Hessian differs from the exact one in the variances by about 1e-3 there)",
+            ));
+        }
         let ll = limit(opts, "ll")?;
         let ul = limit(opts, "ul")?;
         for h in [
@@ -501,6 +612,7 @@ impl Session {
             &[
                 "cmdline",
                 "cmd",
+                "offset1",
                 "llopt",
                 "ulopt",
                 "marginsok",
@@ -546,6 +658,9 @@ impl Session {
             ("cluster", 2),
             ("level", 3),
             ("nolog", 3),
+            ("iterate", 4),
+            ("offset", 3),
+            ("noconstant", 3),
         ]) {
             return Err(no(format!(
                 "cloglog with the option {o} is not translated yet"
@@ -622,6 +737,7 @@ impl Session {
             "cloglog",
             &[
                 "cmdline",
+                "offset",
                 "cmd",
                 "predict",
                 "marginsok",
@@ -667,6 +783,9 @@ impl Session {
             ("cluster", 2),
             ("level", 3),
             ("nolog", 3),
+            ("iterate", 4),
+            ("offset", 3),
+            ("noconstant", 3),
         ]) {
             return Err(no(format!(
                 "hetprobit with the option {o} is not translated yet"
@@ -720,6 +839,7 @@ impl Session {
             "hetprobit",
             &[
                 "cmdline",
+                "offset1",
                 "cmd",
                 "predict",
                 "method",
@@ -766,6 +886,9 @@ impl Session {
             ("cluster", 2),
             ("level", 3),
             ("nolog", 3),
+            ("iterate", 4),
+            ("offset", 3),
+            ("noconstant", 3),
         ]) {
             return Err(no(format!(
                 "heckman with the option {o} is not translated yet"
@@ -778,6 +901,11 @@ impl Session {
         let l = self.cx_line(c, opts, out, &[W::F, W::P, W::I], "heckman")?;
         if l.stopped {
             return Ok(());
+        }
+        if l.nocons && !twostep {
+            return Err(no(
+                "heckman with noconstant by maximum likelihood is not translated (Stata starts from values other than the two-step ones there, so its log and e(ic) differ); twostep is",
+            ));
         }
         let Some(sel) = opts.arg("select", 3) else {
             out.line("stop(\"option select() required (Stata: r(198))\", call. = FALSE)");
@@ -836,6 +964,7 @@ impl Session {
             "heckman",
             &[
                 "cmdline",
+                "offset1",
                 "marginsok",
                 "marginsnotok",
                 "cmd",
@@ -1098,6 +1227,29 @@ estat ic");
     }
 
     #[test]
+    fn tobit_runs_under_stepwise_and_nestreg() {
+        let out = r("use d
+stepwise, pr(.2): tobit y x1 x2 x3, ll(0)
+nestreg: tobit y (x1) (x2 x3), ll(0)
+nestreg: tobit y (x1) (x2) [fw = w], ll(0)");
+        assert!(
+            out[1].contains("stata_stepwise(") && out[1].contains("ll = 0, ul = NULL"),
+            "{out:?}"
+        );
+        assert!(
+            out[1].contains("stata_tobit(")
+                && out[1].contains("stata_sw_formula")
+                && out[1].contains("stepwise = TRUE"),
+            "{out:?}"
+        );
+        assert!(
+            out[2].contains("Block 2: x2 x3") && out[2].contains("stata_nr_block("),
+            "{out:?}"
+        );
+        assert!(out[3].starts_with("NOT: nestreg with weights"), "{out:?}");
+    }
+
+    #[test]
     fn statas_errors_are_kept_and_the_rest_refused() {
         let out = r("use d
 cloglog d x1 [aw = w]
@@ -1121,7 +1273,7 @@ predict p, e(0, 1)");
             "{out:?}"
         );
         assert!(
-            out[6].starts_with("NOT: tobit with the option from"),
+            out[6].contains("from = stop(\"matrix b not found"),
             "{out:?}"
         );
         assert!(

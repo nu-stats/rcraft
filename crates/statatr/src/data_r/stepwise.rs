@@ -19,7 +19,7 @@ use crate::reader::Prefix;
 pub(super) const STEPWISE_HELPER: &str = r##"stata_sw_rows <- function(d, v) d[stats::complete.cases(d[v]), , drop = FALSE]
 stata_stepwise <- function(d, kind, lhs, dep, terms, pr = NULL, pe = NULL, forward = FALSE, hier = FALSE,
                            lock1 = FALSE, lr = FALSE, show = TRUE, wvar = NULL, wkind = "", robust = FALSE,
-                           clvar = NULL, noconst = FALSE) {
+                           clvar = NULL, noconst = FALSE, ll = NULL, ul = NULL) {
   refuse <- function(...) stop("stepwise: ", ..., "; not translated", call. = FALSE)
   rawv <- function(x) { v <- unclass(x); attributes(v) <- NULL; v }
   bq <- function(v) if (make.names(v) == v) v else paste0("`", v, "`")
@@ -85,6 +85,17 @@ stata_stepwise <- function(d, kind, lhs, dep, terms, pr = NULL, pe = NULL, forwa
   Xall <- do.call(cbind, cx)
   cons <- as.integer(!noconst)
   fam <- switch(kind, logit = stats::binomial("logit"), probit = stats::binomial("probit"), poisson = stats::poisson(), NULL)
+  if (kind == "tobit") {
+    lim <- function(v, extreme) if (is.null(v)) NULL else if (isTRUE(v)) extreme else v
+    lo_l <- lim(ll, min(y)); hi_l <- lim(ul, max(y))
+    if (!is.null(lo_l) && !is.null(hi_l) && lo_l > hi_l) stop("observations with ll() > ul() not allowed (Stata: r(198))", call. = FALSE)
+    tlo <- y; thi <- y
+    for (i in seq_len(n)) {
+      if (!is.null(lo_l) && y[i] <= lo_l) { tlo[i] <- -Inf; thi[i] <- lo_l }
+      else if (!is.null(hi_l) && y[i] >= hi_l) { tlo[i] <- hi_l; thi[i] <- Inf }
+    }
+    tmid <- ifelse(is.infinite(tlo), thi, ifelse(is.infinite(thi), tlo, y))
+  }
   ctl <- stats::glm.control(epsilon = 1e-12, maxit = 100)
   # the log likelihood of a model with the linear predictor eta (what a likelihood-ratio test compares)
   ll_eta <- function(eta) {
@@ -104,6 +115,16 @@ stata_stepwise <- function(d, kind, lhs, dep, terms, pr = NULL, pe = NULL, forwa
     k <- ncol(X1)
     if (k == 0) {
       return(list(k = 0L, ci = ci, ll = if (kind == "regress") ll_rss(sum(w1 * y^2)) else ll_eta(rep(0, n))))
+    }
+    if (kind == "tobit") {
+      # tobit (censoring limits ll and ul of the search's rows): the slopes first, the constant and sigma^2 last
+      Xs <- Xall[, ci, drop = FALSE]
+      f <- stata_cx_nfit(tlo, thi, tmid, Xs, w, wk == "f", "tobit", 300)
+      kx <- ncol(Xs)
+      V <- stata_cx_vcov(f, rob, w, wk == "f", cl)
+      ord <- c(kx + 1, seq_len(kx))
+      neff <- if (wk == "f") sum(w1) else n
+      return(list(k = k, ci = ci, b = f$b[ord], V = V[ord, ord, drop = FALSE], dfr = neff - kx, ll = f$ll))
     }
     df <- data.frame(yv = y)
     df$X <- X1
@@ -130,7 +151,7 @@ stata_stepwise <- function(d, kind, lhs, dep, terms, pr = NULL, pe = NULL, forwa
     b <- m$b[pos]
     W <- drop(crossprod(b, solve(m$V[pos, pos, drop = FALSE], b)))
     q <- length(pos)
-    if (kind == "regress") stats::pf(W / q, q, m$dfr, lower.tail = FALSE) else stats::pchisq(W, q, lower.tail = FALSE)
+    if (kind %in% c("regress", "tobit")) stats::pf(W / q, q, m$dfr, lower.tail = FALSE) else stats::pchisq(W, q, lower.tail = FALSE)
   }
   p_lr <- function(m, s) stats::pchisq(max(0, 2 * (m$ll - s$ll)), m$k - s$k, lower.tail = FALSE)
   p_remove <- function(inc, t) {
@@ -478,7 +499,7 @@ impl Session {
             })
             .unwrap_or_default();
         let kind = c.name.as_str();
-        if !matches!(kind, "regress" | "logit" | "probit" | "poisson") {
+        if !matches!(kind, "regress" | "logit" | "probit" | "poisson" | "tobit") {
             return Err(no(format!("stepwise with {kind} is not translated")));
         }
         self.no_by(c, "stepwise")?;
@@ -512,7 +533,9 @@ impl Session {
             )));
         }
         let opts = Opts(&c.options);
-        let known: &[(&str, usize)] = if kind == "regress" {
+        let known: &[(&str, usize)] = if kind == "tobit" {
+            &[("level", 3), ("ll", 2), ("ul", 2)]
+        } else if kind == "regress" {
             &[
                 ("level", 3),
                 ("beta", 4),
@@ -532,6 +555,11 @@ impl Session {
         let w = self.weight_of(c, &[W::F, W::A, W::P, W::I])?;
         if kind != "regress" && matches!(w, Some((W::A, _))) {
             return self.sw_fail(out, "aweights not allowed", 101);
+        }
+        if kind == "tobit" && matches!(w, Some((W::A | W::P | W::I, _))) {
+            return Err(no(
+                "stepwise with tobit is translated without weights or with frequency weights only",
+            ));
         }
         // the variance: Stata's own errors for a kind the command lacks, the rest as the command
         if let Some(v) = opts.arg("vce", 3) {
@@ -680,6 +708,15 @@ impl Session {
         // forward with pe() alone; backward with pr() (alone or with pe())
         let forward = forward_opt || (pe.is_some() && pr.is_none());
         let src = self.rows_for(c, out)?;
+        let limits = if kind == "tobit" {
+            format!(
+                ", ll = {}, ul = {}",
+                super::censored::limit_arg(&opts, "ll")?,
+                super::censored::limit_arg(&opts, "ul")?
+            )
+        } else {
+            String::new()
+        };
         let dep_r = r_name(dep);
         let lhs = if matches!(kind, "logit" | "probit") {
             format!("as.numeric({dep_r} != 0)")
@@ -709,7 +746,11 @@ impl Session {
         if w.is_some() {
             self.helpers.insert("stata_wrows");
         }
-        if kind == "regress" {
+        if kind == "tobit" {
+            for h in ["stata_cx", "stata_tobit", "stata_fmt"] {
+                self.helpers.insert(h);
+            }
+        } else if kind == "regress" {
             self.helpers.insert("stata_lm_wvcov");
         } else {
             self.helpers.insert("stata_glm_vcov");
@@ -721,7 +762,7 @@ impl Session {
             self.helpers.insert("stata_ib");
         }
         out.line(format!(
-            "stata_sw_formula <- stata_stepwise({src}, {}, {}, {}, list({}), pr = {}, pe = {}, forward = {}, hier = {}, lock1 = {}, lr = {}, show = {}, wvar = {wvar}, wkind = {wkind}, robust = {}, clvar = {}, noconst = {})",
+            "stata_sw_formula <- stata_stepwise({src}, {}, {}, {}, list({}), pr = {}, pe = {}, forward = {}, hier = {}, lock1 = {}, lr = {}, show = {}, wvar = {wvar}, wkind = {wkind}, robust = {}, clvar = {}, noconst = {}{limits})",
             r_text(kind),
             r_text(&lhs),
             r_text(dep),

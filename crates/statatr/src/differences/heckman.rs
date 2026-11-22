@@ -9,9 +9,10 @@ Guide {
              independence, fweights, pweights, iweights, robust, clustered, replay. predict gives xb, xbsel, psel, \
              mills, ycond and yexp.",
         ),
+        p("As Stata 19 (options)", "offset() in the outcome equation, iterate(), noconstant with twostep."),
         p(
             "Not yet",
-            "factor variables (also in select()), mills() and the other options, from(), noconstant, constraints.",
+            "factor variables (also in select()), mills() and the other options, from(), noconstant by maximum likelihood (twostep is translated; Stata's start differs), constraints().",
         ),
     ],
 }

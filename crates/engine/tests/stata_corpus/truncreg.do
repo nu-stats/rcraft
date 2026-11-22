@@ -14,7 +14,7 @@ generate double ys = 1 + 0.8 * x1 - 0.5 * x2 + e
 generate double fw = 1 + mod(_n, 3)
 generate double pw = 0.5 + mod(_n, 4) / 2
 program define shwr
-    display "@ s " %24.17g e(N) " " %24.17g e(ll) " " %24.17g e(chi2) " " %24.17g e(p) " " e(df_m) " " e(rank) " " e(N_bf) " " e(k_eq) " " e(k_aux) " " e(k_eq_model)
+    display "@ s " %24.17g e(N) " " %24.17g e(ll) " " %24.17g e(chi2) " " %24.17g round(e(p), .000001) " " e(df_m) " " e(rank) " " e(N_bf) " " e(k_eq) " " e(k_aux) " " e(k_eq_model)
     display "@ sg " %24.17g e(sigma) " " e(converged)
     forvalues j = 1/`=colsof(e(b))' {
         display "@ b`j' " %24.17g el(e(b), 1, `j') " " %24.17g el(e(V), `j', `j')
@@ -55,3 +55,14 @@ foreach v in xb0 xb1 sd {
 }
 test x1 = x2
 display "@ tt " %24.17g r(chi2) " " %24.17g r(p) " " r(df)
+* offset() and iterate()
+generate double off = mod(_n * 13, 7) / 10
+truncreg ys x1 x2, ll(0) offset(off) nolog
+shwr
+display "@ o1 " (e(offset1) == "off")
+predict double xbo, xb
+quietly summarize xbo
+display "@ po " %24.17g r(mean) " " %24.17g r(sd) " " %24.17g r(min) " " %24.17g r(max)
+truncreg ys x1 x2, ll(0) iterate(30)
+shwr
+truncreg
