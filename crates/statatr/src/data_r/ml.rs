@@ -1069,6 +1069,7 @@ impl Session {
             | Fit::Cloglog
             | Fit::Hetprobit
             | Fit::Heckman
+            | Fit::Frac
             | Fit::Nlsur => return Err(no("this model is not fitted here")),
             Fit::Reghdfe => return self.reghdfe(c, opts, out),
             Fit::Cluster2 => return self.cluster2(c, opts, out),
@@ -1326,6 +1327,7 @@ impl Session {
             | Fit::Cloglog
             | Fit::Hetprobit
             | Fit::Heckman
+            | Fit::Frac
             | Fit::Reghdfe
             | Fit::Cluster2
             | Fit::Asclogit
@@ -1447,6 +1449,7 @@ impl Session {
             | Fit::Cloglog
             | Fit::Hetprobit
             | Fit::Heckman
+            | Fit::Frac
             | Fit::Reghdfe
             | Fit::Cluster2
             | Fit::Asclogit

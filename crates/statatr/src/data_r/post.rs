@@ -357,6 +357,9 @@ impl Session {
         if matches!(&self.e_ret, super::returned::Returned::Program { cmd, .. } if cmd == "lasso") {
             return self.lasso_predict(c, opts, out);
         }
+        if let Some(cmd) = self.frac_active() {
+            return self.frac_predict(c, opts, out, &cmd);
+        }
         if self.qreg_active() {
             return self.qreg_predict(c, opts, out);
         }
@@ -419,6 +422,7 @@ impl Session {
             | Fit::Cloglog
             | Fit::Hetprobit
             | Fit::Heckman
+            | Fit::Frac
             | Fit::Nlsur => &[],
             Fit::Logit | Fit::Probit => &[("pr", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
             Fit::Poisson => &[("n", 1), ("ir", 2), ("xb", 2), ("stdp", 4), ("score", 5)],
