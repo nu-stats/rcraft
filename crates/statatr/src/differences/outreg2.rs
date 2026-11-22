@@ -13,13 +13,19 @@ Guide {
              rows in Stata's order (a column alone in its model's order, xtreg's Number of \
              panels included; Observations and R-squared first once columns are added; e() \
              rows sorted by name), standard errors with 3 decimals, Robust in the footer \
-             after a robust or clustered first column.",
+             after a robust or clustered first column. Without tstat or se it writes standard \
+             errors in outreg2's own number format (by the size of the number) and with bdec() \
+             alone 3 decimals for them; sdec(); nocons, noobs, nor2, noaster, alpha() with \
+             symbol(); stats(coef), (coef se), (coef tstat|pval|ci) and (coef se tstat pval); \
+             tex alone (a whole document) and word (Rich Text, .rtf or .doc); a .txt name; and \
+             logit, probit and poisson.",
         ),
         p(
             "Not yet",
-            "outreg2 without tstat or se, bdec() and tdec() (its own number format), label \
-             with an .xls file, other files (.doc), stored models by name, or after factor \
-             variables that keep() does not leave out.",
+            "stats(... beta), tex(pretty), label with word, nocons, noobs, nor2, noaster, \
+             alpha(), symbol() or stats() with append, noobs, nor2, noaster, alpha(), \
+             symbol() or stats() with an .xls or .tex file, label with an .xls file, stored \
+             models by name, or after factor variables that keep() does not leave out.",
         ),
     ],
 }

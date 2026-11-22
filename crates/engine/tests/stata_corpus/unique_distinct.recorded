@@ -1,0 +1,43 @@
+* Stata 19.0's results for unique_distinct.do, recorded by cargo xtask stata-record
+@ u_a 90 10 10
+@ u_ab 90 35 35
+@ u_s 90 5 5
+@ u_dc 90 88 88
+@ u_if 27 8 8
+@ u_in 41 19 19
+@ u_none 0 0 0
+@ u_det 90 10 10
+@ ub_n 5
+@ ub_s 5 35 1 10
+@ ubid 5 30
+@ ubid2 18 250
+@ ubid2_s 18 71
+@ ub2 18 90 1 10
+@ ubif 5 18
+@ ubdet 90 35
+@ ubdet_s 5 67
+@ u_nogen 111
+@ rc_def 110
+@ rc_none 100
+@ rc_nov 111
+@ rc_by 111
+@ d_a 9 87
+@ d_abc 36 90
+@ d_sd 34 89
+@ d_miss 5 90
+@ d_smiss 5 90
+@ d_joint 84 86
+@ d_jm 88 90
+@ d_min 36 90
+@ d_max 36 90
+@ d_swap 36 90
+@ d_minmax 4 89
+@ d_if 7 26
+@ d_in 4 40
+@ d_none 0 0
+@ d_all 4 5
+@ d_abbrev 9 87
+@ drc_nov 111
+@ drc_by 198
+@ drc_abbrev 198
+@ drc_min 198

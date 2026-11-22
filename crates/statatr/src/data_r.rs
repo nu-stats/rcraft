@@ -46,6 +46,7 @@ mod contract;
 mod cut;
 mod dates;
 mod descr;
+mod distinct;
 mod dyndoc;
 mod eclass;
 mod epitab;
@@ -150,8 +151,10 @@ mod ts;
 mod tsreg;
 mod tstests;
 mod ttest;
+mod unique;
 mod weights;
 mod winsor;
+mod winsor2;
 mod xi;
 mod xport;
 mod xt;
@@ -921,6 +924,7 @@ const HARMLESS: &[&str] = &[
 ];
 
 const LEAVE_DATA_ALONE: &[&str] = &[
+    "distinct",
     "svyset",
     "svydescribe",
     "xtunitroot",
@@ -1679,6 +1683,9 @@ fn helper_code(name: &str) -> &'static str {
         "stata_codebook" => codebook::CODEBOOK_HELPER,
         "stata_center" => center::CENTER_HELPER,
         "stata_winsor" => winsor::WINSOR_HELPER,
+        "stata_winsor2" => winsor2::WINSOR2_HELPER,
+        "stata_unique" => unique::UNIQUE_HELPER,
+        "stata_distinct" => distinct::DISTINCT_HELPER,
         "stata_rangestat" => rangestat::RANGESTAT_HELPER,
         "stata_nsplit" => rangestat::NSPLIT_HELPER,
         "stata_alpha" => alpha::ALPHA_HELPER,
@@ -3022,6 +3029,7 @@ impl Session {
                 | "compress"
                 | "center"
                 | "winsor"
+                | "winsor2"
                 | "rangestat"
                 | "nsplit"
                 | "alpha"
@@ -3443,6 +3451,9 @@ impl Session {
             "codebook" => self.codebook(c, out),
             "center" => self.center(c, &opts, out),
             "winsor" => self.winsor(c, &opts, out),
+            "winsor2" => self.winsor2(c, &opts, out),
+            "unique" => self.unique(c, &opts, out),
+            "distinct" => self.distinct(c, &opts, out),
             "rangestat" => self.rangestat(c, &opts, out),
             "nsplit" => self.nsplit(c, &opts, out),
             "alpha" => self.alpha(c, &opts, out),

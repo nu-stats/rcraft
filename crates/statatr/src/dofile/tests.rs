@@ -864,9 +864,9 @@ fn a_varlist_takes_abbreviations_as_stata_does() {
 
 #[test]
 fn a_refused_command_that_changes_variables_in_place_loses_them() {
-    // winsor2 (SSC) is not translated; it changes price, so what reads price
+    // sem (a command not translated) changes price, so what reads price
     // after it is refused rather than run on the old values
-    let text = "use auto\nwinsor2 price, replace\nsummarize price\nsave t, replace\nsummarize mpg";
+    let text = "use auto\nsem price, replace\nsummarize price\nsave t, replace\nsummarize mpg";
     let mut r = Run::new(text, &NoFiles, Options::default());
     loop {
         match r.next_event() {
