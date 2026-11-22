@@ -276,6 +276,8 @@ const VARLIST: &[&str] = &[
     "center",
     "winsor",
     "winsor2",
+    "unique",
+    "distinct",
     "alpha",
     "isid",
 ];

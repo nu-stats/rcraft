@@ -52,6 +52,8 @@ pub(super) const WINSOR2_HELPER: &str = r##"stata_winsor2 <- function(d, vars, c
       } else res[idx] <- pmin(pmax(y[idx], l), h)
     }
     st <- stores[[v]]
+    # a winsorized new variable made by group is a float whatever the old type (Stata 19)
+    if (!replace && !trim && length(by)) st <- "float"
     lab0 <- attr(orig, "label", exact = TRUE)
     base <- if (is.null(lab0) || !nzchar(lab0)) v else lab0
     lab <- if (label) paste0(base, "-", if (trim) "Trim" else "Winsor", "(p", cl(lo), ",p", cl(hi), ")") else base
@@ -92,7 +94,9 @@ impl Session {
             ("label", 5),
             ("nolabel", 7),
         ]) {
-            return Err(no(format!("winsor2 with the option {o} is not translated yet")));
+            return Err(no(format!(
+                "winsor2 with the option {o} is not translated yet"
+            )));
         }
         let stop = |out: &mut Out, m: &str| {
             out.line(format!("stop({}, call. = FALSE)", r_text(m)));
@@ -101,7 +105,12 @@ impl Session {
             stop(out, "weights not allowed (Stata: r(101))");
             return Ok(());
         }
-        let vars: Vec<String> = c.parts.main.split_whitespace().map(str::to_string).collect();
+        let vars: Vec<String> = c
+            .parts
+            .main
+            .split_whitespace()
+            .map(str::to_string)
+            .collect();
         if vars.is_empty() {
             stop(out, "varlist required (Stata: r(100))");
             return Ok(());
@@ -114,7 +123,10 @@ impl Session {
         let replace = opts.has("replace", 7);
         let trim = opts.has("trim", 4);
         if replace && opts.has("suffix", 6) {
-            stop(out, "suffix() cannot be specified with replace (Stata: r(198))");
+            stop(
+                out,
+                "suffix() cannot be specified with replace (Stata: r(198))",
+            );
             return Ok(());
         }
         let suffix = match opts.arg("suffix", 6) {
@@ -122,8 +134,14 @@ impl Session {
             None if trim => "_tr".to_string(),
             None => "_w".to_string(),
         };
-        if !suffix.is_empty() && !suffix.chars().all(|ch| ch.is_ascii_alphanumeric() || ch == '_') {
-            return Err(no(format!("winsor2, suffix({suffix}): a name's letters are translated")));
+        if !suffix.is_empty()
+            && !suffix
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
+        {
+            return Err(no(format!(
+                "winsor2, suffix({suffix}): a name's letters are translated"
+            )));
         }
         let by: Vec<String> = opts
             .arg("by", 2)
@@ -144,9 +162,7 @@ impl Session {
                     }
                     match w.parse::<f64>() {
                         Ok(x) if x.is_finite() => v.push(x),
-                        _ => {
-                            return Err(no(format!("winsor2, cuts({t}): numbers are translated")))
-                        }
+                        _ => return Err(no(format!("winsor2, cuts({t}): numbers are translated"))),
                     }
                 }
                 v
@@ -161,7 +177,9 @@ impl Session {
                     );
                     Ok(())
                 }
-                _ => Err(no("winsor2 with more than two numbers in cuts() is not translated yet")),
+                _ => Err(no(
+                    "winsor2 with more than two numbers in cuts() is not translated yet",
+                )),
             };
         };
         let (lo, hi) = (*lo, *hi);
@@ -258,6 +276,9 @@ impl Session {
             let n = format!("{v}{suffix}");
             self.kinds.insert(n.clone(), Kind::Number);
             match self.storage.get(v).copied() {
+                _ if !trim && !by.is_empty() => {
+                    self.storage.insert(n, Storage::Float);
+                }
                 Some(s) if s != Storage::Str => {
                     self.storage.insert(n, s);
                 }

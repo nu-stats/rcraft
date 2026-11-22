@@ -813,6 +813,10 @@ cnsreg y x1 x2 x3, constraints(1) {o}"
             "winsor" if name == "generate" => format!("winsor y, {o} p(.1)"),
             "winsor" if name == "p" || name == "h" => format!("winsor y, gen(z) {o}"),
             "winsor" => format!("winsor y, gen(z) p(.1) {o}"),
+            "winsor2" if name == "replace" || name == "suffix" => {
+                format!("winsor2 y, cuts(5 95) {o}")
+            }
+            "winsor2" => format!("winsor2 y, cuts(5 95) suffix(_q) {o}"),
             "connected" | "line" | "scatter" => format!("{cmd} y x, {o}"),
             "twoway" => format!("twoway scatter y x, {o}"),
             "describe" => format!("describe, {o}"),

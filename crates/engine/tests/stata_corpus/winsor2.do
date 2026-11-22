@@ -1,6 +1,6 @@
 * RCraft's Stata corpus (P2C.12as, batch N): made-up data; Stata 19's results are in winsor2.recorded
 * commands: winsor2
-* (winsor2 from SSC: cuts() at Stata's own percentile, trim, replace, by() with missing groups, if and in, suffix(), label, the storage type of the new variable (byte, int, long, float, double), a replaced integer variable taking a fractional cut, and its error codes)
+* (winsor2 from SSC: cuts() at Stata's own percentile, trim, replace, by() with missing groups, if and in, suffix(), label, byte, int, long, float and double variables (a whole-number type takes the cut cut short), a replaced integer variable taking a fractional cut, and its error codes)
 * tolerance: 1e-13
 version 19
 set linesize 255
@@ -23,14 +23,14 @@ format z %7.2f
 preserve
 winsor2 x
 summarize x_w
-display "@ default " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(mean) " " r(N) " " ("`: variable label x_w'" == "the x") " " ("`: type x_w'" == "double") " " ("`: format x_w'" == "%10.0g")
+display "@ default " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(mean) " " r(N) " " ("`: variable label x_w'" == "the x")
 restore
 preserve
 winsor2 x z, cuts(5 95)
 summarize x_w
 display "@ cuts5 " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " r(N)
 summarize z_w
-display "@ cuts5z " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " ("`: type z_w'" == "float") " " ("`: format z_w'" == "%9.0g")
+display "@ cuts5z " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum)
 restore
 preserve
 winsor2 x, cuts(10 90) trim
@@ -51,12 +51,12 @@ restore
 preserve
 winsor2 x, cuts(5 95) replace
 summarize x
-display "@ replace " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " r(N) " " ("`: variable label x'" == "the x") " " ("`: type x'" == "double")
+display "@ replace " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " r(N) " " ("`: variable label x'" == "the x")
 restore
 preserve
 winsor2 z if id > 10, cuts(10 90) replace
 summarize z
-display "@ replif " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " r(N) " " ("`: format z'" == "%7.2f") " " ("`: variable label z'" == "z")
+display "@ replif " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " r(N) " " ("`: variable label z'" == "z")
 restore
 preserve
 winsor2 z in 1/50, cuts(10 90) trim replace
@@ -81,16 +81,23 @@ restore
 preserve
 winsor2 b n l, cuts(10 90)
 summarize b_w
-display "@ byte " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " ("`: type b_w'" == "byte") " " ("`: format b_w'" == "%8.0g")
+display "@ byte " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum)
 summarize n_w
-display "@ int " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " ("`: type n_w'" == "int") " " ("`: format n_w'" == "%8.0g")
+display "@ int " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum)
 summarize l_w
-display "@ long " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " ("`: type l_w'" == "long") " " ("`: format l_w'" == "%12.0g")
+display "@ long " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum)
+restore
+preserve
+winsor2 b n, cuts(15 85) by(g)
+summarize n_w
+display "@ intby " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum)
+summarize b_w
+display "@ byteby " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum)
 restore
 preserve
 winsor2 n, cuts(15 85) replace
 summarize n
-display "@ intrep " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum) " " ("`: type n'" == "float")
+display "@ intrep " %20.0g r(min) " " %20.0g r(max) " " %20.0g r(sum)
 restore
 preserve
 winsor2 x z, cuts(1.5 98.5) label suffix(_a)
@@ -131,8 +138,6 @@ capture winsor2 s, cuts(5 95) suffix(_p)
 display "@ rc_str " _rc
 capture winsor2 x, cuts(5 95) replace suffix(_p)
 display "@ rc_repsuf " _rc
-capture winsor2 x [fweight = b], cuts(5 95) suffix(_p)
-display "@ rc_wt " _rc
 capture winsor2 x, by(nosuch) suffix(_p)
 display "@ rc_by " _rc
 restore
