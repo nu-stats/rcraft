@@ -9,7 +9,8 @@ Guide {
              leaves that end alone; winsor (the default) sets the values beyond the cuts to \
              them and trim sets them to missing. Without replace the new variable x_w (x_tr \
              with trim, or suffix()) has the old one's storage type (a byte, int or long \
-             takes the cut cut short) and the default display format, and the old label (the \
+             takes the cut cut short; a float whatever the old type when winsorized by \
+             by()) and the default display format, and the old label (the \
              name when there is none, or label's x-Winsor(p1,p99)); replace keeps the \
              variable's type (a whole-number type taking a cut that is not whole becomes \
              float), format and labels, and changes only the rows of if and in. Its error \
