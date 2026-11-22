@@ -13,7 +13,7 @@
 //! contrasts' variance. A contrast the data cannot estimate (a weight outside
 //! the row space of the design) is `(not testable)` or `(not estimable)`.
 
-use super::model::Fit;
+use super::model::{Estimates, Fit};
 use super::*;
 
 pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fit, data, b, V, df, terms, factors, effects = FALSE, cimargins = FALSE,
@@ -49,6 +49,14 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
   have <- intersect(fn, names(b))
   if (length(have) < sum(!is.na(b))) stop("contrast: the coefficients and the model matrix do not match", call. = FALSE)
   bb[have] <- ifelse(is.na(b[have]), 0, b[have])
+  # the columns the fit left out (a zero in e(b)): a contrast built only of them is zero and omitted
+  isna <- stats::setNames(rep(TRUE, length(fn)), fn)
+  isna[have] <- is.na(b[have])
+  only_om <- function(l) {
+    l <- drop(l)
+    nz <- abs(l) > 1e-12 * max(abs(l), 1e-300)
+    any(nz) && all(isna[nz])
+  }
   VV <- matrix(0, length(fn), length(fn), dimnames = list(fn, fn))
   VV[have, have] <- V[have, have]
   VV[is.na(VV)] <- 0
@@ -81,9 +89,16 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
   sv <- svd(crossprod(Xe))
   keep <- sv$d > max(sv$d) * 1e-10
   H <- sv$v[, keep, drop = FALSE] %*% t(sv$v[, keep, drop = FALSE])
-  estimable <- function(L) {
+  # a margin carries the constant, which after xtreg, fe and areg is the panels' mean effect:
+  # the panel indicators carry it too, by their share of the rows (the intercept equals their sum)
+  pshare <- if (ncol(Xe) > ncol(X)) colMeans(Xe[, ncol(X) + seq_len(ncol(Xe) - ncol(X)), drop = FALSE]) else NULL
+  estimable <- function(L, margin = FALSE) {
     L <- matrix(L, ncol = length(fn))
     L <- cbind(L, matrix(0, nrow(L), ncol(Xe) - ncol(X)))
+    ic <- match("(Intercept)", fn)
+    if (margin && !is.null(pshare) && !is.na(ic)) {
+      L[, ncol(X) + seq_along(pshare)] <- outer(L[, ic], pshare)
+    }
     all(vapply(seq_len(nrow(L)), function(i) {
       l <- L[i, ]
       max(abs(l - drop(l %*% H))) <= 1e-8 * max(abs(l), 1e-300)
@@ -109,6 +124,7 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
       R <- R - outer(R[, j], R[j, ]) / R[j, j]
     }
     r <- length(S)
+    if (r == 0) return(list(df = 0, stat = NA_real_, p = NA_real_, W = NA_real_, zero = TRUE))
     W <- if (r) drop(t(est[S]) %*% solve(Vc[S, S, drop = FALSE], est[S])) else 0
     p <- if (small) stats::pf(W / r, r, df, lower.tail = FALSE) else stats::pchisq(W, r, lower.tail = FALSE)
     list(df = r, stat = if (small) W / r else W, p = p, W = W)
@@ -198,6 +214,7 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
         p = if (small) stats::pf(st^2 / rk, rk, df, lower.tail = FALSE) else stats::pchisq(st^2, rk, lower.tail = FALSE),
         crit = if (small) sqrt(rk * stats::qf(1 - alpha, rk, df)) else sqrt(stats::qchisq(1 - alpha, rk))),
       list(p = p0, crit = q(alpha)))
+    if (only_om(l)) return(list(ok = TRUE, omitted = TRUE, est = 0, se = NA_real_, st = NA_real_, p = NA_real_, p0 = NA_real_, crit = adj$crit, lo = NA_real_, hi = NA_real_))
     list(ok = TRUE, est = est, se = se, st = st, p = adj$p, p0 = p0, crit = adj$crit, lo = est - adj$crit * se, hi = est + adj$crit * se)
   }
   method <- c(noadjust = "Unadjusted", bonferroni = "Bonferroni", sidak = "Sidak", scheffe = "Scheffe")[[mcomp]]
@@ -254,15 +271,15 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
     if (kind == "contrast") {
       r$tr <- lapply(r$tests, function(e) if (estimable(e$L)) {
         w <- wald(e$L)
-        w$ok <- TRUE
-        if (nrow(e$L) == 1 && mcomp != "noadjust") {
+        w$ok <- !isTRUE(w$zero)
+        if (w$ok && nrow(e$L) == 1 && mcomp != "noadjust") {
           m <- length(r$ests)
           w$padj <- switch(mcomp, bonferroni = min(1, w$p * m), sidak = 1 - (1 - w$p)^m,
             scheffe = if (small) stats::pf(w$W / r$rank, r$rank, df, lower.tail = FALSE) else stats::pchisq(w$W, r$rank, lower.tail = FALSE))
         }
         w
       } else list(ok = FALSE))
-      r$joint <- if (estimable(r$Lall)) { w <- wald(r$Lall); w$ok <- TRUE; w } else list(ok = FALSE)
+      r$joint <- if (estimable(r$Lall)) { w <- wald(r$Lall); w$ok <- !isTRUE(w$zero); w } else list(ok = FALSE)
     }
     res[[i]] <- r
     for (j in seq_along(r$ests)) {
@@ -293,9 +310,9 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
     out$mcmethod <- mcomp
     # r(F), r(df), r(p): each term's rows, then its joint test when it has several
     ts <- unlist(lapply(res, function(r) c(r$tr, if (length(r$tests) > 1) list(r$joint))), recursive = FALSE)
-    pick <- function(f) matrix(vapply(ts, function(w) if (isTRUE(w$ok)) f(w) else NA_real_, 0), 1, dimnames = list("r1", paste0("c", seq_along(ts))))
+    pick <- function(f, zero = NA_real_) matrix(vapply(ts, function(w) if (isTRUE(w$ok)) f(w) else if (isTRUE(w$zero)) zero else NA_real_, 0), 1, dimnames = list("r1", paste0("c", seq_along(ts))))
     out[[if (small) "F" else "chi2"]] <- pick(function(w) w$stat)
-    out$df <- pick(function(w) w$df)
+    out$df <- pick(function(w) w$df, 0)
     out$p <- pick(function(w) w$p)
     if (small) out$df2 <- pick(function(w) df)
     out$table <- tab
@@ -313,7 +330,7 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
     crit0 <- if (small) stats::qt(1 - alpha / 2, df) else stats::qnorm(1 - alpha / 2)
     mt <- vapply(seq_len(nrow(Mall)), function(i) {
       l <- Mall[i, ]
-      if (!estimable(l)) return(rep(NA_real_, 9))
+      if (!estimable(l, margin = TRUE)) return(rep(NA_real_, 9))
       m <- sum(l * bb)
       se <- sqrt(max(drop(l %*% VV %*% l), 0))
       st <- m / se
@@ -420,7 +437,7 @@ pub(super) const CONTRAST_HELPER: &str = r##"stata_contrast <- function(kind, fi
       cat(sprintf("%*s |", W - 1L, r$label), "\n", sep = "")
       for (j in seq_along(r$ests)) {
         e <- r$er[[j]]
-        body <- if (!e$ok) sprintf("%11s  (not estimable)", ".") else if (effects) {
+        body <- if (!e$ok) sprintf("%11s  (not estimable)", ".") else if (isTRUE(e$omitted)) sprintf("%11s  (omitted)", "0") else if (effects) {
           sprintf("%11s%11s%9.2f%8.3f%13s%12s", g(e$est), g(e$se), e$st, e$p, g(e$lo), g(e$hi))
         } else sprintf("%11s%11s%14s%12s", g(e$est), g(e$se), g(e$lo), g(e$hi))
         cat(sprintf("%*s  |", W - 2L, r$ests[[j]]$label), body, "\n", sep = "")
@@ -533,16 +550,28 @@ impl Session {
         let name = c.name.as_str();
         let pw = name == "pwcompare";
         self.no_by(c, name)?;
-        let est = self.estimates_for(name)?;
-        if !matches!(
-            est.fit,
-            Fit::Regress | Fit::Xtreg | Fit::Logit | Fit::Probit | Fit::Poisson
-        ) {
-            return Err(no(format!(
-                "{name} after {} is not translated yet",
-                est.fit.name()
-            )));
-        }
+        // xtregar keeps its terms, factor levels and panel in the list it leaves, as xtreg, fe does in its lm
+        let xtr = self.is_xtregar(".");
+        let est = if xtr {
+            Estimates {
+                fit: Fit::Xtreg,
+                dep: String::new(),
+                factors: self.xtregar_factors.clone(),
+            }
+        } else {
+            let e = self.estimates_for(name)?;
+            if !matches!(
+                e.fit,
+                Fit::Regress | Fit::Xtreg | Fit::Areg | Fit::Logit | Fit::Probit | Fit::Poisson
+            ) {
+                return Err(no(format!(
+                    "{name} after {} is not translated yet",
+                    e.fit.name()
+                )));
+            }
+            e
+        };
+        let fit_name = if xtr { "xtregar" } else { est.fit.name() };
         if self.svy_fit {
             return Err(no(format!(
                 "{name} after a svy: model is not translated yet"
@@ -633,7 +662,7 @@ impl Session {
         } else {
             return Err(no(format!(
                 "{name} after a command that may have changed the rows since {} is not translated yet",
-                est.fit.name()
+                fit_name
             )));
         };
         let factors: Vec<String> = est
@@ -673,13 +702,19 @@ impl Session {
         for h in ["stata_contrast", "stata_fmt"] {
             self.helpers.insert(h);
         }
-        let eq = if matches!(est.fit, Fit::Regress | Fit::Xtreg) {
+        let eq = if matches!(est.fit, Fit::Regress | Fit::Xtreg | Fit::Areg) {
             String::new()
         } else {
             est.dep.clone()
         };
+        // areg keeps no lm: its formula, factor levels and absorbed variable stand in, as for xtreg, fe
+        let fit_r = if est.fit == Fit::Areg {
+            "list(terms = stats::terms(attr(stata_e, \"stata_areg\")$fo), xlevels = attr(stata_e, \"stata_areg\")$xlev, panel = attr(stata_e, \"stata_areg\")$absorb, type = \"fe\")"
+        } else {
+            "stata_estimates"
+        };
         out.line(format!(
-            "stata_r <- stata_contrast({}, stata_estimates, {rows}, stata_b, stata_vcov, stata_df, list({}), c({}), effects = {}, cimargins = {}, mcomp = {}, level = {}, eq = {}, cmdline = {}, est_cmd = {}, est_cmdline = if (exists(\"stata_e\")) stata_e$cmdline else \"\"{})",
+            "stata_r <- stata_contrast({}, {fit_r}, {rows}, stata_b, stata_vcov, stata_df, list({}), c({}), effects = {}, cimargins = {}, mcomp = {}, level = {}, eq = {}, cmdline = {}, est_cmd = {}, est_cmdline = if (exists(\"stata_e\")) stata_e$cmdline else \"\"{})",
             r_text(name),
             terms_r.join(", "),
             factors.join(", "),
@@ -689,7 +724,7 @@ impl Session {
             r_number(level),
             r_text(&eq),
             r_text(c.text.trim()),
-            r_text(est.fit.name()),
+            r_text(fit_name),
             if self.quiet(c) { ", show = FALSE" } else { "" }
         ));
         self.r_new = Some((R_CONTRAST, name.to_string()));
@@ -729,7 +764,12 @@ pub(super) const HAUSMAN_HELPER: &str = r##"stata_hausman <- function(s1, s2, n1
   }
   if (!length(common)) stop("no coefficients in common; specify equations (Stata: r(498))", call. = FALSE)
   ratio <- if (nzchar(sig)) {
-    if (is.null(a$rmse) || is.null(z$rmse)) stop("sigmamore and sigmaless need e(rmse), which is not kept here", call. = FALSE)
+    if (is.null(a$rmse) || is.null(z$rmse)) {
+      # Stata keeps no e(rmse) after xtregar re, logit, probit and poisson
+      if (any(c(cmd1, cmd2) %in% c("xtregar", "logit", "probit", "poisson"))) stop("Estimators do not save e(sigma) or e(rmse),
+sigma option not allowed (Stata: r(198))", call. = FALSE)
+      stop("sigmamore and sigmaless need e(rmse), which is not kept here", call. = FALSE)
+    }
     (z$rmse / a$rmse)^2
   } else 1
   w1 <- if (sig == "sigmamore") ratio else 1
@@ -789,6 +829,7 @@ pub(super) const HAUSMAN_HELPER: &str = r##"stata_hausman <- function(s1, s2, n1
     cat("\nWarning: chi2 < 0 ==> model fitted on these data\n         fails to meet the asymptotic assumptions\n         of the Hausman test; see suest for a\n         generalized test.\n")
   } else {
     cat(sprintf("Prob > chi2 = %6.4f\n", p))
+    if (any(eigen(Vd, symmetric = TRUE, only.values = TRUE)$values <= 0)) cat("(V_b-V_B is not positive definite)\n")
   }
   invisible(r)
 }"##;
@@ -861,6 +902,47 @@ impl Session {
         }
     }
 
+    /// Whether the results under `name` (`.` for the active ones) are an `xtregar` fit, whose
+    /// coefficients and variance are all that is kept of it.
+    fn is_xtregar(&self, name: &str) -> bool {
+        let kept = |r: &super::returned::Returned| matches!(r, super::returned::Returned::Kept { cmd, .. } if cmd == "xtregar");
+        if name == "." {
+            kept(&self.e_ret) && self.estimates.is_none()
+        } else {
+            self.stored_fit(name).is_some_and(|f| f.is_kept("xtregar"))
+        }
+    }
+
+    /// One set of results for `hausman`: its R expression and the command that made it.
+    fn hausman_set(
+        &self,
+        name: &str,
+        out: &mut Out,
+    ) -> Result<Option<(String, String)>, Untranslated> {
+        if self.is_xtregar(name) {
+            let expr = if name == "." {
+                "list(stata_b = stata_b, stata_vcov = stata_vcov, stata_e = if (exists(\"stata_e\")) stata_e else list())".to_string()
+            } else {
+                format!("stata_stored[[{}]]", r_text(name))
+            };
+            return Ok(Some((expr, "xtregar".into())));
+        }
+        let Some((expr, f)) = self.stored_or_active("hausman", name, out)? else {
+            return Ok(None);
+        };
+        let ok = matches!(
+            f,
+            Fit::Xtreg | Fit::Regress | Fit::Ivregress | Fit::Logit | Fit::Probit | Fit::Poisson
+        );
+        if !ok {
+            return Err(no(format!(
+                "hausman after {} is not translated yet",
+                f.name()
+            )));
+        }
+        Ok(Some((expr, f.name().to_string())))
+    }
+
     /// `hausman consistent [efficient] [, constant sigmamore sigmaless]`.
     pub(super) fn hausman_cmd(
         &mut self,
@@ -890,30 +972,12 @@ impl Session {
                 return Err(no(format!("hausman {n}: not a name of stored results")));
             }
         }
-        let Some((s1, f1)) = self.stored_or_active("hausman", a, out)? else {
+        let Some((s1, n1)) = self.hausman_set(a, out)? else {
             return Ok(());
         };
-        let Some((s2, f2)) = self.stored_or_active("hausman", b, out)? else {
+        let Some((s2, n2)) = self.hausman_set(b, out)? else {
             return Ok(());
         };
-        let ok = |f: Fit| {
-            matches!(
-                f,
-                Fit::Xtreg
-                    | Fit::Regress
-                    | Fit::Ivregress
-                    | Fit::Logit
-                    | Fit::Probit
-                    | Fit::Poisson
-            )
-        };
-        if !ok(f1) || !ok(f2) {
-            return Err(no(format!(
-                "hausman after {} and {} is not translated yet",
-                f1.name(),
-                f2.name()
-            )));
-        }
         let sig = if opts.has("sigmamore", 6) {
             "sigmamore"
         } else if opts.has("sigmaless", 6) {
@@ -927,8 +991,8 @@ impl Session {
             "stata_r <- stata_hausman({s1}, {s2}, {}, {}, {}, {}, constant = {}, sig = {}{})",
             r_text(a),
             r_text(b),
-            r_text(f1.name()),
-            r_text(f2.name()),
+            r_text(&n1),
+            r_text(&n2),
             super::stats::r_logical(opts.has("constant", 4)),
             r_text(sig),
             if self.quiet(c) { ", show = FALSE" } else { "" }
@@ -1145,16 +1209,22 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "predictnl")?;
-        let est = self.estimates_for("predictnl")?;
-        if !matches!(
-            est.fit,
-            Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson
-        ) {
-            return Err(no(format!(
-                "predictnl after {} is not translated yet",
-                est.fit.name()
-            )));
-        }
+        // after xtregar the linear prediction is the coefficients on the plain variables
+        let fit = if self.is_xtregar(".") {
+            Fit::Regress
+        } else {
+            let est = self.estimates_for("predictnl")?;
+            if !matches!(
+                est.fit,
+                Fit::Regress | Fit::Logit | Fit::Probit | Fit::Poisson
+            ) {
+                return Err(no(format!(
+                    "predictnl after {} is not translated yet",
+                    est.fit.name()
+                )));
+            }
+            est.fit
+        };
         if self.svy_fit {
             return Err(no("predictnl after a svy: model is not translated yet"));
         }
@@ -1211,7 +1281,7 @@ impl Session {
             ci = true;
         }
         let d = self.data()?;
-        let (text, preds) = pnl_substitute(rhs.trim(), est.fit)?;
+        let (text, preds) = pnl_substitute(rhs.trim(), fit)?;
         for (n, _, _) in &news {
             out.line(format!(
                 "if ({} %in% names({d})) stop(\"variable {n} already defined\")",
@@ -1240,7 +1310,7 @@ impl Session {
         if value.contains("stata_v = ") {
             return Err(no("predictnl: this expression is not translated yet"));
         }
-        let link = match est.fit {
+        let link = match fit {
             Fit::Logit => "logit",
             Fit::Probit => "probit",
             Fit::Poisson => "log",

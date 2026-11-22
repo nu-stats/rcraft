@@ -1265,6 +1265,7 @@ pub(super) struct StoredFit {
     plain_regress: bool,
     fit_robust: bool,
     fit_cluster: bool,
+    xtregar_factors: std::collections::BTreeMap<String, String>,
     /// Its `stata_esample` still marks the rows, and its copy of the
     /// estimation sample is still the data's; a line since that moves the
     /// rows or changes the data clears these, as it does for the model held.
@@ -1278,6 +1279,11 @@ const FIT_OBJECTS: &str = "c(\"stata_estimates\", \"stata_lasso\", \"stata_b\", 
 impl StoredFit {
     pub(super) fn estimates(&self) -> Option<&super::model::Estimates> {
         self.estimates.as_ref()
+    }
+
+    /// Whether these results are the ones of command `cmd`, kept as coefficients and variance only.
+    pub(super) fn is_kept(&self, cmd: &str) -> bool {
+        matches!(&self.e_ret, Returned::Kept { cmd: c, .. } if c == cmd)
     }
 
     pub(super) fn robust_or_weighted(&self) -> bool {
@@ -1494,6 +1500,7 @@ impl Session {
                 plain_regress: self.plain_regress,
                 fit_robust: self.fit_robust,
                 fit_cluster: self.fit_cluster,
+                xtregar_factors: self.xtregar_factors.clone(),
                 esample: self.esample,
                 changed_since_fit: self.changed_since_fit,
             },
@@ -1568,6 +1575,7 @@ impl Session {
         self.plain_regress = f.plain_regress;
         self.fit_robust = f.fit_robust;
         self.fit_cluster = f.fit_cluster;
+        self.xtregar_factors = f.xtregar_factors;
         self.esample = f.esample;
         self.changed_since_fit = f.changed_since_fit;
         self.active_store = Some(name.to_string());
