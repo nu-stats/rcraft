@@ -1000,7 +1000,8 @@ impl Session {
         Ok(())
     }
 
-    /// `estat ic` after the batch's models (the rest of estat is not translated after them).
+    /// `estat ic`, `estat vce` and `estat summarize` after the batch's models, as Stata 19 prints them with
+    /// r(S), r(V) and r(stats); the other subcommands stop as Stata stops them (`estat gof not valid`, r(321)).
     pub(super) fn censored_estat(
         &mut self,
         c: &Command,
@@ -1008,17 +1009,154 @@ impl Session {
         out: &mut Out,
         cmd: &str,
     ) -> Result<(), Untranslated> {
-        let sub = c.parts.main.trim();
-        if sub.len() < 2 || !"ic".starts_with(sub) || !opts.0.is_empty() {
-            return Err(no(format!(
-                "estat {sub} after {cmd} is not translated yet (estat ic is)"
-            )));
+        let (sub, rest) = super::first_word(&c.parts.main);
+        let is = |full: &str, min: usize| sub.len() >= min && full.starts_with(sub);
+        let stop = |out: &mut Out, msg: &str| super::sureg::eq_stop(out, msg);
+        if sub.is_empty() {
+            stop(out, "subcommand required (Stata: r(321))");
+            return Ok(());
         }
-        self.helpers.insert("stata_cx");
-        if !self.quiet(c) {
-            out.line("stata_cx_estat_ic(stata_e)");
+        if is("bootstrap", 4) {
+            stop(out, "last estimates not found (Stata: r(301))");
+            return Ok(());
         }
-        out.caveat("printed in R's layout, not Stata's table");
+        if !(is("ic", 2) || is("vce", 3) || is("summarize", 2)) {
+            stop(out, &format!("estat {sub} not valid (Stata: r(321))"));
+            return Ok(());
+        }
+        let quiet = self.quiet(c);
+        let emit = |out: &mut Out, call: String| {
+            let call = format!("stata_r <- {call}");
+            out.line(if quiet {
+                format!("invisible(utils::capture.output({call}))")
+            } else {
+                call
+            });
+        };
+        if is("ic", 2) {
+            if !rest.is_empty() {
+                stop(out, "varlist not allowed (Stata: r(101))");
+                return Ok(());
+            }
+            if let Some(o) = opts.other(&[("n", 1), ("df", 2)]) {
+                stop(out, &format!("option {o} not allowed (Stata: r(198))"));
+                return Ok(());
+            }
+            // whole numbers only: Stata shows a fractional n or df rounded, which is not reproduced
+            let whole = |name: &str, min: usize| -> Result<Option<f64>, Untranslated> {
+                match opts.arg(name, min) {
+                    None => Ok(None),
+                    Some(a) => match a.trim().parse::<f64>() {
+                        Ok(v) if v.is_finite() && v.fract() == 0.0 && v.abs() < 1e15 => Ok(Some(v)),
+                        _ => Err(no(format!(
+                            "estat ic with {name}({}) after {cmd}: whole numbers are translated",
+                            a.trim()
+                        ))),
+                    },
+                }
+            };
+            let n = whole("n", 1)?;
+            let df = whole("df", 2)?;
+            if n.is_some_and(|v| v <= 0.0) {
+                stop(
+                    out,
+                    "n() invalid -- invalid number, outside of allowed range (Stata: r(125))",
+                );
+                return Ok(());
+            }
+            if df.is_some_and(|v| v < 0.0) {
+                return Err(no(format!(
+                    "estat ic with a negative df() after {cmd} is not translated yet"
+                )));
+            }
+            let mut call = String::from("stata_cx_estat_ic(stata_e");
+            if let Some(v) = n {
+                call.push_str(&format!(", n = {}", r_number(v)));
+            }
+            if let Some(v) = df {
+                call.push_str(&format!(", df = {}", r_number(v)));
+            }
+            call.push(')');
+            for h in [
+                "stata_cx",
+                "stata_est_more",
+                "stata_fmt",
+                "stata_tables",
+                "stata_returned",
+            ] {
+                self.helpers.insert(h);
+            }
+            emit(out, call);
+        } else if is("vce", 3) {
+            if !rest.is_empty() {
+                stop(out, "varlist not allowed (Stata: r(101))");
+                return Ok(());
+            }
+            if let Some(o) = opts.other(&[("correlation", 4), ("covariance", 3), ("format", 1)]) {
+                return Err(no(format!(
+                    "estat vce after {cmd} with the option {o} is not translated yet"
+                )));
+            }
+            let fmt = match opts.arg("format", 1) {
+                None => String::new(),
+                Some(f) => {
+                    let f = f.trim().to_string();
+                    if !super::returned::valid_format(&f) {
+                        return Err(no(format!(
+                            "estat vce, format({f}): not a format RCraft has"
+                        )));
+                    }
+                    format!(", format = {}", r_text(&f))
+                }
+            };
+            for h in ["stata_cx", "stata_fmt", "stata_tables", "stata_returned"] {
+                self.helpers.insert(h);
+            }
+            emit(
+                out,
+                format!(
+                    "stata_cx_estat_vce(stata_e, correlation = {}{fmt})",
+                    super::stats::r_logical(opts.has("correlation", 4))
+                ),
+            );
+        } else {
+            if let Some(o) = opts.other(&[("equation", 2), ("labels", 3), ("noheader", 6)]) {
+                return Err(no(format!(
+                    "estat summarize after {cmd} with the option {o} is not translated yet"
+                )));
+            }
+            let vars: Vec<&str> = rest.split_whitespace().collect();
+            if let Some(v) = vars.iter().find(|v| !is_name(v)) {
+                return Err(no(format!(
+                    "estat summarize {v}: only variable names written out are translated"
+                )));
+            }
+            if !vars.is_empty() && opts.has("equation", 2) {
+                return Err(no(format!(
+                    "estat summarize with a varlist and equation after {cmd} is not translated yet"
+                )));
+            }
+            let d = self.data()?;
+            for h in ["stata_cx", "stata_fmt", "stata_tables", "stata_returned"] {
+                self.helpers.insert(h);
+            }
+            let vlist = if vars.is_empty() {
+                String::new()
+            } else {
+                let v: Vec<String> = vars.iter().map(|v| r_text(v)).collect();
+                format!(", vars = c({})", v.join(", "))
+            };
+            emit(
+                out,
+                format!(
+                    "stata_cx_estat_summ(stata_e, {d}{vlist}, equation = {}, labels = {}, noheader = {})",
+                    super::stats::r_logical(opts.has("equation", 2)),
+                    super::stats::r_logical(opts.has("labels", 3)),
+                    super::stats::r_logical(opts.has("noheader", 6))
+                ),
+            );
+        }
+        self.r_new = Some((&[], "estat".into()));
         Ok(())
     }
 

@@ -585,27 +585,28 @@ stata_est_dir <- function(names = NULL) {
   cat(rule)
   invisible(NULL)
 }
-stata_est_stats <- function(names = NULL) {
+stata_est_stats <- function(names = NULL, n = NULL, df = NULL, dot = FALSE) {
   es <- if (is.null(names)) {
     e <- stata_e
-    stats::setNames(list(e), if (is.null(e[["_estimates_name"]])) "." else e[["_estimates_name"]])
+    stats::setNames(list(e), if (dot || is.null(e[["_estimates_name"]])) "." else e[["_estimates_name"]])
   } else stata_est_list(names)
   num <- function(v) if (is.null(v) || length(v) == 0) NA_real_ else as.numeric(v)
   S <- t(vapply(es, function(e) {
-    N <- num(e$N); ll <- num(e$ll); k <- num(e$rank)
+    N <- if (is.null(n)) num(e$N) else n; ll <- num(e$ll); k <- if (is.null(df)) num(e$rank) else df
     c(N = N, ll0 = num(e$ll_0), ll = ll, df = k, AIC = -2 * ll + 2 * k, BIC = -2 * ll + log(N) * k)
   }, numeric(6)))
   rownames(S) <- names(es)
   g <- function(v) if (is.na(v)) "." else stata_fmt(v, "%9.0g", trim = TRUE)
+  gn <- function(v) if (is.na(v)) "." else stata_fmt(v, "%20.0fc", trim = TRUE)
   rule <- paste0(strrep("-", 77), "\n")
   cat("\nAkaike's information criterion and Bayesian information criterion\n\n", rule,
       "       Model |          N   ll(null)  ll(model)      df        AIC        BIC\n",
       "-------------+", strrep("-", 63), "\n", sep = "")
   for (i in seq_len(nrow(S))) {
-    cat(sprintf("%12s |%11s%11s%11s%8s%11s%11s", stata_tab_abbrev(rownames(S)[i], 12), g(S[i, 1]), g(S[i, 2]), g(S[i, 3]),
+    cat(sprintf("%12s |%11s%11s%11s%8s%11s%11s", stata_tab_abbrev(rownames(S)[i], 12), gn(S[i, 1]), g(S[i, 2]), g(S[i, 3]),
                 g(S[i, 4]), g(S[i, 5]), g(S[i, 6])), "\n", sep = "")
   }
-  cat(rule, "Note: BIC uses N = number of observations. See [R] IC note.\n", sep = "")
+  cat(rule, if (is.null(n)) "Note: BIC uses N = number of observations. See [R] IC note.\n", sep = "")
   invisible(list(S = S))
 }"##;
 

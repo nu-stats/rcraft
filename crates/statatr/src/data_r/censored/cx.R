@@ -168,13 +168,162 @@ stata_cx_setup <- function(d, dep, terms, extra = character(), wvar = NULL, clus
   off <- if (is.null(offset)) NULL else stata_cx_num(mf[[offset]])
   list(rows = rows, mf = mf, des = des, X = des$X, n = nrow(mf), off = off)
 }
-# estat ic after the batch's models: N, ll(null) where the model has one, ll(model), df = e(rank), AIC, BIC
-stata_cx_estat_ic <- function(e) {
-  k <- e$rank; n <- e$N; ll <- e$ll
-  tab <- data.frame(N = n, "ll(null)" = if (is.null(e$ll_0)) NA_real_ else e$ll_0, "ll(model)" = ll, df = k,
-                    AIC = -2 * ll + 2 * k, BIC = -2 * ll + log(n) * k, check.names = FALSE)
-  if (is.null(e$ll_0)) tab[["ll(null)"]] <- NULL
-  rownames(tab) <- "."
-  print(tab, digits = 8)
-  invisible(tab)
+# estat ic after the six models: the estimates stats table with the one row "." and r(S); n() and df() as given
+# (heckman twostep keeps no likelihood: r(321))
+stata_cx_estat_ic <- function(e, n = NULL, df = NULL) {
+  if (is.null(e$ll)) stop("likelihood information not found in last estimation results (Stata: r(321))", call. = FALSE)
+  stata_est_stats(NULL, n = n, df = df, dot = TRUE)
+}
+# e(V)'s column names as Stata keeps them (truncreg's equation is eq1, its sigma sits in /)
+stata_cx_vnames <- function(e) {
+  nm <- colnames(e$V)
+  if (identical(e$cmd, "truncreg")) {
+    k <- length(nm)
+    nm <- c(sub("^[^:]*:", "eq1:", nm[-k]), "/:sigma")
+  }
+  nm
+}
+# estat vce after the six: the lower triangle in equation blocks, r(V)
+stata_cx_estat_vce <- function(e, correlation = FALSE, format = NULL) {
+  V <- as.matrix(e$V)
+  nm <- stata_cx_vnames(e)
+  eq <- sub(":.*$", "", nm)
+  short <- sub("^[^:]*:", "", nm)
+  if (any(grepl("[.#]", short[eq != "/"]))) stop("RCraft: estat vce with factor variables after ", e$cmd, " is not translated yet", call. = FALSE)
+  k <- length(nm)
+  M <- if (correlation) { s <- sqrt(diag(V)); V / outer(s, s) } else V
+  f <- if (!is.null(format)) format else if (correlation) "%8.4f" else "%10.0g"
+  fw <- as.integer(sub("^%-?0?([0-9]+).*$", "\\1", f))
+  first <- c(TRUE, eq[-1] != eq[-k])
+  W <- ifelse(first, fw + 1L, fw + 2L)
+  grp <- cumsum(first)
+  G <- max(grp)
+  Wg <- vapply(seq_len(G), function(g) sum(W[grp == g]), 0)
+  geq <- eq[first]
+  ls <- if (exists("stata_linesize")) stata_linesize else 79
+  if (14 + sum(Wg + 1) + G > ls) stop("RCraft: estat vce wider than the line after ", e$cmd, " is not translated yet", call. = FALSE)
+  paren <- grepl("(", short, fixed = TRUE)
+  spec <- paren[k]
+  pad <- function(s, n) formatC(s, width = n)
+  blank <- function(n) strrep(" ", n)
+  cat("\n", if (correlation) "Correlation" else "Covariance", " matrix of coefficients of ", e$cmd, " model\n\n", sep = "")
+  cat(blank(13), "|", paste(vapply(seq_len(G), function(g) formatC(paste0(" ", geq[g]), width = -(Wg[g] + if (g < G || spec) 1L else 0L)), ""), collapse = "|"), "\n", sep = "")
+  hcell <- function(j) if (j == k && spec) paste0(" ", pad(short[j], W[j])) else pad(stata_tab_abbrev(short[j], 12), W[j])
+  cat(pad("e(V)", 12), " |", paste(vapply(seq_len(G), function(g) paste0(paste(vapply(which(grp == g), hcell, ""), collapse = ""), if (g == G && spec) "" else " "), ""), collapse = "|"), "\n", sep = "")
+  dash <- paste0(strrep("-", 13), "+", paste(vapply(seq_len(G), function(g) strrep("-", Wg[g] + if (g < G) 1 else 0), ""), collapse = "+"), "\n")
+  for (g in seq_len(G)) {
+    cat(dash)
+    cat(formatC(geq[g], width = -13), "|", paste(vapply(seq_len(G), function(h) blank(Wg[h] + if (h < G) 1 else 0), ""), collapse = "|"), "\n", sep = "")
+    for (i in which(grp == g)) {
+      cells <- vapply(seq_len(k), function(j) if (j <= i) pad(stata_fmt(M[i, j], f, trim = TRUE), W[j]) else blank(W[j]), "")
+      lab <- if (paren[i]) paste0(pad(short[i], 13), "|") else paste0(pad(stata_tab_abbrev(short[i], 12), 12), " |")
+      cat(lab, paste(vapply(seq_len(G), function(h) paste0(paste(cells[grp == h], collapse = ""), " "), ""), collapse = "|"), "\n", sep = "")
+    }
+  }
+  dimnames(M) <- list(nm, nm)
+  invisible(list(V = M))
+}
+# estat summarize after the six: mean, sd, min and max over e(sample) of the dependent variables and each
+# equation's regressors (or of the varlist), weights as Stata weights them, r(stats)
+stata_cx_estat_summ <- function(e, d, vars = NULL, equation = FALSE, labels = FALSE, noheader = FALSE) {
+  nm <- stata_cx_vnames(e)
+  eqv <- sub(":.*$", "", nm)
+  sh <- sub("^[^:]*:", "", nm)
+  deps <- strsplit(e$depvar, " ", fixed = TRUE)[[1]]
+  eqn <- unique(eqv[!startsWith(eqv, "/")])
+  grp <- lapply(eqn, function(g) setdiff(unique(sh[eqv == g]), "_cons"))
+  names(grp) <- eqn
+  grp <- grp[lengths(grp) > 0]
+  if (any(grepl("[.#]", unlist(grp)))) stop("RCraft: estat summarize with factor variables after ", e$cmd, " is not translated yet", call. = FALSE)
+  if (!is.null(vars)) vars <- unique(vars)
+  secs <- if (!is.null(vars)) list(vars) else if (equation) c(list(depvar = deps), grp) else list(unique(c(deps, unlist(grp))))
+  shown <- unique(unlist(secs))
+  miss <- setdiff(shown, names(d))
+  if (length(miss)) stop("variable ", miss[1], " not found (Stata: r(111))", call. = FALSE)
+  x <- d[which(stata_esample), , drop = FALSE]
+  num <- function(u) { u <- unclass(u); attributes(u) <- NULL; as.numeric(u) }
+  wv <- if (is.null(e$wexp)) NULL else sub("^=\\s*", "", e$wexp)
+  wt <- e$wtype
+  w <- if (is.null(wv)) NULL else num(x[[wv]])
+  cl <- e$clustvar
+  if (!is.null(cl) && identical(wt, "fweight")) stop("RCraft: estat summarize after a clustered fit with frequency weights is not translated yet", call. = FALSE)
+  st <- function(v) {
+    u <- num(x[[v]])
+    ok <- !is.na(u)
+    uu <- u[ok]
+    if (is.null(w)) return(c(mean(uu), stats::sd(uu), min(uu), max(uu)))
+    ww <- w[ok]
+    sw <- sum(ww)
+    m <- sum(ww * uu) / sw
+    ss <- sum(ww * (uu - m)^2)
+    den <- if (wt %in% c("fweight", "iweight")) sw - 1 else (length(uu) - 1) * sw / length(uu)
+    c(m, sqrt(ss / den), min(uu), max(uu))
+  }
+  stw <- if (is.null(w)) NULL else c(mean(w), stats::sd(w), min(w), max(w))
+  nobs <- if (!is.null(e$N)) e$N else nrow(x)
+  g <- function(v, wd) formatC(stata_fmt(v, "%9.0g", trim = TRUE), width = wd)
+  g8 <- function(v, wd) formatC(stata_fmt(v, "%8.0g", trim = TRUE), width = wd)
+  nmiss <- vapply(shown, function(v) sum(is.na(num(x[[v]]))), 0)
+  cat("\n")
+  if (labels) {
+    if (!noheader) {
+      if (is.null(cl)) {
+        cat("Estimation sample ", formatC(e$cmd, width = -34), "Number of obs = ", formatC(stata_tab_count(nobs), width = 10), "\n", sep = "")
+      } else {
+        sz <- as.numeric(table(x[[cl]]))
+        ind <- strrep(" ", 45)
+        cat("Estimation sample ", formatC(e$cmd, width = -27), sprintf("Number of obs        = %10s\n\n", stata_tab_count(nobs)), sep = "")
+        cat(ind, sprintf("Number of clusters   = %10d\n", length(sz)), ind, sprintf("Obs per cluster: min = %10d\n", as.integer(min(sz))),
+            ind, sprintf("                 avg = %10.1f\n", mean(sz)), ind, sprintf("                 max = %10d\n\n", as.integer(max(sz))), sep = "")
+      }
+    }
+    line <- function(ch) cat(strrep("-", 13), ch, strrep("-", 64), "\n", sep = "")
+    row <- function(v, s, lab) cat(formatC(stata_tab_abbrev(v), width = 12), " |", g(s[1], 10), g(s[2], 11), g8(s[3], 9), g8(s[4], 9),
+                                   if (is.null(lab) || !nzchar(lab)) "" else paste0("   ", lab), "\n", sep = "")
+    cat(strrep("-", 78), "\n", sep = "")
+    cat("    Variable |      Mean   Std. dev.     Min      Max   Label\n")
+    lab <- function(v) { l <- attr(d[[v]], "label", exact = TRUE); if (is.null(l)) "" else l }
+  } else {
+    if (!noheader) {
+      if (is.null(cl)) {
+        cat("  Estimation sample ", formatC(e$cmd, width = -23), "Number of obs = ", formatC(stata_tab_count(nobs), width = 10), "\n\n", sep = "")
+      } else {
+        sz <- as.numeric(table(x[[cl]]))
+        ind <- strrep(" ", 36)
+        cat("  Estimation sample ", e$cmd, "\n", ind, sprintf("Number of obs        = %10s\n\n", stata_tab_count(nobs)), sep = "")
+        cat(ind, sprintf("Number of clusters   = %10d\n", length(sz)), ind, sprintf("Obs per cluster: min = %10d\n", as.integer(min(sz))),
+            strrep(" ", 53), sprintf("avg = %10.1f\n", mean(sz)), strrep(" ", 53), sprintf("max = %10d\n\n", as.integer(max(sz))), sep = "")
+      }
+    }
+    line <- function(ch) cat("  ", strrep("-", 13), ch, strrep("-", 53), "\n", sep = "")
+    row <- function(v, s, lab) cat("  ", formatC(stata_tab_abbrev(v), width = 12), " |", g(s[1], 13), g(s[2], 14), g(s[3], 13), g(s[4], 13), "\n", sep = "")
+    cat("  ", strrep("-", 67), "\n", sep = "")
+    cat("      Variable |         Mean      Std. dev.         Min          Max\n")
+    lab <- function(v) ""
+  }
+  line("+")
+  rn <- character(0)
+  mat <- NULL
+  add <- function(name, s) { rn <<- c(rn, name); mat <<- rbind(mat, s) }
+  for (si in seq_along(secs)) {
+    if (length(secs) > 1) {
+      if (si > 1) line("+")
+      cat(if (labels) "" else "  ", formatC(names(secs)[si], width = -12), " |\n", sep = "")
+    }
+    for (v in secs[[si]]) {
+      s <- st(v)
+      row(v, s, lab(v))
+      add(if (length(secs) > 1) paste0(names(secs)[si], ":", v) else v, s)
+    }
+  }
+  if (!is.null(stw)) {
+    line("+")
+    row("_weight", stw, paste("=", wv))
+    add(if (length(secs) > 1) "weight:_weight" else "_weight", stw)
+  }
+  if (labels) cat(strrep("-", 78), "\n", sep = "") else cat("  ", strrep("-", 67), "\n", sep = "")
+  if (!is.null(cl)) cat(if (labels) "" else "  ", "Std. dev. not adjusted for clustering\n", sep = "")
+  for (v in shown[nmiss > 0]) cat("  ", v, " statistics based on ", sum(!is.na(num(x[[v]]))), " nonmissing observations\n", sep = "")
+  dimnames(mat) <- list(rn, c("mean", "sd", "min", "max"))
+  invisible(list(stats = mat))
 }

@@ -1,1 +1,1 @@
-&["intreg"]
+&["estat_censored", "intreg"]

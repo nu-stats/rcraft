@@ -1,1 +1,1 @@
-&["hetprobit"]
+&["estat_censored", "hetprobit"]
