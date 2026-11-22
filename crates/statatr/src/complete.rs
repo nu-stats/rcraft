@@ -727,6 +727,10 @@ mod tests {
             "case" => "g",
             "alternatives" => "t",
             "mv" => "5",
+            "tolerance" | "ltolerance" | "nrtolerance" => "1e-6",
+            "link" if cmd == "betareg" => "probit",
+            "slink" => "root",
+            "model" => "theta",
             _ => "x",
         };
         let o = if opt.ends_with('(') {
@@ -934,6 +938,14 @@ gettoken a b : s, {o}"
             "hetprobit" => format!("hetprobit d x, het(x) {o}"),
             "heckman" if name == "select" => format!("heckman y x, {o}"),
             "heckman" => format!("heckman y x, select(x) {o}"),
+            "fracreg" if name == "het" => "fracreg probit y x, het(x)".to_string(),
+            "fracreg" => format!("fracreg logit y x, {o}"),
+            "betareg" => format!("betareg y x, {o}"),
+            "boxcox" if name == "notrans" => "boxcox y x, notrans(w)".to_string(),
+            "boxcox" => format!("boxcox y x, {o}"),
+            "zip" | "zinb" if name == "inflate" => format!("{cmd} count x, {o}"),
+            "zip" | "zinb" => format!("{cmd} count x, inflate(x) {o}"),
+            "tpoisson" | "tnbreg" | "ztp" | "ztnb" => format!("{cmd} count x, {o}"),
             "label" => format!("label define l 1 \"a\", {o}"),
             // what predict can make depends on the model: hr after stcox, pr after
             // logit, outcome() after mlogit

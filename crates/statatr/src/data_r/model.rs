@@ -67,6 +67,8 @@ pub(super) enum Fit {
     Cloglog,
     Hetprobit,
     Heckman,
+    /// the fraction and count models of batch M (`frac`)
+    Frac,
 }
 
 impl Fit {
@@ -103,6 +105,7 @@ impl Fit {
             Fit::Cloglog => "cloglog",
             Fit::Hetprobit => "hetprobit",
             Fit::Heckman => "heckman",
+            Fit::Frac => "frac",
         }
     }
 

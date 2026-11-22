@@ -30,6 +30,8 @@ mod anova;
 mod anovaplot;
 mod areg;
 mod arima;
+mod betareg;
+mod boxcox;
 mod censored;
 mod center;
 mod centile;
@@ -55,6 +57,7 @@ mod esttable;
 mod factor;
 mod filefilter;
 mod files;
+mod frac;
 mod framelink;
 mod frames;
 mod fre;
@@ -155,6 +158,7 @@ mod xtdpd;
 mod xtregar;
 mod xtsum;
 mod xtunitroot;
+mod zcount;
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -603,6 +607,15 @@ const WEIGHTED: &[&str] = &[
     "cloglog",
     "hetprobit",
     "heckman",
+    "fracreg",
+    "betareg",
+    "boxcox",
+    "zip",
+    "zinb",
+    "tpoisson",
+    "tnbreg",
+    "ztp",
+    "ztnb",
     "mvreg",
     "ltable",
     "dfuller",
@@ -1564,6 +1577,10 @@ fn helper_code(name: &str) -> &'static str {
         "stata_trunc" => censored::TRUNC_HELPER,
         "stata_bin" => censored::BIN_HELPER,
         "stata_heckman" => censored::HECKMAN_HELPER,
+        "stata_frac" => frac::FRAC_HELPER,
+        "stata_betareg" => betareg::BETAREG_HELPER,
+        "stata_boxcox" => boxcox::BOXCOX_HELPER,
+        "stata_zcount" => zcount::ZCOUNT_HELPER,
         "stata_xi" => xi::XI_HELPER,
         "stata_est_mark" => returned::EST_MARK_HELPER,
         "stata_esttab" => esttab::ESTTAB_HELPER,
@@ -3310,6 +3327,10 @@ impl Session {
             "cloglog" => self.cloglog(c, &opts, out),
             "hetprobit" => self.hetprobit(c, &opts, out),
             "heckman" => self.heckman(c, &opts, out),
+            "fracreg" => self.fracreg(c, &opts, out),
+            "betareg" => self.betareg(c, &opts, out),
+            "boxcox" => self.boxcox(c, &opts, out),
+            "zip" | "zinb" | "tpoisson" | "tnbreg" | "ztp" | "ztnb" => self.zcount(c, &opts, out),
             "xi" => self.xi(c, out),
             "mvreg" => self.mvreg(c, &opts, out),
             "marginsplot" => self.marginsplot(c, &opts, out),
@@ -6717,15 +6738,15 @@ capture display 3 = 4");
     fn a_model_that_is_not_translated_hides_the_one_before() {
         let out = r("use s
 regress y x
-betareg y x
+mixed y x
 estat ic
 predict yh
 display _b[x]
 regress y x
 estat ic");
-        assert!(out[2].starts_with("NOT: betareg"), "{out:?}");
+        assert!(out[2].starts_with("NOT: mixed"), "{out:?}");
         assert!(
-            out[3].starts_with("NOT: estat: the model Stata holds here is not known: betareg y x"),
+            out[3].starts_with("NOT: estat: the model Stata holds here is not known: mixed y x"),
             "{out:?}"
         );
         assert!(out[4].starts_with("NOT: predict: the model"), "{out:?}");

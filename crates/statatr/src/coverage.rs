@@ -253,6 +253,7 @@ const MODELS: &[&str] = &[
     "asclogit",
     "arima",
     "betareg",
+    "boxcox",
     "biprobit",
     "bootstrap",
     "bsample",
@@ -360,6 +361,8 @@ const MODELS: &[&str] = &[
     "xttobit",
     "xtunitroot",
     "zinb",
+    "ztnb",
+    "ztp",
     "zip",
 ];
 

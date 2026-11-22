@@ -20,7 +20,7 @@ pub(super) const IVPROBIT_HELPER: &str = r##"# Stata's ml: Newton-Raphson, halvi
 # 1/8, 1/4, ... of the step while it rises (each added to the point reached); modified
 # Marquardt where -H is not positive definite; done when g'H^-1g <= 1e-5 and (reldif(ll) <= 1e-7
 # or mreldif(b) <= 1e-6), checked before each step after the first
-stata_ml_max <- function(llf, derivs, b, maxit = 300) {
+stata_ml_max <- function(llf, derivs, b, maxit = 300, tol = 1e-6, ltol = 1e-7, nrtol = 1e-5) {
   rd <- function(a, b) abs(a - b) / (abs(b) + 1)
   lg <- numeric(0); prev <- NULL; conv <- FALSE
   d <- derivs(b)
@@ -32,7 +32,7 @@ stata_ml_max <- function(llf, derivs, b, maxit = 300) {
       inv <- solve(A); step <- as.numeric(inv %*% d$g)
       if (!is.null(prev)) {
         nr <- sum(d$g * step)
-        if (abs(nr) <= 1e-5 && (rd(d$ll, prev$ll) <= 1e-7 || max(rd(b, prev$b)) <= 1e-6)) { conv <- TRUE; break }
+        if (abs(nr) <= nrtol && (rd(d$ll, prev$ll) <= ltol || max(rd(b, prev$b)) <= tol)) { conv <- TRUE; break }
       }
     }
     if (length(lg) > maxit) break
@@ -41,8 +41,14 @@ stata_ml_max <- function(llf, derivs, b, maxit = 300) {
       dir <- as.numeric(solve(m, d$g)); u <- dir / sqrt(sum(dir^2)); gu <- sum(d$g * u)
       len <- 0.01 * abs(d$ll) / abs(gu); v <- llf(b + len * u); tries <- 0
       while (!(isTRUE(v > d$ll)) && tries < 60) { len <- len / 2; v <- llf(b + len * u); tries <- tries + 1 }
-      for (i in 1:200) { f2 <- llf(b + 2 * len * u); if (isTRUE(f2 > v)) { len <- 2 * len; v <- f2 } else break }
-      prev <- list(b = b, ll = d$ll); b <- b + len * u; d <- derivs(b); next
+      if (isTRUE(v > d$ll)) {
+        for (i in 1:200) { f2 <- llf(b + 2 * len * u); if (isTRUE(f2 > v)) { len <- 2 * len; v <- f2 } else break }
+        prev <- list(b = b, ll = d$ll); b <- b + len * u; d <- derivs(b); next
+      }
+      # no length helps: the ordinary step with -H + lambda I, the smallest lambda (doubling from 1e-4 of the largest diagonal) that makes it positive definite
+      lam <- 1e-4 * max(max(abs(diag(A))), 1)
+      for (i in 1:80) { M <- A; diag(M) <- diag(A) + lam; if (!inherits(tryCatch(chol((M + t(M)) / 2), error = function(e) e), "error")) break; lam <- lam * 2 }
+      step <- as.numeric(solve(M, d$g))
     }
     t <- 1; nx <- llf(b + t * step); halved <- FALSE
     while ((is.nan(nx) || nx < d$ll) && t > 1e-15) { halved <- TRUE; t <- t / 2; nx <- llf(b + t * step) }
