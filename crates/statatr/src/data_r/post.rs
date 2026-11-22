@@ -345,6 +345,13 @@ impl Session {
         if let Some((cmd, model)) = self.ss_active() {
             return self.ss_predict(c, opts, out, &cmd, &model);
         }
+        match self.multi_active() {
+            Some("discrim") => return self.discrim_predict(c, opts, out),
+            Some("mprobit") => return self.choice_predict(c, opts, out, "mprobit"),
+            Some("slogit") => return self.choice_predict(c, opts, out, "slogit"),
+            Some("nlogit") => return self.nlogit_predict(c, opts, out),
+            _ => {}
+        }
         if self.ivprobit_active() {
             return self.ivprobit_predict(c, opts, out);
         }
@@ -1033,6 +1040,9 @@ impl Session {
         out: &mut Out,
     ) -> Result<(), Untranslated> {
         self.no_by(c, "estat")?;
+        if self.multi_active() == Some("discrim") {
+            return self.discrim_estat(c, opts, out);
+        }
         if self.ivprobit_active() {
             return Err(no("estat after ivprobit is not translated yet"));
         }

@@ -82,6 +82,7 @@ mod mhodds;
 mod ml;
 mod model;
 mod more;
+mod multi;
 mod mvtest;
 mod natscale;
 mod nestreg;
@@ -1765,6 +1766,13 @@ fn helper_code(name: &str) -> &'static str {
         "stata_power" => power::POWER_HELPER,
         "stata_epitab" => epitab::EPITAB_HELPER,
         "stata_mvtest" => mvtest::MVTEST_HELPER,
+        "stata_manova" => multi::MANOVA_HELPER,
+        "stata_canon" => multi::CANON_HELPER,
+        "stata_discrim" => multi::DISCRIM_HELPER,
+        "stata_mds" => multi::MDS_HELPER,
+        "stata_cluster" => multi::CLUSTER_HELPER,
+        "stata_choice" => multi::CHOICE_HELPER,
+        "stata_nlogit" => multi::NLOGIT_HELPER,
         "stata_factor" => factor::FACTOR_HELPER,
         "stata_rotate" => rotate::ROTATE_HELPER,
         "stata_kap" => kap::KAP_HELPER,
@@ -3287,6 +3295,16 @@ impl Session {
             "power" => self.power(c, &opts, out),
             "cs" | "csi" | "cc" | "cci" | "ir" | "iri" => self.epitab(c, &opts, out),
             "mvtest" => self.mvtest(c, &opts, out),
+            "manova" => self.manova(c, &opts, out),
+            "canon" => self.canon(c, &opts, out),
+            "discrim" => self.discrim(c, &opts, out),
+            "mds" => self.mds(c, &opts, out),
+            "cluster" => self.cluster(c, &opts, out),
+            "mprobit" => self.choice_fit(c, &opts, out, "mprobit"),
+            "slogit" => self.choice_fit(c, &opts, out, "slogit"),
+            "nlogit" => self.nlogit(c, out),
+            "nlogitgen" => self.nlogitgen(c, out),
+            "nlogittree" => self.nlogittree(c, &opts, out),
             "tabodds" => self.tabodds(c, &opts, out),
             "factor" => self.factor(c, &opts, out),
             "rotate" => self.rotate(c, &opts, out),

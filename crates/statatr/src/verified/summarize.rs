@@ -1,1 +1,1 @@
-&["aware", "control", "descriptives", "extended_missing", "regress_r", "tabulate_more"]
+&["aware", "control", "descriptives", "extended_missing", "mprobit", "nlogit", "regress_r", "slogit", "tabulate_more"]
