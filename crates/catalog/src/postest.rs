@@ -12,7 +12,7 @@ use crate::data::BASE;
 
 /// The first class names of R objects these dialogs are offered on.
 pub const MODEL_CLASSES: &[&str] = &[
-    "lm", "glm", "aov", "negbin", "polr", "multinom", "plm", "pgmm", "fixest",
+    "lm", "glm", "aov", "negbin", "polr", "multinom", "plm", "pgmm", "fixest", "svyglm",
 ];
 
 /// Whether an object whose first class is `class` is a model these dialogs take.
@@ -34,6 +34,8 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
     match class {
         "pgmm" => vec![&MODEL_FIT],
         "plm" | "fixest" => vec![&MODEL_FIT, &ROBUST],
+        // a survey model has no likelihood, so no comparison, AIC or diagnostics
+        "svyglm" => vec![&MODEL_FIT, &TEST_TERMS, &PREDICTED],
         _ => MODEL_SPECS.to_vec(),
     }
 }
@@ -66,6 +68,11 @@ pub const MODEL_FIT: Spec = Spec {
              if (inherits(m, c(\"plm\", \"pgmm\"))) {{\n    \
              if (inherits(m, \"plm\")) {{\n      cat(\"\\nR-squared\\n\")\n      \
              print(summary(m)$r.squared)\n    }}\n    return(invisible(NULL))\n  }}\n  \
+             if (inherits(m, \"svyglm\")) {{\n    \
+             cat(\"Design degrees of freedom: \", survey::degf(m$survey.design), \"\\n\", sep = \"\")\n    \
+             cat(\"\\nWeighted deviance\\n\")\n    \
+             print(c(null = m$null.deviance, residual = m$deviance))\n    \
+             return(invisible(NULL))\n  }}\n  \
              ll <- stats::logLik(m)\n  \
              print(c(logLik = as.numeric(ll), df = attr(ll, \"df\"), AIC = stats::AIC(m), \
              BIC = stats::BIC(m)))\n  \
@@ -256,7 +263,7 @@ pub const PREDICTED: Spec = Spec {
         let mut code = linear_guard(&m);
         if !a.name_text("fitted").is_empty() {
             code.push_str(&format!(
-                "\n{d}[[{}]] <- stats::predict({m}, newdata = {d}, type = {})",
+                "\n{d}[[{}]] <- as.vector(stats::predict({m}, newdata = {d}, type = {}))",
                 a.name_string("fitted"),
                 r_string(a.choice("type")),
             ));
@@ -545,9 +552,20 @@ pub const TEST_TERMS: Spec = Spec {
     code: |a, _| {
         let m = a.data();
         let test = "if (inherits(m, \"glm\")) \"Chisq\" else \"F\"";
+        // a survey model: the adjusted Wald F test of Stata's test (F times
+        // (d - q + 1) / d on q and d - q + 1 degrees of freedom, d the design's)
+        let svy_test = "svy_test <- function(m, terms) {\n    \
+             d <- survey::degf(m$survey.design)\n    \
+             r <- survey::regTermTest(m, stats::reformulate(terms), df = d)\n    \
+             q <- r$df\n    f <- r$Ftest * (d - q + 1) / d\n    \
+             data.frame(term = paste(terms, collapse = \" + \"), F = f, df1 = q, \
+             df2 = d - q + 1, p = stats::pf(f, q, d - q + 1, lower.tail = FALSE))\n  }";
         if a.choice("kind") == "each" {
             return format!(
-                "{}\n(function(m) stats::drop1(m, test = {test}))({m})",
+                "{}\n(function(m) {{\n  if (inherits(m, \"svyglm\")) {{\n  {svy_test}\n  \
+                 print(do.call(rbind, lapply(attr(stats::terms(m), \"term.labels\"), \
+                 function(t) svy_test(m, t))), row.names = FALSE)\n  }} else \
+                 stats::drop1(m, test = {test})\n}})({m})",
                 linear_guard(&m)
             );
         }
@@ -557,9 +575,12 @@ pub const TEST_TERMS: Spec = Spec {
         format!(
             "{guard}\n(function(m) {{\n  have <- attr(stats::terms(m), \"term.labels\")\n  \
              stopifnot(\"not terms of the model\" = all(c({}) %in% have))\n  \
+             if (inherits(m, \"svyglm\")) {{\n  {svy_test}\n  \
+             print(svy_test(m, c({})), row.names = FALSE)\n  return(invisible(NULL))\n  }}\n  \
              reduced <- stats::update(m, . ~ . - {})\n  \
              cat(\"Model without the terms against the full model\\n\")\n  \
              print(stats::anova(reduced, m, test = {test}))\n}})({m})",
+            quoted.join(", "),
             quoted.join(", "),
             minus.join(" - "),
             guard = linear_guard(&m),
@@ -947,7 +968,8 @@ mod tests {
         .unwrap_or_default();
         assert!(
             out.contains(
-                "`my data`[[\"yhat\"]] <- stats::predict(m1, newdata = `my data`, type = \"response\")"
+                "`my data`[[\"yhat\"]] <- as.vector(stats::predict(m1, newdata = `my data`, \
+                 type = \"response\"))"
             ),
             "{out}"
         );
@@ -1021,7 +1043,7 @@ mod tests {
         let each = make(&TEST_TERMS, "m1", &[]).unwrap_or_default();
         assert!(
             each.ends_with(
-                "stats::drop1(m, test = if (inherits(m, \"glm\")) \"Chisq\" else \"F\"))(m1)"
+                "stats::drop1(m, test = if (inherits(m, \"glm\")) \"Chisq\" else \"F\")\n})(m1)"
             ),
             "{each}"
         );
