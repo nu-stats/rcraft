@@ -207,9 +207,16 @@ pub const FACTOR_ANALYSIS: Spec = Spec {
     check: factor_check,
     code: |a, _| {
         let m = a.name("save");
+        // The optimiser is asked for the tightest stop first (factr = 10), which is what
+        // matches Stata; on some platforms its line search gives up on an easy problem
+        // ("unable to optimize from this starting value"), so it is asked again with a
+        // looser stop, then looser still, and only then is the failure reported.
         let fit = format!(
-            "stats::factanal(~ {}, factors = {}, data = {}, rotation = \"none\", \
-             control = list(opt = list(factr = 10)))",
+            "local({{\n    for (fr in c(10, 1e3, 1e5, 1e7)) {{\n      \
+             r <- tryCatch(stats::factanal(~ {}, factors = {}, data = {}, rotation = \"none\", \
+             control = list(opt = list(factr = fr))), error = function(e) e)\n      \
+             if (!inherits(r, \"error\")) return(r)\n    }}\n    \
+             stop(conditionMessage(r), call. = FALSE)\n  }})",
             rhs(a),
             a.number("factors"),
             a.data()
@@ -577,9 +584,20 @@ mod tests {
         let c = code(&FACTOR_ANALYSIS, &v);
         assert!(
             c.starts_with(
-                "fa <- local({\n  fit <- stats::factanal(~ height + weight + age, factors = 1, \
-                 data = d, rotation = \"none\", control = list(opt = list(factr = 10)))\n"
+                "fa <- local({\n  fit <- local({\n    for (fr in c(10, 1e3, 1e5, 1e7)) {"
             ),
+            "{c}"
+        );
+        // the tightest stop is tried first; a failure is retried looser, then reported
+        assert!(
+            c.contains(
+                "stats::factanal(~ height + weight + age, factors = 1, data = d, \
+                 rotation = \"none\", control = list(opt = list(factr = fr)))"
+            ),
+            "{c}"
+        );
+        assert!(
+            c.contains("stop(conditionMessage(r), call. = FALSE)"),
             "{c}"
         );
         // the statistic is Stata's: N, not N - 1, in the multiplier
@@ -596,7 +614,7 @@ mod tests {
         );
         let c = code(&FACTOR_ANALYSIS, &v);
         assert!(
-            c.starts_with("f2 <- local({\n  fit <- stats::factanal("),
+            c.starts_with("f2 <- local({\n  fit <- local({\n    for (fr in c(10, 1e3,"),
             "{c}"
         );
         assert!(

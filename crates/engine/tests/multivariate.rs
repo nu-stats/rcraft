@@ -371,6 +371,27 @@ fn factor_analysis_matches_stata() {
         &[],
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
+    // when the tightest stop fails (it does on some platforms: "unable to optimize
+    // from this starting value"), the dialog asks again looser: make the first
+    // attempt fail (an NA stop) and the fit must still come back, from the next one
+    let mut values = FACTOR_ANALYSIS.defaults(&ctx);
+    values.set_text("factors", "2");
+    values.set_text("save", "fretry");
+    values.set_list("x", vars.iter().map(|n| n.to_string()).collect());
+    let code = FACTOR_ANALYSIS.generate(&ctx, &values, Style::Base);
+    assert!(code.is_ok(), "{code:?}");
+    let code = code.unwrap_or_default();
+    assert!(code.contains("c(10, 1e3,"), "{code}");
+    let (outcome, text) = run(
+        &mut e,
+        Source::Typed,
+        &code.replace("c(10, 1e3,", "c(NA, 1e3,"),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[within("fretry$uniquenesses", "fnone$uniquenesses", "1e-4")],
+    );
     // the criterion factanal minimises, written out: the eigenvalues of the
     // correlation matrix scaled by the uniquenesses, beyond the factors kept
     define(&mut e, "fa_ml <- fnone");
