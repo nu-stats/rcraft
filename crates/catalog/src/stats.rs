@@ -17,6 +17,7 @@ use crate::models;
 use crate::multilevel;
 use crate::multivariate;
 use crate::panel;
+use crate::resampling;
 use crate::survey;
 use crate::survival;
 use crate::timeseries;
@@ -452,6 +453,8 @@ pub const SPECS: &[&Spec] = &[
     &multivariate::FACTOR_ANALYSIS,
     &multivariate::CLUSTER_ANALYSIS,
     &multivariate::DISCRIMINANT_ANALYSIS,
+    &resampling::BOOTSTRAP,
+    &resampling::PERMUTATION_TEST,
     &survival::KAPLAN_MEIER,
     &survival::LOG_RANK,
     &survival::COX,
