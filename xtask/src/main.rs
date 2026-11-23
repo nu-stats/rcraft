@@ -5,6 +5,7 @@ mod corpus;
 mod coverage;
 mod layers;
 mod matrix;
+mod progress;
 mod status;
 mod sync;
 
@@ -25,7 +26,10 @@ usage: cargo xtask <task>
   status-fold [--check]
                        fold the plan/status.d fragments into ROADMAP.md and plan/STATUS.md and delete them
                        (--check only checks that they are well formed; ci does)
-  stata-record         run the Stata corpus on a licensed Stata and keep its results (P2B.10)
+  progress [--check] [--today YYYY-MM-DD]
+                       the roadmap's % complete from plan/progress.txt and the code, the pace
+                       against the planned days, and the tasks left (ci runs --check)
+  stata-record       run the Stata corpus on a licensed Stata and keep its results (P2B.10)
   stata-matrix         write the RCraft and StatCraft command table (C:/pinokio/api/stata-matrix.csv; not committed)";
 
 pub type Result<T = ()> = std::result::Result<T, String>;
@@ -40,6 +44,7 @@ fn main() -> ExitCode {
         Some("assets") => assets::check(),
         Some("coverage") => coverage::run(rest.iter().any(|a| a == "--check")),
         Some("status-fold") => status::run(rest),
+        Some("progress") => progress::run(rest),
         Some("stata-record") => corpus::record(),
         Some("stata-matrix") => matrix::run(rest),
         Some("sync-statcraft-lang") => sync::run(rest),
@@ -73,6 +78,7 @@ fn ci() -> Result {
     layers::check()?;
     assets::check()?;
     coverage::run(true)?;
+    progress::run(&["--check".to_string()])?;
     println!("ci: all checks passed");
     Ok(())
 }
