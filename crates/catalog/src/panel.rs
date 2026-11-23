@@ -639,7 +639,7 @@ const DYNAMIC_ERRORS: &[Opt] = &[
     },
     Opt {
         value: "conventional",
-        label: "Conventional (two steps only)",
+        label: "Conventional",
     },
 ];
 
@@ -658,16 +658,33 @@ const OUTCOME_LAGS: &[Opt] = &[
     },
 ];
 
+/// After one step plm leaves the standard errors and the Sargan statistic unscaled. Stata's
+/// scale for both is the residual variance of the differenced equation, the sum of squared
+/// residuals over twice the used rows less the coefficients; the covariance also takes the
+/// number of units (plm's weighting matrix is divided by it). Rows plm pads for gaps in the
+/// panel are all zeros in the instruments and are not counted. The covariance in the saved
+/// model is replaced, so `summary(model, robust = FALSE)` shows the scaled errors.
+const ONE_STEP_CONVENTIONAL: &str = "local({
+  w <- MODEL$W
+  e <- MODEL$residuals
+  used <- vapply(w, function(a) sum(rowSums(abs(a)) > 0), 1)
+  groups <- length(w)
+  k <- length(stats::coef(MODEL))
+  sigma2 <- sum(unlist(e)^2) / (2 * (sum(used) - k))
+  scores <- Reduce(`+`, Map(function(a, r) crossprod(a, r), w, e))
+  sargan <- sum(scores * (MODEL$A1 %*% scores)) / groups / sigma2
+  df <- ncol(w[[1]]) - k
+  MODEL$vcov <<- MODEL$vcov * sigma2 * groups
+  out <- utils::capture.output(print(summary(MODEL, robust = FALSE TIMES)))
+  line <- sprintf('Sargan test: chisq(%d) = %s (p-value = %s)', df, format(sargan, digits = 7),
+    format.pval(stats::pchisq(sargan, df, lower.tail = FALSE), digits = 5))
+  out[grepl('^Sargan test', out)] <- line
+  cat(out, sep = '\\n')
+})";
+
 /// The panel check, plus the choices a dynamic model cannot take.
 fn dynamic_check(a: &Args) -> Vec<Problem> {
     let mut out = plm_check(a);
-    if a.choice("steps") == "onestep" && a.choice("errors") == "conventional" {
-        out.push(Problem::new(
-            "errors",
-            "One-step conventional standard errors are not offered (plm leaves them unscaled, \
-             unlike Stata's xtabond); take robust errors, or two steps.",
-        ));
-    }
     if a.name_text("save") == a.ctx.dataset {
         out.push(Problem::new(
             "save",
@@ -687,9 +704,10 @@ pub const DYNAMIC_PANEL: Spec = Spec {
             plm::pgmm and prints the summary with Arellano and Bond's tests of first- and \
             second-order autocorrelation in the differenced errors (a significant first order \
             is expected; a significant second order says the instruments are not valid) and \
-            the Sargan test of the overidentifying restrictions. No constant and no time \
-            effects. After one step the Sargan test is not printed, as plm's differs from \
-            Stata's.",
+            the Sargan test of the overidentifying restrictions. Time effects add a dummy for \
+            each period. After one step with conventional errors, the standard errors and the \
+            Sargan test are scaled as Stata's xtabond does (plm leaves them unscaled); after \
+            one step with robust errors there is no Sargan test, as in Stata. No constant.",
     widgets: &[
         Widget::Variable {
             id: "y",
@@ -729,6 +747,13 @@ pub const DYNAMIC_PANEL: Spec = Spec {
             hint: "After two steps, conventional errors are biased downwards; robust ones are \
                    recommended.",
         },
+        Widget::Check {
+            id: "twoways",
+            label: "Time effects (a dummy for each period)",
+            default: false,
+            hint: "Adds a dummy for each period to the predictors, as a variable for each year \
+                   would in Stata.",
+        },
         SAVE,
     ],
     needs: &["plm"],
@@ -746,24 +771,40 @@ pub const DYNAMIC_PANEL: Spec = Spec {
         let mut terms = vec![lag_term];
         terms.extend(a.vars("x").iter().map(|n| r_name(n)));
         let steps = a.choice("steps");
+        let effect = if a.flag("twoways") {
+            "twoways"
+        } else {
+            "individual"
+        };
+        // plm leaves the period dummies out of the table unless asked
+        let times = if a.flag("twoways") {
+            ", time.dummies = TRUE"
+        } else {
+            ""
+        };
         let fit = format!(
             "{model} <- local({{\n  # pgmm looks for plm() in the frame that calls it\n  plm <- plm::plm\n  \
              plm::pgmm({y} ~ {} | stats::lag({y}, 2:99), data = {}, {}, \
-             effect = \"individual\", model = {}, transformation = \"d\")\n}})",
+             effect = \"{effect}\", model = {}, transformation = \"d\")\n}})",
             terms.join(" + "),
             a.data(),
             index_arg(a),
             r_string(steps),
         );
-        let show = if steps == "onestep" {
+        let robust = a.choice("errors") == "robust";
+        let show = if steps == "onestep" && robust {
             format!(
-                "out <- utils::capture.output(print(summary({model}, robust = TRUE)))\n\
+                "out <- utils::capture.output(print(summary({model}, robust = TRUE{times})))\n\
                  cat(out[!grepl(\"^Sargan test\", out)], sep = \"\\n\")\n\
-                 cat(\"Sargan test: not shown after one step\\n\")"
+                 cat(\"Sargan test: not available with robust errors\\n\")"
             )
+        } else if steps == "onestep" {
+            ONE_STEP_CONVENTIONAL
+                .replace("MODEL", &model)
+                .replace(" TIMES", times)
         } else {
             format!(
-                "print(summary({model}, robust = {}))",
+                "print(summary({model}, robust = {}{times}))",
                 if a.choice("errors") == "robust" {
                     "TRUE"
                 } else {
@@ -784,12 +825,94 @@ const IV_MODELS: &[Opt] = &[
     },
     Opt {
         value: "random",
-        label: "Random effects",
+        label: "Random effects (Balestra and Varadharajan-Krishnakumar)",
+    },
+    Opt {
+        value: "ec2sls",
+        label: "Random effects, EC2SLS (Baltagi)",
+    },
+    Opt {
+        value: "between",
+        label: "Between",
+    },
+    Opt {
+        value: "fd",
+        label: "First differences",
     },
 ];
 
+const IV_ERRORS: &[Opt] = &[
+    Opt {
+        value: "conventional",
+        label: "Conventional",
+    },
+    Opt {
+        value: "robust",
+        label: "Robust to clustering on the panel unit",
+    },
+];
+
+/// Coefficients with the constant and with standard errors written out: the fixed-effects
+/// constant that plm leaves out, and errors clustered on the panel unit (plm's own
+/// covariance functions do not use the instrumented predictors). Two-stage least squares is
+/// run on the transformed data the fit used; the within fit adds the grand means back, so the
+/// constant is the one Stata reports. The clustered errors take the factor G/(G-1) and
+/// (N-1)/(N-K), K counting the constant; conventional errors on the within fit divide by
+/// N-G-K without the constant. Estimates equal the fit's; only the errors are new.
+const IV_TABLE: &str = "local({
+  m <- MODEL
+  robust <- ROBUST
+  within <- identical(m$args$model, 'within')
+  res <- stats::residuals(m)
+  index <- plm::index(m)
+  id <- as.character(index[[1]])[match(names(res), rownames(index))]
+  y <- as.numeric(plm::pmodel.response(m))
+  x <- stats::model.matrix(m)
+  z <- stats::model.matrix(m, rhs = 2)
+  if (within) {
+    raw <- function(rhs) stats::model.matrix(m$model, rhs = rhs, model = 'pooling')
+    x <- cbind(sweep(x, 2, colMeans(raw(1)[, colnames(x), drop = FALSE]), '+'), '(Intercept)' = 1)
+    z <- cbind(sweep(z, 2, colMeans(raw(2)[, colnames(z), drop = FALSE]), '+'), '(Intercept)' = 1)
+    y <- y + mean(as.numeric(m$model[[1]]))
+  }
+  fitted <- z %*% solve(crossprod(z), crossprod(z, x))
+  bread <- solve(crossprod(fitted))
+  b <- as.numeric(bread %*% crossprod(fitted, y))
+  e <- as.numeric(y - x %*% b)
+  n <- length(e)
+  g <- length(unique(id))
+  if (robust) {
+    meat <- Reduce(`+`, lapply(split(seq_along(e), id), function(i) {
+      s <- crossprod(fitted[i, , drop = FALSE], e[i])
+      tcrossprod(s)
+    }))
+    v <- bread %*% meat %*% bread * g / (g - 1) * (n - 1) / (n - ncol(x))
+  } else {
+    v <- bread * sum(e^2) / (n - g - ncol(x) + 1)
+  }
+  se <- sqrt(diag(v))
+  table <- cbind(Estimate = b, 'Std. Error' = se, 'z-value' = b / se,
+    'Pr(>|z|)' = 2 * stats::pnorm(-abs(b / se)))
+  rownames(table) <- colnames(x)
+  cat(if (robust) '\\nCoefficients, standard errors robust to clustering on the panel unit:\\n'
+      else '\\nCoefficients with the constant:\\n')
+  stats::printCoefmat(table, digits = 7)
+})";
+
 fn panel_iv_check(a: &Args) -> Vec<Problem> {
     let mut out = plm_check(a);
+    if a.choice("errors") == "robust" && ["ec2sls", "between"].contains(&a.choice("model")) {
+        out.push(Problem::new(
+            "errors",
+            if a.choice("model") == "between" {
+                "Robust errors are not offered for the between estimator (Stata's xtivreg, be \
+                 has none either); take conventional errors."
+            } else {
+                "Robust errors are not offered after EC2SLS (they do not agree with Stata's \
+                 xtivreg, re ec2sls); take conventional errors or the other estimators."
+            },
+        ));
+    }
     let endogenous = a.vars("endog");
     let instruments = a.vars("inst");
     let exogenous = a.vars("x");
@@ -851,8 +974,12 @@ pub const PANEL_IV: Spec = Spec {
     about: "A panel regression in which some predictors are correlated with the errors, \
             replaced by instruments: two-stage least squares on the within-transformed data \
             (fixed effects), or the random-effects version of Balestra and Varadharajan-\
-            Krishnakumar (Stata's xtivreg, re default). It fits with plm::plm and prints its \
-            summary. Standard errors are the conventional ones.",
+            Krishnakumar (Stata's xtivreg, re default), the same with Baltagi's EC2SLS, the \
+            between estimator, or first differences. It fits with plm::plm and prints its \
+            summary, then the coefficients with the constant (the fixed-effects constant is \
+            the average of the unit effects, as in Stata) and, if asked, standard errors \
+            robust to clustering on the panel unit, as Stata's vce(robust). Robust errors are \
+            not offered for EC2SLS or the between estimator.",
     widgets: &[
         Widget::Variable {
             id: "y",
@@ -892,6 +1019,13 @@ pub const PANEL_IV: Spec = Spec {
             default: "within",
             hint: "",
         },
+        Widget::Choice {
+            id: "errors",
+            label: "Standard errors",
+            options: IV_ERRORS,
+            default: "conventional",
+            hint: "",
+        },
         SAVE,
     ],
     needs: &["plm"],
@@ -911,15 +1045,30 @@ pub const PANEL_IV: Spec = Spec {
         let instruments = a.vars("inst");
         let predictors: Vec<&str> = exogenous.iter().chain(&endogenous).copied().collect();
         let all_instruments: Vec<&str> = exogenous.iter().chain(&instruments).copied().collect();
-        format!(
-            "{model} <- plm::plm({} ~ {} | {}, data = {}, {}, model = {})\nprint(summary({model}))",
+        let (plm_model, extra) = match a.choice("model") {
+            "ec2sls" => ("random", ", inst.method = \"baltagi\""),
+            other => (other, ""),
+        };
+        let robust = a.choice("errors") == "robust";
+        let mut out = format!(
+            "{model} <- plm::plm({} ~ {} | {}, data = {}, {}, model = {}{extra})\nprint(summary({model}))",
             a.var("y").unwrap_or_default(),
             join(&predictors),
             join(&all_instruments),
             a.data(),
             index_arg(a),
-            r_string(a.choice("model")),
-        )
+            r_string(plm_model),
+        );
+        // the table with the constant: for the within fit always, for the rest when robust
+        if robust || plm_model == "within" {
+            out.push('\n');
+            out.push_str(
+                &IV_TABLE
+                    .replace("MODEL", &model)
+                    .replace("ROBUST", if robust { "TRUE" } else { "FALSE" }),
+            );
+        }
+        out
     },
 };
 
@@ -974,6 +1123,191 @@ const UNIT_ROOT_LAGS: &[Opt] = &[
     },
 ];
 
+/// The periods at which Im, Pesaran and Shin tabulate the mean and variance of the
+/// Dickey-Fuller t statistic (Table 3 of the 2003 paper); between them Stata, and so the
+/// dialog, interpolates linearly, and beyond them takes the end rows. The numbers were read
+/// off Stata 19's xtunitroot ips on made-up panels by solving for them, and checked at
+/// periods between the rows.
+const IPS_PERIODS: [f64; 10] = [10., 15., 20., 25., 30., 40., 50., 60., 70., 100.];
+
+const NA: f64 = f64::NAN;
+
+/// (lags, with a trend, mean at each of the periods, variance at each).
+#[allow(clippy::type_complexity)]
+const IPS_TABLE: &[(usize, bool, [f64; 10], [f64; 10])] = &[
+    (
+        0,
+        false,
+        [
+            -1.504, -1.514, -1.522, -1.520, -1.526, -1.523, -1.527, -1.519, -1.524, -1.532,
+        ],
+        [
+            1.069, 0.923, 0.851, 0.809, 0.789, 0.770, 0.760, 0.749, 0.736, 0.735,
+        ],
+    ),
+    (
+        1,
+        false,
+        [
+            -1.488, -1.503, -1.516, -1.514, -1.519, -1.520, -1.524, -1.519, -1.522, -1.530,
+        ],
+        [
+            1.255, 1.011, 0.915, 0.861, 0.831, 0.803, 0.781, 0.770, 0.753, 0.745,
+        ],
+    ),
+    (
+        2,
+        false,
+        [
+            -1.319, -1.387, -1.428, -1.443, -1.460, -1.476, -1.493, -1.490, -1.498, -1.514,
+        ],
+        [
+            1.421, 1.078, 0.969, 0.905, 0.865, 0.830, 0.798, 0.789, 0.766, 0.754,
+        ],
+    ),
+    (
+        3,
+        false,
+        [
+            -1.306, -1.366, -1.413, -1.433, -1.453, -1.471, -1.489, -1.486, -1.495, -1.512,
+        ],
+        [
+            1.759, 1.181, 1.037, 0.952, 0.907, 0.858, 0.819, 0.802, 0.782, 0.761,
+        ],
+    ),
+    (
+        4,
+        false,
+        [
+            NA, -1.260, -1.329, -1.363, -1.394, -1.428, -1.454, -1.458, -1.470, -1.495,
+        ],
+        [
+            NA, 1.279, 1.097, 1.005, 0.946, 0.886, 0.842, 0.819, 0.801, 0.771,
+        ],
+    ),
+    (
+        0,
+        true,
+        [
+            -2.166, -2.167, -2.168, -2.167, -2.172, -2.173, -2.176, -2.174, -2.174, -2.177,
+        ],
+        [
+            1.132, 0.869, 0.763, 0.713, 0.690, 0.655, 0.633, 0.621, 0.610, 0.597,
+        ],
+    ),
+    (
+        1,
+        true,
+        [
+            -2.173, -2.169, -2.172, -2.172, -2.173, -2.177, -2.180, -2.178, -2.176, -2.179,
+        ],
+        [
+            1.453, 0.975, 0.845, 0.769, 0.734, 0.687, 0.654, 0.641, 0.627, 0.605,
+        ],
+    ),
+    (
+        2,
+        true,
+        [
+            -1.914, -1.999, -2.047, -2.074, -2.095, -2.120, -2.137, -2.143, -2.146, -2.158,
+        ],
+        [
+            1.627, 1.036, 0.882, 0.796, 0.756, 0.702, 0.661, 0.653, 0.634, 0.613,
+        ],
+    ),
+    (
+        3,
+        true,
+        [
+            NA, -1.977, -2.032, -2.065, -2.091, -2.117, -2.137, -2.142, -2.146, -2.158,
+        ],
+        [
+            NA, 1.214, 0.983, 0.861, 0.808, 0.735, 0.688, 0.674, 0.650, 0.625,
+        ],
+    ),
+    (
+        4,
+        true,
+        [
+            NA, -1.823, -1.911, -1.968, -2.009, -2.057, -2.091, -2.103, -2.114, -2.135,
+        ],
+        [
+            NA, 1.332, 1.052, 0.913, 0.845, 0.759, 0.705, 0.685, 0.662, 0.629,
+        ],
+    ),
+];
+
+fn ips_grid() -> String {
+    let items: Vec<String> = IPS_PERIODS.iter().map(|p| format!("{p}")).collect();
+    format!("c({})", items.join(", "))
+}
+
+/// The table row for these lags and this trend, as the text of two R vectors.
+fn ips_moments(lags: usize, trend: bool) -> (String, String) {
+    let row = IPS_TABLE
+        .iter()
+        .find(|(l, t, _, _)| *l == lags && *t == trend);
+    let text = |values: Option<&[f64; 10]>| {
+        let items: Vec<String> = values
+            .map(|v| {
+                v.iter()
+                    .map(|x| {
+                        if x.is_nan() {
+                            "NA".to_string()
+                        } else {
+                            format!("{x:.3}")
+                        }
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        format!("c({})", items.join(", "))
+    };
+    (text(row.map(|r| &r.2)), text(row.map(|r| &r.3)))
+}
+
+/// Im-Pesaran-Shin W-t-bar as Stata's xtunitroot ips has it: each unit's augmented
+/// Dickey-Fuller t (lags of the difference, a mean, perhaps a trend; the sample drops the
+/// first lags + 1 periods), averaged over the units, then standardised with the tabulated
+/// mean and variance of that t at the number of periods.
+const IPS_CODE: &str = "print(local({
+  panel <- plm::pdata.frame(@DATA@, @INDEX@)
+  size <- plm::pdim(panel)
+  stopifnot(\"the panel must be balanced: every unit observed in every period\" = size$balanced)
+  periods <- size$nT$T
+  lags <- @LAGS@
+  trend <- @TREND@
+  # mean and variance of the Dickey-Fuller t: Im, Pesaran and Shin (2003), Table 3
+  grid <- @GRID@
+  at <- min(max(periods, 10), 100)
+  mean_t <- stats::approx(grid, @MEANS@, xout = at)$y
+  var_t <- stats::approx(grid, @VARIANCES@, xout = at)$y
+  stopifnot(\"too few periods for this many lags: no tabulated moments\" =
+    !is.na(mean_t) && periods - lags - 1 > 2 + lags + trend)
+  dickey_fuller <- function(y) {
+    change <- diff(y)
+    rows <- (lags + 1):(length(y) - 1)
+    x <- cbind(1, if (trend) rows + 1, y[rows])
+    if (lags > 0) x <- cbind(x, vapply(1:lags, function(j) change[rows - j], numeric(length(rows))))
+    fit <- stats::lm.fit(x, change[rows])
+    spot <- 2 + trend
+    s2 <- sum(fit$residuals^2) / (length(rows) - ncol(x))
+    unname(fit$coefficients[spot] / sqrt(s2 * solve(crossprod(x))[spot, spot]))
+  }
+  groups <- split(panel[[@VARIABLE@]], plm::index(panel)[[1]])
+  t_bar <- mean(vapply(groups, dickey_fuller, numeric(1)))
+  w <- sqrt(length(groups)) * (t_bar - mean_t) / sqrt(var_t)
+  structure(list(
+    statistic = c(`W-t-bar` = w),
+    p.value = stats::pnorm(w),
+    parameter = c(units = length(groups), periods = periods, lags = lags),
+    estimate = c(`t-bar` = t_bar, `mean of t` = mean_t, `variance of t` = var_t),
+    method = paste('Im-Pesaran-Shin unit-root test, a mean', if (trend) 'and a trend', 'for each unit'),
+    data.name = @VARIABLE@,
+    alternative = 'some units are stationary'
+  ), class = 'htest')
+}))";
+
 fn unit_root_check(a: &Args) -> Vec<Problem> {
     let v = a.var_text("var");
     let id = a.var_text("id");
@@ -1011,9 +1345,10 @@ pub const PANEL_UNIT_ROOT: Spec = Spec {
             Each unit's regression has the lags of the difference chosen. It fits with \
             plm::purtest. The panel must be balanced. Levin-Lin-Chu's long-run variance uses a \
             Bartlett kernel with floor(3.21 T^(1/3)) lags, and its statistic and p-value are \
-            Stata's xtunitroot llc. Im-Pesaran-Shin's W-t-bar is standardised with plm's \
-            tabulated moments (with the degrees-of-freedom correction), which differ a little \
-            from Stata's: its statistic is within about 0.04 of xtunitroot ips.",
+            Stata's xtunitroot llc. Im-Pesaran-Shin's W-t-bar is each unit's augmented \
+            Dickey-Fuller t averaged and standardised with Im, Pesaran and Shin's tabulated \
+            mean and variance (interpolated between their periods), and is Stata's xtunitroot \
+            ips; it takes up to four lags and is written in base R.",
     widgets: &[
         Widget::Variable {
             id: "var",
@@ -1052,17 +1387,27 @@ pub const PANEL_UNIT_ROOT: Spec = Spec {
     code: |a, _| {
         let test = a.choice("test");
         let variable = a.var_string("var").unwrap_or_default();
-        let extra = if test == "ips" {
-            ", ips.stat = \"Wtbar\", dfcor = TRUE"
-        } else {
-            ", q = floor(3.21 * periods^(1/3))"
-        };
+        if test == "ips" {
+            let lags: usize = a.choice("lags").parse().unwrap_or(1);
+            let trend = a.choice("terms") == "trend";
+            let (means, variances) = ips_moments(lags, trend);
+            return IPS_CODE
+                .replace("@DATA@", &a.data())
+                .replace("@INDEX@", &index_arg(a))
+                .replace("@VARIABLE@", &variable)
+                .replace("@LAGS@", &lags.to_string())
+                .replace("@TREND@", if trend { "TRUE" } else { "FALSE" })
+                .replace("@GRID@", &ips_grid())
+                .replace("@MEANS@", &means)
+                .replace("@VARIANCES@", &variances);
+        }
         format!(
             "print(local({{\n  panel <- plm::pdata.frame({}, {})\n  \
              size <- plm::pdim(panel)\n  \
              stopifnot(\"the panel must be balanced: every unit observed in every period\" = \
              size$balanced)\n  periods <- size$nT$T\n  \
-             plm::purtest(panel[[{variable}]], test = {}, exo = {}, lags = {}{extra})\n}}))",
+             plm::purtest(panel[[{variable}]], test = {}, exo = {}, lags = {}, \
+             q = floor(3.21 * periods^(1/3)))\n}}))",
             a.data(),
             index_arg(a),
             r_string(test),
@@ -1446,7 +1791,7 @@ mod tests {
             "{out}"
         );
         assert!(out.ends_with("print(summary(ab, robust = FALSE))"), "{out}");
-        // one step prints no Sargan test, and conventional errors are refused
+        // one step with robust errors prints no Sargan test
         let v = values(
             &DYNAMIC_PANEL,
             &[
@@ -1471,10 +1816,22 @@ mod tests {
             ],
             &[("x", &["hours"])],
         );
-        assert!(DYNAMIC_PANEL
-            .problems(&ctx(), &v)
-            .iter()
-            .any(|p| p.widget == "errors"));
+        // one step with conventional errors scales them as Stata does
+        let out = code(&DYNAMIC_PANEL, &v);
+        assert!(
+            out.contains("ab$vcov <<-") || out.contains("model$vcov <<-"),
+            "{out}"
+        );
+        assert!(DYNAMIC_PANEL.problems(&ctx(), &v).is_empty());
+        // time effects use plm's two-way effect
+        let mut v = values(
+            &DYNAMIC_PANEL,
+            &[("y", "wage"), ("id", "id"), ("time", "year")],
+            &[],
+        );
+        v.set_flag("twoways", true);
+        let out = code(&DYNAMIC_PANEL, &v);
+        assert!(out.contains("effect = \"twoways\""), "{out}");
         // the outcome cannot be a predictor
         let v = values(
             &DYNAMIC_PANEL,
@@ -1498,11 +1855,53 @@ mod tests {
                 ("inst", &["visits"]),
             ],
         );
-        assert_eq!(
-            code(&PANEL_IV, &v),
-            "model <- plm::plm(wage ~ hours + days | hours + visits, data = d, index = c(\"id\", \"year\"), model = \"within\")\n\
-             print(summary(model))"
+        let out = code(&PANEL_IV, &v);
+        assert!(
+            out.starts_with(
+                "model <- plm::plm(wage ~ hours + days | hours + visits, data = d, index = c(\"id\", \"year\"), model = \"within\")\n\
+                 print(summary(model))\n"
+            ),
+            "{out}"
         );
+        // the within fit gets the constant, with conventional errors
+        assert!(out.contains("m <- model\n  robust <- FALSE"), "{out}");
+        // the others print the summary only, unless robust errors are asked for
+        let mut v = values(
+            &PANEL_IV,
+            &[
+                ("y", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("model", "fd"),
+            ],
+            &[("endog", &["days"]), ("inst", &["visits"])],
+        );
+        assert!(code(&PANEL_IV, &v).ends_with("model = \"fd\")\nprint(summary(model))"));
+        v.set_text("errors", "robust");
+        assert!(code(&PANEL_IV, &v).contains("robust <- TRUE"));
+        // EC2SLS is Baltagi's random-effects estimator, and has no robust errors
+        let mut v = values(
+            &PANEL_IV,
+            &[
+                ("y", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("model", "ec2sls"),
+            ],
+            &[("endog", &["days"]), ("inst", &["visits"])],
+        );
+        assert!(code(&PANEL_IV, &v).contains("model = \"random\", inst.method = \"baltagi\")"));
+        assert!(PANEL_IV.problems(&ctx(), &v).is_empty());
+        v.set_text("errors", "robust");
+        assert!(PANEL_IV
+            .problems(&ctx(), &v)
+            .iter()
+            .any(|p| p.widget == "errors"));
+        v.set_text("model", "between");
+        assert!(PANEL_IV
+            .problems(&ctx(), &v)
+            .iter()
+            .any(|p| p.widget == "errors"));
         let v = values(
             &PANEL_IV,
             &[
@@ -1569,9 +1968,15 @@ mod tests {
             ],
             &[],
         );
-        assert!(code(&PANEL_UNIT_ROOT, &v).contains(
-            "test = \"ips\", exo = \"trend\", lags = 2, ips.stat = \"Wtbar\", dfcor = TRUE)"
-        ));
+        // Im-Pesaran-Shin is base R with the tabulated moments for these lags and the trend
+        let out = code(&PANEL_UNIT_ROOT, &v);
+        assert!(out.contains("lags <- 2\n  trend <- TRUE"), "{out}");
+        assert!(
+            out.contains("c(NA, -1.823, -1.911") || out.contains("c(-1.914, -1.999, -2.047"),
+            "{out}"
+        );
+        assert!(out.contains("panel[[\"wage\"]]"), "{out}");
+        assert!(!out.contains("purtest"), "{out}");
         // Im-Pesaran-Shin needs a mean; the variable is not the unit or the time
         let v = values(
             &PANEL_UNIT_ROOT,
