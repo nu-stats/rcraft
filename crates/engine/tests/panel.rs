@@ -1118,6 +1118,559 @@ fn dynamic_panel_matches_xtabond() {
     assert_eq!(body(&shown), body(&expected), "{shown}");
 }
 
+/// A limit on the outcome's instrument lags against `maxldep(q)` of xtabond and xtdpdsys
+/// (noconstant), on the dynamic panel (Stata 19): the coefficients, the covariance elements
+/// Stata printed (second row), and Sargan's chi2 where it exists.
+#[test]
+fn instrument_lag_limits_match_maxldep() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // (method, q, steps, errors, coefficients, V[1,0], V[1,1], Sargan's chi2)
+    type Case = (
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static str,
+        f64,
+        f64,
+        Option<f64>,
+    );
+    let cases: &[Case] = &[
+        (
+            "difference",
+            "1",
+            "onestep",
+            "conventional",
+            "c(.308865575862643, .340057306476837)",
+            0.0166329049670331,
+            0.00926901439234816,
+            Some(4.98237971262893),
+        ),
+        (
+            "difference",
+            "3",
+            "onestep",
+            "conventional",
+            "c(.127639203861048, .305348501563287)",
+            0.00869909634931753,
+            0.00672247126120431,
+            Some(8.90520414112995),
+        ),
+        (
+            "difference",
+            "2",
+            "twosteps",
+            "conventional",
+            "c(.0856188427844731, .264214945159418)",
+            0.0072563170319647,
+            0.00658679762269942,
+            Some(8.17359598943162),
+        ),
+        (
+            "difference",
+            "2",
+            "twosteps",
+            "robust",
+            "c(.0856188427844731, .264214945159418)",
+            0.0122754813638505,
+            0.0109227883245685,
+            None,
+        ),
+        (
+            "system",
+            "1",
+            "onestep",
+            "conventional",
+            "c(.64121434905665, .412515926336883)",
+            0.000686322726374024,
+            0.00791003154285798,
+            Some(4.83470388679276),
+        ),
+        (
+            "system",
+            "2",
+            "onestep",
+            "conventional",
+            "c(.629494727399618, .413884840908133)",
+            0.000671541336185446,
+            0.00777358204829441,
+            Some(7.85246453805179),
+        ),
+        (
+            "system",
+            "2",
+            "twosteps",
+            "robust",
+            "c(.711331130953527, .398071566079328)",
+            0.00144291400141588,
+            0.016715244610217,
+            None,
+        ),
+    ];
+    for (method, q, steps, errors, coefficients, cross, variance, sargan) in cases {
+        let (outcome, text) = dialog2(
+            &mut e,
+            DYNAMIC,
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("method", method),
+                ("maxlag", q),
+                ("steps", steps),
+                ("errors", errors),
+                ("save", "lim"),
+            ],
+            &[("x", &["x"])],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{method} {q}: {text}");
+        let (coefs, vcov, robust_vcov) = if *method == "system" {
+            ("lim$coefficients", "lim$vcov", "lim$vcov")
+        } else {
+            ("coef(lim)", "lim$vcov", "plm::vcovHC(lim)")
+        };
+        let v = if *errors == "robust" {
+            robust_vcov
+        } else {
+            vcov
+        };
+        let checks = vec![
+            same(coefs, coefficients),
+            same(&format!("{v}[2, 1]"), &cross.to_string()),
+            same(&format!("{v}[2, 2]"), &variance.to_string()),
+        ];
+        if let Some(chi2) = sargan {
+            // printed with seven digits: the first five are Stata's
+            let shown = chi2.to_string();
+            assert!(
+                text.contains(&shown[..6]),
+                "{method} {q}: Sargan {chi2} not in {text}"
+            );
+        }
+        holds(&mut e, &checks);
+    }
+}
+
+/// System GMM against xtdpdsys ..., noconstant, on the dynamic panel (Stata 19). Each case:
+/// lags, steps, errors, the other predictors, then the coefficients, the elements of the
+/// covariance that Stata printed (row, column, value; zero-based, x last) and Sargan's chi2.
+#[test]
+fn system_gmm_matches_xtdpdsys() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    type Case = (
+        &'static str,
+        &'static str,
+        &'static str,
+        &'static [&'static str],
+        &'static str,
+        &'static [(usize, usize, f64)],
+        Option<f64>,
+    );
+    let cases: &[Case] = &[
+        (
+            "1",
+            "onestep",
+            "conventional",
+            &["x"],
+            "c(.616677892952302, .402086451011282)",
+            &[(1, 1, 0.00757717418247851), (0, 1, 0.000592648461152445)],
+            Some(11.3908445327785),
+        ),
+        (
+            "1",
+            "onestep",
+            "robust",
+            &["x"],
+            "c(.616677892952302, .402086451011282)",
+            &[(1, 1, 0.00928584458759118), (0, 1, 0.000660759790202744)],
+            None,
+        ),
+        (
+            "1",
+            "twosteps",
+            "conventional",
+            &["x"],
+            "c(.701462651176986, .342149747357803)",
+            &[(1, 1, 0.00512366402527943), (0, 1, 0.000214119700110163)],
+            Some(16.9554821189992),
+        ),
+        (
+            "1",
+            "twosteps",
+            "robust",
+            &["x"],
+            "c(.701462651176986, .342149747357803)",
+            &[(1, 1, 0.0102448086500373), (0, 1, 0.0016763846478006)],
+            None,
+        ),
+        (
+            "2",
+            "onestep",
+            "conventional",
+            &["x"],
+            "c(.634593553203442, .0902972324120975, .368542458745112)",
+            &[
+                (0, 0, 0.00397293485547886),
+                (2, 2, 0.00914627704982487),
+                (0, 2, 0.00042348340701698),
+                (1, 2, -0.000202728269415531),
+            ],
+            Some(8.90497624682949),
+        ),
+        (
+            "2",
+            "twosteps",
+            "robust",
+            &["x"],
+            "c(.683870484372759, .104488840533705, .309904531100126)",
+            &[
+                (0, 0, 0.00542818816426374),
+                (2, 2, 0.0109990839606794),
+                (0, 2, 0.00099320890357029),
+                (1, 2, -0.000170246433356633),
+            ],
+            None,
+        ),
+        (
+            "3",
+            "twosteps",
+            "robust",
+            &["x"],
+            "c(.65458376103762, .102996995275367, -.0498504672781486, .307899834531041)",
+            &[(0, 0, 0.00930555240444774), (3, 3, 0.0127383306788567)],
+            None,
+        ),
+        (
+            "1",
+            "twosteps",
+            "robust",
+            &["x", "z"],
+            "c(.710362677440093, .312476878677443, .0680374017627275)",
+            &[],
+            None,
+        ),
+        (
+            "1",
+            "onestep",
+            "conventional",
+            &["x", "z"],
+            "c(.61909460109713, .38223327848308, .0363827144382625)",
+            &[],
+            Some(11.4275794206513),
+        ),
+    ];
+    for (lags, steps, errors, others, coefficients, covariance, sargan) in cases {
+        let (outcome, text) = dialog2(
+            &mut e,
+            DYNAMIC,
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("method", "system"),
+                ("lags", lags),
+                ("steps", steps),
+                ("errors", errors),
+                ("save", "sg"),
+            ],
+            &[("x", others)],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert!(text.contains("system GMM (Blundell-Bond)"), "{text}");
+        let mut checks = vec![same("sg$coefficients", coefficients)];
+        for (r, c, value) in *covariance {
+            checks.push(same(
+                &format!("sg$vcov[{}, {}]", r + 1, c + 1),
+                &value.to_string(),
+            ));
+        }
+        if let Some(chi2) = sargan {
+            checks.push(same("sg$sargan", &chi2.to_string()));
+        }
+        holds(&mut e, &checks);
+    }
+    // with a constant, as xtdpdsys has it by default: the level equation keeps its second
+    // period, whose only instrument is the constant
+    let with_constant: &[Case] = &[
+        (
+            "1",
+            "onestep",
+            "conventional",
+            &["x"],
+            "c(.616389986006725, .401828843205422, -.0260893333852326)",
+            &[
+                (0, 0, 0.00417225649608554),
+                (1, 1, 0.00760693155196966),
+                (2, 2, 0.00506791447416189),
+            ],
+            Some(11.3276107001353),
+        ),
+        (
+            "1",
+            "onestep",
+            "robust",
+            &["x"],
+            "c(.616389986006725, .401828843205422, -.0260893333852326)",
+            &[
+                (0, 0, 0.00670689993935055),
+                (1, 1, 0.00917833789096383),
+                (2, 2, 0.0197891478153194),
+            ],
+            None,
+        ),
+        (
+            "1",
+            "twosteps",
+            "conventional",
+            &["x"],
+            "c(.7027197785131, .34207156812095, -.0177605416521949)",
+            &[
+                (0, 0, 0.00184140631349319),
+                (1, 1, 0.00507187673394295),
+                (2, 2, 0.008725252798175),
+            ],
+            Some(17.0135705326574),
+        ),
+        (
+            "1",
+            "twosteps",
+            "robust",
+            &["x"],
+            "c(.7027197785131, .34207156812095, -.0177605416521949)",
+            &[
+                (0, 0, 0.00676589084780925),
+                (1, 1, 0.0104354225380635),
+                (2, 2, 0.0230759126984561),
+            ],
+            None,
+        ),
+        (
+            "2",
+            "onestep",
+            "conventional",
+            &["x"],
+            "c(.634892150951326, .0909728761863792, .368377169147114, .0151930743048318)",
+            &[],
+            Some(8.83703931344237),
+        ),
+        (
+            "2",
+            "twosteps",
+            "robust",
+            &["x"],
+            "c(.683822248953859, .102964786046203, .312539271870638, .0120772987483505)",
+            &[],
+            None,
+        ),
+    ];
+    for (lags, steps, errors, others, coefficients, covariance, sargan) in with_constant {
+        let (outcome, text) = dialog2(
+            &mut e,
+            DYNAMIC,
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("method", "system"),
+                ("constant", "true"),
+                ("lags", lags),
+                ("steps", steps),
+                ("errors", errors),
+                ("save", "sc"),
+            ],
+            &[("x", others)],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert!(text.contains("(Intercept)"), "{text}");
+        let mut checks = vec![same("sc$coefficients", coefficients)];
+        for (r, c, value) in *covariance {
+            checks.push(same(
+                &format!("sc$vcov[{}, {}]", r + 1, c + 1),
+                &value.to_string(),
+            ));
+        }
+        if let Some(chi2) = sargan {
+            checks.push(same("sc$sargan", &chi2.to_string()));
+        }
+        holds(&mut e, &checks);
+    }
+    // Arellano and Bond's tests after system GMM, against estat abond (e(arm1), e(arm2));
+    // Stata leaves them out after one step with conventional errors, and so does the dialog
+    for (constant, steps, m1, m2) in [
+        ("false", "onestep", -5.35499407954567, 1.16539094573659),
+        ("false", "twosteps", -4.32540267371371, 1.21851196339287),
+        ("true", "onestep", -5.34567480289285, 1.16511345514252),
+        ("true", "twosteps", -4.33564997968909, 1.22017684416183),
+    ] {
+        let (outcome, text) = dialog2(
+            &mut e,
+            DYNAMIC,
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("method", "system"),
+                ("constant", constant),
+                ("steps", steps),
+                ("errors", "robust"),
+                ("save", "sm"),
+            ],
+            &[("x", &["x"])],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert!(text.contains("Autocorrelation test (1)"), "{text}");
+        holds(&mut e, &[same("sm$m", &format!("c({m1}, {m2})"))]);
+    }
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("method", "system"),
+            ("errors", "conventional"),
+            ("steps", "onestep"),
+            ("save", "sn"),
+        ],
+        &[("x", &["x"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Autocorrelation tests: not available"),
+        "{text}"
+    );
+    // time effects: a dummy for each period from the third on, among the exogenous
+    // predictors, as year dummies are in Stata (xtdpdsys y x yr3-yr7, noconstant)
+    for (steps, errors, coefficients, sargan, m1) in [
+        (
+            "onestep",
+            "conventional",
+            "c(.629538831988633, .401909503666496, .244861685775691, .0273985802504902, \
+               .268814243772277, .0614177829224477, .0722961192735729)",
+            Some(10.8746677625022),
+            None,
+        ),
+        (
+            "twosteps",
+            "robust",
+            "c(.717155905027251, .365663828842525, .258471954954326, .0501128900203699, \
+               .209302030381767, .103114559510245, .0287319203329844)",
+            None,
+            Some(-4.33403482728217),
+        ),
+    ] {
+        let (outcome, text) = dialog2(
+            &mut e,
+            DYNAMIC,
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("method", "system"),
+                ("twoways", "true"),
+                ("steps", steps),
+                ("errors", errors),
+                ("save", "st"),
+            ],
+            &[("x", &["x"])],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert!(text.contains("year 2007"), "{text}");
+        let mut checks = vec![same("st$coefficients", coefficients)];
+        if let Some(chi2) = sargan {
+            checks.push(same("st$sargan", &chi2.to_string()));
+        }
+        if let Some(value) = m1 {
+            checks.push(same("st$m[1]", &value.to_string()));
+        }
+        holds(&mut e, &checks);
+    }
+    // a panel with gaps and a missing predictor: the rows a unit cannot fill drop out, as
+    // they do in Stata (xtdpdsys on the same data)
+    for (steps, errors, coefficients, cross, variance, sargan) in [
+        (
+            "onestep",
+            "conventional",
+            "c(.650768068000344, .401816219600718)",
+            0.000584805182709421,
+            0.00786873007886197,
+            Some(11.5210193524256),
+        ),
+        (
+            "onestep",
+            "robust",
+            "c(.650768068000344, .401816219600718)",
+            0.000281702044021056,
+            0.0100622882171313,
+            None,
+        ),
+        (
+            "twosteps",
+            "robust",
+            "c(.734546497290767, .34129630335613)",
+            0.00184235317412307,
+            0.0110472502259122,
+            None,
+        ),
+    ] {
+        let (outcome, text) = dialog2(
+            &mut e,
+            GAPPED,
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("method", "system"),
+                ("steps", steps),
+                ("errors", errors),
+                ("save", "sgap"),
+            ],
+            &[("x", &["x"])],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        let mut checks = vec![
+            same("sgap$coefficients", coefficients),
+            same("sgap$vcov[2, 1]", &cross.to_string()),
+            same("sgap$vcov[2, 2]", &variance.to_string()),
+        ];
+        if let Some(chi2) = sargan {
+            checks.push(same("sgap$sargan", &chi2.to_string()));
+        }
+        holds(&mut e, &checks);
+    }
+    // the time variable must step evenly, or the differences would span the gap
+    let (outcome, text) = dialog2(
+        &mut e,
+        &format!("{DYNAMIC}; d$year[d$year >= 2005] <- d$year[d$year >= 2005] + 3"),
+        &DYNAMIC_PANEL,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("method", "system"),
+        ],
+        &[("x", &["x"])],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("one step apart"), "{text}");
+}
+
 #[test]
 fn panel_iv_matches_xtivreg() {
     let Some(mut e) = engine() else { return };
@@ -1248,6 +1801,38 @@ fn panel_iv_matches_xtivreg() {
         for (name, want) in *rows {
             close(&text, name, want, model);
         }
+    }
+    // the small option: t statistics with the degrees of freedom of e(df_r) in Stata 19
+    for (model, errors, df) in [
+        ("within", "conventional", 148),
+        ("within", "robust", 148),
+        ("random", "conventional", 178),
+        ("random", "robust", 30),
+        ("ec2sls", "conventional", 178),
+        ("between", "conventional", 27),
+        ("fd", "conventional", 147),
+        ("fd", "robust", 29),
+    ] {
+        let (outcome, text) = dialog2(
+            &mut e,
+            INSTRUMENTED,
+            &PANEL_IV,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("model", model),
+                ("errors", errors),
+                ("small", "true"),
+                ("save", "sm"),
+            ],
+            lists,
+        );
+        assert_eq!(outcome, Outcome::Ok, "{model} {errors}: {text}");
+        assert!(
+            text.contains(&format!("t statistics, {df} degrees of freedom")),
+            "{model} {errors} should have {df} degrees of freedom: {text}"
+        );
     }
     // the other estimators: coefficients and conventional covariance as xtivreg
     for (model, save) in [("ec2sls", "ec"), ("between", "be"), ("fd", "fdm")] {

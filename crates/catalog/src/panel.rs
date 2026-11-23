@@ -643,6 +643,233 @@ const DYNAMIC_ERRORS: &[Opt] = &[
     },
 ];
 
+const DYNAMIC_METHODS: &[Opt] = &[
+    Opt {
+        value: "difference",
+        label: "Difference GMM (Arellano-Bond)",
+    },
+    Opt {
+        value: "system",
+        label: "System GMM (Blundell-Bond)",
+    },
+];
+
+/// Blundell-Bond system GMM written out, as Stata's xtdpdsys has it (without a constant).
+/// Each unit stacks the equation in differences (periods lags+2 to T; the outcome's earlier
+/// levels from the first period to two back as instruments, a block for each period, and the
+/// differences of the other predictors as their own) and the equation in levels (periods
+/// max(3, lags+1) to T; the lagged difference of the outcome as the instrument for each
+/// period). The first-step weighting matrix is block diagonal: the first-difference matrix
+/// (2 on the diagonal, -1 beside it) for the difference equation, the identity for levels.
+/// Two steps weight by the inverse of the first step's squared scores; the robust errors
+/// after two steps are Windmeijer's. After one step the conventional errors and Sargan's
+/// statistic divide by sigma^2, the difference equation's residual sum of squares over
+/// twice its observations less the coefficients.
+const SYSTEM_GMM: &str = "MODEL <- local({
+  d <- @DATA@
+  id <- @ID@
+  time <- @TIME@
+  y <- @Y@
+  x <- @X@
+  lags <- @LAGS@
+  limit <- @LIMIT@
+  steps <- @STEPS@
+  robust <- @ROBUST@
+  cons <- @CONS@
+  times <- @TIMES@
+  d <- d[order(d[[id]], d[[time]]), ]
+  units <- split(d, d[[id]])
+  # every unit is laid out on the whole grid of periods; what it does not have is a row of
+  # zeros, which contributes nothing, so a unit may miss periods
+  stamps <- sort(unique(d[[time]]))
+  periods <- length(stamps)
+  stopifnot('system GMM needs the periods one step apart: no missing step in the time variable' =
+    length(stamps) > 1 && all(diff(stamps) == diff(stamps)[1]) && diff(stamps)[1] > 0,
+    'a unit is in the data twice for one period' =
+      !any(vapply(units, function(u) anyDuplicated(u[[time]]) > 0, TRUE)),
+    'too few periods for this many lags' = periods >= lags + 3)
+  ts <- (lags + 2):periods
+  ls <- max(if (cons) 2 else 3, lags + 1):periods
+  nd <- length(ts)
+  nl <- length(ls)
+  # the level equation's instrument is the lagged difference, so a period-2 row carries
+  # only the constant: Stata's xtdpdsys keeps that row when there is one
+  instrumented <- ls >= 3
+  # time effects are a dummy for each period from the third on, among the exogenous
+  # predictors: they are differenced in the one equation and kept in the other, and
+  # instrument themselves, which is what year dummies do in Stata's xtdpdsys
+  dummies <- matrix(0, periods, 0)
+  if (times && periods > 2) {
+    dummies <- outer(stamps, stamps[-(1:2)], `==`) * 1
+    colnames(dummies) <- paste(time, stamps[-(1:2)])
+  }
+  stack <- function(u) {
+    at <- match(stamps, u[[time]])
+    v <- u[[y]][at]
+    xs <- cbind(as.matrix(u[x])[at, , drop = FALSE], dummies)
+    dv <- c(NA, diff(v))
+    dx <- if (ncol(xs)) rbind(NA, apply(xs, 2, diff)) else matrix(0, periods, 0)
+    gmm <- matrix(0, nd, sum(pmin(ts - 2, limit)))
+    off <- 0
+    for (r in seq_len(nd)) {
+      keep <- seq(max(1, ts[r] - 1 - limit), ts[r] - 2)
+      levels <- v[keep]
+      levels[is.na(levels)] <- 0
+      gmm[r, off + seq_along(keep)] <- levels
+      off <- off + length(keep)
+    }
+    zd <- cbind(gmm, dx[ts, , drop = FALSE])
+    xd <- cbind(vapply(seq_len(lags), function(j) dv[ts - j], numeric(nd)), dx[ts, , drop = FALSE],
+      if (cons) 0)
+    xl <- cbind(vapply(seq_len(lags), function(j) v[ls - j], numeric(nl)), xs[ls, , drop = FALSE],
+      if (cons) 1)
+    zl <- matrix(0, nl, sum(instrumented) + cons)
+    zl[cbind(which(instrumented), seq_len(sum(instrumented)))] <- dv[ls[instrumented] - 1]
+    if (cons) zl[, ncol(zl)] <- 1
+    z <- matrix(0, nd + nl, ncol(zd) + ncol(zl))
+    z[seq_len(nd), seq_len(ncol(zd))] <- zd
+    z[nd + seq_len(nl), ncol(zd) + seq_len(ncol(zl))] <- zl
+    # a row the unit cannot fill, because it misses a period or a predictor, is set to zero
+    # and so adds nothing to any of the sums
+    xx <- rbind(xd, xl)
+    yy <- c(dv[ts], v[ls])
+    empty <- is.na(yy) | apply(is.na(xx), 1, any)
+    z[empty, ] <- 0
+    xx[empty, ] <- 0
+    yy[empty] <- 0
+    z[is.na(z)] <- 0
+    xx[is.na(xx)] <- 0
+    list(z = z, x = xx, y = yy, filled = !empty)
+  }
+  rows <- lapply(units, stack)
+  filled <- sum(vapply(rows, function(r) sum(r$filled[seq_len(nd)]), 1))
+  stopifnot('no unit has enough periods in a row for this model' = filled > 0)
+  tri <- diag(2, nd)
+  if (nd > 1) for (i in seq_len(nd - 1)) tri[i, i + 1] <- tri[i + 1, i] <- -1
+  h <- matrix(0, nd + nl, nd + nl)
+  h[seq_len(nd), seq_len(nd)] <- tri
+  h[nd + seq_len(nl), nd + seq_len(nl)] <- diag(nl)
+  total <- function(f) Reduce(`+`, lapply(rows, f))
+  zx <- total(function(r) crossprod(r$z, r$x))
+  zy <- total(function(r) crossprod(r$z, r$y))
+  one <- solve(total(function(r) t(r$z) %*% h %*% r$z))
+  bread1 <- solve(t(zx) %*% one %*% zx)
+  b1 <- bread1 %*% t(zx) %*% one %*% zy
+  resid <- function(b) lapply(rows, function(r) as.numeric(r$y - r$x %*% b))
+  scores <- function(u) Map(function(r, e) as.numeric(crossprod(r$z, e)), rows, u)
+  meat <- function(u) Reduce(`+`, lapply(scores(u), tcrossprod))
+  u1 <- resid(b1)
+  k <- length(b1)
+  rob1 <- bread1 %*% t(zx) %*% one %*% meat(u1) %*% one %*% zx %*% bread1
+  if (steps == 'onestep') {
+    b <- b1
+    used <- u1
+    bread <- bread1
+    weight <- one
+    sigma2 <- sum(vapply(u1, function(e) sum(e[seq_len(nd)]^2), 1)) / (2 * (filled - k))
+    s <- Reduce(`+`, scores(u1))
+    sargan <- sum(s * (one %*% s)) / sigma2
+    v <- if (robust) rob1 else bread1 * sigma2
+  } else {
+    two <- solve(meat(u1))
+    bread2 <- solve(t(zx) %*% two %*% zx)
+    b <- bread2 %*% t(zx) %*% two %*% zy
+    used <- resid(b)
+    bread <- bread2
+    weight <- two
+    g <- Reduce(`+`, scores(used))
+    sargan <- sum(g * (two %*% g))
+    v <- bread2
+    if (robust) {
+      shift <- vapply(seq_len(k), function(j) {
+        dw <- Reduce(`+`, Map(function(r, e) {
+          xj <- r$x[, j]
+          t(r$z) %*% (tcrossprod(xj, e) + tcrossprod(e, xj)) %*% r$z
+        }, rows, u1))
+        as.numeric(bread2 %*% t(zx) %*% two %*% dw %*% two %*% g)
+      }, numeric(k))
+      v <- bread2 + shift %*% bread2 + bread2 %*% t(shift) + shift %*% rob1 %*% t(shift)
+    }
+  }
+  # Arellano and Bond's test of autocorrelation of order j in the differenced errors: the
+  # lagged residual is the difference equation's, padded with zeros over the level rows,
+  # while the residual it is weighted by is the whole system's, as Stata's estat abond has it
+  mtest <- function(order) {
+    if (order >= nd) return(NA_real_)
+    lagged <- lapply(used, function(e) {
+      out <- numeric(length(e))
+      out[(order + 1):nd] <- e[seq_len(nd - order)]
+      out
+    })
+    ex <- Reduce(`+`, Map(function(e, r) crossprod(e, r$x), lagged, rows))
+    eve <- Reduce(`+`, Map(function(e, l) sum(e * l)^2, used, lagged))
+    zve <- Reduce(`+`, Map(function(r, e, l) crossprod(r$z, e) * sum(e * l), rows, used, lagged))
+    top <- Reduce(`+`, Map(function(e, l) sum(e * l), used, lagged))
+    bottom <- eve - 2 * ex %*% bread %*% t(zx) %*% weight %*% zve + ex %*% v %*% t(ex)
+    as.numeric(top / sqrt(bottom))
+  }
+  # with one step and conventional errors Stata leaves them out, as they need a robust one
+  m <- if (robust || steps != 'onestep') vapply(1:2, mtest, numeric(1)) else c(NA_real_, NA_real_)
+  list(coefficients = setNames(as.numeric(b),
+    c(paste0('L', seq_len(lags), '.', y), x, colnames(dummies), if (cons) '(Intercept)')), vcov = v,
+    sargan = sargan, df = ncol(rows[[1]]$z) - k, units = length(rows), steps = steps,
+    robust = robust, difference = filled,
+    level = sum(vapply(rows, function(r) sum(r$filled[nd + seq_len(nl)]), 1)), m = m)
+})
+local({
+  fit <- MODEL
+  se <- sqrt(diag(fit$vcov))
+  table <- cbind(Estimate = fit$coefficients, 'Std. Error' = se, 'z-value' = fit$coefficients / se,
+    'Pr(>|z|)' = 2 * stats::pnorm(-abs(fit$coefficients / se)))
+  cat(sprintf('%s system GMM (Blundell-Bond): %d units, %d difference and %d level equations\\n',
+    if (fit$steps == 'onestep') 'One-step' else 'Two-step', fit$units, fit$difference, fit$level))
+  cat(if (fit$robust) 'Standard errors robust to heteroskedasticity' else 'Conventional standard errors')
+  cat(if (fit$robust && fit$steps != 'onestep') ' (Windmeijer-corrected)\\n\\n' else '\\n\\n')
+  stats::printCoefmat(table, digits = 7)
+  if (fit$robust && fit$steps == 'onestep') {
+    cat('\\nSargan test: not available with robust errors\\n')
+  } else {
+    cat(sprintf('\\nSargan test: chisq(%d) = %s (p-value = %s)\\n', fit$df, format(fit$sargan, digits = 7),
+      format.pval(stats::pchisq(fit$sargan, fit$df, lower.tail = FALSE), digits = 5)))
+  }
+  if (all(is.na(fit$m))) {
+    cat('Autocorrelation tests: not available after one step with conventional errors\\n')
+  } else {
+    for (j in seq_along(fit$m)) {
+      if (is.na(fit$m[j])) {
+        cat(sprintf('Autocorrelation test (%d): too few periods\\n', j))
+      } else {
+        cat(sprintf('Autocorrelation test (%d): normal = %s (p-value = %s)\\n', j,
+          format(fit$m[j], digits = 7),
+          format.pval(2 * stats::pnorm(-abs(fit$m[j])), digits = 5)))
+      }
+    }
+  }
+})";
+
+const INSTRUMENT_LIMITS: &[Opt] = &[
+    Opt {
+        value: "all",
+        label: "All earlier",
+    },
+    Opt {
+        value: "1",
+        label: "1",
+    },
+    Opt {
+        value: "2",
+        label: "2",
+    },
+    Opt {
+        value: "3",
+        label: "3",
+    },
+    Opt {
+        value: "4",
+        label: "4",
+    },
+];
+
 const OUTCOME_LAGS: &[Opt] = &[
     Opt {
         value: "1",
@@ -685,6 +912,13 @@ const ONE_STEP_CONVENTIONAL: &str = "local({
 /// The panel check, plus the choices a dynamic model cannot take.
 fn dynamic_check(a: &Args) -> Vec<Problem> {
     let mut out = plm_check(a);
+    if a.choice("method") == "difference" && a.flag("constant") {
+        out.push(Problem::new(
+            "constant",
+            "Difference GMM has no constant: differencing takes it away with the unit effects; \
+             untick it, or take system GMM.",
+        ));
+    }
     if a.name_text("save") == a.ctx.dataset {
         out.push(Problem::new(
             "save",
@@ -707,7 +941,15 @@ pub const DYNAMIC_PANEL: Spec = Spec {
             the Sargan test of the overidentifying restrictions. Time effects add a dummy for \
             each period. After one step with conventional errors, the standard errors and the \
             Sargan test are scaled as Stata's xtabond does (plm leaves them unscaled); after \
-            one step with robust errors there is no Sargan test, as in Stata. No constant.",
+            one step with robust errors there is no Sargan test, as in Stata. The number of \
+            lags of the outcome used as instruments can be limited (Stata's maxldep). System \
+            GMM (Blundell-Bond, Stata's xtdpdsys) adds the equation in levels, with the lagged \
+            differences of the outcome as its instruments; it is written in base R, needs a \
+            time variable whose periods step evenly, and can take a constant in the level \
+            equation (instrumented by itself, which keeps the second period's row) and time \
+            effects (a dummy for each period from the third on, among the exogenous \
+            predictors). A unit may miss periods: the rows it cannot fill drop out. \
+            Difference GMM has no constant.",
     widgets: &[
         Widget::Variable {
             id: "y",
@@ -723,6 +965,14 @@ pub const DYNAMIC_PANEL: Spec = Spec {
             default: "1",
             hint: "The outcome one, two or three periods back.",
         },
+        Widget::Choice {
+            id: "maxlag",
+            label: "Lags of the outcome used as instruments",
+            options: INSTRUMENT_LIMITS,
+            default: "all",
+            hint: "Every earlier level is an instrument by default; fewer instruments make a \
+                   smaller, less efficient but sturdier fit (Stata's maxldep).",
+        },
         Widget::Variables {
             id: "x",
             label: "Other predictors",
@@ -732,6 +982,15 @@ pub const DYNAMIC_PANEL: Spec = Spec {
         },
         PANEL_ID,
         PANEL_TIME,
+        Widget::Choice {
+            id: "method",
+            label: "Estimator",
+            options: DYNAMIC_METHODS,
+            default: "difference",
+            hint: "System GMM adds the equation in levels, with the lagged differences of the \
+                   outcome as its instruments: it is more efficient when the outcome is close \
+                   to a random walk, and it needs a time variable whose periods step evenly.",
+        },
         Widget::Choice {
             id: "steps",
             label: "Estimation",
@@ -746,6 +1005,14 @@ pub const DYNAMIC_PANEL: Spec = Spec {
             default: "robust",
             hint: "After two steps, conventional errors are biased downwards; robust ones are \
                    recommended.",
+        },
+        Widget::Check {
+            id: "constant",
+            label: "Constant (system GMM only)",
+            default: false,
+            hint: "The level equation gets a constant, instrumented by itself, as Stata's \
+                   xtdpdsys does unless told otherwise. Difference GMM has none: it is \
+                   differenced away.",
         },
         Widget::Check {
             id: "twoways",
@@ -763,6 +1030,38 @@ pub const DYNAMIC_PANEL: Spec = Spec {
         let model = a.name("save");
         let y = a.var("y").unwrap_or_default();
         let lags: usize = a.choice("lags").parse().unwrap_or(1);
+        if a.choice("method") == "system" {
+            let others: Vec<String> = a.vars("x").iter().map(|n| r_string(n)).collect();
+            let others = if others.is_empty() {
+                "character(0)".to_string()
+            } else {
+                format!("c({})", others.join(", "))
+            };
+            let limit = match a.choice("maxlag").parse::<usize>() {
+                Ok(q) => q.to_string(),
+                Err(_) => "Inf".to_string(),
+            };
+            return SYSTEM_GMM
+                .replace("@LIMIT@", &limit)
+                .replace("@DATA@", &a.data())
+                .replace("@ID@", &a.var_string("id").unwrap_or_default())
+                .replace("@TIME@", &a.var_string("time").unwrap_or_default())
+                .replace("@Y@", &a.var_string("y").unwrap_or_default())
+                .replace("@X@", &others)
+                .replace("@LAGS@", &lags.to_string())
+                .replace("@STEPS@", &r_string(a.choice("steps")))
+                .replace(
+                    "@ROBUST@",
+                    if a.choice("errors") == "robust" {
+                        "TRUE"
+                    } else {
+                        "FALSE"
+                    },
+                )
+                .replace("@CONS@", if a.flag("constant") { "TRUE" } else { "FALSE" })
+                .replace("@TIMES@", if a.flag("twoways") { "TRUE" } else { "FALSE" })
+                .replace("MODEL", &model);
+        }
         let lag_term = if lags == 1 {
             format!("stats::lag({y}, 1)")
         } else {
@@ -782,9 +1081,14 @@ pub const DYNAMIC_PANEL: Spec = Spec {
         } else {
             ""
         };
+        // the last lag of the outcome used as an instrument: Stata's maxldep(q) is lags 2 to q + 1
+        let last = match a.choice("maxlag").parse::<usize>() {
+            Ok(q) => (q + 1).to_string(),
+            Err(_) => "99".to_string(),
+        };
         let fit = format!(
             "{model} <- local({{\n  # pgmm looks for plm() in the frame that calls it\n  plm <- plm::plm\n  \
-             plm::pgmm({y} ~ {} | stats::lag({y}, 2:99), data = {}, {}, \
+             plm::pgmm({y} ~ {} | stats::lag({y}, 2:{last}), data = {}, {}, \
              effect = \"{effect}\", model = {}, transformation = \"d\")\n}})",
             terms.join(" + "),
             a.data(),
@@ -862,6 +1166,7 @@ const IV_ERRORS: &[Opt] = &[
 const IV_TABLE: &str = "local({
   m <- MODEL
   robust <- ROBUST
+  small <- SMALL
   within <- identical(m$args$model, 'within')
   res <- stats::residuals(m)
   index <- plm::index(m)
@@ -881,21 +1186,37 @@ const IV_TABLE: &str = "local({
   e <- as.numeric(y - x %*% b)
   n <- length(e)
   g <- length(unique(id))
+  labels <- colnames(x)
   if (robust) {
     meat <- Reduce(`+`, lapply(split(seq_along(e), id), function(i) {
       s <- crossprod(fitted[i, , drop = FALSE], e[i])
       tcrossprod(s)
     }))
     v <- bread %*% meat %*% bread * g / (g - 1) * (n - 1) / (n - ncol(x))
-  } else {
+  } else if (within) {
     v <- bread * sum(e^2) / (n - g - ncol(x) + 1)
+  } else {
+    b <- as.numeric(stats::coef(m))
+    labels <- names(stats::coef(m))
+    v <- stats::vcov(m)
   }
   se <- sqrt(diag(v))
-  table <- cbind(Estimate = b, 'Std. Error' = se, 'z-value' = b / se,
-    'Pr(>|z|)' = 2 * stats::pnorm(-abs(b / se)))
-  rownames(table) <- colnames(x)
-  cat(if (robust) '\\nCoefficients, standard errors robust to clustering on the panel unit:\\n'
-      else '\\nCoefficients with the constant:\\n')
+  stat <- b / se
+  if (small) {
+    # Stata's degrees of freedom: the within fit takes the unit effects off, the clustered
+    # random-effects fit counts the units, the clustered differences one fewer
+    df <- if (within) n - g - ncol(x) + 1
+      else if (robust) g - identical(m$args$model, 'fd')
+      else n - ncol(x) + identical(m$args$model, 'random')
+    table <- cbind(Estimate = b, 'Std. Error' = se, 't-value' = stat,
+      'Pr(>|t|)' = 2 * stats::pt(-abs(stat), df))
+  } else {
+    table <- cbind(Estimate = b, 'Std. Error' = se, 'z-value' = stat,
+      'Pr(>|z|)' = 2 * stats::pnorm(-abs(stat)))
+  }
+  rownames(table) <- labels
+  cat(if (robust) '\nCoefficients, standard errors robust to clustering on the panel unit'
+      else '\nCoefficients with the constant', if (small) sprintf(' (t statistics, %d degrees of freedom)', df), ':\n', sep = '')
   stats::printCoefmat(table, digits = 7)
 })";
 
@@ -1026,6 +1347,14 @@ pub const PANEL_IV: Spec = Spec {
             default: "conventional",
             hint: "",
         },
+        Widget::Check {
+            id: "small",
+            label: "Small-sample statistics (t instead of z)",
+            default: false,
+            hint:
+                "Judges each coefficient by a t distribution with the degrees of freedom Stata's \
+                   small option uses; the errors themselves do not change.",
+        },
         SAVE,
     ],
     needs: &["plm"],
@@ -1060,12 +1389,14 @@ pub const PANEL_IV: Spec = Spec {
             r_string(plm_model),
         );
         // the table with the constant: for the within fit always, for the rest when robust
-        if robust || plm_model == "within" {
+        let small = a.flag("small");
+        if robust || small || plm_model == "within" {
             out.push('\n');
             out.push_str(
                 &IV_TABLE
                     .replace("MODEL", &model)
-                    .replace("ROBUST", if robust { "TRUE" } else { "FALSE" }),
+                    .replace("ROBUST", if robust { "TRUE" } else { "FALSE" })
+                    .replace("SMALL", if small { "TRUE" } else { "FALSE" }),
             );
         }
         out
@@ -1822,6 +2153,39 @@ mod tests {
             out.contains("ab$vcov <<-") || out.contains("model$vcov <<-"),
             "{out}"
         );
+        assert!(DYNAMIC_PANEL.problems(&ctx(), &v).is_empty());
+        // a limit on the instrument lags is Stata's maxldep: lags 2 to q + 1
+        let mut v = values(
+            &DYNAMIC_PANEL,
+            &[("y", "wage"), ("id", "id"), ("time", "year")],
+            &[],
+        );
+        v.set_text("maxlag", "2");
+        assert!(code(&DYNAMIC_PANEL, &v).contains("stats::lag(wage, 2:3)"));
+        // system GMM is base R and takes the limit
+        v.set_text("method", "system");
+        let out = code(&DYNAMIC_PANEL, &v);
+        assert!(
+            out.contains("limit <- 2") && out.contains("y <- \"wage\""),
+            "{out}"
+        );
+        assert!(!out.contains("pgmm"), "{out}");
+        assert!(DYNAMIC_PANEL.problems(&ctx(), &v).is_empty());
+        // the constant belongs to system GMM only
+        v.set_flag("constant", true);
+        assert!(code(&DYNAMIC_PANEL, &v).contains("cons <- TRUE"));
+        assert!(DYNAMIC_PANEL.problems(&ctx(), &v).is_empty());
+        v.set_text("method", "difference");
+        assert!(DYNAMIC_PANEL
+            .problems(&ctx(), &v)
+            .iter()
+            .any(|p| p.widget == "constant"));
+        v.set_flag("constant", false);
+        v.set_text("method", "system");
+        // system GMM takes time effects as period dummies of its own
+        v.set_flag("twoways", true);
+        let out = code(&DYNAMIC_PANEL, &v);
+        assert!(out.contains("times <- TRUE"), "{out}");
         assert!(DYNAMIC_PANEL.problems(&ctx(), &v).is_empty());
         // time effects use plm's two-way effect
         let mut v = values(
