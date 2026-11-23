@@ -121,7 +121,12 @@ pub const BAYESIAN_REGRESSION: Spec = Spec {
             equal-tailed credible interval, its Monte Carlo standard error (mcse), its effective \
             sample size (n_eff) and R-hat, which is close to 1 once the chains agree. The \
             iterations are per chain, the first half of them warm-up. The same seed gives the \
-            same draws. Rows with a missing value are left out.",
+            same draws. A warning follows the table when a chain has not converged (R-hat above \
+            1.05, or fewer than 100 effective draws). The priors are rstanarm's, so they are not \
+            Stata's `bayes` defaults: the intercept's prior is on the intercept at the centred \
+            predictors, and the error scale (sigma, not sigma-squared) has an exponential prior; \
+            posterior means agree with Stata's to within Monte Carlo error only under priors \
+            that are the same. Rows with a missing value are left out.",
     widgets: &[
         Widget::Variable {
             id: "y",
@@ -238,12 +243,17 @@ pub const BAYESIAN_REGRESSION: Spec = Spec {
         };
         let mut code = format!(
             "{m} <- rstanarm::stan_glm({y} ~ {x}, data = {}, family = stats::{}(){prior}, \
-             chains = {}, iter = {}, seed = {}, cores = 1, refresh = 0)\n\
+             chains = {}, iter = {}, seed = {}, init_r = 0.5, cores = 1, refresh = 0)\n\
              cat(\"Posterior summary: {} chains of {} iterations (the first half warm-up), \
              {percent}% credible interval\\n\")\n\
-             print(local({{\n  s <- unclass(summary({m}, probs = c((1 - {level}) / 2, \
+             local({{\n  s <- unclass(summary({m}, probs = c((1 - {level}) / 2, \
              (1 + {level}) / 2)))\n  \
-             round(s[!rownames(s) %in% c(\"mean_PPD\", \"log-posterior\"), , drop = FALSE], 4)\n}}))",
+             s <- s[!rownames(s) %in% c(\"mean_PPD\", \"log-posterior\"), , drop = FALSE]\n  \
+             print(round(s, 4))\n  \
+             if (any(s[, \"Rhat\"] > 1.05 | s[, \"n_eff\"] < 100, na.rm = TRUE))\n    \
+             cat(\"\\nWarning: the chains have not converged (R-hat above 1.05 or fewer than \
+             100 effective draws); do not trust these numbers.\\nRun more iterations or use a \
+             tighter prior.\\n\")\n  invisible(NULL)\n}})",
             a.data(),
             a.choice("family"),
             a.number("chains").trim(),
@@ -310,10 +320,15 @@ mod tests {
         assert_eq!(
             c,
             "bayes <- rstanarm::stan_glm(y ~ `arm span` + group, data = d, family = stats::gaussian(), \
-             chains = 4, iter = 2000, seed = 1, cores = 1, refresh = 0)\n\
+             chains = 4, iter = 2000, seed = 1, init_r = 0.5, cores = 1, refresh = 0)\n\
              cat(\"Posterior summary: 4 chains of 2000 iterations (the first half warm-up), 95% credible interval\\n\")\n\
-             print(local({\n  s <- unclass(summary(bayes, probs = c((1 - 0.95) / 2, (1 + 0.95) / 2)))\n  \
-             round(s[!rownames(s) %in% c(\"mean_PPD\", \"log-posterior\"), , drop = FALSE], 4)\n}))"
+             local({\n  s <- unclass(summary(bayes, probs = c((1 - 0.95) / 2, (1 + 0.95) / 2)))\n  \
+             s <- s[!rownames(s) %in% c(\"mean_PPD\", \"log-posterior\"), , drop = FALSE]\n  \
+             print(round(s, 4))\n  \
+             if (any(s[, \"Rhat\"] > 1.05 | s[, \"n_eff\"] < 100, na.rm = TRUE))\n    \
+             cat(\"\\nWarning: the chains have not converged (R-hat above 1.05 or fewer than \
+             100 effective draws); do not trust these numbers.\\nRun more iterations or use a \
+             tighter prior.\\n\")\n  invisible(NULL)\n})"
         );
         let mut v = values(
             &[

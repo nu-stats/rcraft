@@ -1,10 +1,14 @@
 //! Statistics menu, panel and fixed-effects models (P6.1): fixed-effects
 //! regression and count or binary models with any number of absorbed fixed
 //! effects through `fixest`, the classic panel estimators (within, random,
-//! between, pooled, first differences) through `plm`, and the Hausman test
-//! between fixed and random effects. Each fits its model, keeps it in the
-//! workspace under the name the dialog asks for (the Hausman test keeps
-//! none) and prints the package's own summary. None changes the data.
+//! between, pooled, first differences) through `plm`, the Hausman test
+//! between fixed and random effects, the Arellano-Bond dynamic panel model
+//! (`plm::pgmm`), panel instrumental variables (`plm::plm` with instruments),
+//! the Levin-Lin-Chu and Im-Pesaran-Shin panel unit-root tests
+//! (`plm::purtest`) and Wooldridge's test for serial correlation in base R.
+//! The models keep their fit in the workspace under the name the dialog asks
+//! for (the tests keep none) and print the package's own summary. None changes
+//! the data.
 
 use rcraft_rcodegen::dialog::{Args, Opt, Problem, Spec, TextDefault, TextRule};
 use rcraft_rcodegen::dialog::{VarKind, Widget};
@@ -615,11 +619,559 @@ pub const HAUSMAN: Spec = Spec {
     },
 };
 
+// ---- Dynamic panel model (Arellano-Bond) ----
+
+const STEPS: &[Opt] = &[
+    Opt {
+        value: "twosteps",
+        label: "Two steps",
+    },
+    Opt {
+        value: "onestep",
+        label: "One step",
+    },
+];
+
+const DYNAMIC_ERRORS: &[Opt] = &[
+    Opt {
+        value: "robust",
+        label: "Robust (Windmeijer's correction after two steps)",
+    },
+    Opt {
+        value: "conventional",
+        label: "Conventional (two steps only)",
+    },
+];
+
+const OUTCOME_LAGS: &[Opt] = &[
+    Opt {
+        value: "1",
+        label: "1",
+    },
+    Opt {
+        value: "2",
+        label: "2",
+    },
+    Opt {
+        value: "3",
+        label: "3",
+    },
+];
+
+/// The panel check, plus the choices a dynamic model cannot take.
+fn dynamic_check(a: &Args) -> Vec<Problem> {
+    let mut out = plm_check(a);
+    if a.choice("steps") == "onestep" && a.choice("errors") == "conventional" {
+        out.push(Problem::new(
+            "errors",
+            "One-step conventional standard errors are not offered (plm leaves them unscaled, \
+             unlike Stata's xtabond); take robust errors, or two steps.",
+        ));
+    }
+    if a.name_text("save") == a.ctx.dataset {
+        out.push(Problem::new(
+            "save",
+            format!("{} is the data frame; choose another name.", a.ctx.dataset),
+        ));
+    }
+    out
+}
+
+pub const DYNAMIC_PANEL: Spec = Spec {
+    entry: "Dynamic panel model (GMM)",
+    menu: "Statistics > Panel models > Dynamic panel model (GMM)",
+    about: "The Arellano-Bond difference GMM estimator of a panel model with lags of the outcome \
+            among the predictors and a fixed effect for each unit: the model is differenced, and \
+            every lag of the outcome from the second back is an instrument; the other \
+            predictors are taken as exogenous and instrument themselves. It fits with \
+            plm::pgmm and prints the summary with Arellano and Bond's tests of first- and \
+            second-order autocorrelation in the differenced errors (a significant first order \
+            is expected; a significant second order says the instruments are not valid) and \
+            the Sargan test of the overidentifying restrictions. No constant and no time \
+            effects. After one step the Sargan test is not printed, as plm's differs from \
+            Stata's.",
+    widgets: &[
+        Widget::Variable {
+            id: "y",
+            label: "Outcome",
+            kinds: NUMBERS,
+            required: true,
+            hint: "",
+        },
+        Widget::Choice {
+            id: "lags",
+            label: "Lags of the outcome as predictors",
+            options: OUTCOME_LAGS,
+            default: "1",
+            hint: "The outcome one, two or three periods back.",
+        },
+        Widget::Variables {
+            id: "x",
+            label: "Other predictors",
+            kinds: NUMBERS,
+            min: 0,
+            hint: "Taken as exogenous: not correlated with the errors in any period.",
+        },
+        PANEL_ID,
+        PANEL_TIME,
+        Widget::Choice {
+            id: "steps",
+            label: "Estimation",
+            options: STEPS,
+            default: "twosteps",
+            hint: "",
+        },
+        Widget::Choice {
+            id: "errors",
+            label: "Standard errors",
+            options: DYNAMIC_ERRORS,
+            default: "robust",
+            hint: "After two steps, conventional errors are biased downwards; robust ones are \
+                   recommended.",
+        },
+        SAVE,
+    ],
+    needs: &["plm"],
+    styles: BASE,
+    check: dynamic_check,
+    code: |a, _| {
+        let model = a.name("save");
+        let y = a.var("y").unwrap_or_default();
+        let lags: usize = a.choice("lags").parse().unwrap_or(1);
+        let lag_term = if lags == 1 {
+            format!("stats::lag({y}, 1)")
+        } else {
+            format!("stats::lag({y}, 1:{lags})")
+        };
+        let mut terms = vec![lag_term];
+        terms.extend(a.vars("x").iter().map(|n| r_name(n)));
+        let steps = a.choice("steps");
+        let fit = format!(
+            "{model} <- local({{\n  # pgmm looks for plm() in the frame that calls it\n  plm <- plm::plm\n  \
+             plm::pgmm({y} ~ {} | stats::lag({y}, 2:99), data = {}, {}, \
+             effect = \"individual\", model = {}, transformation = \"d\")\n}})",
+            terms.join(" + "),
+            a.data(),
+            index_arg(a),
+            r_string(steps),
+        );
+        let show = if steps == "onestep" {
+            format!(
+                "out <- utils::capture.output(print(summary({model}, robust = TRUE)))\n\
+                 cat(out[!grepl(\"^Sargan test\", out)], sep = \"\\n\")\n\
+                 cat(\"Sargan test: not shown after one step\\n\")"
+            )
+        } else {
+            format!(
+                "print(summary({model}, robust = {}))",
+                if a.choice("errors") == "robust" {
+                    "TRUE"
+                } else {
+                    "FALSE"
+                }
+            )
+        };
+        format!("{fit}\n{show}")
+    },
+};
+
+// ---- Panel instrumental variables ----
+
+const IV_MODELS: &[Opt] = &[
+    Opt {
+        value: "within",
+        label: "Fixed effects (within)",
+    },
+    Opt {
+        value: "random",
+        label: "Random effects",
+    },
+];
+
+fn panel_iv_check(a: &Args) -> Vec<Problem> {
+    let mut out = plm_check(a);
+    let endogenous = a.vars("endog");
+    let instruments = a.vars("inst");
+    let exogenous = a.vars("x");
+    let y = a.var_text("y");
+    if endogenous.contains(&y) {
+        out.push(Problem::new(
+            "endog",
+            format!("{y} is the outcome; it cannot also be an endogenous predictor."),
+        ));
+    }
+    if let Some(v) = endogenous.iter().find(|v| exogenous.contains(v)) {
+        out.push(Problem::new(
+            "endog",
+            format!("{v} is already an exogenous predictor; it cannot also be endogenous."),
+        ));
+    }
+    if let Some(v) = instruments
+        .iter()
+        .find(|v| exogenous.contains(v) || endogenous.contains(v) || **v == y)
+    {
+        out.push(Problem::new(
+            "inst",
+            format!("{v} is in the model; an instrument must be a variable left out of it."),
+        ));
+    }
+    if instruments.len() < endogenous.len() {
+        out.push(Problem::new(
+            "inst",
+            format!(
+                "The model needs at least as many instruments as endogenous predictors: {} \
+                 instruments for {}.",
+                instruments.len(),
+                endogenous.len()
+            ),
+        ));
+    }
+    for (w, list) in [("endog", &endogenous), ("inst", &instruments)] {
+        for v in list {
+            if [a.var_text("id"), a.var_text("time")].contains(v) {
+                out.push(Problem::new(
+                    w,
+                    format!("{v} is the panel unit or the time; choose another variable."),
+                ));
+            }
+        }
+    }
+    if a.name_text("save") == a.ctx.dataset {
+        out.push(Problem::new(
+            "save",
+            format!("{} is the data frame; choose another name.", a.ctx.dataset),
+        ));
+    }
+    out
+}
+
+pub const PANEL_IV: Spec = Spec {
+    entry: "Panel instrumental variables",
+    menu: "Statistics > Panel models > Panel instrumental variables",
+    about: "A panel regression in which some predictors are correlated with the errors, \
+            replaced by instruments: two-stage least squares on the within-transformed data \
+            (fixed effects), or the random-effects version of Balestra and Varadharajan-\
+            Krishnakumar (Stata's xtivreg, re default). It fits with plm::plm and prints its \
+            summary. Standard errors are the conventional ones.",
+    widgets: &[
+        Widget::Variable {
+            id: "y",
+            label: "Outcome",
+            kinds: NUMBERS,
+            required: true,
+            hint: "",
+        },
+        Widget::Variables {
+            id: "endog",
+            label: "Endogenous predictors",
+            kinds: NUMBERS,
+            min: 1,
+            hint: "Predictors that may be correlated with the errors.",
+        },
+        Widget::Variables {
+            id: "inst",
+            label: "Instruments",
+            kinds: NUMBERS,
+            min: 1,
+            hint: "Variables left out of the model that move the endogenous predictors and are \
+                   not correlated with the errors: at least as many as endogenous predictors.",
+        },
+        Widget::Variables {
+            id: "x",
+            label: "Exogenous predictors",
+            kinds: PREDICTORS,
+            min: 0,
+            hint: "Predictors that are not correlated with the errors.",
+        },
+        PANEL_ID,
+        PANEL_TIME,
+        Widget::Choice {
+            id: "model",
+            label: "Estimator",
+            options: IV_MODELS,
+            default: "within",
+            hint: "",
+        },
+        SAVE,
+    ],
+    needs: &["plm"],
+    styles: BASE,
+    check: panel_iv_check,
+    code: |a, _| {
+        let model = a.name("save");
+        let join = |names: &[&str]| {
+            names
+                .iter()
+                .map(|n| r_name(n))
+                .collect::<Vec<_>>()
+                .join(" + ")
+        };
+        let exogenous = a.vars("x");
+        let endogenous = a.vars("endog");
+        let instruments = a.vars("inst");
+        let predictors: Vec<&str> = exogenous.iter().chain(&endogenous).copied().collect();
+        let all_instruments: Vec<&str> = exogenous.iter().chain(&instruments).copied().collect();
+        format!(
+            "{model} <- plm::plm({} ~ {} | {}, data = {}, {}, model = {})\nprint(summary({model}))",
+            a.var("y").unwrap_or_default(),
+            join(&predictors),
+            join(&all_instruments),
+            a.data(),
+            index_arg(a),
+            r_string(a.choice("model")),
+        )
+    },
+};
+
+// ---- Panel unit-root test ----
+
+const UNIT_ROOT_TESTS: &[Opt] = &[
+    Opt {
+        value: "levinlin",
+        label: "Levin-Lin-Chu (one common root)",
+    },
+    Opt {
+        value: "ips",
+        label: "Im-Pesaran-Shin (a root for each unit)",
+    },
+];
+
+const UNIT_ROOT_TERMS: &[Opt] = &[
+    Opt {
+        value: "intercept",
+        label: "A mean for each unit",
+    },
+    Opt {
+        value: "trend",
+        label: "A mean and a trend for each unit",
+    },
+    Opt {
+        value: "none",
+        label: "Neither (Levin-Lin-Chu only)",
+    },
+];
+
+const UNIT_ROOT_LAGS: &[Opt] = &[
+    Opt {
+        value: "0",
+        label: "0",
+    },
+    Opt {
+        value: "1",
+        label: "1",
+    },
+    Opt {
+        value: "2",
+        label: "2",
+    },
+    Opt {
+        value: "3",
+        label: "3",
+    },
+    Opt {
+        value: "4",
+        label: "4",
+    },
+];
+
+fn unit_root_check(a: &Args) -> Vec<Problem> {
+    let v = a.var_text("var");
+    let id = a.var_text("id");
+    let time = a.var_text("time");
+    let mut out = Vec::new();
+    for (w, other, what) in [("id", id, "panel unit"), ("time", time, "time")] {
+        if !v.is_empty() && v == other {
+            out.push(Problem::new(
+                w,
+                format!("{v} is the variable tested; choose another variable for the {what}."),
+            ));
+        }
+    }
+    if !id.is_empty() && id == time {
+        out.push(Problem::new(
+            "time",
+            "The panel unit and the time must be different variables.",
+        ));
+    }
+    if a.choice("test") == "ips" && a.choice("terms") == "none" {
+        out.push(Problem::new(
+            "terms",
+            "The Im-Pesaran-Shin test needs a mean for each unit, with or without a trend.",
+        ));
+    }
+    out
+}
+
+pub const PANEL_UNIT_ROOT: Spec = Spec {
+    entry: "Panel unit-root test",
+    menu: "Statistics > Panel models > Panel unit-root test",
+    about: "Tests whether a variable has a unit root in every unit (the null) against being \
+            stationary. Levin-Lin-Chu assumes one autoregressive coefficient for all units; \
+            Im-Pesaran-Shin lets each unit have its own and tests whether some are stationary. \
+            Each unit's regression has the lags of the difference chosen. It fits with \
+            plm::purtest. The panel must be balanced. Levin-Lin-Chu's long-run variance uses a \
+            Bartlett kernel with floor(3.21 T^(1/3)) lags, and its statistic and p-value are \
+            Stata's xtunitroot llc. Im-Pesaran-Shin's W-t-bar is standardised with plm's \
+            tabulated moments (with the degrees-of-freedom correction), which differ a little \
+            from Stata's: its statistic is within about 0.04 of xtunitroot ips.",
+    widgets: &[
+        Widget::Variable {
+            id: "var",
+            label: "Variable",
+            kinds: NUMBERS,
+            required: true,
+            hint: "",
+        },
+        PANEL_ID,
+        PANEL_TIME,
+        Widget::Choice {
+            id: "test",
+            label: "Test",
+            options: UNIT_ROOT_TESTS,
+            default: "levinlin",
+            hint: "",
+        },
+        Widget::Choice {
+            id: "terms",
+            label: "Include",
+            options: UNIT_ROOT_TERMS,
+            default: "intercept",
+            hint: "",
+        },
+        Widget::Choice {
+            id: "lags",
+            label: "Lags of the difference",
+            options: UNIT_ROOT_LAGS,
+            default: "1",
+            hint: "Added to each unit's regression to remove autocorrelation.",
+        },
+    ],
+    needs: &["plm"],
+    styles: BASE,
+    check: unit_root_check,
+    code: |a, _| {
+        let test = a.choice("test");
+        let variable = a.var_string("var").unwrap_or_default();
+        let extra = if test == "ips" {
+            ", ips.stat = \"Wtbar\", dfcor = TRUE"
+        } else {
+            ", q = floor(3.21 * periods^(1/3))"
+        };
+        format!(
+            "print(local({{\n  panel <- plm::pdata.frame({}, {})\n  \
+             size <- plm::pdim(panel)\n  \
+             stopifnot(\"the panel must be balanced: every unit observed in every period\" = \
+             size$balanced)\n  periods <- size$nT$T\n  \
+             plm::purtest(panel[[{variable}]], test = {}, exo = {}, lags = {}{extra})\n}}))",
+            a.data(),
+            index_arg(a),
+            r_string(test),
+            r_string(a.choice("terms")),
+            a.choice("lags"),
+        )
+    },
+};
+
+// ---- Panel serial-correlation test (Wooldridge) ----
+
+/// A text for inside an R string.
+fn in_string(text: &str) -> String {
+    text.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+pub const PANEL_SERIAL: Spec = Spec {
+    entry: "Panel serial-correlation test",
+    menu: "Statistics > Panel models > Panel serial-correlation test",
+    about: "Wooldridge's test for first-order autocorrelation in the errors of a panel model. \
+            If the errors are not autocorrelated, the residuals of the model in first \
+            differences have a correlation of -0.5 with their own lag. The dialog regresses \
+            the first differences of the outcome on those of the predictors (no constant), \
+            regresses the residuals on their lag, and tests that coefficient against -0.5 with \
+            standard errors clustered by panel unit: an F test with 1 and (units - 1) degrees \
+            of freedom. Differences and lags go by the time variable, so a missing period is \
+            not differenced across. Base R; no package.",
+    widgets: &[
+        Widget::Variable {
+            id: "y",
+            label: "Outcome",
+            kinds: NUMBERS,
+            required: true,
+            hint: "",
+        },
+        Widget::Variables {
+            id: "x",
+            label: "Predictors",
+            kinds: NUMBERS,
+            min: 1,
+            hint: "Numbers only: the model is fitted in first differences.",
+        },
+        PANEL_ID,
+        Widget::Variable {
+            id: "time",
+            label: "Time",
+            kinds: NUMBERS,
+            required: true,
+            hint: "A whole number for each period (a year, say): differences go by this.",
+        },
+    ],
+    needs: &[],
+    styles: BASE,
+    check: plm_check,
+    code: |a, _| {
+        let dif_x: Vec<String> = a
+            .vars("x")
+            .iter()
+            .map(|n| format!("dif(d0[[{}]])", r_string(n)))
+            .collect();
+        let (id, time) = (
+            a.var_string("id").unwrap_or_default(),
+            a.var_string("time").unwrap_or_default(),
+        );
+        let y = a.var_string("y").unwrap_or_default();
+        let label = format!(
+            "{} on {}, clustered by {}",
+            a.var_text("y"),
+            a.vars("x").join(" and "),
+            a.var_text("id")
+        );
+        format!(
+            "print(local({{\n  d0 <- {d}\n  d0 <- d0[order(d0[[{id}]], d0[[{time}]]), ]\n  \
+             stopifnot(\"each unit may have each period only once\" = \
+             !anyDuplicated(d0[c({id}, {time})]))\n  \
+             key <- function(i, t) paste(i, t)\n  \
+             prev <- match(key(d0[[{id}]], d0[[{time}]] - 1), key(d0[[{id}]], d0[[{time}]]))\n  \
+             dif <- function(v) v - v[prev]\n  dy <- dif(d0[[{y}]])\n  dx <- cbind({x})\n  \
+             ok <- stats::complete.cases(dy, dx)\n  \
+             e <- rep(NA_real_, length(dy))\n  \
+             e[ok] <- stats::lm.fit(dx[ok, , drop = FALSE], dy[ok])$residuals\n  \
+             le <- e[prev]\n  keep <- !is.na(e) & !is.na(le)\n  \
+             ee <- e[keep]; ll <- le[keep]; g <- d0[[{id}]][keep]\n  \
+             b <- sum(ll * ee) / sum(ll^2)\n  u <- ee - b * ll\n  n <- length(unique(g))\n  \
+             stopifnot(\"the test needs at least two units with consecutive periods\" = n > 1)\n  \
+             v <- n / (n - 1) * sum(tapply(ll * u, g, sum)^2) / sum(ll^2)^2\n  \
+             f <- (b + 0.5)^2 / v\n  \
+             structure(list(statistic = c(F = f), parameter = c(`num df` = 1, `denom df` = n - 1), \
+             p.value = stats::pf(f, 1, n - 1, lower.tail = FALSE), \
+             estimate = c(`residual on its lag` = b), \
+             null.value = c(`residual on its lag` = -0.5), alternative = \"two.sided\", \
+             method = \"Wooldridge test for serial correlation in panel data\", \
+             data.name = \"{label}\"), class = \"htest\")\n}}))",
+            d = a.data(),
+            x = dif_x.join(", "),
+            label = in_string(&label),
+        )
+    },
+};
+
 pub const SPECS: &[&Spec] = &[
     &FIXED_EFFECTS_REGRESSION,
     &FIXED_EFFECTS_GLM,
     &PANEL_MODEL,
     &HAUSMAN,
+    &DYNAMIC_PANEL,
+    &PANEL_IV,
+    &PANEL_UNIT_ROOT,
+    &PANEL_SERIAL,
 ];
 
 #[cfg(test)]
@@ -859,6 +1411,226 @@ mod tests {
             .problems(&ctx(), &v)
             .iter()
             .any(|p| p.widget == "id"));
+    }
+
+    #[test]
+    fn dynamic_panel_writes_pgmm() {
+        let v = values(
+            &DYNAMIC_PANEL,
+            &[("y", "wage"), ("id", "id"), ("time", "year")],
+            &[("x", &["hours"])],
+        );
+        assert_eq!(
+            code(&DYNAMIC_PANEL, &v),
+            "model <- local({\n  # pgmm looks for plm() in the frame that calls it\n  plm <- plm::plm\n  \
+             plm::pgmm(wage ~ stats::lag(wage, 1) + hours | stats::lag(wage, 2:99), data = d, \
+             index = c(\"id\", \"year\"), effect = \"individual\", model = \"twosteps\", transformation = \"d\")\n})\n\
+             print(summary(model, robust = TRUE))"
+        );
+        // two lags, no other predictor, conventional errors
+        let v = values(
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("lags", "2"),
+                ("errors", "conventional"),
+                ("save", "ab"),
+            ],
+            &[],
+        );
+        let out = code(&DYNAMIC_PANEL, &v);
+        assert!(
+            out.contains("plm::pgmm(wage ~ stats::lag(wage, 1:2) | "),
+            "{out}"
+        );
+        assert!(out.ends_with("print(summary(ab, robust = FALSE))"), "{out}");
+        // one step prints no Sargan test, and conventional errors are refused
+        let v = values(
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("steps", "onestep"),
+            ],
+            &[("x", &["hours"])],
+        );
+        let out = code(&DYNAMIC_PANEL, &v);
+        assert!(out.contains("model = \"onestep\""), "{out}");
+        assert!(out.contains("grepl(\"^Sargan test\""), "{out}");
+        let v = values(
+            &DYNAMIC_PANEL,
+            &[
+                ("y", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("steps", "onestep"),
+                ("errors", "conventional"),
+            ],
+            &[("x", &["hours"])],
+        );
+        assert!(DYNAMIC_PANEL
+            .problems(&ctx(), &v)
+            .iter()
+            .any(|p| p.widget == "errors"));
+        // the outcome cannot be a predictor
+        let v = values(
+            &DYNAMIC_PANEL,
+            &[("y", "wage"), ("id", "id"), ("time", "year")],
+            &[("x", &["wage"])],
+        );
+        assert!(DYNAMIC_PANEL
+            .problems(&ctx(), &v)
+            .iter()
+            .any(|p| p.widget == "x"));
+    }
+
+    #[test]
+    fn panel_iv_writes_the_instrument_formula() {
+        let v = values(
+            &PANEL_IV,
+            &[("y", "wage"), ("id", "id"), ("time", "year")],
+            &[
+                ("x", &["hours"]),
+                ("endog", &["days"]),
+                ("inst", &["visits"]),
+            ],
+        );
+        assert_eq!(
+            code(&PANEL_IV, &v),
+            "model <- plm::plm(wage ~ hours + days | hours + visits, data = d, index = c(\"id\", \"year\"), model = \"within\")\n\
+             print(summary(model))"
+        );
+        let v = values(
+            &PANEL_IV,
+            &[
+                ("y", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("model", "random"),
+                ("save", "iv"),
+            ],
+            &[("endog", &["days", "hours"]), ("inst", &["visits", "left"])],
+        );
+        assert!(code(&PANEL_IV, &v)
+            .starts_with("iv <- plm::plm(wage ~ days + hours | visits + left, data = d, "));
+        // fewer instruments than endogenous predictors, an instrument already in the model
+        let v = values(
+            &PANEL_IV,
+            &[("y", "wage"), ("id", "id"), ("time", "year")],
+            &[
+                ("x", &["hours"]),
+                ("endog", &["days", "left"]),
+                ("inst", &["hours"]),
+            ],
+        );
+        let problems = PANEL_IV.problems(&ctx(), &v);
+        let messages: Vec<&str> = problems.iter().map(|p| p.message.as_str()).collect();
+        assert!(
+            messages.iter().any(|m| m.contains("at least as many")),
+            "{messages:?}"
+        );
+        assert!(
+            messages.iter().any(|m| m.contains("left out of it")),
+            "{messages:?}"
+        );
+    }
+
+    #[test]
+    fn panel_unit_root_writes_purtest() {
+        let v = values(
+            &PANEL_UNIT_ROOT,
+            &[("var", "wage"), ("id", "id"), ("time", "year")],
+            &[],
+        );
+        let out = code(&PANEL_UNIT_ROOT, &v);
+        assert!(
+            out.contains(
+                "plm::purtest(panel[[\"wage\"]], test = \"levinlin\", exo = \"intercept\", lags = 1, \
+                 q = floor(3.21 * periods^(1/3)))"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("plm::pdata.frame(d, index = c(\"id\", \"year\"))"),
+            "{out}"
+        );
+        let v = values(
+            &PANEL_UNIT_ROOT,
+            &[
+                ("var", "wage"),
+                ("id", "id"),
+                ("time", "year"),
+                ("test", "ips"),
+                ("terms", "trend"),
+                ("lags", "2"),
+            ],
+            &[],
+        );
+        assert!(code(&PANEL_UNIT_ROOT, &v).contains(
+            "test = \"ips\", exo = \"trend\", lags = 2, ips.stat = \"Wtbar\", dfcor = TRUE)"
+        ));
+        // Im-Pesaran-Shin needs a mean; the variable is not the unit or the time
+        let v = values(
+            &PANEL_UNIT_ROOT,
+            &[
+                ("var", "id"),
+                ("id", "id"),
+                ("time", "year"),
+                ("test", "ips"),
+                ("terms", "none"),
+            ],
+            &[],
+        );
+        let widgets: Vec<&str> = PANEL_UNIT_ROOT
+            .problems(&ctx(), &v)
+            .iter()
+            .map(|p| p.widget)
+            .collect();
+        assert!(
+            widgets.contains(&"terms") && widgets.contains(&"id"),
+            "{widgets:?}"
+        );
+    }
+
+    #[test]
+    fn panel_serial_correlation_is_base_r() {
+        let v = values(
+            &PANEL_SERIAL,
+            &[("y", "wage"), ("id", "firm"), ("time", "year")],
+            &[("x", &["hours", "days"])],
+        );
+        let out = code(&PANEL_SERIAL, &v);
+        assert!(
+            out.contains("dx <- cbind(dif(d0[[\"hours\"]]), dif(d0[[\"days\"]]))"),
+            "{out}"
+        );
+        assert!(
+            out.contains("stats::pf(f, 1, n - 1, lower.tail = FALSE)"),
+            "{out}"
+        );
+        assert!(
+            out.contains("data.name = \"wage on hours and days, clustered by firm\""),
+            "{out}"
+        );
+        assert!(PANEL_SERIAL.packages(Style::Base).is_empty());
+        // the unit and the time must differ from the model's variables
+        let v = values(
+            &PANEL_SERIAL,
+            &[("y", "wage"), ("id", "hours"), ("time", "hours")],
+            &[("x", &["hours"])],
+        );
+        let widgets: Vec<&str> = PANEL_SERIAL
+            .problems(&ctx(), &v)
+            .iter()
+            .map(|p| p.widget)
+            .collect();
+        assert!(
+            widgets.contains(&"id") && widgets.contains(&"time"),
+            "{widgets:?}"
+        );
     }
 
     #[test]

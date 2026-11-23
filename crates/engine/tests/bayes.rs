@@ -23,7 +23,7 @@
 //!   difference is checked to be small next to the posterior's spread.
 //!
 //! The logit and Poisson models are checked against the maximum-likelihood fit
-//! of `glm` (a normal(0, 10) prior is weak, so the posterior mean lies
+//! of `glm` (a normal(0, 100) prior is nearly flat, so the posterior mean lies
 //! close to it), and a model R cannot fit (a 0/1 model for a continuous outcome)
 //! comes back as an error without taking R down.
 //!
@@ -312,7 +312,7 @@ fn bayesian_regression_matches_exact_posterior_and_stata() {
             // the same seed gives the same draws
             "isTRUE(all.equal(draws, as.matrix(rstanarm::stan_glm(y ~ x1 + x2, data = bd, \
              family = stats::gaussian(), prior = rstanarm::normal(location = 0, scale = 5, \
-             autoscale = FALSE), chains = 4, iter = 2000, seed = 1, cores = 1, refresh = 0))))"
+             autoscale = FALSE), chains = 4, iter = 2000, seed = 1, init_r = 0.5, cores = 1, refresh = 0))))"
                 .to_string(),
         ],
     );
@@ -370,6 +370,26 @@ fn bayesian_regression_matches_exact_posterior_and_stata() {
         &mut e,
         &["inherits(bd_default, 'stanreg') && nrow(as.matrix(bd_default)) == 400".to_string()],
     );
+    // a run too short to converge (50 draws per chain) says so after the table
+    let (outcome, text) = dialog(
+        &mut e,
+        &ctx,
+        &BAYESIAN_REGRESSION,
+        &[
+            ("y", "y"),
+            ("chains", "2"),
+            ("iter", "100"),
+            ("seed", "2"),
+            ("save", "bd_short"),
+        ],
+        &[("x", &["x1", "x2"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Warning: the chains have not converged"),
+        "{text}"
+    );
 }
 
 #[test]
@@ -391,7 +411,7 @@ fn logit_and_poisson_models_match_maximum_likelihood() {
                 ("family", family),
                 ("prior", "normal"),
                 ("prior_mean", "0"),
-                ("prior_sd", "10"),
+                ("prior_sd", "100"),
                 ("chains", "4"),
                 ("iter", "2000"),
                 ("seed", "7"),
@@ -402,10 +422,13 @@ fn logit_and_poisson_models_match_maximum_likelihood() {
         );
         assert_eq!(outcome, Outcome::Ok, "{family}\n{text}");
         assert!(
-            text.contains("Rhat") && text.contains("n_eff") && !text.contains("sigma"),
+            text.contains("Rhat")
+                && text.contains("n_eff")
+                && !text.contains("sigma")
+                && !text.contains("Warning: the chains"),
             "{text}"
         );
-        // a weak prior: the posterior mean sits near the maximum-likelihood
+        // a nearly flat prior: the posterior mean sits near the maximum-likelihood
         // estimate, within a quarter of the posterior spread plus Monte Carlo error
         // (the posterior is slightly skewed, so it is not the mode)
         holds(

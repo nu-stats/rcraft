@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 132 | 131 | 0 | 1 |
+| 136 | 135 | 0 | 1 |
 
 ## File
 
@@ -89,6 +89,10 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Fixed-effects count or binary model | verified |
 | Panel model | verified |
 | Hausman test (fixed or random effects) | verified |
+| Dynamic panel model (GMM) | verified |
+| Panel instrumental variables | verified |
+| Panel unit-root test | verified |
+| Panel serial-correlation test | verified |
 | Principal components | verified |
 | Factor analysis | verified |
 | Cluster analysis | verified |
