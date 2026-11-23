@@ -678,7 +678,10 @@ fn survey_ratios_are_statas() {
     // the interval is the estimate plus and minus t(9) standard errors
     let r = row(&text, "income/hours");
     assert_eq!(r.len(), 4, "{text}");
-    assert!(((r[3] - r[2]) / 2.0 / r[1] - 2.262157162740992).abs() < 1e-4, "{text}");
+    assert!(
+        ((r[3] - r[2]) / 2.0 / r[1] - 2.262157162740992).abs() < 1e-4,
+        "{text}"
+    );
     let est = "survey::svyratio(~income + smokes, ~hours, design, na.rm = TRUE)";
     holds_more(
         &mut e,
@@ -704,13 +707,7 @@ fn survey_ratios_are_statas() {
     // a ratio for each group (domains)
     let mut set = vec![("den", "hours"), ("by", "region")];
     set.extend(design);
-    let (outcome, text) = dialog(
-        &mut e,
-        &SURVEY_RATIOS,
-        &set,
-        &[("num", &["income"])],
-        &[],
-    );
+    let (outcome, text) = dialog(&mut e, &SURVEY_RATIOS, &set, &[("num", &["income"])], &[]);
     assert_eq!(outcome, Outcome::Ok, "{text}");
     let by = "survey::svyby(~income, ~region, design, survey::svyratio, denominator = ~hours, na.rm = TRUE)";
     holds_more(
@@ -828,7 +825,8 @@ fn survey_quantiles_follow_the_weighted_distribution() {
         &[],
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
-    let q = "survey::svyquantile(~income, design, 0.5, ci = TRUE, alpha = 0.1, na.rm = TRUE)$income";
+    let q =
+        "survey::svyquantile(~income, design, 0.5, ci = TRUE, alpha = 0.1, na.rm = TRUE)$income";
     holds_more(
         &mut e,
         &[
@@ -874,7 +872,10 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
     let r = row(&text, "y");
     assert_eq!(r.len(), 4, "{text}");
     // the interval is on 3 df: t(3) = 3.182446
-    assert!(((r[3] - r[2]) / 2.0 / r[1] - 3.182446305284263).abs() < 1e-4, "{text}");
+    assert!(
+        ((r[3] - r[2]) / 2.0 / r[1] - 3.182446305284263).abs() < 1e-4,
+        "{text}"
+    );
     let est = "survey::svymean(~y + x, design)";
     holds_more(
         &mut e,
@@ -884,7 +885,10 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
                 "c(rep_se(paste0('brr', 1:4), 1 / 4, d$y), rep_se(paste0('brr', 1:4), 1 / 4, d$x))",
             ),
             // Stata 19: svy brr, hadamard(H): mean y x (the means, then the standard errors)
-            same(&format!("coef({est})"), "c(53.7774761904762, 13.6343174603175)"),
+            same(
+                &format!("coef({est})"),
+                "c(53.7774761904762, 13.6343174603175)",
+            ),
             near(
                 &format!("survey::SE({est})"),
                 "c(.857631180665941, .101583426969287)",
@@ -905,10 +909,7 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
         &[],
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
-    holds_more(
-        &mut e,
-        "design$fay.rho == 0.3",
-    );
+    holds_more(&mut e, "design$fay.rho == 0.3");
 
     // the delete-one jackknife: svy jackknife: mean y x, on 35 df
     let (outcome, text) = dialog_on(
@@ -922,7 +923,10 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
     let r = row(&text, "y");
-    assert!(((r[3] - r[2]) / 2.0 / r[1] - 2.030107928).abs() < 1e-4, "{text}");
+    assert!(
+        ((r[3] - r[2]) / 2.0 / r[1] - 2.030107928).abs() < 1e-4,
+        "{text}"
+    );
     holds_more(
         &mut e,
         &[
@@ -953,7 +957,10 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
     let r = row(&text, "y");
-    assert!(((r[3] - r[2]) / 2.0 / r[1] - 1.959963984540054).abs() < 1e-4, "{text}");
+    assert!(
+        ((r[3] - r[2]) / 2.0 / r[1] - 1.959963984540054).abs() < 1e-4,
+        "{text}"
+    );
     holds_more(
         &mut e,
         &[
@@ -982,7 +989,10 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
         .iter()
         .map(|p| p.widget)
         .collect();
-    assert!(problems.contains(&"strata") && problems.contains(&"repweights"), "{problems:?}");
+    assert!(
+        problems.contains(&"strata") && problems.contains(&"repweights"),
+        "{problems:?}"
+    );
 }
 
 #[test]
@@ -1014,12 +1024,12 @@ fn multistage_design_matches_svyset() {
         &[
             // the first stage's variance with its correction, plus the second stage's
             // within each primary unit, weighted by the first stage's sampling fraction
-            same(
-                &format!("survey::SE({est})[1]"),
-                "ms_se(d$income)",
-            ),
+            same(&format!("survey::SE({est})[1]"), "ms_se(d$income)"),
             // Stata 19: svy: mean income hours, on 9 df
-            same(&format!("coef({est})"), "c(321.811714975845, 31.6672041062802)"),
+            same(
+                &format!("coef({est})"),
+                "c(321.811714975845, 31.6672041062802)",
+            ),
             same(
                 &format!("survey::SE({est})"),
                 "c(5.49442654860872, .888193416298451)",
@@ -1092,7 +1102,10 @@ fn subpopulation_matches_svy_subpop() {
                 "mean_of(d$income, keep = !is.na(d$income), dom = d$region == 'north')[2]",
             ),
             // Stata 19: svy, subpop(if region == "north"): mean income hours
-            same(&format!("coef({est})"), "c(319.404624277457, 31.2161271676301)"),
+            same(
+                &format!("coef({est})"),
+                "c(319.404624277457, 31.2161271676301)",
+            ),
             same(
                 &format!("survey::SE({est})"),
                 "c(7.09210480782385, 1.15581968524795)",
@@ -1138,7 +1151,10 @@ fn survey_models_have_the_model_menu() {
         .iter()
         .map(|s| s.entry)
         .collect();
-    assert_eq!(entries, ["Model fit", "Test terms", "Predicted values and residuals"]);
+    assert_eq!(
+        entries,
+        ["Model fit", "Test terms", "Predicted values and residuals"]
+    );
     let design = [("weights", "wt"), ("psu", "psu"), ("strata", "stratum")];
     let mut set = vec![("y", "income"), ("save", "m1")];
     set.extend(design);

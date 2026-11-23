@@ -1097,11 +1097,7 @@ mod tests {
             "{}",
             code(&SURVEY_MEANS, &v)
         );
-        let v = values(
-            &SURVEY_MEANS,
-            &[("weights", "wt"), ("method", "JK1")],
-            reps,
-        );
+        let v = values(&SURVEY_MEANS, &[("weights", "wt"), ("method", "JK1")], reps);
         assert!(code(&SURVEY_MEANS, &v).contains("type = \"JK1\", scale = (2/3), combined"));
         let v = values(
             &SURVEY_MEANS,
