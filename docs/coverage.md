@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 131 | 130 | 0 | 1 |
+| 132 | 131 | 0 | 1 |
 
 ## File
 
@@ -95,6 +95,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Discriminant analysis | verified |
 | Bootstrap | verified |
 | Permutation test | verified |
+| Bayesian regression | verified |
 | Kaplan-Meier survival curves | verified |
 | Log-rank test | verified |
 | Cox proportional hazards model | verified |

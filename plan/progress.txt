@@ -111,7 +111,7 @@ P6.6 | part | 2026-11-28 | entry: IV probit or tobit; entry: Treatment effects; 
 P6.10 | open | 2026-11-28 | entry: Structural equation model
 P6.11 | open | 2026-11-29 | entry: Meta-analysis
 P6.12 | open | 2026-11-29 | entry: Machine learning model
-P6.9 | open | 2026-11-30 | entry: Bayesian regression
+P6.9 | done | 2026-11-30 | entry: Bayesian regression; test: crates/engine/tests/bayes.rs::bayesian_regression_matches_exact_posterior_and_stata; test: crates/engine/tests/bayes.rs::logit_and_poisson_models_match_maximum_likelihood
 P2A.6 | open | 2026-12-01 | entry: RCraft manual; test: crates/ui-egui/src/help_window.rs::manual_pages_are_found_by_search
 P9.1 | open | 2026-12-03 | test: crates/catalog/src/plugin.rs::a_spec_file_becomes_a_dialog; test: crates/catalog/src/plugin.rs::a_bad_spec_file_is_refused_with_its_line; test: crates/engine/tests/plugins.rs::a_plugin_menu_runs_in_r
 P9.2 | open | 2026-12-03 | test: crates/catalog/src/plugin.rs::specs_export_and_import_unchanged; test: xtask/src/coverage.rs::coverage_lists_plugin_compatibility
