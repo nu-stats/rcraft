@@ -305,13 +305,13 @@ fn design_check(a: &Args, analysed: &[&str]) -> Vec<Problem> {
             .is_some_and(|r| r.iter().any(|(_, w)| w == v))
         {
             out.push(Problem::new(
-                *id,
+                id,
                 format!("{v} already has a part in the design; choose another variable."),
             ));
         }
         if analysed.contains(v) {
             out.push(Problem::new(
-                *id,
+                id,
                 format!("{v} is analysed; it cannot also be part of the design."),
             ));
         }
