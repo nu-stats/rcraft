@@ -11,11 +11,31 @@ use rcraft_rcodegen::{r_name, r_string};
 use crate::data::BASE;
 
 /// The first class names of R objects these dialogs are offered on.
-pub const MODEL_CLASSES: &[&str] = &["lm", "glm", "aov", "negbin", "polr", "multinom"];
+pub const MODEL_CLASSES: &[&str] = &[
+    "lm", "glm", "aov", "negbin", "polr", "multinom", "plm", "pgmm", "fixest",
+];
 
 /// Whether an object whose first class is `class` is a model these dialogs take.
 pub fn is_model_class(class: &str) -> bool {
     MODEL_CLASSES.contains(&class)
+}
+
+/// Whether `class` is a panel model fitted by `plm` or `fixest`.
+pub fn is_panel_class(class: &str) -> bool {
+    matches!(class, "plm" | "pgmm" | "fixest")
+}
+
+/// The dialogs offered on a model whose first class is `class`: all of
+/// [`MODEL_SPECS`] on the linear and generalised linear ones, and on the panel
+/// ones only the actions that work on them (fit statistics, and robust
+/// standard errors on `plm` and `fixest`; the rest need `lm` or `glm`
+/// objects).
+pub fn model_specs(class: &str) -> Vec<&'static Spec> {
+    match class {
+        "pgmm" => vec![&MODEL_FIT],
+        "plm" | "fixest" => vec![&MODEL_FIT, &ROBUST],
+        _ => MODEL_SPECS.to_vec(),
+    }
 }
 
 const LINEAR_ONLY: &str = "stopifnot(\"this works for linear and generalised linear models\" = \
@@ -32,7 +52,9 @@ pub const MODEL_FIT: Spec = Spec {
     entry: "Model fit",
     menu: "Objects > Model > Fit statistics",
     about: "Number of observations, log-likelihood, AIC and BIC, with R-squared for a linear \
-            model and the deviance for a generalised linear model.",
+            model and the deviance for a generalised linear model. A plm panel model has no \
+            likelihood: it shows the observations and its R-squared; a pgmm model, the \
+            observations.",
     widgets: &[],
     needs: &[],
     styles: BASE,
@@ -40,8 +62,11 @@ pub const MODEL_FIT: Spec = Spec {
     code: |a, _| {
         let m = a.data();
         format!(
-            "(function(m) {{\n  ll <- stats::logLik(m)\n  \
-             cat(\"Observations: \", stats::nobs(m), \"\\n\", sep = \"\")\n  \
+            "(function(m) {{\n  cat(\"Observations: \", stats::nobs(m), \"\\n\", sep = \"\")\n  \
+             if (inherits(m, c(\"plm\", \"pgmm\"))) {{\n    \
+             if (inherits(m, \"plm\")) {{\n      cat(\"\\nR-squared\\n\")\n      \
+             print(summary(m)$r.squared)\n    }}\n    return(invisible(NULL))\n  }}\n  \
+             ll <- stats::logLik(m)\n  \
              print(c(logLik = as.numeric(ll), df = attr(ll, \"df\"), AIC = stats::AIC(m), \
              BIC = stats::BIC(m)))\n  \
              if (inherits(m, \"glm\")) {{\n    cat(\"\\nDeviance\\n\")\n    \
@@ -422,13 +447,43 @@ pub const ROBUST: Spec = Spec {
                 format!("{} cluster-robust (by {cluster})", a.choice("type")),
             )
         };
+        // a fixest model takes fixest's own HC1 or a cluster formula, a plm one
+        // plm's Arellano estimator (clustered by its panel unit)
+        let (fixest_vcov, fixest_label) = if cluster.is_empty() {
+            (r_string("hetero"), "HC1 robust".to_string())
+        } else {
+            (
+                format!("stats::reformulate({})", r_string(&r_name(cluster))),
+                format!(
+                    "cluster-robust (by {})",
+                    cluster.replace('\\', "\\\\").replace('"', "\\\"")
+                ),
+            )
+        };
+        let no_cluster = if cluster.is_empty() { "TRUE" } else { "FALSE" };
+        let conf = a.choice("conf");
         format!(
-            "{guard}\ncat(\"Coefficients with {label} standard errors\\n\")\n\
+            "stopifnot(\"this works for linear and generalised linear models, and for fixest and \
+             plm models\" = inherits({m}, c(\"lm\", \"fixest\", \"plm\")))\n\
+             if (inherits({m}, c(\"fixest\", \"plm\"))) {{\n  \
+             if (inherits({m}, \"fixest\")) {{\n    \
+             stopifnot(\"fixest has the HC1 correction only\" = identical({ty}, \"HC1\"))\n    \
+             vc <- stats::vcov({m}, vcov = {fixest_vcov})\n    \
+             cat(\"Coefficients with {fixest_label} standard errors\\n\")\n  \
+             }} else {{\n    \
+             stopifnot(\"a plm model is clustered by its panel unit already: leave Cluster by \
+             empty\" = {no_cluster})\n    \
+             vc <- plm::vcovHC({m}, type = {ty})\n    \
+             cat(\"Coefficients with {} robust (Arellano, clustered by panel unit) standard \
+             errors\\n\")\n  }}\n  \
+             print(lmtest::coeftest({m}, vcov. = vc))\n  \
+             cat(\"\\nConfidence intervals\\n\")\n  \
+             print(lmtest::coefci({m}, vcov. = vc, level = {conf}))\n}} else {{\n\
+             cat(\"Coefficients with {label} standard errors\\n\")\n\
              print(lmtest::coeftest({m}, vcov. = {vcov}))\n\
              cat(\"\\nConfidence intervals\\n\")\n\
-             print(lmtest::coefci({m}, vcov. = {vcov}, level = {}))",
-            a.choice("conf"),
-            guard = linear_guard(&m),
+             print(lmtest::coefci({m}, vcov. = {vcov}, level = {conf}))\n}}",
+            a.choice("type"),
         )
     },
 };
@@ -830,9 +885,20 @@ mod tests {
 
     #[test]
     fn model_actions_are_offered_on_model_classes_only() {
-        for class in ["lm", "glm", "aov", "negbin", "polr", "multinom"] {
+        for class in [
+            "lm", "glm", "aov", "negbin", "polr", "multinom", "plm", "pgmm", "fixest",
+        ] {
             assert!(is_model_class(class), "{class}");
         }
+        // the panel classes take only the actions that work on them
+        let entries = |class: &str| -> Vec<&'static str> {
+            model_specs(class).iter().map(|s| s.entry).collect()
+        };
+        assert_eq!(entries("plm"), ["Model fit", "Robust standard errors"]);
+        assert_eq!(entries("fixest"), ["Model fit", "Robust standard errors"]);
+        assert_eq!(entries("pgmm"), ["Model fit"]);
+        assert_eq!(model_specs("lm").len(), MODEL_SPECS.len());
+        assert!(is_panel_class("plm") && !is_panel_class("lm"));
         for class in ["data.frame", "tbl_df", "function", "numeric", ""] {
             assert!(!is_model_class(class), "{class}");
         }
@@ -923,7 +989,7 @@ mod tests {
             ),
             "{out}"
         );
-        assert!(out.ends_with("level = 0.9))"), "{out}");
+        assert!(out.contains("level = 0.9))"), "{out}");
         assert!(message(&ROBUST, "m1", &[("type", "HC9")]).contains("Pick one"));
     }
 

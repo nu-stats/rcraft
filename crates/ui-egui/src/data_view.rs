@@ -432,18 +432,21 @@ pub fn object_list(
             if rcraft_catalog::postest::is_model_class(&item.class) {
                 ui.separator();
                 ui.menu_button("Model", |ui| {
-                    for spec in rcraft_catalog::postest::MODEL_SPECS {
+                    // a panel model takes only the actions that work on it (P6.1)
+                    for spec in rcraft_catalog::postest::model_specs(&item.class) {
                         if ui.button(format!("{}…", spec.entry)).clicked() {
                             out.push(ObjectClick::Dialog(spec, item.name.clone()));
                             ui.close_menu();
                         }
                     }
                     // Reports (P7.1): the model in a table with others
-                    ui.separator();
-                    for spec in rcraft_catalog::report::MODEL_REPORTS {
-                        if ui.button(format!("{}…", spec.entry)).clicked() {
-                            out.push(ObjectClick::Dialog(spec, item.name.clone()));
-                            ui.close_menu();
+                    if !rcraft_catalog::postest::is_panel_class(&item.class) {
+                        ui.separator();
+                        for spec in rcraft_catalog::report::MODEL_REPORTS {
+                            if ui.button(format!("{}…", spec.entry)).clicked() {
+                                out.push(ObjectClick::Dialog(spec, item.name.clone()));
+                                ui.close_menu();
+                            }
                         }
                     }
                 });

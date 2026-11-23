@@ -778,3 +778,647 @@ fn random_effects_and_hausman_are_statas_on_a_balanced_panel() {
         ],
     );
 }
+
+// ---- P6.1, second half: dynamic panels, panel IV, unit roots, serial correlation ----
+
+use rcraft_catalog::panel::{DYNAMIC_PANEL, PANEL_IV, PANEL_SERIAL, PANEL_UNIT_ROOT};
+use rcraft_catalog::postest::{self, MODEL_FIT, ROBUST};
+
+/// Forty units over seven years of `y = 0.5 y(-1) + 0.4 x + a + e`; the same
+/// numbers were loaded into Stata 19 for `xtabond`.
+const DYNAMIC: &str = "d <- local({ set.seed(61); n <- 40; T <- 7; id <- rep(1:n, each = T); \
+     year <- rep(2001:(2000 + T), n); a <- rnorm(n)[id]; x <- round(rnorm(n * T) + 0.3 * a, 3); \
+     z <- round(rnorm(n * T) + 0.5 * x, 3); y <- numeric(n * T); y0 <- rnorm(n); \
+     for (i in 1:n) { prev <- y0[i]; for (t in 1:T) { r <- (i - 1) * T + t; \
+       y[r] <- 0.5 * prev + 0.4 * x[r] + a[r] + rnorm(1); prev <- y[r] } }; \
+     data.frame(id, year, x, z, y = round(y, 3)) })";
+
+/// `DYNAMIC` with three rows dropped and one `x` missing: gaps in time.
+const GAPPED: &str = "d <- local({ d <- local({ set.seed(61); n <- 40; T <- 7; \
+     id <- rep(1:n, each = T); year <- rep(2001:(2000 + T), n); a <- rnorm(n)[id]; \
+     x <- round(rnorm(n * T) + 0.3 * a, 3); z <- round(rnorm(n * T) + 0.5 * x, 3); \
+     y <- numeric(n * T); y0 <- rnorm(n); \
+     for (i in 1:n) { prev <- y0[i]; for (t in 1:T) { r <- (i - 1) * T + t; \
+       y[r] <- 0.5 * prev + 0.4 * x[r] + a[r] + rnorm(1); prev <- y[r] } }; \
+     data.frame(id, year, x, z, y = round(y, 3)) }); \
+     d <- d[-c(10, 11, 60), ]; d$x[100] <- NA; d })";
+
+/// Thirty units over six years, `x2` correlated with the error and with the
+/// two instruments `z1` and `z2`; `x1` exogenous.
+const INSTRUMENTED: &str = "d <- local({ set.seed(62); n <- 30; T <- 6; \
+     id <- rep(1:n, each = T); year <- rep(2001:(2000 + T), n); a <- rnorm(n)[id]; \
+     u <- rnorm(n * T); x1 <- round(rnorm(n * T) + 0.4 * a, 3); z1 <- round(rnorm(n * T), 3); \
+     z2 <- round(rnorm(n * T) + 0.3 * a, 3); \
+     x2 <- round(0.8 * z1 + 0.5 * z2 + 0.6 * u + 0.3 * a + rnorm(n * T), 3); \
+     y <- round(1 + 0.5 * x1 + 0.7 * x2 + a + u, 3); data.frame(id, year, y, x1, x2, z1, z2) })";
+
+/// Twenty units over twenty periods: `y` stationary with its own root for
+/// each unit, `w` a random walk with a start for each unit.
+const ROOTS: &str = "d <- local({ set.seed(63); n <- 20; T <- 20; id <- rep(1:n, each = T); \
+     year <- rep(1:T, n); y <- numeric(n * T); mu <- rnorm(n); \
+     for (i in 1:n) { prev <- mu[i]; rho <- 0.6 + 0.3 * (i %% 3) / 2; \
+       for (t in 1:T) { r <- (i - 1) * T + t; y[r] <- mu[i] * (1 - rho) + rho * prev + rnorm(1); \
+         prev <- y[r] } }; y <- round(y, 3); w <- numeric(n * T); \
+     for (i in 1:n) { prev <- 0; for (t in 1:T) { r <- (i - 1) * T + t; prev <- prev + rnorm(1); \
+       w[r] <- round(prev + mu[i], 3) } }; data.frame(id, year, y, w) })";
+
+/// The context of the second half's data (the first half's columns as well).
+fn panel_context() -> Context {
+    let mut ctx = context();
+    for name in ["x", "z", "y", "x1", "x2", "z1", "z2", "w"] {
+        ctx.columns.push(ColumnInfo {
+            name: name.into(),
+            kind: VarKind::Number,
+        });
+    }
+    ctx
+}
+
+/// Like `dialog`, with the second half's columns.
+fn dialog2(
+    e: &mut Engine,
+    make: &str,
+    spec: &Spec,
+    set: &[(&str, &str)],
+    lists: &[(&str, &[&str])],
+) -> (Outcome, String) {
+    let (made, text) = run(e, Source::Typed, make);
+    assert_eq!(made, Outcome::Ok, "{text}");
+    let ctx = panel_context();
+    let mut values = spec.defaults(&ctx);
+    for (id, text) in set {
+        values.set_text(id, *text);
+    }
+    for (id, names) in lists {
+        values.set_list(id, names.iter().map(|n| n.to_string()).collect());
+    }
+    let code = spec.generate(&ctx, &values, Style::Base);
+    assert!(code.is_ok(), "{code:?}");
+    run(e, Source::Menu(spec.menu.into()), &code.unwrap_or_default())
+}
+
+/// The number after `label` in `text` (up to the next comma or space).
+fn number_after(text: &str, label: &str) -> f64 {
+    text.split(label)
+        .nth(1)
+        .and_then(|rest| {
+            rest.split(|c: char| c == ',' || c.is_whitespace())
+                .next()
+                .and_then(|n| n.parse::<f64>().ok())
+        })
+        .unwrap_or(f64::NAN)
+}
+
+/// Runs the checks `exprs` (as `holds`, for several at once).
+fn all_hold(e: &mut Engine, exprs: &[String]) {
+    holds(e, exprs);
+}
+
+#[test]
+fn dynamic_panel_matches_xtabond() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let lists: &[(&str, &[&str])] = &[("x", &["x"])];
+    // two steps with robust (Windmeijer) errors, the dialog's default
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[("y", "y"), ("id", "id"), ("time", "year"), ("save", "ab1")],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    for needle in [
+        "Two-steps model Difference GMM",
+        "Sargan test: chisq(14)",
+        "Autocorrelation test (1)",
+        "Autocorrelation test (2)",
+    ] {
+        assert!(text.contains(needle), "{needle} missing in {text}");
+    }
+    // one step, robust: no Sargan test is printed
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("steps", "onestep"),
+            ("save", "ab2"),
+        ],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("One-step model Difference GMM")
+            && text.contains("Sargan test: not shown after one step")
+            && !text.contains("Sargan test: chisq"),
+        "{text}"
+    );
+    // two steps, conventional errors
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("errors", "conventional"),
+            ("save", "ab3"),
+        ],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    // two lags of the outcome
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("lags", "2"),
+            ("save", "ab4"),
+        ],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let robust = "summary(ab1, robust = TRUE)$coefficients[, 2]";
+    all_hold(
+        &mut e,
+        &[
+            // Stata 19: xtabond y x, lags(1) noconstant twostep vce(robust)
+            same("coef(ab1)", "c(.10674838203774, .267284198210873)"),
+            same(robust, "sqrt(c(.0409124022828614, .00546991211180994))"),
+            // estat abond: m1 and m2, as plm::mtest with the robust covariance
+            same(
+                "c(plm::mtest(ab1, order = 1, vcov = plm::vcovHC(ab1))$statistic, \
+                   plm::mtest(ab1, order = 2, vcov = plm::vcovHC(ab1))$statistic)",
+                "c(-1.72011985395622, -.0601315407473723)",
+            ),
+            // xtabond y x, lags(1) noconstant vce(robust)
+            same("coef(ab2)", "c(.137591110944501, .303749381281215)"),
+            same(
+                "summary(ab2, robust = TRUE)$coefficients[, 2]",
+                "sqrt(c(.0383260657863139, .00642366898045101))",
+            ),
+            same(
+                "c(plm::mtest(ab2, order = 1, vcov = plm::vcovHC(ab2))$statistic, \
+                   plm::mtest(ab2, order = 2, vcov = plm::vcovHC(ab2))$statistic)",
+                "c(-2.15400917680742, -.0195494505317342)",
+            ),
+            // xtabond y x, lags(1) noconstant twostep: conventional errors, m1, m2
+            // and Sargan's chi2(14) (Stata prints 11.24771)
+            same("coef(ab3)", "c(.10674838203774, .267284198210873)"),
+            same(
+                "summary(ab3, robust = FALSE)$coefficients[, 2]",
+                "sqrt(c(.022210139422862, .00316491037462199))",
+            ),
+            same(
+                "c(plm::mtest(ab3, order = 1)$statistic, plm::mtest(ab3, order = 2)$statistic)",
+                "c(-2.48073221558718, -.0660746410542963)",
+            ),
+            within("plm::sargan(ab3)$statistic", "11.24771", "1e-6"),
+            // xtabond y x, lags(2) noconstant twostep vce(robust); estat abond, artests(3)
+            same(
+                "coef(ab4)",
+                "c(.194582466618915, .0562935012693752, .262638919234913)",
+            ),
+            same(
+                "summary(ab4, robust = TRUE)$coefficients[, 2]",
+                "sqrt(c(.137141108118089, .0137414714783214, .00739475704252883))",
+            ),
+            same(
+                "c(plm::mtest(ab4, order = 1, vcov = plm::vcovHC(ab4))$statistic, \
+                   plm::mtest(ab4, order = 2, vcov = plm::vcovHC(ab4))$statistic, \
+                   plm::mtest(ab4, order = 3, vcov = plm::vcovHC(ab4))$statistic)",
+                "c(-1.32565721023591, -.729466985882428, .216673661584872)",
+            ),
+        ],
+    );
+    // the package's own report for the call written out by hand
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "m <- local({ plm <- plm::plm; plm::pgmm(y ~ stats::lag(y, 1) + x | stats::lag(y, 2:99), \
+           data = d, index = c('id', 'year'), effect = 'individual', \
+           model = 'twosteps', transformation = 'd') }); print(summary(m, robust = TRUE))",
+    );
+    let (_, shown) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[("y", "y"), ("id", "id"), ("time", "year")],
+        lists,
+    );
+    // the lines after the call: from "Balanced Panel" on
+    let body = |t: &str| -> Vec<String> {
+        let lines = report(t);
+        lines
+            .iter()
+            .position(|l| l.starts_with("Balanced Panel"))
+            .map(|i| lines.get(i..).unwrap_or_default().to_vec())
+            .unwrap_or_default()
+    };
+    assert!(body(&expected).len() > 8, "{expected}");
+    assert_eq!(body(&shown), body(&expected), "{shown}");
+}
+
+#[test]
+fn panel_iv_matches_xtivreg() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let lists: &[(&str, &[&str])] = &[("x", &["x1"]), ("endog", &["x2"]), ("inst", &["z1", "z2"])];
+    let (outcome, text) = dialog2(
+        &mut e,
+        INSTRUMENTED,
+        &PANEL_IV,
+        &[("y", "y"), ("id", "id"), ("time", "year"), ("save", "fe")],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Instrumental variable estimation") && text.contains("Within Model"),
+        "{text}"
+    );
+    let (outcome, text) = dialog2(
+        &mut e,
+        INSTRUMENTED,
+        &PANEL_IV,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("model", "random"),
+            ("save", "re"),
+        ],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Random Effect Model") && text.contains("Balestra-Varadharajan-Krishnakumar"),
+        "{text}"
+    );
+    all_hold(
+        &mut e,
+        &[
+            // two-stage least squares on the demeaned data, written out
+            same(
+                "c(coef(fe), sqrt(diag(vcov(fe))))",
+                "local({ n <- length(unique(d$id)); N <- nrow(d); dm <- function(v) v - ave(v, d$id); \
+                   X <- cbind(dm(d$x1), dm(d$x2)); Z <- cbind(dm(d$x1), dm(d$z1), dm(d$z2)); \
+                   yy <- dm(d$y); Xh <- Z %*% solve(crossprod(Z), crossprod(Z, X)); \
+                   b <- solve(crossprod(Xh, X), crossprod(Xh, yy)); e <- yy - X %*% b; \
+                   c(b, sqrt(diag(sum(e^2) / (N - n - 2) * solve(crossprod(Xh))))) })",
+            ),
+            // Stata 19: xtivreg y x1 (x2 = z1 z2), fe: x1, x2 and their errors
+            same(
+                "c(coef(fe), sqrt(diag(vcov(fe))))",
+                "c(.58494433324006, .758761826220583, sqrt(.00781716168448615), \
+                   sqrt(.00837930012806866))",
+            ),
+            // xtivreg y x1 (x2 = z1 z2), re (the default, g2sls); sigma_e, sigma_u
+            same(
+                "c(coef(re)[c('x1', 'x2')], sqrt(diag(vcov(re)))[c('x1', 'x2')])",
+                "c(.791934204721017, .860827501504644, sqrt(.00749753294577665), \
+                   sqrt(.00871157019311366))",
+            ),
+            same(
+                "sqrt(plm::ercomp(re)$sigma2)",
+                "c(1.03967201756119, .435188502337796)",
+            ),
+        ],
+    );
+}
+
+#[test]
+fn panel_unit_root_matches_xtunitroot() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // Levin-Lin-Chu, 20 periods: the adjusted t* of xtunitroot llc, lags 0 to 2
+    // with a mean, with a trend and with neither (Stata prints four decimals)
+    let llc: &[(&str, &str, &str, f64)] = &[
+        ("y", "intercept", "0", -4.3881),
+        ("y", "intercept", "1", -3.2430),
+        ("y", "intercept", "2", -2.1154),
+        ("y", "trend", "0", -4.2999),
+        ("y", "trend", "1", -2.4770),
+        ("y", "trend", "2", -1.2919),
+        ("y", "none", "0", -5.5837),
+        ("y", "none", "1", -4.7758),
+        ("w", "intercept", "0", -2.0885),
+        ("w", "intercept", "1", -2.1256),
+        ("w", "trend", "0", -1.4349),
+        ("w", "trend", "1", -0.8843),
+    ];
+    for (var, terms, lags, stata) in llc {
+        let (outcome, text) = dialog2(
+            &mut e,
+            ROOTS,
+            &PANEL_UNIT_ROOT,
+            &[
+                ("var", var),
+                ("id", "id"),
+                ("time", "year"),
+                ("terms", terms),
+                ("lags", lags),
+            ],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert!(text.contains("Levin-Lin-Chu"), "{text}");
+        let z = number_after(&text, "z = ");
+        assert!(
+            (z - stata).abs() < 1.5e-4,
+            "{var} {terms} lags {lags}: {z} against Stata's {stata}\n{text}"
+        );
+    }
+    // the same call at full precision: Stata's r(tds) and r(p_tds) for y with a
+    // mean and one lag
+    all_hold(
+        &mut e,
+        &[
+            same(
+                "plm::purtest(plm::pdata.frame(d, index = c('id', 'year'))$y, test = 'levinlin', \
+                   exo = 'intercept', lags = 1, q = floor(3.21 * 20^(1/3)))$statistic$statistic",
+                "-3.242977413477258",
+            ),
+            same(
+                "plm::purtest(plm::pdata.frame(d, index = c('id', 'year'))$y, test = 'levinlin', \
+                   exo = 'intercept', lags = 1, q = floor(3.21 * 20^(1/3)))$statistic$p.value",
+                ".0005914379402105",
+            ),
+        ],
+    );
+    // 12 periods: the bandwidth floor(3.21 T^(1/3)) is 7, whatever the lags
+    let short = format!("{ROOTS}; d <- d[d$year <= 12, ]");
+    for (var, terms, lags, stata) in [
+        ("y", "intercept", "0", -4.7660),
+        ("y", "intercept", "1", -3.3619),
+        ("y", "intercept", "2", -1.5407),
+        ("w", "trend", "0", -6.2927),
+        ("w", "trend", "1", -6.7787),
+        ("w", "trend", "2", -5.2351),
+    ] {
+        let (outcome, text) = dialog2(
+            &mut e,
+            &short,
+            &PANEL_UNIT_ROOT,
+            &[
+                ("var", var),
+                ("id", "id"),
+                ("time", "year"),
+                ("terms", terms),
+                ("lags", lags),
+            ],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        let z = number_after(&text, "z = ");
+        assert!(
+            (z - stata).abs() < 1.5e-4,
+            "T=12 {var} {terms} lags {lags}: {z} against Stata's {stata}\n{text}"
+        );
+    }
+    // Im-Pesaran-Shin: its W-t-bar, standardised with plm's moments, against
+    // xtunitroot ips (W-t-bar -2.9180 for y with a mean and one lag): the
+    // statistics differ a little (the known gap; plan/small-fixes.md)
+    let (outcome, text) = dialog2(
+        &mut e,
+        ROOTS,
+        &PANEL_UNIT_ROOT,
+        &[
+            ("var", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("test", "ips"),
+        ],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Im-Pesaran-Shin"), "{text}");
+    let w = number_after(&text, "Wtbar = ");
+    assert!(
+        (w - -2.9180).abs() < 0.05,
+        "W-t-bar {w} against Stata's -2.9180\n{text}"
+    );
+    // an unbalanced panel is refused, not run
+    let (outcome, text) = dialog2(
+        &mut e,
+        &format!("{ROOTS}; d <- d[-5, ]"),
+        &PANEL_UNIT_ROOT,
+        &[("var", "y"), ("id", "id"), ("time", "year")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("must be balanced"), "{text}");
+}
+
+#[test]
+fn panel_serial_correlation_matches_wooldridge() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let (outcome, text) = dialog2(
+        &mut e,
+        GAPPED,
+        &PANEL_SERIAL,
+        &[("y", "y"), ("id", "id"), ("time", "year")],
+        &[("x", &["x", "z"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Wooldridge test for serial correlation in panel data")
+            && text.contains("num df = 1, denom df = 39"),
+        "{text}"
+    );
+    // the same test by another route: the differences matched on (unit, year - 1),
+    // regress, residuals on their lag, Stata's cluster sandwich from sandwich::vcovCL
+    // with its HC1 factor G/(G-1) (N-1)/(N-K)
+    define(
+        &mut e,
+        "ow <- local({ prev <- d; prev$year <- prev$year + 1; \
+           m <- merge(d, prev, by = c('id', 'year'), suffixes = c('', '.l')); \
+           m$dy <- m$y - m$y.l; m$dx <- m$x - m$x.l; m$dz <- m$z - m$z.l; \
+           fit <- lm(dy ~ 0 + dx + dz, m); m$e <- NA; m$e[as.integer(names(resid(fit)))] <- resid(fit); \
+           prev2 <- m[, c('id', 'year', 'e')]; prev2$year <- prev2$year + 1; \
+           k <- merge(m[, c('id', 'year', 'e')], prev2, by = c('id', 'year'), suffixes = c('', '.l')); \
+           k <- k[!is.na(k$e) & !is.na(k$e.l), ]; \
+           f2 <- lm(e ~ 0 + e.l, k); v <- sandwich::vcovCL(f2, cluster = k$id, type = 'HC1'); \
+           fs <- unname((coef(f2) + 0.5)^2 / v[1, 1]); \
+           c(nrow(k), fs, pf(fs, 1, length(unique(k$id)) - 1, lower.tail = FALSE)) })",
+    );
+    all_hold(
+        &mut e,
+        &[
+            "ow[1] == 190".to_string(),
+            // Stata 19: regress D.y D.x D.z, noconstant cluster(id); residuals on their
+            // lag, noconstant, cluster(id); test L.e = -.5: F(1, 39) and its p-value
+            // (Stata stores the residuals in single precision, so its F agrees to 1e-7)
+            within(
+                "ow[2:3]",
+                "c(22.2950978669578, .0000300084783450977)",
+                "1e-6",
+            ),
+        ],
+    );
+    // the dialog's own F is the same number
+    let f = number_after(&text, "F = ");
+    assert!((f - 22.2951).abs() < 1.5e-4, "F = {f} in {text}");
+}
+
+#[test]
+fn panel_models_have_the_model_menu() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // the menu: Model fit and Robust standard errors on fixest and plm, Model fit on pgmm
+    for class in ["fixest", "plm"] {
+        assert!(postest::is_model_class(class));
+        let entries: Vec<&str> = postest::model_specs(class)
+            .iter()
+            .map(|s| s.entry)
+            .collect();
+        assert_eq!(entries, ["Model fit", "Robust standard errors"], "{class}");
+    }
+    assert!(postest::is_model_class("pgmm"));
+    assert_eq!(postest::model_specs("pgmm").len(), 1);
+    // a pgmm on the dynamic data, then a feols and a plm on the unbalanced panel
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[("y", "y"), ("id", "id"), ("time", "year"), ("save", "gm1")],
+        &[("x", &["x"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = dialog(
+        &mut e,
+        MAKE,
+        &FIXED_EFFECTS_REGRESSION,
+        &[("y", "wage"), ("save", "fe1")],
+        &[("x", &["hours"]), ("fe", &["id"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = dialog(
+        &mut e,
+        MAKE,
+        &PANEL_MODEL,
+        &[
+            ("y", "wage"),
+            ("id", "id"),
+            ("time", "year"),
+            ("save", "pm1"),
+        ],
+        &[("x", &["hours"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    // the dialogs of the Objects pane's Model menu, on an object by name
+    let on_model = |e: &mut Engine, spec: &Spec, model: &str, set: &[(&str, &str)]| {
+        let ctx = Context {
+            dataset: model.into(),
+            frames: Vec::new(),
+            columns: Vec::new(),
+        };
+        let mut values = spec.defaults(&ctx);
+        for (id, text) in set {
+            values.set_text(id, *text);
+        }
+        let code = spec.generate(&ctx, &values, Style::Base);
+        assert!(code.is_ok(), "{code:?}");
+        run(e, Source::Menu(spec.menu.into()), &code.unwrap_or_default())
+    };
+    let (outcome, text) = on_model(&mut e, &MODEL_FIT, "fe1", &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Observations: 35") && text.contains("logLik") && text.contains("BIC"),
+        "{text}"
+    );
+    let (outcome, text) = on_model(&mut e, &MODEL_FIT, "pm1", &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Observations: 35") && text.contains("R-squared") && text.contains("rsq"),
+        "{text}"
+    );
+    let (outcome, text) = on_model(&mut e, &MODEL_FIT, "gm1", &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Observations: 200"), "{text}");
+    // Robust standard errors on the feols: fixest's HC1 and a cluster formula
+    let (outcome, text) = on_model(&mut e, &ROBUST, "fe1", &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("HC1 robust standard errors"), "{text}");
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "v <- stats::vcov(fe1, vcov = 'hetero'); \
+         cat('Coefficients with HC1 robust standard errors\\n'); \
+         print(lmtest::coeftest(fe1, vcov. = v)); cat('\\nConfidence intervals\\n'); \
+         print(lmtest::coefci(fe1, vcov. = v, level = 0.95))",
+    );
+    assert_eq!(report(&text), report(&expected), "{text}");
+    let (outcome, text) = on_model(
+        &mut e,
+        &ROBUST,
+        "fe1",
+        &[("cluster", "firm"), ("data", "d")],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("cluster-robust (by firm)"), "{text}");
+    holds(
+        &mut e,
+        &[same(
+            "sqrt(diag(stats::vcov(fe1, vcov = ~firm)))",
+            "sqrt(diag(stats::vcov(fixest::feols(wage ~ hours | id, data = d, vcov = ~firm))))",
+        )],
+    );
+    // and on the plm: Arellano's, clustered by the panel unit
+    let (outcome, text) = on_model(&mut e, &ROBUST, "pm1", &[("type", "HC3")]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("HC3 robust (Arellano, clustered by panel unit)"),
+        "{text}"
+    );
+    let (_, expected) = run(
+        &mut e,
+        Source::Typed,
+        "v <- plm::vcovHC(pm1, type = 'HC3'); \
+         cat('Coefficients with HC3 robust (Arellano, clustered by panel unit) standard errors\\n'); \
+         print(lmtest::coeftest(pm1, vcov. = v)); cat('\\nConfidence intervals\\n'); \
+         print(lmtest::coefci(pm1, vcov. = v, level = 0.95))",
+    );
+    assert_eq!(report(&text), report(&expected), "{text}");
+    // a plm model has its panel unit as the cluster already, a fixest one only HC1
+    let (outcome, text) = on_model(
+        &mut e,
+        &ROBUST,
+        "pm1",
+        &[("cluster", "firm"), ("data", "d")],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(
+        text.contains("clustered by its panel unit already"),
+        "{text}"
+    );
+    let (outcome, text) = on_model(&mut e, &ROBUST, "fe1", &[("type", "HC3")]);
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("HC1 correction only"), "{text}");
+}
