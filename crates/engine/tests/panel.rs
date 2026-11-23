@@ -1267,14 +1267,8 @@ fn panel_serial_correlation_matches_wooldridge() {
         &mut e,
         &[
             "ow[1] == 190".to_string(),
-            // Stata 19: regress D.y D.x D.z, noconstant cluster(id); residuals on their
-            // lag, noconstant, cluster(id); test L.e = -.5: F(1, 39) and its p-value
-            // (Stata stores the residuals in single precision, so its F agrees to 1e-7)
-            within(
-                "ow[2:3]",
-                "c(22.2950978669578, .0000300084783450977)",
-                "1e-6",
-            ),
+            // Stata 19: xtserial y x z (Stata Journal st0039), F(1, 39) and its p-value
+            same("ow[2:3]", "c(22.2950973833785, .000030008483145379)"),
         ],
     );
     // the dialog's own F is the same number
