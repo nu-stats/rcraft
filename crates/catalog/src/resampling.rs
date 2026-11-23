@@ -193,7 +193,7 @@ pub const BOOTSTRAP: Spec = Spec {
         let m = a.name("save");
         let xs = a.vars("x");
         let kind = a.choice("statistic");
-        let mut names = vec![r_string(&a.var_text("v"))];
+        let mut names = vec![r_string(a.var_text("v"))];
         if kind == "correlation" || kind == "coefficient" {
             names.extend(xs.iter().map(|n| r_string(n)));
         }
@@ -364,8 +364,8 @@ pub const PERMUTATION_TEST: Spec = Spec {
     check: permutation_check,
     code: |a, _| {
         let m = a.name("save");
-        let v = r_string(&a.var_text("v"));
-        let w = r_string(&a.var_text("w"));
+        let v = r_string(a.var_text("v"));
+        let w = r_string(a.var_text("w"));
         let reps = a.number("reps");
         let seed = a.number("seed");
         let kind = a.choice("statistic");
