@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 135 | 134 | 0 | 1 |
+| 137 | 136 | 0 | 1 |
 
 ## File
 
@@ -105,6 +105,8 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Parametric survival model | verified |
 | Survey means and totals | verified |
 | Survey proportions and tables | verified |
+| Survey ratios | verified |
+| Survey quantiles | verified |
 | Survey regression | verified |
 | Two-stage least squares | verified |
 | Heckman selection model | verified |
