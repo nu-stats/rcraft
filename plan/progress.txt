@@ -1,0 +1,124 @@
+# RCraft's roadmap ledger: one line for each task id in ROADMAP.md.
+# `cargo xtask progress` works out "% complete" from this file and the code;
+# see xtask/src/progress.rs for the format. Never type a percentage anywhere:
+# change a line only when its checks hold (CI fails a `done` line whose
+# checks fail). Each task left has a work order in plan/work-orders/.
+#
+# id | state | planned done | checks (entry: catalog menu entry, Verified;
+#                              test: file::fn, present and not ignored;
+#                              file: path exists; owner: the owner must see it)
+
+# Done before the ledger began (22 Nov 2026), from plan/AUDIT.md, the
+# roadmap's own done notes and the merged commits.
+P0.1 | done
+P0.2 | done
+P0.3 | done
+P0.4 | done
+P0.5 | done
+P0.6 | done
+P1.1 | done
+P1.3 | done
+P1.4 | done
+P1.5 | done
+P1.6 | done
+P1A.1 | done
+P1A.2 | done
+P1A.3 | done
+P1A.4 | done
+P1A.5 | done
+P1A.6 | done
+P1A.7 | done
+P1A.8 | done
+P1A.9 | done
+P1A.10 | done
+P1A.11 | done
+P2.1 | done
+P2.2 | done
+P2.3 | done
+P2.4 | done
+P2A.1 | done
+P2A.2 | done
+P2A.3 | done
+P2A.4 | done
+P2A.5 | done
+P2A.7 | done
+P2A.8 | done
+P2A.9 | done
+P2B.1 | done
+P2B.2 | done
+P2B.3 | done
+P2B.4 | done
+P2B.5 | done
+P2B.6 | done
+P2B.12 | done
+P2B.7 | done
+P2B.8 | done
+P2B.9 | done
+P2B.10 | done
+P2B.11 | done
+P2C.1 | done
+P2C.2 | done
+P2C.3 | done
+P2C.4 | done
+P2C.5 | done
+P2C.6 | done
+P2C.7 | done
+P2C.8 | done
+P2C.9 | done
+P2C.10 | done
+P2C.11 | done
+P2C.12 | done
+P2C.13 | done
+P2C.14 | done
+P2C.15 | done
+P2C.16 | done
+P3.1 | done
+P3.2 | done
+P3.3 | done
+P3.4 | done
+P3.5 | done
+P3.6 | done
+P3.7 | done
+P3.8 | done
+P4.0 | done
+P4.1 | done
+P4.2 | done
+P4.3 | done
+P4.4 | done
+P4.5 | done
+P5.1 | done
+P5.3 | done
+P5.4 | done
+P7.2 | done
+P7.3 | done
+P7.4 | done
+P7.5 | done
+P8.1 | done
+P8.3 | done
+
+# Left to do, in the order of the plan (one thread, about five working hours
+# a day). The dates are the plan; `cargo xtask progress` reports the pace.
+
+P6.7 | open | 2026-11-24 | entry: Principal components; entry: Factor analysis; entry: Cluster analysis; entry: Discriminant analysis
+P6.8 | open | 2026-11-24 | entry: Bootstrap; entry: Permutation test
+P6.1 | part | 2026-11-25 | entry: Dynamic panel model (GMM); entry: Panel instrumental variables; entry: Panel unit-root test; entry: Panel serial-correlation test; test: crates/engine/tests/panel.rs::panel_models_have_the_model_menu
+P6.4 | part | 2026-11-25 | entry: Survey ratios; entry: Survey quantiles; test: crates/engine/tests/survey.rs::replicate_weights_match_svy_brr_and_jackknife; test: crates/engine/tests/survey.rs::multistage_design_matches_svyset; test: crates/engine/tests/survey.rs::subpopulation_matches_svy_subpop; test: crates/engine/tests/survey.rs::survey_models_have_the_model_menu
+P6.3 | part | 2026-11-26 | entry: Competing-risks model; entry: Survival curves from a Cox model; test: crates/engine/tests/survival.rs::time_varying_covariates_match_stsplit; test: crates/engine/tests/survival.rs::survival_models_have_the_model_menu
+P7.1 | part | 2026-11-26 | test: crates/engine/tests/model_table.rs::custom_rows_go_under_the_statistics; test: crates/engine/tests/model_table.rs::other_model_classes_sit_side_by_side
+P6.2 | part | 2026-11-27 | entry: Mixed model (glmmTMB); entry: Intraclass correlation; test: crates/engine/tests/multilevel.rs::random_slopes_in_glmer_match_melogit; test: crates/engine/tests/multilevel.rs::crossed_effects_match_mixed; test: crates/engine/tests/multilevel.rs::random_effect_predictions_match_predict_reffects
+P6.5 | part | 2026-11-27 | entry: Unit-root test; entry: Exponential smoothing; entry: Vector autoregression; entry: Forecast; entry: Time-series plot; test: crates/engine/tests/timeseries.rs::seasonal_arima_matches_stata; test: crates/engine/tests/timeseries.rs::arimax_matches_stata
+P6.6 | part | 2026-11-28 | entry: IV probit or tobit; entry: Treatment effects; test: crates/engine/tests/iv.rs::liml_and_gmm_match_ivregress; test: crates/engine/tests/iv.rs::iv_models_have_the_model_menu
+P6.10 | open | 2026-11-28 | entry: Structural equation model
+P6.11 | open | 2026-11-29 | entry: Meta-analysis
+P6.12 | open | 2026-11-29 | entry: Machine learning model
+P6.9 | open | 2026-11-30 | entry: Bayesian regression
+P2A.6 | open | 2026-12-01 | entry: RCraft manual; test: crates/ui-egui/src/help_window.rs::manual_pages_are_found_by_search
+P9.1 | open | 2026-12-03 | test: crates/catalog/src/plugin.rs::a_spec_file_becomes_a_dialog; test: crates/catalog/src/plugin.rs::a_bad_spec_file_is_refused_with_its_line; test: crates/engine/tests/plugins.rs::a_plugin_menu_runs_in_r
+P9.2 | open | 2026-12-03 | test: crates/catalog/src/plugin.rs::specs_export_and_import_unchanged; test: xtask/src/coverage.rs::coverage_lists_plugin_compatibility
+P9.3 | open | 2026-12-04 | test: crates/ui-egui/src/prefs.rs::preferences_survive_a_restart; test: crates/rcodegen/src/dialog.rs::the_preferred_style_reaches_every_dialog
+P8.4 | part | 2026-12-04 | entry: RCraft manual; owner: has read the RCraft manual
+P5.2 | open | 2026-12-05 | entry: Plot builder; test: crates/engine/tests/graphs.rs::plot_builder_draws_what_it_writes
+P8.2 | open | 2026-12-07 | file: .github/workflows/release.yml; owner: a release run built every installer and each one started
+P1.2 | open | 2026-12-08 | test: crates/rhost/src/portable.rs::a_wrong_checksum_is_refused; test: crates/rhost/tests/portable.rs::the_pinned_r_downloads_verifies_and_starts
+P2A.10 | open | 2026-12-10 | test: crates/report/src/pdf.rs::fonts_are_embedded; test: crates/report/src/pdf.rs::a_package_manual_has_contents_and_index; test: crates/engine/tests/manual_pdf.rs::the_rcraft_manual_saves_as_pdf
+P8.5 | open | | file: apps/web/Cargo.toml; owner: the browser edition opens and runs a command
