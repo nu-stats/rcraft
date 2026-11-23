@@ -20,8 +20,8 @@
 //! makes the largest loading positive (compared by absolute value, with the
 //! sign rule checked); `factor, ml` stops at its default tolerance about 3e-5
 //! short of the maximum (checked at 1e-4, and to 1e-6 against a run with the
-//! tolerance tightened); the likelihood-ratio statistic of `factanal` uses N-1
-//! where Stata's uses N; `MASS::lda` weighs the group means by the priors where
+//! tolerance tightened); the likelihood-ratio statistic of `factanal` uses N-1 (the
+//! dialog recomputes it with N, as Stata has it); `MASS::lda` weighs the group means by the priors where
 //! Stata weighs them by the group sizes, so its discriminant functions are Stata's
 //! only with proportional priors (the classification table is Stata's with either);
 //! `stats::varimax` stops about 5e-9 short of the exact two-factor rotation.
@@ -376,6 +376,11 @@ fn factor_analysis_matches_stata() {
     define(&mut e, "fa_ml <- fnone");
     define(
         &mut e,
+        "fa_raw <- stats::factanal(~ v1 + v2 + v3 + v4 + v5 + v6, factors = 2, data = fa, \
+         rotation = 'none', control = list(opt = list(factr = 10)))",
+    );
+    define(
+        &mut e,
         "R <- stats::cor(fa); k <- 2; p <- 6; \
          crit <- function(psi) { s <- diag(1 / sqrt(psi)); \
            ev <- eigen(s %*% R %*% s, symmetric = TRUE, only.values = TRUE)$values[-(1:k)]; \
@@ -431,13 +436,25 @@ fn factor_analysis_matches_stata() {
             // Stata at its default tolerance stops about 3e-5 short
             within("fa_ml$uniquenesses", "loose_psi", "1e-4"),
             within("unclass(fa_ml$loadings)", "loose_L", "1e-4"),
-            // the test of the number of factors: factanal's statistic uses N - 1
-            // where Stata's uses N, N - (2p+5)/6 - 2k/3 times the same criterion
+            // the test of the number of factors: factanal's own statistic uses
+            // N - 1 where Stata's uses N, N - (2p+5)/6 - 2k/3 times the same
+            // criterion; the dialog's is Stata's (and its p-value goes with it),
+            // with or without the rotation
+            // (stats::factanal itself, run here on the data, gives the N - 1 figure)
             within(
-                "fa_ml$STATISTIC * (40 - (2 * 6 + 5) / 6 - 2 * 2 / 3) / (40 - 1 - (2 * 6 + 5) / 6 - 2 * 2 / 3)",
+                "fa_raw$STATISTIC * (40 - (2 * 6 + 5) / 6 - 2 * 2 / 3) / (40 - 1 - (2 * 6 + 5) / 6 - 2 * 2 / 3)",
                 "stata_chi2",
                 "1e-6",
             ),
+            "fa_raw$STATISTIC < stata_chi2".to_string(),
+            within("fnone$STATISTIC", "stata_chi2", "1e-6"),
+            within("fav$STATISTIC", "stata_chi2", "1e-6"),
+            within(
+                "fnone$PVAL",
+                "pchisq(stata_chi2, fnone$dof, lower.tail = FALSE)",
+                "1e-6",
+            ),
+            "fa1$STATISTIC > 0 && fa1$PVAL >= 0 && fa1$PVAL <= 1".to_string(),
             // the varimax dialog: Kaiser's angle (two factors), normalisation off
             within("unclass(fav$loadings)", "B", "1e-7"),
             // Stata 19: rotate, varimax (after the tight fit): rotated loadings

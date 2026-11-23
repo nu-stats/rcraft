@@ -167,7 +167,8 @@ pub const FACTOR_ANALYSIS: Spec = Spec {
     about: "Explains the correlations among the chosen variables by a few common factors. It fits \
             by maximum likelihood with stats::factanal and prints each variable's uniqueness (the \
             part no factor explains), the loadings, the variation each factor carries and the \
-            likelihood-ratio test of the number of factors. A varimax rotation (without Kaiser \
+            likelihood-ratio test of the number of factors (with N, not N-1, in its multiplier, \
+            as Stata has it). A varimax rotation (without Kaiser \
             normalisation) turns the factors to simplify the loadings; factors are then ordered \
             by the variation they carry and signed so their loadings sum to more than zero. \
             Rows with a missing value are left out.",
@@ -213,9 +214,16 @@ pub const FACTOR_ANALYSIS: Spec = Spec {
             a.number("factors"),
             a.data()
         );
+        // factanal's likelihood-ratio statistic multiplies the criterion by
+        // N - 1 - (2p+5)/6 - 2k/3; Stata's multiplies by N - (2p+5)/6 - 2k/3
+        let chi2 = "  if (!is.null(fit$STATISTIC)) {\n    \
+             p <- length(fit$uniquenesses); k <- ncol(fit$loadings); n <- fit$n.obs\n    \
+             fit$STATISTIC <- fit$STATISTIC * (n - (2 * p + 5) / 6 - 2 * k / 3) / \
+             (n - 1 - (2 * p + 5) / 6 - 2 * k / 3)\n    \
+             fit$PVAL <- stats::pchisq(fit$STATISTIC, fit$dof, lower.tail = FALSE)\n  }\n";
         if a.choice("rotation") == "varimax" {
             format!(
-                "{m} <- local({{\n  fit <- {fit}\n  \
+                "{m} <- local({{\n  fit <- {fit}\n{chi2}  \
                  rot <- stats::varimax(fit$loadings, normalize = FALSE, eps = 1e-15)\n  \
                  load <- unclass(rot$loadings)\n  \
                  load <- load[, order(colSums(load^2), decreasing = TRUE), drop = FALSE]\n  \
@@ -224,7 +232,7 @@ pub const FACTOR_ANALYSIS: Spec = Spec {
                  fit$rotmat <- NULL\n  fit\n}})\nprint({m})"
             )
         } else {
-            format!("{m} <- {fit}\nprint({m})")
+            format!("{m} <- local({{\n  fit <- {fit}\n{chi2}  fit\n}})\nprint({m})")
         }
     },
 };
@@ -566,11 +574,21 @@ mod tests {
             &[("factors", "1")],
             &[("x", &["height", "weight", "age"])],
         );
-        assert_eq!(
-            code(&FACTOR_ANALYSIS, &v),
-            "fa <- stats::factanal(~ height + weight + age, factors = 1, data = d, rotation = \"none\", \
-             control = list(opt = list(factr = 10)))\nprint(fa)"
+        let c = code(&FACTOR_ANALYSIS, &v);
+        assert!(
+            c.starts_with(
+                "fa <- local({\n  fit <- stats::factanal(~ height + weight + age, factors = 1, \
+                 data = d, rotation = \"none\", control = list(opt = list(factr = 10)))\n"
+            ),
+            "{c}"
         );
+        // the statistic is Stata's: N, not N - 1, in the multiplier
+        assert!(
+            c.contains("(n - (2 * p + 5) / 6 - 2 * k / 3) / (n - 1 - (2 * p + 5) / 6 - 2 * k / 3)"),
+            "{c}"
+        );
+        assert!(c.contains("fit$PVAL <- stats::pchisq("), "{c}");
+        assert!(c.ends_with("  fit\n})\nprint(fa)"), "{c}");
         let v = values(
             &FACTOR_ANALYSIS,
             &[("factors", "2"), ("rotation", "varimax"), ("save", "f2")],
