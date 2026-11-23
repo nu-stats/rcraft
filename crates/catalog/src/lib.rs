@@ -20,6 +20,7 @@ pub mod panel;
 pub mod plot_export;
 pub mod postest;
 pub mod report;
+pub mod resampling;
 pub mod save;
 pub mod stats;
 pub mod survey;
@@ -207,6 +208,8 @@ pub const ENTRIES: &[Entry] = &[
     verified("Factor analysis", Area::Statistics),
     verified("Cluster analysis", Area::Statistics),
     verified("Discriminant analysis", Area::Statistics),
+    verified("Bootstrap", Area::Statistics),
+    verified("Permutation test", Area::Statistics),
     verified("Kaplan-Meier survival curves", Area::Statistics),
     verified("Log-rank test", Area::Statistics),
     verified("Cox proportional hazards model", Area::Statistics),
