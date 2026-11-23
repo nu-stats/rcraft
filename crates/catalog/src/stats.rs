@@ -467,6 +467,8 @@ pub const SPECS: &[&Spec] = &[
     &survival::PARAMETRIC,
     &survey::SURVEY_MEANS,
     &survey::SURVEY_TABLES,
+    &survey::SURVEY_RATIOS,
+    &survey::SURVEY_QUANTILES,
     &survey::SURVEY_REGRESSION,
     &iv::IV_REGRESSION,
     &iv::HECKMAN,

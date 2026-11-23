@@ -222,6 +222,8 @@ pub const ENTRIES: &[Entry] = &[
     verified("Parametric survival model", Area::Statistics),
     verified("Survey means and totals", Area::Statistics),
     verified("Survey proportions and tables", Area::Statistics),
+    verified("Survey ratios", Area::Statistics),
+    verified("Survey quantiles", Area::Statistics),
     verified("Survey regression", Area::Statistics),
     verified("Two-stage least squares", Area::Statistics),
     verified("Heckman selection model", Area::Statistics),
