@@ -339,7 +339,7 @@ pub const PERMUTATION_TEST: Spec = Spec {
         Widget::Text {
             id: "reps",
             label: "Permutations (B)",
-            default: TextDefault::Fixed("10000"),
+            default: TextDefault::Fixed("50000"),
             rule: TextRule::Number,
             hint: "Random shuffles. Used only when the arrangements are more than this many.",
         },
@@ -545,8 +545,8 @@ mod tests {
             c.contains("stat <- function(s) mean(y[s]) - mean(y[!s])"),
             "{c}"
         );
-        assert!(c.contains("exact <- arrangements <= 10000"), "{c}");
-        assert!(c.contains("replicate(10000, stat(sample(second)))"), "{c}");
+        assert!(c.contains("exact <- arrangements <= 50000"), "{c}");
+        assert!(c.contains("replicate(50000, stat(sample(second)))"), "{c}");
         assert!(c.contains("(count + 1) / (length(t) + 1)"), "{c}");
         let v = values(
             &PERMUTATION_TEST,
