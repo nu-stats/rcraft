@@ -15,6 +15,7 @@ use crate::inference;
 use crate::iv;
 use crate::models;
 use crate::multilevel;
+use crate::multivariate;
 use crate::panel;
 use crate::survey;
 use crate::survival;
@@ -447,6 +448,10 @@ pub const SPECS: &[&Spec] = &[
     &panel::FIXED_EFFECTS_GLM,
     &panel::PANEL_MODEL,
     &panel::HAUSMAN,
+    &multivariate::PRINCIPAL_COMPONENTS,
+    &multivariate::FACTOR_ANALYSIS,
+    &multivariate::CLUSTER_ANALYSIS,
+    &multivariate::DISCRIMINANT_ANALYSIS,
     &survival::KAPLAN_MEIER,
     &survival::LOG_RANK,
     &survival::COX,

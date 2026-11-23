@@ -15,6 +15,7 @@ pub mod inference;
 pub mod iv;
 pub mod models;
 pub mod multilevel;
+pub mod multivariate;
 pub mod panel;
 pub mod plot_export;
 pub mod postest;
@@ -202,6 +203,10 @@ pub const ENTRIES: &[Entry] = &[
     verified("Fixed-effects count or binary model", Area::Statistics),
     verified("Panel model", Area::Statistics),
     verified("Hausman test (fixed or random effects)", Area::Statistics),
+    verified("Principal components", Area::Statistics),
+    verified("Factor analysis", Area::Statistics),
+    verified("Cluster analysis", Area::Statistics),
+    verified("Discriminant analysis", Area::Statistics),
     verified("Kaplan-Meier survival curves", Area::Statistics),
     verified("Log-rank test", Area::Statistics),
     verified("Cox proportional hazards model", Area::Statistics),
