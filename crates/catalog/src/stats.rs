@@ -464,6 +464,8 @@ pub const SPECS: &[&Spec] = &[
     &survival::KAPLAN_MEIER,
     &survival::LOG_RANK,
     &survival::COX,
+    &survival::COX_CURVES,
+    &survival::COMPETING_RISKS,
     &survival::PARAMETRIC,
     &survey::SURVEY_MEANS,
     &survey::SURVEY_TABLES,
