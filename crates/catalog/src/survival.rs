@@ -565,16 +565,17 @@ pub const COMPETING_RISKS: Spec = Spec {
     menu: "Statistics > Survival > Competing-risks model",
     about: "How the predictors change the chance of one kind of event when another kind can \
             happen first and prevent it (Fine and Gray's subdistribution hazard model). \
-            survival::finegray makes the weighted rows (subjects with a competing event stay \
-            in the risk set, with weights that fall as censoring would have removed them), \
-            and survival::coxph fits them with each subject as a cluster. The exp(coef) column \
-            is the subhazard ratio. The rows are kept in the workspace as the model's name \
-            followed by _data. Rows missing a value are left out first, as in Stata, so the \
-            censoring distribution comes from the rows used. The subhazard ratios are Stata's \
-            stcrreg's when no censoring time equals an event time; where they tie, R and \
-            Stata treat the tied censored subjects differently and the ratios differ a little. \
-            The robust standard errors differ from stcrreg's by a few per cent, since stcrreg \
-            also accounts for estimating the censoring distribution.",
+            The weighted rows are made as survival::finegray makes them (subjects with a \
+            competing event stay in the risk set, with weights that fall as censoring would \
+            have removed them) but with the censoring distribution taken just before each \
+            time, as Stata's stcrreg does, so the subhazard ratios equal stcrreg's even with \
+            tied times; survival::coxph then fits them with each subject as a cluster. The \
+            exp(coef) column is the subhazard ratio. The rows are kept in the workspace as \
+            the model's name followed by _data. Rows missing a value are left out first, as \
+            in Stata. The robust standard errors are stcrreg's too: Fine and Gray's sandwich, \
+            with the term for estimating the censoring distribution, times n / (n - 1); they \
+            replace the plain cluster sandwich in the summary's robust se column, and equal \
+            stcrreg's, tied times included.",
     widgets: &[
         TIME,
         Widget::Variable {
@@ -622,31 +623,115 @@ pub const COMPETING_RISKS: Spec = Spec {
     code: |a, _| {
         let model = a.name("save");
         let rows = r_name(&format!("{}_data", a.name_text("save")));
-        let status = a.var("status").unwrap_or_default();
+        let data = a.data();
+        let cols = [a.var_text("time"), a.var_text("status")]
+            .into_iter()
+            .chain(a.vars("x"))
+            .map(r_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let xcols = a
+            .vars("x")
+            .into_iter()
+            .map(r_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        let build = SUBDISTRIBUTION_ROWS
+            .replace("{rows}", &rows)
+            .replace("{data}", &data)
+            .replace("{cols}", &cols)
+            .replace("{xcols}", &xcols)
+            .replace("{time}", &r_string(a.var_text("time")))
+            .replace("{status}", &r_string(a.var_text("status")))
+            .replace("{cause}", &r_string(a.expr("cause")))
+            .replace("{x}", &rhs(a));
+        let variance = STCRREG_VARIANCE
+            .replace("{model}", &model)
+            .replace("{rows}", &rows);
         format!(
-            "{rows} <- local({{\n  dd <- {data}[stats::complete.cases({data}[, c({cols})]), , drop = FALSE]\n  \
-             dd$.row <- seq_len(nrow(dd))\n  \
-             survival::finegray(survival::Surv({time}, factor({status})) ~ {x} + .row, data = dd, \
-             etype = {cause}, id = .row)\n}})\n\
+            "{build}\n\
              {model} <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ {x}, \
              data = {rows}, weights = fgwt, ties = {ties}, cluster = .row)\n\
+             {variance}\n\
              cat(\"Competing-risks regression: exp(coef) is the subhazard ratio\\n\")\n\
              print(summary({model}, conf.int = {conf}))",
-            data = a.data(),
-            cols = [a.var_text("time"), a.var_text("status")]
-                .into_iter()
-                .chain(a.vars("x"))
-                .map(r_string)
-                .collect::<Vec<_>>()
-                .join(", "),
-            time = a.var("time").unwrap_or_default(),
             x = rhs(a),
-            cause = r_string(a.expr("cause")),
             ties = r_string(a.choice("ties")),
             conf = a.choice("conf"),
         )
     },
 };
+
+/// The rows of Fine and Gray's weighted risk sets, as survival::finegray makes
+/// them (start, stop, status, weight, one block per subject) but with the
+/// censoring distribution G taken just before each time, as Stata's stcrreg
+/// does: a subject with the competing event stays in every later risk set,
+/// from the pieces between censoring times, with weight G(t-) / G(own time-).
+/// Rows missing a value are left out first.
+const SUBDISTRIBUTION_ROWS: &str = "{rows} <- local({
+  dd <- {data}[stats::complete.cases({data}[, c({cols})]), , drop = FALSE]
+  tm <- dd[[{time}]]
+  code <- as.character(dd[[{status}]])
+  st <- ifelse(code == {cause}, 1L, ifelse(code == levels(factor(dd[[{status}]]))[1], 0L, 2L))
+  cu <- sort(unique(tm[st == 0]))
+  keep <- 1 - vapply(cu, function(u) sum(tm == u & st == 0) / sum(tm >= u), 0)
+  g_before <- function(t) prod(keep[cu < t])
+  g_upto <- function(t) prod(keep[cu <= t])
+  last <- max(tm)
+  pieces <- lapply(seq_along(tm), function(i) {
+    own <- data.frame(fgstart = 0, fgstop = tm[i], fgstatus = as.integer(st[i] == 1), fgwt = 1, .row = i)
+    if (st[i] != 2) return(own)
+    from <- unique(c(tm[i], cu[cu > tm[i]]))
+    from <- from[from < last]
+    if (!length(from)) return(own)
+    rbind(own, data.frame(fgstart = from, fgstop = c(from[-1], last), fgstatus = 0L,
+                          fgwt = vapply(from, g_upto, 0) / g_before(tm[i]), .row = i))
+  })
+  out <- do.call(rbind, pieces)
+  res <- cbind(dd[out$.row, c({xcols}), drop = FALSE], out)
+  rownames(res) <- NULL
+  attr(res, \"subjects\") <- list(tm = tm, st = st,
+    X = stats::model.matrix(~ {x}, dd)[, -1, drop = FALSE])
+  res
+})";
+
+/// Stata's robust covariance for the model fitted to those rows: Fine and
+/// Gray's sandwich, with each subject's score residual plus the term for
+/// estimating the censoring distribution, times n / (n - 1). It replaces the
+/// plain cluster sandwich coxph gives, which leaves that term out.
+const STCRREG_VARIANCE: &str = "if (!anyNA(stats::coef({model}))) {model}$var <- local({
+  sj <- attr({rows}, \"subjects\")
+  tm <- sj$tm; st <- sj$st; X <- sj$X
+  n <- length(tm); b <- stats::coef({model}); e <- as.vector(exp(X %*% b))
+  cu <- sort(unique(tm[st == 0]))
+  nr <- vapply(cu, function(u) sum(tm >= u), 0)
+  dc <- vapply(cu, function(u) sum(tm == u & st == 0), 0)
+  g_before <- function(t) prod((1 - dc / nr)[cu < t])
+  gt <- vapply(tm, g_before, 0)
+  uk <- sort(unique(tm[st == 1])); K <- length(uk)
+  dk <- vapply(uk, function(t) sum(tm == t & st == 1), 0)
+  W <- matrix(vapply(uk, function(t) ifelse(tm >= t, 1, ifelse(st == 2, g_before(t) / gt, 0)), numeric(n)), n, K)
+  s0 <- colSums(W * e)
+  Ebar <- crossprod(W * e, X) / s0
+  q <- dk / s0
+  info <- Reduce(`+`, lapply(seq_len(K), function(k)
+    dk[k] * (crossprod(X, W[, k] * e * X) / s0[k] - tcrossprod(Ebar[k, ]))))
+  ev <- outer(seq_len(n), seq_len(K), function(i, k) as.numeric(tm[i] == uk[k] & st[i] == 1))
+  eta <- X * as.numeric(st == 1) - ev %*% Ebar
+  eta <- eta - e * (X * as.vector(W %*% q) - W %*% (Ebar * q))
+  Wc <- ifelse(outer(tm, uk, '<') & st == 2, W, 0)
+  Ck <- (crossprod(Wc * e, X) - Ebar * colSums(Wc * e)) * q
+  Cj <- e * (X * as.vector(Wc %*% q) - Wc %*% (Ebar * q))
+  own <- ifelse(st == 0, 1 / nr[match(tm, cu)], 0)
+  jump <- function(tt) own * outer(tm, tt, '<=') -
+    t(outer(cu, tm, '<=')) %*% ((dc / nr^2) * t(outer(tt, cu, '>=')))
+  cmp <- which(st == 2)
+  psi <- jump(uk) %*% Ck - jump(tm[cmp]) %*% Cj[cmp, , drop = FALSE]
+  ii <- solve(info)
+  v <- ii %*% crossprod(eta + psi) %*% ii * n / (n - 1)
+  dimnames(v) <- dimnames({model}$var)
+  v
+})";
 
 // ---- Survival curves from a Cox model ----
 
@@ -657,12 +742,12 @@ pub const COX_CURVES: Spec = Spec {
             survival::survfit: the baseline survival (the product of one minus the baseline \
             hazard at each event time) raised to the model's hazard ratio for those values, \
             so the curve at time t is S0(t)^exp(xb), as Stata's stcurve, survival and \
-            predict, basesurv give it. Without values the curve is for the mean of each \
-            numeric predictor and the first level of each categorical one (R's choice; Stata \
-            uses the mean of a categorical predictor's 0 and 1 column). Give several values \
-            (age = c(40, 60)) for one curve each. The survival at chosen times is printed, and \
-            the curves drawn in the Graph tab. With Efron ties R's baseline hazard carries \
-            Efron's adjustment, which Stata's does not.",
+            predict, basesurv give it. Without values the curve is for the mean of every \
+            predictor (a categorical predictor's 0 and 1 column too, as Stata does). Give \
+            several values (age = c(40, 60)) for one curve each. The survival at chosen times \
+            is printed, and the curves drawn in the Graph tab. For a model fitted with Efron \
+            ties (one stratum, no weights) the baseline is moved to Stata's Efron baseline, \
+            and the confidence limits with it.",
     widgets: &[
         Widget::Text {
             id: "model",
@@ -678,8 +763,7 @@ pub const COX_CURVES: Spec = Spec {
             rule: TextRule::Any,
             hint: "Optional: the values to predict at, written as in data.frame, such as \
                    arm = \"b\", age = 50. Every predictor of the model needs one, and a \
-                   stratified model also the strata. Leave empty for the means (and the first \
-                   level of a categorical predictor).",
+                   stratified model also the strata. Leave empty for the means.",
         },
         Widget::Text {
             id: "times",
@@ -723,15 +807,26 @@ pub const COX_CURVES: Spec = Spec {
     code: |a, _| {
         let (model, curves) = (a.name("model"), a.name("save"));
         let values = a.expr("values");
-        let newdata = if values.is_empty() {
-            String::new()
+        // without values, the curve is for the mean of every column of the
+        // design matrix (a factor's 0 and 1 column too, as Stata does), where
+        // survfit would set a factor to its first level
+        let (fitted, newdata) = if values.is_empty() {
+            (
+                format!(
+                    "local({{ m <- {model}; m$means <- colMeans(stats::model.matrix(m)); m }})"
+                ),
+                String::new(),
+            )
         } else {
-            format!(", newdata = data.frame({values})")
+            (model.clone(), format!(", newdata = data.frame({values})"))
         };
         let mut code = format!(
             "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits({model}, \"coxph\"))\n\
-             {curves} <- survival::survfit({model}{newdata}, conf.int = {}, stype = 1)",
-            a.choice("conf")
+             {curves} <- survival::survfit({fitted}{newdata}, conf.int = {}, stype = 1)\n{}",
+            a.choice("conf"),
+            EFRON_BASELINE
+                .replace("{model}", &model)
+                .replace("{curves}", &curves)
         );
         if !values.is_empty() {
             code.push_str(&format!(
@@ -758,6 +853,36 @@ pub const COX_CURVES: Spec = Spec {
         code
     },
 };
+
+/// With Efron ties R's baseline survival is Breslow's product limit, and
+/// Stata's `predict, basesurv` is Efron's: the events at one time are taken in
+/// turn, each against the risk set less the share of the tied events already
+/// counted, a factor (1 - r / (sum of r over the risk set - (l - 1) / m times
+/// the sum over the tied events))^(1 / r). Every curve is S0(t)^exp(xb), so
+/// each is moved to Stata's baseline by one power at each time, which leaves
+/// untied data (and Breslow and exact ties) alone. Only models of a single
+/// stratum without case weights.
+const EFRON_BASELINE: &str = "if (identical({model}$method, 'efron') && NCOL({model}$y) == 2 &&
+    is.null({model}$strata) && is.null({model}$weights) && !anyNA(stats::coef({model}))) {
+  k <- local({
+    tm <- {model}$y[, 1]; ev <- {model}$y[, 2] == 1
+    r <- as.vector(exp(stats::model.matrix({model}) %*% stats::coef({model})))
+    tt <- sort(unique(tm[ev]))
+    logs <- vapply(tt, function(t) {
+      D <- which(tm == t & ev); m <- length(D)
+      sr <- sum(r[tm >= t]); sd <- sum(r[D])
+      efron <- sum(log1p(-r[D] / (sr - (seq_len(m) - 1) / m * sd)) / r[D])
+      breslow <- if (m == 1) efron else log(stats::uniroot(
+        function(a) sum(r[D] / (1 - a^r[D])) - sr, c(1e-12, 1 - 1e-12), tol = 1e-14)$root)
+      c(efron, breslow)
+    }, numeric(2))
+    c(1, cumsum(logs[1, ]) / cumsum(logs[2, ]))[findInterval({curves}$time, tt) + 1]
+  })
+  {curves}$surv <- exp(log({curves}$surv) * k)
+  {curves}$lower <- exp(log({curves}$lower) * k)
+  {curves}$upper <- exp(log({curves}$upper) * k)
+  rm(k)
+}";
 
 pub const SPECS: &[&Spec] = &[
     &KAPLAN_MEIER,
@@ -977,17 +1102,35 @@ mod tests {
             &[("time", "time"), ("status", "cause"), ("ties", "breslow")],
             &[("x", &["arm", "age"])],
         );
-        assert_eq!(
-            code(&COMPETING_RISKS, &v),
-            "fg_data <- local({\n  dd <- d[stats::complete.cases(d[, c(\"time\", \"cause\", \"arm\", \"age\")]), , drop = FALSE]\n  \
-             dd$.row <- seq_len(nrow(dd))\n  \
-             survival::finegray(survival::Surv(time, factor(cause)) ~ arm + age + .row, data = dd, \
-             etype = \"1\", id = .row)\n})\n\
-             fg <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ arm + age, \
-             data = fg_data, weights = fgwt, ties = \"breslow\", cluster = .row)\n\
-             cat(\"Competing-risks regression: exp(coef) is the subhazard ratio\\n\")\n\
-             print(summary(fg, conf.int = 0.95))"
+        let text = code(&COMPETING_RISKS, &v);
+        assert!(
+            text.starts_with(
+                "fg_data <- local({\n  dd <- d[stats::complete.cases(d[, c(\"time\", \"cause\", \"arm\", \"age\")]), , drop = FALSE]\n  \
+                 tm <- dd[[\"time\"]]\n  code <- as.character(dd[[\"cause\"]])\n  \
+                 st <- ifelse(code == \"1\", 1L,"
+            ),
+            "{text}"
         );
+        assert!(text.contains("res <- cbind(dd[out$.row, c(\"arm\", \"age\"), drop = FALSE], out)"));
+        assert!(text.contains(
+            "fg <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ arm + age, \
+             data = fg_data, weights = fgwt, ties = \"breslow\", cluster = .row)\n\
+             if (!anyNA(stats::coef(fg))) fg$var <- local({"
+        ));
+        assert!(text.contains("model.matrix(~ arm + age, dd)"), "{text}");
+        assert!(text.ends_with(
+            "cat(\"Competing-risks regression: exp(coef) is the subhazard ratio\\n\")\n\
+             print(summary(fg, conf.int = 0.95))"
+        ));
+        for placeholder in [
+            "{rows}", "{data}", "{cols}", "{xcols}", "{time}", "{status}", "{cause}", "{model}",
+            "{x}",
+        ] {
+            assert!(
+                !text.contains(placeholder),
+                "{placeholder} unfilled: {text}"
+            );
+        }
         let mut empty = v.clone();
         empty.set_text("cause", "");
         assert!(COMPETING_RISKS
@@ -999,17 +1142,31 @@ mod tests {
     #[test]
     fn cox_curves_predict_at_values_or_means() {
         let v = values(&COX_CURVES, &[], &[]);
-        assert_eq!(
-            code(&COX_CURVES, &v),
-            "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits(cox, \"coxph\"))\n\
-             curves <- survival::survfit(cox, conf.int = 0.95, stype = 1)\n\
-             k <- NCOL(curves$surv)\n\
-             graphics::plot(curves, conf.int = (k == 1), col = seq_len(k), lwd = 2, \
-             xlab = \"Time\", ylab = \"Survival probability\", \
-             main = \"Survival curves from a Cox model\")\n\
-             if (k > 1) graphics::legend(\"topright\", legend = paste(\"Row\", seq_len(k)), \
-             col = seq_len(k), lwd = 2, bty = \"n\")\nrm(k)"
+        let text = code(&COX_CURVES, &v);
+        // no values: the means of the design matrix's columns, then the Efron
+        // baseline step, then the plot
+        assert!(
+            text.contains(
+                "curves <- survival::survfit(local({ m <- cox; m$means <- colMeans(stats::model.matrix(m)); m }), \
+                 conf.int = 0.95, stype = 1)\nif (identical(cox$method, 'efron')"
+            ),
+            "{text}"
         );
+        assert!(
+            text.contains("curves$surv <- exp(log(curves$surv) * k)"),
+            "{text}"
+        );
+        assert!(
+            text.ends_with(
+                "main = \"Survival curves from a Cox model\")\n\
+                 if (k > 1) graphics::legend(\"topright\", legend = paste(\"Row\", seq_len(k)), \
+                 col = seq_len(k), lwd = 2, bty = \"n\")\nrm(k)"
+            ),
+            "{text}"
+        );
+        for placeholder in ["{model}", "{curves}"] {
+            assert!(!text.contains(placeholder), "{placeholder} unfilled");
+        }
         let mut v = values(
             &COX_CURVES,
             &[
@@ -1019,14 +1176,18 @@ mod tests {
             &[],
         );
         v.set_flag("draw", false);
-        assert_eq!(
-            code(&COX_CURVES, &v),
-            "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits(cox, \"coxph\"))\n\
-             curves <- survival::survfit(cox, newdata = data.frame(arm = \"b\", age = c(40, 60)), \
-             conf.int = 0.95, stype = 1)\n\
-             cat(\"Covariate values\\n\")\nprint(data.frame(arm = \"b\", age = c(40, 60)))\n\
-             print(summary(curves, times = c(10, 20)))"
+        let text = code(&COX_CURVES, &v);
+        assert!(
+            text.contains(
+                "curves <- survival::survfit(cox, newdata = data.frame(arm = \"b\", age = c(40, 60)), \
+                 conf.int = 0.95, stype = 1)\nif (identical(cox$method, 'efron')"
+            ),
+            "{text}"
         );
+        assert!(text.ends_with(
+            "cat(\"Covariate values\\n\")\nprint(data.frame(arm = \"b\", age = c(40, 60)))\n\
+             print(summary(curves, times = c(10, 20)))"
+        ));
         v.set_text("times", "10, soon");
         assert!(COX_CURVES
             .problems(&ctx(), &v)

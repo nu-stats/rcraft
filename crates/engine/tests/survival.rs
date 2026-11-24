@@ -654,7 +654,7 @@ fn dialog_on(
 }
 
 #[test]
-fn competing_risks_are_fine_gray_and_close_to_stcrreg() {
+fn competing_risks_match_stcrreg() {
     let Some(mut e) = engine() else { return };
     settle(&mut e);
     versions(&mut e);
@@ -667,8 +667,8 @@ fn competing_risks_are_fine_gray_and_close_to_stcrreg() {
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
     assert!(text.contains("subhazard ratio"), "{text}");
-    // the same without tied times, for Stata's own numbers (time2 is time
-    // plus a row-number fraction, so no two times are equal)
+    // the same without tied times (time2 is time plus a row-number fraction,
+    // so no two times are equal)
     let (outcome, text, _) = dialog(
         &mut e,
         &COMPETING_RISKS,
@@ -683,16 +683,17 @@ fn competing_risks_are_fine_gray_and_close_to_stcrreg() {
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
     define(&mut e, ORACLE);
-    // survival's own two steps written out by hand: finegray's rows, then
-    // coxph with the subdistribution weights and each subject a cluster,
-    // on the rows with no missing value
+    // survival::finegray's rows and coxph with the subdistribution weights and
+    // each subject a cluster, on the rows with no missing value: the dialog's
+    // rows are finegray's when no censoring time equals another time
     define(
         &mut e,
         "fg0 <- local({ dd <- d[!is.na(d$age), ]; dd$r <- seq_len(nrow(dd)); \
-           survival::finegray(survival::Surv(time, factor(cause)) ~ arm + age + r, data = dd, \
+           survival::finegray(survival::Surv(time2, factor(cause)) ~ arm + age + r, data = dd, \
              etype = '1', id = r) }); \
          m0 <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ arm + age, data = fg0, \
-           weights = fgwt, ties = 'breslow', cluster = r)",
+           weights = fgwt, ties = 'breslow', cluster = r); \
+         dc2 <- dc; dc2$time <- dc2$time2",
     );
     // Fine and Gray's partial likelihood by hand, Breslow's ties, with the
     // censoring distribution G taken just before each time (the convention
@@ -717,50 +718,47 @@ fn competing_risks_are_fine_gray_and_close_to_stcrreg() {
     holds(
         &mut e,
         &[
-            same(
-                "c(coef(fg), sqrt(diag(vcov(fg))))",
-                "c(coef(m0), sqrt(diag(vcov(m0))))",
-            ),
             // 22 failures (Stata's No. failed) from 38 subjects, each weight
-            // between 0 and 1, and the expanded rows named after the model
+            // between 0 and 1, and the rows named after the model
             "sum(fg_data$fgstatus) == 22 && length(unique(fg_data$.row)) == 38".to_string(),
             "all(fg_data$fgwt > 0 & fg_data$fgwt <= 1)".to_string(),
+            "sum(fg2_data$fgstatus) == 22 && length(unique(fg2_data$.row)) == 38".to_string(),
+            // without ties the rows and coefficients are finegray's
+            same("coef(fg2)", "coef(m0)"),
+            // the coefficients are Fine and Gray's estimator by hand, with
+            // and without tied times
+            same("coef(fg)", "fg_hand(X, dc$time, dc$cause)"),
+            same("coef(fg2)", "fg_hand(X, dc2$time, dc2$cause)"),
             // Stata 19: stset time, failure(cause==1); stcrreg armb age,
-            // compete(cause==2): the hand-written estimator agrees with it
-            within(
-                "fg_hand(X, dc$time, dc$cause)",
-                "c(-.640945403838436, .0239356115333248)",
-                "1e-6",
-            ),
-            // with tied times, finegray handles a censoring time equal to an
-            // event time differently from Stata, so its subhazard ratios are
-            // within 1% of Stata's; its robust errors, within 3%, since
-            // stcrreg also accounts for estimating the censoring
-            // distribution (plan/small-fixes.md)
+            // compete(cause==2), then the same with time2 (the figures agree
+            // to what Stata's own iteration keeps)
             within(
                 "coef(fg)",
                 "c(-.640945403838436, .0239356115333248)",
-                "1e-2",
+                "1e-7",
             ),
-            within(
-                "sqrt(diag(vcov(fg)))",
-                "c(.432947492509726, .0240724012871915)",
-                "3e-2",
-            ),
-            // Stata 19, the same with time2 (no ties): stcrreg armb age,
-            // compete(cause==2) gives the same coefficients as finegray, to
-            // the figures Stata's own iteration keeps
             within(
                 "coef(fg2)",
                 "c(-.653805260618764, .0251259667836071)",
                 "1e-7",
             ),
+            // the robust errors: Fine and Gray's sandwich with the term for
+            // estimating the censoring distribution (a censoring time equal to
+            // another time counts, as in Stata), times n / (n - 1), equal
+            // stcrreg's to 1e-6 with and without tied times, and not the plain
+            // cluster sandwich coxph gives
             within(
                 "sqrt(diag(vcov(fg2)))",
                 "c(.431533559256939, .0245366406)",
-                "3e-2",
+                "1e-6",
             ),
-            "sum(fg2_data$fgstatus) == 22 && length(unique(fg2_data$.row)) == 38".to_string(),
+            within(
+                "sqrt(diag(vcov(fg)))",
+                "c(.432947492509726, .0240724012871915)",
+                "1e-6",
+            ),
+            "!isTRUE(all.equal(sqrt(diag(vcov(fg2))), sqrt(diag(vcov(m0))), tolerance = 1e-3))"
+                .to_string(),
         ],
     );
 }
@@ -770,7 +768,7 @@ fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
     let Some(mut e) = engine() else { return };
     settle(&mut e);
     versions(&mut e);
-    for (ties, save) in [("breslow", "cb"), ("exact", "cx")] {
+    for (ties, save) in [("breslow", "cb"), ("exact", "cx"), ("efron", "ce")] {
         let (outcome, text, _) = dialog(
             &mut e,
             &COX,
@@ -804,6 +802,9 @@ fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
     for (model, save, values) in [
         ("cb", "c2", ""),
         ("cx", "c3", "arm = 'b', age = 50"),
+        ("ce", "c5", "arm = 'b', age = 50"),
+        ("ce", "c6", ""),
+        ("cx", "c7", ""),
         ("cb", "c4", "arm = c('a', 'b'), age = c(40, 60)"),
     ] {
         let (outcome, text, plots) = dialog(
@@ -828,8 +829,8 @@ fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
     // sum over the events at t_j of r / (1 - a^r) = sum over the risk set of r
     // (a_j = (1 - r / sum r)^(1 / r) for one event; Kalbfleisch and Prentice's
     // product limit, which Stata's predict, basesurv gives), and then
-    // S(t | x) = S0(t)^exp(xb); with no values given, survfit sets a factor to
-    // its first level and a number to its mean
+    // S(t | x) = S0(t)^exp(xb); with no values given, the covariates are the
+    // means of the design matrix's columns (a factor's 0 and 1 column too)
     define(
         &mut e,
         "cox_surv <- function(m, x, at) { r <- as.vector(exp(X %*% coef(m))); \
@@ -839,14 +840,14 @@ fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
              else uniroot(function(a) sum(r[D] / (1 - a^r[D])) - sum(r[R]), \
                           c(1e-12, 1 - 1e-12), tol = 1e-14)$root }, 0); \
            vapply(at, function(a) exp(sum(log(alpha[tt <= a])) * exp(sum(coef(m) * x))), 0) }; \
-         ts <- c(10, 20, 30, 40); xref <- c(0, mean(X[, 2])); \
+         ts <- c(10, 20, 30, 40); xbar <- colMeans(X); \
          surv_at <- function(f) as.vector(summary(f, times = ts)$surv)",
     );
     holds(
         &mut e,
         &[
             same("surv_at(c1)", "cox_surv(cb, c(1, 50), ts)"),
-            same("surv_at(c2)", "cox_surv(cb, xref, ts)"),
+            same("surv_at(c2)", "cox_surv(cb, xbar, ts)"),
             // curves for two values of each predictor, one per row of values
             "identical(dim(c4$surv)[2], 2L)".to_string(),
             same(
@@ -855,7 +856,7 @@ fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
             ),
             // Stata 19: stcox armb age, breslow; predict bs, basesurv; at the
             // last bs at or before each time, bs^exp(xb) for armb = 1, age = 50
-            // and for armb = 0 at the mean age (what survfit gives without values)
+            // and for the means (armb .5, the mean age)
             within(
                 "surv_at(c1)",
                 "c(.97502622070734, .86145734539009, .651790904025156, .374152445685131)",
@@ -863,7 +864,7 @@ fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
             ),
             within(
                 "surv_at(c2)",
-                "c(.917511980656725, .601918105236976, .232932078228056, .0352101687582811)",
+                "c(.955709221248276, .765578093579227, .464544371523078, .171884382207356)",
                 "1e-8",
             ),
             // the same with exactp ties
@@ -872,6 +873,27 @@ fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
                 "c(.975676242432655, .86473280436271, .658331995816286, .379456865751947)",
                 "1e-8",
             ),
+            within(
+                "surv_at(c7)",
+                "c(.956148552199715, .767467267385156, .467070156239883, .171253904597434)",
+                "1e-8",
+            ),
+            // and with efron ties, where Stata's baseline is Efron's: stcox
+            // armb age, efron; predict bs, basesurv
+            within(
+                "surv_at(c5)",
+                "c(.975280521073835, .862713330611936, .654555980101737, .376014294082014)",
+                "1e-8",
+            ),
+            within(
+                "surv_at(c6)",
+                "c(.955912333672961, .766426440824921, .466066765358928, .171702559124698)",
+                "1e-8",
+            ),
+            // the confidence limits keep their order around the curve
+            "all(summary(c5, times = ts)$lower < summary(c5, times = ts)$surv & \
+             summary(c5, times = ts)$surv < summary(c5, times = ts)$upper)"
+                .to_string(),
         ],
     );
 }
