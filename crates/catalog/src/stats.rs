@@ -9,6 +9,7 @@ use rcraft_rcodegen::dialog::{no_check, Args, Opt, Problem, Spec, TextDefault, T
 use rcraft_rcodegen::dialog::{Style, Widget};
 use rcraft_rcodegen::r_string;
 
+use crate::bayes;
 use crate::data::BASE;
 use crate::generalised;
 use crate::inference;
@@ -459,6 +460,7 @@ pub const SPECS: &[&Spec] = &[
     &multivariate::DISCRIMINANT_ANALYSIS,
     &resampling::BOOTSTRAP,
     &resampling::PERMUTATION_TEST,
+    &bayes::BAYESIAN_REGRESSION,
     &survival::KAPLAN_MEIER,
     &survival::LOG_RANK,
     &survival::COX,

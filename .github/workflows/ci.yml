@@ -33,12 +33,14 @@ jobs:
             libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxext-dev \
             libxkbcommon-dev libwayland-dev libxcb1-dev libx11-xcb-dev \
             libxkbcommon-x11-dev libgl1-mesa-dev pkg-config
-      - name: Linux libraries for R packages built from source
+      - name: Linux system libraries the R packages need
         if: runner.os == 'Linux'
         # the snapshot has no 26.04 build of nloptr (lme4's dependency); its own
         # bundled NLopt needs an older cmake policy than the image's cmake accepts,
         # so use the system NLopt, which nloptr finds through pkg-config
-        run: sudo apt-get install -y --no-install-recommends libnlopt-dev
+        # igraph (rstanarm, through shinystan) ships a binary linked to GLPK,
+        # which the runner image does not carry
+        run: sudo apt-get install -y --no-install-recommends libnlopt-dev libglpk40
       - name: Read the R pins
         id: pins
         shell: bash
@@ -82,9 +84,17 @@ jobs:
             export REPO="https://packagemanager.posit.co/cran/$SNAPSHOT"
           fi
           echo "package repository: $REPO"
-          Rscript -e 'pk <- c("readxl", "writexl", "haven", "arrow", "dplyr", "MASS", "nnet", "sandwich", "lmtest", "marginaleffects", "readr", "tidyr", "car", "ggplot2", "openxlsx2", "fixest", "plm", "survey", "sampleSelection", "lme4", "gt"); need <- setdiff(pk, rownames(installed.packages(lib.loc = Sys.getenv("R_LIBS_USER")))); if (length(need)) install.packages(need, repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("writexl"), requireNamespace("haven"), requireNamespace("arrow"), requireNamespace("dplyr"), requireNamespace("MASS"), requireNamespace("nnet"), requireNamespace("sandwich"), requireNamespace("lmtest"), requireNamespace("marginaleffects"), requireNamespace("readr"), requireNamespace("tidyr"), requireNamespace("car"), requireNamespace("ggplot2"), requireNamespace("openxlsx2"), requireNamespace("fixest"), requireNamespace("plm"), requireNamespace("survey"), requireNamespace("sampleSelection"), requireNamespace("lme4"), requireNamespace("gt"))' 2>&1 | tee pkgs.log || {
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # rstanarm needs shiny (through shinystan), which needs httpuv and later.
+            # The snapshot has no 26.04 binary of those two, and later's source does
+            # not compile against 26.04's C library (conflicting pthread_once_t), so
+            # take the same versions from the snapshot's Ubuntu 24.04 binaries, which
+            # link only to the C and C++ runtimes
+            Rscript -e 'pk <- c("later", "httpuv"); need <- setdiff(pk, rownames(installed.packages(lib.loc = Sys.getenv("R_LIBS_USER")))); if (length(need)) install.packages(need, repos = paste0("https://packagemanager.posit.co/cran/__linux__/noble/", Sys.getenv("SNAPSHOT")))'
+          fi
+          Rscript -e 'pk <- c("readxl", "writexl", "haven", "arrow", "dplyr", "MASS", "nnet", "sandwich", "lmtest", "marginaleffects", "readr", "tidyr", "car", "ggplot2", "openxlsx2", "fixest", "plm", "survey", "sampleSelection", "lme4", "gt", "rstanarm"); need <- setdiff(pk, rownames(installed.packages(lib.loc = Sys.getenv("R_LIBS_USER")))); if (length(need)) install.packages(need, repos = Sys.getenv("REPO")); stopifnot(requireNamespace("readxl"), requireNamespace("writexl"), requireNamespace("haven"), requireNamespace("arrow"), requireNamespace("dplyr"), requireNamespace("MASS"), requireNamespace("nnet"), requireNamespace("sandwich"), requireNamespace("lmtest"), requireNamespace("marginaleffects"), requireNamespace("readr"), requireNamespace("tidyr"), requireNamespace("car"), requireNamespace("ggplot2"), requireNamespace("openxlsx2"), requireNamespace("fixest"), requireNamespace("plm"), requireNamespace("survey"), requireNamespace("sampleSelection"), requireNamespace("lme4"), requireNamespace("gt"), requireNamespace("rstanarm"))' 2>&1 | tee pkgs.log || {
             tail -n 25 pkgs.log | sed -e 's/%/%25/g' | awk 'BEGIN { ORS = "%0A" } { print }' > pkgs-tail.txt
-            echo "::error title=installing readxl, writexl, haven, arrow, dplyr, MASS, nnet, sandwich, lmtest, marginaleffects, tidyr, car, ggplot2, openxlsx2, fixest, plm, survey, sampleSelection and lme4 failed::$(cat pkgs-tail.txt)"
+            echo "::error title=installing readxl, writexl, haven, arrow, dplyr, MASS, nnet, sandwich, lmtest, marginaleffects, tidyr, car, ggplot2, openxlsx2, fixest, plm, survey, sampleSelection, lme4 and rstanarm failed::$(cat pkgs-tail.txt)"
             exit 1
           }
           # Word export (officer, flextable): the snapshot has no macOS binary of
