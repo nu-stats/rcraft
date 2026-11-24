@@ -140,7 +140,8 @@ const MAKE_REP: &str = "d <- local({ \
      set.seed(11); \
      bs <- sapply(1:30, function(r) w * tabulate(sample.int(36, 36, replace = TRUE), 36)); \
      colnames(bs) <- paste0('bs', 1:30); \
-     data.frame(y, x, w, s, p, brr, jk, bs) })";
+     z <- as.numeric(y > 53); grp <- 1 + (x > 13.5); \
+     data.frame(y, x, w, s, p, z, grp, brr, jk, bs) })";
 
 /// The [SVY] manual's formulas in plain R: `vtotal(z, fpc)` is formula (1)
 /// for the total of the weighted scores `z` (one column per estimate).
@@ -183,7 +184,9 @@ fn context() -> Context {
 
 /// The columns of [`MAKE_REP`].
 fn rep_context() -> Context {
-    let mut names: Vec<String> = ["y", "x", "w", "s", "p"].map(String::from).to_vec();
+    let mut names: Vec<String> = ["y", "x", "w", "s", "p", "z", "grp"]
+        .map(String::from)
+        .to_vec();
     names.extend((1..=4).map(|i| format!("brr{i}")));
     names.extend((1..=36).map(|i| format!("jk{i}")));
     names.extend((1..=30).map(|i| format!("bs{i}")));
@@ -494,7 +497,8 @@ fn regressions_are_the_sandwich_and_statas() {
         Source::Typed,
         "design <- survey::svydesign(ids = ~psu, strata = ~stratum, weights = ~wt, nest = TRUE, data = d); \
          m <- survey::svyglm(income ~ hours + region, design = design, family = stats::gaussian()); \
-         print(summary(m)); print(stats::confint(m, level = 0.95, df = survey::degf(design)))",
+         print(summary(m, df.resid = survey::degf(design))); \
+         print(stats::confint(m, level = 0.95, ddf = survey::degf(design)))",
     );
     assert_eq!(report(&text), report(&expected), "{text}");
     // D V{G} D', D = (X'WX)^-1, the scores w e x, over the complete rows
@@ -638,8 +642,9 @@ const ORACLE_MORE: &str = "ratio_of <- function(x, y, keep = ok, dom = rep(TRUE,
          for (p in unique(key[r])) { rr <- r & key == p; mm <- sum(rr); zz <- z[rr]; \
            f2 <- if (fpc2) mm / d$f2[k][rr][1] else 0; \
            out <- out + f1 * (1 - f2) * mm / (mm - 1) * sum((zz - mean(zz))^2) } }; sqrt(out) }; \
-     rep_se <- function(cols, scale, x) { W <- as.matrix(d[cols]); th <- colSums(W * x) / colSums(W); \
-       sqrt(scale * sum((th - mean(th))^2)) }";
+     fl <- function(v) readBin(writeBin(v, raw(), size = 4), 'double', size = 4, n = length(v)); \
+     rep_se <- function(cols, scale, x, f = identity) { W <- as.matrix(d[cols]); \
+       th <- f(colSums(W * x) / colSums(W)); sqrt(scale * sum((th - mean(th))^2)) }";
 
 /// Like `holds`, with the extra oracles defined too.
 fn holds_more(e: &mut Engine, exprs: &str) {
@@ -853,10 +858,12 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
     let jk: Vec<&str> = jk.iter().map(String::as_str).collect();
     let bs: Vec<String> = (1..=30).map(|i| format!("bs{i}")).collect();
     let bs: Vec<&str> = bs.iter().map(String::as_str).collect();
-    // Stata computes a replicate design's variance from weights it holds in its own
-    // way, and agrees with the textbook formula to about 1e-6; the textbook formula
-    // (below, in plain R) is matched to 1e-9 and Stata's numbers to 1e-5
-    const STATA: f64 = 1e-5;
+    // Stata 19 by default keeps each replicate's estimate (and the jackknife
+    // multiplier) in single precision, so its standard errors differ from the
+    // textbook formula in the 7th digit; with svy, saving(file, double) it keeps
+    // them in double and equals the formula. The dialog equals the double runs to
+    // 1e-9, and the formula on estimates rounded to single precision (`fl`)
+    // equals Stata's default runs to 1e-9.
 
     // balanced repeated replication: svy brr: mean y x, on 3 df
     let (outcome, text) = dialog_on(
@@ -889,12 +896,75 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
                 &format!("coef({est})"),
                 "c(53.7774761904762, 13.6343174603175)",
             ),
-            near(
+            // with saving(, double), then Stata's default run
+            same(
                 &format!("survey::SE({est})"),
+                "c(.85763149339289, .101583307546939)",
+            ),
+            same(
+                "c(rep_se(paste0('brr', 1:4), 1 / 4, d$y, fl), rep_se(paste0('brr', 1:4), 1 / 4, d$x, fl))",
                 "c(.857631180665941, .101583426969287)",
-                STATA,
             ),
             "inherits(design, 'svyrep.design')".to_string(),
+            // the design carries Stata's df, the replicates less one
+            "survey::degf(design) == 3".to_string(),
+        ]
+        .join(", "),
+    );
+    // Survey regression: the t tests on the design's 3 df, as svy brr: regress
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE_REP,
+        &ctx,
+        &SURVEY_REGRESSION,
+        &[("y", "y"), ("weights", "w"), ("method", "BRR")],
+        &[("x", &["x"]), ("repweights", &brr)],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let tab = "coef(summary(model, df.resid = survey::degf(design)))['x', ]";
+    holds_more(
+        &mut e,
+        &[
+            // Stata 19: svy, saving(, double): regress y x (b, se, t, p of x)
+            same(
+                tab,
+                "c(.702257876759757, .256844091348829, 2.73417960705974, .0716881834194516)",
+            ),
+            // the interval is on the same 3 df (svyglm's confint takes ddf, not df)
+            same(
+                "stats::confint(model, level = 0.95, ddf = 3)['x', ]",
+                ".702257876759757 + c(-1, 1) * stats::qt(0.975, 3) * .256844091348829",
+            ),
+        ]
+        .join(", "),
+    );
+    assert!(text.contains("-0.11513"), "{text}");
+    assert!(text.contains("0.071688"), "{text}");
+    // the Rao-Scott test on the design's 3 df, as svy brr: tabulate
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE_REP,
+        &ctx,
+        &SURVEY_TABLES,
+        &[
+            ("row", "z"),
+            ("col", "grp"),
+            ("weights", "w"),
+            ("method", "BRR"),
+        ],
+        &[("repweights", &brr)],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let chi = "survey::svychisq(~z + grp, design)";
+    holds_more(
+        &mut e,
+        &[
+            // Stata 19: svy, saving(, double): tabulate z g (the design-based F, df, p)
+            same(&format!("{chi}$statistic"), ".103909823735847"),
+            same(&format!("{chi}$parameter"), "c(1, 3)"),
+            same(&format!("{chi}$p.value"), ".768345066869535"),
         ]
         .join(", "),
     );
@@ -934,11 +1004,37 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
                 &format!("survey::SE({est})"),
                 "c(rep_se(paste0('jk', 1:36), 35 / 36, d$y), rep_se(paste0('jk', 1:36), 35 / 36, d$x))",
             ),
-            // Stata 19: svy jackknife: mean y x
-            near(
+            // Stata 19: svy jackknife: mean y x, with saving(, double), then the
+            // default run (its multiplier 35/36 in single precision too)
+            same(
                 &format!("survey::SE({est})"),
+                "c(.893003285121537, .292403444786862)",
+            ),
+            same(
+                "c(rep_se(paste0('jk', 1:36), fl(35 / 36), d$y, fl), rep_se(paste0('jk', 1:36), fl(35 / 36), d$x, fl))",
                 "c(.89300622837083, .292403481274657)",
-                STATA,
+            ),
+            "survey::degf(design) == 35".to_string(),
+        ]
+        .join(", "),
+    );
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE_REP,
+        &ctx,
+        &SURVEY_REGRESSION,
+        &[("y", "y"), ("weights", "w"), ("method", "JK1")],
+        &[("x", &["x"]), ("repweights", &jk)],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds_more(
+        &mut e,
+        &[
+            // Stata 19: svy, saving(, double): regress y x (b, se, t, p of x), on 35 df
+            same(
+                tab,
+                "c(.702257876759757, .459350542420508, 1.52880602482642, .135300915138187)",
             ),
         ]
         .join(", "),
@@ -968,11 +1064,37 @@ fn replicate_weights_match_svy_brr_and_jackknife() {
                 &format!("survey::SE({est})"),
                 "c(rep_se(paste0('bs', 1:30), 1 / 30, d$y), rep_se(paste0('bs', 1:30), 1 / 30, d$x))",
             ),
-            // Stata 19: svyset [pw=w], bsrweight(bs1-bs30) bsn(1) vce(bootstrap)
-            near(
+            // Stata 19: svyset [pw=w], bsrweight(bs1-bs30) bsn(1) vce(bootstrap),
+            // with saving(, double), then the default run
+            same(
                 &format!("survey::SE({est})"),
+                "c(.75949724057585, .199552706969403)",
+            ),
+            same(
+                "c(rep_se(paste0('bs', 1:30), 1 / 30, d$y, fl), rep_se(paste0('bs', 1:30), 1 / 30, d$x, fl))",
                 "c(.759497433750394, .199552755496812)",
-                STATA,
+            ),
+        ]
+        .join(", "),
+    );
+    // the bootstrap has no design df in Stata: its t tests are normal
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE_REP,
+        &ctx,
+        &SURVEY_REGRESSION,
+        &[("y", "y"), ("weights", "w"), ("method", "bootstrap")],
+        &[("x", &["x"]), ("repweights", &bs)],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds_more(
+        &mut e,
+        &[
+            // Stata 19: svy, saving(, double): regress y x (b, se, z, p of x)
+            same(
+                "coef(summary(model, df.resid = Inf))['x', ]",
+                "c(.702257876759757, .536893933069856, 1.30800114045689, .190872922465473)",
             ),
         ]
         .join(", "),
@@ -1170,6 +1292,24 @@ fn survey_models_have_the_model_menu() {
     set.extend(design);
     let (outcome, text) = dialog(&mut e, &SURVEY_REGRESSION, &set, &[("x", &["hours"])], &[]);
     assert_eq!(outcome, Outcome::Ok, "{text}");
+    // the printed t tests are on the design's 9 df, as Stata's (survey's summary
+    // alone would take 9 + 1 less the 2 coefficients)
+    assert!(text.contains("8.16e-09"), "{text}");
+    holds_more(
+        &mut e,
+        &[
+            // Stata 19: svy: regress income hours (t and p of hours)
+            same(
+                "coef(summary(m2, df.resid = survey::degf(design)))['hours', 3]",
+                "20.2424347356068",
+            ),
+            same(
+                "coef(summary(m2, df.resid = survey::degf(design)))['hours', 4]",
+                "8.1639353857192e-09",
+            ),
+        ]
+        .join(", "),
+    );
     let on_model = |e: &mut Engine, spec: &Spec, model: &str, set: &[(&str, &str)]| {
         let ctx = Context {
             dataset: model.into(),
