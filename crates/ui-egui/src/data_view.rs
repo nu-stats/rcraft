@@ -440,7 +440,7 @@ pub fn object_list(
                         }
                     }
                     // Reports (P7.1): the model in a table with others
-                    if !rcraft_catalog::postest::is_panel_class(&item.class) {
+                    if rcraft_catalog::postest::takes_model_table(&item.class) {
                         ui.separator();
                         for spec in rcraft_catalog::report::MODEL_REPORTS {
                             if ui.button(format!("{}…", spec.entry)).clicked() {

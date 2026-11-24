@@ -13,7 +13,7 @@ use crate::data::BASE;
 /// The first class names of R objects these dialogs are offered on.
 pub const MODEL_CLASSES: &[&str] = &[
     "lm", "glm", "aov", "negbin", "polr", "multinom", "plm", "pgmm", "fixest", "svyglm", "coxph",
-    "survreg",
+    "lmerMod", "glmerMod", "survreg",
 ];
 
 /// Whether an object whose first class is `class` is a model these dialogs take.
@@ -24,6 +24,13 @@ pub fn is_model_class(class: &str) -> bool {
 /// Whether `class` is a panel model fitted by `plm` or `fixest`.
 pub fn is_panel_class(class: &str) -> bool {
     matches!(class, "plm" | "pgmm" | "fixest")
+}
+
+/// Whether the Model table (Reports) takes a model whose first class is
+/// `class`: every model class but `pgmm`, whose coefficients and covariance
+/// the table does not read.
+pub fn takes_model_table(class: &str) -> bool {
+    is_model_class(class) && class != "pgmm"
 }
 
 /// The dialogs offered on a model whose first class is `class`: all of
@@ -40,6 +47,9 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         // a survival model has a likelihood, but no residual or diagnostic
         // the other dialogs know: its fit and its comparison with another
         "coxph" | "survreg" => vec![&MODEL_FIT, &COMPARE_MODELS],
+        // a mixed model: its fit statistics only (the other dialogs need an
+        // lm or glm object)
+        "lmerMod" | "glmerMod" => vec![&MODEL_FIT],
         _ => MODEL_SPECS.to_vec(),
     }
 }

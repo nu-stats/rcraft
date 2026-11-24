@@ -5,7 +5,7 @@
 //! Excel, and it can be kept under a name.
 
 use rcraft_rcodegen::dialog::{Args, Opt, Problem, Spec, TextDefault, TextRule, Widget};
-use rcraft_rcodegen::r_name;
+use rcraft_rcodegen::{r_name, r_string};
 
 use crate::data::BASE;
 
@@ -57,8 +57,79 @@ const TABLE_SES: &[Opt] = &[
 /// Most decimal places offered.
 const MAX_DIGITS: u32 = 10;
 
+/// The rows typed in the Rows box, one per line, as `label | value | value`:
+/// the label and what to show under each model (none for a blank).
+fn custom_rows(a: &Args) -> Vec<(String, Vec<String>)> {
+    a.values
+        .text("rows")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let mut parts = line.split('|').map(|p| p.trim().to_string());
+            let label = parts.next().unwrap_or_default();
+            (label, parts.collect())
+        })
+        .collect()
+}
+
+/// The lines typed in the Coefficients box, `term` or `term | label`: the
+/// coefficients to show first, in that order, and what to call them.
+fn coefficient_lines(a: &Args) -> Vec<(String, Option<String>)> {
+    a.values
+        .text("coefs")
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(|line| match line.split_once('|') {
+            Some((term, label)) => {
+                let label = label.trim();
+                (
+                    term.trim().to_string(),
+                    (!label.is_empty()).then(|| label.to_string()),
+                )
+            }
+            None => (line.to_string(), None),
+        })
+        .collect()
+}
+
 fn table_check(a: &Args) -> Vec<Problem> {
     let mut out = Vec::new();
+    let mut listed: Vec<String> = Vec::new();
+    for (term, _) in coefficient_lines(a) {
+        if term.is_empty() {
+            out.push(Problem::new(
+                "coefs",
+                "A line needs the coefficient's name before the |.",
+            ));
+        } else if listed.contains(&term) {
+            out.push(Problem::new(
+                "coefs",
+                format!("{term} is listed more than once."),
+            ));
+        } else {
+            listed.push(term);
+        }
+    }
+    let models = 1 + other_models(a).len();
+    for (label, values) in custom_rows(a) {
+        if label.is_empty() {
+            out.push(Problem::new(
+                "rows",
+                "A row needs a label before the first |.",
+            ));
+        } else if values.len() > models {
+            out.push(Problem::new(
+                "rows",
+                format!(
+                    "{label} has {} values for {models} model{}; give at most one per model.",
+                    values.len(),
+                    if models == 1 { "" } else { "s" }
+                ),
+            ));
+        }
+    }
     let mut seen = vec![a.ctx.dataset.as_str()];
     for name in other_models(a) {
         if seen.contains(&name) {
@@ -115,31 +186,53 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
             capitalised(words)
         ),
     };
-    // each model's estimates, standard errors, statistics and p-values
-    let (guard, errors) = match robust {
-        None => (
-            String::new(),
-            "se <- ct[, 2]\n    stat <- ct[, 3]\n    p <- ct[, 4]\n    ".to_string(),
-        ),
-        Some(kind) => (
+    // each model's estimates, standard errors, degrees of freedom; robust
+    // errors are the sandwich's for lm and glm, fixest's heteroskedasticity-
+    // robust ones, plm's vcovHC (clustered on the unit), the sandwich for a Cox
+    // or survreg model (refitted with robust = TRUE), and sandwich::sandwich for
+    // polr and multinom; svyglm's are design-based already, and lme4 has none
+    let guard = match robust {
+        None => String::new(),
+        Some(kind) => format!(
             "if (!requireNamespace(\"sandwich\", quietly = TRUE)) \
-             stop(\"robust standard errors need the sandwich package; install it from Packages\")\n  "
-                .to_string(),
-            format!(
-                "se <- sqrt(diag(sandwich::vcovHC(m, type = \"{kind}\")))[rownames(ct)]\n    \
-                 stat <- ct[, 1] / se\n    \
-                 p <- 2 * stats::pt(-abs(stat), df)\n    "
-            ),
+             stop(\"robust standard errors need the sandwich package; install it from Packages\")\n  \
+             robust_vcov <- function(m) {{\n    \
+             if (inherits(m, \"svyglm\")) stop(\"robust standard errors are not offered for a survey \
+             model; its standard errors already follow the design\")\n    \
+             if (inherits(m, \"merMod\")) stop(\"robust standard errors are not offered for a mixed model\")\n    \
+             if (inherits(m, \"lm\")) sandwich::vcovHC(m, type = \"{kind}\")\n    \
+             else if (inherits(m, \"fixest\")) {{\n      \
+             if (\"{kind}\" != \"HC1\") stop(\"fixest has the HC1 robust errors only; choose HC1\")\n      \
+             stats::vcov(m, vcov = \"hetero\")\n    \
+             }} else if (inherits(m, \"plm\")) plm::vcovHC(m, type = \"{kind}\")\n    \
+             else if (inherits(m, c(\"coxph\", \"survreg\"))) stats::vcov(stats::update(m, robust = TRUE))\n    \
+             else if (inherits(m, \"polr\")) sandwich::sandwich(m)\n    \
+             else if (inherits(m, \"multinom\")) {{\n      \
+             X <- stats::model.matrix(m)\n      \
+             y <- stats::model.response(stats::model.frame(m))\n      \
+             P <- as.matrix(stats::fitted(m))\n      \
+             if (ncol(P) == 1) P <- cbind(1 - P, P)\n      \
+             Y <- outer(as.character(y), m$lev, \"==\") * 1\n      \
+             S <- do.call(cbind, lapply(seq_len(ncol(P))[-1], function(j) (Y[, j] - P[, j]) * X))\n      \
+             V <- stats::vcov(m)\n      \
+             V %*% crossprod(S) %*% V\n    \
+             }}\n    \
+             else stop(\"robust standard errors are not offered for \", class(m)[1], \" models\")\n  \
+             }}\n  "
         ),
+    };
+    let errors = match robust {
+        None => "se <- sqrt(diag(as.matrix(stats::vcov(m))))[names(est)]".to_string(),
+        Some(_) => "se <- sqrt(diag(as.matrix(robust_vcov(m))))[names(est)]".to_string(),
     };
     let below = match paren {
         "statistic" => "paste0(\"(\", fmt(stat), \")\")",
         "p" => "paste0(\"(\", fmt(p), \")\")",
         "ci" => {
-            "paste0(\"[\", fmt(ct[, 1] - stats::qt(0.975, df) * se), \", \", \
-             fmt(ct[, 1] + stats::qt(0.975, df) * se), \"]\")"
+            "paste0(\"[\", fmt(f$est - stats::qt(0.975, f$df) * f$se), \", \", \
+             fmt(f$est + stats::qt(0.975, f$df) * f$se), \"]\")"
         }
-        _ => "paste0(\"(\", fmt(se), \")\")",
+        _ => "paste0(\"(\", fmt(f$se), \")\")",
     };
     if stars {
         note.push_str("; * p < 0.05, ** p < 0.01, *** p < 0.001");
@@ -149,30 +242,26 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
     } else {
         "rep(\"\", length(p))"
     };
+    // the statistics a class has are shown; blank where it has none
     let mut stats: Vec<&str> = Vec::new();
     if a.flag("n") {
         stats.push(
-            "    Observations = vapply(models, function(m) as.character(stats::nobs(m)), \"\")",
+            "    Observations = vapply(models, function(m) tryCatch(as.character(\
+             if (inherits(m, \"coxph\")) m$n else stats::nobs(m)), error = function(e) \"\"), \"\")",
         );
     }
     if a.flag("r2") {
-        stats.push(
-            "    `R-squared` = vapply(models, function(m) \
-             if (inherits(m, \"glm\")) \"\" else fmt(summary(m)$r.squared), \"\")",
-        );
-        stats.push(
-            "    `Adjusted R-squared` = vapply(models, function(m) \
-             if (inherits(m, \"glm\")) \"\" else fmt(summary(m)$adj.r.squared), \"\")",
-        );
+        // lm, fixest and plm have an R-squared; a glm, a survey model and the
+        // rest have none, and are left blank
+        stats.push("    `R-squared` = vapply(models, r2, \"\", adjusted = FALSE)");
+        stats.push("    `Adjusted R-squared` = vapply(models, r2, \"\", adjusted = TRUE)");
     }
     if a.flag("ic") {
-        stats.push("    AIC = vapply(models, function(m) fmt(stats::AIC(m)), \"\")");
-        stats.push("    BIC = vapply(models, function(m) fmt(stats::BIC(m)), \"\")");
+        stats.push("    AIC = vapply(models, one, \"\", stats::AIC)");
+        stats.push("    BIC = vapply(models, one, \"\", stats::BIC)");
     }
     if a.flag("ll") {
-        stats.push(
-            "    `Log-likelihood` = vapply(models, function(m) fmt(as.numeric(stats::logLik(m))), \"\")",
-        );
+        stats.push("    `Log-likelihood` = vapply(models, one, \"\", stats::logLik)");
     }
     let foot = if stats.is_empty() {
         String::new()
@@ -186,27 +275,99 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
             stats.join(",\n")
         )
     };
+    // the coefficients the user listed come first, in that order, under the
+    // labels typed; the rest follow as they are
+    let listed = coefficient_lines(a);
+    let order_block = if listed.is_empty() {
+        "shown <- terms\n  ".to_string()
+    } else {
+        let keys: Vec<String> = listed.iter().map(|(t, _)| r_string(t)).collect();
+        let named: Vec<&(String, Option<String>)> =
+            listed.iter().filter(|(_, l)| l.is_some()).collect();
+        let label_keys: Vec<String> = named.iter().map(|(t, _)| r_string(t)).collect();
+        let label_values: Vec<String> = named
+            .iter()
+            .map(|(_, l)| r_string(l.as_deref().unwrap_or_default()))
+            .collect();
+        format!(
+            "keep <- c({})\n  terms <- c(intersect(keep, terms), setdiff(terms, keep))\n  \
+             labels <- stats::setNames(c({}), c({}))\n  \
+             shown <- unname(ifelse(terms %in% names(labels), labels[terms], terms))\n  ",
+            keys.join(", "),
+            label_values.join(", "),
+            label_keys.join(", ")
+        )
+    };
+    // the user's own rows, under the statistics
+    let custom = custom_rows(a);
+    let custom_block = if custom.is_empty() {
+        String::new()
+    } else {
+        let rows: Vec<String> = custom
+            .iter()
+            .map(|(label, values)| {
+                let mut cells = vec![r_string(label)];
+                cells.extend(values.iter().map(|v| r_string(v)));
+                format!("c({})", cells.join(", "))
+            })
+            .collect();
+        format!(
+            "  custom <- list({})\n  \
+             custom <- do.call(rbind, lapply(custom, function(r) \
+             c(r, rep(\"\", length(models) + 1 - length(r)))))\n  \
+             custom <- as.data.frame(custom, stringsAsFactors = FALSE)\n  \
+             names(custom) <- names(out)\n  \
+             out <- rbind(out, custom)\n",
+            rows.join(", ")
+        )
+    };
     let call = format!(
         "(function(models, digits) {{\n  \
-         ok <- vapply(models, inherits, logical(1), \"lm\")\n  \
-         if (!all(ok)) stop(\"the table takes linear and generalised linear models; not: \", \
-         paste(names(models)[!ok], collapse = \", \"))\n  \
-         {guard}fmt <- function(x) formatC(x, format = \"f\", digits = digits)\n  \
-         terms <- unique(unlist(lapply(models, function(m) names(stats::coef(m)))))\n  \
-         cells <- vapply(models, function(m) {{\n    \
-         ct <- stats::coef(summary(m))\n    \
-         df <- if (inherits(m, \"glm\")) Inf else stats::df.residual(m)\n    \
-         {errors}\
+         known <- c(\"lm\", \"glm\", \"fixest\", \"plm\", \"coxph\", \"survreg\", \"svyglm\", \"merMod\", \
+         \"polr\", \"multinom\")\n  \
+         ok <- vapply(models, function(m) inherits(m, known), logical(1))\n  \
+         if (!all(ok)) stop(\"the table takes lm, glm, fixest, plm, coxph, survreg, svyglm, lme4, \
+         polr and multinom models; not: \", paste(names(models)[!ok], collapse = \", \"))\n  \
+         {guard}fmt <- function(x) ifelse(is.finite(x), formatC(x, format = \"f\", digits = digits), \"\")\n  \
+         one <- function(m, f) if (inherits(m, \"svyglm\")) \"\" else \
+         tryCatch({{ v <- as.numeric(f(m)); if (length(v) == 1) fmt(v) else \"\" }}, \
+         error = function(e) \"\")\n  \
+         r2 <- function(m, adjusted) {{\n    \
+         if (inherits(m, \"svyglm\") || inherits(m, \"glm\")) \"\"\n    \
+         else if (inherits(m, \"lm\")) fmt(if (adjusted) summary(m)$adj.r.squared else summary(m)$r.squared)\n    \
+         else if (inherits(m, \"fixest\")) fmt(as.numeric(fixest::r2(m, if (adjusted) \"ar2\" else \"r2\")))\n    \
+         else if (inherits(m, \"plm\")) fmt(unname(summary(m)$r.squared[if (adjusted) 2 else 1]))\n    \
+         else \"\"\n  \
+         }}\n  \
+         fit_of <- function(m) {{\n    \
+         est <- if (inherits(m, \"merMod\")) lme4::fixef(m) \
+         else if (inherits(m, \"multinom\") && is.matrix(stats::coef(m))) {{\n      \
+         cm <- stats::coef(m)\n      \
+         stats::setNames(as.vector(t(cm)), as.vector(t(outer(rownames(cm), colnames(cm), paste, sep = \":\"))))\n    \
+         }} else stats::coef(m)\n    \
+         est <- est[!is.na(est)]\n    \
+         {errors}\n    \
+         df <- if (inherits(m, \"glm\")) {{\n      \
+         if (m$family$family %in% c(\"binomial\", \"poisson\")) Inf else m$df.residual\n    \
+         }} else if (inherits(m, c(\"lm\", \"plm\"))) stats::df.residual(m) else Inf\n    \
+         list(est = est, se = se, df = df)\n  \
+         }}\n  \
+         fits <- lapply(models, fit_of)\n  \
+         terms <- unique(unlist(lapply(fits, function(f) names(f$est))))\n  \
+         {order_block}\
+         cells <- vapply(fits, function(f) {{\n    \
+         stat <- f$est / f$se\n    \
+         p <- 2 * stats::pt(-abs(stat), f$df)\n    \
          out <- rep(\"\", 2 * length(terms))\n    \
-         i <- match(rownames(ct), terms)\n    \
-         out[2 * i - 1] <- paste0(fmt(ct[, 1]), {star})\n    \
+         i <- match(names(f$est), terms)\n    \
+         out[2 * i - 1] <- paste0(fmt(f$est), {star})\n    \
          out[2 * i] <- {below}\n    \
          out\n  \
          }}, character(2 * length(terms)))\n  \
-         out <- data.frame(term = as.vector(rbind(terms, \"\")), \
+         out <- data.frame(term = as.vector(rbind(shown, \"\")), \
          matrix(cells, ncol = length(models), dimnames = list(NULL, names(models))), \
          check.names = FALSE, row.names = NULL)\n\
-         {foot}  \
+         {foot}{custom_block}  \
          names(out)[1] <- \" \"\n  \
          cat(\"{note}\\n\")\n  \
          attr(out, \"note\") <- \"{note}\"\n  \
@@ -250,9 +411,13 @@ pub const MODEL_TABLE: Spec = Spec {
     menu: "Objects > Model > Model table",
     about: "Put this model and others side by side in one table: each coefficient with its \
             stars and, below it, its standard error (or statistic, p-value or 95% interval), \
-            the model's own or robust, then the number of rows, R-squared, AIC and BIC. The \
-            table copies into Word or Excel from Results, and can go into the report. For \
-            linear and generalised linear models.",
+            the model's own or robust, then the number of rows, R-squared, AIC and BIC, then \
+            any extra rows you type. The table copies into Word or Excel from Results, and can \
+            go into the report. Models of different kinds can share a table: lm, glm, fixest, \
+            plm, coxph, survreg, svyglm, lme4, polr and multinom; coefficients come from the \
+            model and standard errors from its covariance matrix (robust ones for lm and glm \
+            only), and a statistic a class does not have is left blank. P-values use the t \
+            distribution for linear models (and plm), the normal for the others.",
     widgets: &[
         Widget::Text {
             id: "others",
@@ -276,7 +441,10 @@ pub const MODEL_TABLE: Spec = Spec {
             options: TABLE_SES,
             default: "model",
             hint: "Robust ones need the sandwich package; the stars, statistics, p-values and \
-                   intervals are then worked out from them.",
+                   intervals are then worked out from them. lm and glm use the HC type chosen; \
+                   plm uses it too (clustered on the unit); fixest has HC1 only; a Cox, survreg, \
+                   polr or multinom model uses the plain sandwich (no HC adjustment); survey \
+                   and mixed models have none and are refused.",
         },
         Widget::Check {
             id: "stars",
@@ -299,7 +467,7 @@ pub const MODEL_TABLE: Spec = Spec {
         },
         Widget::Check {
             id: "r2",
-            label: "R-squared and adjusted R-squared (linear models)",
+            label: "R-squared and adjusted R-squared (lm, fixest, plm)",
             default: true,
             hint: "",
         },
@@ -314,6 +482,24 @@ pub const MODEL_TABLE: Spec = Spec {
             label: "Log-likelihood",
             default: false,
             hint: "",
+        },
+        Widget::Text {
+            id: "coefs",
+            label: "Coefficient order and labels",
+            default: TextDefault::Empty,
+            rule: TextRule::Lines,
+            hint: "Optional, one coefficient per line: its name as the table shows it, then | and \
+                   the label to show, such as age | Age in years. Those listed come first, in \
+                   this order; the rest follow. A multinomial model's names are outcome:term.",
+        },
+        Widget::Text {
+            id: "rows",
+            label: "Extra rows",
+            default: TextDefault::Empty,
+            rule: TextRule::Lines,
+            hint: "Optional, one row per line, written label | value for the first model | value \
+                   for the next, such as Controls | No | Yes. They go under the statistics; a \
+                   missing value is left blank.",
         },
         Widget::Text {
             id: "save",
@@ -854,7 +1040,8 @@ mod tests {
         let one = make("fit", &[], &[]).unwrap_or_default();
         assert!(one.ends_with("})(list(fit = fit), 3)"), "{one}");
         assert!(
-            one.contains("se <- ct[, 2]") && one.contains("fmt(se)"),
+            one.contains("se <- sqrt(diag(as.matrix(stats::vcov(m))))")
+                && one.contains("fmt(f$se)"),
             "{one}"
         );
         assert!(
@@ -890,7 +1077,7 @@ mod tests {
             "{two}"
         );
         assert!(
-            two.contains("p <- ct[, 4]")
+            two.contains("p <- 2 * stats::pt(-abs(stat), f$df)")
                 && two.contains("fmt(p)")
                 && two.contains("P-values in parentheses\\n"),
             "{two}"
@@ -902,6 +1089,36 @@ mod tests {
         let bare =
             make("fit", &[], &[("n", false), ("r2", false), ("ic", false)]).unwrap_or_default();
         assert!(!bare.contains("extra <- list("), "{bare}");
+    }
+
+    #[test]
+    fn extra_rows_go_under_the_statistics_and_are_checked() {
+        let code = make(
+            "fit",
+            &[
+                ("others", "m2"),
+                ("rows", "Controls | No | Yes\nCluster | state\n\n"),
+            ],
+            &[],
+        )
+        .unwrap_or_default();
+        // after the statistics block, before the first column is named
+        let at_stats = code.find("out <- rbind(out, fit)").unwrap_or(usize::MAX);
+        let at_rows = code
+            .find("custom <- list(c(\"Controls\", \"No\", \"Yes\"), c(\"Cluster\", \"state\"))")
+            .unwrap_or(0);
+        assert!(at_stats < at_rows, "{code}");
+        assert!(code.contains("out <- rbind(out, custom)"), "{code}");
+        // more values than models, and a row with no label
+        for rows in ["Controls | No | Yes | Maybe", " | No"] {
+            let made = make("fit", &[("others", "m2"), ("rows", rows)], &[]);
+            let problems = made.err().unwrap_or_default();
+            assert!(problems.iter().any(|p| p.widget == "rows"), "{rows}");
+        }
+        // no rows, nothing added
+        assert!(!make("fit", &[], &[])
+            .unwrap_or_default()
+            .contains("custom <- "));
     }
 
     #[test]

@@ -201,6 +201,8 @@ fn sample_text(id: &str, rule: TextRule) -> Option<&'static str> {
         "levels" => Some("low, medium, high"),
         "find" => Some("old"),
         "others" => Some("fit2"),
+        "rows" => Some("Controls | No | Yes"),
+        "coefs" => Some("x | Age in years"),
         "factor" => Some("group"),
         "contrasts" => Some("a = 1, b = -1"),
         "text" => Some("The models below use the survey's second wave."),
@@ -208,7 +210,7 @@ fn sample_text(id: &str, rule: TextRule) -> Option<&'static str> {
             TextRule::Name => Some("new_name"),
             TextRule::Number => Some("1"),
             TextRule::Expression => Some("x"),
-            TextRule::SavePath | TextRule::Any => None,
+            TextRule::SavePath | TextRule::Any | TextRule::Lines => None,
         },
     }
 }
