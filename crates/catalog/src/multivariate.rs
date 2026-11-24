@@ -423,7 +423,8 @@ pub const DISCRIMINANT_ANALYSIS: Spec = Spec {
             assigns each row to the most likely group. It fits a linear discriminant with \
             MASS::lda (one covariance matrix for all groups) and prints the priors, the group \
             means, the coefficients of the linear discriminant functions and each function's \
-            share of the separation, then the table of true against assigned groups for the \
+            share of the separation (found with the groups weighed by their sizes, as Stata's \
+            discrim lda does, whatever the priors), then the table of true against assigned groups for the \
             rows used. Rows with a missing value are left out.",
     widgets: &[
         Widget::Variable {
@@ -463,14 +464,24 @@ pub const DISCRIMINANT_ANALYSIS: Spec = Spec {
         let m = a.name("save");
         let g = a.var("group").unwrap_or_default();
         let formula = format!("{g} ~ {}", rhs(a));
-        let prior = if a.choice("priors") == "equal" {
+        // lda weighs the group means by the priors when it finds the canonical
+        // functions; Stata weighs them by the group sizes. With equal priors the
+        // functions and their shares come from the fit with the sizes as priors
+        // (the classification still uses the priors asked for)
+        let (prior, sizes) = if a.choice("priors") == "equal" {
             let n = format!("nlevels(factor({}${g}))", a.data());
-            format!(", prior = rep(1 / {n}, {n})")
+            (
+                format!(", prior = rep(1 / {n}, {n})"),
+                format!(
+                    "\n{m}[c(\"scaling\", \"svd\")] <- MASS::lda({formula}, data = {})[c(\"scaling\", \"svd\")]",
+                    a.data()
+                ),
+            )
         } else {
-            String::new()
+            (String::new(), String::new())
         };
         format!(
-            "{m} <- MASS::lda({formula}, data = {}{prior})\nprint({m})\n\
+            "{m} <- MASS::lda({formula}, data = {}{prior}){sizes}\nprint({m})\n\
              cat(\"\\nClassification of the rows used (true group down, assigned group across)\\n\")\n\
              print(local({{\n  rows <- stats::model.frame({formula}, data = {})\n  \
              assigned <- stats::predict({m}, rows)$class\n  \
@@ -719,7 +730,9 @@ mod tests {
         assert!(
             c.starts_with(
                 "lda <- MASS::lda(species ~ height + `arm span`, data = d, \
-                 prior = rep(1 / nlevels(factor(d$species)), nlevels(factor(d$species))))\nprint(lda)\n"
+                 prior = rep(1 / nlevels(factor(d$species)), nlevels(factor(d$species))))\n\
+                 lda[c(\"scaling\", \"svd\")] <- MASS::lda(species ~ height + `arm span`, \
+                 data = d)[c(\"scaling\", \"svd\")]\nprint(lda)\n"
             ),
             "{c}"
         );
@@ -731,7 +744,7 @@ mod tests {
             &[("x", &["height"])],
         );
         assert!(code(&DISCRIMINANT_ANALYSIS, &v)
-            .starts_with("lda <- MASS::lda(species ~ height, data = d)\n"));
+            .starts_with("lda <- MASS::lda(species ~ height, data = d)\nprint(lda)\n"));
         // the group is not also a predictor
         let v = values(
             &DISCRIMINANT_ANALYSIS,

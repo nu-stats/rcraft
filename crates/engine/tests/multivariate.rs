@@ -22,8 +22,8 @@
 //! short of the maximum (checked at 1e-4, and to 1e-6 against a run with the
 //! tolerance tightened); the likelihood-ratio statistic of `factanal` uses N-1 (the
 //! dialog recomputes it with N, as Stata has it); `MASS::lda` weighs the group means by the priors where
-//! Stata weighs them by the group sizes, so its discriminant functions are Stata's
-//! only with proportional priors (the classification table is Stata's with either);
+//! Stata weighs them by the group sizes, so the dialog takes the discriminant
+//! functions from the fit with the sizes as priors (Stata's with any priors);
 //! `stats::varimax` stops about 5e-9 short of the exact two-factor rotation.
 //!
 //! The test records the R and package versions it ran with (AGENTS.md
@@ -708,15 +708,19 @@ fn discriminant_analysis_matches_stata() {
                 .to_string(),
             "identical(as.integer(stats::predict(lp, di)$class), as.integer(cls(c(20, 15, 10) / 45)))"
                 .to_string(),
-            // lda's scaling is the sphered eigenvectors, up to sign; MASS weights the
-            // group means by the priors, so the canonical functions are Stata's
-            // (which weigh by the group sizes) with proportional priors
+            // lda's scaling is the sphered eigenvectors, up to sign. MASS weighs the
+            // group means by the priors; the dialog takes the canonical functions
+            // from the fit with the group sizes as priors, as Stata weighs them, so
+            // they are Stata's with equal priors too
             same("abs(lp$scaling)", "abs(U)"),
+            same("abs(ld$scaling)", "abs(U)"),
             same("lp$svd^2 / sum(lp$svd^2)", "em$values[1:2] / sum(em$values[1:2])"),
             // Stata 19: the canonical function coefficients (up to sign), their
             // eigenvalues' shares, and the two classification tables
             same("abs(lp$scaling)", "abs(s_U)"),
+            same("abs(ld$scaling)", "abs(s_U)"),
             same("lp$svd^2 / sum(lp$svd^2)", "s_Ev / sum(s_Ev)"),
+            same("ld$svd^2 / sum(ld$svd^2)", "s_Ev / sum(s_Ev)"),
             same("unname(tab(ld))", "s_equal"),
             same("unname(tab(lp))", "s_prop"),
             same("unname(counts(rep(1 / 3, 3)))", "s_equal"),
