@@ -2345,3 +2345,137 @@ fn panel_models_have_the_model_menu() {
     assert_eq!(outcome, Outcome::Error, "{text}");
     assert!(text.contains("HC1 correction only"), "{text}");
 }
+
+#[test]
+fn panel_iv_nosa_regress_and_ec2sls_robust_match_xtivreg() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let lists: &[(&str, &[&str])] = &[("x", &["x1"]), ("endog", &["x2"]), ("inst", &["z1", "z2"])];
+    // the same panel with seven rows dropped: unbalanced
+    let unbalanced = format!("{INSTRUMENTED}; d <- d[-c(3, 4, 17, 40, 41, 42, 77), ]");
+    let base = [("y", "y"), ("id", "id"), ("time", "year")];
+    let fit = |e: &mut Engine, make: &str, extra: &[(&str, &str)], save: &str| {
+        let mut set = base.to_vec();
+        set.extend_from_slice(extra);
+        set.push(("save", save));
+        let (outcome, text) = dialog2(e, make, &PANEL_IV, &set, lists);
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        text
+    };
+    // EC2SLS with robust errors (balanced), next to plm's EC2SLS fit
+    fit(&mut e, INSTRUMENTED, &[("model", "ec2sls")], "ec");
+    let text = fit(
+        &mut e,
+        INSTRUMENTED,
+        &[("model", "ec2sls"), ("errors", "robust")],
+        "ecr",
+    );
+    assert!(text.contains("robust to clustering"), "{text}");
+    fit(
+        &mut e,
+        INSTRUMENTED,
+        &[("model", "random"), ("nosa", "true")],
+        "g2n",
+    );
+    fit(
+        &mut e,
+        INSTRUMENTED,
+        &[("model", "ec2sls"), ("nosa", "true")],
+        "ecn",
+    );
+    fit(
+        &mut e,
+        INSTRUMENTED,
+        &[("model", "random"), ("regress", "true")],
+        "rer",
+    );
+    fit(
+        &mut e,
+        INSTRUMENTED,
+        &[("model", "within"), ("regress", "true")],
+        "fer",
+    );
+    all_hold(
+        &mut e,
+        &[
+            // the direct EC2SLS fit has plm's coefficients
+            same("ecr$coefficients", "coef(ec)[names(ecr$coefficients)]"),
+            // Stata 19: xtivreg y x1 (x2 = z1 z2), re ec2sls vce(robust): the
+            // variances of x2, x1, _cons and the x2, x1 covariance
+            same(
+                "c(diag(ecr$vcov)[c('x2', 'x1', '(Intercept)')], ecr$vcov['x2', 'x1'])",
+                "c(.00655764075355548, .00505081918498702, .0267813035603816, -.000166040863955719)",
+            ),
+            // xtivreg ..., re nosa: x2, x1, _cons, se(x2), sigma_u, sigma_e
+            same(
+                "c(g2n$coefficients[c('x2', 'x1', '(Intercept)')], sqrt(g2n$vcov['x2', 'x2']), g2n$sigma_u, g2n$sigma_e)",
+                "c(.868304121165968, .806575601148172, .970167512059956, .0939951025836193, \
+                   .393493164738014, 1.03271761163371)",
+            ),
+            // xtivreg ..., re ec2sls nosa
+            same("ecn$coefficients[['x2']]", ".907046323353946"),
+            // xtivreg ..., re regress (here equal to xtreg y x1 x2, re)
+            same(
+                "c(rer$coefficients[c('x2', 'x1', '(Intercept)')], sqrt(diag(rer$vcov))[c('x2', 'x1')], rer$sigma_u, rer$sigma_e)",
+                "c(1.05253480215706, .737028940880505, .943085638937209, .0562299453203163, \
+                   .0817796242463456, .430106953169168, .988629683954089)",
+            ),
+            // xtivreg ..., fe regress: the within regression, as with a dummy per unit
+            same(
+                "coef(fer)[c('x1', 'x2')]",
+                "coef(lm(y ~ x1 + x2 + factor(id), data = d))[c('x1', 'x2')]",
+            ),
+            same(
+                "c(coef(fer)[['x2']], sqrt(vcov(fer)['x2', 'x2']))",
+                "c(.974976015011972, .0546078956098232)",
+            ),
+        ],
+    );
+    // unbalanced: Stata's adapted Swamy-Arora and Baltagi-Chang components
+    fit(
+        &mut e,
+        &unbalanced,
+        &[("model", "random"), ("nosa", "true")],
+        "g2n2",
+    );
+    fit(
+        &mut e,
+        &unbalanced,
+        &[("model", "random"), ("regress", "true")],
+        "rer2",
+    );
+    fit(
+        &mut e,
+        &unbalanced,
+        &[("model", "within"), ("regress", "true")],
+        "fer2",
+    );
+    all_hold(
+        &mut e,
+        &[
+            same(
+                "c(g2n2$coefficients[c('x2', 'x1', '(Intercept)')], sqrt(g2n2$vcov['x2', 'x2']), g2n2$sigma_u, g2n2$sigma_e)",
+                "c(.84215879437902, .822602590678174, .985783093919771, .104469562202495, \
+                   .472249368262034, 1.03868891263547)",
+            ),
+            same(
+                "c(rer2$coefficients[c('x2', 'x1', '(Intercept)')], sqrt(diag(rer2$vcov))[c('x2', 'x1')], rer2$sigma_u, rer2$sigma_e)",
+                "c(1.06294648363746, .73958138054077, .950889555495966, .0587794732933803, \
+                   .0851423238907285, .50310940157563, .983168440272533)",
+            ),
+            same(
+                "c(coef(fer2)[['x2']], sqrt(vcov(fer2)['x2', 'x2']))",
+                "c(1.00002369898804, .0576951662002081)",
+            ),
+        ],
+    );
+    // EC2SLS's instruments on an unbalanced panel are not Stata's yet: refused
+    let mut set = base.to_vec();
+    set.extend([("model", "ec2sls"), ("errors", "robust"), ("save", "ecr2")]);
+    let (outcome, text) = dialog2(&mut e, &unbalanced, &PANEL_IV, &set, lists);
+    assert_ne!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("balanced panel"), "{text}");
+}
