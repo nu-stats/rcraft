@@ -5,6 +5,7 @@
 //! Entries with a dialog have a [`rcraft_rcodegen::dialog::Spec`] in an area
 //! module ([`data`]).
 
+pub mod bayes;
 pub mod combine;
 pub mod data;
 pub mod data_tools;
@@ -214,6 +215,7 @@ pub const ENTRIES: &[Entry] = &[
     verified("Discriminant analysis", Area::Statistics),
     verified("Bootstrap", Area::Statistics),
     verified("Permutation test", Area::Statistics),
+    verified("Bayesian regression", Area::Statistics),
     verified("Kaplan-Meier survival curves", Area::Statistics),
     verified("Log-rank test", Area::Statistics),
     verified("Cox proportional hazards model", Area::Statistics),
