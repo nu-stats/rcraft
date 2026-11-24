@@ -219,6 +219,8 @@ pub const ENTRIES: &[Entry] = &[
     verified("Kaplan-Meier survival curves", Area::Statistics),
     verified("Log-rank test", Area::Statistics),
     verified("Cox proportional hazards model", Area::Statistics),
+    verified("Survival curves from a Cox model", Area::Statistics),
+    verified("Competing-risks model", Area::Statistics),
     verified("Parametric survival model", Area::Statistics),
     verified("Survey means and totals", Area::Statistics),
     verified("Survey proportions and tables", Area::Statistics),

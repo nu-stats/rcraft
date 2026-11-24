@@ -25,7 +25,10 @@
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::survival::{COX, KAPLAN_MEIER, LOG_RANK, PARAMETRIC};
+use rcraft_catalog::postest::{self, COMPARE_MODELS, MODEL_FIT};
+use rcraft_catalog::survival::{
+    COMPETING_RISKS, COX, COX_CURVES, KAPLAN_MEIER, LOG_RANK, PARAMETRIC,
+};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind, Widget};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -123,8 +126,9 @@ const MAKE: &str = "d <- local({ \
      start <- round(time * (i %% 3) / 10, 1); \
      centre <- c('x', 'y')[1 + i %% 2]; \
      site <- 1 + (i * 3) %% 8; \
+     cause <- ifelse(died == 0, 0, ifelse(i %% 3 == 0, 2, 1)); \
      age[c(6, 29)] <- NA; \
-     data.frame(time, died, arm, age, start, centre, site) })";
+     data.frame(time, died, arm, age, start, centre, site, cause, time2 = time + i / 100) })";
 
 /// The formulas in plain R: `dc` the rows with an age, `X` its arm b and age
 /// columns, and `cox_hand`, Newton-Raphson on Breslow's or Efron's partial
@@ -154,6 +158,8 @@ fn context() -> Context {
             ("start", VarKind::Number),
             ("centre", VarKind::Text),
             ("site", VarKind::Number),
+            ("cause", VarKind::Number),
+            ("time2", VarKind::Number),
         ]
         .into_iter()
         .map(|(name, kind)| ColumnInfo {
@@ -602,6 +608,438 @@ fn parametric_models_are_streg() {
                    .165073203885982, .00947951705393789, .544758643436734, \
                    -1.26402277944453, .142342110760198)",
                 "1e-8",
+            ),
+        ],
+    );
+}
+
+/// Runs a dialog on an R object that is not `d`: the data frame or model
+/// named in `dataset`, already made by an earlier step.
+fn dialog_on(
+    e: &mut Engine,
+    dataset: &str,
+    columns: &[(&str, VarKind)],
+    spec: &Spec,
+    set: &[(&str, &str)],
+    lists: &[(&str, &[&str])],
+    flags: &[&str],
+) -> (Outcome, String) {
+    let ctx = Context {
+        dataset: dataset.into(),
+        frames: Vec::new(),
+        columns: columns
+            .iter()
+            .map(|(name, kind)| ColumnInfo {
+                name: (*name).into(),
+                kind: *kind,
+            })
+            .collect(),
+    };
+    let mut values = spec.defaults(&ctx);
+    for (id, text) in set {
+        values.set_text(id, *text);
+    }
+    for (id, names) in lists {
+        values.set_list(id, names.iter().map(|n| n.to_string()).collect());
+    }
+    for w in spec.widgets {
+        if let Widget::Check { id, .. } = w {
+            values.set_flag(id, flags.contains(id));
+        }
+    }
+    let code = spec.generate(&ctx, &values, Style::Base);
+    assert!(code.is_ok(), "{code:?}");
+    let (outcome, text, _) = run(e, Source::Menu(spec.menu.into()), &code.unwrap_or_default());
+    (outcome, text)
+}
+
+#[test]
+fn competing_risks_are_fine_gray_and_close_to_stcrreg() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    versions(&mut e);
+    let (outcome, text, _) = dialog(
+        &mut e,
+        &COMPETING_RISKS,
+        &[("time", "time"), ("status", "cause"), ("ties", "breslow")],
+        &[("x", &["arm", "age"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("subhazard ratio"), "{text}");
+    // the same without tied times, for Stata's own numbers (time2 is time
+    // plus a row-number fraction, so no two times are equal)
+    let (outcome, text, _) = dialog(
+        &mut e,
+        &COMPETING_RISKS,
+        &[
+            ("time", "time2"),
+            ("status", "cause"),
+            ("ties", "breslow"),
+            ("save", "fg2"),
+        ],
+        &[("x", &["arm", "age"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    define(&mut e, ORACLE);
+    // survival's own two steps written out by hand: finegray's rows, then
+    // coxph with the subdistribution weights and each subject a cluster,
+    // on the rows with no missing value
+    define(
+        &mut e,
+        "fg0 <- local({ dd <- d[!is.na(d$age), ]; dd$r <- seq_len(nrow(dd)); \
+           survival::finegray(survival::Surv(time, factor(cause)) ~ arm + age + r, data = dd, \
+             etype = '1', id = r) }); \
+         m0 <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ arm + age, data = fg0, \
+           weights = fgwt, ties = 'breslow', cluster = r)",
+    );
+    // Fine and Gray's partial likelihood by hand, Breslow's ties, with the
+    // censoring distribution G taken just before each time (the convention
+    // Stata's stcrreg follows): a subject with the competing event stays in
+    // every later risk set with weight G(t-) / G(its time-)
+    define(
+        &mut e,
+        "gfun <- function(t, tm, cs) { g <- 1; \
+           for (u in sort(unique(tm[cs == 0]))) \
+             if (u < t) g <- g * (1 - sum(tm == u & cs == 0) / sum(tm >= u)); g }; \
+         fg_hand <- function(X, tm, cs) { b <- rep(0, ncol(X)); \
+           gt <- sapply(tm, gfun, tm = tm, cs = cs); \
+           for (it in 1:100) { U <- rep(0, ncol(X)); I <- matrix(0, ncol(X), ncol(X)); \
+             for (t in sort(unique(tm[cs == 1]))) { \
+               w <- ifelse(tm >= t, 1, ifelse(cs == 2, gfun(t, tm, cs) / gt, 0)); \
+               r <- as.vector(w * exp(X %*% b)); D <- tm == t & cs == 1; \
+               s0 <- sum(r); s1 <- colSums(r * X); \
+               U <- U + colSums(X[D, , drop = FALSE]) - sum(D) * s1 / s0; \
+               I <- I + sum(D) * (crossprod(X, r * X) / s0 - tcrossprod(s1) / s0^2) }; \
+             st <- solve(I, U); b <- b + st; if (max(abs(st)) < 1e-12) break }; b }",
+    );
+    holds(
+        &mut e,
+        &[
+            same(
+                "c(coef(fg), sqrt(diag(vcov(fg))))",
+                "c(coef(m0), sqrt(diag(vcov(m0))))",
+            ),
+            // 22 failures (Stata's No. failed) from 38 subjects, each weight
+            // between 0 and 1, and the expanded rows named after the model
+            "sum(fg_data$fgstatus) == 22 && length(unique(fg_data$.row)) == 38".to_string(),
+            "all(fg_data$fgwt > 0 & fg_data$fgwt <= 1)".to_string(),
+            // Stata 19: stset time, failure(cause==1); stcrreg armb age,
+            // compete(cause==2): the hand-written estimator agrees with it
+            within(
+                "fg_hand(X, dc$time, dc$cause)",
+                "c(-.640945403838436, .0239356115333248)",
+                "1e-6",
+            ),
+            // with tied times, finegray handles a censoring time equal to an
+            // event time differently from Stata, so its subhazard ratios are
+            // within 1% of Stata's; its robust errors, within 3%, since
+            // stcrreg also accounts for estimating the censoring
+            // distribution (plan/small-fixes.md)
+            within(
+                "coef(fg)",
+                "c(-.640945403838436, .0239356115333248)",
+                "1e-2",
+            ),
+            within(
+                "sqrt(diag(vcov(fg)))",
+                "c(.432947492509726, .0240724012871915)",
+                "3e-2",
+            ),
+            // Stata 19, the same with time2 (no ties): stcrreg armb age,
+            // compete(cause==2) gives the same coefficients as finegray, to
+            // the figures Stata's own iteration keeps
+            within(
+                "coef(fg2)",
+                "c(-.653805260618764, .0251259667836071)",
+                "1e-7",
+            ),
+            within(
+                "sqrt(diag(vcov(fg2)))",
+                "c(.431533559256939, .0245366406)",
+                "3e-2",
+            ),
+            "sum(fg2_data$fgstatus) == 22 && length(unique(fg2_data$.row)) == 38".to_string(),
+        ],
+    );
+}
+
+#[test]
+fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    versions(&mut e);
+    for (ties, save) in [("breslow", "cb"), ("exact", "cx")] {
+        let (outcome, text, _) = dialog(
+            &mut e,
+            &COX,
+            &[
+                ("time", "time"),
+                ("event", "died"),
+                ("ties", ties),
+                ("save", save),
+            ],
+            &[("x", &["arm", "age"])],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    }
+    let times = "10, 20, 30, 40";
+    let (outcome, text, plots) = dialog(
+        &mut e,
+        &COX_CURVES,
+        &[
+            ("model", "cb"),
+            ("values", "arm = 'b', age = 50"),
+            ("times", times),
+            ("save", "c1"),
+        ],
+        &[],
+        &["draw"],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert_eq!(plots, 1, "{text}");
+    assert!(text.contains("survival"), "{text}");
+    for (model, save, values) in [
+        ("cb", "c2", ""),
+        ("cx", "c3", "arm = 'b', age = 50"),
+        ("cb", "c4", "arm = c('a', 'b'), age = c(40, 60)"),
+    ] {
+        let (outcome, text, plots) = dialog(
+            &mut e,
+            &COX_CURVES,
+            &[
+                ("model", model),
+                ("values", values),
+                ("times", times),
+                ("save", save),
+            ],
+            &[],
+            &["draw"],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert_eq!(plots, 1, "{text}");
+    }
+    define(&mut e, ORACLE);
+    // Breslow's baseline hazard h_j = d_j / (sum over the risk set of exp(xb)) at
+    // each event time (Breslow's), the baseline survival the product over event
+    // times up to t of the factors a_j that solve the likelihood equation
+    // sum over the events at t_j of r / (1 - a^r) = sum over the risk set of r
+    // (a_j = (1 - r / sum r)^(1 / r) for one event; Kalbfleisch and Prentice's
+    // product limit, which Stata's predict, basesurv gives), and then
+    // S(t | x) = S0(t)^exp(xb); with no values given, survfit sets a factor to
+    // its first level and a number to its mean
+    define(
+        &mut e,
+        "cox_surv <- function(m, x, at) { r <- as.vector(exp(X %*% coef(m))); \
+           tt <- sort(unique(dc$time[dc$died == 1])); \
+           alpha <- vapply(tt, function(t) { D <- dc$time == t & dc$died == 1; R <- dc$time >= t; \
+             if (sum(D) == 1) (1 - r[D] / sum(r[R]))^(1 / r[D]) \
+             else uniroot(function(a) sum(r[D] / (1 - a^r[D])) - sum(r[R]), \
+                          c(1e-12, 1 - 1e-12), tol = 1e-14)$root }, 0); \
+           vapply(at, function(a) exp(sum(log(alpha[tt <= a])) * exp(sum(coef(m) * x))), 0) }; \
+         ts <- c(10, 20, 30, 40); xref <- c(0, mean(X[, 2])); \
+         surv_at <- function(f) as.vector(summary(f, times = ts)$surv)",
+    );
+    holds(
+        &mut e,
+        &[
+            same("surv_at(c1)", "cox_surv(cb, c(1, 50), ts)"),
+            same("surv_at(c2)", "cox_surv(cb, xref, ts)"),
+            // curves for two values of each predictor, one per row of values
+            "identical(dim(c4$surv)[2], 2L)".to_string(),
+            same(
+                "summary(c4, times = 20)$surv[1, ]",
+                "c(cox_surv(cb, c(0, 40), 20), cox_surv(cb, c(1, 60), 20))",
+            ),
+            // Stata 19: stcox armb age, breslow; predict bs, basesurv; at the
+            // last bs at or before each time, bs^exp(xb) for armb = 1, age = 50
+            // and for armb = 0 at the mean age (what survfit gives without values)
+            within(
+                "surv_at(c1)",
+                "c(.97502622070734, .86145734539009, .651790904025156, .374152445685131)",
+                "1e-8",
+            ),
+            within(
+                "surv_at(c2)",
+                "c(.917511980656725, .601918105236976, .232932078228056, .0352101687582811)",
+                "1e-8",
+            ),
+            // the same with exactp ties
+            within(
+                "surv_at(c3)",
+                "c(.975676242432655, .86473280436271, .658331995816286, .379456865751947)",
+                "1e-8",
+            ),
+        ],
+    );
+}
+
+#[test]
+fn time_varying_covariates_match_stsplit() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    versions(&mut e);
+    let fit = |e: &mut Engine, extra: &[(&str, &str)], lists: &[(&str, &[&str])]| {
+        let mut set = vec![("time", "time"), ("event", "died"), ("ties", "breslow")];
+        set.extend_from_slice(extra);
+        let (outcome, text, _) = dialog(e, &COX, &set, lists, &[]);
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    };
+    fit(&mut e, &[("save", "cb")], &[("x", &["arm", "age"])]);
+    fit(
+        &mut e,
+        &[("split", "10, 20"), ("save", "csp")],
+        &[("x", &["arm", "age"])],
+    );
+    fit(
+        &mut e,
+        &[("split", "10, 20"), ("save", "cv")],
+        &[("x", &["arm", "age"]), ("varying", &["age"])],
+    );
+    let both = |m: &str| format!("c(coef({m}), sqrt(diag(vcov({m}))))");
+    holds(
+        &mut e,
+        &[
+            // 105 rows once cut at 10 and 20 (Stata's stsplit, at(10 20)), with
+            // the interval as a factor of 1, 2 and 3
+            "nrow(split_data) == 105".to_string(),
+            "identical(levels(split_data$interval), c('1', '2', '3'))".to_string(),
+            // cutting changes nothing for a model with no interval terms
+            same(&both("csp"), &both("cb")),
+            // Stata 19: stset time, failure(died) id(rowid); stcox armb age,
+            // breslow, before and after stsplit period, at(10 20)
+            same(
+                &both("csp"),
+                "c(-1.28409462670782, -.0136226053651508, .430014463307847, .0209238027223065)",
+            ),
+            // Stata 19: stcox armb c.age#i.period, breslow after the split
+            within(
+                &both("cv"),
+                "c(-1.29993547069813, .00118221607062002, -.0583060611772343, \
+                   .0013359962378508, .429569033962738, .0820610186282193, \
+                   .0436045091332839, .0253027541269418)",
+                "1e-8",
+            ),
+        ],
+    );
+    // the start, stop input: the cut rows fitted as they are, through the
+    // start time box, are the same model
+    let columns = [
+        ("tstart", VarKind::Number),
+        ("time", VarKind::Number),
+        ("died", VarKind::Number),
+        ("arm", VarKind::Factor),
+        ("age", VarKind::Number),
+    ];
+    let (outcome, text) = dialog_on(
+        &mut e,
+        "split_data",
+        &columns,
+        &COX,
+        &[
+            ("time", "time"),
+            ("event", "died"),
+            ("entry", "tstart"),
+            ("ties", "breslow"),
+            ("save", "css"),
+        ],
+        &[("x", &["arm", "age"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "identical(attr(css$y, 'type'), 'counting')".to_string(),
+            same(&both("css"), &both("csp")),
+        ],
+    );
+}
+
+#[test]
+fn survival_models_have_the_model_menu() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    versions(&mut e);
+    for class in ["coxph", "survreg"] {
+        assert!(postest::is_model_class(class), "{class}");
+        let entries: Vec<&str> = postest::model_specs(class)
+            .iter()
+            .map(|s| s.entry)
+            .collect();
+        assert_eq!(entries, ["Model fit", "Compare models"], "{class}");
+    }
+    let fit = |e: &mut Engine, save: &str, x: &[&str]| {
+        let (outcome, text, _) = dialog(
+            e,
+            &COX,
+            &[
+                ("time", "time"),
+                ("event", "died"),
+                ("ties", "efron"),
+                ("save", save),
+            ],
+            &[("x", x)],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    };
+    fit(&mut e, "cb", &["arm", "age"]);
+    fit(&mut e, "cage", &["age"]);
+    let (outcome, text, _) = dialog(
+        &mut e,
+        &PARAMETRIC,
+        &[("time", "time"), ("event", "died"), ("save", "aft")],
+        &[("x", &["arm", "age"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    // Model fit on a Cox model: the rows used and the events, and the
+    // log-likelihood, which is Stata's e(ll) (stcox armb age, efron)
+    let (outcome, text) = dialog_on(&mut e, "cb", &[], &MODEL_FIT, &[], &[], &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Observations: 38") && text.contains("Events: 33") && text.contains("logLik"),
+        "{text}"
+    );
+    // Model fit on a Weibull model: survreg's log-likelihood is on the log-time
+    // scale, Stata streg's adds the log of each event time
+    let (outcome, text) = dialog_on(&mut e, "aft", &[], &MODEL_FIT, &[], &[], &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Observations: 38")
+            && text.contains("Log-likelihood on the time scale (as Stata reports it)"),
+        "{text}"
+    );
+    // Compare models: the Cox model against its sub-model, with the
+    // likelihood-ratio test
+    let (outcome, text) = dialog_on(
+        &mut e,
+        "cb",
+        &[],
+        &COMPARE_MODELS,
+        &[("others", "cage")],
+        &[],
+        &["nested"],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("AIC") && text.contains("Chisq"), "{text}");
+    holds(
+        &mut e,
+        &[
+            // Stata 19: stcox armb age, efron: e(ll); stcox age, efron: e(ll)
+            same("as.numeric(logLik(cb))", "-85.8986670222571"),
+            same("as.numeric(logLik(cage))", "-90.8194063452229"),
+            same(
+                "anova(cb, cage)$Chisq[2]",
+                "2 * (-85.8986670222571 - -90.8194063452229)",
+            ),
+            // Stata 19: streg armb age, d(weibull) time: e(ll)
+            same(
+                "as.numeric(logLik(aft)) + sum(log(aft$y[aft$y[, 2] == 1, 1]))",
+                "-23.9688007745029",
             ),
         ],
     );

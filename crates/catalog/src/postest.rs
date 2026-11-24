@@ -12,7 +12,8 @@ use crate::data::BASE;
 
 /// The first class names of R objects these dialogs are offered on.
 pub const MODEL_CLASSES: &[&str] = &[
-    "lm", "glm", "aov", "negbin", "polr", "multinom", "plm", "pgmm", "fixest", "svyglm",
+    "lm", "glm", "aov", "negbin", "polr", "multinom", "plm", "pgmm", "fixest", "svyglm", "coxph",
+    "survreg",
 ];
 
 /// Whether an object whose first class is `class` is a model these dialogs take.
@@ -36,6 +37,9 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         "plm" | "fixest" => vec![&MODEL_FIT, &ROBUST],
         // a survey model has no likelihood, so no comparison, AIC or diagnostics
         "svyglm" => vec![&MODEL_FIT, &TEST_TERMS, &PREDICTED],
+        // a survival model has a likelihood, but no residual or diagnostic
+        // the other dialogs know: its fit and its comparison with another
+        "coxph" | "survreg" => vec![&MODEL_FIT, &COMPARE_MODELS],
         _ => MODEL_SPECS.to_vec(),
     }
 }
@@ -56,7 +60,9 @@ pub const MODEL_FIT: Spec = Spec {
     about: "Number of observations, log-likelihood, AIC and BIC, with R-squared for a linear \
             model and the deviance for a generalised linear model. A plm panel model has no \
             likelihood: it shows the observations and its R-squared; a pgmm model, the \
-            observations.",
+            observations. A Cox model also shows its events; a parametric survival model its \
+            log-likelihood both as survreg gives it (on the log-time scale) and as Stata reports \
+            it, so AIC and BIC compare only with other survreg models.",
     widgets: &[],
     needs: &[],
     styles: BASE,
@@ -64,7 +70,9 @@ pub const MODEL_FIT: Spec = Spec {
     code: |a, _| {
         let m = a.data();
         format!(
-            "(function(m) {{\n  cat(\"Observations: \", stats::nobs(m), \"\\n\", sep = \"\")\n  \
+            "(function(m) {{\n  cat(\"Observations: \", if (inherits(m, \"coxph\")) m$n else stats::nobs(m), \
+             \"\\n\", sep = \"\")\n  \
+             if (inherits(m, \"coxph\")) cat(\"Events: \", m$nevent, \"\\n\", sep = \"\")\n  \
              if (inherits(m, c(\"plm\", \"pgmm\"))) {{\n    \
              if (inherits(m, \"plm\")) {{\n      cat(\"\\nR-squared\\n\")\n      \
              print(summary(m)$r.squared)\n    }}\n    return(invisible(NULL))\n  }}\n  \
@@ -76,6 +84,9 @@ pub const MODEL_FIT: Spec = Spec {
              ll <- stats::logLik(m)\n  \
              print(c(logLik = as.numeric(ll), df = attr(ll, \"df\"), AIC = stats::AIC(m), \
              BIC = stats::BIC(m)))\n  \
+             if (inherits(m, \"survreg\") && m$dist %in% c(\"weibull\", \"exponential\", \"lognormal\", \"loglogistic\")) {{\n    \
+             cat(\"\\nLog-likelihood on the time scale (as Stata reports it): \", \
+             format(as.numeric(ll) + sum(log(m$y[m$y[, 2] == 1, 1])), digits = 10), \"\\n\", sep = \"\")\n  }}\n  \
              if (inherits(m, \"glm\")) {{\n    cat(\"\\nDeviance\\n\")\n    \
              print(c(null = m$null.deviance, residual = m$deviance))\n  }} else if (inherits(m, \"lm\")) {{\n    \
              s <- stats::summary.lm(m)\n    cat(\"\\nR-squared\\n\")\n    \
