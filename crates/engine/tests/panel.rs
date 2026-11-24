@@ -847,7 +847,12 @@ fn dialog2(
     let ctx = panel_context();
     let mut values = spec.defaults(&ctx);
     for (id, text) in set {
-        values.set_text(id, *text);
+        // "true" and "false" set a tick box
+        match *text {
+            "true" => values.set_flag(id, true),
+            "false" => values.set_flag(id, false),
+            _ => values.set_text(id, *text),
+        }
     }
     for (id, names) in lists {
         values.set_list(id, names.iter().map(|n| n.to_string()).collect());
@@ -862,8 +867,9 @@ fn number_after(text: &str, label: &str) -> f64 {
     text.split(label)
         .nth(1)
         .and_then(|rest| {
+            // the number may wrap onto the next line
             rest.split(|c: char| c == ',' || c.is_whitespace())
-                .next()
+                .find(|n| !n.is_empty())
                 .and_then(|n| n.parse::<f64>().ok())
         })
         .unwrap_or(f64::NAN)
@@ -916,10 +922,65 @@ fn dynamic_panel_matches_xtabond() {
     assert_eq!(outcome, Outcome::Ok, "{text}");
     assert!(
         text.contains("One-step model Difference GMM")
-            && text.contains("Sargan test: not shown after one step")
+            && text.contains("Sargan test: not available with robust errors")
             && !text.contains("Sargan test: chisq"),
         "{text}"
     );
+    // one step, conventional errors: scaled as xtabond does, with Sargan's test
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("steps", "onestep"),
+            ("errors", "conventional"),
+            ("save", "ab5"),
+        ],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Sargan test: chisq(14) = 10.5625"),
+        "Sargan: {text}"
+    );
+    // time effects, one and two steps (Stata: year dummies from the third year on)
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("steps", "onestep"),
+            ("errors", "conventional"),
+            ("twoways", "true"),
+            ("save", "ab6"),
+        ],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("Sargan test: chisq(14) = 10.16001"),
+        "Sargan: {text}"
+    );
+    let (outcome, text) = dialog2(
+        &mut e,
+        DYNAMIC,
+        &DYNAMIC_PANEL,
+        &[
+            ("y", "y"),
+            ("id", "id"),
+            ("time", "year"),
+            ("twoways", "true"),
+            ("save", "ab7"),
+        ],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
     // two steps, conventional errors
     let (outcome, text) = dialog2(
         &mut e,
@@ -1001,6 +1062,32 @@ fn dynamic_panel_matches_xtabond() {
                    plm::mtest(ab4, order = 3, vcov = plm::vcovHC(ab4))$statistic)",
                 "c(-1.32565721023591, -.729466985882428, .216673661584872)",
             ),
+            // xtabond y x, lags(1) noconstant: one step, conventional errors (the saved
+            // model carries the scaled covariance); Sargan's chi2 is in the printed text
+            same(
+                "c(ab5$vcov)",
+                "c(.035193643894173, .00693687642346718, .00693687642346718, \
+                   .00628375847283977)",
+            ),
+            // xtabond y x yr3-yr7, lags(1) noconstant, with year dummies for the third year on
+            same(
+                "coef(ab6)",
+                "c(.142542005667952, .300211523820986, .195670156505416, .100696544800044, \
+                   .340551747032089, .236351445807019, .206483388486004)",
+            ),
+            // the same, twostep vce(robust): coefficients, errors (Stata prints eight
+            // digits) and, with conventional errors, Sargan's chi2
+            same(
+                "coef(ab7)",
+                "c(.0893352382136159, .251276495595191, .275014673138745, .269835797372983, \
+                   .385626356809703, .423973555904867, .342488882982881)",
+            ),
+            within(
+                "summary(ab7, robust = TRUE, time.dummies = TRUE)$coefficients[1:3, 2]",
+                "c(.21212195, .07890934, .23943749)",
+                "1e-7",
+            ),
+            within("plm::sargan(ab7)$statistic", "11.0376356245242", "1e-9"),
         ],
     );
     // the package's own report for the call written out by hand
@@ -1099,6 +1186,135 @@ fn panel_iv_matches_xtivreg() {
             ),
         ],
     );
+    // the within fit prints its constant and errors as xtivreg, fe (Stata prints 7 digits)
+    let (outcome, text) = dialog2(
+        &mut e,
+        INSTRUMENTED,
+        &PANEL_IV,
+        &[("y", "y"), ("id", "id"), ("time", "year"), ("save", "fe")],
+        lists,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    close(&text, "(Intercept)", &[1.00149985867962, 0.0790255], "fe");
+    close(&text, "x2", &[0.758761826220583, 0.0915385], "fe");
+    close(&text, "x1", &[0.58494433324006, 0.0884147], "fe");
+    // xtivreg ..., fe vce(robust)
+    #[allow(clippy::type_complexity)]
+    let cases: &[(&str, &[(&str, &[f64])])] = &[
+        (
+            "within",
+            &[
+                ("(Intercept)", &[1.00149985867962, 0.0161366]),
+                ("x2", &[0.758761826220583, 0.0884285]),
+                ("x1", &[0.58494433324006, 0.0846966]),
+            ],
+        ),
+        // xtivreg, re vce(robust)
+        (
+            "random",
+            &[
+                ("(Intercept)", &[0.972277921898638, 0.1660547]),
+                ("x2", &[0.860827501504644, 0.0840035]),
+                ("x1", &[0.791934204721017, 0.0734298]),
+            ],
+        ),
+        // xtivreg, fd vce(robust)
+        (
+            "fd",
+            &[
+                ("(Intercept)", &[0.0770060514806601, 0.0498091]),
+                ("x2", &[0.827191656214664, 0.1389746]),
+                ("x1", &[0.545360012042538, 0.1058732]),
+            ],
+        ),
+    ];
+    for (model, rows) in cases {
+        let (outcome, text) = dialog2(
+            &mut e,
+            INSTRUMENTED,
+            &PANEL_IV,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("model", model),
+                ("errors", "robust"),
+                ("save", "iv"),
+            ],
+            lists,
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert!(text.contains("robust to clustering"), "{text}");
+        for (name, want) in *rows {
+            close(&text, name, want, model);
+        }
+    }
+    // the other estimators: coefficients and conventional covariance as xtivreg
+    for (model, save) in [("ec2sls", "ec"), ("between", "be"), ("fd", "fdm")] {
+        let (outcome, text) = dialog2(
+            &mut e,
+            INSTRUMENTED,
+            &PANEL_IV,
+            &[
+                ("y", "y"),
+                ("id", "id"),
+                ("time", "year"),
+                ("model", model),
+                ("save", save),
+            ],
+            lists,
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    }
+    all_hold(
+        &mut e,
+        &[
+            // xtivreg y x1 (x2 = z1 z2), re ec2sls
+            same(
+                "c(coef(ec)[c('x2', 'x1', '(Intercept)')], diag(vcov(ec))[c('x2', 'x1')])",
+                "c(.897526784063384, .782649306376429, .966618539048477, \
+                   .00835662234849417, .00732571742861951)",
+            ),
+            // xtivreg y x1 (x2 = z1 z2), be
+            same(
+                "c(coef(be)[c('x2', 'x1', '(Intercept)')], diag(vcov(be))[c('x2', 'x1')])",
+                "c(1.21087343188245, 1.40732952738044, .877530550247329, \
+                   .10337028288164, .0688323776445410)",
+            ),
+            // xtivreg y x1 (x2 = z1 z2), fd
+            same(
+                "c(coef(fdm)[c('x2', 'x1', '(Intercept)')], diag(vcov(fdm))[c('x2', 'x1')])",
+                "c(.827191656214664, .545360012042538, .0770060514806601, \
+                   .0132349206450006, .00884423125922785)",
+            ),
+        ],
+    );
+}
+
+/// The numbers in the last line of `text` that starts with `name`, against `want` to the
+/// precision Stata prints (seven digits).
+fn close(text: &str, name: &str, want: &[f64], what: &str) {
+    let line = text
+        .lines()
+        .rev()
+        .find(|l| {
+            l.trim_start().starts_with(name)
+                && l.trim_start()[name.len()..].starts_with(char::is_whitespace)
+        })
+        .unwrap_or_default();
+    assert!(!line.is_empty(), "{what}: no line for {name} in {text}");
+    let got: Vec<f64> = line.trim_start()[name.len()..]
+        .split_whitespace()
+        .map_while(|t| t.parse::<f64>().ok())
+        .collect();
+    for (i, w) in want.iter().enumerate() {
+        let g = got.get(i).copied().unwrap_or(f64::NAN);
+        assert!(
+            // Stata's rounding to seven decimals, plus ours to eight
+            (g - w).abs() <= 6e-8,
+            "{what} {name}[{i}]: {g} against {w} in {text}"
+        );
+    }
 }
 
 #[test]
@@ -1193,28 +1409,156 @@ fn panel_unit_root_matches_xtunitroot() {
             "T=12 {var} {terms} lags {lags}: {z} against Stata's {stata}\n{text}"
         );
     }
-    // Im-Pesaran-Shin: its W-t-bar, standardised with plm's moments, against
-    // xtunitroot ips (W-t-bar -2.9180 for y with a mean and one lag): the
-    // statistics differ a little (the known gap; plan/small-fixes.md)
+    // Im-Pesaran-Shin against xtunitroot ips (r(wtbar), full precision): 20 periods (a row of
+    // Im, Pesaran and Shin's table) and 12 and 17 (interpolated between rows), lags 0 to 2,
+    // with a mean and with a trend
+    let cases: &[(&str, &str, &str, &str, f64, f64)] = &[
+        (
+            "20",
+            "y",
+            "intercept",
+            "0",
+            -3.82739432576606,
+            0.0000647534772242604,
+        ),
+        (
+            "20",
+            "y",
+            "trend",
+            "0",
+            -1.72346054853421,
+            0.0424026367904158,
+        ),
+        (
+            "20",
+            "y",
+            "intercept",
+            "1",
+            -2.9179597213464,
+            0.00176164929170244,
+        ),
+        (
+            "20",
+            "y",
+            "trend",
+            "1",
+            -0.421777644662236,
+            0.336593662279301,
+        ),
+        (
+            "20",
+            "y",
+            "intercept",
+            "2",
+            -1.97419311432543,
+            0.0241798943290245,
+        ),
+        (
+            "20",
+            "y",
+            "trend",
+            "2",
+            0.0888250664915501,
+            0.535389531876127,
+        ),
+        (
+            "20",
+            "w",
+            "intercept",
+            "0",
+            -0.665604610360997,
+            0.252831929388633,
+        ),
+        ("20", "w", "trend", "1", 1.0979915265432, 0.863895905332549),
+        (
+            "12",
+            "y",
+            "intercept",
+            "0",
+            -2.4643131959396,
+            0.00686380498886545,
+        ),
+        ("12", "y", "trend", "0", -1.0079571211219, 0.15673752376996),
+        (
+            "12",
+            "y",
+            "intercept",
+            "1",
+            -1.18096252901726,
+            0.118808804621812,
+        ),
+        (
+            "12",
+            "w",
+            "trend",
+            "2",
+            -0.836985645048165,
+            0.201300318501414,
+        ),
+        (
+            "17",
+            "y",
+            "intercept",
+            "1",
+            -2.30809922038445,
+            0.0104968092723945,
+        ),
+        ("17", "y", "trend", "2", 1.50207476602164, 0.933461099532602),
+        (
+            "17",
+            "w",
+            "intercept",
+            "2",
+            0.118458198910033,
+            0.547147692864282,
+        ),
+    ];
+    for (periods, var, terms, lags, stata_w, stata_p) in cases {
+        let data = format!("{ROOTS}; d <- d[d$year <= {periods}, ]");
+        let (outcome, text) = dialog2(
+            &mut e,
+            &data,
+            &PANEL_UNIT_ROOT,
+            &[
+                ("var", var),
+                ("id", "id"),
+                ("time", "year"),
+                ("test", "ips"),
+                ("terms", terms),
+                ("lags", lags),
+            ],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert!(text.contains("Im-Pesaran-Shin"), "{text}");
+        // the printed statistic has four decimals, as Stata's
+        let w = number_after(&text, "W-t-bar = ");
+        assert!(
+            (w - stata_w).abs() < 1e-4,
+            "T={periods} {var} {terms} lags {lags}: W-t-bar {w} against Stata's {stata_w}\n{text}"
+        );
+        let p = number_after(&text, "p-value =");
+        assert!(
+            (p - stata_p).abs() < 1e-3 * stata_p,
+            "T={periods} {var} {terms} lags {lags}: p {p} against Stata's {stata_p}\n{text}"
+        );
+    }
+    // too few periods for the lags: refused, not run
     let (outcome, text) = dialog2(
         &mut e,
-        ROOTS,
+        &format!("{ROOTS}; d <- d[d$year <= 8, ]"),
         &PANEL_UNIT_ROOT,
         &[
             ("var", "y"),
             ("id", "id"),
             ("time", "year"),
             ("test", "ips"),
+            ("lags", "4"),
         ],
         &[],
     );
-    assert_eq!(outcome, Outcome::Ok, "{text}");
-    assert!(text.contains("Im-Pesaran-Shin"), "{text}");
-    let w = number_after(&text, "Wtbar = ");
-    assert!(
-        (w - -2.9180).abs() < 0.05,
-        "W-t-bar {w} against Stata's -2.9180\n{text}"
-    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("too few periods"), "{text}");
     // an unbalanced panel is refused, not run
     let (outcome, text) = dialog2(
         &mut e,
