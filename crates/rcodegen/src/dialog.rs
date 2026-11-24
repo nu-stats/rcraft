@@ -110,6 +110,9 @@ pub enum TextRule {
     /// The path of a file to write; must not be empty. The window offers a
     /// Browse button that opens the system's save dialog.
     SavePath,
+    /// Anything, on several lines (the window gives a taller box); used for a
+    /// list with one entry per line. May be empty.
+    Lines,
 }
 
 /// One option of a [`Widget::Choice`]: the value code functions see, and the
@@ -482,7 +485,7 @@ fn widget_problem(w: &Widget, ctx: &Context, values: &Values) -> Option<Problem>
         } => {
             let text = values.text(id);
             match rule {
-                TextRule::Any => None,
+                TextRule::Any | TextRule::Lines => None,
                 TextRule::Name => {
                     let name = text.trim();
                     if name.is_empty() {

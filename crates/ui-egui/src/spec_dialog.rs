@@ -502,6 +502,17 @@ fn widget_row(
                     }
                 });
             }
+            Widget::Text {
+                id,
+                rule: TextRule::Lines,
+                ..
+            } => {
+                ui.add(
+                    egui::TextEdit::multiline(open.values.text_mut(id))
+                        .desired_rows(4)
+                        .desired_width(320.0),
+                );
+            }
             Widget::Text { id, .. } => {
                 ui.add(egui::TextEdit::singleline(open.values.text_mut(id)).desired_width(320.0));
             }
