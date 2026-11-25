@@ -643,44 +643,86 @@ pub const TMB_MIXED: Spec = Spec {
 
 // ---- Intraclass correlation ----
 
+/// The intraclass correlation's R, with `@MODEL@` for the fitted model. The
+/// table has one row for each level, outermost first, each level's
+/// correlation adding the levels above it. Its standard errors come from the
+/// delta method on the covariance of the variance parameters, the inverse of
+/// half the Hessian of lme4's own deviance function (profiled over the
+/// coefficients and the residual variance for a linear model, over nothing
+/// for a logistic one), and its interval is the 95% one on the logit scale,
+/// as Stata's estat icc.
+const ICC_R: &str = r#"(function(m) {
+  stopifnot("this works for models fitted by lmer or glmer" = inherits(m, "merMod"))
+  glm <- inherits(m, "glmerMod")
+  resid <- if (!glm) stats::sigma(m)^2 else {
+    f <- stats::family(m)
+    if (f$family == "binomial" && f$link == "logit") pi^2 / 3 else
+    if (f$family == "binomial" && f$link == "probit") 1 else
+    stop("the intraclass correlation is defined for linear, logistic and probit models")
+  }
+  v <- as.data.frame(lme4::VarCorr(m))
+  v <- v[v$grp != "Residual" & v$var1 == "(Intercept)" & is.na(v$var2), ]
+  stopifnot("the model needs a random intercept" = nrow(v) > 0)
+  parts <- strsplit(v$grp, ":", fixed = TRUE)
+  v <- v[order(lengths(parts)), ]
+  parts <- parts[order(lengths(parts))]
+  nested <- all(vapply(seq_along(parts), function(i) length(parts[[i]]) == i &&
+    (i == 1 || identical(parts[[i]][seq_len(i - 1)], parts[[i - 1]])), logical(1)))
+  stopifnot("crossed groups have no intraclass correlation" = nested)
+  inner <- vapply(parts, function(p) p[length(p)], "")
+  level <- vapply(seq_along(inner), function(i) paste(inner[seq_len(i)], collapse = ">"), "")
+  out <- data.frame(level = level, variance = v$vcov, icc = cumsum(v$vcov) / (sum(v$vcov) + resid))
+  err <- tryCatch({
+    cn <- lme4::getME(m, "cnms"); th <- lme4::getME(m, "theta")
+    size <- vapply(cn, function(x) length(x) * (length(x) + 1) / 2, 1)
+    first <- cumsum(c(1, size))[seq_along(cn)]
+    isint <- vapply(cn, function(x) x[1] == "(Intercept)", TRUE)
+    idx <- first[isint][order(lengths(strsplit(sub("\\.[0-9]+$", "", names(cn)[isint]), ":", fixed = TRUE)))]
+    devfun <- stats::update(m, devFunOnly = TRUE)
+    dv <- function(p) do.call(devfun, list(p))
+    p0 <- if (glm) c(th, lme4::getME(m, "beta")) else th
+    r0 <- if (glm) resid else 1
+    n <- length(p0); H <- matrix(0, n, n)
+    for (i in seq_len(n)) for (j in i:n) {
+      hi <- 3e-3 * max(1, abs(p0[i])); hj <- 3e-3 * max(1, abs(p0[j]))
+      ei <- replace(numeric(n), i, hi); ej <- replace(numeric(n), j, hj)
+      H[i, j] <- H[j, i] <- (dv(p0 + ei + ej) - dv(p0 + ei - ej) - dv(p0 - ei + ej) + dv(p0 - ei - ej)) / (4 * hi * hj)
+    }
+    V <- solve(H / 2)[seq_along(th), seq_along(th), drop = FALSE]
+    g <- function(t) cumsum(t[idx]^2) / (sum(t[idx]^2) + r0)
+    J <- matrix(vapply(seq_along(th), function(j) {
+      e <- replace(numeric(length(th)), j, 1e-6); (g(th + e) - g(th - e)) / 2e-6 }, numeric(length(idx))),
+      nrow = length(idx))
+    se <- sqrt(diag(J %*% V %*% t(J)))
+    stopifnot(all(is.finite(se)))
+    w <- stats::qnorm(0.975) * se / (out$icc * (1 - out$icc))
+    cbind(std.err = se, lower95 = stats::plogis(stats::qlogis(out$icc) - w),
+          upper95 = stats::plogis(stats::qlogis(out$icc) + w))
+  }, error = function(e) NULL)
+  cat("Residual variance: ", format(resid, digits = 10), "\n\n", sep = "")
+  if (is.null(err)) {
+    print(out)
+    cat("\nStandard errors need the model's data frame, as it was when the model was fitted.\n")
+  } else print(cbind(out, err))
+  invisible(NULL)
+})(@MODEL@)"#;
+
 pub const ICC: Spec = Spec {
     entry: "Intraclass correlation",
     menu: "Objects > Model > Intraclass correlation",
     about: "How alike two rows of the same group are: the variance of the group intercepts over \
             their sum with the residual variance, from a model fitted by lmer or glmer, as \
-            Stata's estat icc. For a logistic model the residual variance is pi^2/3 (the \
-            variance of the logistic latent variable), for a probit model 1. With nested levels \
-            each level's correlation adds the levels above it; random slopes are left out of it \
-            (the correlation where the slopes' variables are zero). Crossed groups and models \
-            for counts have none.",
+            Stata's estat icc, with its standard error and 95% interval (from the delta method; \
+            the interval on the logit scale). For a logistic model the residual variance is \
+            pi^2/3 (the variance of the logistic latent variable), for a probit model 1. With \
+            nested levels each level's correlation adds the levels above it; random slopes are \
+            left out of it (the correlation where the slopes' variables are zero). Crossed groups \
+            and models for counts have none.",
     widgets: &[],
     needs: &[],
     styles: BASE,
     check: |_| Vec::new(),
-    code: |a, _| {
-        let m = a.data();
-        format!(
-            "(function(m) {{\n  \
-             stopifnot(\"this works for models fitted by lmer or glmer\" = inherits(m, \"merMod\"))\n  \
-             resid <- if (!inherits(m, \"glmerMod\")) stats::sigma(m)^2 else {{\n    \
-             f <- stats::family(m)\n    \
-             if (f$family == \"binomial\" && f$link == \"logit\") pi^2 / 3 else \
-             if (f$family == \"binomial\" && f$link == \"probit\") 1 else \
-             stop(\"the intraclass correlation is defined for linear, logistic and probit models\")\n  }}\n  \
-             v <- as.data.frame(lme4::VarCorr(m))\n  \
-             v <- v[v$grp != \"Residual\" & v$var1 == \"(Intercept)\" & is.na(v$var2), ]\n  \
-             parts <- strsplit(v$grp, \":\", fixed = TRUE)\n  \
-             v <- v[order(lengths(parts)), ]\n  parts <- parts[order(lengths(parts))]\n  \
-             nested <- all(vapply(seq_along(parts), function(i) length(parts[[i]]) == i && \
-             (i == 1 || identical(parts[[i]][seq_len(i - 1)], parts[[i - 1]])), logical(1)))\n  \
-             stopifnot(\"crossed groups have no intraclass correlation\" = nested)\n  \
-             inner <- vapply(parts, function(p) p[length(p)], \"\")\n  \
-             level <- vapply(seq_along(inner), function(i) paste(inner[seq_len(i)], collapse = \">\"), \"\")\n  \
-             cat(\"Residual variance: \", format(resid, digits = 10), \"\\n\\n\", sep = \"\")\n  \
-             print(data.frame(level = level, variance = v$vcov, icc = cumsum(v$vcov) / (sum(v$vcov) + resid)))\n  \
-             invisible(NULL)\n}})({m})"
-        )
-    },
+    code: |a, _| ICC_R.replace("@MODEL@", &a.data()),
 };
 
 pub const SPECS: &[&Spec] = &[&LINEAR_MIXED, &GENERALIZED_MIXED, &TMB_MIXED];
