@@ -479,6 +479,10 @@ pub const SPECS: &[&Spec] = &[
     &multilevel::TMB_MIXED,
     &timeseries::ARIMA,
     &timeseries::AUTOCORRELATIONS,
+    &timeseries::UNIT_ROOT,
+    &timeseries::SMOOTHING,
+    &timeseries::VAR,
+    &timeseries::TS_PLOT,
 ];
 
 #[cfg(test)]
