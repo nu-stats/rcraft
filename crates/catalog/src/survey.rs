@@ -110,7 +110,8 @@ const FPC2: Widget = Widget::Variable {
     kinds: NUMBERS,
     required: false,
     hint: "Optional: the number of secondary units in each primary unit's population (or the \
-           sampling fraction). Give both corrections or neither.",
+           sampling fraction). Without it the second stage counts as drawn from an infinite \
+           population, as Stata takes it.",
 };
 
 const METHODS: &[Opt] = &[
@@ -127,10 +128,43 @@ const METHODS: &[Opt] = &[
         label: "Replicate weights: delete-one jackknife (JK1)",
     },
     Opt {
+        value: "JKn",
+        label: "Replicate weights: stratified jackknife (JKn)",
+    },
+    Opt {
         value: "bootstrap",
         label: "Replicate weights: bootstrap",
     },
+    Opt {
+        value: "BRRdesign",
+        label: "Replicates built from the strata and clusters: BRR (or Fay)",
+    },
+    Opt {
+        value: "JKndesign",
+        label: "Replicates built from the strata and clusters: jackknife (JKn)",
+    },
 ];
+
+const JKMULT: Widget = Widget::Text {
+    id: "jkmult",
+    label: "Jackknife multipliers (JKn)",
+    default: TextDefault::Empty,
+    rule: TextRule::Any,
+    hint: "Optional, with JKn replicate weights: one number for every replicate, or one per \
+           replicate separated by commas, such as (n - 1) / n for a stratum of n replicates \
+           (Stata's jkrweight(, multiplier())). Empty: (R - 1) / R for R replicates, Stata's \
+           default.",
+};
+
+const JKSTRATA: Widget = Widget::Text {
+    id: "jkstrata",
+    label: "Stratum of each replicate (JKn)",
+    default: TextDefault::Empty,
+    rule: TextRule::Any,
+    hint: "Optional, with JKn replicate weights: one stratum number per replicate, separated by \
+           commas (Stata's jkrweight(, stratum())). It sets the design's degrees of freedom: \
+           the replicates less the strata.",
+};
 
 const METHOD: Widget = Widget::Choice {
     id: "method",
@@ -139,7 +173,10 @@ const METHOD: Widget = Widget::Choice {
     default: "taylor",
     hint: "Replicate weights replace the strata, clusters and corrections: choose their columns \
            below. The bootstrap's variance divides by the number of replicates, as Stata's \
-           bsrweight does, and its intervals use the normal distribution.",
+           bsrweight does, and its intervals use the normal distribution. JKn weights and the \
+           jackknife built from the design are centred on the full-sample estimate (Stata's \
+           svy jackknife, mse). BRR built from the design uses survey's Hadamard matrix, \
+           so it equals Stata's svy brr given that matrix in hadamard().",
 };
 
 const REPWEIGHTS: Widget = Widget::Variables {
@@ -147,7 +184,8 @@ const REPWEIGHTS: Widget = Widget::Variables {
     label: "Replicate weights",
     kinds: NUMBERS,
     min: 0,
-    hint: "With BRR, JK1 or bootstrap: the columns holding one full weight per replicate (each \
+    hint:
+        "With BRR, JK1, JKn or bootstrap: the columns holding one full weight per replicate (each \
            already includes the sampling weight, as Stata's brrweight, jkrweight and bsrweight \
            take them). Leave empty for linearisation.",
 };
@@ -157,7 +195,8 @@ const FAY: Widget = Widget::Text {
     label: "Fay's coefficient (BRR)",
     default: TextDefault::Fixed("0"),
     rule: TextRule::Number,
-    hint: "0 for plain BRR; between 0 and 1 for Fay's method (Stata's fay()).",
+    hint: "0 for plain BRR; between 0 and 1 for Fay's method (Stata's fay()), with BRR \
+           weights or BRR built from the design.",
 };
 
 const SUBPOP: Widget = Widget::Text {
@@ -179,9 +218,16 @@ const SAVE_DESIGN: Widget = Widget::Text {
            calls; a name already in use is replaced.",
 };
 
-/// Whether the standard errors come from replicate weights.
+/// Whether the standard errors come from replicates (weights given, or built
+/// from the strata and clusters).
 fn is_replicate(a: &Args) -> bool {
     a.choice("method") != "taylor"
+}
+
+/// Whether the replicates are built from the strata and clusters
+/// (`as.svrepdesign`) rather than given as replicate-weight columns.
+fn from_design(a: &Args) -> bool {
+    matches!(a.choice("method"), "BRRdesign" | "JKndesign")
 }
 
 /// The data the design is built on: the data frame, or, with a second stage,
@@ -206,24 +252,118 @@ fn design_data(a: &Args, analysed: &[&str]) -> String {
     )
 }
 
-/// `design <- survey::svydesign(...)` (or `svrepdesign`), then the
-/// subpopulation: the design every dialog starts from.
+/// The `survey::svydesign(...)` call of the strata, clusters and corrections.
+/// A first-stage correction without a second-stage one takes the second stage
+/// as sampled from an infinite population (Stata's `svyset psu, fpc() || ssu`).
+fn svydesign_call(a: &Args, data: &str) -> String {
+    let weights = a.var("weights").unwrap_or_default();
+    let mut ids = a.var("psu").unwrap_or_else(|| "1".into());
+    if let Some(ssu) = a.var("ssu") {
+        ids = format!("{ids} + {ssu}");
+    }
+    let strata = a
+        .var("strata")
+        .map_or_else(String::new, |s| format!(", strata = ~{s}"));
+    let fpc = match (a.var("fpc"), a.var("fpc2"), a.var("ssu")) {
+        (Some(f), Some(g), _) => format!(", fpc = ~{f} + {g}"),
+        (Some(f), None, Some(_)) => format!(", fpc = ~{f} + I(0 * {f} + Inf)"),
+        (Some(f), None, None) => format!(", fpc = ~{f}"),
+        _ => String::new(),
+    };
+    let nest = if a.var("strata").is_some() && a.var("psu").is_some() {
+        ", nest = TRUE"
+    } else {
+        ""
+    };
+    format!(
+        "survey::svydesign(ids = ~{ids}{strata}, weights = ~{weights}{fpc}{nest}, data = {data})"
+    )
+}
+
+/// The jackknife multipliers typed for JKn weights: one number, or one per
+/// replicate; `Err` says what is wrong.
+fn jk_multipliers(a: &Args) -> Result<Vec<String>, String> {
+    let k = a.vars("repweights").len();
+    let parts: Vec<String> = a
+        .expr("jkmult")
+        .split(',')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if parts.is_empty() {
+        return Ok(vec![format!("{}/{k}", k.saturating_sub(1))]);
+    }
+    if parts.len() != 1 && parts.len() != k {
+        return Err(format!(
+            "Give one multiplier, or one for each of the {k} replicates."
+        ));
+    }
+    if parts
+        .iter()
+        .any(|p| !p.parse::<f64>().is_ok_and(|m| m.is_finite() && m > 0.0))
+    {
+        return Err("Each multiplier is a number above 0.".into());
+    }
+    Ok(parts)
+}
+
+/// The strata typed for JKn weights, one per replicate (or none).
+fn jk_strata(a: &Args) -> Result<Vec<String>, String> {
+    let k = a.vars("repweights").len();
+    let parts: Vec<String> = a
+        .expr("jkstrata")
+        .split(',')
+        .map(|p| p.trim().to_string())
+        .filter(|p| !p.is_empty())
+        .collect();
+    if !parts.is_empty() && parts.len() != k {
+        return Err(format!("Give a stratum for each of the {k} replicates."));
+    }
+    Ok(parts)
+}
+
+/// `design <- survey::svydesign(...)` (or `svrepdesign`, or `as.svrepdesign`
+/// of it), then the subpopulation: the design every dialog starts from.
 fn design_line(a: &Args, analysed: &[&str]) -> String {
     let design = a.name("design");
     let weights = a.var("weights").unwrap_or_default();
     let data = design_data(a, analysed);
-    let mut line = if is_replicate(a) {
+    let fay = a.number("fay");
+    let has_fay = fay.parse::<f64>().is_ok_and(|f| f != 0.0);
+    let mut line = if from_design(a) {
+        // survey's own replicates of the strata and clusters: BRR from its
+        // Hadamard matrix (Stata's svy brr with that matrix in hadamard()), or
+        // the delete-one-cluster jackknife centred on the full-sample estimate
+        // (Stata's svy jackknife, mse)
+        let kind = match (a.choice("method"), has_fay) {
+            ("BRRdesign", true) => format!("type = \"Fay\", fay.rho = {fay}"),
+            ("BRRdesign", false) => "type = \"BRR\"".to_string(),
+            _ => "type = \"JKn\", mse = TRUE".to_string(),
+        };
+        format!(
+            "{design} <- survey::as.svrepdesign({}, {kind})",
+            svydesign_call(a, &data)
+        )
+    } else if is_replicate(a) {
         let k = a.vars("repweights").len();
         let kind = match a.choice("method") {
             "BRR" => {
-                let fay = a.number("fay");
-                if fay.parse::<f64>().is_ok_and(|f| f != 0.0) {
+                if has_fay {
                     format!(", type = \"BRR\", fay.rho = {fay}")
                 } else {
                     ", type = \"BRR\"".to_string()
                 }
             }
             "JK1" => format!(", type = \"JK1\", scale = ({}/{k})", k.saturating_sub(1)),
+            "JKn" => {
+                let m = jk_multipliers(a).unwrap_or_default();
+                let rscales = if m.len() == 1 {
+                    format!("rep({}, {k})", m.join(""))
+                } else {
+                    format!("c({})", m.join(", "))
+                };
+                format!(", type = \"JKn\", scale = 1, rscales = {rscales}, mse = TRUE")
+            }
             _ => format!(", type = \"other\", scale = 1/{k}, rscales = rep(1, {k})"),
         };
         format!(
@@ -232,48 +372,44 @@ fn design_line(a: &Args, analysed: &[&str]) -> String {
             formula_of(a, "repweights")
         )
     } else {
-        let mut ids = a.var("psu").unwrap_or_else(|| "1".into());
-        if let Some(ssu) = a.var("ssu") {
-            ids = format!("{ids} + {ssu}");
-        }
-        let strata = a
-            .var("strata")
-            .map_or_else(String::new, |s| format!(", strata = ~{s}"));
-        let fpc = match (a.var("fpc"), a.var("fpc2")) {
-            (Some(f), Some(g)) => format!(", fpc = ~{f} + {g}"),
-            (Some(f), None) => format!(", fpc = ~{f}"),
-            _ => String::new(),
-        };
-        let nest = if a.var("strata").is_some() && a.var("psu").is_some() {
-            ", nest = TRUE"
-        } else {
-            ""
-        };
-        format!(
-            "{design} <- survey::svydesign(ids = ~{ids}{strata}, weights = ~{weights}{fpc}{nest}, \
-             data = {data})"
-        )
+        format!("{design} <- {}", svydesign_call(a, &data))
     };
     let cond = a.expr("subpop");
     if !cond.is_empty() {
         line.push_str(&format!("\n{design} <- base::subset({design}, {cond})"));
     }
-    // Stata's design df for BRR and JK1 weights, set on the design after the
-    // subset (which drops it), so svychisq, the model's tests and Model fit use it
-    if matches!(a.choice("method"), "BRR" | "JK1") {
+    // Stata's design df for replicates, set on the design after the subset
+    // (which drops it), so svychisq, the model's tests and Model fit use it:
+    // the replicates less one (BRR, JK1), the replicates less the strata (JKn),
+    // or the clusters less the strata of the design the replicates are built from
+    if matches!(a.choice("method"), "BRR" | "JK1" | "JKn") {
         line.push_str(&format!("\n{design}$degf <- {}", degf_text(a)));
+    } else if from_design(a) {
+        line.push_str(&format!(
+            "\n{design}$degf <- survey::degf({})",
+            svydesign_call(a, &data)
+        ));
     }
     line
 }
 
 /// The degrees of freedom for intervals: the design's (PSUs less strata); with
 /// BRR or JK1 replicate weights the number of replicates less one, as Stata
-/// takes it (survey's own count, the rank of the weights, can be one less); a
-/// bootstrap design has none, as in Stata, so its intervals are normal.
+/// takes it (survey's own count, the rank of the weights, can be one less);
+/// with JKn weights the replicates less their strata; a bootstrap design has
+/// none, as in Stata, so its intervals are normal.
 fn degf_text(a: &Args) -> String {
+    let k = a.vars("repweights").len();
     match a.choice("method") {
         "bootstrap" => "Inf".into(),
-        "BRR" | "JK1" => a.vars("repweights").len().saturating_sub(1).to_string(),
+        "BRR" | "JK1" => k.saturating_sub(1).to_string(),
+        "JKn" => {
+            let strata = jk_strata(a).unwrap_or_default();
+            let mut distinct: Vec<&String> = strata.iter().collect();
+            distinct.sort();
+            distinct.dedup();
+            k.saturating_sub(distinct.len().max(1)).to_string()
+        }
         _ => format!("survey::degf({})", a.name("design")),
     }
 }
@@ -328,7 +464,30 @@ fn design_check(a: &Args, analysed: &[&str]) -> Vec<Problem> {
         ));
     }
     let has = |id: &str| !a.var_text(id).is_empty();
-    if is_replicate(a) {
+    if from_design(a) {
+        for id in ["ssu", "fpc", "fpc2"] {
+            if has(id) {
+                out.push(Problem::new(
+                    id,
+                    "Replicates built from the design use its strata and clusters only; clear \
+                     this, or choose linearisation.",
+                ));
+            }
+        }
+        if !has("psu") {
+            out.push(Problem::new(
+                "psu",
+                "Replicates are built from the primary sampling units; choose them.",
+            ));
+        }
+        if !a.vars("repweights").is_empty() {
+            out.push(Problem::new(
+                "repweights",
+                "These replicates are built from the design; clear the replicate weights, or \
+                 choose a replicate-weight method.",
+            ));
+        }
+    } else if is_replicate(a) {
         for id in ["psu", "ssu", "strata", "fpc", "fpc2"] {
             if has(id) {
                 out.push(Problem::new(
@@ -344,13 +503,12 @@ fn design_check(a: &Args, analysed: &[&str]) -> Vec<Problem> {
                 "Choose at least two replicate-weight columns.",
             ));
         }
-        if a.choice("method") == "BRR" {
-            let fay = a.number("fay").parse::<f64>().unwrap_or(0.0);
-            if !(0.0..1.0).contains(&fay) {
-                out.push(Problem::new(
-                    "fay",
-                    "Fay's coefficient is 0 or between 0 and 1.",
-                ));
+        if a.choice("method") == "JKn" {
+            if let Err(message) = jk_multipliers(a) {
+                out.push(Problem::new("jkmult", message));
+            }
+            if let Err(message) = jk_strata(a) {
+                out.push(Problem::new("jkstrata", message));
             }
         }
     } else {
@@ -366,10 +524,19 @@ fn design_check(a: &Args, analysed: &[&str]) -> Vec<Problem> {
                 "The second-stage correction needs secondary sampling units.",
             ));
         }
-        if has("ssu") && has("fpc") != has("fpc2") {
+        if has("fpc2") && !has("fpc") {
             out.push(Problem::new(
-                if has("fpc") { "fpc2" } else { "fpc" },
-                "With a second stage, give the correction for both stages or for neither.",
+                "fpc",
+                "A second-stage correction needs the first stage's too.",
+            ));
+        }
+    }
+    if matches!(a.choice("method"), "BRR" | "BRRdesign") {
+        let fay = a.number("fay").parse::<f64>().unwrap_or(0.0);
+        if !(0.0..1.0).contains(&fay) {
+            out.push(Problem::new(
+                "fay",
+                "Fay's coefficient is 0 or between 0 and 1.",
             ));
         }
     }
@@ -447,6 +614,8 @@ pub const SURVEY_MEANS: Spec = Spec {
         FPC2,
         REPWEIGHTS,
         FAY,
+        JKMULT,
+        JKSTRATA,
         SUBPOP,
         CONFIDENCE,
         SAVE_DESIGN,
@@ -529,6 +698,8 @@ pub const SURVEY_TABLES: Spec = Spec {
         FPC2,
         REPWEIGHTS,
         FAY,
+        JKMULT,
+        JKSTRATA,
         SUBPOP,
         CONFIDENCE,
         SAVE_DESIGN,
@@ -632,6 +803,8 @@ pub const SURVEY_RATIOS: Spec = Spec {
         FPC2,
         REPWEIGHTS,
         FAY,
+        JKMULT,
+        JKSTRATA,
         SUBPOP,
         CONFIDENCE,
         SAVE_DESIGN,
@@ -686,7 +859,18 @@ fn typed_quantiles<'a>(a: &'a Args) -> Option<Vec<&'a str>> {
 }
 
 fn quantiles_check(a: &Args) -> Vec<Problem> {
-    let mut out = design_check(a, &[a.var_text("y")]);
+    let mut analysed = vec![a.var_text("y")];
+    let by = a.var_text("by");
+    if !by.is_empty() {
+        analysed.push(by);
+    }
+    let mut out = design_check(a, &analysed);
+    if !by.is_empty() && by == a.var_text("y") {
+        out.push(Problem::new(
+            "by",
+            format!("{by} is analysed; choose another variable for the groups."),
+        ));
+    }
     if typed_quantiles(a).is_none() {
         out.push(Problem::new(
             "quantiles",
@@ -731,6 +915,13 @@ pub const SURVEY_QUANTILES: Spec = Spec {
             rule: TextRule::Any,
             hint: "Numbers between 0 and 1, separated by commas.",
         },
+        Widget::Variable {
+            id: "by",
+            label: "For each group of",
+            kinds: GROUPS,
+            required: false,
+            hint: "Optional: the quantiles in each group (survey::svyby), the whole design kept.",
+        },
         WEIGHTS,
         METHOD,
         PSU,
@@ -740,6 +931,8 @@ pub const SURVEY_QUANTILES: Spec = Spec {
         FPC2,
         REPWEIGHTS,
         FAY,
+        JKMULT,
+        JKSTRATA,
         SUBPOP,
         CONFIDENCE,
         SAVE_DESIGN,
@@ -755,13 +948,24 @@ pub const SURVEY_QUANTILES: Spec = Spec {
         } else {
             ""
         };
-        format!(
-            "{}\nprint(survey::svyquantile(~{}, {design}, quantiles = c({probs}), ci = TRUE, \
-             alpha = {}{df}, na.rm = TRUE))",
-            design_line(a, &[a.var_text("y")]),
-            a.var("y").unwrap_or_default(),
-            alpha_of(a.choice("conf"))
-        )
+        let y = a.var("y").unwrap_or_default();
+        let alpha = alpha_of(a.choice("conf"));
+        let mut analysed = vec![a.var_text("y")];
+        let estimate = match a.var("by") {
+            Some(by) => {
+                analysed.push(a.var_text("by"));
+                format!(
+                    "survey::svyby(~{y}, ~{by}, {design}, survey::svyquantile, \
+                     quantiles = c({probs}), ci = TRUE, alpha = {alpha}{df}, na.rm = TRUE, \
+                     keep.var = TRUE)"
+                )
+            }
+            None => format!(
+                "survey::svyquantile(~{y}, {design}, quantiles = c({probs}), ci = TRUE, \
+                 alpha = {alpha}{df}, na.rm = TRUE)"
+            ),
+        };
+        format!("{}\nprint({estimate})", design_line(a, &analysed))
     },
 };
 
@@ -855,6 +1059,8 @@ pub const SURVEY_REGRESSION: Spec = Spec {
         FPC2,
         REPWEIGHTS,
         FAY,
+        JKMULT,
+        JKSTRATA,
         SUBPOP,
         CONFIDENCE,
         SAVE_DESIGN,
@@ -1060,7 +1266,8 @@ mod tests {
             ),
             "{c}"
         );
-        // one correction without the other, a second stage without a first
+        // a first-stage correction alone: the second stage from an infinite
+        // population; a second-stage one alone is refused
         let v = values(
             &SURVEY_MEANS,
             &[
@@ -1071,7 +1278,20 @@ mod tests {
             ],
             &[("x", &["income"])],
         );
-        assert!(widgets_of(&SURVEY_MEANS, &v).contains(&"fpc2"));
+        assert!(widgets_of(&SURVEY_MEANS, &v).is_empty());
+        let c = code(&SURVEY_MEANS, &v);
+        assert!(c.contains("fpc = ~pop + I(0 * pop + Inf)"), "{c}");
+        let v = values(
+            &SURVEY_MEANS,
+            &[
+                ("weights", "wt"),
+                ("psu", "school id"),
+                ("ssu", "pupil"),
+                ("fpc2", "pop2"),
+            ],
+            &[("x", &["income"])],
+        );
+        assert!(widgets_of(&SURVEY_MEANS, &v).contains(&"fpc"));
         let v = values(
             &SURVEY_MEANS,
             &[("weights", "wt"), ("ssu", "pupil")],
@@ -1283,5 +1503,113 @@ mod tests {
             .problems(&ctx(), &v)
             .iter()
             .any(|p| p.widget == "save"));
+    }
+
+    #[test]
+    fn jackknife_and_brr_take_strata_and_build_from_the_design() {
+        let reps: &[(&str, &[&str])] = &[("x", &["income"]), ("repweights", &["r1", "r2", "r3"])];
+        // JKn weights: multipliers (default (R - 1) / R), centred on the estimate,
+        // and the replicates less their strata as the design df
+        let v = values(
+            &SURVEY_MEANS,
+            &[
+                ("weights", "wt"),
+                ("method", "JKn"),
+                ("jkstrata", "1, 1, 2"),
+            ],
+            reps,
+        );
+        assert!(SURVEY_MEANS.problems(&ctx(), &v).is_empty());
+        let c = code(&SURVEY_MEANS, &v);
+        assert!(
+            c.contains("type = \"JKn\", scale = 1, rscales = rep(2/3, 3), mse = TRUE"),
+            "{c}"
+        );
+        assert!(c.contains("design$degf <- 1\n"), "{c}");
+        let v = values(
+            &SURVEY_MEANS,
+            &[
+                ("weights", "wt"),
+                ("method", "JKn"),
+                ("jkmult", "0.5, 0.5, 0.75"),
+            ],
+            reps,
+        );
+        let c = code(&SURVEY_MEANS, &v);
+        assert!(c.contains("rscales = c(0.5, 0.5, 0.75)"), "{c}");
+        assert!(c.contains("design$degf <- 2\n"), "{c}");
+        for (id, bad) in [
+            ("jkmult", "0.5, 0.5"),
+            ("jkmult", "-1"),
+            ("jkstrata", "1, 2"),
+        ] {
+            let v = values(
+                &SURVEY_MEANS,
+                &[("weights", "wt"), ("method", "JKn"), (id, bad)],
+                reps,
+            );
+            assert!(widgets_of(&SURVEY_MEANS, &v).contains(&id), "{bad}");
+        }
+        // from the design: survey's own BRR (or Fay) and jackknife
+        let design = [
+            ("weights", "wt"),
+            ("psu", "school id"),
+            ("strata", "stratum"),
+        ];
+        let mut set = design.to_vec();
+        set.extend([("method", "BRRdesign"), ("fay", "0.3")]);
+        let v = values(&SURVEY_MEANS, &set, &[("x", &["income"])]);
+        assert!(SURVEY_MEANS.problems(&ctx(), &v).is_empty());
+        let c = code(&SURVEY_MEANS, &v);
+        assert!(
+            c.starts_with(
+                "design <- survey::as.svrepdesign(survey::svydesign(ids = ~`school id`, \
+                 strata = ~stratum, weights = ~wt, nest = TRUE, data = d), type = \"Fay\", \
+                 fay.rho = 0.3)\ndesign$degf <- survey::degf(survey::svydesign("
+            ),
+            "{c}"
+        );
+        let mut set = design.to_vec();
+        set.push(("method", "JKndesign"));
+        let v = values(&SURVEY_MEANS, &set, &[("x", &["income"])]);
+        let c = code(&SURVEY_MEANS, &v);
+        assert!(c.contains("type = \"JKn\", mse = TRUE)"), "{c}");
+        assert!(c.contains("df = survey::degf(design)"), "{c}");
+        // built from the design: needs clusters, takes no corrections or weights
+        let v = values(
+            &SURVEY_MEANS,
+            &[("weights", "wt"), ("method", "JKndesign"), ("fpc", "pop")],
+            &[("x", &["income"]), ("repweights", &["r1", "r2"])],
+        );
+        let w = widgets_of(&SURVEY_MEANS, &v);
+        assert!(
+            w.contains(&"psu") && w.contains(&"fpc") && w.contains(&"repweights"),
+            "{w:?}"
+        );
+    }
+
+    #[test]
+    fn quantiles_for_each_group() {
+        let v = values(
+            &SURVEY_QUANTILES,
+            &[("y", "income"), ("weights", "wt"), ("by", "region")],
+            &[],
+        );
+        assert!(SURVEY_QUANTILES.problems(&ctx(), &v).is_empty());
+        let c = code(&SURVEY_QUANTILES, &v);
+        assert!(
+            c.contains(
+                "print(survey::svyby(~income, ~region, design, survey::svyquantile, \
+                 quantiles = c(0.25, 0.5, 0.75), ci = TRUE, alpha = 0.05, na.rm = TRUE, \
+                 keep.var = TRUE))"
+            ),
+            "{c}"
+        );
+        let v = values(
+            &SURVEY_QUANTILES,
+            &[("y", "income"), ("weights", "wt"), ("by", "income")],
+            &[],
+        );
+        assert!(widgets_of(&SURVEY_QUANTILES, &v).contains(&"by"));
     }
 }

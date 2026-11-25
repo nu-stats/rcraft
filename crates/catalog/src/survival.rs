@@ -575,7 +575,10 @@ pub const COMPETING_RISKS: Spec = Spec {
             in Stata. The robust standard errors are stcrreg's too: Fine and Gray's sandwich, \
             with the term for estimating the censoring distribution, times n / (n - 1); they \
             replace the plain cluster sandwich in the summary's robust se column, and equal \
-            stcrreg's, tied times included.",
+            stcrreg's, tied times included. Effects that change with time (Stata's tvc() and \
+            texp()) add a column for the predictor times the function of time, with the rows \
+            cut at every event time. There is no stratified model: Stata's stcrreg takes no \
+            strata().",
     widgets: &[
         TIME,
         Widget::Variable {
@@ -595,6 +598,24 @@ pub const COMPETING_RISKS: Spec = Spec {
                    is the competing event.",
         },
         PREDICTOR_LIST,
+        Widget::Variables {
+            id: "tvc",
+            label: "Effects that change with time",
+            kinds: NUMBERS,
+            min: 0,
+            hint: "Optional: numeric variables with a coefficient for themselves times the \
+                   function of time below, as Stata's stcrreg, tvc(); choose one among the \
+                   predictors too for its main effect. The rows are then cut at every time of \
+                   the event of interest.",
+        },
+        Widget::Text {
+            id: "texp",
+            label: "Function of time",
+            default: TextDefault::Fixed("t"),
+            rule: TextRule::Any,
+            hint: "An R expression in t, the time, such as log(t) (Stata's texp(); its default \
+                   is the time itself). Used only with effects that change with time.",
+        },
         Widget::Choice {
             id: "ties",
             label: "Tied event times",
@@ -618,22 +639,72 @@ pub const COMPETING_RISKS: Spec = Spec {
         } else if cause == a.var_text("status") {
             out.push(Problem::new("cause", "Type a code, not the column's name."));
         }
+        if !a.vars("tvc").is_empty() {
+            let texp = a.expr("texp");
+            if texp.is_empty() {
+                out.push(Problem::new(
+                    "texp",
+                    "Type a function of the time t, such as t or log(t).",
+                ));
+            } else if let Some(message) = expression_problem(texp) {
+                out.push(Problem::new("texp", message));
+            }
+        }
         out
     },
     code: |a, _| {
         let model = a.name("save");
         let rows = r_name(&format!("{}_data", a.name_text("save")));
+        let tvc = a.vars("tvc");
+        // each effect that changes with time: a column for the predictor times
+        // the function of time at the row's end, the rows cut at every time of
+        // the event of interest (so a row's end is the event time it is used at)
+        let (cut, zcols, tvc_terms) = if tvc.is_empty() {
+            (String::new(), "NULL".to_string(), String::new())
+        } else {
+            let mut cut = format!(
+                "\n  tvg <- function(t) {}\n  uk <- sort(unique(tm[st == 1]))\n  \
+                 res <- survival::survSplit(data = res, cut = uk, start = \"fgstart\", end = \"fgstop\", event = \"fgstatus\")",
+                a.expr("texp")
+            );
+            for v in &tvc {
+                cut.push_str(&format!(
+                    "\n  res[[{}]] <- res[[{}]] * tvg(res$fgstop)",
+                    r_string(&format!("tvc_{v}")),
+                    r_string(v)
+                ));
+            }
+            let quoted: Vec<String> = tvc.iter().map(|v| r_string(v)).collect();
+            let terms: Vec<String> = tvc
+                .iter()
+                .map(|v| format!(" + {}", r_name(&format!("tvc_{v}"))))
+                .collect();
+            (
+                cut,
+                format!(
+                    "as.matrix(dd[, c({}), drop = FALSE]), g = tvg",
+                    quoted.join(", ")
+                ),
+                terms.concat(),
+            )
+        };
         let data = a.data();
+        // the predictors, then the time-varying variables not among them
+        let mut used = a.vars("x");
+        for v in a.vars("tvc") {
+            if !used.contains(&v) {
+                used.push(v);
+            }
+        }
         let cols = [a.var_text("time"), a.var_text("status")]
             .into_iter()
-            .chain(a.vars("x"))
+            .chain(used.iter().copied())
             .map(r_string)
             .collect::<Vec<_>>()
             .join(", ");
-        let xcols = a
-            .vars("x")
-            .into_iter()
-            .map(r_string)
+        let xcols = used
+            .iter()
+            .map(|v| r_string(v))
             .collect::<Vec<_>>()
             .join(", ");
         let build = SUBDISTRIBUTION_ROWS
@@ -644,13 +715,15 @@ pub const COMPETING_RISKS: Spec = Spec {
             .replace("{time}", &r_string(a.var_text("time")))
             .replace("{status}", &r_string(a.var_text("status")))
             .replace("{cause}", &r_string(a.expr("cause")))
-            .replace("{x}", &rhs(a));
+            .replace("{x}", &rhs(a))
+            .replace("{cut}", &cut)
+            .replace("{zcols}", &zcols);
         let variance = STCRREG_VARIANCE
             .replace("{model}", &model)
             .replace("{rows}", &rows);
         format!(
             "{build}\n\
-             {model} <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ {x}, \
+             {model} <- survival::coxph(survival::Surv(fgstart, fgstop, fgstatus) ~ {x}{tvc_terms}, \
              data = {rows}, weights = fgwt, ties = {ties}, cluster = .row)\n\
              {variance}\n\
              cat(\"Competing-risks regression: exp(coef) is the subhazard ratio\\n\")\n\
@@ -688,21 +761,23 @@ const SUBDISTRIBUTION_ROWS: &str = "{rows} <- local({
                           fgwt = vapply(from, g_upto, 0) / g_before(tm[i]), .row = i))
   })
   out <- do.call(rbind, pieces)
-  res <- cbind(dd[out$.row, c({xcols}), drop = FALSE], out)
+  res <- cbind(dd[out$.row, c({xcols}), drop = FALSE], out){cut}
   rownames(res) <- NULL
   attr(res, \"subjects\") <- list(tm = tm, st = st,
-    X = stats::model.matrix(~ {x}, dd)[, -1, drop = FALSE])
+    X = stats::model.matrix(~ {x}, dd)[, -1, drop = FALSE], Z = {zcols})
   res
 })";
 
 /// Stata's robust covariance for the model fitted to those rows: Fine and
 /// Gray's sandwich, with each subject's score residual plus the term for
 /// estimating the censoring distribution, times n / (n - 1). It replaces the
-/// plain cluster sandwich coxph gives, which leaves that term out.
+/// plain cluster sandwich coxph gives, which leaves that term out. With
+/// effects that change with time a subject's covariates at event time t are
+/// its predictors and the chosen ones times the function of t.
 const STCRREG_VARIANCE: &str = "if (!anyNA(stats::coef({model}))) {model}$var <- local({
   sj <- attr({rows}, \"subjects\")
-  tm <- sj$tm; st <- sj$st; X <- sj$X
-  n <- length(tm); b <- stats::coef({model}); e <- as.vector(exp(X %*% b))
+  tm <- sj$tm; st <- sj$st; X <- sj$X; Z <- sj$Z
+  n <- length(tm); b <- stats::coef({model}); p <- length(b)
   cu <- sort(unique(tm[st == 0]))
   nr <- vapply(cu, function(u) sum(tm >= u), 0)
   dc <- vapply(cu, function(u) sum(tm == u & st == 0), 0)
@@ -711,17 +786,18 @@ const STCRREG_VARIANCE: &str = "if (!anyNA(stats::coef({model}))) {model}$var <-
   uk <- sort(unique(tm[st == 1])); K <- length(uk)
   dk <- vapply(uk, function(t) sum(tm == t & st == 1), 0)
   W <- matrix(vapply(uk, function(t) ifelse(tm >= t, 1, ifelse(st == 2, g_before(t) / gt, 0)), numeric(n)), n, K)
-  s0 <- colSums(W * e)
-  Ebar <- crossprod(W * e, X) / s0
-  q <- dk / s0
-  info <- Reduce(`+`, lapply(seq_len(K), function(k)
-    dk[k] * (crossprod(X, W[, k] * e * X) / s0[k] - tcrossprod(Ebar[k, ]))))
-  ev <- outer(seq_len(n), seq_len(K), function(i, k) as.numeric(tm[i] == uk[k] & st[i] == 1))
-  eta <- X * as.numeric(st == 1) - ev %*% Ebar
-  eta <- eta - e * (X * as.vector(W %*% q) - W %*% (Ebar * q))
   Wc <- ifelse(outer(tm, uk, '<') & st == 2, W, 0)
-  Ck <- (crossprod(Wc * e, X) - Ebar * colSums(Wc * e)) * q
-  Cj <- e * (X * as.vector(Wc %*% q) - Wc %*% (Ebar * q))
+  info <- matrix(0, p, p); eta <- matrix(0, n, p); Cj <- matrix(0, n, p); Ck <- matrix(0, K, p)
+  for (k in seq_len(K)) {
+    Xt <- if (is.null(Z)) X else cbind(X, Z * sj$g(uk[k]))
+    ek <- as.vector(exp(Xt %*% b)); wk <- W[, k] * ek; s0 <- sum(wk); q <- dk[k] / s0
+    eb <- colSums(wk * Xt) / s0; D <- sweep(Xt, 2, eb)
+    info <- info + dk[k] * (crossprod(Xt, wk * Xt) / s0 - tcrossprod(eb))
+    eta <- eta + (tm == uk[k] & st == 1) * D - (wk * q) * D
+    wc <- Wc[, k] * ek
+    Ck[k, ] <- colSums(wc * D) * q
+    Cj <- Cj + (wc * q) * D
+  }
   own <- ifelse(st == 0, 1 / nr[match(tm, cu)], 0)
   jump <- function(tt) own * outer(tm, tt, '<=') -
     t(outer(cu, tm, '<=')) %*% ((dc / nr^2) * t(outer(tt, cu, '>=')))
@@ -735,6 +811,21 @@ const STCRREG_VARIANCE: &str = "if (!anyNA(stats::coef({model}))) {model}$var <-
 
 // ---- Survival curves from a Cox model ----
 
+const CURVE_KINDS: &[Opt] = &[
+    Opt {
+        value: "survival",
+        label: "Survival",
+    },
+    Opt {
+        value: "cumhaz",
+        label: "Cumulative hazard",
+    },
+    Opt {
+        value: "hazard",
+        label: "Hazard (smoothed)",
+    },
+];
+
 pub const COX_CURVES: Spec = Spec {
     entry: "Survival curves from a Cox model",
     menu: "Statistics > Survival > Survival curves from a Cox model",
@@ -747,7 +838,12 @@ pub const COX_CURVES: Spec = Spec {
             several values (age = c(40, 60)) for one curve each. The survival at chosen times \
             is printed, and the curves drawn in the Graph tab. For a model fitted with Efron \
             ties (one stratum, no weights) the baseline is moved to Stata's Efron baseline, \
-            and the confidence limits with it.",
+            and the confidence limits with it. The cumulative hazard is survfit's (Breslow's \
+            sum, with Efron's correction for an Efron model), as stcurve, cumhaz. The hazard \
+            is Stata's stcurve, hazard: the curve's hazard contributions at the event times \
+            smoothed with the Epanechnikov kernel, by default of width 0.9 min(sd, IQR / \
+            1.349) n^(-1/5) over the n distinct event times, on 101 points between the first \
+            and last event time, kept only one width away from both ends.",
     widgets: &[
         Widget::Text {
             id: "model",
@@ -755,6 +851,21 @@ pub const COX_CURVES: Spec = Spec {
             default: TextDefault::Fixed("cox"),
             rule: TextRule::Name,
             hint: "The name of a model in the workspace fitted by the Cox dialog (or coxph).",
+        },
+        Widget::Choice {
+            id: "kind",
+            label: "Curve",
+            options: CURVE_KINDS,
+            default: "survival",
+            hint: "The hazard needs a model without strata or case weights, as Stata's stcurve.",
+        },
+        Widget::Text {
+            id: "width",
+            label: "Smoothing width (hazard)",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Optional: the kernel's width in time units (Stata's width()). Leave empty \
+                   for Stata's default.",
         },
         Widget::Text {
             id: "values",
@@ -795,6 +906,13 @@ pub const COX_CURVES: Spec = Spec {
         if let Err(message) = number_list(a.expr("times")) {
             out.push(Problem::new("times", message));
         }
+        let width = a.expr("width");
+        if !width.is_empty() && !width.parse::<f64>().is_ok_and(|w| w.is_finite() && w > 0.0) {
+            out.push(Problem::new(
+                "width",
+                "The width is a number above 0, or empty for Stata's default.",
+            ));
+        }
         let save = a.name_text("save");
         if save == a.name_text("model") || save == a.ctx.dataset {
             out.push(Problem::new(
@@ -820,9 +938,21 @@ pub const COX_CURVES: Spec = Spec {
         } else {
             (model.clone(), format!(", newdata = data.frame({values})"))
         };
+        let times = number_list(a.expr("times")).unwrap_or_default();
+        if a.choice("kind") == "hazard" {
+            return hazard_code(a, &model, &curves, &fitted, &newdata, &times);
+        }
+        // the cumulative hazard is survfit's direct sum (stype 2), with Efron's
+        // correction for an Efron model (ctype 2), as Stata's basechazard; the
+        // survival curve is the product limit (stype 1)
+        let stype = if a.choice("kind") == "cumhaz" {
+            format!(", stype = 2, ctype = if (identical({model}$method, \"efron\")) 2 else 1")
+        } else {
+            ", stype = 1".to_string()
+        };
         let mut code = format!(
             "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits({model}, \"coxph\"))\n\
-             {curves} <- survival::survfit({fitted}{newdata}, conf.int = {}, stype = 1)\n{}",
+             {curves} <- survival::survfit({fitted}{newdata}, conf.int = {}{stype})\n{}",
             a.choice("conf"),
             EFRON_BASELINE
                 .replace("{model}", &model)
@@ -833,19 +963,41 @@ pub const COX_CURVES: Spec = Spec {
                 "\ncat(\"Covariate values\\n\")\nprint(data.frame({values}))"
             ));
         }
-        let times = number_list(a.expr("times")).unwrap_or_default();
+        let cumhaz = a.choice("kind") == "cumhaz";
         if !times.is_empty() {
-            code.push_str(&format!(
-                "\nprint(summary({curves}, times = c({})))",
-                times.join(", ")
-            ));
+            let at = times.join(", ");
+            code.push_str(&if cumhaz {
+                format!(
+                    "\nprint(local({{\n  s <- summary({curves}, times = c({at}))\n  \
+                     h <- as.matrix(s$cumhaz)\n  \
+                     colnames(h) <- if (ncol(h) == 1) \"cumhaz\" else paste0(\"cumhaz\", seq_len(ncol(h)))\n  \
+                     cbind(time = s$time, h)\n}}))"
+                )
+            } else {
+                format!("\nprint(summary({curves}, times = c({at})))")
+            });
         }
         if a.flag("draw") {
+            let (what, ylab, title, band) = if cumhaz {
+                (
+                    ", cumhaz = TRUE",
+                    "Cumulative hazard",
+                    "Cumulative hazard from a Cox model",
+                    "FALSE",
+                )
+            } else {
+                (
+                    "",
+                    "Survival probability",
+                    "Survival curves from a Cox model",
+                    "(k == 1)",
+                )
+            };
             code.push_str(&format!(
                 "\nk <- NCOL({curves}$surv)\n\
-                 graphics::plot({curves}, conf.int = (k == 1), col = seq_len(k), lwd = 2, \
-                 xlab = \"Time\", ylab = \"Survival probability\", \
-                 main = \"Survival curves from a Cox model\")\n\
+                 graphics::plot({curves}{what}, conf.int = {band}, col = seq_len(k), lwd = 2, \
+                 xlab = \"Time\", ylab = \"{ylab}\", \
+                 main = \"{title}\")\n\
                  if (k > 1) graphics::legend(\"topright\", legend = paste(\"Row\", seq_len(k)), \
                  col = seq_len(k), lwd = 2, bty = \"n\")\nrm(k)"
             ));
@@ -853,6 +1005,98 @@ pub const COX_CURVES: Spec = Spec {
         code
     },
 };
+
+/// Stata's `stcurve, hazard`: the hazard contributions of each curve at the
+/// distinct event times, smoothed with the Epanechnikov kernel (of support
+/// plus or minus sqrt(5) widths), on 101 points from the first to the last
+/// event time, kept only where they are a width from both ends. With Breslow or
+/// exact ties a contribution is one less the curve's survival ratio at the
+/// time; with Efron ties it is 1 - (1 - h0)^exp(xb), h0 Stata's Efron basehc:
+/// the sum over the tied events of 1 - (1 - r / d_l)^(1 / r), d_l the risk set
+/// less the share of the tied events already counted. The default width is
+/// 0.9 min(sd, IQR / 1.349) n^(-1/5) of the n distinct event times (the
+/// quartiles as Stata's summarize takes them).
+fn hazard_code(
+    a: &Args,
+    model: &str,
+    curves: &str,
+    fitted: &str,
+    newdata: &str,
+    times: &[String],
+) -> String {
+    let values = a.expr("values");
+    let rx = if values.is_empty() {
+        "exp(sum(colMeans(stats::model.matrix(m)) * stats::coef(m)))".to_string()
+    } else {
+        format!(
+            "stats::predict(m, newdata = data.frame({values}), type = \"risk\", reference = \"zero\")"
+        )
+    };
+    let width = a.expr("width");
+    let width = if width.is_empty() {
+        "local({\n    q <- diff(stats::quantile(tt, c(0.25, 0.75), type = 2, names = FALSE)) / 1.349\n    \
+         s <- stats::sd(tt)\n    0.9 * (if (q > 0) min(s, q) else s) * length(tt)^(-1 / 5)\n  })"
+            .to_string()
+    } else {
+        width.to_string()
+    };
+    let at = if times.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "\n  at <- c({})\n  sm <- smooth(at)\n  sm[!(at >= min(tt) + w & at <= max(tt) - w), ] <- NA\n  \
+             cat(\"Smoothed hazard at the times asked for (empty outside the range shown)\\n\")\n  \
+             print(stats::setNames(data.frame(at, sm), c(\"time\", heads)), row.names = FALSE)",
+            times.join(", ")
+        )
+    };
+    let mut code = format!(
+        "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits({model}, \"coxph\"))\n\
+         stopifnot(\"the hazard needs a model without strata or case weights, as Stata's stcurve\" = \
+         is.null(attr(stats::terms({model}), \"specials\")$strata) && is.null({model}$weights))\n\
+         {curves} <- local({{\n  m <- {model}\n  \
+         y <- m$y; p <- NCOL(y); stop <- y[, p - 1]; ev <- y[, p] == 1\n  \
+         start <- if (p == 3) y[, 1] else rep(-Inf, length(stop))\n  \
+         tt <- sort(unique(stop[ev]))\n  \
+         if (identical(m$method, \"efron\")) {{\n    \
+         r <- as.vector(exp(stats::model.matrix(m) %*% stats::coef(m)))\n    \
+         h0 <- vapply(tt, function(t) {{\n      D <- which(stop == t & ev); k <- length(D)\n      \
+         den <- sum(r[start < t & stop >= t]) - (seq_len(k) - 1) / k * sum(r[D])\n      \
+         sum(1 - (1 - r[D] / den)^(1 / r[D]))\n    }}, 0)\n    \
+         hc <- 1 - outer(1 - h0, {rx}, `^`)\n  \
+         }} else {{\n    \
+         sf <- survival::survfit({fitted}{newdata}, stype = 1)\n    \
+         s <- as.matrix(sf$surv)[match(tt, sf$time), , drop = FALSE]\n    \
+         hc <- 1 - s / rbind(1, s[-nrow(s), , drop = FALSE])\n  }}\n  \
+         w <- {width}\n  \
+         g <- seq(min(tt), max(tt), length.out = 101)\n  \
+         g <- g[g >= min(tt) + w & g <= max(tt) - w]\n  \
+         if (!length(g)) stop(\"the width leaves no time a width from the first and last event times; choose a smaller width\")\n  \
+         kern <- function(u) ifelse(abs(u) < sqrt(5), 0.75 * (1 - u^2 / 5) / sqrt(5), 0)\n  \
+         smooth <- function(x) matrix(vapply(x, function(v) colSums(kern((v - tt) / w) * hc) / w, \
+         numeric(ncol(hc))), nrow = length(x), byrow = TRUE)\n  \
+         heads <- if (ncol(hc) == 1) \"hazard\" else paste0(\"hazard\", seq_len(ncol(hc)))\n  \
+         cat(sprintf(\"Smoothed hazard: Epanechnikov kernel of width %.6g\\n\", w)){at}\n  \
+         out <- stats::setNames(data.frame(g, smooth(g)), c(\"time\", heads))\n  \
+         attr(out, \"width\") <- w\n  out\n}})"
+    );
+    if !values.is_empty() {
+        code.push_str(&format!(
+            "\ncat(\"Covariate values\\n\")\nprint(data.frame({values}))"
+        ));
+    }
+    if a.flag("draw") {
+        code.push_str(&format!(
+            "\nk <- ncol({curves}) - 1\n\
+             graphics::matplot({curves}$time, as.matrix({curves}[-1]), type = \"l\", lty = 1, \
+             lwd = 2, col = seq_len(k), xlab = \"Time\", ylab = \"Smoothed hazard\", \
+             main = \"Hazard from a Cox model\")\n\
+             if (k > 1) graphics::legend(\"topleft\", legend = paste(\"Row\", seq_len(k)), \
+             col = seq_len(k), lwd = 2, bty = \"n\")\nrm(k)"
+        ));
+    }
+    code
+}
 
 /// With Efron ties R's baseline survival is Breslow's product limit, and
 /// Stata's `predict, basesurv` is Efron's: the events at one time are taken in
@@ -1193,5 +1437,80 @@ mod tests {
             .problems(&ctx(), &v)
             .iter()
             .any(|p| p.widget == "times"));
+    }
+
+    #[test]
+    fn competing_risks_take_effects_that_change_with_time() {
+        let v = values(
+            &COMPETING_RISKS,
+            &[("time", "time"), ("status", "cause"), ("texp", "log(t)")],
+            &[("x", &["arm", "age"]), ("tvc", &["age"])],
+        );
+        assert!(COMPETING_RISKS.problems(&ctx(), &v).is_empty());
+        let text = code(&COMPETING_RISKS, &v);
+        assert!(text.contains("tvg <- function(t) log(t)"), "{text}");
+        assert!(
+            text.contains("res[[\"tvc_age\"]] <- res[[\"age\"]] * tvg(res$fgstop)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("~ arm + age + tvc_age, data = fg_data"),
+            "{text}"
+        );
+        assert!(text.contains("Z = as.matrix(dd[, c(\"age\"), drop = FALSE]), g = tvg"));
+        // without them, no cut and no second matrix
+        let v = values(
+            &COMPETING_RISKS,
+            &[("time", "time"), ("status", "cause")],
+            &[("x", &["arm", "age"])],
+        );
+        let text = code(&COMPETING_RISKS, &v);
+        assert!(
+            !text.contains("survSplit") && text.contains("Z = NULL"),
+            "{text}"
+        );
+        // an empty function of time with an effect chosen
+        let v = values(
+            &COMPETING_RISKS,
+            &[("time", "time"), ("status", "cause"), ("texp", "")],
+            &[("x", &["age"]), ("tvc", &["age"])],
+        );
+        let problems = COMPETING_RISKS.problems(&ctx(), &v);
+        assert!(problems.iter().any(|p| p.widget == "texp"), "{problems:?}");
+    }
+
+    #[test]
+    fn cox_curves_give_the_hazard_and_cumulative_hazard() {
+        let v = values(&COX_CURVES, &[("kind", "cumhaz"), ("times", "10")], &[]);
+        let text = code(&COX_CURVES, &v);
+        assert!(
+            text.contains("stype = 2, ctype = if (identical(cox$method, \"efron\")) 2 else 1)"),
+            "{text}"
+        );
+        assert!(text.contains("cumhaz = TRUE, conf.int = FALSE"), "{text}");
+        assert!(text.contains("h <- as.matrix(s$cumhaz)"), "{text}");
+        let v = values(
+            &COX_CURVES,
+            &[("kind", "hazard"), ("values", "age = 50"), ("width", "5")],
+            &[],
+        );
+        let text = code(&COX_CURVES, &v);
+        assert!(text.contains("w <- 5\n"), "{text}");
+        assert!(
+            text.contains("reference = \"zero\"") && text.contains("sqrt(5)"),
+            "{text}"
+        );
+        assert!(text.contains("graphics::matplot(curves$time"), "{text}");
+        let v = values(&COX_CURVES, &[("kind", "hazard")], &[]);
+        let text = code(&COX_CURVES, &v);
+        assert!(text.contains("type = 2, names = FALSE"), "{text}");
+        assert!(text.contains("colMeans(stats::model.matrix(m))"), "{text}");
+        for bad in ["0", "-1", "soon"] {
+            let v = values(&COX_CURVES, &[("kind", "hazard"), ("width", bad)], &[]);
+            assert!(COX_CURVES
+                .problems(&ctx(), &v)
+                .iter()
+                .any(|p| p.widget == "width"));
+        }
     }
 }

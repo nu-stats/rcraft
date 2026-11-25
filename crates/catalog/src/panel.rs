@@ -1220,18 +1220,53 @@ const IV_TABLE: &str = "local({
   stats::printCoefmat(table, digits = 7)
 })";
 
+/// Whether the random-effects IV fit is computed directly ([`RE_IV_STATA`])
+/// rather than by plm: Baltagi-Chang components, the instruments ignored, or
+/// robust errors after EC2SLS.
+fn direct_re_iv(a: &Args) -> bool {
+    let model = a.choice("model");
+    matches!(model, "random" | "ec2sls")
+        && (a.flag("nosa")
+            || a.flag("regress")
+            || (model == "ec2sls" && a.choice("errors") == "robust"))
+}
+
 fn panel_iv_check(a: &Args) -> Vec<Problem> {
     let mut out = plm_check(a);
-    if a.choice("errors") == "robust" && ["ec2sls", "between"].contains(&a.choice("model")) {
+    let model = a.choice("model");
+    let random = matches!(model, "random" | "ec2sls");
+    if a.choice("errors") == "robust" && model == "between" {
         out.push(Problem::new(
             "errors",
-            if a.choice("model") == "between" {
-                "Robust errors are not offered for the between estimator (Stata's xtivreg, be \
-                 has none either); take conventional errors."
-            } else {
-                "Robust errors are not offered after EC2SLS (they do not agree with Stata's \
-                 xtivreg, re ec2sls); take conventional errors or the other estimators."
-            },
+            "Robust errors are not offered for the between estimator (Stata's xtivreg, be has \
+             none either); take conventional errors.",
+        ));
+    }
+    if a.flag("nosa") && !random {
+        out.push(Problem::new(
+            "nosa",
+            "Baltagi-Chang components are for the random-effects estimators.",
+        ));
+    }
+    if a.flag("regress") {
+        if !matches!(model, "within" | "random" | "ec2sls") {
+            out.push(Problem::new(
+                "regress",
+                "Ignoring the instruments is offered for fixed and random effects.",
+            ));
+        }
+        if a.choice("errors") == "robust" {
+            out.push(Problem::new(
+                "regress",
+                "With the instruments ignored, take conventional errors.",
+            ));
+        }
+    }
+    if a.flag("small") && direct_re_iv(a) {
+        out.push(Problem::new(
+            "small",
+            "The small-sample statistics are not offered with Baltagi-Chang components, \
+             the instruments ignored or robust errors after EC2SLS.",
         ));
     }
     let endogenous = a.vars("endog");
@@ -1355,6 +1390,22 @@ pub const PANEL_IV: Spec = Spec {
                 "Judges each coefficient by a t distribution with the degrees of freedom Stata's \
                    small option uses; the errors themselves do not change.",
         },
+        Widget::Check {
+            id: "nosa",
+            label: "Baltagi-Chang variance components (Stata's nosa)",
+            default: false,
+            hint: "Random effects only: the variance components of Baltagi and Chang instead of \
+                   the adapted Swamy-Arora ones. The fit is then computed directly (not by plm) \
+                   and saved as a list of coefficients, covariance and components.",
+        },
+        Widget::Check {
+            id: "regress",
+            label: "Ignore the instruments (Stata's regress)",
+            default: false,
+            hint: "Fixed or random effects, conventional errors: the endogenous predictors are \
+                   treated as exogenous (fixed effects: Stata's xtreg, fe; random effects: \
+                   xtivreg's own variance components, computed directly).",
+        },
         SAVE,
     ],
     needs: &["plm"],
@@ -1374,11 +1425,71 @@ pub const PANEL_IV: Spec = Spec {
         let instruments = a.vars("inst");
         let predictors: Vec<&str> = exogenous.iter().chain(&endogenous).copied().collect();
         let all_instruments: Vec<&str> = exogenous.iter().chain(&instruments).copied().collect();
+        let robust = a.choice("errors") == "robust";
+        if direct_re_iv(a) {
+            let regress = a.flag("regress");
+            let mut cols: Vec<&str> = vec![a.var_text("y"), a.var_text("id")];
+            for v in predictors.iter().chain(&instruments) {
+                if !cols.contains(v) {
+                    cols.push(v);
+                }
+            }
+            let ec2sls = a.choice("model") == "ec2sls";
+            let title = match (regress, ec2sls, a.flag("nosa")) {
+                (true, _, _) => "Random-effects GLS regression, the instruments ignored",
+                (false, true, true) => "EC2SLS random-effects IV, Baltagi-Chang components",
+                (false, true, false) => "EC2SLS random-effects IV",
+                (false, false, _) => "G2SLS random-effects IV, Baltagi-Chang components",
+            };
+            let title = if robust {
+                format!("{title}, errors robust to clustering on the panel unit")
+            } else {
+                title.to_string()
+            };
+            return RE_IV_STATA
+                .replace("{model}", &model)
+                .replace("{data}", &a.data())
+                .replace(
+                    "{cols}",
+                    &cols
+                        .iter()
+                        .map(|c| r_string(c))
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )
+                .replace("{id}", &r_string(a.var_text("id")))
+                .replace("{y}", &r_string(a.var_text("y")))
+                .replace("{xterms}", &join(&predictors))
+                .replace(
+                    "{zterms}",
+                    &join(if regress {
+                        &predictors
+                    } else {
+                        &all_instruments
+                    }),
+                )
+                .replace(
+                    "{ec2sls}",
+                    if ec2sls && !regress { "TRUE" } else { "FALSE" },
+                )
+                .replace("{nosa}", if a.flag("nosa") { "TRUE" } else { "FALSE" })
+                .replace("{robust}", if robust { "TRUE" } else { "FALSE" })
+                .replace("{title}", &r_string(&title));
+        }
+        if a.flag("regress") {
+            // fixed effects with the instruments ignored: the within regression
+            return format!(
+                "{model} <- plm::plm({} ~ {}, data = {}, {}, model = \"within\")\nprint(summary({model}))",
+                a.var("y").unwrap_or_default(),
+                join(&predictors),
+                a.data(),
+                index_arg(a),
+            );
+        }
         let (plm_model, extra) = match a.choice("model") {
             "ec2sls" => ("random", ", inst.method = \"baltagi\""),
             other => (other, ""),
         };
-        let robust = a.choice("errors") == "robust";
         let mut out = format!(
             "{model} <- plm::plm({} ~ {} | {}, data = {}, {}, model = {}{extra})\nprint(summary({model}))",
             a.var("y").unwrap_or_default(),
@@ -1403,6 +1514,75 @@ pub const PANEL_IV: Spec = Spec {
     },
 };
 
+/// Stata's random-effects IV (`xtivreg, re`) computed directly, for what plm
+/// cannot give: Baltagi and Chang's variance components (`nosa`), the fit with
+/// the instruments ignored (`regress`), and robust errors after EC2SLS. The
+/// components are Stata's: sigma_e^2 from the within 2SLS residuals over N - n -
+/// K (N - n with nosa); sigma_u^2 from the between 2SLS residuals, the adapted
+/// Swamy-Arora (sum of T_i e_i^2 - (n - K - 1) sigma_e^2) / (N - tr((X'PX)^-1
+/// X'PPX)) or, with nosa, (sum of T_i e_i^2 - n sigma_e^2) / N. The data are
+/// quasi-demeaned with theta_i = 1 - sqrt(sigma_e^2 / (T_i sigma_u^2 +
+/// sigma_e^2)); G2SLS transforms the instruments the same way, EC2SLS uses
+/// their within and between parts. The conventional covariance is the
+/// transformed residuals' variance over N - p times (X^'X^)^-1, the robust one
+/// the cluster sandwich times n / (n - 1) (N - 1) / (N - p).
+const RE_IV_STATA: &str = "{model} <- local({
+  d <- {data}[stats::complete.cases({data}[, c({cols})]), , drop = FALSE]
+  id <- as.character(d[[{id}]])
+  ec2sls <- {ec2sls}; nosa <- {nosa}; robust <- {robust}
+  y <- d[[{y}]]
+  X0 <- stats::model.matrix(~ {xterms}, d)[, -1, drop = FALSE]
+  Z0 <- stats::model.matrix(~ {zterms}, d)[, -1, drop = FALSE]
+  N <- length(y); n <- length(unique(id)); K <- ncol(X0)
+  tsls <- function(y, X, Z) {
+    Xh <- Z %*% solve(crossprod(Z), crossprod(Z, X))
+    b <- solve(crossprod(Xh, X), crossprod(Xh, y))
+    list(b = drop(b), e = drop(y - X %*% b), Xh = Xh)
+  }
+  dm <- function(v) v - stats::ave(v, id)
+  mb <- function(v) stats::ave(v, id)
+  w <- tsls(dm(y), apply(X0, 2, dm), apply(Z0, 2, dm))
+  se2 <- sum(w$e^2) / (N - n - if (nosa) 0 else K)
+  first <- !duplicated(id)
+  Tu <- as.vector(table(id)[id[first]])
+  Xb <- cbind(1, apply(X0, 2, mb))
+  Zb <- cbind(1, apply(Z0, 2, mb))
+  b1 <- tsls(mb(y)[first], Xb[first, , drop = FALSE], Zb[first, , drop = FALSE])
+  uPu <- sum(Tu * b1$e^2)
+  su2 <- if (nosa) (uPu - n * se2) / N else
+    (uPu - (n - K - 1) * se2) / (N - sum(diag(solve(crossprod(Xb)) %*% crossprod(rowsum(Xb, id)))))
+  su2 <- max(su2, 0)
+  Ti <- as.vector(table(id)[id])
+  if (ec2sls && length(unique(Ti)) > 1)
+    stop(\"EC2SLS with these options needs a balanced panel: on an unbalanced one its instruments are not Stata's yet\")
+  th <- 1 - sqrt(se2 / (Ti * su2 + se2))
+  X <- cbind('(Intercept)' = 1, X0)
+  Xs <- X - th * apply(X, 2, mb)
+  ys <- y - th * mb(y)
+  Z <- if (ec2sls) cbind(apply(Z0, 2, dm), 1, apply(Z0, 2, mb)) else {
+    Zc <- cbind(1, Z0); Zc - th * apply(Zc, 2, mb)
+  }
+  r <- tsls(ys, Xs, Z)
+  A <- solve(crossprod(r$Xh))
+  p <- ncol(X)
+  V <- if (robust) {
+    meat <- Reduce(`+`, lapply(split(seq_len(N), id), function(i)
+      tcrossprod(colSums(r$Xh[i, , drop = FALSE] * r$e[i]))))
+    A %*% meat %*% A * n / (n - 1) * (N - 1) / (N - p)
+  } else sum(r$e^2) / (N - p) * A
+  dimnames(V) <- list(colnames(X), colnames(X))
+  list(coefficients = stats::setNames(r$b, colnames(X)), vcov = V, sigma_u = sqrt(su2),
+       sigma_e = sqrt(se2), nobs = N, groups = n)
+})
+local({
+  m <- {model}
+  se <- sqrt(diag(m$vcov))
+  z <- m$coefficients / se
+  cat({title}, sprintf(' (%d rows, %d units)\\n', m$nobs, m$groups), sep = '')
+  stats::printCoefmat(cbind(Estimate = m$coefficients, 'Std. Error' = se, 'z value' = z,
+    'Pr(>|z|)' = 2 * stats::pnorm(-abs(z))), digits = 7)
+  cat(sprintf('sigma_u = %.7g, sigma_e = %.7g\\n', m$sigma_u, m$sigma_e))
+})";
 // ---- Panel unit-root test ----
 
 const UNIT_ROOT_TESTS: &[Opt] = &[
@@ -2243,7 +2423,8 @@ mod tests {
         assert!(code(&PANEL_IV, &v).ends_with("model = \"fd\")\nprint(summary(model))"));
         v.set_text("errors", "robust");
         assert!(code(&PANEL_IV, &v).contains("robust <- TRUE"));
-        // EC2SLS is Baltagi's random-effects estimator, and has no robust errors
+        // EC2SLS is Baltagi's random-effects estimator; its robust errors are
+        // computed directly (Stata's cluster sandwich)
         let mut v = values(
             &PANEL_IV,
             &[
@@ -2257,10 +2438,41 @@ mod tests {
         assert!(code(&PANEL_IV, &v).contains("model = \"random\", inst.method = \"baltagi\")"));
         assert!(PANEL_IV.problems(&ctx(), &v).is_empty());
         v.set_text("errors", "robust");
+        assert!(PANEL_IV.problems(&ctx(), &v).is_empty());
+        let c = code(&PANEL_IV, &v);
+        assert!(
+            c.contains("ec2sls <- TRUE; nosa <- FALSE; robust <- TRUE") && !c.contains("plm::plm"),
+            "{c}"
+        );
+        // Baltagi-Chang components and the instruments ignored, random effects
+        v.set_text("errors", "conventional");
+        v.set_text("model", "random");
+        v.set_flag("nosa", true);
+        let c = code(&PANEL_IV, &v);
+        assert!(
+            c.contains("ec2sls <- FALSE; nosa <- TRUE; robust <- FALSE"),
+            "{c}"
+        );
+        assert!(c.contains("stats::model.matrix(~ visits, d)"), "{c}");
+        v.set_flag("nosa", false);
+        v.set_flag("regress", true);
+        let c = code(&PANEL_IV, &v);
+        assert!(c.contains("stats::model.matrix(~ days, d)[, -1, drop = FALSE]\n  Z0 <- stats::model.matrix(~ days, d)"), "{c}");
+        v.set_text("model", "within");
+        assert!(code(&PANEL_IV, &v).starts_with("model <- plm::plm(wage ~ days, data = d"));
+        v.set_text("model", "fd");
         assert!(PANEL_IV
             .problems(&ctx(), &v)
             .iter()
-            .any(|p| p.widget == "errors"));
+            .any(|p| p.widget == "regress"));
+        v.set_flag("regress", false);
+        v.set_flag("nosa", true);
+        assert!(PANEL_IV
+            .problems(&ctx(), &v)
+            .iter()
+            .any(|p| p.widget == "nosa"));
+        v.set_flag("nosa", false);
+        v.set_text("errors", "robust");
         v.set_text("model", "between");
         assert!(PANEL_IV
             .problems(&ctx(), &v)

@@ -761,6 +761,72 @@ fn competing_risks_match_stcrreg() {
                 .to_string(),
         ],
     );
+
+    // an effect that changes with time: age also times log(t), as stcrreg,
+    // tvc(age) texp(ln(_t)); the rows are cut at every event time
+    let (outcome, text, _) = dialog(
+        &mut e,
+        &COMPETING_RISKS,
+        &[
+            ("time", "time"),
+            ("status", "cause"),
+            ("ties", "breslow"),
+            ("texp", "log(t)"),
+            ("save", "fgt"),
+        ],
+        &[("x", &["arm", "age"]), ("tvc", &["age"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("tvc_age"), "{text}");
+    // Fine and Gray's estimator by hand with the covariates at each event time
+    define(
+        &mut e,
+        "fg_tvc <- function(X, Z, g, tm, cs) { b <- rep(0, ncol(X) + ncol(Z)); \
+           gt <- sapply(tm, gfun, tm = tm, cs = cs); \
+           for (it in 1:100) { U <- rep(0, length(b)); I <- matrix(0, length(b), length(b)); \
+             for (t in sort(unique(tm[cs == 1]))) { Xt <- cbind(X, Z * g(t)); \
+               w <- ifelse(tm >= t, 1, ifelse(cs == 2, gfun(t, tm, cs) / gt, 0)); \
+               r <- as.vector(w * exp(Xt %*% b)); D <- tm == t & cs == 1; \
+               s0 <- sum(r); s1 <- colSums(r * Xt); \
+               U <- U + colSums(Xt[D, , drop = FALSE]) - sum(D) * s1 / s0; \
+               I <- I + sum(D) * (crossprod(Xt, r * Xt) / s0 - tcrossprod(s1) / s0^2) }; \
+             st <- solve(I, U); b <- b + st; if (max(abs(st)) < 1e-12) break }; b }",
+    );
+    holds(
+        &mut e,
+        &[
+            same(
+                "coef(fgt)",
+                "fg_tvc(X, cbind(dc$age), log, dc$time, dc$cause)",
+            ),
+            same("fgt_data$tvc_age", "fgt_data$age * log(fgt_data$fgstop)"),
+            // Stata 19: stcrreg armb age, compete(cause==2) tvc(age)
+            // texp(ln(_t)): armb, age, age times ln(_t), and their robust errors
+            within(
+                "coef(fgt)",
+                "c(-.640930954418586, .098391950212153, -.0232352615126033)",
+                "1e-7",
+            ),
+            within(
+                "sqrt(diag(vcov(fgt)))",
+                "c(.428202198789318, .128693633331725, .0414195497789158)",
+                "1e-6",
+            ),
+        ],
+    );
+    // Stata's stcrreg takes no strata(), so the dialog offers none; a variable
+    // in tvc() need not have a main effect, as in Stata
+    let mut values = COMPETING_RISKS.defaults(&context());
+    values.set_text("time", "time");
+    values.set_text("status", "cause");
+    values.set_list("x", vec!["arm".into()]);
+    values.set_list("tvc", vec!["age".into()]);
+    assert!(COMPETING_RISKS.problems(&context(), &values).is_empty());
+    assert!(!COMPETING_RISKS
+        .widgets
+        .iter()
+        .any(|w| matches!(w, Widget::Variable { id: "strata", .. })));
 }
 
 #[test]
@@ -898,6 +964,198 @@ fn cox_curves_are_the_baseline_to_the_exp_xb_and_statas() {
     );
 }
 
+#[test]
+fn cox_hazard_and_cumulative_hazard_are_stcurves() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    versions(&mut e);
+    for (ties, save) in [("breslow", "cb"), ("exact", "cx"), ("efron", "ce")] {
+        let (outcome, text, _) = dialog(
+            &mut e,
+            &COX,
+            &[
+                ("time", "time"),
+                ("event", "died"),
+                ("ties", ties),
+                ("save", save),
+            ],
+            &[("x", &["arm", "age"])],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    }
+    // the cumulative hazard at arm b, age 50, for each kind of ties
+    for (model, save) in [("cb", "h1"), ("cx", "h2"), ("ce", "h3")] {
+        let (outcome, text, plots) = dialog(
+            &mut e,
+            &COX_CURVES,
+            &[
+                ("model", model),
+                ("kind", "cumhaz"),
+                ("values", "arm = 'b', age = 50"),
+                ("times", "8, 11, 29, 40, 54"),
+                ("save", save),
+            ],
+            &[],
+            &["draw"],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert_eq!(plots, 1, "{text}");
+        assert!(text.contains("cumhaz"), "{text}");
+    }
+    // the smoothed hazard: at arm b, age 50 (Breslow and exact), at the means and
+    // for two rows of values (Efron), and with a width of 5
+    for (model, save, values, width) in [
+        ("cb", "z1", "arm = 'b', age = 50", ""),
+        ("cx", "z2", "arm = 'b', age = 50", ""),
+        ("ce", "z3", "", ""),
+        ("ce", "z4", "arm = c('a', 'b'), age = c(45, 60)", ""),
+        ("cb", "z5", "arm = 'b', age = 50", "5"),
+    ] {
+        let (outcome, text, plots) = dialog(
+            &mut e,
+            &COX_CURVES,
+            &[
+                ("model", model),
+                ("kind", "hazard"),
+                ("values", values),
+                ("width", width),
+                ("times", "20, 50"),
+                ("save", save),
+            ],
+            &[],
+            &["draw"],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        assert_eq!(plots, 1, "{text}");
+        assert!(text.contains("Epanechnikov kernel of width"), "{text}");
+    }
+    define(&mut e, ORACLE);
+    // Breslow's cumulative hazard, the sum over event times of d / (sum over the
+    // risk set of exp(xb)), times exp(xb); the hazard contributions of a curve,
+    // one less its survival ratio at each event time (Breslow and exact ties),
+    // or 1 - (1 - h0)^exp(xb) with Efron's h0, the sum over the tied events of
+    // 1 - (1 - r / d_l)^(1 / r); the Epanechnikov kernel smoother; the width
+    // 0.9 min(sd, IQR / 1.349) n^(-1/5) of the distinct event times
+    define(
+        &mut e,
+        "tt <- sort(unique(dc$time[dc$died == 1])); \
+         breslow_H <- function(m, x, at) { r <- as.vector(exp(X %*% coef(m))); \
+           dH <- vapply(tt, function(t) sum(dc$time == t & dc$died == 1) / sum(r[dc$time >= t]), 0); \
+           vapply(at, function(a) sum(dH[tt <= a]), 0) * exp(sum(coef(m) * x)) }; \
+         efron_h0 <- function(m) { r <- as.vector(exp(X %*% coef(m))); \
+           vapply(tt, function(t) { D <- which(dc$time == t & dc$died == 1); k <- length(D); \
+             den <- sum(r[dc$time >= t]) - (seq_len(k) - 1) / k * sum(r[D]); \
+             sum(1 - (1 - r[D] / den)^(1 / r[D])) }, 0) }; \
+         kp_contrib <- function(m, x) { s <- vapply(tt, function(t) { f <- survival::survfit(m, \
+             newdata = data.frame(arm = c('a', 'b')[x[1] + 1], age = x[2]), stype = 1); \
+             f$surv[f$time == t] }, 0); 1 - s / c(1, head(s, -1)) }; \
+         q <- stats::quantile(tt, c(0.25, 0.75), type = 2, names = FALSE); \
+         w0 <- 0.9 * min(sd(tt), (q[2] - q[1]) / 1.349) * length(tt)^(-1 / 5); \
+         ep <- function(u) ifelse(abs(u) < sqrt(5), 3 / 4 * (1 - u^2 / 5) / sqrt(5), 0); \
+         smooth_at <- function(at, cc, w = w0) vapply(at, function(v) sum(ep((v - tt) / w) * cc) / w, 0); \
+         grid <- function(w = w0) { g <- seq(8, 54, length.out = 101); g[g >= 8 + w & g <= 54 - w] }",
+    );
+    holds(
+        &mut e,
+        &[
+            same(
+                "as.vector(summary(h1, times = c(8, 11, 29, 40, 54))$cumhaz)",
+                "breslow_H(cb, c(1, 50), c(8, 11, 29, 40, 54))",
+            ),
+            // Stata 19: stcox armb age, breslow (exactp, efron); predict H,
+            // basechazard; H * exp(xb) at armb = 1, age = 50 (stcurve, cumhaz)
+            same(
+                "as.vector(summary(h1, times = c(8, 11, 29, 40, 54))$cumhaz)",
+                "c(.0121029717911526, .0511229713756994, .402375613647139, .910127525267337, 2.61355922135538)",
+            ),
+            same(
+                "as.vector(summary(h2, times = c(8, 11, 29, 40, 54))$cumhaz)",
+                "c(.0117794060444646, .0497791823885296, .392756138054102, .89598194446619, 2.60258248718795)",
+            ),
+            same(
+                "as.vector(summary(h3, times = c(8, 11, 29, 40, 54))$cumhaz)",
+                "c(.0119757514275733, .0510548808627151, .411394933592066, .918147303522454, 2.62589697545722)",
+            ),
+            // Efron's h0 is Stata's predict, basehc after stcox, efron (at 8, 11,
+            // 12, 27 and 29, ties at all but the first)
+            same(
+                "efron_h0(ce)[match(c(8, 11, 12, 27, 29), tt)]",
+                "c(.0873898217239446, .191889210774882, .204657402123903, .392957520933578, .703736628784472)",
+            ),
+            // the dialog's hazard is the smoother on the grid, by hand
+            same("attr(z1, 'width')", "w0"),
+            same("z1$time", "grid()"),
+            same("z1$hazard", "smooth_at(grid(), kp_contrib(cb, c(1, 50)))"),
+            same("z2$hazard", "smooth_at(grid(), kp_contrib(cx, c(1, 50)))"),
+            same(
+                "z3$hazard",
+                "smooth_at(grid(), 1 - (1 - efron_h0(ce))^exp(sum(colMeans(X) * coef(ce))))",
+            ),
+            same(
+                "z4$hazard2",
+                "smooth_at(grid(), 1 - (1 - efron_h0(ce))^exp(sum(c(1, 60) * coef(ce))))",
+            ),
+            same("z5$time", "grid(5)"),
+            same("z5$hazard", "smooth_at(grid(5), kp_contrib(cb, c(1, 50)), 5)"),
+            // Stata 19: stcurve, hazard at(armb=1 age=50) outfile(): 73 points from
+            // 14.44 to 47.56; Stata keeps the curve in single precision, so 2e-7
+            "nrow(z1) == 73 && nrow(z3) == 73".to_string(),
+            within(
+                "z1$hazard[c(1, 2, 20, 73)]",
+                "c(.0115549890324473, .0119493333622813, .0246726609766483, .0911883413791656)",
+                "2e-7",
+            ),
+            // exactp ties
+            within(
+                "z2$hazard[1:2]",
+                "c(.0112710688263178, .0116566903889179)",
+                "2e-7",
+            ),
+            // efron at the means, and at (armb 0, age 45) and (armb 1, age 60)
+            within(
+                "z3$hazard[c(1, 2, 73)]",
+                "c(.0210135839879513, .0217470433562994, .142648905515671)",
+                "2e-7",
+            ),
+            within(
+                "c(z4$hazard1[1:2], z4$hazard2[1:2])",
+                "c(.0447285659611225, .0462591499090195, .0102442298084497, .0106050195172429)",
+                "2e-7",
+            ),
+            // width(5): from 13.06
+            within(
+                "z5$hazard[1:2]",
+                "c(.0104881804436445, .0108795175328851)",
+                "2e-7",
+            ),
+            same("z5$time[1]", "13.06"),
+        ],
+    );
+    // the hazard refuses a stratified model, as Stata's stcurve does
+    let (outcome, text, _) = dialog(
+        &mut e,
+        &COX,
+        &[
+            ("time", "time"),
+            ("event", "died"),
+            ("strata", "centre"),
+            ("save", "cs"),
+        ],
+        &[("x", &["arm", "age"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text, _) = dialog(
+        &mut e,
+        &COX_CURVES,
+        &[("model", "cs"), ("kind", "hazard"), ("save", "z6")],
+        &[],
+        &[],
+    );
+    assert_ne!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("without strata"), "{text}");
+}
 #[test]
 fn time_varying_covariates_match_stsplit() {
     let Some(mut e) = engine() else { return };

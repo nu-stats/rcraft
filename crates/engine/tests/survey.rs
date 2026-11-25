@@ -1387,3 +1387,231 @@ fn survey_models_have_the_model_menu() {
         .join(", "),
     );
 }
+
+#[test]
+fn stratified_jackknife_brr_from_the_design_and_a_lone_correction_match_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // MAKE with twelve delete-one-cluster jackknife weights (a cluster's rows
+    // out, the rest of its stratum times 4 / 3), as data providers give them
+    let make_jk = format!(
+        "{MAKE}; local({{ key <- paste(d$stratum, d$psu); ks <- unique(key); \
+           for (j in seq_along(ks)) {{ h <- d$stratum[key == ks[j]][1]; \
+             d[[paste0('jk', j)]] <<- ifelse(key == ks[j], 0, ifelse(d$stratum == h, d$wt * 4 / 3, d$wt)) }} }})"
+    );
+    let mut ctx = context();
+    ctx.columns.extend((1..=12).map(|j| ColumnInfo {
+        name: format!("jk{j}"),
+        kind: VarKind::Number,
+    }));
+    let jk: Vec<String> = (1..=12).map(|j| format!("jk{j}")).collect();
+    let jk: Vec<&str> = jk.iter().map(String::as_str).collect();
+    let design = [("weights", "wt"), ("psu", "psu"), ("strata", "stratum")];
+
+    // the jackknife built from the strata and clusters, centred on the estimate
+    let mut set = design.to_vec();
+    set.push(("method", "JKndesign"));
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE,
+        &context(),
+        &SURVEY_MEANS,
+        &set,
+        &[("x", &["hours"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    // the same by hand: drop each cluster in turn, the rest of its stratum
+    // weighted up by n / (n - 1), and (n - 1) / n times the squared distances
+    // from the full-sample mean
+    let jk_hand = "local({ key <- paste(d$stratum, d$psu); ks <- unique(key); m <- sum(d$wt * d$hours) / sum(d$wt); \
+                   sqrt(sum(vapply(ks, function(k) { h <- d$stratum[key == k][1]; \
+                     w <- ifelse(key == k, 0, ifelse(d$stratum == h, d$wt * 4 / 3, d$wt)); \
+                     3 / 4 * (sum(w * d$hours) / sum(w) - m)^2 }, 0))) })";
+    holds_more(
+        &mut e,
+        &[
+            same("survey::SE(survey::svymean(~hours, design))", jk_hand),
+            // Stata 19: svyset psu [pw=wt], strata(stratum) vce(jackknife);
+            // svy jackknife, mse: mean hours, on 9 df
+            same(
+                "survey::SE(survey::svymean(~hours, design))",
+                ".911122097913483",
+            ),
+            "survey::degf(design) == 9".to_string(),
+        ]
+        .join(", "),
+    );
+    let mut set = design.to_vec();
+    set.extend([("method", "JKndesign"), ("y", "hours")]);
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE,
+        &context(),
+        &SURVEY_REGRESSION,
+        &set,
+        &[("x", &["smokes"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds_more(
+        &mut e,
+        &[
+            // Stata 19: svy jackknife, mse: regress hours smokes
+            same("coef(model)[['smokes']]", "-.61786877394636"),
+            same("survey::SE(model)[['smokes']]", "1.08044442952156"),
+        ]
+        .join(", "),
+    );
+
+    // JKn weights given as columns, with the stratum of each replicate (for the
+    // df) and Stata's default multiplier (R - 1) / R
+    let (outcome, text) = dialog_on(
+        &mut e,
+        &make_jk,
+        &ctx,
+        &SURVEY_MEANS,
+        &[
+            ("weights", "wt"),
+            ("method", "JKn"),
+            ("jkstrata", "1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3"),
+        ],
+        &[("x", &["hours"]), ("repweights", &jk)],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds_more(
+        &mut e,
+        &[
+            same(
+                "survey::SE(survey::svymean(~hours, design))",
+                "sqrt(11 / 12) / sqrt(3 / 4) * .911122097913483",
+            ),
+            // Stata 19: svyset [pw=wt], jkrweight(jk1-jk12, stratum(1 1 1 1 2 2
+            // 2 2 3 3 3 3)); svy jackknife, mse: mean hours, on 9 df
+            same(
+                "survey::SE(survey::svymean(~hours, design))",
+                "1.00728337899349",
+            ),
+            "survey::degf(design) == 9".to_string(),
+        ]
+        .join(", "),
+    );
+
+    // BRR and Fay built from the design with survey's Hadamard matrix; Stata
+    // gives the same with that matrix (its columns 2 to 4 first) in hadamard()
+    let rep_design = [("weights", "w"), ("psu", "p"), ("strata", "s")];
+    for (fay, se) in [
+        ("0", "c(.981084768970267, .348325752937969)"),
+        ("0.3", "c(.962577574383445, .345290426046319)"),
+    ] {
+        let mut set = rep_design.to_vec();
+        set.extend([("method", "BRRdesign"), ("fay", fay)]);
+        let (outcome, text) = dialog_on(
+            &mut e,
+            MAKE_REP,
+            &rep_context(),
+            &SURVEY_MEANS,
+            &set,
+            &[("x", &["y", "x"])],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        holds_more(
+            &mut e,
+            &[
+                // Stata 19: svyset p [pw=w], strata(s) vce(brr); svy brr,
+                // hadamard(H) fay(): mean y x, on 3 df
+                same("survey::SE(survey::svymean(~y + x, design))", se),
+                "survey::degf(design) == 3".to_string(),
+            ]
+            .join(", "),
+        );
+    }
+    let mut set = rep_design.to_vec();
+    set.extend([("method", "BRRdesign"), ("y", "y")]);
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE_REP,
+        &rep_context(),
+        &SURVEY_REGRESSION,
+        &set,
+        &[("x", &["x"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds_more(
+        &mut e,
+        &[
+            // Stata 19: svy brr, hadamard(H): regress y x
+            same("survey::SE(model)[['x']]", ".439294331520818"),
+        ]
+        .join(", "),
+    );
+
+    // a first-stage correction with a second stage that has none: the second
+    // stage as drawn from an infinite population
+    let mut set = design.to_vec();
+    set.extend([("ssu", "ssu"), ("fpc", "pop")]);
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE,
+        &context(),
+        &SURVEY_MEANS,
+        &set,
+        &[("x", &["hours"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds_more(
+        &mut e,
+        &[
+            // the two-stage formula with f1 = n / N and no second-stage correction
+            same(
+                "survey::SE(survey::svymean(~hours, design))",
+                "ms_se(d$hours, fpc1 = TRUE, fpc2 = FALSE)",
+            ),
+            // Stata 19: svyset psu [pw=wt], strata(stratum) fpc(pop) || ssu
+            same(
+                "survey::SE(survey::svymean(~hours, design))",
+                ".869054550185629",
+            ),
+        ]
+        .join(", "),
+    );
+
+    // quantiles for each group: each point estimate is the group's weighted
+    // distribution function inverted (the design kept whole)
+    let (outcome, text) = dialog_on(
+        &mut e,
+        MAKE,
+        &context(),
+        &SURVEY_QUANTILES,
+        &[
+            ("y", "income"),
+            ("by", "region"),
+            ("weights", "wt"),
+            ("psu", "psu"),
+            ("strata", "stratum"),
+            ("quantiles", "0.5"),
+        ],
+        &[],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds_more(
+        &mut e,
+        &[same(
+            "coef(survey::svyby(~income, ~region, design, survey::svyquantile, quantiles = 0.5, \
+             na.rm = TRUE, keep.var = TRUE))",
+            "vapply(levels(d$region), function(g) { k <- !is.na(d$income) & d$region == g; \
+               o <- order(d$income[k]); xs <- d$income[k][o]; cw <- cumsum(w[k][o]) / sum(w[k]); \
+               xs[which(cw >= 0.5 - 1e-12)[1]] }, 0)",
+        )]
+        .join(", "),
+    );
+    assert!(text.contains("north") && text.contains("west"), "{text}");
+}

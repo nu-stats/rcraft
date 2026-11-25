@@ -52,6 +52,10 @@ const TABLE_SES: &[Opt] = &[
         value: "HC3",
         label: "Robust, HC3 (better in small samples)",
     },
+    Opt {
+        value: "cluster",
+        label: "Clustered on a variable (Stata's vce(cluster))",
+    },
 ];
 
 /// Most decimal places offered.
@@ -96,6 +100,12 @@ fn coefficient_lines(a: &Args) -> Vec<(String, Option<String>)> {
 
 fn table_check(a: &Args) -> Vec<Problem> {
     let mut out = Vec::new();
+    if a.choice("vcov") == "cluster" && a.expr("cluster").is_empty() {
+        out.push(Problem::new(
+            "cluster",
+            "Type the name of the variable to cluster on.",
+        ));
+    }
     let mut listed: Vec<String> = Vec::new();
     for (term, _) in coefficient_lines(a) {
         if term.is_empty() {
@@ -178,7 +188,20 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
         "in parentheses"
     };
     let stars = a.flag("stars");
+    let clustered = a.choice("vcov") == "cluster";
+    let cluster = a.expr("cluster");
+    let shown: String = cluster
+        .chars()
+        .filter(|c| !matches!(c, '"' | '\\'))
+        .collect();
     let mut note = match (robust, paren) {
+        (None, "se") if clustered => {
+            format!("Standard errors clustered on {shown} {enclosed}")
+        }
+        (None, _) if clustered => format!(
+            "{} from standard errors clustered on {shown}, {enclosed}",
+            capitalised(words)
+        ),
         (None, _) => format!("{} {enclosed}", capitalised(words)),
         (Some(kind), "se") => format!("Robust ({kind}) standard errors {enclosed}"),
         (Some(kind), _) => format!(
@@ -191,7 +214,36 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
     // robust ones, plm's vcovHC (clustered on the unit), the sandwich for a Cox
     // or survreg model (refitted with robust = TRUE), and sandwich::sandwich for
     // polr and multinom; svyglm's are design-based already, and lme4 has none
+    // clustered errors on the variable as the model's rows have it: sandwich's
+    // vcovCL for lm; for glm the sandwich at the fitted values (vcovCL takes glm's
+    // working weights from the last iteration, 3e-8 off). The factors are CR1
+    // for lm (Stata's regress, vce(cluster): G / (G - 1) and
+    // (N - 1) / (N - K)) and G / (G - 1) alone for glm (Stata's logit and
+    // poisson); the number of clusters is kept for lm's t degrees of freedom
     let guard = match robust {
+        None if clustered => format!(
+            "if (!requireNamespace(\"sandwich\", quietly = TRUE)) \
+             stop(\"clustered standard errors need the sandwich package; install it from Packages\")\n  \
+             robust_vcov <- function(m) {{\n    \
+             if (!inherits(m, \"lm\") || inherits(m, \"svyglm\")) stop(\"clustered standard errors \
+             are offered for lm and glm models, not for \", class(m)[1], \" models\")\n    \
+             cl <- stats::expand.model.frame(m, ~ {}, na.expand = FALSE)[[{}]]\n    \
+             if (anyNA(cl)) stop(\"the cluster variable is missing in rows the model used\")\n    \
+             V <- if (inherits(m, \"glm\")) {{\n      \
+             X <- stats::model.matrix(m)\n      \
+             de <- m$family$mu.eta(m$linear.predictors)\n      \
+             va <- m$family$variance(m$fitted.values)\n      \
+             bread <- solve(crossprod(X, (m$prior.weights * de^2 / va) * X))\n      \
+             S <- X * (m$prior.weights * (m$y - m$fitted.values) * de / va)\n      \
+             G <- length(unique(cl))\n      \
+             bread %*% crossprod(rowsum(S, cl)) %*% bread * G / (G - 1)\n    \
+             }} else sandwich::vcovCL(m, cluster = cl, type = \"HC1\", cadjust = TRUE)\n    \
+             attr(V, \"clusters\") <- length(unique(cl))\n    \
+             V\n  \
+             }}\n  ",
+            r_name(cluster),
+            r_string(cluster)
+        ),
         None => String::new(),
         Some(kind) => format!(
             "if (!requireNamespace(\"sandwich\", quietly = TRUE)) \
@@ -222,8 +274,17 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
         ),
     };
     let errors = match robust {
+        None if clustered => "V <- robust_vcov(m)\n    \
+                              se <- sqrt(diag(as.matrix(V)))[names(est)]"
+            .to_string(),
         None => "se <- sqrt(diag(as.matrix(stats::vcov(m))))[names(est)]".to_string(),
         Some(_) => "se <- sqrt(diag(as.matrix(robust_vcov(m))))[names(est)]".to_string(),
+    };
+    // Stata's t tests after regress, vce(cluster) take G - 1 degrees of freedom
+    let cluster_df = if clustered {
+        "if (!inherits(m, \"glm\")) df <- attr(V, \"clusters\") - 1\n    "
+    } else {
+        ""
     };
     let below = match paren {
         "statistic" => "paste0(\"(\", fmt(stat), \")\")",
@@ -350,7 +411,7 @@ fn table_code(a: &Args, _: rcraft_rcodegen::dialog::Style) -> String {
          df <- if (inherits(m, \"glm\")) {{\n      \
          if (m$family$family %in% c(\"binomial\", \"poisson\")) Inf else m$df.residual\n    \
          }} else if (inherits(m, c(\"lm\", \"plm\"))) stats::df.residual(m) else Inf\n    \
-         list(est = est, se = se, df = df)\n  \
+         {cluster_df}list(est = est, se = se, df = df)\n  \
          }}\n  \
          fits <- lapply(models, fit_of)\n  \
          terms <- unique(unlist(lapply(fits, function(f) names(f$est))))\n  \
@@ -445,6 +506,16 @@ pub const MODEL_TABLE: Spec = Spec {
                    plm uses it too (clustered on the unit); fixest has HC1 only; a Cox, survreg, \
                    polr or multinom model uses the plain sandwich (no HC adjustment); survey \
                    and mixed models have none and are refused.",
+        },
+        Widget::Text {
+            id: "cluster",
+            label: "Cluster variable",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "With clustered errors: a column of the data the models were fitted on. lm \
+                   models get Stata's regress, vce(cluster) errors (CR1: G / (G - 1) times \
+                   (N - 1) / (N - K)) with t on G - 1 degrees of freedom; glm models Stata's \
+                   logit or poisson ones (G / (G - 1)); other classes are refused.",
         },
         Widget::Check {
             id: "stars",

@@ -407,6 +407,93 @@ fn robust_errors_for_every_class_that_has_them() {
 }
 
 #[test]
+fn clustered_errors_on_a_chosen_variable_are_statas() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !packages(&mut e) {
+        return;
+    }
+    define(&mut e, MAKE);
+    define(
+        &mut e,
+        "ols <- lm(y ~ x + z, data = d); lg <- glm(status ~ x + z, family = binomial, data = d); \
+         pan <- plm::plm(y ~ x + z, data = d, index = c('g', 't'), model = 'within')",
+    );
+    let (outcome, text) = table(
+        &mut e,
+        "ols",
+        &[
+            ("others", "lg"),
+            ("digits", "10"),
+            ("vcov", "cluster"),
+            ("cluster", "g"),
+        ],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    define(
+        &mut e,
+        "fmt <- function(x) formatC(x, format = 'f', digits = 10); \
+         terms <- tab[[1]][c(TRUE, FALSE)]; \
+         se_is <- function(col, se) { i <- match(names(se), terms); \
+           all(!is.na(i)) && identical(tab[[col]][2 * i], paste0('(', fmt(unname(se)), ')')) }; \
+         X <- cbind(1, d$x, d$z); n <- nrow(X); G <- 6; \
+         cr <- function(S, A, adj) { meat <- Reduce(`+`, lapply(split(seq_len(n), d$g), function(k) \
+           tcrossprod(colSums(S[k, , drop = FALSE])))); sqrt(diag(A %*% meat %*% A * adj)) }; \
+         ols_cr1 <- setNames(cr(X * resid(ols), solve(crossprod(X)), G / (G - 1) * (n - 1) / (n - 3)), \
+           names(coef(ols))); \
+         p <- fitted(lg); lg_cr <- setNames(cr(X * (d$status - p), solve(crossprod(X, p * (1 - p) * X)), \
+           G / (G - 1)), names(coef(lg)))",
+    );
+    holds(
+        &mut e,
+        &[
+            // the cluster sandwich written out: CR1 for lm, G / (G - 1) for glm
+            "se_is('ols', ols_cr1)",
+            "se_is('lg', lg_cr)",
+            // Stata 19: regress y x z, vce(cluster g); logit status x z,
+            // vce(cluster g) (x, z, _cons)
+            "isTRUE(all.equal(unname(ols_cr1[c(2, 3, 1)]), \
+               c(.0466144293097301, .0926241261150648, .113318450669376), tolerance = 1e-9))",
+            "isTRUE(all.equal(unname(lg_cr[c(2, 3, 1)]), \
+               c(.273195520488591, .204893832611605, .536533786556489), tolerance = 1e-9))",
+            "grepl('clustered on g', attr(tab, 'note'), fixed = TRUE)",
+        ],
+    );
+    // p-values: lm's on G - 1 = 5 degrees of freedom, as Stata's
+    let (outcome, text) = table(
+        &mut e,
+        "ols",
+        &[
+            ("digits", "10"),
+            ("vcov", "cluster"),
+            ("cluster", "g"),
+            ("paren", "p"),
+        ],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            // Stata 19: the p-value of x after regress y x z, vce(cluster g)
+            "identical(tab[['ols']][2 * match('x', tab[[1]][c(TRUE, FALSE)])], \
+               paste0('(', formatC(.000162471063745797, format = 'f', digits = 10), ')'))",
+        ],
+    );
+    // other classes are refused with a message, and a missing variable is asked for
+    let (outcome, text) = table(&mut e, "pan", &[("vcov", "cluster"), ("cluster", "g")], &[]);
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("offered for lm and glm models"), "{text}");
+    let ctx = context("ols");
+    let mut values = MODEL_TABLE.defaults(&ctx);
+    values.set_text("vcov", "cluster");
+    assert!(MODEL_TABLE
+        .problems(&ctx, &values)
+        .iter()
+        .any(|p| p.widget == "cluster"));
+}
+#[test]
 fn r_squared_for_fixest_and_plm_and_labelled_coefficients() {
     let Some(mut e) = engine() else { return };
     settle(&mut e);
