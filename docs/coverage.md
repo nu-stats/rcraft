@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 150 | 149 | 0 | 1 |
+| 152 | 151 | 0 | 1 |
 
 ## File
 
@@ -115,7 +115,9 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Survey quantiles | verified |
 | Survey regression | verified |
 | Two-stage least squares | verified |
+| IV probit or tobit | verified |
 | Heckman selection model | verified |
+| Treatment effects | verified |
 | Linear mixed model | verified |
 | Logistic or Poisson mixed model | verified |
 | Mixed model (glmmTMB) | verified |

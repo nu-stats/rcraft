@@ -23,7 +23,8 @@
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::iv::{HECKMAN, IV_REGRESSION};
+use rcraft_catalog::iv::{HECKMAN, IV_ML, IV_REGRESSION, TREATMENT_EFFECTS};
+use rcraft_catalog::postest::{self, MODEL_FIT, ROBUST};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind, Widget};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -121,7 +122,8 @@ fn versions(e: &mut Engine) -> bool {
 /// 120 rows in six regions. Schooling shares an error with the wage, and z1
 /// and z2 move it; x is missing in rows 7 and 55. Earnings are seen where
 /// the work index is positive, its error correlated with the earnings'
-/// (kids and dist are excluded from the earnings equation).
+/// (kids and dist are excluded from the earnings equation). high is the wage
+/// above 9; hrs the wage less 8, censored at 0; top the wage censored at 10.
 const MAKE: &str = "d <- local({ \
      set.seed(6601); n <- 120; region <- rep(1:6, each = 20); \
      z1 <- round(rnorm(n), 3); z2 <- round(rnorm(n) + 0.3 * z1, 3); x <- round(rnorm(n, 2), 3); \
@@ -134,7 +136,8 @@ const MAKE: &str = "d <- local({ \
      works <- as.numeric(0.8 + 0.5 * x - 0.6 * kids - 0.15 * dist + 0.4 * z1 + s > 0); \
      earn <- round(2 + 0.6 * ifelse(is.na(x), 2, x) + 0.3 * z1 + e, 3); \
      earn[works == 0 | is.na(works)] <- NA; \
-     data.frame(wage, educ, x, z1, z2, region, works, earn, kids, dist) })";
+     data.frame(wage, educ, x, z1, z2, region, works, earn, kids, dist, \
+       high = as.numeric(wage > 9), hrs = pmax(0, round(wage - 8, 3)), top = pmin(wage, 10)) })";
 
 /// Two-stage least squares in plain R on the complete rows `k`: `Xh` the
 /// regressors projected on the instruments, `b`, the residuals `e`, the
@@ -163,6 +166,9 @@ fn context() -> Context {
             ("earn", VarKind::Number),
             ("kids", VarKind::Number),
             ("dist", VarKind::Number),
+            ("high", VarKind::Number),
+            ("hrs", VarKind::Number),
+            ("top", VarKind::Number),
         ]
         .into_iter()
         .map(|(name, kind)| ColumnInfo {
@@ -580,5 +586,567 @@ fn heckman_is_statas_both_ways() {
             ),
             same("se2[2]", ".157479856987281"),
         ],
+    );
+}
+
+/// Each value of `got` within `tol` (relative, mean) of the Stata numbers.
+fn near(got: &str, stata: &str, tol: &str) -> String {
+    within(got, &format!("c({stata})"), tol)
+}
+
+#[test]
+fn liml_and_gmm_match_ivregress() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let fit = |e: &mut Engine, set: &[(&str, &str)], x: &[&str], insts: &[&str], flags: &[&str]| {
+        let (outcome, text) = dialog(
+            e,
+            &IV_REGRESSION,
+            &[[("y", "wage")].as_slice(), set].concat(),
+            &[("endog", &["educ"]), ("instruments", insts), ("x", x)],
+            flags,
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        text
+    };
+    let (x, z) = (["x"], ["z1", "z2"]);
+    let liml = |e: &mut Engine, save: &str, errors: &str, cluster: &str, flags: &[&str]| {
+        fit(
+            e,
+            &[
+                ("estimator", "liml"),
+                ("save", save),
+                ("errors", errors),
+                ("cluster", cluster),
+            ],
+            &x,
+            &z,
+            flags,
+        )
+    };
+    let text = liml(&mut e, "l", "iid", "", &["first"]);
+    assert!(
+        text.contains("kappa = 1.043479293") && text.contains("Coefficients:"),
+        "{text}"
+    );
+    liml(&mut e, "ls", "iid", "", &["small"]);
+    liml(&mut e, "lr", "hetero", "", &[]);
+    liml(&mut e, "lrs", "hetero", "", &["small"]);
+    liml(&mut e, "lc", "iid", "region", &[]);
+    liml(&mut e, "lcs", "iid", "region", &["small"]);
+    fit(
+        &mut e,
+        &[("estimator", "liml"), ("save", "l0")],
+        &[],
+        &z,
+        &[],
+    );
+    let gmm = |e: &mut Engine, save: &str, errors: &str, cluster: &str, flags: &[&str]| {
+        fit(
+            e,
+            &[
+                ("estimator", "gmm"),
+                ("save", save),
+                ("errors", errors),
+                ("cluster", cluster),
+            ],
+            &x,
+            &z,
+            flags,
+        )
+    };
+    let text = gmm(&mut e, "g", "hetero", "", &[]);
+    assert!(text.contains("Hansen's J = 3.980823"), "{text}");
+    gmm(&mut e, "gs", "hetero", "", &["small"]);
+    gmm(&mut e, "gu", "iid", "", &[]);
+    gmm(&mut e, "gus", "iid", "", &["small"]);
+    gmm(&mut e, "gc", "iid", "region", &[]);
+    gmm(&mut e, "gcs", "iid", "region", &["small"]);
+    fit(
+        &mut e,
+        &[("estimator", "gmm"), ("save", "g0"), ("errors", "hetero")],
+        &[],
+        &["z1", "z2", "x"],
+        &[],
+    );
+    let se = |m: &str| format!("sqrt(diag({m}$vcov))[c(2, 3, 1)]");
+    let b = |m: &str| format!("coef({m})[c(2, 3, 1)]");
+    // the LIML k written out: the least variance ratio of the outcome less
+    // educ's part, after the exogenous predictor alone and after all the
+    // instruments, is kappa, at the LIML coefficient
+    define(
+        &mut e,
+        "k <- d[!is.na(d$x), ]; ratio <- function(g) { r <- k$wage - g * k$educ; \
+           sum(resid(lm(r ~ x, k))^2) / sum(resid(lm(r ~ z1 + z2 + x, k))^2) }; \
+         least <- optimize(ratio, c(0, 1), tol = 1e-12)",
+    );
+    holds(
+        &mut e,
+        &[
+            within("least$objective", "l$kappa", "1e-12"),
+            within("least$minimum", "coef(l)[2]", "1e-6"),
+            // Stata 19: ivregress liml wage x (educ = z1 z2): e(b), its
+            // errors and e(kappa); then small, vce(robust) with and without
+            // small, vce(cluster region) with and without small
+            same(
+                &b("l"),
+                "c(.498447193365507, .566211009068049, 1.88873382345548)",
+            ),
+            same("l$kappa", "1.04347929250276"),
+            same(
+                &se("l"),
+                "c(.082467239678828, .0865299369077466, .947367126537199)",
+            ),
+            same(
+                &se("ls"),
+                "c(.0835359741922704, .0876513219617324, .959644534499127)",
+            ),
+            same(
+                &se("lr"),
+                "c(.0891813317268475, .0791658743292889, 1.01138875002576)",
+            ),
+            same(
+                &se("lrs"),
+                "c(.0903370775423062, .0801918247856405, 1.02449584646635)",
+            ),
+            same(
+                &se("lc"),
+                "c(.0859468051647588, .030262696253335, 1.03186648014669)",
+            ),
+            same(
+                &se("lcs"),
+                "c(.0949651746626453, .03343815084169, 1.14013988452289)",
+            ),
+            same(&b("lcs"), &b("l")),
+            // ivregress liml wage (educ = z1 z2)
+            same(
+                "c(coef(l0)[c(2, 1)], sqrt(diag(l0$vcov))[c(2, 1)])",
+                "c(.459945888070735, 3.44702201488394, .100187667706886, 1.18996236882436)",
+            ),
+            // ivregress gmm wage x (educ = z1 z2), estat overid; then small,
+            // vce(unadjusted) with and without small, wmatrix(cluster region)
+            // with and without small (and its J)
+            same(
+                &b("g"),
+                "c(.533541755446612, .569129369158756, 1.44488754839693)",
+            ),
+            same(
+                &se("g"),
+                "c(.0839159460935805, .0770453545788644, .94926125117524)",
+            ),
+            same("g$J", "3.98082286609787"),
+            same("pchisq(g$J, 1, lower.tail = FALSE)", ".0460210758055616"),
+            same(
+                &se("gs"),
+                "c(.0850034551234408, .0780438241512609, .961563206052783)",
+            ),
+            same(
+                &se("gu"),
+                "c(.0849862873200696, .0779156898702126, .961423544513104)",
+            ),
+            same(
+                &se("gus"),
+                "c(.0860876674412186, .0789254385562032, .973883116678474)",
+            ),
+            same(&b("gu"), &b("g")),
+            same(
+                &b("gc"),
+                "c(.522334538671452, .567134273562958, 1.50976405113003)",
+            ),
+            same(
+                &se("gc"),
+                "c(.0848662462003165, .0361900888513891, 1.01167758891253)",
+            ),
+            same("gc$J", "3.04842106963101"),
+            same(
+                &se("gcs"),
+                "c(.0937712330077658, .0399875027610472, 1.11783257968936)",
+            ),
+            // ivregress gmm wage (educ = z1 z2 x)
+            same(
+                "c(coef(g0)[c(2, 1)], sqrt(diag(g0$vcov))[c(2, 1)], g0$J)",
+                "c(.738464603000113, .24708644915647, .0838435431243328, .997931527006952, \
+                   29.1150248245141)",
+            ),
+        ],
+    );
+}
+
+#[test]
+fn iv_probit_and_tobit_match_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let fit = |e: &mut Engine, set: &[(&str, &str)]| {
+        let (outcome, text) = dialog(
+            e,
+            &IV_ML,
+            &[[("endog", "educ")].as_slice(), set].concat(),
+            &[("instruments", &["z1", "z2"]), ("x", &["x"])],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        text
+    };
+    let text = fit(&mut e, &[("y", "high"), ("save", "p")]);
+    assert!(
+        text.contains("Wald test of exogeneity") && text.contains("corr(educ, high)"),
+        "{text}"
+    );
+    fit(
+        &mut e,
+        &[("y", "high"), ("save", "pr"), ("errors", "hetero")],
+    );
+    fit(
+        &mut e,
+        &[("y", "high"), ("save", "pc"), ("cluster", "region")],
+    );
+    let tobit = |e: &mut Engine, set: &[(&str, &str)]| {
+        fit(e, &[[("model", "tobit")].as_slice(), set].concat())
+    };
+    let text = tobit(&mut e, &[("y", "hrs"), ("save", "t")]);
+    assert!(text.contains("34 censored below and 0 above"), "{text}");
+    tobit(
+        &mut e,
+        &[("y", "hrs"), ("save", "tr"), ("errors", "hetero")],
+    );
+    tobit(
+        &mut e,
+        &[("y", "hrs"), ("save", "tc"), ("cluster", "region")],
+    );
+    let text = tobit(
+        &mut e,
+        &[("y", "top"), ("save", "tu"), ("lower", ""), ("upper", "10")],
+    );
+    assert!(text.contains("0 censored below and 30 above"), "{text}");
+    tobit(&mut e, &[("y", "hrs"), ("save", "tb"), ("upper", "3")]);
+    // Stata's order: the outcome's educ, x, _cons; educ's x, z1, z2, _cons;
+    // /athrho2_1, (/lnsigma1,) /lnsigma2
+    let b = |m: &str| format!("coef({m})[c(2, 3, 1, 7, 5, 6, 4, 8:length(coef({m})))]");
+    let se = |m: &str| format!("sqrt(diag({m}$vcov))[c(2, 3, 1, 7, 5, 6, 4, 8:length(coef({m})))]");
+    // Stata stops where its change in the log-likelihood is below 1e-7, which
+    // on this flat likelihood leaves its probit estimates about 1e-7 from the
+    // maximum the dialog reaches (the log-likelihoods agree to 1e-15)
+    let ml = |a: &str, b: &str| near(a, b, "1e-6");
+    holds(
+        &mut e,
+        &[
+            // Stata 19: ivprobit high x (educ = z1 z2), then vce(robust) and
+            // vce(cluster region): e(b), the errors, e(ll), e(chi2_exog)
+            ml(
+                &b("p"),
+                ".445027211426933, .654367535925901, -6.69367627371841, .35494909486421, \
+                 .850704114589881, .53469502190419, 11.0824051603976, .635720894873503, \
+                 -.0708165020149279",
+            ),
+            ml(
+                &se("p"),
+                ".165789105027139, .150011343568814, 2.06490601874771, .0807294285935275, \
+                 .0873995656453498, .0899633867388431, .179777723692365, .210850980303174, \
+                 .0654972679194354",
+            ),
+            within("p$loglik", "-201.901474847615", "1e-12"),
+            ml("coef(p)[8]^2 / p$vcov[8, 8]", "9.09037340510604"),
+            ml(
+                &se("pr"),
+                ".166183448658647, .142504353842388, 2.04252461111504, .0728714178677016, \
+                 .0840492211149925, .0939368956510701, .173842039584188, .200459221404438, \
+                 .0559409043707051",
+            ),
+            ml(
+                &se("pc"),
+                ".171378786557404, .191125736064477, 2.27586078298853, .050735322521732, \
+                 .0766708170397616, .134795092094013, .219368391366173, .146241278370201, \
+                 .0657944003628893",
+            ),
+            // ivtobit hrs x (educ = z1 z2), ll(0), then vce(robust) and
+            // vce(cluster region)
+            ml(
+                &b("t"),
+                ".461867784483787, .529953459427294, -5.58505841070149, .351721046701458, \
+                 .880332037400995, .489795035718691, 11.0899659490096, .736876624713189, \
+                 -.0258646139482307, -.0656071714266214",
+            ),
+            ml(
+                &se("t"),
+                ".0903627429101763, .094798953548531, 1.055459287166, .0811121744676045, \
+                 .082637638901454, .0821943491587294, .180624593839367, .139614921608568, \
+                 .09794258398048, .065878290122782",
+            ),
+            within("t$loglik", "-271.771226716996", "1e-12"),
+            ml("coef(t)[8]^2 / t$vcov[8, 8]", "27.8564574948848"),
+            ml(
+                &se("tr"),
+                ".0903427826625507, .0911466807438586, 1.01616245478992, .0734456728777231, \
+                 .0764866453331406, .081542282234108, .174941878332976, .132000401750469, \
+                 .107015097347805, .0570012426644965",
+            ),
+            ml(
+                &se("tc"),
+                ".118741907408908, .0598794454307406, 1.37488250234631, .0503636322757906, \
+                 .077415071417707, .133765085453119, .226058839431677, .204268078477806, \
+                 .153263171598813, .0676054965194201",
+            ),
+            // ivtobit top x (educ = z1 z2), ul(10); ivtobit hrs ..., ll(0) ul(3)
+            ml(
+                &b("tu"),
+                ".499501042877933, .601043041629748, 1.81820389150888, .354475211189553, \
+                 .855400457987996, .527998865409236, 11.0835111802591, .563603416372363, \
+                 -.00971325625829627, -.0701804246877386",
+            ),
+            ml(
+                &se("tu"),
+                ".0907493275231051, .0952312244757202, 1.04559658586063, .0807538440568585, \
+                 .0845824516845294, .0848595744176109, .179826791553234, .12949570486903, \
+                 .0868503102619269, .0655043033439294",
+            ),
+            within("tu$loglik", "-287.082280870356", "1e-12"),
+            ml(
+                &b("tb"),
+                ".51720544070403, .54649443419374, -6.26721735041622, .352045221760911, \
+                 .877594120077694, .494232437052534, 11.089203962001, .685057933388784, \
+                 .00416676628101525, -.0662175545585323",
+            ),
+            ml(
+                &se("tb"),
+                ".0987512753033668, .10263443662479, 1.16688742258873, .081076261125825, \
+                 .0836705409856743, .0847128437134688, .180547762468196, .144007578959286, \
+                 .104407030850768, .0658836736904021",
+            ),
+            within("tb$loglik", "-269.160854752638", "1e-12"),
+        ],
+    );
+    // the probit's log-likelihood written out on its own at the dialog's
+    // estimate: educ's normal density times the probit given its error
+    define(
+        &mut e,
+        "k <- d[!is.na(d$x), ]; th <- coef(p); rho <- tanh(th[8]); sg <- exp(th[9]); \
+         u <- (k$educ - th[4] - th[5] * k$z1 - th[6] * k$z2 - th[7] * k$x) / sg; \
+         w <- (th[1] + th[2] * k$educ + th[3] * k$x + rho * u) / sqrt(1 - rho^2); \
+         own <- sum(dnorm(u, log = TRUE) - log(sg) + pnorm((2 * k$high - 1) * w, log.p = TRUE))",
+    );
+    holds(&mut e, &[within("own", "p$loglik", "1e-13")]);
+}
+
+#[test]
+fn treatment_effects_match_teffects() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let te = |e: &mut Engine, method: &str, stat: &str, save: &str, x: &[&str], tx: &[&str]| {
+        let (outcome, text) = dialog(
+            e,
+            &TREATMENT_EFFECTS,
+            &[
+                ("y", "wage"),
+                ("treat", "works"),
+                ("method", method),
+                ("stat", stat),
+                ("save", save),
+            ],
+            &[("x", x), ("tx", tx)],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        text
+    };
+    let xz = ["x", "z1"];
+    let text = te(&mut e, "ra", "ate", "ra", &xz, &[]);
+    assert!(
+        text.contains("118 observations, 63 treated") && text.contains("ATE (1 vs 0)"),
+        "{text}"
+    );
+    te(&mut e, "ra", "atet", "rat", &xz, &[]);
+    te(&mut e, "ra", "pomeans", "rap", &xz, &[]);
+    te(&mut e, "ipw", "ate", "ipw", &[], &xz);
+    te(&mut e, "ipw", "atet", "ipt", &[], &xz);
+    te(&mut e, "ipw", "pomeans", "ipp", &[], &xz);
+    te(&mut e, "aipw", "ate", "aipw", &xz, &xz);
+    te(&mut e, "aipw", "atet", "aipt", &xz, &xz);
+    te(&mut e, "aipw", "pomeans", "aipp", &xz, &xz);
+    te(&mut e, "aipw", "ate", "a2", &["x"], &["x", "z1", "kids"]);
+    te(&mut e, "aipw", "atet", "a2t", &["x"], &["x", "z1", "kids"]);
+    te(&mut e, "ra", "ate", "ra0", &[], &[]);
+    te(&mut e, "ipw", "atet", "i2t", &[], &["x", "z1", "kids"]);
+    let both = |m: &str| format!("c(coef({m}), sqrt(diag({m}$vcov)))");
+    // the point estimates written out: the two groups' regressions predicted
+    // for every row, and the logit's weights normalised within each group
+    define(
+        &mut e,
+        "k <- d[!is.na(d$x), ]; on <- k$works == 1; \
+         p1 <- predict(lm(wage ~ x + z1, k[on, ]), k); p0 <- predict(lm(wage ~ x + z1, k[!on, ]), k); \
+         ps <- fitted(glm(works ~ x + z1, binomial, k)); \
+         w1 <- weighted.mean(k$wage[on], 1 / ps[on]); w0 <- weighted.mean(k$wage[!on], 1 / (1 - ps[!on]))",
+    );
+    holds(
+        &mut e,
+        &[
+            same("coef(ra)", "c(mean(p1 - p0), mean(p0))"),
+            same("coef(rat)", "c(mean(p1[on] - p0[on]), mean(p0[on]))"),
+            same("coef(ipw)", "c(w1 - w0, w0)"),
+            // Stata 19: teffects ra (wage x z1) (works), then atet and
+            // pomeans: the effect and the control mean, their robust errors
+            same(
+                &both("ra"),
+                "c(-.0592069620531749, 8.97046608742692, .273167715955733, .222986635007254)",
+            ),
+            same(
+                &both("rat"),
+                "c(-.159285687561524, 9.41866663994248, .298609563451583, .275744386687767)",
+            ),
+            same(
+                &both("rap"),
+                "c(8.97046608742692, 8.91125912537374, .222986635007254, .187754581964885)",
+            ),
+            // teffects ipw (wage) (works x z1), atet, pomeans
+            same(
+                &both("ipw"),
+                "c(.0569419121063197, 8.90853312432116, .272457488490695, .236927548463686)",
+            ),
+            same(
+                &both("ipt"),
+                "c(-.0674895878332434, 9.32687054021419, .33271157760977, .300674208761148)",
+            ),
+            same(
+                &both("ipp"),
+                "c(8.90853312432116, 8.96547503642748, .236927548463686, .175102912741137)",
+            ),
+            // teffects aipw (wage x z1) (works x z1), pomeans, atet (its
+            // table's printed digits)
+            same(
+                &both("aipw"),
+                "c(-.0182462465517867, 9.00024822219498, .26622142121603, .225521500701419)",
+            ),
+            same(
+                &both("aipp"),
+                "c(9.00024822219498, 8.98200197564319, .225521500701419, .172843123499455)",
+            ),
+            near(
+                &both("aipt"),
+                "-.2150681, 9.474449, .3055101, .2865445",
+                "1e-6",
+            ),
+            // teffects aipw (wage x) (works x z1 kids), and atet; teffects ra
+            // (wage) (works); teffects ipw (wage) (works x z1 kids), atet
+            same(
+                &both("a2"),
+                "c(-.0403376749718972, 8.89546710255316, .251608291224233, .207734447524056)",
+            ),
+            same(
+                &both("a2t"),
+                "c(-.0188113984329089, 9.27819235081386, .303686894129314, .277527041830216)",
+            ),
+            same(
+                &both("ra0"),
+                "c(.802308225108225, 8.45707272727273, .286435922175046, .224914102765567)",
+            ),
+            "ra0$nobs == 118".to_string(),
+            same(
+                &both("i2t"),
+                "c(.180320838772696, 9.07906011360826, .350157039524563, .322869328341323)",
+            ),
+        ],
+    );
+}
+
+#[test]
+fn iv_models_have_the_model_menu() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // the menu: Model fit and Robust standard errors on a two-stage fit
+    // (fixest), Model fit on a Heckman model (selection)
+    let entries = |class: &str| -> Vec<&str> {
+        postest::model_specs(class)
+            .iter()
+            .map(|s| s.entry)
+            .collect()
+    };
+    assert!(postest::is_model_class("fixest") && postest::is_model_class("selection"));
+    assert_eq!(entries("fixest"), ["Model fit", "Robust standard errors"]);
+    assert_eq!(entries("selection"), ["Model fit"]);
+    assert!(!postest::takes_model_table("selection"));
+    // LIML, GMM, IV probit and tobit and treatment effects are plain lists
+    assert!(!postest::is_model_class("list"));
+    let (outcome, text) = dialog(
+        &mut e,
+        &IV_REGRESSION,
+        &[("y", "wage"), ("save", "iv")],
+        &[
+            ("endog", &["educ"]),
+            ("instruments", &["z1", "z2"]),
+            ("x", &["x"]),
+        ],
+        &["small"],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    for (method, save) in [("ml", "hm"), ("2step", "h2")] {
+        let (outcome, text) = dialog(
+            &mut e,
+            &HECKMAN,
+            &[
+                ("y", "earn"),
+                ("selected", "works"),
+                ("method", method),
+                ("save", save),
+            ],
+            &[("x", &["x", "z1"]), ("z", &["x", "kids", "dist", "z1"])],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    }
+    let (outcome, text) = run(
+        &mut e,
+        Source::Typed,
+        "cat(class(iv)[1], class(hm)[1], class(h2)[1])",
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert_eq!(
+        text.split_whitespace().collect::<Vec<_>>(),
+        ["fixest", "selection", "selection"]
+    );
+    // the dialogs of the Objects pane's Model menu, on an object by name
+    let on_model = |e: &mut Engine, spec: &Spec, model: &str| {
+        let ctx = Context {
+            dataset: model.into(),
+            frames: Vec::new(),
+            columns: Vec::new(),
+        };
+        let values = spec.defaults(&ctx);
+        let code = spec.generate(&ctx, &values, Style::Base);
+        assert!(code.is_ok(), "{code:?}");
+        let (outcome, text) = run(e, Source::Menu(spec.menu.into()), &code.unwrap_or_default());
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        text
+    };
+    let text = on_model(&mut e, &MODEL_FIT, "iv");
+    assert!(
+        text.contains("Observations: 118") && text.contains("BIC"),
+        "{text}"
+    );
+    let text = on_model(&mut e, &ROBUST, "iv");
+    assert!(text.contains("HC1"), "{text}");
+    // Stata 19: heckman earn x z1, select(works = x kids dist z1): e(ll), and
+    // estat ic's BIC on its 118 observations (-2 ll + 10 ln 118)
+    let text = on_model(&mut e, &MODEL_FIT, "hm");
+    assert!(
+        text.contains("Observations: 118")
+            && text.contains("-122.5531")
+            && text.contains("292.8131"),
+        "{text}"
+    );
+    let text = on_model(&mut e, &MODEL_FIT, "h2");
+    assert!(
+        text.contains("Observations: 118") && text.contains("two steps have no likelihood"),
+        "{text}"
     );
 }

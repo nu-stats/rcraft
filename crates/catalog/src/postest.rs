@@ -19,9 +19,14 @@ pub const MODEL_CLASSES: &[&str] = &[
 /// The time-series models (P6.5), which take only Forecast.
 pub const TIME_SERIES_CLASSES: &[&str] = &["Arima", "HoltWinters"];
 
+/// Heckman's selection model from sampleSelection (P6.6), which takes Model fit.
+pub const SELECTION_CLASSES: &[&str] = &["selection"];
+
 /// Whether an object whose first class is `class` is a model these dialogs take.
 pub fn is_model_class(class: &str) -> bool {
-    MODEL_CLASSES.contains(&class) || TIME_SERIES_CLASSES.contains(&class)
+    MODEL_CLASSES.contains(&class)
+        || TIME_SERIES_CLASSES.contains(&class)
+        || SELECTION_CLASSES.contains(&class)
 }
 
 /// Whether `class` is a panel model fitted by `plm` or `fixest`.
@@ -33,7 +38,11 @@ pub fn is_panel_class(class: &str) -> bool {
 /// `class`: every model class but `pgmm`, whose coefficients and covariance
 /// the table does not read.
 pub fn takes_model_table(class: &str) -> bool {
-    is_model_class(class) && !matches!(class, "pgmm" | "stanreg" | "Arima" | "HoltWinters")
+    is_model_class(class)
+        && !matches!(
+            class,
+            "pgmm" | "stanreg" | "Arima" | "HoltWinters" | "selection"
+        )
 }
 
 /// The dialogs offered on a model whose first class is `class`: all of
@@ -50,6 +59,9 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         // a survival model has a likelihood, but no residual or diagnostic
         // the other dialogs know: its fit and its comparison with another
         "coxph" | "survreg" => vec![&MODEL_FIT, &COMPARE_MODELS],
+        // a Heckman model: its fit (Compare models' nested test needs anova, which
+        // sampleSelection does not have)
+        "selection" => vec![&MODEL_FIT],
         // a mixed model: its fit statistics only (the other dialogs need an
         // lm or glm object)
         "lmerMod" | "glmerMod" => vec![&MODEL_FIT, &crate::multilevel::ICC],
@@ -87,7 +99,8 @@ pub const MODEL_FIT: Spec = Spec {
             likelihood: it shows the observations and its R-squared; a pgmm model, the \
             observations. A Cox model also shows its events; a parametric survival model its \
             log-likelihood both as survreg gives it (on the log-time scale) and as Stata reports \
-            it, so AIC and BIC compare only with other survreg models.",
+            it, so AIC and BIC compare only with other survreg models. A Heckman model fitted \
+            in two steps has no likelihood, so it shows its observations only.",
     widgets: &[],
     needs: &[],
     styles: BASE,
@@ -98,6 +111,9 @@ pub const MODEL_FIT: Spec = Spec {
             "(function(m) {{\n  cat(\"Observations: \", if (inherits(m, \"coxph\")) m$n else stats::nobs(m), \
              \"\\n\", sep = \"\")\n  \
              if (inherits(m, \"coxph\")) cat(\"Events: \", m$nevent, \"\\n\", sep = \"\")\n  \
+             if (inherits(m, \"selection\") && !identical(m$method, \"ml\")) {{\n    \
+             cat(\"Heckman's two steps have no likelihood, so no log-likelihood, AIC or BIC\\n\")\n    \
+             return(invisible(NULL))\n  }}\n  \
              if (inherits(m, c(\"plm\", \"pgmm\"))) {{\n    \
              if (inherits(m, \"plm\")) {{\n      cat(\"\\nR-squared\\n\")\n      \
              print(summary(m)$r.squared)\n    }}\n    return(invisible(NULL))\n  }}\n  \
@@ -973,6 +989,8 @@ mod tests {
         );
         assert!(!takes_model_table("stanreg"));
         assert_eq!(entries("lmerMod"), ["Model fit", "Intraclass correlation"]);
+        assert_eq!(entries("selection"), ["Model fit"]);
+        assert!(is_model_class("selection") && !takes_model_table("selection"));
         assert!(is_panel_class("plm") && !is_panel_class("lm"));
         for class in ["data.frame", "tbl_df", "function", "numeric", ""] {
             assert!(!is_model_class(class), "{class}");
