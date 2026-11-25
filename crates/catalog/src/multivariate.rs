@@ -71,7 +71,8 @@ pub const PRINCIPAL_COMPONENTS: Spec = Spec {
             correlation matrix (each variable standardised) or on the covariance matrix, and \
             prints each component's eigenvalue with its share of the variation, then the \
             loadings (the eigenvectors). Each component is signed so that its largest loading \
-            is positive. Rows with a missing value are left out.",
+            is positive, or, as Stata's pca does, so that its loadings sum to more than 0. Rows \
+            with a missing value are left out.",
     widgets: &[
         Widget::Variables {
             id: "x",
@@ -86,6 +87,12 @@ pub const PRINCIPAL_COMPONENTS: Spec = Spec {
             default: true,
             hint: "Untick to use the covariance matrix, which lets a variable with a large spread \
                    dominate.",
+        },
+        Widget::Check {
+            id: "stata_sign",
+            label: "Sign as Stata (each component's loadings sum to more than 0)",
+            default: false,
+            hint: "Otherwise each component's largest loading is made positive.",
         },
         Widget::Check {
             id: "scores",
@@ -111,9 +118,14 @@ pub const PRINCIPAL_COMPONENTS: Spec = Spec {
     },
     code: |a, _| {
         let m = a.name("save");
+        let flip = if a.flag("stata_sign") {
+            "flip <- ifelse(colSums(fit$rotation) < 0, -1, 1)"
+        } else {
+            "flip <- apply(fit$rotation, 2, function(v) if (v[which.max(abs(v))] < 0) -1 else 1)"
+        };
         let mut code = format!(
             "{m} <- local({{\n  fit <- stats::prcomp(~ {}, data = {}, scale. = {})\n  \
-             flip <- apply(fit$rotation, 2, function(v) if (v[which.max(abs(v))] < 0) -1 else 1)\n  \
+             {flip}\n  \
              fit$rotation <- sweep(fit$rotation, 2, flip, \"*\")\n  \
              fit$x <- sweep(fit$x, 2, flip, \"*\")\n  fit\n}})\n\
              print(local({{\n  eig <- {m}$sdev^2\n  \
@@ -135,6 +147,25 @@ pub const PRINCIPAL_COMPONENTS: Spec = Spec {
 
 // ---- Factor analysis ----
 
+const FACTOR_METHODS: &[Opt] = &[
+    Opt {
+        value: "ml",
+        label: "Maximum likelihood",
+    },
+    Opt {
+        value: "pf",
+        label: "Principal factors",
+    },
+    Opt {
+        value: "ipf",
+        label: "Iterated principal factors",
+    },
+    Opt {
+        value: "pcf",
+        label: "Principal-component factors",
+    },
+];
+
 const ROTATIONS: &[Opt] = &[
     Opt {
         value: "none",
@@ -144,6 +175,14 @@ const ROTATIONS: &[Opt] = &[
         value: "varimax",
         label: "Varimax",
     },
+    Opt {
+        value: "promax",
+        label: "Promax (oblique)",
+    },
+    Opt {
+        value: "oblimin",
+        label: "Oblimin (oblique)",
+    },
 ];
 
 fn factor_check(a: &Args) -> Vec<Problem> {
@@ -151,27 +190,170 @@ fn factor_check(a: &Args) -> Vec<Problem> {
     let f = whole(a, "factors", "The number of factors", 1, &mut out);
     let p = a.vars("x").len() as i64;
     let f = i64::from(f);
-    if p >= 3 && (p - f) * (p - f) < p + f {
+    if a.choice("method") == "ml" {
+        if p >= 3 && (p - f) * (p - f) < p + f {
+            out.push(Problem::new(
+                "factors",
+                format!("{f} factors is too many for {p} variables: the model would have more unknowns than the variables give."),
+            ));
+        }
+    } else if p >= 1 && f > p {
         out.push(Problem::new(
             "factors",
-            format!("{f} factors is too many for {p} variables: the model would have more unknowns than the variables give."),
+            format!("{f} factors is more than the {p} variables."),
         ));
+    }
+    match a.choice("rotation") {
+        "promax" => match a.number("power").parse::<f64>() {
+            Ok(m) if (1.0..=100.0).contains(&m) => {}
+            _ => out.push(Problem::new(
+                "power",
+                "The promax power must be a number from 1 to 100.",
+            )),
+        },
+        "oblimin" => match a.number("gamma").parse::<f64>() {
+            Ok(g) if g.is_finite() => {}
+            _ => out.push(Problem::new("gamma", "Type the oblimin gamma as a number.")),
+        },
+        _ => {}
     }
     not_the_data(a, &mut out);
     out
 }
 
+/// The R of a principal-factor fit (principal factors, iterated, or
+/// principal-component factors), a list shaped like factanal's.
+fn principal_factor_fit(a: &Args) -> String {
+    let method = a.choice("method");
+    let (start, floor) = if method == "pcf" {
+        ("rep(1, ncol(R))", "1")
+    } else {
+        ("1 - 1 / diag(solve(R))", "0")
+    };
+    let solve = if method == "ipf" {
+        "for (it in 1:20000) {\n      r <- pf(h)\n      hn <- rowSums(r$L^2)\n      \
+         if (sum((hn - h)^2) < 1e-8) break\n      h <- hn\n    }"
+    } else {
+        "r <- pf(h)"
+    };
+    format!(
+        "local({{\n    x <- stats::na.omit({}[, {}])\n    R <- stats::cor(x)\n    k <- {}\n    \
+         pf <- function(h) {{\n      Rr <- R\n      diag(Rr) <- h\n      \
+         e <- eigen(Rr, symmetric = TRUE)\n      kk <- min(k, sum(e$values > {floor}))\n      \
+         if (kk < 1) stop(\"No eigenvalue is above {floor}, so no factor is kept.\", call. = FALSE)\n      \
+         L <- e$vectors[, seq_len(kk), drop = FALSE] %*% diag(sqrt(e$values[seq_len(kk)]), kk)\n      \
+         list(L = sweep(L, 2, ifelse(colSums(L) < 0, -1, 1), \"*\"), values = e$values)\n    }}\n    \
+         h <- {start}\n    {solve}\n    L <- r$L\n    \
+         dimnames(L) <- list(colnames(R), paste0(\"Factor\", seq_len(ncol(L))))\n    \
+         list(loadings = structure(L, class = \"loadings\"), uniquenesses = 1 - rowSums(L^2), \
+         eigenvalues = r$values, factors = ncol(L), n.obs = nrow(x), method = {})\n  }})",
+        a.data(),
+        names_vector(a),
+        a.number("factors"),
+        r_string(method),
+    )
+}
+
+/// The R that rotates `fit$loadings` in place (nothing without a rotation).
+/// Factors are then ordered by the variation they carry (for oblique ones,
+/// the column sums of squares of the structure matrix) and signed so their
+/// loadings sum to more than 0, as Stata's rotate does.
+fn rotation_code(a: &Args) -> String {
+    let rotation = a.choice("rotation");
+    if rotation == "none" {
+        return String::new();
+    }
+    let mut s = String::from(
+        "  A <- unclass(fit$loadings)\n  \
+         tidy <- function(L, Phi = NULL) {\n    \
+         S <- if (is.null(Phi)) L else L %*% Phi\n    \
+         o <- order(colSums(S^2), decreasing = TRUE)\n    \
+         s <- ifelse(colSums(L[, o, drop = FALSE]) < 0, -1, 1)\n    \
+         L <- sweep(L[, o, drop = FALSE], 2, s, \"*\")\n    \
+         if (is.null(Phi)) list(L = L) else list(L = L, Phi = Phi[o, o, drop = FALSE] * outer(s, s))\n  }\n  \
+         kaiser <- function(A) {\n    k <- ncol(A)\n    p <- nrow(A)\n    \
+         if (k < 2) return(A)\n    \
+         for (sweep in 1:1000) {\n      moved <- 0\n      \
+         for (i in 1:(k - 1)) for (j in (i + 1):k) {\n        \
+         x <- A[, i]\n        y <- A[, j]\n        u <- x^2 - y^2\n        v <- 2 * x * y\n        \
+         phi <- atan2(2 * sum(u * v) - 2 * sum(u) * sum(v) / p, \
+         sum(u^2 - v^2) - (sum(u)^2 - sum(v)^2) / p) / 4\n        \
+         moved <- max(moved, abs(phi))\n        \
+         A[, c(i, j)] <- cbind(cos(phi) * x + sin(phi) * y, cos(phi) * y - sin(phi) * x)\n      }\n      \
+         if (moved < 1e-15) break\n    }\n    A\n  }\n",
+    );
+    if a.flag("exact") {
+        s.push_str("  vmx <- kaiser\n");
+    } else {
+        // Stata's varimax: the exact angle for two factors, the SVD iteration
+        // stopped at a relative change of 1e-8 for more
+        s.push_str(
+            "  vmx <- function(A) if (ncol(A) < 3) kaiser(A) else \
+             unclass(stats::varimax(A, normalize = FALSE, eps = 1e-8)$loadings)\n",
+        );
+    }
+    match rotation {
+        "promax" => s.push_str(&format!(
+            "  V <- tidy(vmx(A))$L\n  \
+             r <- if (ncol(V) < 2) list(L = V) else {{\n    \
+             Q <- V * abs(V)^({} - 1)\n    U <- solve(crossprod(V), crossprod(V, Q))\n    \
+             U <- U %*% diag(sqrt(diag(solve(crossprod(U)))), ncol(U))\n    \
+             tidy(V %*% U, solve(crossprod(U)))\n  }}\n",
+            a.number("power")
+        )),
+        "oblimin" => s.push_str(&format!(
+            "  oblimin <- function(A, gam) {{\n    p <- nrow(A)\n    k <- ncol(A)\n    \
+             N <- matrix(1, k, k) - diag(k)\n    C <- diag(p) - gam / p\n    \
+             crit <- function(L) {{\n      L2 <- L^2\n      M <- C %*% L2 %*% N\n      \
+             list(f = sum(L2 * M) / 4, G = L * M)\n    }}\n    \
+             Tm <- diag(k)\n    al <- 1\n    L <- A\n    q <- crit(L)\n    \
+             G <- -t(t(L) %*% q$G %*% solve(Tm))\n    \
+             for (it in 1:10000) {{\n      \
+             Gp <- G - Tm %*% diag(colSums(Tm * G), k)\n      s <- sqrt(sum(Gp^2))\n      \
+             if (s < 1e-8) break\n      al <- 2 * al\n      ok <- FALSE\n      \
+             for (i in 1:60) {{\n        X <- Tm - al * Gp\n        \
+             Tt <- sweep(X, 2, sqrt(colSums(X^2)), \"/\")\n        \
+             Lt <- A %*% t(solve(Tt))\n        qt <- crit(Lt)\n        \
+             if (qt$f < q$f - 0.5 * s^2 * al) {{\n          ok <- TRUE\n          break\n        }}\n        \
+             al <- al / 2\n      }}\n      if (!ok) break\n      \
+             Tm <- Tt\n      L <- Lt\n      q <- qt\n      G <- -t(t(L) %*% q$G %*% solve(Tm))\n    }}\n    \
+             tidy(L, crossprod(Tm))\n  }}\n  \
+             r <- if (ncol(A) < 2) list(L = A) else oblimin(A, {})\n",
+            a.number("gamma")
+        )),
+        _ => s.push_str("  r <- tidy(vmx(A))\n"),
+    }
+    s.push_str(
+        "  L <- r$L\n  dimnames(L) <- dimnames(A)\n  \
+         fit$loadings <- structure(L, class = \"loadings\")\n  \
+         fit$rotmat <- if (is.null(r$Phi)) NULL else solve(t(chol(r$Phi)))\n  \
+         fit$Phi <- r$Phi\n",
+    );
+    s
+}
+
 pub const FACTOR_ANALYSIS: Spec = Spec {
     entry: "Factor analysis",
     menu: "Statistics > Multivariate > Factor analysis",
-    about: "Explains the correlations among the chosen variables by a few common factors. It fits \
-            by maximum likelihood with stats::factanal and prints each variable's uniqueness (the \
-            part no factor explains), the loadings, the variation each factor carries and the \
-            likelihood-ratio test of the number of factors (with N, not N-1, in its multiplier, \
-            as Stata has it). A varimax rotation (without Kaiser \
-            normalisation) turns the factors to simplify the loadings; factors are then ordered \
-            by the variation they carry and signed so their loadings sum to more than zero. \
-            Rows with a missing value are left out.",
+    about: "Explains the correlations among the chosen variables by a few common factors. By \
+            maximum likelihood it fits with stats::factanal and prints each variable's uniqueness \
+            (the part no factor explains), the loadings, the variation each factor carries and \
+            the likelihood-ratio test of the number of factors (with N, not N-1, in its \
+            multiplier, as Stata has it). Principal factors take the eigenvectors of the \
+            correlation matrix with the squared multiple correlations on its diagonal; iterated \
+            principal factors put the communalities back on the diagonal until they move by less \
+            than 1e-4 (as Stata's ipf stops); principal-component factors keep the ones on the \
+            diagonal. As in Stata, those keep no more factors than eigenvalues above 0 (above 1 \
+            for principal-component factors), and a uniqueness may come out below 0. A varimax \
+            rotation (without Kaiser normalisation) turns the factors to simplify the loadings: \
+            as Stata does, the exact rotation for two factors and, for more, the iteration \
+            stopped when the criterion grows by less than 1e-8 (or, if asked, the exact \
+            maximum). Promax raises the varimax loadings to a power to make a target and fits \
+            oblique factors to it; oblimin (gamma 0 is quartimin) is fitted by gradient \
+            projection from the unrotated factors. Oblique factors print their correlations, in \
+            `name$Phi`. Factors are ordered by the variation they carry (for oblique ones, of \
+            the structure matrix) and signed so their loadings sum to more than zero. Rows with \
+            a missing value are left out.",
     widgets: &[
         Widget::Variables {
             id: "x",
@@ -179,6 +361,13 @@ pub const FACTOR_ANALYSIS: Spec = Spec {
             kinds: NUMBERS,
             min: 3,
             hint: "Three or more numeric variables.",
+        },
+        Widget::Choice {
+            id: "method",
+            label: "Method",
+            options: FACTOR_METHODS,
+            default: "ml",
+            hint: "",
         },
         Widget::Text {
             id: "factors",
@@ -195,6 +384,27 @@ pub const FACTOR_ANALYSIS: Spec = Spec {
             hint: "",
         },
         Widget::Text {
+            id: "power",
+            label: "Promax power",
+            default: TextDefault::Fixed("3"),
+            rule: TextRule::Number,
+            hint: "Used by promax only; 3 is Stata's default.",
+        },
+        Widget::Text {
+            id: "gamma",
+            label: "Oblimin gamma",
+            default: TextDefault::Fixed("0"),
+            rule: TextRule::Number,
+            hint: "Used by oblimin only; 0 is quartimin, Stata's default.",
+        },
+        Widget::Check {
+            id: "exact",
+            label: "Varimax to the exact maximum",
+            default: false,
+            hint: "With three or more factors Stata stops sooner; tick to rotate until the \
+                   angles are below 1e-15.",
+        },
+        Widget::Text {
             id: "save",
             label: "Save the model as",
             default: TextDefault::Fixed("fa"),
@@ -207,6 +417,25 @@ pub const FACTOR_ANALYSIS: Spec = Spec {
     check: factor_check,
     code: |a, _| {
         let m = a.name("save");
+        let rotation = rotation_code(a);
+        if a.choice("method") != "ml" {
+            let title = match a.choice("method") {
+                "ipf" => "Iterated principal factors",
+                "pcf" => "Principal-component factors",
+                _ => "Principal factors",
+            };
+            let fit = principal_factor_fit(a);
+            return format!(
+                "{m} <- local({{\n  fit <- {fit}\n{rotation}  fit\n}})\n\
+                 cat(sprintf(\"{title}, %d rows, %d factors\\n\\nUniquenesses:\\n\", \
+                 {m}$n.obs, {m}$factors))\n\
+                 print(round({m}$uniquenesses, 3))\nprint({m}$loadings, digits = 3)\n\
+                 if (!is.null({m}$Phi)) {{\n  cat(\"\\nFactor correlations:\\n\")\n  \
+                 print(round({m}$Phi, 3))\n}}\n\
+                 cat(\"\\nEigenvalues of the correlation matrix with communalities on the diagonal:\\n\")\n\
+                 print(round({m}$eigenvalues, 5))"
+            );
+        }
         // The optimiser is asked for the tightest stop first (factr = 10), which is what
         // matches Stata; on some platforms its line search gives up on an easy problem
         // ("unable to optimize from this starting value"), so it is asked again with a
@@ -228,19 +457,7 @@ pub const FACTOR_ANALYSIS: Spec = Spec {
              fit$STATISTIC <- fit$STATISTIC * (n - (2 * p + 5) / 6 - 2 * k / 3) / \
              (n - 1 - (2 * p + 5) / 6 - 2 * k / 3)\n    \
              fit$PVAL <- stats::pchisq(fit$STATISTIC, fit$dof, lower.tail = FALSE)\n  }\n";
-        if a.choice("rotation") == "varimax" {
-            format!(
-                "{m} <- local({{\n  fit <- {fit}\n{chi2}  \
-                 rot <- stats::varimax(fit$loadings, normalize = FALSE, eps = 1e-15)\n  \
-                 load <- unclass(rot$loadings)\n  \
-                 load <- load[, order(colSums(load^2), decreasing = TRUE), drop = FALSE]\n  \
-                 load <- sweep(load, 2, ifelse(colSums(load) < 0, -1, 1), \"*\")\n  \
-                 fit$loadings <- structure(load, class = \"loadings\")\n  \
-                 fit$rotmat <- NULL\n  fit\n}})\nprint({m})"
-            )
-        } else {
-            format!("{m} <- local({{\n  fit <- {fit}\n{chi2}  fit\n}})\nprint({m})")
-        }
+        format!("{m} <- local({{\n  fit <- {fit}\n{chi2}{rotation}  fit\n}})\nprint({m})")
     },
 };
 
@@ -280,26 +497,139 @@ const STARTS: &[Opt] = &[
     },
 ];
 
+const DISTANCES: &[Opt] = &[
+    Opt {
+        value: "default",
+        label: "As Stata: squared Euclidean for Ward's, Euclidean otherwise",
+    },
+    Opt {
+        value: "L2",
+        label: "Euclidean (L2)",
+    },
+    Opt {
+        value: "L2squared",
+        label: "Squared Euclidean",
+    },
+    Opt {
+        value: "L1",
+        label: "Absolute value, city block (L1)",
+    },
+    Opt {
+        value: "Linf",
+        label: "Maximum difference (L-infinity)",
+    },
+    Opt {
+        value: "canberra",
+        label: "Canberra",
+    },
+];
+
 fn cluster_check(a: &Args) -> Vec<Problem> {
     let mut out = Vec::new();
     whole(a, "groups", "The number of groups", 2, &mut out);
     if a.choice("method") == "kmeans" && a.choice("start") == "random" {
         whole(a, "seed", "The seed", 0, &mut out);
     }
+    if a.flag("rules") {
+        whole(
+            a,
+            "most",
+            "The most groups for the stopping rules",
+            2,
+            &mut out,
+        );
+    }
     not_the_data(a, &mut out);
     out
+}
+
+/// The R dissimilarities between the rows of `x` for a hierarchical method.
+fn dissimilarity(method: &str, distance: &str) -> &'static str {
+    match distance {
+        "L2" => "stats::dist(x)",
+        "L2squared" => "stats::dist(x)^2",
+        "L1" => "stats::dist(x, method = \"manhattan\")",
+        "Linf" => "stats::dist(x, method = \"maximum\")",
+        // Stata's Canberra: |a - b| / (|a| + |b|), a term with both 0 counting 0
+        "canberra" => {
+            "local({\n    m <- as.matrix(x)\n    a <- abs(m)\n    \
+             stats::as.dist(t(vapply(seq_len(nrow(m)), function(i) {\n      \
+             b <- sweep(a, 2, a[i, ], \"+\")\n      \
+             rowSums(ifelse(b > 0, abs(sweep(m, 2, m[i, ])) / b, 0))\n    }, numeric(nrow(m)))))\n  })"
+        }
+        _ if method == "ward" => "stats::dist(x)^2",
+        _ => "stats::dist(x)",
+    }
+}
+
+/// The R distance from every row of `m` to the centre `c`, for k-means under
+/// a measure other than Euclidean.
+fn centre_distance(distance: &str) -> &'static str {
+    match distance {
+        "L1" => "rowSums(abs(sweep(m, 2, c)))",
+        "Linf" => "apply(abs(sweep(m, 2, c)), 1, max)",
+        _ => {
+            "{\n        b <- sweep(abs(m), 2, abs(c), \"+\")\n        \
+              rowSums(ifelse(b > 0, abs(sweep(m, 2, c)) / b, 0))\n      }"
+        }
+    }
+}
+
+/// The R of the stopping rules for the fitted `m`: Calinski and Harabasz's
+/// pseudo-F (and, for a hierarchy, Duda and Hart's Je(2)/Je(1) and pseudo-T²
+/// for splitting the group that splits next), as Stata's cluster stop.
+fn stopping_rules(m: &str, hierarchical: bool, most: &str) -> String {
+    let start = format!(
+        "{m}$rules <- local({{\n  x <- as.matrix({m}$data)\n  n <- nrow(x)\n  \
+         sse <- function(y) sum(sweep(y, 2, colMeans(y))^2)\n  \
+         ch <- function(g) {{\n    k <- length(unique(g))\n    \
+         W <- sum(vapply(split(seq_len(n), g), function(i) sse(x[i, , drop = FALSE]), 0))\n    \
+         ((sse(x) - W) / (k - 1)) / (W / (n - k))\n  }}\n  "
+    );
+    let shown = format!("cat(\"\\nStopping rules\\n\")\nprint({m}$rules, row.names = FALSE)");
+    if hierarchical {
+        format!(
+            "{start}ks <- seq_len(max(1, min({most}, n - 1)))\n  \
+             out <- data.frame(Groups = ks, Calinski.Harabasz = NA_real_, Duda.Hart = NA_real_, \
+             pseudo.T2 = NA_real_)\n  \
+             for (k in ks) {{\n    g1 <- stats::cutree({m}, k)\n    g2 <- stats::cutree({m}, k + 1)\n    \
+             if (k >= 2) out$Calinski.Harabasz[k] <- ch(g1)\n    \
+             tab <- table(g1, g2)\n    parent <- which(rowSums(tab > 0) == 2)\n    \
+             if (length(parent) == 1) {{\n      rows <- which(g1 == as.integer(rownames(tab)[parent]))\n      \
+             j1 <- sse(x[rows, , drop = FALSE])\n      \
+             j2 <- sum(vapply(split(rows, g2[rows]), function(i) sse(x[i, , drop = FALSE]), 0))\n      \
+             out$Duda.Hart[k] <- j2 / j1\n      \
+             if (length(rows) > 2) out$pseudo.T2[k] <- (j1 - j2) / (j2 / (length(rows) - 2))\n    }}\n  }}\n  \
+             out\n}})\n{shown}"
+        )
+    } else {
+        format!(
+            "{start}data.frame(Groups = length(unique({m}$groups)), \
+             Calinski.Harabasz = ch({m}$groups))\n}})\n{shown}"
+        )
+    }
 }
 
 pub const CLUSTER_ANALYSIS: Spec = Spec {
     entry: "Cluster analysis",
     menu: "Statistics > Multivariate > Cluster analysis",
-    about: "Sorts the rows into groups of similar rows. Hierarchical clustering (stats::hclust on \
-            Euclidean distances; Ward's linkage uses the squared distances) joins the closest \
-            rows and groups step by step and is cut into the number of groups asked for with \
-            stats::cutree. K-means (stats::kmeans, Lloyd's algorithm) starts from the first rows \
-            or from random rows with a seed and moves each row to its nearest group centre until \
-            nothing moves. The group sizes and means are printed; the group of each row is \
-            `name$groups`. Rows with a missing value are left out.",
+    about: "Sorts the rows into groups of similar rows. Hierarchical clustering (stats::hclust) \
+            joins the closest rows and groups step by step and is cut into the number of groups \
+            asked for with stats::cutree; the dissimilarity is, as in Stata, the squared \
+            Euclidean distance for Ward's linkage and the Euclidean distance otherwise, or one \
+            chosen: Euclidean, squared Euclidean, absolute value (L1), maximum difference \
+            (L-infinity) or Canberra (|a - b| / (|a| + |b|) summed over the variables, as \
+            Stata defines it). K-means (Lloyd's algorithm) starts from the first rows or from \
+            random rows with a seed and moves each row to its nearest group centre (the first \
+            on a tie) until nothing moves; the centres are the group means; a measure other \
+            than Euclidean is used for the nearest centre, as Stata's measure() does. The \
+            stopping rules print Calinski and Harabasz's pseudo-F for each number of groups \
+            and, for a hierarchy, Duda and Hart's Je(2)/Je(1) and pseudo-T-squared for the split \
+            from that number of groups to the next, as Stata's cluster stop does (on the \
+            variables' sums of squares, whatever the dissimilarity), kept in `name$rules`. The \
+            group sizes and means \
+            are printed; the group of each row is `name$groups`. Rows with a missing value are \
+            left out.",
     widgets: &[
         Widget::Variables {
             id: "x",
@@ -314,6 +644,13 @@ pub const CLUSTER_ANALYSIS: Spec = Spec {
             label: "Method",
             options: METHODS,
             default: "ward",
+            hint: "",
+        },
+        Widget::Choice {
+            id: "distance",
+            label: "Dissimilarity",
+            options: DISTANCES,
+            default: "default",
             hint: "",
         },
         Widget::Text {
@@ -338,6 +675,19 @@ pub const CLUSTER_ANALYSIS: Spec = Spec {
             hint: "Used by K-means with random starting rows, so the same seed gives the same \
                    groups.",
         },
+        Widget::Check {
+            id: "rules",
+            label: "Stopping rules (Calinski-Harabasz; Duda-Hart for a hierarchy)",
+            default: false,
+            hint: "",
+        },
+        Widget::Text {
+            id: "most",
+            label: "Stopping rules up to this many groups",
+            default: TextDefault::Fixed("10"),
+            rule: TextRule::Number,
+            hint: "For hierarchical clustering; k-means gives the rule for its own groups.",
+        },
         Widget::Text {
             id: "save",
             label: "Save the model as",
@@ -354,39 +704,69 @@ pub const CLUSTER_ANALYSIS: Spec = Spec {
         let m = a.name("save");
         let k = a.number("groups");
         let method = a.choice("method");
+        let distance = a.choice("distance");
         let take = format!("x <- stats::na.omit({}[, {}])", a.data(), names_vector(a));
-        if method == "kmeans" {
-            let (seed, centers) = if a.choice("start") == "random" {
-                (format!("  set.seed({})\n", a.number("seed")), k.to_string())
+        let mut code = if method == "kmeans" {
+            let random = a.choice("start") == "random";
+            let fit = if matches!(distance, "L1" | "Linf" | "canberra") {
+                let (seed, centres) = if random {
+                    (
+                        format!("    set.seed({})\n", a.number("seed")),
+                        format!("m[sample.int(nrow(m), {k}), , drop = FALSE]"),
+                    )
+                } else {
+                    (String::new(), format!("m[seq_len({k}), , drop = FALSE]"))
+                };
+                format!(
+                    "  fit <- local({{\n    m <- as.matrix(x)\n{seed}    ctr <- {centres}\n    \
+                     far <- function(c) {}\n    g <- integer(0)\n    \
+                     for (it in 1:1000) {{\n      \
+                     gn <- max.col(-vapply(seq_len(nrow(ctr)), function(j) far(ctr[j, ]), \
+                     numeric(nrow(m))), ties.method = \"first\")\n      \
+                     if (identical(gn, g)) break\n      g <- gn\n      \
+                     if (any(tabulate(g, nrow(ctr)) == 0)) \
+                     stop(\"A group lost all its rows; try other starting rows.\", call. = FALSE)\n      \
+                     ctr <- do.call(rbind, lapply(seq_len(nrow(ctr)), function(j) \
+                     colMeans(m[g == j, , drop = FALSE])))\n    }}\n    \
+                     list(cluster = g, centers = ctr, iter = it)\n  }})",
+                    centre_distance(distance)
+                )
             } else {
-                (String::new(), format!("x[seq_len({k}), , drop = FALSE]"))
+                let (seed, centers) = if random {
+                    (format!("  set.seed({})\n", a.number("seed")), k.to_string())
+                } else {
+                    (String::new(), format!("x[seq_len({k}), , drop = FALSE]"))
+                };
+                format!(
+                    "{seed}  fit <- stats::kmeans(x, centers = {centers}, algorithm = \"Lloyd\", \
+                     iter.max = 1000)"
+                )
             };
             format!(
-                "{m} <- local({{\n  {take}\n{seed}  \
-                 fit <- stats::kmeans(x, centers = {centers}, algorithm = \"Lloyd\", \
-                 iter.max = 1000)\n  fit$groups <- fit$cluster\n  fit$data <- x\n  fit\n}})\n\
+                "{m} <- local({{\n  {take}\n{fit}\n  fit$groups <- fit$cluster\n  fit$data <- x\n  fit\n}})\n\
                  cat(\"Group sizes\\n\")\nprint(table(Group = {m}$groups))\n\
                  cat(\"\\nGroup means\\n\")\n\
                  print(stats::aggregate({m}$data, list(Group = {m}$groups), mean))"
             )
         } else {
-            let distance = if method == "ward" {
-                "stats::dist(x)^2"
-            } else {
-                "stats::dist(x)"
-            };
             let linkage = if method == "ward" { "ward.D" } else { method };
             format!(
                 "{m} <- local({{\n  {take}\n  \
-                 fit <- stats::hclust({distance}, method = {})\n  \
+                 fit <- stats::hclust({}, method = {})\n  \
                  fit$groups <- stats::cutree(fit, k = {k})\n  fit$data <- x\n  fit\n}})\n\
                  cat(\"Group sizes\\n\")\nprint(table(Group = {m}$groups))\n\
                  cat(\"\\nGroup means\\n\")\n\
                  print(stats::aggregate({m}$data, list(Group = {m}$groups), mean))\n\
                  cat(\"\\nHeights of the last joins\\n\")\nprint(utils::tail({m}$height, 5))",
+                dissimilarity(method, distance),
                 r_string(linkage)
             )
+        };
+        if a.flag("rules") {
+            code.push('\n');
+            code.push_str(&stopping_rules(&m, method != "kmeans", a.number("most")));
         }
+        code
     },
 };
 
@@ -400,6 +780,17 @@ const PRIORS: &[Opt] = &[
     Opt {
         value: "proportional",
         label: "In proportion to the group sizes",
+    },
+];
+
+const DISCRIMINANTS: &[Opt] = &[
+    Opt {
+        value: "linear",
+        label: "Linear (one covariance matrix)",
+    },
+    Opt {
+        value: "quadratic",
+        label: "Quadratic (a covariance matrix per group)",
     },
 ];
 
@@ -425,7 +816,11 @@ pub const DISCRIMINANT_ANALYSIS: Spec = Spec {
             means, the coefficients of the linear discriminant functions and each function's \
             share of the separation (found with the groups weighed by their sizes, as Stata's \
             discrim lda does, whatever the priors), then the table of true against assigned groups for the \
-            rows used. Rows with a missing value are left out.",
+            rows used. The quadratic discriminant (MASS::qda, as Stata's discrim qda) gives each \
+            group its own covariance matrix; it prints the priors and group means, then the \
+            same table, and each row's posterior probabilities are \
+            `predict(name)$posterior`. Each group needs more rows than predictors. Rows with a \
+            missing value are left out.",
     widgets: &[
         Widget::Variable {
             id: "group",
@@ -439,6 +834,13 @@ pub const DISCRIMINANT_ANALYSIS: Spec = Spec {
             label: "Predictors",
             kinds: NUMBERS,
             min: 1,
+            hint: "",
+        },
+        Widget::Choice {
+            id: "method",
+            label: "Discriminant",
+            options: DISCRIMINANTS,
+            default: "linear",
             hint: "",
         },
         Widget::Choice {
@@ -468,20 +870,24 @@ pub const DISCRIMINANT_ANALYSIS: Spec = Spec {
         // functions; Stata weighs them by the group sizes. With equal priors the
         // functions and their shares come from the fit with the sizes as priors
         // (the classification still uses the priors asked for)
+        let quadratic = a.choice("method") == "quadratic";
         let (prior, sizes) = if a.choice("priors") == "equal" {
             let n = format!("nlevels(factor({}${g}))", a.data());
-            (
-                format!(", prior = rep(1 / {n}, {n})"),
+            let sizes = if quadratic {
+                String::new()
+            } else {
                 format!(
                     "\n{m}[c(\"scaling\", \"svd\")] <- MASS::lda({formula}, data = {})[c(\"scaling\", \"svd\")]",
                     a.data()
-                ),
-            )
+                )
+            };
+            (format!(", prior = rep(1 / {n}, {n})"), sizes)
         } else {
             (String::new(), String::new())
         };
+        let fit = if quadratic { "qda" } else { "lda" };
         format!(
-            "{m} <- MASS::lda({formula}, data = {}{prior}){sizes}\nprint({m})\n\
+            "{m} <- MASS::{fit}({formula}, data = {}{prior}){sizes}\nprint({m})\n\
              cat(\"\\nClassification of the rows used (true group down, assigned group across)\\n\")\n\
              print(local({{\n  rows <- stats::model.frame({formula}, data = {})\n  \
              assigned <- stats::predict({m}, rows)$class\n  \
@@ -572,6 +978,12 @@ mod tests {
         let c = code(&PRINCIPAL_COMPONENTS, &v);
         assert!(c.contains("scale. = FALSE"), "{c}");
         assert!(c.ends_with("print(utils::head(comp$x))"), "{c}");
+        v.set_flag("stata_sign", true);
+        let c = code(&PRINCIPAL_COMPONENTS, &v);
+        assert!(
+            c.contains("flip <- ifelse(colSums(fit$rotation) < 0, -1, 1)"),
+            "{c}"
+        );
         let v = values(
             &PRINCIPAL_COMPONENTS,
             &[("save", "d")],
@@ -629,10 +1041,57 @@ mod tests {
             "{c}"
         );
         assert!(
-            c.contains("stats::varimax(fit$loadings, normalize = FALSE"),
+            c.contains("if (ncol(A) < 3) kaiser(A) else unclass(stats::varimax(A, normalize = FALSE, eps = 1e-8)"),
             "{c}"
         );
         assert!(c.ends_with("print(f2)"), "{c}");
+        // principal factors, promax with its power; iterated, oblimin; exact varimax
+        let v = values(
+            &FACTOR_ANALYSIS,
+            &[
+                ("method", "pf"),
+                ("factors", "2"),
+                ("rotation", "promax"),
+                ("power", "4"),
+            ],
+            &[("x", &["height", "weight", "age", "arm span"])],
+        );
+        let c = code(&FACTOR_ANALYSIS, &v);
+        assert!(
+            c.contains("h <- 1 - 1 / diag(solve(R))")
+                && c.contains("kk <- min(k, sum(e$values > 0))")
+                && c.contains("Q <- V * abs(V)^(4 - 1)")
+                && c.contains("Principal factors, %d rows")
+                && !c.contains("factanal"),
+            "{c}"
+        );
+        let mut v = values(
+            &FACTOR_ANALYSIS,
+            &[
+                ("method", "ipf"),
+                ("factors", "2"),
+                ("rotation", "oblimin"),
+                ("gamma", "0.5"),
+            ],
+            &[("x", &["height", "weight", "age", "arm span"])],
+        );
+        let c = code(&FACTOR_ANALYSIS, &v);
+        assert!(
+            c.contains("if (sum((hn - h)^2) < 1e-8) break")
+                && c.contains("oblimin(A, 0.5)")
+                && c.contains("fit$rotmat <- if (is.null(r$Phi)) NULL"),
+            "{c}"
+        );
+        v.set_text("method", "pcf");
+        v.set_text("rotation", "varimax");
+        v.set_flag("exact", true);
+        let c = code(&FACTOR_ANALYSIS, &v);
+        assert!(
+            c.contains("h <- rep(1, ncol(R))")
+                && c.contains("sum(e$values > 1)")
+                && c.contains("vmx <- kaiser\n"),
+            "{c}"
+        );
     }
 
     #[test]
@@ -656,6 +1115,25 @@ mod tests {
             &[("x", &["height", "weight", "age", "arm span"])],
         );
         assert!(widgets(&FACTOR_ANALYSIS, &v).contains(&"factors"));
+        // principal factors need no degrees of freedom, only no more factors
+        // than variables; the promax power and oblimin gamma are numbers
+        let v = values(
+            &FACTOR_ANALYSIS,
+            &[("method", "pf"), ("factors", "3")],
+            &[("x", &["height", "weight", "age"])],
+        );
+        assert!(widgets(&FACTOR_ANALYSIS, &v).is_empty());
+        let v = values(
+            &FACTOR_ANALYSIS,
+            &[
+                ("method", "pf"),
+                ("factors", "4"),
+                ("rotation", "promax"),
+                ("power", "0.5"),
+            ],
+            &[("x", &["height", "weight", "age"])],
+        );
+        assert_eq!(widgets(&FACTOR_ANALYSIS, &v), vec!["factors", "power"]);
     }
 
     #[test]
@@ -702,6 +1180,42 @@ mod tests {
         let c = code(&CLUSTER_ANALYSIS, &v);
         assert!(c.contains("set.seed(42)"), "{c}");
         assert!(c.contains("centers = 3, algorithm"), "{c}");
+        // other dissimilarities; k-means by L1 from its own loop; the stopping rules
+        let mut v = values(
+            &CLUSTER_ANALYSIS,
+            &[("method", "average"), ("distance", "L1")],
+            &[("x", &["height", "weight"])],
+        );
+        v.set_flag("rules", true);
+        let c = code(&CLUSTER_ANALYSIS, &v);
+        assert!(
+            c.contains(
+                "stats::hclust(stats::dist(x, method = \"manhattan\"), method = \"average\")"
+            ) && c.contains("Calinski.Harabasz")
+                && c.contains("out$Duda.Hart[k] <- j2 / j1")
+                && c.contains("seq_len(max(1, min(10, n - 1)))"),
+            "{c}"
+        );
+        let v = values(
+            &CLUSTER_ANALYSIS,
+            &[("method", "single"), ("distance", "canberra")],
+            &[("x", &["height", "weight"])],
+        );
+        assert!(code(&CLUSTER_ANALYSIS, &v).contains("abs(sweep(m, 2, m[i, ])) / b"));
+        let mut v = values(
+            &CLUSTER_ANALYSIS,
+            &[("method", "kmeans"), ("distance", "Linf")],
+            &[("x", &["height", "weight"])],
+        );
+        v.set_flag("rules", true);
+        let c = code(&CLUSTER_ANALYSIS, &v);
+        assert!(
+            c.contains("far <- function(c) apply(abs(sweep(m, 2, c)), 1, max)")
+                && c.contains("ties.method = \"first\"")
+                && !c.contains("stats::kmeans")
+                && !c.contains("Duda"),
+            "{c}"
+        );
     }
 
     #[test]
@@ -745,6 +1259,19 @@ mod tests {
         );
         assert!(code(&DISCRIMINANT_ANALYSIS, &v)
             .starts_with("lda <- MASS::lda(species ~ height, data = d)\nprint(lda)\n"));
+        // quadratic: qda, with the priors, and no canonical functions
+        let v = values(
+            &DISCRIMINANT_ANALYSIS,
+            &[("group", "species"), ("method", "quadratic")],
+            &[("x", &["height"])],
+        );
+        let c = code(&DISCRIMINANT_ANALYSIS, &v);
+        assert!(
+            c.starts_with("lda <- MASS::qda(species ~ height, data = d, prior = rep(")
+                && !c.contains("scaling")
+                && c.contains("stats::predict(lda, rows)$class"),
+            "{c}"
+        );
         // the group is not also a predictor
         let v = values(
             &DISCRIMINANT_ANALYSIS,
