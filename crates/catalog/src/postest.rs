@@ -13,7 +13,7 @@ use crate::data::BASE;
 /// The first class names of R objects these dialogs are offered on.
 pub const MODEL_CLASSES: &[&str] = &[
     "lm", "glm", "aov", "negbin", "polr", "multinom", "plm", "pgmm", "fixest", "svyglm", "coxph",
-    "lmerMod", "glmerMod", "survreg",
+    "lmerMod", "glmerMod", "survreg", "stanreg",
 ];
 
 /// Whether an object whose first class is `class` is a model these dialogs take.
@@ -30,7 +30,7 @@ pub fn is_panel_class(class: &str) -> bool {
 /// `class`: every model class but `pgmm`, whose coefficients and covariance
 /// the table does not read.
 pub fn takes_model_table(class: &str) -> bool {
-    is_model_class(class) && class != "pgmm"
+    is_model_class(class) && class != "pgmm" && class != "stanreg"
 }
 
 /// The dialogs offered on a model whose first class is `class`: all of
@@ -50,10 +50,15 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         // a mixed model: its fit statistics only (the other dialogs need an
         // lm or glm object)
         "lmerMod" | "glmerMod" => vec![&MODEL_FIT, &crate::multilevel::ICC],
+        // a Bayesian fit: posterior predictions, checks and loo (P6.9b)
+        "stanreg" => crate::bayes::MODEL_SPECS.to_vec(),
         _ => MODEL_SPECS
             .iter()
             .copied()
-            .filter(|s| s.menu != crate::multilevel::ICC.menu)
+            .filter(|s| {
+                s.menu != crate::multilevel::ICC.menu
+                    && !crate::bayes::MODEL_SPECS.iter().any(|b| b.menu == s.menu)
+            })
             .collect(),
     }
 }
@@ -899,6 +904,9 @@ pub const MODEL_SPECS: &[&Spec] = &[
     &CONTRASTS,
     &MARGINAL_EFFECTS,
     &crate::multilevel::ICC,
+    &crate::bayes::POSTERIOR_PREDICTIONS,
+    &crate::bayes::BAYES_CHECKS,
+    &crate::bayes::BAYES_LOO,
 ];
 
 #[cfg(test)]
@@ -944,7 +952,16 @@ mod tests {
         assert_eq!(entries("plm"), ["Model fit", "Robust standard errors"]);
         assert_eq!(entries("fixest"), ["Model fit", "Robust standard errors"]);
         assert_eq!(entries("pgmm"), ["Model fit"]);
-        assert_eq!(model_specs("lm").len(), MODEL_SPECS.len() - 1);
+        assert_eq!(model_specs("lm").len(), MODEL_SPECS.len() - 4);
+        assert_eq!(
+            entries("stanreg"),
+            [
+                "Posterior predictions",
+                "Trace plots and predictive checks",
+                "Compare Bayesian models (loo)"
+            ]
+        );
+        assert!(!takes_model_table("stanreg"));
         assert_eq!(entries("lmerMod"), ["Model fit", "Intraclass correlation"]);
         assert!(is_panel_class("plm") && !is_panel_class("lm"));
         for class in ["data.frame", "tbl_df", "function", "numeric", ""] {

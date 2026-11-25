@@ -27,12 +27,25 @@
 //! close to it), and a model R cannot fit (a 0/1 model for a continuous outcome)
 //! comes back as an error without taking R down.
 //!
+//! P6.9b adds: Student t and Cauchy priors, one for each coefficient or one
+//! for all, and the intercept's own prior, checked on a Poisson model whose
+//! predictor has mean 0 (so rstanarm's intercept at the centred predictors is
+//! Stata's constant and every prior can be the same) against the exact
+//! posterior on a grid and Stata's `bayes, prior()` (whose `t()` takes the
+//! squared scale); sampling the priors alone against their quantiles; the
+//! negative binomial, Gamma and ordered logit fits against maximum likelihood
+//! and Stata's `bayes: nbreg | glm | ologit` (their auxiliary and cutpoint
+//! priors differ, so with a share of the posterior sd as slack); and the
+//! Model menu: posterior predictions by hand from the draws, the trace and
+//! density plots, posterior predictive p-values against `bayesstats
+//! ppvalues`, and loo against plain importance sampling and WAIC.
+//!
 //! The test records the R and package versions it ran with (AGENTS.md
 //! section 5), and checks R is the one `ENVIRONMENT` pins.
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::bayes::BAYESIAN_REGRESSION;
+use rcraft_catalog::bayes::{BAYESIAN_REGRESSION, BAYES_CHECKS, BAYES_LOO, POSTERIOR_PREDICTIONS};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind, Widget};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -467,4 +480,529 @@ fn a_model_r_cannot_fit_is_an_error_not_a_crash() {
     let (outcome, text) = run(&mut e, Source::Typed, "cat(1 + 1)");
     assert_eq!(outcome, Outcome::Ok, "{text}");
     assert!(text.contains('2'), "{text}");
+}
+
+// ---- P6.9b: other families, per-coefficient Student t and Cauchy priors,
+// the intercept's prior, sampling the priors, and the Model menu ----
+
+/// `pa`: twenty-five counts on a predictor of mean 0 (so rstanarm's intercept
+/// at the centred predictors is Stata's constant); `pb`: forty counts on two
+/// predictors of mean 0; `fm`: 120 rows of a negative binomial count, a Gamma
+/// outcome and an ordered outcome on two predictors (seed 3).
+const MAKE_B: &str = r#"
+pa <- data.frame(x = seq(-1.2, 1.2, by = 0.1),
+  y = c(0, 1, 2, 0, 0, 1, 1, 2, 3, 0, 0, 1, 1, 1, 1, 1, 1, 4, 2, 3, 4, 3, 1, 1, 1))
+pb <- data.frame(x1 = rep(c(-1.5, -1, -0.5, 0, 0.5, 1, 1.5, 0), 5), x2 = rep(c(-1, -0.5, 0, 0.5, 1), each = 8),
+  y = c(1, 3, 1, 1, 4, 7, 7, 3, 1, 0, 2, 3, 0, 1, 4, 1, 1, 1, 0, 2, 4, 3, 1, 0, 1, 0, 0, 2, 0, 1,
+        2, 0, 2, 1, 0, 2, 0, 0, 4, 1))
+fm <- local({
+  set.seed(3); n <- 120; x1 <- round(rnorm(n), 3); x2 <- round(rnorm(n), 3)
+  mu <- exp(0.5 + 0.4 * x1 - 0.3 * x2)
+  data.frame(x1 = x1, x2 = x2, ynb = rnbinom(n, size = 3, mu = mu),
+    yg = round(rgamma(n, shape = 4, rate = 4 / mu), 4),
+    yo = cut(0.8 * x1 - 0.5 * x2 + rlogis(n), c(-Inf, -0.5, 0.7, Inf),
+             labels = c("low", "mid", "high"), ordered_result = TRUE))
+})
+post_sum <- function(f) unclass(summary(f, probs = c(0.025, 0.975)))
+"#;
+
+/// Stata 19 on the same data (`bayes, prior() rseed(1) mcmcsize(): poisson |
+/// nbreg | glm, family(gamma) link(log) | ologit`, then `bayesstats summary`):
+/// posterior mean, sd and MCSE by row; `bayesmh, likelihood(poisson)` with
+/// `bayespredict` and `bayesstats ppvalues` (the replicated mean and
+/// P(T >= T_obs) of the mean, minimum and maximum). Stata's `t(mu, s2, df)`
+/// takes the squared scale. Only numbers.
+const STATA_B: &str = r#"
+st <- function(...) { m <- rbind(...); colnames(m) <- c("mean", "sd", "mcse"); m }
+s_pat <- st(`(Intercept)` = c(0.267967608067124, 0.180328456241475, 0.00271130441932936),
+            x = c(0.408433196737714, 0.226774653777511, 0.00320463031481194))
+s_pat_mu1 <- c(0.853936119576476, 0.30541005013626, 0.0044115336495064)
+s_pac <- st(`(Intercept)` = c(0.263371018711389, 0.17710704842437, 0.00296159657426889),
+            x = c(0.409995961970072, 0.230119147301667, 0.00313454533040702))
+s_pbt <- st(`(Intercept)` = c(0.317899386329994, 0.142092513567549, 0.00217119371973662),
+            x1 = c(0.453486243543547, 0.133684673645191, 0.00223895912312221),
+            x2 = c(-0.591818713452986, 0.182597670542909, 0.00303242533170093))
+s_pbn <- st(`(Intercept)` = c(0.300920647421338, 0.146551797708944, 0.00222954902078363),
+            x1 = c(0.480372417716277, 0.136254128053065, 0.00212606034150242),
+            x2 = c(-0.612327865305596, 0.181920077515514, 0.00351150183562031))
+s_nb <- st(`(Intercept)` = c(0.541699762988054, 0.0842810036289391, 0.00210458419687921),
+           x1 = c(0.385506319196764, 0.096305806922378, 0.00266469568776031),
+           x2 = c(-0.219855859350152, 0.0745020728824299, 0.00164311776688061))
+s_gam <- st(`(Intercept)` = c(0.464577432843925, 0.0931283061941038, 0.00241528306397612),
+            x1 = c(0.445975584225503, 0.10687500893526, 0.0028892756271101),
+            x2 = c(-0.286460190435205, 0.0819017478518964, 0.00214855235902872))
+s_ol <- st(x1 = c(0.660954640261799, 0.238488008491925, 0.00666987018538623),
+           x2 = c(-0.61827858146765, 0.177360542780059, 0.00619400662958601),
+           `low|mid` = c(-0.561835008874621, 0.206361522253323, 0.00631329845594903),
+           `mid|high` = c(0.722719566559413, 0.214976180188998, 0.00559952726264971))
+s_pp <- c(mean = 0.5034, min = 1, max = 0.7862); s_pp_rep <- c(mean = 1.402834, min = 0.00165, max = 4.44645)
+"#;
+
+/// The exact posterior of the Poisson model on `pa` with a normal(0, 2)
+/// prior on the constant and the given log prior on the slope, on a 401 by
+/// 401 grid: the means of the constant, the slope and exp(constant - 1.2
+/// slope), the expected count of the first row.
+const EXACT_B: &str = r#"
+exact_pa <- function(lp_b) {
+  a <- seq(-1.5, 1.8, length = 401); b <- seq(-1.2, 2.2, length = 401)
+  G <- outer(a, b, Vectorize(function(a, b) { eta <- a + b * pa$x
+    sum(pa$y * eta - exp(eta)) + dnorm(a, 0, 2, log = TRUE) + lp_b(b) }))
+  w <- exp(G - max(G)); w <- w / sum(w)
+  c(`(Intercept)` = sum(w * a), x = sum(w * rep(b, each = 401)),
+    mu1 = sum(w * exp(outer(a, b, function(a, b) a - 1.2 * b))))
+}
+ex_t <- exact_pa(function(b) dt(b / 0.5, 3, log = TRUE) - log(0.5))
+ex_c <- exact_pa(function(b) dcauchy(b, 0, 0.5, log = TRUE))
+# within k combined Monte Carlo errors, plus a share `slack` of Stata's sd
+agree <- function(s, st, k = 4, slack = 0) {
+  r <- rownames(st); all(abs(s[r, "mean"] - st[, "mean"]) < k * sqrt(s[r, "mcse"]^2 + st[, "mcse"]^2) + slack * st[, "sd"]) }
+"#;
+
+fn ctx_of(dataset: &str, columns: &[&str]) -> Context {
+    Context {
+        dataset: dataset.into(),
+        frames: Vec::new(),
+        columns: columns
+            .iter()
+            .map(|name| ColumnInfo {
+                name: (*name).into(),
+                kind: VarKind::Number,
+            })
+            .collect(),
+    }
+}
+
+fn fit(e: &mut Engine, ctx: &Context, set: &[(&str, &str)], x: &[&str], flags: &[&str]) -> String {
+    let (outcome, text) = dialog(e, ctx, &BAYESIAN_REGRESSION, set, &[("x", x)], flags);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    text
+}
+
+#[test]
+fn student_t_and_cauchy_priors_match_the_exact_posterior_and_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    define(&mut e, MAKE_B);
+    define(&mut e, STATA_B);
+    define(&mut e, EXACT_B);
+    let pa = ctx_of("pa", &["x", "y"]);
+    let poisson_int = [
+        ("y", "y"),
+        ("family", "poisson"),
+        ("int_prior", "normal"),
+        ("int_mean", "0"),
+        ("int_sd", "2"),
+        ("iter", "4000"),
+    ];
+    let mut t = poisson_int.to_vec();
+    t.extend([
+        ("prior", "student_t"),
+        ("prior_df", "3"),
+        ("prior_mean", "0"),
+        ("prior_sd", "0.5"),
+        ("save", "pt"),
+    ]);
+    let text = fit(&mut e, &pa, &t, &["x"], &["show_priors"]);
+    assert!(
+        text.contains("student_t") && text.contains("Intercept"),
+        "{text}"
+    );
+    let mut c = poisson_int.to_vec();
+    c.extend([
+        ("prior", "cauchy"),
+        ("prior_mean", "0"),
+        ("prior_sd", "0.5"),
+        ("save", "pc"),
+    ]);
+    fit(&mut e, &pa, &c, &["x"], &[]);
+    holds(
+        &mut e,
+        &[
+            // the exact posterior means, within four of the sampler's errors
+            "local({ s <- post_sum(pt); all(abs(s[c('(Intercept)', 'x'), 'mean'] - ex_t[1:2]) < 4 * s[c('(Intercept)', 'x'), 'mcse']) })".into(),
+            "local({ s <- post_sum(pc); all(abs(s[c('(Intercept)', 'x'), 'mean'] - ex_c[1:2]) < 4 * s[c('(Intercept)', 'x'), 'mcse']) })".into(),
+            // Stata's, under the same priors, within four of its errors, and the
+            // two programs within four combined errors
+            "all(abs(s_pat[, 'mean'] - ex_t[1:2]) < 4 * s_pat[, 'mcse'])".into(),
+            "all(abs(s_pac[, 'mean'] - ex_c[1:2]) < 4 * s_pac[, 'mcse'])".into(),
+            "abs(s_pat_mu1[1] - ex_t[['mu1']]) < 4 * s_pat_mu1[3]".into(),
+            "agree(post_sum(pt), s_pat)".into(),
+            "agree(post_sum(pc), s_pac)".into(),
+            // the priors are the ones typed
+            "rstanarm::prior_summary(pt)$prior$dist == 'student_t' && rstanarm::prior_summary(pt)$prior$scale == 0.5".into(),
+            "rstanarm::prior_summary(pc)$prior$dist == 'cauchy' && rstanarm::prior_summary(pc)$prior_intercept$scale == 2".into(),
+        ],
+    );
+
+    // one prior for each coefficient: Student t, then normal
+    let pb = ctx_of("pb", &["x1", "x2", "y"]);
+    for (prior, df, loc, scale, save) in [
+        ("student_t", "3, 5", "0, 0.5", "0.5, 1", "pbt"),
+        ("normal", "3", "0, 1", "1, 2", "pbn"),
+    ] {
+        let mut set = poisson_int.to_vec();
+        set.extend([
+            ("prior", prior),
+            ("prior_df", df),
+            ("prior_mean", loc),
+            ("prior_sd", scale),
+            ("save", save),
+        ]);
+        fit(&mut e, &pb, &set, &["x1", "x2"], &[]);
+    }
+    holds(
+        &mut e,
+        &[
+            "isTRUE(all.equal(as.vector(rstanarm::prior_summary(pbt)$prior$df), c(3, 5)))".into(),
+            "isTRUE(all.equal(as.vector(rstanarm::prior_summary(pbn)$prior$scale), c(1, 2)))"
+                .into(),
+            "agree(post_sum(pbt), s_pbt)".into(),
+            "agree(post_sum(pbn), s_pbn)".into(),
+        ],
+    );
+
+    // the priors alone: the slope's draws follow t(3) * 0.5, the intercept's
+    // Cauchy(0, 1), whatever the data
+    let mut prior_only = vec![
+        ("y", "y"),
+        ("prior", "student_t"),
+        ("prior_df", "3"),
+        ("prior_mean", "0"),
+        ("prior_sd", "0.5"),
+        ("int_prior", "cauchy"),
+        ("int_mean", "0"),
+        ("int_sd", "1"),
+        ("iter", "4000"),
+        ("save", "ppd"),
+    ];
+    prior_only.push(("seed", "3"));
+    define(&mut e, MAKE);
+    let text = fit(&mut e, &context("bd"), &prior_only, &["x1"], &["prior_pd"]);
+    assert!(
+        text.contains("Prior summary (the data are not used)"),
+        "{text}"
+    );
+    // the intercept's prior is on the intercept at the centred predictor
+    holds(
+        &mut e,
+        &[
+            "local({ d <- as.matrix(ppd); p <- c(0.1, 0.25, 0.5, 0.75, 0.9); \
+             ac <- d[, '(Intercept)'] + mean(bd$x1) * d[, 'x1']; \
+             all(abs(sapply(0.5 * qt(p, 3), function(q) mean(d[, 'x1'] <= q)) - p) < 0.03) && \
+             all(abs(sapply(qcauchy(p), function(q) mean(ac <= q)) - p) < 0.03) })"
+                .into(),
+        ],
+    );
+}
+
+/// `all.equal` to 1e-9, unnamed.
+fn same(a: &str, b: &str) -> String {
+    format!("isTRUE(all.equal(unname(as.vector({a})), unname(as.vector({b})), tolerance = 1e-9))")
+}
+
+#[test]
+fn other_families_match_stata_and_maximum_likelihood() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    define(&mut e, MAKE_B);
+    define(&mut e, STATA_B);
+    define(&mut e, EXACT_B);
+    let fm = ctx_of("fm", &["x1", "x2", "ynb", "yg"]);
+    let diffuse = [
+        ("prior", "normal"),
+        ("prior_mean", "0"),
+        ("prior_sd", "100"),
+        ("int_prior", "normal"),
+        ("int_mean", "0"),
+        ("int_sd", "100"),
+    ];
+    for (y, family, save) in [("ynb", "neg_binomial", "fnb"), ("yg", "gamma", "fgam")] {
+        let mut set = vec![("y", y), ("family", family), ("save", save)];
+        set.extend(diffuse);
+        let text = fit(&mut e, &fm, &set, &["x1", "x2"], &[]);
+        assert!(
+            text.contains(if family == "gamma" {
+                "shape"
+            } else {
+                "reciprocal_dispersion"
+            }),
+            "{text}"
+        );
+    }
+    let mut fo = fm.clone();
+    fo.columns.push(ColumnInfo {
+        name: "yo".into(),
+        kind: VarKind::Factor,
+    });
+    let text = fit(
+        &mut e,
+        &fo,
+        &[("y", "yo"), ("family", "ordinal"), ("save", "fol")],
+        &["x1", "x2"],
+        &[],
+    );
+    assert!(
+        text.contains("low|mid") && text.contains("mid|high"),
+        "{text}"
+    );
+    holds(
+        &mut e,
+        &[
+            // near the maximum-likelihood fits under nearly flat priors
+            "local({ g <- MASS::glm.nb(ynb ~ x1 + x2, data = fm); s <- post_sum(fnb)[1:3, ]; \
+               all(abs(s[, 'mean'] - coef(g)) < 0.25 * s[, 'sd'] + 4 * s[, 'mcse']) })".into(),
+            "local({ g <- glm(yg ~ x1 + x2, data = fm, family = Gamma(link = 'log')); s <- post_sum(fgam)[1:3, ]; \
+               all(abs(s[, 'mean'] - coef(g)) < 0.25 * s[, 'sd'] + 4 * s[, 'mcse']) })".into(),
+            "local({ g <- MASS::polr(yo ~ x1 + x2, data = fm); s <- post_sum(fol); \
+               all(abs(s[c('x1', 'x2'), 'mean'] - g$coefficients) < 0.4 * s[c('x1', 'x2'), 'sd']) && \
+               all(abs(s[c('low|mid', 'mid|high'), 'mean'] - g$zeta) < 0.4 * s[c('low|mid', 'mid|high'), 'sd']) })".into(),
+            // Stata's bayes: nbreg (its prior on log alpha is not rstanarm's on
+            // 1 / alpha), glm gamma (which fixes the scale at 1, so its spread is
+            // wider: means only), ologit (flat cutpoints where rstanarm has a
+            // Dirichlet prior on the category probabilities)
+            "agree(post_sum(fnb), s_nb, slack = 0.1)".into(),
+            "agree(post_sum(fgam), s_gam, slack = 0.15)".into(),
+            "agree(post_sum(fol), s_ol, slack = 0.4)".into(),
+            "all(post_sum(fnb)[, 'Rhat'] < 1.02, na.rm = TRUE)".into(),
+            "inherits(fol, 'polr') && identical(levels(rstanarm::get_y(fol)), c('low', 'mid', 'high'))".into(),
+        ],
+    );
+}
+
+/// Runs the code of a Model-menu dialog on the fit `model`; returns the
+/// outcome, the text and how many plots came back.
+fn model_dialog(
+    e: &mut Engine,
+    spec: &Spec,
+    model: &str,
+    set: &[(&str, &str)],
+    flags: Option<&[&str]>,
+) -> (Outcome, String, usize) {
+    let ctx = Context {
+        dataset: model.into(),
+        frames: Vec::new(),
+        columns: Vec::new(),
+    };
+    let mut values = spec.defaults(&ctx);
+    for (id, text) in set {
+        values.set_text(id, *text);
+    }
+    if let Some(flags) = flags {
+        for w in spec.widgets {
+            if let Widget::Check { id, .. } = w {
+                values.set_flag(id, flags.contains(id));
+            }
+        }
+    }
+    let code = spec.generate(&ctx, &values, Style::Base);
+    assert!(code.is_ok(), "{code:?}");
+    let code = code.unwrap_or_default();
+    let id = e.submit(Source::Menu(spec.menu.into()), &code);
+    assert!(id.is_ok(), "{id:?}");
+    let id = id.unwrap_or_default();
+    settle(e);
+    let outcome = e
+        .history()
+        .entries()
+        .last()
+        .and_then(|h| h.outcome)
+        .unwrap_or(Outcome::Error);
+    let block = e.results().blocks().iter().find(|b| b.command == id);
+    let plots = block.map_or(0, |b| {
+        b.items
+            .iter()
+            .filter(|i| matches!(i, Item::Plot { .. }))
+            .count()
+    });
+    let text = block
+        .map(|b| {
+            b.items
+                .iter()
+                .map(|i| match i {
+                    Item::Text { text, .. } => text.clone(),
+                    Item::Warning(w) => format!("warning: {w}\n"),
+                    Item::Error { message, .. } => format!("error: {message}\n"),
+                    Item::Notice(n) => n.clone(),
+                    Item::Plot { .. } => String::new(),
+                })
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default();
+    (outcome, text, plots)
+}
+
+#[test]
+fn the_model_menu_predicts_checks_and_compares() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    define(&mut e, MAKE_B);
+    define(&mut e, STATA_B);
+    define(&mut e, EXACT_B);
+    let pa = ctx_of("pa", &["x", "y"]);
+    let base = [
+        ("y", "y"),
+        ("family", "poisson"),
+        ("int_prior", "normal"),
+        ("int_mean", "0"),
+        ("int_sd", "2"),
+        ("prior_mean", "0"),
+        ("prior_sd", "0.5"),
+        ("iter", "4000"),
+    ];
+    let mut t = base.to_vec();
+    t.extend([("prior", "student_t"), ("prior_df", "3"), ("save", "pt")]);
+    fit(&mut e, &pa, &t, &["x"], &[]);
+    let mut c = base.to_vec();
+    c.extend([("prior", "cauchy"), ("save", "pc")]);
+    fit(&mut e, &pa, &c, &["x"], &[]);
+    define(&mut e, "pa2 <- rbind(pa, data.frame(x = NA, y = 1))");
+
+    // ---- posterior predictions ----
+    for (kind, prefix) in [("epred", "mu"), ("linpred", "eta"), ("predict", "ynew")] {
+        let (outcome, text, _) = model_dialog(
+            &mut e,
+            &POSTERIOR_PREDICTIONS,
+            "pt",
+            &[
+                ("data", "pa2"),
+                ("kind", kind),
+                ("prefix", prefix),
+                ("seed", "7"),
+            ],
+            None,
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    }
+    define(
+        &mut e,
+        "dr <- as.matrix(pt); X <- cbind(1, pa$x); lin <- dr[, c('(Intercept)', 'x')] %*% t(X); \
+         ynew <- rstanarm::posterior_predict(pt, newdata = pa, seed = 7)",
+    );
+    holds(
+        &mut e,
+        &[
+            "is.na(pa2$mu[26]) && is.na(pa2$mu_lower[26])".into(),
+            same("pa2$mu[1:25]", "colMeans(exp(lin))"),
+            same(
+                "pa2$mu_lower[1:25]",
+                "apply(exp(lin), 2, quantile, 0.025, names = FALSE)",
+            ),
+            same("pa2$eta[1:25]", "colMeans(lin)"),
+            same("pa2$ynew[1:25]", "colMeans(ynew)"),
+            // the first row's expected count against the exact posterior and Stata
+            "abs(pa2$mu[1] - ex_t[['mu1']]) < 4 * sd(exp(lin[, 1])) / sqrt(1000)".into(),
+            "abs(pa2$mu[1] - s_pat_mu1[1]) < 4 * sqrt(s_pat_mu1[3]^2 + var(exp(lin[, 1])) / 1000)"
+                .into(),
+        ],
+    );
+
+    // ---- trace plot, density overlay and posterior predictive p-values ----
+    let (outcome, text, plots) = model_dialog(
+        &mut e,
+        &BAYES_CHECKS,
+        "pt",
+        &[],
+        Some(&["trace", "density", "ppc_mean", "ppc_min", "ppc_max"]),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(plots >= 2, "{plots} plots\n{text}");
+    assert!(text.contains("Posterior predictive p-values"), "{text}");
+    define(
+        &mut e,
+        "yr <- rstanarm::posterior_predict(pt, seed = 1); \
+         hand <- sapply(list(mean = mean, min = min, max = max), function(f) mean(apply(yr, 1, f) >= f(pa$y)))",
+    );
+    holds(
+        &mut e,
+        &[
+            same("pt$ppvalues$p", "hand"),
+            same(
+                "pt$ppvalues$observed",
+                "c(mean(pa$y), min(pa$y), max(pa$y))",
+            ),
+            // Stata's bayesstats ppvalues, within the Monte Carlo error of both
+            "all(abs(pt$ppvalues$p - s_pp) < 4 * sqrt(2 * pmax(s_pp * (1 - s_pp), 0.01) / 2000))"
+                .into(),
+            "all(abs(pt$ppvalues$replicated - s_pp_rep) < c(0.03, 0.01, 0.1))".into(),
+        ],
+    );
+
+    // ---- loo ----
+    let (outcome, text, _) = model_dialog(&mut e, &BAYES_LOO, "pt", &[("others", "pc")], None);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(
+        text.contains("elpd_loo") && text.contains("Ranked by elpd_loo"),
+        "{text}"
+    );
+    define(
+        &mut e,
+        "ll <- rstanarm::log_lik(pt); is_elpd <- sum(-log(colMeans(exp(-ll)))); \
+         lppd <- sum(log(colMeans(exp(ll)))); waic_elpd <- lppd - sum(apply(ll, 2, var)); \
+         cmp <- loo::loo_compare(list(pt = pt$loo, pc = pc$loo))",
+    );
+    holds(
+        &mut e,
+        &[
+            "inherits(pt$loo, 'psis_loo') && inherits(pc$loo, 'psis_loo')".into(),
+            // Pareto smoothing moves plain importance sampling little here, and
+            // WAIC is near too
+            "abs(pt$loo$estimates['elpd_loo', 1] - is_elpd) < 0.5".into(),
+            "abs(pt$loo$estimates['elpd_loo', 1] - waic_elpd) < 1".into(),
+            same(
+                "abs(cmp[2, 'elpd_diff'])",
+                "abs(pt$loo$estimates['elpd_loo', 1] - pc$loo$estimates['elpd_loo', 1])",
+            ),
+        ],
+    );
+
+    // ---- an ordered logit: each category's probability from its cutpoints ----
+    let mut fo = ctx_of("fm", &["x1", "x2"]);
+    fo.columns.push(ColumnInfo {
+        name: "yo".into(),
+        kind: VarKind::Factor,
+    });
+    fit(
+        &mut e,
+        &fo,
+        &[
+            ("y", "yo"),
+            ("family", "ordinal"),
+            ("iter", "1000"),
+            ("save", "fol"),
+        ],
+        &["x1", "x2"],
+        &[],
+    );
+    let (outcome, text, _) = model_dialog(
+        &mut e,
+        &POSTERIOR_PREDICTIONS,
+        "fol",
+        &[("data", "fm"), ("prefix", "p")],
+        None,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    define(
+        &mut e,
+        "D <- as.matrix(fol); eta <- D[, c('x1', 'x2')] %*% t(as.matrix(fm[, c('x1', 'x2')])); \
+         p1 <- colMeans(plogis(D[, 'low|mid'] - eta)); \
+         p3 <- colMeans(1 - plogis(D[, 'mid|high'] - eta))",
+    );
+    holds(
+        &mut e,
+        &[
+            same("fm$p_low", "p1"),
+            same("fm$p_high", "p3"),
+            same("fm$p_low + fm$p_mid + fm$p_high", "rep(1, 120)"),
+        ],
+    );
 }
