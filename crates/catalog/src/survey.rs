@@ -258,6 +258,11 @@ fn design_line(a: &Args, analysed: &[&str]) -> String {
     if !cond.is_empty() {
         line.push_str(&format!("\n{design} <- base::subset({design}, {cond})"));
     }
+    // Stata's design df for BRR and JK1 weights, set on the design after the
+    // subset (which drops it), so svychisq, the model's tests and Model fit use it
+    if matches!(a.choice("method"), "BRR" | "JK1") {
+        line.push_str(&format!("\n{design}$degf <- {}", degf_text(a)));
+    }
     line
 }
 
@@ -888,12 +893,13 @@ pub const SURVEY_REGRESSION: Spec = Spec {
         analysed.push(a.var_text("y"));
         let mut code = format!(
             "{}\n{model} <- survey::svyglm({} ~ {rhs}, design = {design}, family = stats::{family}(){control})\n\
-             print(summary({model}))",
+             print(summary({model}, df.resid = {}))",
             design_line(a, &analysed),
             a.var("y").unwrap_or_default(),
+            degf_text(a),
         );
         let ci = format!(
-            "stats::confint({model}, level = {}, df = {})",
+            "stats::confint({model}, level = {}, ddf = {})",
             a.choice("conf"),
             degf_text(a)
         );
@@ -1092,7 +1098,8 @@ mod tests {
         assert!(
             code(&SURVEY_MEANS, &v).starts_with(
                 "design <- survey::svrepdesign(weights = ~wt, repweights = ~r1 + r2 + r3, \
-                 type = \"BRR\", fay.rho = 0.3, combined.weights = TRUE, data = d)\n"
+                 type = \"BRR\", fay.rho = 0.3, combined.weights = TRUE, data = d)\n\
+                 design$degf <- 2\n"
             ),
             "{}",
             code(&SURVEY_MEANS, &v)
@@ -1110,6 +1117,8 @@ mod tests {
             "{c}"
         );
         assert!(c.contains("df = Inf"), "{c}");
+        // a bootstrap design keeps survey's df (Stata has none for it)
+        assert!(!c.contains("$degf <-"), "{c}");
         // strata with replicate weights, replicate weights with none chosen
         let v = values(
             &SURVEY_MEANS,
@@ -1261,9 +1270,9 @@ mod tests {
             "design <- survey::svydesign(ids = ~1, strata = ~stratum, weights = ~wt, data = d)\n\
              model <- survey::svyglm(smokes ~ income + region, design = design, family = stats::quasibinomial(), \
              control = stats::glm.control(epsilon = 1e-14, maxit = 100))\n\
-             print(summary(model))\ncat(\"\\nOdds ratios\\n\")\n\
+             print(summary(model, df.resid = survey::degf(design)))\ncat(\"\\nOdds ratios\\n\")\n\
              print(exp(cbind(odds_ratio = stats::coef(model), stats::confint(model, level = 0.95, \
-             df = survey::degf(design)))))"
+             ddf = survey::degf(design)))))"
         );
         let v = values(
             &SURVEY_REGRESSION,
