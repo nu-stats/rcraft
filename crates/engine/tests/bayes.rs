@@ -1006,3 +1006,185 @@ fn the_model_menu_predicts_checks_and_compares() {
         ],
     );
 }
+
+/// Stata 19 with its own default priors (`bayes, rseed(1) mcmcsize(40000)
+/// burnin(5000): logit y x1 x2` on `lg`, `regress y x1 x2` on `bd`), and the
+/// run on `bd` with normal(0, 25) slopes recorded above: posterior mean, sd
+/// and MCSE by row. Only numbers.
+const STATA_M: &str = r#"
+s_lg <- st(`(Intercept)` = c(-0.528899163967921, 0.309238103978842, 0.00452952153813886),
+           x1 = c(1.20652448120493, 0.417920069798189, 0.00708102886238382),
+           x2 = c(-0.574872120506271, 0.416227723724512, 0.00853738119417732))
+s_bd <- st(`(Intercept)` = c(0.994252285241206, 0.117082898724128, 0.00185027795046497),
+           x1 = c(2.01070919612944, 0.144633488354913, 0.00240842076272814),
+           x2 = c(-1.52817749774359, 0.166010809506582, 0.00288001219508063),
+           sigma2 = c(0.539336072933889, 0.131413422215749, 0.00169865315445797))
+s_bd25 <- st(`(Intercept)` = c(0.9928765, 0.1165207, 0.001755), x1 = c(2.013188, 0.1411727, 0.002753),
+             x2 = c(-1.53162, 0.1638497, 0.003972), sigma2 = c(0.5391658, 0.129379, 0.002391))
+# the dialog's table, from the draws
+mh_sum <- function(f) { s <- rstan::monitor(f$draws, warmup = 0, probs = c(0.025, 0.975), print = FALSE)
+  s <- as.matrix(as.data.frame(s)[, 1:7]); colnames(s)[2] <- "mcse"; s }
+# the exact posterior of the Gaussian model under normal priors of variances V0 on
+# the constant and slopes and igamma(.01, .01) on the variance (as exact_stata)
+exact_v <- function(d, V0) {
+  y <- d$y; Z <- cbind(1, d$x1, d$x2); n <- length(y)
+  vg <- exp(seq(log(1e-3), log(50), length.out = 6000))
+  lw <- sapply(vg, function(v) {
+    R <- chol(v * diag(n) + Z %*% V0 %*% t(Z))
+    z <- backsolve(R, y, transpose = TRUE)
+    -sum(log(diag(R))) - sum(z^2) / 2 - 1.01 * log(v) - 0.01 / v + log(v)
+  })
+  w <- exp(lw - max(lw)); w <- w / sum(w)
+  mu <- sapply(vg, function(v) as.vector(solve(crossprod(Z) / v + solve(V0), crossprod(Z, y) / v)))
+  c(as.vector(mu %*% w), sum(vg * w))
+}
+"#;
+
+#[test]
+fn statas_priors_match_stata_and_the_exact_posterior() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    define(&mut e, MAKE);
+    define(&mut e, MAKE_B);
+    define(&mut e, STATA_B);
+    define(&mut e, EXACT_B);
+    define(&mut e, STATA_M);
+    let long = [("chains", "4"), ("iter", "10000"), ("seed", "1")];
+    let bd = ctx_of("bd", &["y", "x1", "x2"]);
+    // Stata's default priors on the Gaussian model, and normal(0, 25) slopes
+    let mut set = vec![("y", "y"), ("save", "g0")];
+    set.extend(long);
+    let text = fit(&mut e, &bd, &set, &["x1", "x2"], &["stata"]);
+    for word in [
+        "Stata's priors, random-walk Metropolis-Hastings, 4 chains of 10000",
+        "sigma2: igamma(0.01, 0.01)",
+        "mcse",
+        "n_eff",
+        "Rhat",
+        "Acceptance rate",
+    ] {
+        assert!(text.contains(word), "{word} missing from\n{text}");
+    }
+    assert!(!text.contains("Warning"), "{text}");
+    let mut set = vec![
+        ("y", "y"),
+        ("prior", "normal"),
+        ("prior_sd", "5"),
+        ("save", "g25"),
+    ];
+    set.extend(long);
+    fit(&mut e, &bd, &set, &["x1", "x2"], &["stata"]);
+    define(
+        &mut e,
+        "e0 <- exact_v(bd, diag(c(1e4, 1e4, 1e4))); e25 <- exact_v(bd, diag(c(1e4, 25, 25))); \
+         m0 <- mh_sum(g0); m25 <- mh_sum(g25)",
+    );
+    holds(
+        &mut e,
+        &[
+            "inherits(g0, 'bayes_mh') && identical(dim(g0$draws), c(5000L, 4L, 4L))".into(),
+            // the exact posterior under Stata's priors, to four MCSEs
+            "all(abs(m0[, 'mean'] - e0) < 4 * m0[, 'mcse'])".into(),
+            "all(abs(m25[, 'mean'] - e25) < 4 * m25[, 'mcse'])".into(),
+            // Stata's own means are that exact posterior too
+            "all(abs(s_bd[, 'mean'] - e0) < 4 * s_bd[, 'mcse'])".into(),
+            // and the two samplers agree, with no slack for different priors
+            "agree(m0, s_bd) && agree(m25, s_bd25)".into(),
+            "all(abs(m0[rownames(s_bd), 'sd'] / s_bd[, 'sd'] - 1) < 0.1)".into(),
+            "all(m0[, 'Rhat'] < 1.02) && all(m0[, 'n_eff'] > 500)".into(),
+            "all(g0$acceptance > 0.15 & g0$acceptance < 0.4)".into(),
+        ],
+    );
+    // the same seed gives the same draws
+    let mut set = vec![
+        ("y", "y"),
+        ("prior", "normal"),
+        ("prior_sd", "5"),
+        ("save", "g25b"),
+    ];
+    set.extend(long);
+    fit(&mut e, &bd, &set, &["x1", "x2"], &["stata"]);
+    holds(&mut e, &["identical(g25$draws, g25b$draws)".into()]);
+
+    // a logit model with Stata's defaults
+    let lg = ctx_of("lg", &["y", "x1", "x2"]);
+    let mut set = vec![("y", "y"), ("family", "binomial"), ("save", "l0")];
+    set.extend(long);
+    fit(&mut e, &lg, &set, &["x1", "x2"], &["stata"]);
+    // the Poisson model on pa with a Student t slope and a normal(0, 2) constant
+    let pa = ctx_of("pa", &["y", "x"]);
+    let mut set = vec![
+        ("y", "y"),
+        ("family", "poisson"),
+        ("prior", "student_t"),
+        ("prior_sd", "0.5"),
+        ("prior_df", "3"),
+        ("int_prior", "normal"),
+        ("int_sd", "2"),
+        ("save", "pt0"),
+    ];
+    set.extend(long);
+    fit(&mut e, &pa, &set, &["x"], &["stata"]);
+    // the negative binomial, Gamma and ordered logit models with Stata's defaults
+    let mut fm = ctx_of("fm", &["x1", "x2", "ynb", "yg"]);
+    for (y, family, save) in [("ynb", "neg_binomial", "n0"), ("yg", "gamma", "ga0")] {
+        let mut set = vec![("y", y), ("family", family), ("save", save)];
+        set.extend(long);
+        let text = fit(&mut e, &fm, &set, &["x1", "x2"], &["stata"]);
+        assert!(
+            text.contains(if family == "gamma" {
+                "scale: fixed at 1"
+            } else {
+                "lnalpha"
+            }),
+            "{text}"
+        );
+    }
+    fm.columns.push(ColumnInfo {
+        name: "yo".into(),
+        kind: VarKind::Factor,
+    });
+    let mut set = vec![("y", "yo"), ("family", "ordinal"), ("save", "o0")];
+    set.extend(long);
+    let text = fit(&mut e, &fm, &set, &["x1", "x2"], &["stata"]);
+    assert!(
+        text.contains("low|mid") && text.contains("cutpoints: flat"),
+        "{text}"
+    );
+    holds(
+        &mut e,
+        &[
+            "agree(mh_sum(l0), s_lg)".into(),
+            "local({ s <- mh_sum(pt0); all(abs(s[, 'mean'] - ex_t[1:2]) < 4 * s[, 'mcse']) && agree(s, s_pat) })"
+                .into(),
+            // within combined MCSEs of Stata, with no slack: the priors are the same
+            // (log alpha's mean is not compared: its posterior's long left tail is
+            // reached by neither sampler)
+            "agree(mh_sum(n0), s_nb)".into(),
+            "agree(mh_sum(ga0), s_gam)".into(),
+            "agree(mh_sum(o0), s_ol)".into(),
+            // the Gamma scale fixed at 1 gives Stata's spread, not glm's
+            "local({ s <- mh_sum(ga0); all(abs(s[rownames(s_gam), 'sd'] / s_gam[, 'sd'] - 1) < 0.1) })"
+                .into(),
+            "local({ s <- mh_sum(o0); all(abs(s[rownames(s_ol), 'sd'] / s_ol[, 'sd'] - 1) < 0.1) })"
+                .into(),
+            "all(o0$draws[, , 'low|mid'] < o0$draws[, , 'mid|high'])".into(),
+        ],
+    );
+    // an outcome the family cannot take is an error, not a crash
+    let mut set = vec![("y", "y"), ("family", "poisson"), ("save", "bad")];
+    set.extend(long);
+    let (outcome, text) = dialog(
+        &mut e,
+        &bd,
+        &BAYESIAN_REGRESSION,
+        &set,
+        &[("x", &["x1", "x2"])],
+        &["stata"],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("must be a count"), "{text}");
+}

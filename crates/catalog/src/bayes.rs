@@ -54,7 +54,7 @@ const FAMILIES: &[Opt] = &[
 const PRIORS: &[Opt] = &[
     Opt {
         value: "default",
-        label: "rstanarm's default weakly informative priors",
+        label: "The default priors (rstanarm's weakly informative ones, or Stata's when ticked)",
     },
     Opt {
         value: "normal",
@@ -176,6 +176,244 @@ fn prior_code(a: &Args, kind: &str, ids: (&str, &str, &str)) -> String {
 const COEFFICIENTS: (&str, &str, &str) = ("prior_mean", "prior_sd", "prior_df");
 const INTERCEPT: (&str, &str, &str) = ("int_mean", "int_sd", "int_df");
 
+// ---- Stata's priors, sampled in plain R (small-fixes rows 14 and 22) ----
+
+/// A log prior density of the vector `b` as R: Stata's default
+/// normal(0, 10000) (a variance; the sd is 100), or the typed normal, Student t
+/// or Cauchy, each coefficient on its own.
+fn stata_prior_r(a: &Args, kind: &str, ids: (&str, &str, &str)) -> String {
+    let (loc, scale, df) = ids;
+    let (loc, scale, df) = (
+        r_numbers(a.values.text(loc)),
+        r_numbers(a.values.text(scale)),
+        r_numbers(a.values.text(df)),
+    );
+    match kind {
+        "normal" => format!("sum(stats::dnorm(b, {loc}, {scale}, log = TRUE))"),
+        "student_t" => {
+            format!("sum(stats::dt((b - {loc}) / {scale}, {df}, log = TRUE) - log({scale}))")
+        }
+        "cauchy" => format!("sum(stats::dcauchy(b, {loc}, {scale}, log = TRUE))"),
+        _ => "sum(stats::dnorm(b, 0, 100, log = TRUE))".to_string(),
+    }
+}
+
+/// The R that checks a typed prior's lists against the number of
+/// coefficients `n` (an R expression).
+fn stata_prior_lengths(a: &Args, kind: &str, n: &str) -> String {
+    if kind == "default" {
+        return String::new();
+    }
+    let (loc, scale, df) = COEFFICIENTS;
+    let mut lists = vec![
+        r_numbers(a.values.text(loc)),
+        r_numbers(a.values.text(scale)),
+    ];
+    if kind == "student_t" {
+        lists.push(r_numbers(a.values.text(df)));
+    }
+    format!(
+        "  if (!all(lengths(list({})) %in% c(1, {n})))\n    \
+         stop(\"Type one location and scale for every coefficient, or one for each of the \", \
+         {n}, \" coefficients.\", call. = FALSE)\n",
+        lists.join(", ")
+    )
+}
+
+/// The random-walk Metropolis-Hastings sampler, as Stata's `bayes` samples:
+/// started at the maximum-likelihood fit (jittered by one standard error per
+/// chain), its proposal covariance and scale adapted during the warm-up
+/// (aiming at an acceptance rate of 0.234), then kept fixed. `lp` is the log
+/// posterior, `start` and `S` the start and its covariance, `back` maps the
+/// sampled parameters to the reported ones.
+const MH_SAMPLER: &str = "  p <- length(start); warm <- @ITER@ %/% 2
+  set.seed(@SEED@)
+  draws <- array(NA_real_, c(@ITER@ - warm, @CHAINS@, p), dimnames = list(NULL, NULL, names(start)))
+  accepted <- numeric(@CHAINS@)
+  for (chain in seq_len(@CHAINS@)) {
+    L <- t(chol(S)); th <- start + as.vector(L %*% stats::rnorm(p))
+    cur <- lp(th)
+    if (!is.finite(cur)) { th <- start; cur <- lp(th) }
+    sc <- 2.38^2 / p; kept <- matrix(NA_real_, warm, p)
+    for (i in seq_len(@ITER@)) {
+      prop <- th + sqrt(sc) * as.vector(L %*% stats::rnorm(p))
+      new <- lp(prop)
+      ok <- is.finite(new) && log(stats::runif(1)) < new - cur
+      if (ok) { th <- prop; cur <- new }
+      if (i <= warm) {
+        kept[i, ] <- th
+        sc <- sc * exp((ok - 0.234) / sqrt(i))
+        if (i %% 50 == 0 && i >= 200) {
+          C <- stats::cov(kept[(i %/% 2):i, , drop = FALSE])
+          R <- tryCatch(chol(C + diag(1e-10 * max(diag(C)) + 1e-300, p)), error = function(e) NULL)
+          if (!is.null(R)) L <- t(R)
+        }
+      } else {
+        draws[i - warm, chain, ] <- back(th); accepted[chain] <- accepted[chain] + ok
+      }
+    }
+  }
+";
+
+/// The family's part of the Stata-prior fit: the outcome checked, the
+/// maximum-likelihood start and its covariance, and `lp`, the log posterior.
+fn stata_family(a: &Args, family: &str) -> String {
+    let coef = stata_prior_r(a, a.choice("prior"), COEFFICIENTS);
+    let constant = stata_prior_r(a, a.choice("int_prior"), INTERCEPT);
+    let lengths = stata_prior_lengths(a, a.choice("prior"), "sum(!int)");
+    let priors = format!(
+        "  int <- colnames(X) == \"(Intercept)\"\n\
+         {lengths}  \
+         prior_b <- function(b) {coef}\n  \
+         prior_c <- function(b) {constant}\n  \
+         lpb <- function(b) prior_b(b[!int]) + prior_c(b[int])\n"
+    );
+    match family {
+        "ordinal" => {
+            let lengths = stata_prior_lengths(a, a.choice("prior"), "ncol(X)");
+            format!(
+                "  X <- X[, colnames(X) != \"(Intercept)\", drop = FALSE]\n  \
+                 if (ncol(X) == 0) stop(\"The ordered logit needs a predictor.\", call. = FALSE)\n  \
+                 y <- if (is.ordered(y)) y else factor(y, ordered = TRUE)\n  \
+                 y <- droplevels(y); lev <- levels(y)\n  \
+                 if (length(lev) < 3) stop(\"An ordered logit needs three categories or more.\", call. = FALSE)\n\
+                 {lengths}  \
+                 g <- MASS::polr(y ~ X, Hess = TRUE)\n  \
+                 start <- c(g$coefficients, g$zeta); S <- solve(g$Hessian)\n  \
+                 names(start) <- c(colnames(X), paste(lev[-length(lev)], lev[-1], sep = \"|\"))\n  \
+                 k <- ncol(X); y <- as.integer(y); nc <- length(lev) - 1\n  \
+                 prior_b <- function(b) {coef}\n  \
+                 lp <- function(t) {{\n    \
+                 cuts <- t[k + seq_len(nc)]\n    \
+                 if (any(diff(cuts) <= 0)) return(-Inf)\n    \
+                 xb <- as.vector(X %*% t[seq_len(k)]); cc <- c(-Inf, cuts, Inf)\n    \
+                 sum(log(stats::plogis(cc[y + 1] - xb) - stats::plogis(cc[y] - xb))) + prior_b(t[seq_len(k)])\n  \
+                 }}\n"
+            )
+        }
+        "gaussian" => format!(
+            "  if (!is.numeric(y)) stop(\"The outcome must be a number.\", call. = FALSE)\n\
+             {priors}  \
+             g <- stats::lm.fit(X, y); n <- length(y); k <- ncol(X); v0 <- sum(g$residuals^2) / n\n  \
+             start <- c(g$coefficients, log(v0)); names(start) <- c(colnames(X), \"sigma2\")\n  \
+             S <- rbind(cbind(v0 * solve(crossprod(X)), 0), c(rep(0, k), 2 / n))\n  \
+             # sigma2 is sampled on its log: igamma(0.01, 0.01) and the Jacobian\n  \
+             lp <- function(t) {{\n    \
+             v <- exp(t[k + 1])\n    \
+             sum(stats::dnorm(y, as.vector(X %*% t[1:k]), sqrt(v), log = TRUE)) + lpb(t[1:k]) +\n      \
+             stats::dgamma(1 / v, 0.01, rate = 0.01, log = TRUE) - log(v)\n  \
+             }}\n  \
+             back <- function(t) {{ t[k + 1] <- exp(t[k + 1]); t }}\n"
+        ),
+        "neg_binomial" => format!(
+            "  if (!is.numeric(y) || any(y < 0 | y != round(y))) stop(\"The outcome must be a count \
+             (whole numbers from 0).\", call. = FALSE)\n\
+             {priors}  \
+             g <- MASS::glm.nb(y ~ X - 1); k <- ncol(X)\n  \
+             start <- c(g$coefficients, -log(g$theta)); names(start) <- c(colnames(X), \"lnalpha\")\n  \
+             S <- rbind(cbind(stats::vcov(g), 0), c(rep(0, k), (g$SE.theta / g$theta)^2))\n  \
+             lp <- function(t) sum(stats::dnbinom(y, size = exp(-t[k + 1]), mu = exp(as.vector(X %*% t[1:k])), \
+             log = TRUE)) +\n    lpb(t[1:k]) + stats::dnorm(t[k + 1], 0, 100, log = TRUE)\n"
+        ),
+        _ => {
+            let (check, fam, ll) = match family {
+                "binomial" => (
+                    "  y <- as.numeric(if (is.factor(y)) y != levels(y)[1] else if (is.character(y)) \
+                     y != sort(unique(y))[1] else y != 0)\n",
+                    "stats::binomial()",
+                    "sum(stats::plogis(ifelse(y == 1, eta, -eta), log.p = TRUE))",
+                ),
+                "poisson" => (
+                    "  if (!is.numeric(y) || any(y < 0 | y != round(y))) stop(\"The outcome must be a \
+                     count (whole numbers from 0).\", call. = FALSE)\n",
+                    "stats::poisson()",
+                    "sum(stats::dpois(y, exp(eta), log = TRUE))",
+                ),
+                // Stata's bayes: glm, family(gamma) fixes the scale at 1
+                _ => (
+                    "  if (!is.numeric(y) || any(y <= 0)) stop(\"The outcome must be above 0.\", \
+                     call. = FALSE)\n",
+                    "stats::Gamma(link = \"log\")",
+                    "sum(stats::dexp(y, exp(-eta), log = TRUE))",
+                ),
+            };
+            format!(
+                "{check}{priors}  \
+                 g <- stats::glm.fit(X, y, family = {fam})\n  \
+                 start <- g$coefficients; names(start) <- colnames(X)\n  \
+                 S <- chol2inv(qr.R(g$qr))[order(g$qr$pivot), order(g$qr$pivot)]\n  \
+                 lp <- function(t) {{ eta <- as.vector(X %*% t); {ll} + lpb(t) }}\n"
+            )
+        }
+    }
+}
+
+/// The whole Stata-prior fit, kept as a list of class `bayes_mh`: the draws
+/// (iterations by chains by parameters), the acceptance rates and the priors.
+fn stata_fit(a: &Args, m: &str, y: &str, x: &str) -> String {
+    let family = a.choice("family");
+    let sampler = MH_SAMPLER
+        .replace("@ITER@", a.number("iter").trim())
+        .replace("@CHAINS@", a.number("chains").trim())
+        .replace("@SEED@", a.number("seed").trim());
+    let back = if family == "gaussian" {
+        ""
+    } else {
+        "  back <- identity\n"
+    };
+    format!(
+        "{m} <- local({{\n  \
+         f <- {y} ~ {x}\n  \
+         d <- stats::model.frame(f, data = {})\n  \
+         X <- stats::model.matrix(f, d); y <- stats::model.response(d)\n\
+         {}{back}{sampler}  \
+         structure(list(draws = draws, acceptance = accepted / (@ITER@ - warm), family = {}, \
+         formula = f, nobs = nrow(d)), class = \"bayes_mh\")\n}})",
+        a.data(),
+        stata_family(a, family),
+        r_string(family),
+    )
+    .replace("@ITER@", a.number("iter").trim())
+}
+
+/// The priors of a Stata-prior fit, as Stata names them.
+fn stata_priors_text(a: &Args) -> String {
+    let typed = |kind: &str, ids: (&str, &str, &str)| {
+        let (loc, scale, df) = ids;
+        let (loc, scale, df) = (
+            r_numbers(a.values.text(loc)),
+            r_numbers(a.values.text(scale)),
+            r_numbers(a.values.text(df)),
+        );
+        match kind {
+            "normal" => format!("normal(mean {loc}, sd {scale})"),
+            "student_t" => format!("Student t(df {df}, location {loc}, scale {scale})"),
+            "cauchy" => format!("Cauchy(location {loc}, scale {scale})"),
+            _ => "normal(0, 10000) (a variance)".to_string(),
+        }
+    };
+    let mut lines = vec![format!(
+        "coefficients: {}",
+        typed(a.choice("prior"), COEFFICIENTS)
+    )];
+    match a.choice("family") {
+        "ordinal" => lines.push("cutpoints: flat (1)".into()),
+        family => {
+            lines.push(format!(
+                "constant: {}",
+                typed(a.choice("int_prior"), INTERCEPT)
+            ));
+            match family {
+                "gaussian" => lines.push("sigma2: igamma(0.01, 0.01)".into()),
+                "neg_binomial" => lines.push("lnalpha: normal(0, 10000)".into()),
+                "gamma" => lines.push("scale: fixed at 1, as Stata's bayes: glm".into()),
+                _ => {}
+            }
+        }
+    }
+    lines.join("; ")
+}
+
 fn bayes_check(a: &Args) -> Vec<Problem> {
     let y = a.var_text("y");
     let mut out = Vec::new();
@@ -186,7 +424,26 @@ fn bayes_check(a: &Args) -> Vec<Problem> {
         ));
     }
     let ordinal = a.choice("family") == "ordinal";
-    if ordinal && a.choice("prior") != "default" {
+    let stata = a.flag("stata");
+    if stata && a.flag("prior_pd") {
+        out.push(Problem::new(
+            "prior_pd",
+            "Sampling the priors alone is done by rstanarm; Stata's normal(0, 10000) priors \
+             are too wide to show anything. Untick one of the two.",
+        ));
+    }
+    if stata && ordinal {
+        prior_check(a, a.choice("prior"), COEFFICIENTS, &mut out);
+        if a.choice("int_prior") != "default" {
+            out.push(Problem::new(
+                "int_prior",
+                "An ordered logit has cutpoints, not a constant; Stata's priors on them are flat.",
+            ));
+        }
+    } else if stata {
+        prior_check(a, a.choice("prior"), COEFFICIENTS, &mut out);
+        prior_check(a, a.choice("int_prior"), INTERCEPT, &mut out);
+    } else if ordinal && a.choice("prior") != "default" {
         out.push(Problem::new(
             "prior",
             "rstanarm's ordered logit (stan_polr) takes no normal, t or Cauchy prior on the \
@@ -195,7 +452,9 @@ fn bayes_check(a: &Args) -> Vec<Problem> {
     } else {
         prior_check(a, a.choice("prior"), COEFFICIENTS, &mut out);
     }
-    if ordinal && a.choice("int_prior") != "default" {
+    if stata {
+        // checked above
+    } else if ordinal && a.choice("int_prior") != "default" {
         out.push(Problem::new(
             "int_prior",
             "An ordered logit has cutpoints, not an intercept; their prior is rstanarm's \
@@ -232,6 +491,9 @@ fn bayes_code(a: &Args) -> String {
         .map(|n| r_name(n))
         .collect::<Vec<_>>()
         .join(" + ");
+    if a.flag("stata") {
+        return stata_code(a, &m, &y, &x);
+    }
     let mut priors = String::new();
     if a.choice("prior") != "default" {
         priors.push_str(&format!(
@@ -307,6 +569,39 @@ fn bayes_code(a: &Args) -> String {
     code
 }
 
+/// The fit under Stata's priors and its summary table (the same columns as
+/// rstanarm's, from `rstan::monitor`), with the acceptance rate.
+fn stata_code(a: &Args, m: &str, y: &str, x: &str) -> String {
+    let (chains, iter, level) = (
+        a.number("chains").trim(),
+        a.number("iter").trim(),
+        a.choice("level"),
+    );
+    let percent = match level {
+        "0.9" => "90",
+        "0.99" => "99",
+        _ => "95",
+    };
+    format!(
+        "{}\n\
+         cat(\"Posterior summary: Stata's priors, random-walk Metropolis-Hastings, {chains} chains of \
+         {iter} iterations (the first half warm-up), {percent}% credible interval\\n\")\n\
+         cat(\"Priors: {}\\n\")\n\
+         local({{\n  \
+         s <- rstan::monitor({m}$draws, warmup = 0, probs = c((1 - {level}) / 2, (1 + {level}) / 2), \
+         print = FALSE)\n  \
+         s <- as.matrix(as.data.frame(s)[, 1:7]); colnames(s)[2] <- \"mcse\"\n  \
+         print(round(s, 4))\n  \
+         cat(\"\\nAcceptance rate:\", round(mean({m}$acceptance), 3), \"\\n\")\n  \
+         if (any(s[, \"Rhat\"] > 1.05 | s[, \"n_eff\"] < 100, na.rm = TRUE))\n    \
+         cat(\"\\nWarning: the chains have not converged (R-hat above 1.05 or fewer than \
+         100 effective draws); do not trust these numbers.\\nRun more iterations.\\n\")\n  \
+         invisible(NULL)\n}})",
+        stata_fit(a, m, y, x),
+        stata_priors_text(a).replace('\\', "\\\\").replace('"', "\\\""),
+    )
+}
+
 pub const BAYESIAN_REGRESSION: Spec = Spec {
     entry: "Bayesian regression",
     menu: "Statistics > Bayesian regression",
@@ -331,9 +626,21 @@ pub const BAYESIAN_REGRESSION: Spec = Spec {
             table when a chain has not converged (R-hat above 1.05, or fewer than 100 \
             effective draws). Sampling from the priors only (the data unused) shows what the \
             priors imply. Posterior means agree with Stata's bayes to within Monte Carlo error \
-            only under priors that are the same. The Objects pane's Model menu has posterior \
-            predictions, trace plots and predictive checks, and loo comparison for the fit. \
-            Rows with a missing value are left out.",
+            only under priors that are the same. With \"Stata's priors and sampler\" ticked the \
+            fit is Stata's instead: its default priors (normal(0, 10000) on every coefficient \
+            and on the constant itself, not at the centred predictors; igamma(0.01, 0.01) on \
+            sigma-squared, which the table reports; normal(0, 10000) on the negative \
+            binomial's log alpha; flat cutpoints; the Gamma scale fixed at 1, as Stata's bayes: \
+            glm fixes it), or the typed normal, t or Cauchy priors, sampled as Stata samples, \
+            by random-walk Metropolis-Hastings started at the maximum-likelihood fit, its \
+            proposal tuned during the warm-up. Such a sampler needs more iterations than \
+            Hamiltonian Monte Carlo for the same precision (Stata draws 10,000 after 2,500 \
+            warm-up). When a count shows little overdispersion, log alpha's posterior under \
+            normal(0, 10000) keeps a long tail toward minus infinity (alpha near 0) that a \
+            random-walk sampler, Stata's too, does not reach; its mean is then not the \
+            posterior's, though the coefficients barely depend on it. The Objects pane's Model \
+            menu has posterior predictions, trace plots and predictive checks, and loo \
+            comparison for an rstanarm fit. Rows with a missing value are left out.",
     widgets: &[
         Widget::Variable {
             id: "y",
@@ -357,6 +664,17 @@ pub const BAYESIAN_REGRESSION: Spec = Spec {
             options: FAMILIES,
             default: "gaussian",
             hint: "",
+        },
+        Widget::Check {
+            id: "stata",
+            label: "Stata's priors and sampler (as Stata's bayes)",
+            default: false,
+            hint: "Stata's default priors (normal(0, 10000) on every coefficient and the \
+                   constant, igamma(0.01, 0.01) on sigma-squared, normal(0, 10000) on the \
+                   negative binomial's log alpha, flat cutpoints, the Gamma scale fixed at 1), or \
+                   the priors typed below on the coefficients and the constant itself, sampled by \
+                   random-walk Metropolis-Hastings in R. Not an rstanarm fit, so the Model menu \
+                   does not take it.",
         },
         Widget::Choice {
             id: "prior",
@@ -394,7 +712,7 @@ pub const BAYESIAN_REGRESSION: Spec = Spec {
             label: "Prior on the intercept",
             options: PRIORS,
             default: "default",
-            hint: "On the intercept at the centred predictors.",
+            hint: "rstanarm puts it on the intercept at the centred predictors; with Stata's priors it is on the constant itself.",
         },
         Widget::Text {
             id: "int_mean",
@@ -959,6 +1277,101 @@ mod tests {
             ) && c.contains("rstanarm::stan_polr(y ~ age, data = d, prior = NULL, chains = 4"),
             "{c}"
         );
+    }
+
+    #[test]
+    fn writes_statas_priors_and_sampler() {
+        let c = code(&[("iter", "6000")], &["age"], &["stata"]);
+        assert!(
+            c.starts_with(
+                "bayes <- local({\n  f <- y ~ age\n  d <- stats::model.frame(f, data = d)\n  \
+                 X <- stats::model.matrix(f, d); y <- stats::model.response(d)\n"
+            ) && c.contains("prior_b <- function(b) sum(stats::dnorm(b, 0, 100, log = TRUE))")
+                && c.contains("prior_c <- function(b) sum(stats::dnorm(b, 0, 100, log = TRUE))")
+                && c.contains("stats::dgamma(1 / v, 0.01, rate = 0.01, log = TRUE) - log(v)")
+                && c.contains("names(start) <- c(colnames(X), \"sigma2\")")
+                && c.contains("warm <- 6000 %/% 2")
+                && c.contains("acceptance = accepted / (6000 - warm), family = \"gaussian\"")
+                && c.contains("class = \"bayes_mh\")\n})")
+                && c.contains("Stata's priors, random-walk Metropolis-Hastings, 4 chains of 6000")
+                && c.contains(
+                    "Priors: coefficients: normal(0, 10000) (a variance); constant: \
+                     normal(0, 10000) (a variance); sigma2: igamma(0.01, 0.01)"
+                )
+                && c.contains("rstan::monitor(bayes$draws, warmup = 0")
+                && !c.contains("rstanarm::"),
+            "{c}"
+        );
+        let c = code(
+            &[
+                ("family", "poisson"),
+                ("prior", "student_t"),
+                ("prior_mean", "0, 1"),
+                ("prior_sd", "0.5"),
+                ("prior_df", "3"),
+                ("int_prior", "cauchy"),
+                ("int_sd", "2"),
+            ],
+            &["age", "arm span"],
+            &["stata"],
+        );
+        assert!(
+            c.contains(
+                "prior_b <- function(b) sum(stats::dt((b - c(0, 1)) / 0.5, 3, log = TRUE) - log(0.5))"
+            ) && c.contains("prior_c <- function(b) sum(stats::dcauchy(b, 0, 2, log = TRUE))")
+                && c.contains("if (!all(lengths(list(c(0, 1), 0.5, 3)) %in% c(1, sum(!int))))")
+                && c.contains("sum(stats::dpois(y, exp(eta), log = TRUE)) + lpb(t)"),
+            "{c}"
+        );
+        let c = code(&[("family", "neg_binomial")], &["age"], &["stata"]);
+        assert!(
+            c.contains("stats::dnorm(t[k + 1], 0, 100, log = TRUE)")
+                && c.contains("\"lnalpha\"")
+                && c.contains("lnalpha: normal(0, 10000)"),
+            "{c}"
+        );
+        let c = code(&[("family", "gamma")], &["age"], &["stata"]);
+        assert!(
+            c.contains("sum(stats::dexp(y, exp(-eta), log = TRUE))")
+                && c.contains("scale: fixed at 1"),
+            "{c}"
+        );
+        let c = code(
+            &[
+                ("family", "ordinal"),
+                ("prior", "normal"),
+                ("prior_sd", "2"),
+            ],
+            &["age"],
+            &["stata"],
+        );
+        assert!(
+            c.contains("MASS::polr(y ~ X, Hess = TRUE)")
+                && c.contains("if (any(diff(cuts) <= 0)) return(-Inf)")
+                && c.contains("prior_b <- function(b) sum(stats::dnorm(b, 0, 2, log = TRUE))")
+                && c.contains("cutpoints: flat (1)")
+                && !c.contains("prior_c"),
+            "{c}"
+        );
+        // no prior sampling, and no constant's prior on an ordered logit
+        let mut v = values(&[], &["age"]);
+        v.set_flag("stata", true);
+        v.set_flag("prior_pd", true);
+        assert_eq!(
+            BAYESIAN_REGRESSION
+                .problems(&ctx(), &v)
+                .iter()
+                .map(|p| p.widget)
+                .collect::<Vec<_>>(),
+            vec!["prior_pd"]
+        );
+        let mut v = values(&[("family", "ordinal"), ("int_prior", "normal")], &["age"]);
+        v.set_flag("stata", true);
+        assert_eq!(widgets(&v), vec!["int_prior"]);
+        // the ordered logit takes typed coefficient priors with Stata's
+        let mut v = values(&[("family", "ordinal"), ("prior", "normal")], &["age"]);
+        v.set_flag("stata", true);
+        assert!(widgets(&v).is_empty());
     }
 
     fn model_ctx() -> Context {
