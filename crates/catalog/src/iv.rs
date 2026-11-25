@@ -163,6 +163,32 @@ const IV_ERRORS: &[Opt] = &[
     },
 ];
 
+/// The two-stage dialog's choice: the estimator's own default first (conventional
+/// for two-stage least squares and LIML, robust for GMM, as Stata's ivregress).
+const IV_ERRORS_BY_ESTIMATOR: &[Opt] = &[
+    Opt {
+        value: "default",
+        label: "Stata's default for the estimator (robust for GMM, else conventional)",
+    },
+    Opt {
+        value: "iid",
+        label: "Conventional",
+    },
+    Opt {
+        value: "hetero",
+        label: "Robust (the spread of the errors may vary)",
+    },
+];
+
+/// The errors in effect: the choice, with "default" resolved by the estimator.
+fn iv_errors<'a>(a: &'a Args) -> &'a str {
+    match a.choice("errors") {
+        "default" if a.choice("estimator") == "gmm" => "hetero",
+        "default" => "iid",
+        other => other,
+    }
+}
+
 fn iv_check(a: &Args) -> Vec<Problem> {
     let mut out = roles(
         a,
@@ -253,7 +279,7 @@ fn iv_matrix(a: &Args) -> String {
         }
     }
     let errors = if cluster.is_empty() {
-        a.choice("errors")
+        iv_errors(a)
     } else {
         "cluster"
     };
@@ -347,8 +373,8 @@ pub const IV_REGRESSION: Spec = Spec {
             default: "2sls",
             hint: "LIML: k-class with k the smallest eigenvalue, less biased with weak \
                    instruments. GMM: two steps, the moments weighted by the first step's robust \
-                   (or, with a cluster, clustered) residuals; Conventional errors are then \
-                   Stata's vce(unadjusted).",
+                   (or, with a cluster, clustered) residuals. Standard errors are robust unless you choose \
+                   Conventional (Stata's vce(unadjusted)).",
         },
         Widget::Variable {
             id: "y",
@@ -389,9 +415,11 @@ pub const IV_REGRESSION: Spec = Spec {
         Widget::Choice {
             id: "errors",
             label: "Standard errors",
-            options: IV_ERRORS,
-            default: "iid",
-            hint: "A variable under Cluster by takes the place of this choice.",
+            options: IV_ERRORS_BY_ESTIMATOR,
+            default: "default",
+            hint: "A variable under Cluster by takes the place of this choice. Left at Stata's \
+                   default, GMM uses robust errors (as ivregress gmm) and the other estimators \
+                   conventional ones.",
         },
         Widget::Variable {
             id: "cluster",
@@ -445,7 +473,7 @@ pub const IV_REGRESSION: Spec = Spec {
         };
         let errors = match a.var("cluster") {
             Some(c) => format!("cluster = ~{c}"),
-            None => format!("vcov = {}", r_string(a.choice("errors"))),
+            None => format!("vcov = {}", r_string(iv_errors(a))),
         };
         let ssc = if a.flag("small") {
             ""
@@ -463,7 +491,7 @@ pub const IV_REGRESSION: Spec = Spec {
         );
         // the summary's first-stage F is the conventional one; with robust or
         // clustered errors Stata's estat firststage reports the Wald form
-        if a.var("cluster").is_some() || a.choice("errors") != "iid" {
+        if a.var("cluster").is_some() || iv_errors(a) != "iid" {
             code.push_str(&format!("\nprint(fixest::fitstat({model}, ~ ivwald))"));
         }
         code.push_str(&format!(
@@ -1295,6 +1323,24 @@ mod tests {
         );
         assert!(gmm.contains("* G / (G - 1) * (N - 1) / (N - K)"), "{gmm}");
         assert!(gmm.contains("Hansen's J"), "{gmm}");
+        // with no error choice made GMM is robust, as ivregress gmm; Conventional
+        // stays reachable, and LIML defaults to conventional
+        let by = |estimator: &str, errors: Option<&str>| {
+            let mut v = values(
+                &IV_REGRESSION,
+                &[("y", "wage"), ("estimator", estimator)],
+                lists,
+            );
+            if let Some(errors) = errors {
+                v.set_text("errors", errors);
+            }
+            code(&IV_REGRESSION, &v)
+        };
+        assert!(by("gmm", None).contains("N * B %*% t(ZX) %*% W %*% S(e)"));
+        assert!(by("gmm", Some("hetero")).contains("N * B %*% t(ZX) %*% W %*% S(e)"));
+        assert!(by("gmm", Some("iid")).contains("V <- N * B"));
+        assert!(by("liml", None).contains("A * sum(e^2)"));
+        assert!(by("liml", Some("hetero")).contains("crossprod(Xh * e)"));
         // fixed effects are refused with LIML and GMM
         let v = values(
             &IV_REGRESSION,

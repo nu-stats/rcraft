@@ -59,9 +59,8 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         // a survival model has a likelihood, but no residual or diagnostic
         // the other dialogs know: its fit and its comparison with another
         "coxph" | "survreg" => vec![&MODEL_FIT, &COMPARE_MODELS],
-        // a Heckman model: its fit (Compare models' nested test needs anova, which
-        // sampleSelection does not have)
-        "selection" => vec![&MODEL_FIT],
+        // a Heckman model: its fit, and a comparison (a written-out likelihood-ratio test)
+        "selection" => vec![&MODEL_FIT, &COMPARE_MODELS],
         // a mixed model: its fit statistics only (the other dialogs need an
         // lm or glm object)
         "lmerMod" | "glmerMod" => vec![&MODEL_FIT, &crate::multilevel::ICC],
@@ -188,7 +187,8 @@ pub const COMPARE_MODELS: Spec = Spec {
             id: "nested",
             label: "Test whether the larger model fits better (nested models only)",
             default: true,
-            hint: "An F test for linear models, a likelihood-ratio test for generalised ones.",
+            hint: "An F test for linear models, a likelihood-ratio test for generalised ones \
+                   and for Heckman models fitted by maximum likelihood.",
         },
     ],
     needs: &[],
@@ -201,8 +201,15 @@ pub const COMPARE_MODELS: Spec = Spec {
             .iter()
             .map(|n| format!("{} = {}", r_name(n), r_name(n)))
             .collect();
+        // Heckman models: sampleSelection has no anova, so the nested test is the
+        // likelihood-ratio test written out (Stata's lrtest), for ML fits only
         let mut body = String::from(
-            "  print(data.frame(model = names(models), \
+            "  heckman <- vapply(models, inherits, logical(1), \"selection\")\n  \
+             if (any(heckman) && !all(vapply(models[heckman], function(m) identical(m$method, \"ml\"), \
+             logical(1)))) {\n    \
+             cat(\"Compare models needs every Heckman model fitted by maximum likelihood; a two-step \
+             fit has no likelihood.\\n\")\n    return(invisible(NULL))\n  }\n  \
+             print(data.frame(model = names(models), \
              df = vapply(models, function(m) attr(stats::logLik(m), \"df\"), numeric(1)), \
              logLik = vapply(models, function(m) as.numeric(stats::logLik(m)), numeric(1)), \
              AIC = vapply(models, stats::AIC, numeric(1)), \
@@ -210,7 +217,15 @@ pub const COMPARE_MODELS: Spec = Spec {
         );
         if a.flag("nested") {
             body.push_str(
-                "  test <- if (all(vapply(models, inherits, logical(1), \"glm\"))) \
+                "  if (all(heckman)) {\n    \
+                 ll <- vapply(models, function(m) as.numeric(stats::logLik(m)), numeric(1))\n    \
+                 df <- vapply(models, function(m) attr(stats::logLik(m), \"df\"), numeric(1))\n    \
+                 lr <- abs(2 * diff(ll)); d <- abs(diff(df))\n    \
+                 cat(\"\\nLikelihood-ratio test of nested models (as Stata's lrtest)\\n\")\n    \
+                 print(data.frame(model = names(models)[-1], df = d, chisq = lr, \
+                 p = stats::pchisq(lr, d, lower.tail = FALSE), row.names = NULL))\n    \
+                 return(invisible(NULL))\n  }\n  \
+                 test <- if (all(vapply(models, inherits, logical(1), \"glm\"))) \
                  list(test = \"Chisq\") else if (all(vapply(models, inherits, logical(1), \"lm\"))) \
                  list(test = \"F\") else list()\n  \
                  cat(\"\\nTest of nested models\\n\")\n  \
@@ -989,7 +1004,7 @@ mod tests {
         );
         assert!(!takes_model_table("stanreg"));
         assert_eq!(entries("lmerMod"), ["Model fit", "Intraclass correlation"]);
-        assert_eq!(entries("selection"), ["Model fit"]);
+        assert_eq!(entries("selection"), ["Model fit", "Compare models"]);
         assert!(is_model_class("selection") && !takes_model_table("selection"));
         assert!(is_panel_class("plm") && !is_panel_class("lm"));
         for class in ["data.frame", "tbl_df", "function", "numeric", ""] {
