@@ -839,13 +839,39 @@ fn mixed_model_glmmtmb_matches_stata() {
         .any(|p| p.widget == "zi"));
 }
 
-/// Reads the numbers of the last column of the intraclass correlation table.
-fn icc_column(text: &str) -> Vec<f64> {
+/// The rows of the intraclass correlation table as (correlation, standard
+/// error, lower and upper limits); the table prints seven digits.
+fn icc_rows(text: &str) -> Vec<[f64; 4]> {
     text.lines()
         .skip_while(|l| !l.trim_start().starts_with("level"))
         .skip(1)
-        .filter_map(|l| l.split_whitespace().last()?.parse::<f64>().ok())
+        .filter_map(|l| {
+            let t: Vec<f64> = l
+                .split_whitespace()
+                .skip(3)
+                .filter_map(|w| w.parse().ok())
+                .collect();
+            Some([*t.first()?, *t.get(1)?, *t.get(2)?, *t.get(3)?])
+        })
         .collect()
+}
+
+/// Whether row `row` of the table is Stata's (`estat icc` after the same
+/// model): the correlation to 2e-6 (Stata stops a little short of lme4), the
+/// error and the interval to 1e-4 (the delta method on a finite-difference
+/// Hessian).
+fn icc_is(text: &str, row: usize, want: [f64; 4]) {
+    let rows = icc_rows(text);
+    let got = rows.get(row);
+    assert!(got.is_some(), "no row {row} in {text}");
+    let got = got.copied().unwrap_or_default();
+    for (i, (g, w)) in got.iter().zip(want).enumerate() {
+        let tol = if i == 0 { 2e-6 } else { 1e-4 };
+        assert!(
+            (g - w).abs() < tol,
+            "row {row} number {i}: {g} against {w} in {text}"
+        );
+    }
 }
 
 /// Runs the intraclass correlation dialog on the fitted model `name`.
@@ -879,9 +905,41 @@ fn intraclass_correlation_matches_estat_icc() {
     // Stata 19: mixed score hours girl || school:, then estat icc
     let (outcome, text) = icc_of(&mut e, "m1");
     assert_eq!(outcome, Outcome::Ok, "{text}");
-    let icc = icc_column(&text);
-    assert_eq!(icc.len(), 1, "{text}");
-    assert!((icc[0] - 0.418883268737999).abs() < 2e-6, "{text}");
+    assert_eq!(icc_rows(&text).len(), 1, "{text}");
+    icc_is(
+        &text,
+        0,
+        [
+            0.418883279247883,
+            0.132071024971427,
+            0.19928555242101,
+            0.676130842568928,
+        ],
+    );
+    // ... , reml
+    fit(
+        &mut e,
+        &LINEAR_MIXED,
+        &[
+            ("y", "score"),
+            ("group", "school"),
+            ("method", "reml"),
+            ("save", "m1r"),
+        ],
+        x,
+    );
+    let (outcome, text) = icc_of(&mut e, "m1r");
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    icc_is(
+        &text,
+        0,
+        [
+            0.442400066277588,
+            0.138826628338768,
+            0.208424882102919,
+            0.705076810649232,
+        ],
+    );
     // ... || school: || class:, whose class level adds the school's variance
     fit(
         &mut e,
@@ -897,10 +955,27 @@ fn intraclass_correlation_matches_estat_icc() {
     let (outcome, text) = icc_of(&mut e, "m2");
     assert_eq!(outcome, Outcome::Ok, "{text}");
     assert!(text.contains("school>class"), "{text}");
-    let icc = icc_column(&text);
-    assert_eq!(icc.len(), 2, "{text}");
-    assert!((icc[0] - 0.36995968227228).abs() < 2e-5, "{text}");
-    assert!((icc[1] - 0.479130487831607).abs() < 2e-5, "{text}");
+    assert_eq!(icc_rows(&text).len(), 2, "{text}");
+    icc_is(
+        &text,
+        0,
+        [
+            0.3699597333452,
+            0.15367099226625,
+            0.138888525962294,
+            0.681304491700294,
+        ],
+    );
+    icc_is(
+        &text,
+        1,
+        [
+            0.479130447279441,
+            0.125610659144746,
+            0.255400265071443,
+            0.711557679810908,
+        ],
+    );
     // ... || school: hours: the correlation where hours is zero
     fit(
         &mut e,
@@ -910,9 +985,41 @@ fn intraclass_correlation_matches_estat_icc() {
     );
     let (outcome, text) = icc_of(&mut e, "m3");
     assert_eq!(outcome, Outcome::Ok, "{text}");
-    let icc = icc_column(&text);
-    assert_eq!(icc.len(), 1, "{text}");
-    assert!((icc[0] - 0.138240142092806).abs() < 2e-5, "{text}");
+    assert_eq!(icc_rows(&text).len(), 1, "{text}");
+    icc_is(
+        &text,
+        0,
+        [
+            0.138240133208837,
+            0.224631236656824,
+            0.0039673015848408,
+            0.865962866602705,
+        ],
+    );
+    // ... || school: hours, covariance(unstructured)
+    fit(
+        &mut e,
+        &LINEAR_MIXED,
+        &[
+            ("y", "score"),
+            ("group", "school"),
+            ("covariance", "unstructured"),
+            ("save", "m3u"),
+        ],
+        &[("x", &["hours", "girl"]), ("slopes", &["hours"])],
+    );
+    let (outcome, text) = icc_of(&mut e, "m3u");
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    icc_is(
+        &text,
+        0,
+        [
+            0.314751567109998,
+            0.346945338567363,
+            0.0192506069447333,
+            0.914883730115681,
+        ],
+    );
     // melogit passed hours girl || school:, whose residual is pi^2/3
     fit(
         &mut e,
@@ -923,9 +1030,17 @@ fn intraclass_correlation_matches_estat_icc() {
     let (outcome, text) = icc_of(&mut e, "m4");
     assert_eq!(outcome, Outcome::Ok, "{text}");
     assert!(text.contains("3.289868"), "{text}");
-    let icc = icc_column(&text);
-    assert_eq!(icc.len(), 1, "{text}");
-    assert!((icc[0] - 0.0505741445635604).abs() < 2e-5, "{text}");
+    assert_eq!(icc_rows(&text).len(), 1, "{text}");
+    icc_is(
+        &text,
+        0,
+        [
+            0.0505741456337743,
+            0.0787436265425069,
+            0.00213612307456929,
+            0.569985118435404,
+        ],
+    );
     // the residual of the logistic model is the latent variable's pi^2/3
     holds(
         &mut e,
@@ -969,6 +1084,17 @@ fn intraclass_correlation_matches_estat_icc() {
     let (outcome, text) = icc_of(&mut e, "lin");
     assert_eq!(outcome, Outcome::Error, "{text}");
     assert!(text.contains("lmer or glmer"), "{text}");
+    // without the model's data frame the errors cannot be worked out: the
+    // estimates are still printed, with the reason
+    define(&mut e, "rm(d)");
+    let (outcome, text) = icc_of(&mut e, "m1");
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert_eq!(icc_rows(&text).len(), 0, "{text}");
+    assert!(
+        text.contains("Standard errors need the model's data frame"),
+        "{text}"
+    );
+    assert!(text.contains("0.41888"), "{text}");
     // the entry is on the Model menu of an lme4 model, and only of those
     assert!(rcraft_catalog::postest::model_specs("lmerMod")
         .iter()
