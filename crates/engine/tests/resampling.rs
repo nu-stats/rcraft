@@ -22,6 +22,19 @@
 //! shuffles at least as large in size as the observed statistic. The two agree
 //! on these data to within the Monte Carlo error, which the test allows for.
 //!
+//! P6.8b adds: whole clusters and strata drawn (the draws are `boot.array`'s,
+//! each replicate redone by hand, the standard error of a mean of equal
+//! clusters against its exact bootstrap value and Stata's `bootstrap,
+//! cluster() strata()`); basic and studentised intervals by their formulas;
+//! Stata's normal, percentile and bias-corrected intervals against `bstat` and
+//! `estat bootstrap` run on the dialog's own replicates (to 1e-9); a statistic
+//! the user writes; permutations within strata listed whole (252^2 crossed
+//! sums) and shuffled; a regression coefficient's predictor permuted (all 5040
+//! orders of seven rows, and Monte Carlo against `permute x _b[x]: regress`);
+//! one-sided p-values and Stata's two-sided rule against `permute`'s lower,
+//! upper and two-sided p. Stata keeps `permute`'s statistic in single
+//! precision, so it is compared to 1e-6.
+//!
 //! The test records the R and package versions it ran with (AGENTS.md
 //! section 5), and checks R is the one `ENVIRONMENT` pins.
 
@@ -697,4 +710,702 @@ fn permutation_test_matches_exact_listing_and_stata() {
     assert!(BOOTSTRAP
         .generate(&bd_context(), &small, Style::Base)
         .is_err());
+}
+
+// ---- P6.8b: clusters and strata, the new intervals, one's own statistic,
+// permutations within strata and of a regression coefficient, one-sided p ----
+
+/// `bc`: forty rows in eight clusters of five (`cl`), four clusters in each of
+/// two strata (`st`), with `st2` crossing the clusters; `pts`: `pt` with strata
+/// `s` (five rows of each group in each) and another predictor `z`; `c7`: seven
+/// rows for an exact coefficient listing. `mc_sd` is the Monte Carlo error of a
+/// standard error worked out from the replicates (their kurtosis).
+const MAKE_B: &str = r#"
+bc <- local({
+  r <- 1:40
+  cl <- rep(1:8, each = 5); st <- rep(1:2, each = 20)
+  v <- round(sin(r * 1.9) * 2 + cos(r * 4.1) + 5 + 0.8 * sin(cl * 2.2), 3)
+  data.frame(cl = cl, st = st, st2 = rep(1:2, 20), v = v, x1 = round(0.6 * v + sin(r * 2.3), 3))
+})
+pts <- local({
+  r <- 1:20
+  y <- round(c(0, 0.6)[rep(1:2, each = 10)] + sin(r * 2.7) + 0.4 * cos(r * 5.3), 3)
+  data.frame(g = rep(1:2, each = 10), y = y, x = round(0.5 * y + 0.8 * cos(r * 3.1), 3),
+             s = rep(rep(1:2, each = 5), 2), z = round(cos(r * 1.3), 3))
+})
+c7 <- data.frame(y = c(2.1, 3.4, 2.9, 4.8, 5.1, 4.2, 6.3), x = c(1.0, 1.7, 2.2, 2.4, 3.1, 3.5, 3.9),
+                 z = c(0.5, -0.2, 0.9, 0.1, -0.7, 0.4, 0.3))
+mc_sd <- function(t) {
+  k <- mean((t - mean(t))^4) / mean((t - mean(t))^2)^2
+  sd(t) * sqrt((k - 1) / (4 * length(t)))
+}
+"#;
+
+/// What Stata 19 reported on the same data. `bstat` on the dialog's own 999
+/// replicates of the mean of `bc$v` (seed 1) and 1000 (seed 2): the standard
+/// error and `estat bootstrap`'s normal, percentile and bias-corrected limits;
+/// `bootstrap ..., reps(20000)` standard errors with `cluster(cl)`, `cluster(cl)
+/// strata(st)` and `strata(st)` for the mean, for `r(sd)/r(mean)` and for
+/// `regress v x1` with `cluster(cl)` (constant, then x1); `permute ...,
+/// reps(50000) seed(1)` p-values (lower, upper, two-sided) on `pts` and `c7`.
+const STATA_B: &str = "\
+s_se <- 0.265642397125646; s_norm <- c(4.46025046886685, 5.50154953113315); \
+s_perc <- c(4.470075, 5.497575); s_bc <- c(4.480375, 5.500875); \
+s_perc2 <- c(4.4412, 5.5004875); s_bc2 <- c(4.41995, 5.4894); \
+s_cl <- 0.246349076524278; s_clst <- 0.236487176238673; s_st <- 0.269007372156452; \
+s_cv <- 0.038085977725217; s_cv_b <- 0.344588848186307; \
+s_reg <- c(0.38413537665302, 0.107883507527712); \
+sp_strata <- c(0.93036, 0.06968, 0.13936); sp_diff <- 0.595099985; \
+sp_coef <- c(0.91282, 0.08718, 0.17436); sp_coef_b <- 0.382758051; \
+sp_coef_strata <- c(0.91046, 0.08954, 0.17908); \
+sp_cor_strata <- c(0.9235, 0.0765, 0.153); sp_rho <- 0.330088764; \
+sp_c7 <- c(0.96714, 0.03308, 0.06616); sp_c7_b <- 1.14418196";
+
+fn bc_context() -> Context {
+    context(
+        "bc",
+        &[
+            ("cl", VarKind::Number),
+            ("st", VarKind::Number),
+            ("st2", VarKind::Number),
+            ("v", VarKind::Number),
+            ("x1", VarKind::Number),
+        ],
+    )
+}
+
+fn bc_boot(e: &mut Engine, set: &[(&str, &str)], x: &[&str], flags: &[&str]) -> (Outcome, String) {
+    dialog(e, &bc_context(), &BOOTSTRAP, set, &[("x", x)], flags)
+}
+
+fn bc_ok(e: &mut Engine, set: &[(&str, &str)], x: &[&str], flags: &[&str]) -> String {
+    let (outcome, text) = bc_boot(e, set, x, flags);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    text
+}
+
+#[test]
+fn bootstrap_clusters_strata_intervals_and_own_statistic() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    define(&mut e, MAKE_B);
+    define(&mut e, STATA_B);
+    define(&mut e, ORACLE);
+
+    // ---- Stata's intervals, basic and studentised, on the same 999 replicates ----
+    let text = bc_ok(
+        &mut e,
+        &[("v", "v"), ("save", "b1")],
+        &[],
+        &["percentile", "basic", "student", "stata"],
+    );
+    assert!(
+        text.contains("Stata BC lower") && text.contains("Studentised upper"),
+        "{text}"
+    );
+    define(
+        &mut e,
+        "idx <- draws(1, 40, 999); th <- mean(bc$v); \
+         t1 <- apply(idx, 1, function(i) mean(bc$v[i])); \
+         v1 <- apply(idx, 1, function(i) var(bc$v[i]) / 40); v0 <- var(bc$v) / 40; \
+         zt <- (t1 - th) / sqrt(v1); iv <- b1$intervals",
+    );
+    holds(
+        &mut e,
+        &[
+            same("b1$t[, 1]", "t1"),
+            same("b1$t[, 2]", "v1"),
+            same("iv$Estimate", "th"),
+            // Stata's standard error and its three intervals, to 1e-9
+            same("iv$Std.Err", "s_se"),
+            same(
+                "c(iv$`Stata normal lower`, iv$`Stata normal upper`)",
+                "s_norm",
+            ),
+            same(
+                "c(iv$`Stata percentile lower`, iv$`Stata percentile upper`)",
+                "s_perc",
+            ),
+            same("c(iv$`Stata BC lower`, iv$`Stata BC upper`)", "s_bc"),
+            // at 999 boot's percentile limits are Stata's
+            same("c(iv$`Percentile lower`, iv$`Percentile upper`)", "s_perc"),
+            // basic: twice the estimate less the upper and lower limits
+            same(
+                "c(iv$`Basic lower`, iv$`Basic upper`)",
+                "2 * th - interp(t1, c(0.975, 0.025))",
+            ),
+            // studentised: each replicate over its own standard error
+            same(
+                "c(iv$`Studentised lower`, iv$`Studentised upper`)",
+                "th - sqrt(v0) * interp(zt, c(0.975, 0.025))",
+            ),
+            "nrow(iv) == 1".into(),
+        ],
+    );
+    // at 1000 replicates Stata's percentile limits average two replicates
+    bc_ok(
+        &mut e,
+        &[("v", "v"), ("reps", "1000"), ("seed", "2"), ("save", "b2")],
+        &[],
+        &["stata", "percentile"],
+    );
+    define(&mut e, "iv <- b2$intervals");
+    holds(
+        &mut e,
+        &[
+            same(
+                "c(iv$`Stata percentile lower`, iv$`Stata percentile upper`)",
+                "s_perc2",
+            ),
+            same("c(iv$`Stata BC lower`, iv$`Stata BC upper`)", "s_bc2"),
+            "abs(iv$`Percentile lower` - s_perc2[1]) > 1e-6".into(),
+        ],
+    );
+
+    // ---- whole clusters: 20000 draws of eight clusters ----
+    let text = bc_ok(
+        &mut e,
+        &[
+            ("v", "v"),
+            ("cluster", "cl"),
+            ("reps", "20000"),
+            ("save", "bcl"),
+        ],
+        &[],
+        &["normal"],
+    );
+    assert!(text.contains("Clusters of cl drawn, 8 in all"), "{text}");
+    define(
+        &mut e,
+        "jdx <- draws(1, 8, 20000); \
+         tcl <- apply(jdx, 1, function(j) mean(unlist(lapply(j, function(g) bc$v[bc$cl == g])))); \
+         cm <- tapply(bc$v, bc$cl, mean); \
+         ideal_cl <- sqrt(mean((cm - mean(cm))^2) / 8); se_cl <- bcl$intervals$Std.Err",
+    );
+    holds(
+        &mut e,
+        &[
+            "identical(boot::boot.array(bcl, indices = TRUE), jdx)".into(),
+            same("bcl$t[, 1]", "tcl"),
+            // the exact bootstrap error of a mean of equal clusters, and
+            // Stata's, within four Monte Carlo errors
+            "abs(se_cl - ideal_cl) < 4 * mc_sd(tcl)".into(),
+            "abs(s_cl - ideal_cl) < 4 * mc_sd(tcl)".into(),
+            "abs(se_cl - s_cl) < 4 * sqrt(2) * mc_sd(tcl)".into(),
+        ],
+    );
+
+    // ---- clusters within strata ----
+    let text = bc_ok(
+        &mut e,
+        &[
+            ("v", "v"),
+            ("cluster", "cl"),
+            ("strata", "st"),
+            ("reps", "20000"),
+            ("save", "bcs"),
+        ],
+        &[],
+        &["percentile"],
+    );
+    assert!(text.contains("Drawn within the 2 strata of st"), "{text}");
+    define(
+        &mut e,
+        "kdx <- boot::boot.array(bcs, indices = TRUE); cst <- rep(1:2, each = 4); \
+         tcs <- apply(kdx, 1, function(j) mean(unlist(lapply(j, function(g) bc$v[bc$cl == g])))); \
+         ideal_cs <- sqrt(sum(sapply(1:2, function(h) { c <- cm[cst == h]; \
+           (4 / 8)^2 * mean((c - mean(c))^2) / 4 }))); se_cs <- bcs$intervals$Std.Err",
+    );
+    holds(
+        &mut e,
+        &[
+            // every drawn cluster comes from the stratum of its place
+            "all(cst[kdx] == cst[col(kdx)])".into(),
+            same("bcs$t[, 1]", "tcs"),
+            "abs(se_cs - ideal_cs) < 4 * mc_sd(tcs)".into(),
+            "abs(s_clst - ideal_cs) < 4 * mc_sd(tcs)".into(),
+        ],
+    );
+
+    // ---- rows within strata ----
+    bc_ok(
+        &mut e,
+        &[
+            ("v", "v"),
+            ("strata", "st"),
+            ("reps", "20000"),
+            ("save", "bst"),
+        ],
+        &[],
+        &["normal"],
+    );
+    define(
+        &mut e,
+        "ldx <- boot::boot.array(bst, indices = TRUE); \
+         tst <- apply(ldx, 1, function(i) mean(bc$v[i])); \
+         ideal_st <- sqrt(sum(sapply(1:2, function(h) { y <- bc$v[bc$st == h]; \
+           (20 / 40)^2 * mean((y - mean(y))^2) / 20 }))); se_st <- bst$intervals$Std.Err",
+    );
+    holds(
+        &mut e,
+        &[
+            "all(bc$st[ldx] == bc$st[col(ldx)])".into(),
+            same("bst$t[, 1]", "tst"),
+            "abs(se_st - ideal_st) < 4 * mc_sd(tst)".into(),
+            "abs(s_st - ideal_st) < 4 * mc_sd(tst)".into(),
+        ],
+    );
+
+    // ---- a statistic of one's own: the coefficient of variation ----
+    bc_ok(
+        &mut e,
+        &[
+            ("statistic", "custom"),
+            ("v", "v"),
+            ("expr", "sd(v) / mean(v)"),
+            ("reps", "20000"),
+            ("save", "bcv"),
+        ],
+        &[],
+        &["normal", "percentile", "bca"],
+    );
+    define(
+        &mut e,
+        "tcv <- apply(draws(1, 40, 20000), 1, function(i) sd(bc$v[i]) / mean(bc$v[i])); \
+         iv <- bcv$intervals",
+    );
+    holds(
+        &mut e,
+        &[
+            same("bcv$t[, 1]", "tcv"),
+            same("iv$Estimate", "s_cv_b"),
+            "row.names(iv) == 'statistic'".into(),
+            "abs(iv$Std.Err - s_cv) < 4 * sqrt(2) * mc_sd(tcv)".into(),
+            "all(is.finite(c(iv$`BCa lower`, iv$`BCa upper`)))".into(),
+        ],
+    );
+    // several numbers keep their names
+    bc_ok(
+        &mut e,
+        &[
+            ("statistic", "custom"),
+            ("v", "v"),
+            ("expr", "quantile(v, c(0.25, 0.75))"),
+            ("save", "bq"),
+        ],
+        &[],
+        &["percentile"],
+    );
+    holds(
+        &mut e,
+        &[
+            "identical(row.names(bq$intervals), c('25%', '75%'))".into(),
+            same("bq$intervals$Estimate", "quantile(bc$v, c(0.25, 0.75))"),
+        ],
+    );
+
+    // ---- coefficients with clusters, against Stata's errors ----
+    bc_ok(
+        &mut e,
+        &[
+            ("statistic", "coefficient"),
+            ("v", "v"),
+            ("cluster", "cl"),
+            ("reps", "20000"),
+            ("save", "breg"),
+        ],
+        &["x1"],
+        &["normal"],
+    );
+    define(
+        &mut e,
+        "iv <- breg$intervals; mcs <- apply(breg$t, 2, mc_sd)",
+    );
+    holds(
+        &mut e,
+        &[
+            same("iv$Estimate", "coef(lm(v ~ x1, data = bc))"),
+            "all(abs(iv$Std.Err - s_reg) < 4 * sqrt(2) * mcs)".into(),
+        ],
+    );
+
+    // ---- studentised coefficients: each replicate's least-squares error ----
+    bc_ok(
+        &mut e,
+        &[("statistic", "coefficient"), ("v", "v"), ("save", "bstu")],
+        &["x1"],
+        &["student"],
+    );
+    define(
+        &mut e,
+        "fits <- lapply(seq_len(999), function(r) lm(v ~ x1, data = bc[idx[r, ], ])); \
+         b_r <- sapply(fits, function(f) coef(f)[2]); \
+         s_r <- sapply(fits, function(f) sqrt(vcov(f)[2, 2])); \
+         f0 <- lm(v ~ x1, data = bc); b0 <- coef(f0)[2]; s0 <- sqrt(vcov(f0)[2, 2]); \
+         iv <- bstu$intervals",
+    );
+    holds(
+        &mut e,
+        &[
+            "identical(row.names(iv), c('(Intercept)', 'x1'))".into(),
+            same("bstu$t[, 2]", "b_r"),
+            same("sqrt(bstu$t[, 4])", "s_r"),
+            same(
+                "c(iv$`Studentised lower`[2], iv$`Studentised upper`[2])",
+                "b0 - s0 * interp((b_r - b0) / s_r, c(0.975, 0.025))",
+            ),
+        ],
+    );
+
+    // ---- refusals: R says why and stays up ----
+    let (outcome, text) = bc_boot(
+        &mut e,
+        &[
+            ("v", "v"),
+            ("cluster", "cl"),
+            ("strata", "st2"),
+            ("save", "bbad"),
+        ],
+        &[],
+        &["normal"],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(
+        text.contains("Each cluster must lie within one stratum"),
+        "{text}"
+    );
+    let (outcome, text) = bc_boot(
+        &mut e,
+        &[
+            ("statistic", "custom"),
+            ("v", "v"),
+            ("expr", "'a'"),
+            ("save", "bbad"),
+        ],
+        &[],
+        &["normal"],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("must give one or more numbers"), "{text}");
+    let mut stud = BOOTSTRAP.defaults(&bc_context());
+    stud.set_text("v", "v");
+    stud.set_text("cluster", "cl");
+    stud.set_flag("student", true);
+    assert!(BOOTSTRAP
+        .generate(&bc_context(), &stud, Style::Base)
+        .is_err());
+    holds(&mut e, &["exists('b1')".into()]);
+}
+
+fn pts_context() -> Context {
+    context(
+        "pts",
+        &[
+            ("g", VarKind::Number),
+            ("y", VarKind::Number),
+            ("x", VarKind::Number),
+            ("s", VarKind::Number),
+            ("z", VarKind::Number),
+        ],
+    )
+}
+
+fn perm(e: &mut Engine, ctx: &Context, set: &[(&str, &str)], z: &[&str]) -> String {
+    let (outcome, text) = dialog(e, ctx, &PERMUTATION_TEST, set, &[("z", z)], &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    text
+}
+
+/// Four Monte Carlo errors of Stata's `permute` p-value `p` from 50000
+/// shuffles, combined with the dialog's own when `both`.
+fn mc(p: &str, both: bool) -> String {
+    let k = if both { "2 * " } else { "" };
+    format!("4 * sqrt({k}{p} * (1 - {p}) / 50000)")
+}
+
+#[test]
+fn permutation_within_strata_coefficients_and_one_sided() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    define(&mut e, MAKE_B);
+    define(&mut e, STATA_B);
+    let ctx = pts_context();
+
+    // ---- the difference in means within strata, every one of 252^2 listed ----
+    // the hand listing: the second group's sum in each stratum, crossed
+    define(
+        &mut e,
+        "u1 <- which(pts$s == 1); u2 <- which(pts$s == 2); \
+         sec <- outer(combn(pts$y[u1], 5, sum), combn(pts$y[u2], 5, sum), '+'); \
+         dd <- as.vector(sec / 10 - (sum(pts$y) - sec) / 10); \
+         obs <- mean(pts$y[pts$g == 2]) - mean(pts$y[pts$g == 1]); tol <- 1e-9; \
+         ex <- c(less = mean(dd <= obs + tol), greater = mean(dd >= obs - tol), \
+                 two = mean(abs(dd) >= abs(obs) - tol))",
+    );
+    for alt in ["two", "greater", "less", "stata"] {
+        let name = format!("ps_{alt}");
+        let text = perm(
+            &mut e,
+            &ctx,
+            &[
+                ("v", "y"),
+                ("w", "g"),
+                ("strata", "s"),
+                ("alternative", alt),
+                ("reps", "100000"),
+                ("save", &name),
+            ],
+            &[],
+        );
+        assert!(
+            text.contains("Shuffled within the 2 strata of s")
+                && text.contains("All 63504 arrangements listed (exact)"),
+            "{text}"
+        );
+    }
+    holds(
+        &mut e,
+        &[
+            "length(dd) == 63504".into(),
+            same("sort(ps_two$replicates)", "sort(dd)"),
+            within("ps_two$statistic", "sp_diff", "1e-6"),
+            same("ps_two$p.value", "ex[['two']]"),
+            same("ps_greater$p.value", "ex[['greater']]"),
+            same("ps_less$p.value", "ex[['less']]"),
+            same(
+                "ps_stata$p.value",
+                "min(1, 2 * min(ex[['greater']], ex[['less']]))",
+            ),
+            // Stata's Monte Carlo p-values lie within four errors of the exact ones
+            format!(
+                "abs(sp_strata[1] - ex[['less']]) < {}",
+                mc("ex[['less']]", false)
+            ),
+            format!(
+                "abs(sp_strata[2] - ex[['greater']]) < {}",
+                mc("ex[['greater']]", false)
+            ),
+            format!(
+                "abs(sp_strata[3] - ps_stata$p.value) < 2 * {}",
+                mc("ex[['greater']]", false)
+            ),
+        ],
+    );
+    // the same within strata by random shuffles
+    perm(
+        &mut e,
+        &ctx,
+        &[
+            ("v", "y"),
+            ("w", "g"),
+            ("strata", "s"),
+            ("alternative", "greater"),
+            ("reps", "20000"),
+            ("seed", "3"),
+            ("save", "psm"),
+        ],
+        &[],
+    );
+    define(
+        &mut e,
+        "set.seed(3); second <- pts$g == 2; units <- list(u1, u2); \
+         tm <- replicate(20000, { s <- second; \
+           for (u in units) s[u] <- s[u][sample.int(length(u))]; \
+           mean(pts$y[s]) - mean(pts$y[!s]) })",
+    );
+    holds(
+        &mut e,
+        &[
+            "!psm$exact".into(),
+            same("psm$replicates", "tm"),
+            same("psm$p.value", "(sum(tm >= obs - tol) + 1) / 20001"),
+            "abs(psm$p.value - ex[['greater']]) < \
+             4 * sqrt(ex[['greater']] * (1 - ex[['greater']]) / 20000)"
+                .into(),
+        ],
+    );
+
+    // ---- a regression coefficient: x shuffled in y ~ x + z ----
+    let text = perm(
+        &mut e,
+        &ctx,
+        &[
+            ("statistic", "coefficient"),
+            ("v", "y"),
+            ("w", "x"),
+            ("alternative", "greater"),
+            ("save", "pcg"),
+        ],
+        &["z"],
+    );
+    assert!(text.contains("50000 random permutations"), "{text}");
+    define(
+        &mut e,
+        "set.seed(1); \
+         tc <- replicate(50000, { p <- sample.int(20); \
+           qr.coef(qr(cbind(1, pts$x[p], pts$z)), pts$y)[2] }); \
+         bc0 <- coef(lm(y ~ x + z, data = pts))[['x']]; tc0 <- 1e-9 * max(1, abs(bc0))",
+    );
+    holds(
+        &mut e,
+        &[
+            same("pcg$statistic", "bc0"),
+            within("pcg$statistic", "sp_coef_b", "1e-6"),
+            same("pcg$replicates", "tc"),
+            same("pcg$p.value", "(sum(tc >= bc0 - tc0) + 1) / 50001"),
+            // against Stata's upper p, within four combined Monte Carlo errors
+            format!("abs(pcg$p.value - sp_coef[2]) < {}", mc("sp_coef[2]", true)),
+        ],
+    );
+    perm(
+        &mut e,
+        &ctx,
+        &[
+            ("statistic", "coefficient"),
+            ("v", "y"),
+            ("w", "x"),
+            ("strata", "s"),
+            ("alternative", "less"),
+            ("save", "pcs"),
+        ],
+        &["z"],
+    );
+    define(
+        &mut e,
+        "set.seed(1); units <- split(1:20, factor(pts$s)); \
+         tcs <- replicate(50000, { p <- 1:20; \
+           for (u in units) p[u] <- u[sample.int(length(u))]; \
+           qr.coef(qr(cbind(1, pts$x[p], pts$z)), pts$y)[2] })",
+    );
+    holds(
+        &mut e,
+        &[
+            same("pcs$replicates", "tcs"),
+            same("pcs$p.value", "(sum(tcs <= bc0 + tc0) + 1) / 50001"),
+            format!(
+                "abs(pcs$p.value - sp_coef_strata[1]) < {}",
+                mc("sp_coef_strata[1]", true)
+            ),
+        ],
+    );
+
+    // ---- a correlation within strata, one-sided ----
+    perm(
+        &mut e,
+        &ctx,
+        &[
+            ("statistic", "correlation"),
+            ("v", "y"),
+            ("w", "x"),
+            ("strata", "s"),
+            ("alternative", "greater"),
+            ("save", "prs"),
+        ],
+        &[],
+    );
+    holds(
+        &mut e,
+        &[
+            within("prs$statistic", "sp_rho", "1e-6"),
+            format!(
+                "abs(prs$p.value - sp_cor_strata[2]) < {}",
+                mc("sp_cor_strata[2]", true)
+            ),
+        ],
+    );
+
+    // ---- seven rows: all 5040 orders of x listed, against Stata ----
+    let c7_ctx = context(
+        "c7",
+        &[
+            ("y", VarKind::Number),
+            ("x", VarKind::Number),
+            ("z", VarKind::Number),
+        ],
+    );
+    for alt in ["less", "stata"] {
+        let name = format!("p7_{alt}");
+        let text = perm(
+            &mut e,
+            &c7_ctx,
+            &[
+                ("statistic", "coefficient"),
+                ("v", "y"),
+                ("w", "x"),
+                ("alternative", alt),
+                ("save", &name),
+            ],
+            &["z"],
+        );
+        assert!(
+            text.contains("All 5040 arrangements listed (exact)"),
+            "{text}"
+        );
+    }
+    define(
+        &mut e,
+        "gr <- as.matrix(expand.grid(rep(list(1:7), 7))); \
+         gr <- gr[rowSums(sapply(1:7, function(k) rowSums(gr == k) > 0)) == 7, ]; \
+         t7 <- apply(gr, 1, function(p) qr.coef(qr(cbind(1, c7$x[p], c7$z)), c7$y)[2]); \
+         b7 <- coef(lm(y ~ x + z, data = c7))[['x']]; tol7 <- 1e-9 * max(1, abs(b7)); \
+         e7 <- c(less = mean(t7 <= b7 + tol7), greater = mean(t7 >= b7 - tol7))",
+    );
+    holds(
+        &mut e,
+        &[
+            "nrow(gr) == 5040".into(),
+            within("p7_less$statistic", "sp_c7_b", "1e-6"),
+            same("sort(p7_less$replicates)", "sort(t7)"),
+            same("p7_less$p.value", "e7[['less']]"),
+            same("p7_stata$p.value", "min(1, 2 * min(e7))"),
+            format!(
+                "abs(sp_c7[1] - e7[['less']]) < {}",
+                mc("e7[['less']]", false)
+            ),
+            format!(
+                "abs(sp_c7[2] - e7[['greater']]) < {}",
+                mc("e7[['greater']]", false)
+            ),
+            format!(
+                "abs(sp_c7[3] - p7_stata$p.value) < 2 * {}",
+                mc("e7[['greater']]", false)
+            ),
+        ],
+    );
+
+    // ---- refusals: a non-numeric predictor stops R with a reason ----
+    let mut pg = pts_context();
+    pg.dataset = "pg".into();
+    define(
+        &mut e,
+        "pg <- transform(pts, x = ifelse(pts$x > 0, 'up', 'down'))",
+    );
+    let (outcome, text) = dialog(
+        &mut e,
+        &pg,
+        &PERMUTATION_TEST,
+        &[
+            ("statistic", "coefficient"),
+            ("v", "y"),
+            ("w", "x"),
+            ("save", "pbad"),
+        ],
+        &[("z", &["z"])],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("must be numeric"), "{text}");
+    let mut bad = PERMUTATION_TEST.defaults(&ctx);
+    bad.set_text("statistic", "coefficient");
+    bad.set_text("v", "y");
+    bad.set_text("w", "x");
+    bad.set_text("strata", "z");
+    bad.set_list("z", vec!["z".into()]);
+    assert!(PERMUTATION_TEST.generate(&ctx, &bad, Style::Base).is_err());
 }
