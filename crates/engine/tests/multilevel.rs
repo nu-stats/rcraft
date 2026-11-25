@@ -25,7 +25,7 @@
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::multilevel::{GENERALIZED_MIXED, LINEAR_MIXED};
+use rcraft_catalog::multilevel::{GENERALIZED_MIXED, ICC, LINEAR_MIXED, TMB_MIXED};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind, Widget};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -85,6 +85,23 @@ fn run(e: &mut Engine, source: Source, code: &str) -> (Outcome, String) {
     (outcome, text)
 }
 
+/// Whether glmmTMB is installed (its version is recorded).
+fn has_glmmtmb(e: &mut Engine) -> bool {
+    let (outcome, text) = run(
+        e,
+        Source::Typed,
+        "cat(if (requireNamespace('glmmTMB', quietly = TRUE)) \
+         as.character(packageVersion('glmmTMB')) else 'none')",
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    if text.trim() == "none" {
+        eprintln!("skipped: glmmTMB is not installed");
+        return false;
+    }
+    eprintln!("ran with glmmTMB {}", text.trim());
+    true
+}
+
 /// The R and lme4 versions, recorded; false when lme4 is not installed.
 fn versions(e: &mut Engine) -> bool {
     let (outcome, text) = run(
@@ -128,7 +145,32 @@ const MAKE: &str = "d <- local({ \
      passed <- as.numeric(runif(n) < plogis(eta)); \
      days <- c(20, 30, 40, 25)[1 + seq_len(n) %% 4]; \
      absences <- rpois(n, days / 30 * exp(0.3 + 0.05 * ifelse(is.na(hours), 5, hours) + 0.5 * u0)); \
-     data.frame(score, hours, girl, school, class, passed, absences, days) })";
+     set.seed(6202); rater <- 1 + (seq_len(n) * 5) %% 7; r0 <- rnorm(7, sd = 1.5)[rater]; \
+     score2 <- round(score + r0 * 3, 2); passed2 <- as.numeric(runif(n) < plogis(eta + r0 * 0.8)); \
+     mu <- days / 30 * exp(0.2 + 0.05 * ifelse(is.na(hours), 5, hours) + 0.6 * u0); \
+     hc <- ifelse(is.na(hours), 5, hours) - 5; eta3 <- -1 + 0.3 * hc + 0.5 * girl + u0 * 0.9 + u1 * 2.2 * hc; \
+     passed3 <- as.numeric(runif(n) < plogis(eta3)); \
+     count3 <- rpois(n, days / 30 * exp(0.3 + 0.1 * hc + 0.4 * u0 + u1 * 2 * hc)); \
+     visits <- rnbinom(n, mu = mu * 3, size = 2); zvisits <- ifelse(runif(n) < 0.3, 0, rpois(n, mu * 3)); \
+     data.frame(score, hours, girl, school, class, passed, absences, days, rater, score2, passed2, \
+       visits, zvisits, passed3, count3) })";
+
+/// 633 pupils in 40 schools of 12 to 20, for the models Stata needs more
+/// data to fit (random slopes in a logistic model, a crossed logistic): school
+/// intercepts and slopes in `hc` (hours centred at 5), nine raters crossing
+/// the schools, counts over 20 to 40 days.
+const MAKE_BIG: &str = "big <- local({ \
+     set.seed(6203); sizes <- c(14, 18, 12, 20, 16, 13, 19, 15, 17, 12, 20, 14, 16, 18, 13, 15, 19, 12, 17, 16, \
+       14, 18, 13, 20, 15, 12, 17, 19, 14, 16, 18, 13, 15, 20, 12, 17, 16, 14, 19, 15); \
+     school <- rep(seq_along(sizes), sizes); n <- length(school); \
+     u0 <- rnorm(40, sd = 1)[school]; u1 <- rnorm(40, sd = 0.5)[school]; \
+     hours <- round(rnorm(n, 5, 2), 2); hc <- hours - 5; girl <- as.numeric((seq_len(n) * 7) %% 3 == 0); \
+     days <- c(20, 30, 40, 25)[1 + seq_len(n) %% 4]; rater <- 1 + (seq_len(n) * 5) %% 9; \
+     r0 <- rnorm(9, sd = 0.8)[rater]; \
+     passed <- as.numeric(runif(n) < plogis(-0.5 + 0.3 * hc + 0.5 * girl + u0 + u1 * hc)); \
+     count <- rpois(n, days / 30 * exp(0.3 + 0.1 * hc + 0.4 * u0 + u1 * hc)); \
+     passed2 <- as.numeric(runif(n) < plogis(-0.5 + 0.3 * hc + 0.5 * girl + u0 + r0)); \
+     data.frame(school, hours, hc, girl, days, rater, passed, count, passed2) })";
 
 /// The likelihoods in plain R on the complete rows `k`. `lmm(Vrel, reml)`:
 /// GLS and the profiled log-likelihood for V / s^2 = `Vrel`. `S`, `C` the
@@ -138,7 +180,7 @@ const MAKE: &str = "d <- local({ \
 /// derivative of `f` at `th`.
 const ORACLE: &str = "k <- d[!is.na(d$hours), ]; X <- cbind(1, k$hours, k$girl); n <- nrow(k); \
      S <- model.matrix(~ factor(school) - 1, k); C <- model.matrix(~ factor(class) - 1, k); \
-     lmm <- function(Vrel, reml = FALSE) { y <- k$score; Vi <- solve(Vrel); \
+     lmm <- function(Vrel, reml = FALSE, y = k$score) { Vi <- solve(Vrel); \
        XVX <- crossprod(X, Vi %*% X); b <- solve(XVX, crossprod(X, Vi %*% y)); r <- y - X %*% b; \
        q <- drop(crossprod(r, Vi %*% r)); m <- if (reml) n - 3 else n; s2 <- q / m; \
        ll <- -0.5 * (m * log(2 * pi * s2) + determinant(Vrel)$modulus + m + \
@@ -173,6 +215,13 @@ fn context() -> Context {
             ("passed", VarKind::Number),
             ("absences", VarKind::Number),
             ("days", VarKind::Number),
+            ("rater", VarKind::Number),
+            ("score2", VarKind::Number),
+            ("passed2", VarKind::Number),
+            ("visits", VarKind::Number),
+            ("zvisits", VarKind::Number),
+            ("passed3", VarKind::Number),
+            ("count3", VarKind::Number),
         ]
         .into_iter()
         .map(|(name, kind)| ColumnInfo {
@@ -183,29 +232,80 @@ fn context() -> Context {
     }
 }
 
-/// Makes the data, then runs the dialog's code on it, its check boxes on.
+fn context_big() -> Context {
+    Context {
+        dataset: "big".into(),
+        frames: Vec::new(),
+        columns: [
+            ("school", VarKind::Number),
+            ("hours", VarKind::Number),
+            ("hc", VarKind::Number),
+            ("girl", VarKind::Number),
+            ("days", VarKind::Number),
+            ("rater", VarKind::Number),
+            ("passed", VarKind::Number),
+            ("count", VarKind::Number),
+            ("passed2", VarKind::Number),
+        ]
+        .into_iter()
+        .map(|(name, kind)| ColumnInfo {
+            name: name.into(),
+            kind,
+        })
+        .collect(),
+    }
+}
+
+/// Makes the data, then runs the dialog's code on it. The "ratios" box is on;
+/// a `set` entry whose text is "on" turns that check box on.
 fn dialog(
     e: &mut Engine,
     spec: &Spec,
     set: &[(&str, &str)],
     lists: &[(&str, &[&str])],
 ) -> (Outcome, String) {
-    let (made, text) = run(e, Source::Typed, MAKE);
+    dialog_on(e, MAKE, &context(), spec, set, lists)
+}
+
+/// The same on the larger data frame `big`.
+fn dialog_big(
+    e: &mut Engine,
+    spec: &Spec,
+    set: &[(&str, &str)],
+    lists: &[(&str, &[&str])],
+) -> (Outcome, String) {
+    dialog_on(e, MAKE_BIG, &context_big(), spec, set, lists)
+}
+
+fn dialog_on(
+    e: &mut Engine,
+    make: &str,
+    ctx: &Context,
+    spec: &Spec,
+    set: &[(&str, &str)],
+    lists: &[(&str, &[&str])],
+) -> (Outcome, String) {
+    let (made, text) = run(e, Source::Typed, make);
     assert_eq!(made, Outcome::Ok, "{text}");
-    let ctx = context();
-    let mut values = spec.defaults(&ctx);
+    let mut values = spec.defaults(ctx);
     for (id, text) in set {
-        values.set_text(id, *text);
+        if *text == "on" {
+            values.set_flag(id, true);
+        } else {
+            values.set_text(id, *text);
+        }
     }
     for (id, names) in lists {
         values.set_list(id, names.iter().map(|n| n.to_string()).collect());
     }
     for w in spec.widgets {
         if let Widget::Check { id, .. } = w {
-            values.set_flag(id, true);
+            if *id == "ratios" {
+                values.set_flag(id, true);
+            }
         }
     }
-    let code = spec.generate(&ctx, &values, Style::Base);
+    let code = spec.generate(ctx, &values, Style::Base);
     assert!(code.is_ok(), "{code:?}");
     let code = code.unwrap_or_default();
     run(e, Source::Menu(spec.menu.into()), &code)
@@ -519,6 +619,700 @@ fn logistic_and_poisson_are_melogit_and_mepoisson() {
             ),
             within("var_of(po)", ".0319178387120046", "1e-4"),
             within("logLik(po) + saturated", "-152.60983787822", "1e-9"),
+        ],
+    );
+}
+
+// ---- the second half of P6.2: glmmTMB, intraclass correlation, slopes in
+// glmer, crossed effects, random-effect predictions ----
+
+/// The Laplace approximation written out in plain R for a zero-inflated
+/// Poisson model with a random intercept on the complete rows `k` (one
+/// probability of an excess zero for every row, an offset of log(days)):
+/// `zlap(th)`, `th` = (the three coefficients, the logit of the zero
+/// probability, the log sd of the school intercepts). Each school's integral
+/// over its intercept is exp(h(m)) sqrt(2 pi / -h''(m)) at the mode m of the
+/// integrand.
+const ZIP_ORACLE: &str = "zlap <- function(th) { b <- th[1:3]; p <- plogis(th[4]); su <- exp(th[5]); \
+     off <- log(k$days); total <- 0; \
+     for (s in unique(k$school)) { i <- k$school == s; yi <- k$zvisits[i]; \
+       e0 <- as.vector(X[i, , drop = FALSE] %*% b) + off[i]; \
+       h <- function(u) { mu <- exp(e0 + u); \
+         sum(ifelse(yi == 0, log(p + (1 - p) * exp(-mu)), log(1 - p) + dpois(yi, mu, log = TRUE))) + \
+           dnorm(u, 0, su, log = TRUE) }; \
+       m <- optimize(function(u) -h(u), c(-20, 20), tol = 1e-14)$minimum; dd <- 1e-4; \
+       for (it in 1:6) m <- m - ((h(m + dd) - h(m - dd)) / (2 * dd)) / ((h(m + dd) - 2 * h(m) + h(m - dd)) / dd^2); \
+       d2 <- (h(m + dd) - 2 * h(m) + h(m - dd)) / dd^2; \
+       total <- total + h(m) + 0.5 * log(2 * pi / -d2) }; total }";
+
+/// glmmTMB's coefficients and errors in Stata's order (hours, girl, _cons;
+/// for a model with the offset or slopes the same three).
+fn tmb_b_se(m: &str) -> String {
+    format!(
+        "c(glmmTMB::fixef({m})$cond[c(2, 3, 1)], \
+         sqrt(diag(as.matrix(vcov({m})$cond)))[c(2, 3, 1)])"
+    )
+}
+
+/// The variance of the school intercepts of a glmmTMB model.
+fn tmb_var(m: &str) -> String {
+    format!("attr(glmmTMB::VarCorr({m})$cond$school, 'stddev')[['(Intercept)']]^2")
+}
+
+#[test]
+fn mixed_model_glmmtmb_matches_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) || !has_glmmtmb(&mut e) {
+        return;
+    }
+    // linear: Stata 19 mixed score hours girl || school: (the numbers of
+    // random_intercepts_are_mixeds), by ML
+    let (outcome, text) = dialog(
+        &mut e,
+        &TMB_MIXED,
+        &[("y", "score"), ("group", "school"), ("save", "g")],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Conditional model"), "{text}");
+    holds(
+        &mut e,
+        &[
+            // (the errors are not compared: glmmTMB's come from the full
+            // Hessian, Stata's mixed from the generalised least squares
+            // covariance at the estimated variances, 1e-3 apart)
+            within(
+                "glmmTMB::fixef(g)$cond[c(2, 3, 1)]",
+                "c(2.12591225639607, 2.9531996936819, 51.0804688466092)",
+                "2e-6",
+            ),
+            within(
+                "log(c(attr(glmmTMB::VarCorr(g)$cond$school, 'stddev'), sigma(g)))",
+                "c(1.01718165533462, 1.18086131617354)",
+                "1e-6",
+            ),
+            within("logLik(g)", "-265.077799247152", "1e-9"),
+        ],
+    );
+    // logistic by Laplace: Stata 19 melogit passed hours girl || school:,
+    // intmethod(laplace)
+    let (outcome, text) = dialog(
+        &mut e,
+        &TMB_MIXED,
+        &[
+            ("y", "passed"),
+            ("family", "binomial"),
+            ("group", "school"),
+            ("save", "lg"),
+        ],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            within(
+                &tmb_b_se("lg"),
+                "c(.277521967242073, .782679267060284, -1.43544634494154, \
+                   .112291776480294, .470168713139983, .629888152390397)",
+                "1e-5",
+            ),
+            within(&tmb_var("lg"), ".165253528762341", "1e-5"),
+            within("logLik(lg)", "-62.9441702801437", "1e-8"),
+        ],
+    );
+    // negative binomial with an exposure: Stata 19 menbreg visits hours girl,
+    // exposure(days) || school:, intmethod(laplace); its ln(alpha) is minus
+    // the log of glmmTMB's theta
+    let (outcome, text) = dialog(
+        &mut e,
+        &TMB_MIXED,
+        &[
+            ("y", "visits"),
+            ("family", "nbinom2"),
+            ("group", "school"),
+            ("exposure", "days"),
+            ("save", "nb"),
+        ],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            within(
+                "glmmTMB::fixef(nb)$cond[c(2, 3, 1)]",
+                "c(.0710557349074445, -.0863522576582768, -2.12311952810286)",
+                "1e-5",
+            ),
+            // the errors are 2e-3 apart: menbreg's against glmmTMB's full
+            // Hessian (the Poisson and logistic ones agree to 1e-6)
+            within(
+                "sqrt(diag(as.matrix(vcov(nb)$cond)))[c(2, 3, 1)]",
+                "c(.04666615071737, .196329992644892, .29694379240728)",
+                "5e-3",
+            ),
+            within("-log(sigma(nb))", "-.57405783506231", "1e-5"),
+            within(&tmb_var("nb"), ".191769497749425", "1e-4"),
+            within("logLik(nb)", "-260.736159801754", "1e-8"),
+        ],
+    );
+    // Poisson with an exposure and independent random slopes, on the larger
+    // data: Stata 19 mepoisson count hours girl, exposure(days) ||
+    // school: hours, intmethod(laplace)
+    let (outcome, text) = dialog_big(
+        &mut e,
+        &TMB_MIXED,
+        &[
+            ("y", "count"),
+            ("family", "poisson"),
+            ("group", "school"),
+            ("exposure", "days"),
+            ("save", "ps"),
+        ],
+        &[("x", &["hours", "girl"]), ("slopes", &["hours"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            within(
+                &tmb_b_se("ps"),
+                "c(.280170418987826, .00923305523835184, -4.63055478633812, \
+                   .0701397661704667, .0636317978683384, .356873971131259)",
+                "1e-5",
+            ),
+            within(
+                "unname(attr(glmmTMB::VarCorr(ps)$cond$school, 'stddev')[c('hours', '(Intercept)')]^2)",
+                "c(.179544492073569, 4.4257257126714)",
+                "1e-4",
+            ),
+            within("logLik(ps)", "-1038.65609871803", "1e-8"),
+        ],
+    );
+    // zero-inflation: the model's log-likelihood is the Laplace
+    // approximation of the zero-inflated Poisson likelihood written out here,
+    // and flat at its estimate (so it is the maximum)
+    let (outcome, text) = dialog(
+        &mut e,
+        &TMB_MIXED,
+        &[
+            ("y", "zvisits"),
+            ("family", "poisson"),
+            ("group", "school"),
+            ("exposure", "days"),
+            ("zi", "on"),
+            ("save", "z"),
+        ],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Zero-inflation model"), "{text}");
+    define(&mut e, ORACLE);
+    define(&mut e, ZIP_ORACLE);
+    define(
+        &mut e,
+        "th <- c(glmmTMB::fixef(z)$cond, glmmTMB::fixef(z)$zi, \
+         log(attr(glmmTMB::VarCorr(z)$cond$school, 'stddev')))",
+    );
+    holds(
+        &mut e,
+        &[
+            within("zlap(th)", "logLik(z)", "1e-7"),
+            // higher than 0.02 away along each parameter, both ways (the
+            // oracle's own finite differences are too coarse for a slope)
+            "all(vapply(seq_along(th), function(j) { s <- numeric(length(th)); s[j] <- 0.02; \
+             zlap(th) > zlap(th + s) && zlap(th) > zlap(th - s) }, TRUE))"
+                .to_string(),
+        ],
+    );
+    // the dialog refuses zero-inflation for a model that is not for counts
+    let ctx = context();
+    let mut v = TMB_MIXED.defaults(&ctx);
+    v.set_text("y", "score");
+    v.set_text("group", "school");
+    v.set_flag("zi", true);
+    assert!(TMB_MIXED
+        .problems(&ctx, &v)
+        .iter()
+        .any(|p| p.widget == "zi"));
+}
+
+/// Reads the numbers of the last column of the intraclass correlation table.
+fn icc_column(text: &str) -> Vec<f64> {
+    text.lines()
+        .skip_while(|l| !l.trim_start().starts_with("level"))
+        .skip(1)
+        .filter_map(|l| l.split_whitespace().last()?.parse::<f64>().ok())
+        .collect()
+}
+
+/// Runs the intraclass correlation dialog on the fitted model `name`.
+fn icc_of(e: &mut Engine, name: &str) -> (Outcome, String) {
+    let mut ctx = context();
+    ctx.dataset = name.into();
+    let values = ICC.defaults(&ctx);
+    let code = ICC.generate(&ctx, &values, Style::Base);
+    assert!(code.is_ok(), "{code:?}");
+    run(e, Source::Menu(ICC.menu.into()), &code.unwrap_or_default())
+}
+
+#[test]
+fn intraclass_correlation_matches_estat_icc() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let x: &[(&str, &[&str])] = &[("x", &["hours", "girl"])];
+    let fit = |e: &mut Engine, spec: &Spec, set: &[(&str, &str)], lists: &[(&str, &[&str])]| {
+        let (outcome, text) = dialog(e, spec, set, lists);
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    };
+    fit(
+        &mut e,
+        &LINEAR_MIXED,
+        &[("y", "score"), ("group", "school"), ("save", "m1")],
+        x,
+    );
+    // Stata 19: mixed score hours girl || school:, then estat icc
+    let (outcome, text) = icc_of(&mut e, "m1");
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let icc = icc_column(&text);
+    assert_eq!(icc.len(), 1, "{text}");
+    assert!((icc[0] - 0.418883268737999).abs() < 2e-6, "{text}");
+    // ... || school: || class:, whose class level adds the school's variance
+    fit(
+        &mut e,
+        &LINEAR_MIXED,
+        &[
+            ("y", "score"),
+            ("group", "school"),
+            ("inner", "class"),
+            ("save", "m2"),
+        ],
+        x,
+    );
+    let (outcome, text) = icc_of(&mut e, "m2");
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("school>class"), "{text}");
+    let icc = icc_column(&text);
+    assert_eq!(icc.len(), 2, "{text}");
+    assert!((icc[0] - 0.36995968227228).abs() < 2e-5, "{text}");
+    assert!((icc[1] - 0.479130487831607).abs() < 2e-5, "{text}");
+    // ... || school: hours: the correlation where hours is zero
+    fit(
+        &mut e,
+        &LINEAR_MIXED,
+        &[("y", "score"), ("group", "school"), ("save", "m3")],
+        &[("x", &["hours", "girl"]), ("slopes", &["hours"])],
+    );
+    let (outcome, text) = icc_of(&mut e, "m3");
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let icc = icc_column(&text);
+    assert_eq!(icc.len(), 1, "{text}");
+    assert!((icc[0] - 0.138240142092806).abs() < 2e-5, "{text}");
+    // melogit passed hours girl || school:, whose residual is pi^2/3
+    fit(
+        &mut e,
+        &GENERALIZED_MIXED,
+        &[("y", "passed"), ("group", "school"), ("save", "m4")],
+        x,
+    );
+    let (outcome, text) = icc_of(&mut e, "m4");
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("3.289868"), "{text}");
+    let icc = icc_column(&text);
+    assert_eq!(icc.len(), 1, "{text}");
+    assert!((icc[0] - 0.0505741445635604).abs() < 2e-5, "{text}");
+    // the residual of the logistic model is the latent variable's pi^2/3
+    holds(
+        &mut e,
+        &[within(
+            "attr(lme4::VarCorr(m4)$school, 'stddev')^2 / (attr(lme4::VarCorr(m4)$school, 'stddev')^2 + pi^2 / 3)",
+            "0.0505741445635604",
+            "2e-5",
+        )],
+    );
+    // what Stata's estat icc refuses is refused here, with the reason: a
+    // model for counts, crossed groups, and a model that is not lme4's
+    fit(
+        &mut e,
+        &GENERALIZED_MIXED,
+        &[
+            ("y", "absences"),
+            ("family", "poisson"),
+            ("group", "school"),
+            ("save", "m5"),
+        ],
+        x,
+    );
+    let (outcome, text) = icc_of(&mut e, "m5");
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("linear, logistic and probit"), "{text}");
+    fit(
+        &mut e,
+        &LINEAR_MIXED,
+        &[
+            ("y", "score2"),
+            ("group", "school"),
+            ("crossed", "rater"),
+            ("save", "m6"),
+        ],
+        x,
+    );
+    let (outcome, text) = icc_of(&mut e, "m6");
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("crossed groups"), "{text}");
+    define(&mut e, "lin <- lm(score ~ hours, data = d)");
+    let (outcome, text) = icc_of(&mut e, "lin");
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("lmer or glmer"), "{text}");
+    // the entry is on the Model menu of an lme4 model, and only of those
+    assert!(rcraft_catalog::postest::model_specs("lmerMod")
+        .iter()
+        .any(|s| s.entry == "Intraclass correlation"));
+    assert!(rcraft_catalog::postest::model_specs("lm")
+        .iter()
+        .all(|s| s.entry != "Intraclass correlation"));
+}
+
+#[test]
+fn random_slopes_in_glmer_match_melogit() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // Stata 19: melogit passed hc girl || school: hc, intmethod(laplace),
+    // independent slopes (its default), and covariance(unstructured); the
+    // Laplace approximation is what glmer allows with slopes
+    let (outcome, text) = dialog_big(
+        &mut e,
+        &GENERALIZED_MIXED,
+        &[("y", "passed"), ("group", "school"), ("save", "ind")],
+        &[("x", &["hc", "girl"]), ("slopes", &["hc"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Odds ratios"), "{text}");
+    let (outcome, text) = dialog_big(
+        &mut e,
+        &GENERALIZED_MIXED,
+        &[
+            ("y", "passed"),
+            ("group", "school"),
+            ("covariance", "unstructured"),
+            ("save", "un"),
+        ],
+        &[("x", &["hc", "girl"]), ("slopes", &["hc"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = run(
+        &mut e,
+        Source::Typed,
+        "stopifnot(isTRUE(all.equal(ind@devcomp$dims[['nAGQ']], 1)), \
+         isTRUE(all.equal(un@devcomp$dims[['nAGQ']], 1))); cat('Laplace')",
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    // the fit is Poisson on the larger data: Stata 19 mepoisson count hours
+    // girl, exposure(days) || school: hours, intmethod(laplace)
+    let (outcome, text) = dialog_big(
+        &mut e,
+        &GENERALIZED_MIXED,
+        &[
+            ("y", "count"),
+            ("family", "poisson"),
+            ("group", "school"),
+            ("exposure", "days"),
+            ("save", "po"),
+        ],
+        &[("x", &["hours", "girl"]), ("slopes", &["hours"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Rate ratios"), "{text}");
+    let fixed = |m: &str| {
+        format!("c(lme4::fixef({m})[c(2, 3, 1)], sqrt(diag(as.matrix(vcov({m}))))[c(2, 3, 1)])")
+    };
+    holds(
+        &mut e,
+        &[
+            within(
+                &fixed("ind"),
+                "c(.465759640805946, .363095244017737, -.802149103678236, \
+                   .0964702801474643, .208585495713124, .213790693282985)",
+                "1e-4",
+            ),
+            within(
+                "c(attr(lme4::VarCorr(ind)$school.1, 'stddev')^2, attr(lme4::VarCorr(ind)$school, 'stddev')^2)",
+                "c(.185052410747099, 1.10966137112068)",
+                "1e-4",
+            ),
+            within("logLik(ind)", "-367.49308096329", "1e-7"),
+            within(
+                &fixed("un"),
+                "c(.462596081540645, .363801404136769, -.785703082925222, \
+                   .0969478796813606, .208537230764549, .215307199614322)",
+                "1e-4",
+            ),
+            within(
+                "local({ v <- as.matrix(lme4::VarCorr(un)$school); c(v[2, 2], v[1, 1], v[1, 2]) })",
+                "c(.188339258532646, 1.09739909765427, .0596523483947688)",
+                "1e-4",
+            ),
+            within("logLik(un)", "-367.380605889837", "1e-7"),
+            within(
+                &fixed("po"),
+                "c(.280170418987826, .00923305523835184, -4.63055478633812, \
+                   .0701397661704667, .0636317978683384, .356873971131259)",
+                "1e-4",
+            ),
+            within(
+                "c(attr(lme4::VarCorr(po)$school.1, 'stddev')^2, attr(lme4::VarCorr(po)$school, 'stddev')^2)",
+                "c(.179544492073569, 4.4257257126714)",
+                "1e-4",
+            ),
+            within("logLik(po)", "-1038.65609871803", "1e-7"),
+        ],
+    );
+}
+
+#[test]
+fn crossed_effects_match_mixed() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // linear: Stata 19 mixed score2 hours girl || _all: R.school || rater:
+    let (outcome, text) = dialog(
+        &mut e,
+        &LINEAR_MIXED,
+        &[
+            ("y", "score2"),
+            ("group", "school"),
+            ("crossed", "rater"),
+            ("save", "cr"),
+        ],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    define(&mut e, ORACLE);
+    // V / s^2 = I + a Z_school Z_school' + b Z_rater Z_rater', as written out
+    define(
+        &mut e,
+        "Rr <- model.matrix(~ factor(rater) - 1, k); \
+         vrel <- function(t) diag(n) + exp(2 * t[1]) * tcrossprod(S) + exp(2 * t[2]) * tcrossprod(Rr); \
+         v <- lme4::VarCorr(cr); \
+         th0 <- log(c(attr(v$school, 'stddev'), attr(v$rater, 'stddev')) / sigma(cr)); \
+         hand <- lmm(vrel(th0), FALSE, k$score2)",
+    );
+    holds(
+        &mut e,
+        &[
+            same("lme4::fixef(cr)", "hand$b"),
+            same("sqrt(diag(as.matrix(vcov(cr))))", "hand$se"),
+            same("sigma(cr)^2", "hand$s2"),
+            within("logLik(cr)", "hand$ll", "1e-12"),
+            "slope(function(t) lmm(vrel(t), FALSE, k$score2)$ll, th0) < 1e-5".to_string(),
+            within(
+                &b_se("cr"),
+                "c(2.09798759553822, 2.98534678059959, 50.2999611599078, \
+                   .170116823691215, .711042458379355, 2.34784493024845)",
+                "1e-6",
+            ),
+            within(
+                "log(c(attr(lme4::VarCorr(cr)$school, 'stddev'), \
+                   attr(lme4::VarCorr(cr)$rater, 'stddev'), sigma(cr)))",
+                "c(1.07076313456896, 1.63746285988173, 1.19154454003963)",
+                "1e-6",
+            ),
+            // (Stata read hours as a float, which moves its log-likelihood 4e-6)
+            within("logLik(cr)", "-277.92136003292", "1e-7"),
+        ],
+    );
+    // logistic by Laplace, on the 98 pupils and on the larger data: Stata 19
+    // melogit passed2 hours girl || _all: R.school || rater:, intmethod(laplace)
+    let (outcome, text) = dialog(
+        &mut e,
+        &GENERALIZED_MIXED,
+        &[
+            ("y", "passed2"),
+            ("group", "school"),
+            ("crossed", "rater"),
+            ("save", "cl"),
+        ],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            // (the errors are not compared with crossed groups: glmer's are
+            // conditional on the variances, Stata's from the full Hessian,
+            // up to 5% apart)
+            within(
+                "lme4::fixef(cl)[c(2, 3, 1)]",
+                "c(.20276953733822, 1.05806257199403, -1.83505573059142)",
+                "1e-4",
+            ),
+            within(
+                "c(attr(lme4::VarCorr(cl)$school, 'stddev')^2, attr(lme4::VarCorr(cl)$rater, 'stddev')^2)",
+                "c(.382221692921158, 1.6894493722024)",
+                "1e-4",
+            ),
+            within("logLik(cl)", "-56.7170062539611", "1e-7"),
+        ],
+    );
+    let (outcome, text) = dialog_big(
+        &mut e,
+        &GENERALIZED_MIXED,
+        &[
+            ("y", "passed2"),
+            ("group", "school"),
+            ("crossed", "rater"),
+            ("save", "cb"),
+        ],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            within(
+                "lme4::fixef(cb)[c(2, 3, 1)]",
+                "c(.280561977161183, .472513701439089, -1.80614761529358)",
+                "1e-4",
+            ),
+            within(
+                "c(attr(lme4::VarCorr(cb)$school, 'stddev')^2, attr(lme4::VarCorr(cb)$rater, 'stddev')^2)",
+                "c(.984855843233208, .654903737773256)",
+                "1e-4",
+            ),
+            within("logLik(cb)", "-378.251679091228", "1e-7"),
+        ],
+    );
+}
+
+/// The row of `d` columns `col` by school (first row of each), in school order.
+fn by_school(col: &str) -> String {
+    format!("as.vector(tapply(d${col}, d$school, function(x) x[1]))")
+}
+
+#[test]
+fn random_effect_predictions_match_predict_reffects() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // linear with an independent random slope: Stata 19 mixed score hours
+    // girl || school: hours, then predict double u*, reffects (u1 for hours,
+    // u2 for the intercept); the two pupils with hours missing get their
+    // school's values too
+    let (outcome, text) = dialog(
+        &mut e,
+        &LINEAR_MIXED,
+        &[
+            ("y", "score"),
+            ("group", "school"),
+            ("ranef", "on"),
+            ("save", "lmod"),
+        ],
+        &[("x", &["hours", "girl"]), ("slopes", &["hours"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "!anyNA(d$u_school) && !anyNA(d$u_hours_school)".to_string(),
+            within(
+                &by_school("u_hours_school"),
+                "c(-0.6573902864162008, -0.5962452375833728, -0.1037963390817329, 0.7655124170049711, \
+                   -0.0814809530333279, 0.4811285913974183, -0.2330093381937715, 0.0742780403107252, \
+                   0.1951391318221626, 0.1558639737731382)",
+                "1e-5",
+            ),
+            within(
+                &by_school("u_school"),
+                "c(0.0955543039011025, -0.4945899824238849, -0.8626989610537531, 1.6631648644122889, \
+                   0.2066843323323358, -0.5434596559877012, -0.0481120190295473, -0.1886437140645636, \
+                   0.3704079151945097, -0.1983070832807693)",
+                "1e-5",
+            ),
+        ],
+    );
+    // the same values are lme4's conditional modes, row by row
+    holds(
+        &mut e,
+        &[same(
+            "d$u_school",
+            "lme4::ranef(lmod)$school[as.character(d$school), '(Intercept)']",
+        )],
+    );
+    // nested: mixed score hours girl || school: || class:, predict double v*
+    let (outcome, text) = dialog(
+        &mut e,
+        &LINEAR_MIXED,
+        &[
+            ("y", "score"),
+            ("group", "school"),
+            ("inner", "class"),
+            ("ranef", "on"),
+            ("save", "nest"),
+        ],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            within(
+                &by_school("u_school"),
+                "c(-2.8966785302384181, -2.9620596010254139, -1.5890685579463970, 5.3618135883652540, \
+                   0.0949004716474007, 1.2345705812411409, -0.8227704414679136, 0.0543554944315568, \
+                   1.0945269105295770, 0.4304100844631510)",
+                "1e-5",
+            ),
+            within(
+                "local({ s <- setNames(c(0.2039825473065860, -0.0769735301264023, 0.3567959163906829, \
+                   -1.2115721088942550, -0.2524245807672841, -0.6216448063955329, -1.3194591145776160, \
+                   0.8505434384301592, 0.1676227036822756, 1.4145862146127199, 0.1376974512323391, \
+                   -0.1096934242149325, 1.3930548242239560, -1.0287473838938910, 0.1751457927655053, \
+                   -0.4179357944590990, -1.0477260523053551, 1.0637657274321770, -0.0091464709320168, \
+                   0.3321286504900032), strsplit('10a 10b 1a 1b 2a 2b 3a 3b 4a 4b 5a 5b 6a 6b 7a 7b 8a 8b 9a 9b', ' ')[[1]]); \
+                   tapply(d$u_school_class, d$class, function(x) x[1])[names(s)] - s })",
+                "rep(0, 20)",
+                "1e-4",
+            ),
+        ],
+    );
+    // logistic: melogit passed hours girl || school:, predict double w*,
+    // remodes (the conditional modes; its plain reffects are posterior
+    // means, which differ by up to 1e-2)
+    let (outcome, text) = dialog(
+        &mut e,
+        &GENERALIZED_MIXED,
+        &[
+            ("y", "passed"),
+            ("group", "school"),
+            ("ranef", "on"),
+            ("save", "lg"),
+        ],
+        &[("x", &["hours", "girl"])],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "!anyNA(d$u_school)".to_string(),
+            within(
+                &by_school("u_school"),
+                "c(-0.0464632690390434, -0.3234149868856445, 0.0925587502841480, 0.2757946871506283, \
+                   0.1085819319575196, -0.3706388728242622, 0.1658726080868514, 0.2799847570649958, \
+                   -0.0930563021640964, -0.0994234318712990)",
+                "1e-4",
+            ),
         ],
     );
 }
