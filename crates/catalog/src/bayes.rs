@@ -1,18 +1,22 @@
-//! Statistics menu, Bayesian regression (P6.9): a Gaussian, binomial (logit) or
-//! Poisson (log) regression fitted by Hamiltonian Monte Carlo with
-//! `rstanarm::stan_glm`, with either rstanarm's default weakly informative
-//! priors or a normal(m, s) prior on every coefficient. It keeps the fit in the
-//! workspace under the name the dialog asks for and prints each parameter's
-//! posterior mean, standard deviation, credible interval, Monte Carlo standard
-//! error, effective sample size and R-hat. It does not change the data.
+//! Statistics menu, Bayesian regression (P6.9): a Gaussian, logit, Poisson,
+//! negative binomial or Gamma regression fitted by Hamiltonian Monte Carlo with
+//! `rstanarm::stan_glm`, or an ordered logit with `rstanarm::stan_polr`, with
+//! rstanarm's default weakly informative priors or a normal, Student t or
+//! Cauchy prior on the coefficients (one for all, or one for each) and on the
+//! intercept. It keeps the fit in the workspace under the name the dialog asks
+//! for and prints each parameter's posterior mean, standard deviation, credible
+//! interval, Monte Carlo standard error, effective sample size and R-hat. It
+//! does not change the data. The Objects pane's Model menu then offers, on the
+//! fit (P6.9b), posterior predictions, trace plots and posterior predictive
+//! checks, and a comparison of models by leave-one-out cross-validation.
 
 use rcraft_rcodegen::dialog::{Args, Opt, Problem, Spec, TextDefault, TextRule};
 use rcraft_rcodegen::dialog::{VarKind, Widget};
-use rcraft_rcodegen::r_name;
+use rcraft_rcodegen::{r_name, r_string};
 
 use crate::data::BASE;
 
-const NUMBERS: &[VarKind] = &[VarKind::Number];
+const OUTCOMES: &[VarKind] = &[VarKind::Number, VarKind::Factor, VarKind::Text];
 const PREDICTORS: &[VarKind] = &[
     VarKind::Number,
     VarKind::Factor,
@@ -33,6 +37,18 @@ const FAMILIES: &[Opt] = &[
         value: "poisson",
         label: "Poisson (count outcome)",
     },
+    Opt {
+        value: "neg_binomial",
+        label: "Negative binomial (overdispersed counts)",
+    },
+    Opt {
+        value: "gamma",
+        label: "Gamma, log link (positive outcome)",
+    },
+    Opt {
+        value: "ordinal",
+        label: "Ordered logit (ordered categories)",
+    },
 ];
 
 const PRIORS: &[Opt] = &[
@@ -42,7 +58,15 @@ const PRIORS: &[Opt] = &[
     },
     Opt {
         value: "normal",
-        label: "Normal(mean, standard deviation) on every coefficient",
+        label: "Normal(location, scale)",
+    },
+    Opt {
+        value: "student_t",
+        label: "Student t(df, location, scale)",
+    },
+    Opt {
+        value: "cauchy",
+        label: "Cauchy(location, scale)",
     },
 ];
 
@@ -72,6 +96,86 @@ fn whole(a: &Args, id: &'static str, what: &str, least: u32, most: u32, out: &mu
     }
 }
 
+/// The numbers of a box that takes one number or several separated by commas;
+/// `None` when one is not a finite number.
+fn numbers(text: &str) -> Option<Vec<f64>> {
+    let parts: Vec<&str> = text.split(',').map(str::trim).collect();
+    if parts.iter().any(|p| p.is_empty()) {
+        return None;
+    }
+    parts
+        .iter()
+        .map(|p| p.parse::<f64>().ok().filter(|v| v.is_finite()))
+        .collect()
+}
+
+/// The numbers of a list box as R: `2` or `c(2, 3)` (the parsed numbers, so
+/// nothing else can reach the code).
+fn r_numbers(text: &str) -> String {
+    let v = numbers(text).unwrap_or_default();
+    let items: Vec<String> = v.iter().map(|x| format!("{x}")).collect();
+    match items.len() {
+        1 => items.concat(),
+        _ => format!("c({})", items.join(", ")),
+    }
+}
+
+/// Checks a prior's boxes: locations any numbers, scales and degrees of
+/// freedom above 0.
+fn prior_check(
+    a: &Args,
+    kind: &str,
+    ids: (&'static str, &'static str, &'static str),
+    out: &mut Vec<Problem>,
+) {
+    if kind == "default" {
+        return;
+    }
+    let (loc, scale, df) = ids;
+    if numbers(a.values.text(loc)).is_none() {
+        out.push(Problem::new(
+            loc,
+            "Type a number, or one for each coefficient separated by commas.",
+        ));
+    }
+    let positive =
+        |id: &str| numbers(a.values.text(id)).is_some_and(|v| v.iter().all(|x| *x > 0.0));
+    if !positive(scale) {
+        out.push(Problem::new(
+            scale,
+            "Each scale must be a number above 0 (one, or one for each coefficient).",
+        ));
+    }
+    if kind == "student_t" && !positive(df) {
+        out.push(Problem::new(
+            df,
+            "Each degrees of freedom must be a number above 0.",
+        ));
+    }
+}
+
+/// A prior as rstanarm code, on the scale of the data (`autoscale = FALSE`).
+fn prior_code(a: &Args, kind: &str, ids: (&str, &str, &str)) -> String {
+    let (loc, scale, df) = ids;
+    let (loc, scale, df) = (
+        r_numbers(a.values.text(loc)),
+        r_numbers(a.values.text(scale)),
+        r_numbers(a.values.text(df)),
+    );
+    match kind {
+        "student_t" => format!(
+            "rstanarm::student_t(df = {df}, location = {loc}, scale = {scale}, autoscale = FALSE)"
+        ),
+        "cauchy" => {
+            format!("rstanarm::cauchy(location = {loc}, scale = {scale}, autoscale = FALSE)")
+        }
+        _ => format!("rstanarm::normal(location = {loc}, scale = {scale}, autoscale = FALSE)"),
+    }
+}
+
+const COEFFICIENTS: (&str, &str, &str) = ("prior_mean", "prior_sd", "prior_df");
+const INTERCEPT: (&str, &str, &str) = ("int_mean", "int_sd", "int_df");
+
 fn bayes_check(a: &Args) -> Vec<Problem> {
     let y = a.var_text("y");
     let mut out = Vec::new();
@@ -81,14 +185,24 @@ fn bayes_check(a: &Args) -> Vec<Problem> {
             format!("{y} is the outcome; it cannot also be a predictor."),
         ));
     }
-    if a.choice("prior") == "normal" {
-        match a.number("prior_sd").trim().parse::<f64>() {
-            Ok(s) if s > 0.0 && s.is_finite() => {}
-            _ => out.push(Problem::new(
-                "prior_sd",
-                "The prior's standard deviation must be a number above 0.",
-            )),
-        }
+    let ordinal = a.choice("family") == "ordinal";
+    if ordinal && a.choice("prior") != "default" {
+        out.push(Problem::new(
+            "prior",
+            "rstanarm's ordered logit (stan_polr) takes no normal, t or Cauchy prior on the \
+             coefficients; it is fitted with flat priors on them.",
+        ));
+    } else {
+        prior_check(a, a.choice("prior"), COEFFICIENTS, &mut out);
+    }
+    if ordinal && a.choice("int_prior") != "default" {
+        out.push(Problem::new(
+            "int_prior",
+            "An ordered logit has cutpoints, not an intercept; their prior is rstanarm's \
+             Dirichlet on the category probabilities.",
+        ));
+    } else {
+        prior_check(a, a.choice("int_prior"), INTERCEPT, &mut out);
     }
     whole(a, "chains", "The number of chains", 1, 64, &mut out);
     whole(
@@ -109,31 +223,126 @@ fn bayes_check(a: &Args) -> Vec<Problem> {
     out
 }
 
+fn bayes_code(a: &Args) -> String {
+    let m = a.name("save");
+    let y = a.var("y").unwrap_or_default();
+    let x = a
+        .vars("x")
+        .iter()
+        .map(|n| r_name(n))
+        .collect::<Vec<_>>()
+        .join(" + ");
+    let mut priors = String::new();
+    if a.choice("prior") != "default" {
+        priors.push_str(&format!(
+            ", prior = {}",
+            prior_code(a, a.choice("prior"), COEFFICIENTS)
+        ));
+    }
+    if a.choice("int_prior") != "default" {
+        priors.push_str(&format!(
+            ", prior_intercept = {}",
+            prior_code(a, a.choice("int_prior"), INTERCEPT)
+        ));
+    }
+    if a.flag("prior_pd") {
+        priors.push_str(", prior_PD = TRUE");
+    }
+    let (chains, iter, seed) = (
+        a.number("chains").trim(),
+        a.number("iter").trim(),
+        a.number("seed").trim(),
+    );
+    let sampler = format!(
+        "chains = {chains}, iter = {iter}, seed = {seed}, init_r = 0.5, cores = 1, refresh = 0"
+    );
+    let fit = if a.choice("family") == "ordinal" {
+        let ys = a.var_string("y").unwrap_or_default();
+        format!(
+            "{m} <- local({{\n  d <- {}\n  \
+             d[[{ys}]] <- if (is.ordered(d[[{ys}]])) d[[{ys}]] else factor(d[[{ys}]], ordered = TRUE)\n  \
+             rstanarm::stan_polr({y} ~ {x}, data = d, prior = NULL{priors}, {sampler})\n}})",
+            a.data()
+        )
+    } else {
+        let family = match a.choice("family") {
+            "binomial" => "stats::binomial()",
+            "poisson" => "stats::poisson()",
+            "neg_binomial" => "rstanarm::neg_binomial_2()",
+            "gamma" => "stats::Gamma(link = \"log\")",
+            _ => "stats::gaussian()",
+        };
+        format!(
+            "{m} <- rstanarm::stan_glm({y} ~ {x}, data = {}, family = {family}{priors}, {sampler})",
+            a.data()
+        )
+    };
+    let level = a.choice("level");
+    let percent = match level {
+        "0.9" => "90",
+        "0.99" => "99",
+        _ => "95",
+    };
+    let what = if a.flag("prior_pd") {
+        "Prior summary (the data are not used)"
+    } else {
+        "Posterior summary"
+    };
+    let mut code = format!(
+        "{fit}\n\
+         cat(\"{what}: {chains} chains of {iter} iterations (the first half warm-up), \
+         {percent}% credible interval\\n\")\n\
+         local({{\n  s <- unclass(summary({m}, probs = c((1 - {level}) / 2, \
+         (1 + {level}) / 2)))\n  \
+         s <- s[!grepl(\"^mean_PPD\", rownames(s)) & rownames(s) != \"log-posterior\", , drop = FALSE]\n  \
+         print(round(s, 4))\n  \
+         if (any(s[, \"Rhat\"] > 1.05 | s[, \"n_eff\"] < 100, na.rm = TRUE))\n    \
+         cat(\"\\nWarning: the chains have not converged (R-hat above 1.05 or fewer than \
+         100 effective draws); do not trust these numbers.\\nRun more iterations or use a \
+         tighter prior.\\n\")\n  invisible(NULL)\n}})"
+    );
+    if a.flag("show_priors") {
+        code.push_str(&format!("\nprint(rstanarm::prior_summary({m}))"));
+    }
+    code
+}
+
 pub const BAYESIAN_REGRESSION: Spec = Spec {
     entry: "Bayesian regression",
     menu: "Statistics > Bayesian regression",
     about: "Fits a regression by Bayes' rule, sampling the posterior with Hamiltonian Monte \
-            Carlo (rstanarm::stan_glm): a linear model with a Gaussian outcome, a logit model \
-            of a 0/1 outcome or a Poisson model of counts. The priors are rstanarm's default \
-            weakly informative ones, or a normal(mean, standard deviation) on every coefficient \
-            as typed (the intercept and, in the linear model, the error scale keep their default \
-            priors). The table gives each parameter's posterior mean, standard deviation and \
-            equal-tailed credible interval, its Monte Carlo standard error (mcse), its effective \
-            sample size (n_eff) and R-hat, which is close to 1 once the chains agree. The \
-            iterations are per chain, the first half of them warm-up. The same seed gives the \
-            same draws. A warning follows the table when a chain has not converged (R-hat above \
-            1.05, or fewer than 100 effective draws). The priors are rstanarm's, so they are not \
-            Stata's `bayes` defaults: the intercept's prior is on the intercept at the centred \
-            predictors, and the error scale (sigma, not sigma-squared) has an exponential prior; \
-            posterior means agree with Stata's to within Monte Carlo error only under priors \
-            that are the same. Rows with a missing value are left out.",
+            Carlo (rstanarm): a linear model with a Gaussian outcome, a logit model of a 0/1 \
+            outcome, a Poisson or negative binomial model of counts, a Gamma model (log link) \
+            of a positive outcome (stan_glm), or an ordered logit of ordered categories \
+            (stan_polr: a factor's own order, numbers in their order, text in alphabetical \
+            order). The priors are rstanarm's default weakly informative ones, or a normal, \
+            Student t or Cauchy prior on the coefficients as typed, on the scale of the data: \
+            one location and scale for every coefficient, or one for each, separated by \
+            commas. The intercept takes its own prior the same way; rstanarm puts it on the \
+            intercept at the centred predictors, which is Stata's constant when the \
+            predictors have mean 0. The ordered logit's coefficients have flat priors and its \
+            cutpoints rstanarm's Dirichlet prior on the category probabilities. The error \
+            scale (sigma), the negative binomial's reciprocal dispersion and the Gamma shape \
+            keep rstanarm's exponential prior, which is not Stata's. The table gives each \
+            parameter's posterior mean, standard deviation and equal-tailed credible interval, \
+            its Monte Carlo standard error (mcse), its effective sample size (n_eff) and R-hat, \
+            which is close to 1 once the chains agree. The iterations are per chain, the first \
+            half of them warm-up. The same seed gives the same draws. A warning follows the \
+            table when a chain has not converged (R-hat above 1.05, or fewer than 100 \
+            effective draws). Sampling from the priors only (the data unused) shows what the \
+            priors imply. Posterior means agree with Stata's bayes to within Monte Carlo error \
+            only under priors that are the same. The Objects pane's Model menu has posterior \
+            predictions, trace plots and predictive checks, and loo comparison for the fit. \
+            Rows with a missing value are left out.",
     widgets: &[
         Widget::Variable {
             id: "y",
             label: "Outcome",
-            kinds: NUMBERS,
+            kinds: OUTCOMES,
             required: true,
-            hint: "A 0/1 variable for the logit model, a count for the Poisson model.",
+            hint: "A 0/1 variable for the logit model, a count for the Poisson and negative \
+                   binomial models, above 0 for the Gamma model, ordered categories for the \
+                   ordered logit.",
         },
         Widget::Variables {
             id: "x",
@@ -154,22 +363,59 @@ pub const BAYESIAN_REGRESSION: Spec = Spec {
             label: "Prior on the coefficients",
             options: PRIORS,
             default: "default",
-            hint: "The default priors scale with the data; a typed normal prior is used as it is, \
-                   on the scale of the data.",
+            hint: "The default priors scale with the data; a typed prior is used as it is, on \
+                   the scale of the data.",
         },
         Widget::Text {
             id: "prior_mean",
-            label: "Prior mean",
+            label: "Location(s)",
             default: TextDefault::Fixed("0"),
-            rule: TextRule::Number,
-            hint: "Used with the normal prior.",
+            rule: TextRule::Any,
+            hint: "Used with a typed prior. One number for every coefficient, or one for each, \
+                   separated by commas, in the order of the model's coefficients (a factor's \
+                   levels after its first).",
         },
         Widget::Text {
             id: "prior_sd",
-            label: "Prior standard deviation",
+            label: "Scale(s)",
             default: TextDefault::Fixed("10"),
-            rule: TextRule::Number,
-            hint: "Used with the normal prior; above 0.",
+            rule: TextRule::Any,
+            hint: "Above 0; the standard deviation of a normal prior.",
+        },
+        Widget::Text {
+            id: "prior_df",
+            label: "Degrees of freedom (Student t)",
+            default: TextDefault::Fixed("3"),
+            rule: TextRule::Any,
+            hint: "Above 0; one, or one for each coefficient.",
+        },
+        Widget::Choice {
+            id: "int_prior",
+            label: "Prior on the intercept",
+            options: PRIORS,
+            default: "default",
+            hint: "On the intercept at the centred predictors.",
+        },
+        Widget::Text {
+            id: "int_mean",
+            label: "Intercept location",
+            default: TextDefault::Fixed("0"),
+            rule: TextRule::Any,
+            hint: "",
+        },
+        Widget::Text {
+            id: "int_sd",
+            label: "Intercept scale",
+            default: TextDefault::Fixed("10"),
+            rule: TextRule::Any,
+            hint: "Above 0.",
+        },
+        Widget::Text {
+            id: "int_df",
+            label: "Intercept degrees of freedom (Student t)",
+            default: TextDefault::Fixed("3"),
+            rule: TextRule::Any,
+            hint: "",
         },
         Widget::Text {
             id: "chains",
@@ -205,6 +451,12 @@ pub const BAYESIAN_REGRESSION: Spec = Spec {
             default: false,
             hint: "Prints rstanarm's prior summary, with the scales it adjusted to the data.",
         },
+        Widget::Check {
+            id: "prior_pd",
+            label: "Sample from the priors only (the data unused)",
+            default: false,
+            hint: "To see what the priors imply before the data are used.",
+        },
         Widget::Text {
             id: "save",
             label: "Save the model as",
@@ -217,57 +469,317 @@ pub const BAYESIAN_REGRESSION: Spec = Spec {
     needs: &["rstanarm"],
     styles: BASE,
     check: bayes_check,
+    code: |a, _| bayes_code(a),
+};
+
+// ---- The Model menu on a Bayesian fit (P6.9b) ----
+
+const PREDICTION_KINDS: &[Opt] = &[
+    Opt {
+        value: "epred",
+        label: "The expected outcome (its posterior mean and interval)",
+    },
+    Opt {
+        value: "predict",
+        label: "A new outcome (the posterior predictive mean and interval)",
+    },
+    Opt {
+        value: "linpred",
+        label: "The linear predictor",
+    },
+];
+
+fn predictions_check(a: &Args) -> Vec<Problem> {
+    let mut out = Vec::new();
+    if a.name_text("data").is_empty() {
+        out.push(Problem::new("data", "Type the data frame's name."));
+    }
+    if a.name_text("prefix").is_empty() {
+        out.push(Problem::new("prefix", "Name the new variables."));
+    }
+    whole(a, "seed", "The seed", 0, 2_147_483_647, &mut out);
+    out
+}
+
+pub const POSTERIOR_PREDICTIONS: Spec = Spec {
+    entry: "Posterior predictions",
+    menu: "Objects > Model > Posterior predictions",
+    about: "Adds the fit's predictions for each row of a data frame as new variables: the \
+            posterior mean and equal-tailed credible interval of the expected outcome \
+            (rstanarm::posterior_epred: the mean, the probability or the expected count), of a \
+            new outcome drawn from the model (posterior_predict, with a seed), or of the linear \
+            predictor (posterior_linpred). For an ordered logit it adds each category's \
+            posterior mean probability, worked out from the linear predictor and the \
+            cutpoints of every draw. Rows with a missing predictor get missing values. A name \
+            already in the data frame is replaced.",
+    widgets: &[
+        Widget::Text {
+            id: "data",
+            label: "Data frame",
+            default: TextDefault::Empty,
+            rule: TextRule::Name,
+            hint: "The data frame to predict for (the one the model was fitted to, or new rows \
+                   with the same predictors); it is changed in place.",
+        },
+        Widget::Choice {
+            id: "kind",
+            label: "Predict",
+            options: PREDICTION_KINDS,
+            default: "epred",
+            hint: "",
+        },
+        Widget::Text {
+            id: "prefix",
+            label: "New variables",
+            default: TextDefault::Fixed("pred"),
+            rule: TextRule::Any,
+            hint: "The mean is this name; its interval is name_lower and name_upper (for an \
+                   ordered logit, name_ and each category).",
+        },
+        Widget::Choice {
+            id: "level",
+            label: "Credible interval",
+            options: LEVELS,
+            default: "0.95",
+            hint: "",
+        },
+        Widget::Text {
+            id: "seed",
+            label: "Seed",
+            default: TextDefault::Fixed("1"),
+            rule: TextRule::Number,
+            hint: "For new outcomes, which are drawn at random.",
+        },
+    ],
+    needs: &["rstanarm"],
+    styles: BASE,
+    check: predictions_check,
     code: |a, _| {
-        let m = a.name("save");
-        let y = a.var("y").unwrap_or_default();
-        let x = a
-            .vars("x")
-            .iter()
-            .map(|n| r_name(n))
-            .collect::<Vec<_>>()
-            .join(" + ");
-        let prior = if a.choice("prior") == "normal" {
-            format!(
-                ", prior = rstanarm::normal(location = {}, scale = {}, autoscale = FALSE)",
-                a.number("prior_mean").trim(),
-                a.number("prior_sd").trim()
-            )
-        } else {
-            String::new()
-        };
+        let (m, d) = (a.data(), a.name("data"));
+        let p = a.name_text("prefix");
         let level = a.choice("level");
-        let percent = match level {
-            "0.9" => "90",
-            "0.99" => "99",
-            _ => "95",
+        let draws = match a.choice("kind") {
+            "predict" => format!(
+                "rstanarm::posterior_predict(fit, newdata = nd[ok, , drop = FALSE], seed = {})",
+                a.number("seed")
+            ),
+            "linpred" => {
+                "rstanarm::posterior_linpred(fit, newdata = nd[ok, , drop = FALSE])".to_string()
+            }
+            _ => "rstanarm::posterior_epred(fit, newdata = nd[ok, , drop = FALSE])".to_string(),
         };
+        format!(
+            "{d} <- local({{\n  fit <- {m}\n  nd <- {d}\n  \
+             stopifnot(\"this works on a model fitted with Bayesian regression\" = inherits(fit, \"stanreg\"))\n  \
+             ok <- stats::complete.cases(nd[, intersect(all.vars(stats::formula(fit))[-1], names(nd)), drop = FALSE])\n  \
+             put <- function(name, v) {{ nd[[name]] <<- NA_real_; nd[[name]][ok] <<- v }}\n  \
+             if (inherits(fit, \"polr\") && {}) {{\n    \
+             eta <- rstanarm::posterior_linpred(fit, newdata = nd[ok, , drop = FALSE])\n    \
+             cuts <- as.matrix(fit)[, names(fit$zeta), drop = FALSE]\n    \
+             cum <- c(lapply(seq_len(ncol(cuts)), function(k) stats::plogis(cuts[, k] - eta)), list(1))\n    \
+             levs <- levels(rstanarm::get_y(fit))\n    \
+             for (k in seq_along(levs)) put(paste0({}, \"_\", levs[k]), \
+             colMeans(if (k == 1) cum[[1]] else cum[[k]] - cum[[k - 1]]))\n  \
+             }} else {{\n    draws <- {draws}\n    \
+             if (inherits(fit, \"polr\")) draws <- matrix(match(draws, levels(rstanarm::get_y(fit))), nrow(draws))\n    \
+             put({}, colMeans(draws))\n    \
+             put({}, apply(draws, 2, stats::quantile, probs = (1 - {level}) / 2, names = FALSE))\n    \
+             put({}, apply(draws, 2, stats::quantile, probs = (1 + {level}) / 2, names = FALSE))\n  }}\n  nd\n}})",
+            if a.choice("kind") == "epred" { "TRUE" } else { "FALSE" },
+            r_string(p),
+            r_string(p),
+            r_string(&format!("{p}_lower")),
+            r_string(&format!("{p}_upper")),
+        )
+    },
+};
+
+const STATISTICS: &[(&str, &str, &str)] = &[
+    ("ppc_mean", "mean", "mean"),
+    ("ppc_sd", "sd", "stats::sd"),
+    ("ppc_min", "min", "min"),
+    ("ppc_max", "max", "max"),
+];
+
+fn checks_check(a: &Args) -> Vec<Problem> {
+    let mut out = Vec::new();
+    whole(a, "seed", "The seed", 0, 2_147_483_647, &mut out);
+    let any =
+        a.flag("trace") || a.flag("density") || STATISTICS.iter().any(|(id, _, _)| a.flag(id));
+    if !any {
+        out.push(Problem::new(
+            "trace",
+            "Choose at least one plot or statistic.",
+        ));
+    }
+    out
+}
+
+pub const BAYES_CHECKS: Spec = Spec {
+    entry: "Trace plots and predictive checks",
+    menu: "Objects > Model > Trace plots and predictive checks",
+    about: "Checks a Bayesian fit. The trace plot shows each parameter's draws chain by chain \
+            (they should overlap and wander without trend); the density plot overlays the \
+            outcome's distribution on those of fifty data sets drawn from the posterior \
+            predictive distribution (rstanarm::pp_check). The posterior predictive p-values \
+            are the share of the data sets drawn from the posterior predictive distribution \
+            (one per posterior draw, with the seed) whose mean, standard deviation, minimum or \
+            maximum is at least the observed one, as Stata's bayesstats ppvalues reports them; \
+            values near 0 or 1 show what the model misses. An ordered outcome is taken as its \
+            category numbers. The p-values are kept in `name$ppvalues`.",
+    widgets: &[
+        Widget::Check {
+            id: "trace",
+            label: "Trace plot",
+            default: true,
+            hint: "",
+        },
+        Widget::Check {
+            id: "density",
+            label: "Posterior predictive density overlay",
+            default: true,
+            hint: "",
+        },
+        Widget::Check {
+            id: "ppc_mean",
+            label: "p-value of the mean",
+            default: true,
+            hint: "",
+        },
+        Widget::Check {
+            id: "ppc_sd",
+            label: "p-value of the standard deviation",
+            default: true,
+            hint: "",
+        },
+        Widget::Check {
+            id: "ppc_min",
+            label: "p-value of the minimum",
+            default: false,
+            hint: "",
+        },
+        Widget::Check {
+            id: "ppc_max",
+            label: "p-value of the maximum",
+            default: false,
+            hint: "",
+        },
+        Widget::Text {
+            id: "seed",
+            label: "Seed",
+            default: TextDefault::Fixed("1"),
+            rule: TextRule::Number,
+            hint: "The replicated data sets are drawn at random.",
+        },
+    ],
+    needs: &["rstanarm"],
+    styles: BASE,
+    check: checks_check,
+    code: |a, _| {
+        let m = a.data();
         let mut code = format!(
-            "{m} <- rstanarm::stan_glm({y} ~ {x}, data = {}, family = stats::{}(){prior}, \
-             chains = {}, iter = {}, seed = {}, init_r = 0.5, cores = 1, refresh = 0)\n\
-             cat(\"Posterior summary: {} chains of {} iterations (the first half warm-up), \
-             {percent}% credible interval\\n\")\n\
-             local({{\n  s <- unclass(summary({m}, probs = c((1 - {level}) / 2, \
-             (1 + {level}) / 2)))\n  \
-             s <- s[!rownames(s) %in% c(\"mean_PPD\", \"log-posterior\"), , drop = FALSE]\n  \
-             print(round(s, 4))\n  \
-             if (any(s[, \"Rhat\"] > 1.05 | s[, \"n_eff\"] < 100, na.rm = TRUE))\n    \
-             cat(\"\\nWarning: the chains have not converged (R-hat above 1.05 or fewer than \
-             100 effective draws); do not trust these numbers.\\nRun more iterations or use a \
-             tighter prior.\\n\")\n  invisible(NULL)\n}})",
-            a.data(),
-            a.choice("family"),
-            a.number("chains").trim(),
-            a.number("iter").trim(),
-            a.number("seed").trim(),
-            a.number("chains").trim(),
-            a.number("iter").trim(),
+            "stopifnot(\"this works on a model fitted with Bayesian regression\" = inherits({m}, \"stanreg\"))"
         );
-        if a.flag("show_priors") {
-            code.push_str(&format!("\nprint(rstanarm::prior_summary({m}))"));
+        if a.flag("trace") {
+            code.push_str(&format!("\nprint(plot({m}, \"trace\"))"));
+        }
+        if a.flag("density") {
+            code.push_str(&format!(
+                "\nprint(rstanarm::pp_check({m}, nreps = 50, seed = {}))",
+                a.number("seed")
+            ));
+        }
+        let stats: Vec<String> = STATISTICS
+            .iter()
+            .filter(|(id, _, _)| a.flag(id))
+            .map(|(_, name, f)| format!("{name} = {f}"))
+            .collect();
+        if !stats.is_empty() {
+            code.push_str(&format!(
+                "\n{m}$ppvalues <- local({{\n  \
+                 y <- rstanarm::get_y({m})\n  \
+                 yrep <- rstanarm::posterior_predict({m}, seed = {})\n  \
+                 if (is.factor(y)) {{\n    yrep <- matrix(match(yrep, levels(y)), nrow(yrep))\n    \
+                 y <- as.integer(y)\n  }}\n  \
+                 y <- as.numeric(y)\n  \
+                 stats <- list({})\n  \
+                 data.frame(observed = vapply(stats, function(f) f(y), 0), \
+                 replicated = vapply(stats, function(f) mean(apply(yrep, 1, f)), 0), \
+                 p = vapply(stats, function(f) mean(apply(yrep, 1, f) >= f(y)), 0))\n}})\n\
+                 cat(\"Posterior predictive p-values (share of replicated data sets at least as large)\\n\")\n\
+                 print({m}$ppvalues)",
+                a.number("seed"),
+                stats.join(", ")
+            ));
         }
         code
     },
 };
+
+fn loo_names<'a>(a: &'a Args) -> Vec<&'a str> {
+    a.values
+        .text("others")
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+pub const BAYES_LOO: Spec = Spec {
+    entry: "Compare Bayesian models (loo)",
+    menu: "Objects > Model > Compare Bayesian models (loo)",
+    about: "Estimates how well each Bayesian fit predicts a row it has not seen, by Pareto \
+            smoothed importance sampling leave-one-out cross-validation (rstanarm::loo): the \
+            expected log predictive density (elpd_loo, higher is better), the effective number \
+            of parameters (p_loo) and looic (-2 elpd_loo), with standard errors, then the \
+            models ranked by loo::loo_compare, each one's difference from the best and the \
+            standard error of that difference. Each model's loo is kept in `name$loo`. A \
+            Pareto k above 0.7 flags rows whose estimate cannot be trusted. Stata's bayes has \
+            no leave-one-out comparison (its bayesstats ic gives DIC and the marginal \
+            likelihood). The models should be fitted to the same rows.",
+    widgets: &[Widget::Text {
+        id: "others",
+        label: "Other models",
+        default: TextDefault::Empty,
+        rule: TextRule::Any,
+        hint: "The names of other Bayesian fits in the workspace, separated by commas; this \
+               model comes first. Leave empty for this model's loo alone.",
+    }],
+    needs: &["rstanarm"],
+    styles: BASE,
+    check: |_| Vec::new(),
+    code: |a, _| {
+        let mut names = vec![a.ctx.dataset.as_str()];
+        names.extend(loo_names(a));
+        let mut code = String::new();
+        for n in &names {
+            let m = r_name(n);
+            code.push_str(&format!(
+                "stopifnot(\"this works on models fitted with Bayesian regression\" = inherits({m}, \"stanreg\"))\n\
+                 {m}$loo <- rstanarm::loo({m})\n"
+            ));
+        }
+        let list = names
+            .iter()
+            .map(|n| format!("{} = {}$loo", r_name(n), r_name(n)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        code.push_str(&format!(
+            "local({{\n  loos <- list({list})\n  \
+             print(do.call(rbind, lapply(names(loos), function(n) {{\n    \
+             e <- loos[[n]]$estimates\n    \
+             data.frame(model = n, elpd_loo = e[\"elpd_loo\", 1], se = e[\"elpd_loo\", 2], \
+             p_loo = e[\"p_loo\", 1], looic = e[\"looic\", 1], \
+             bad_k = sum(loos[[n]]$diagnostics$pareto_k > 0.7))\n  }})), row.names = FALSE)\n  \
+             if (length(loos) > 1) {{\n    cat(\"\\nRanked by elpd_loo\\n\")\n    \
+             print(loo::loo_compare(loos))\n  }}\n  invisible(NULL)\n}})"
+        ));
+        code
+    },
+};
+
+/// The Model menu on a Bayesian fit (`stanreg`).
+pub const MODEL_SPECS: &[&Spec] = &[&POSTERIOR_PREDICTIONS, &BAYES_CHECKS, &BAYES_LOO];
 
 pub const SPECS: &[&Spec] = &[&BAYESIAN_REGRESSION];
 
@@ -323,7 +835,7 @@ mod tests {
              chains = 4, iter = 2000, seed = 1, init_r = 0.5, cores = 1, refresh = 0)\n\
              cat(\"Posterior summary: 4 chains of 2000 iterations (the first half warm-up), 95% credible interval\\n\")\n\
              local({\n  s <- unclass(summary(bayes, probs = c((1 - 0.95) / 2, (1 + 0.95) / 2)))\n  \
-             s <- s[!rownames(s) %in% c(\"mean_PPD\", \"log-posterior\"), , drop = FALSE]\n  \
+             s <- s[!grepl(\"^mean_PPD\", rownames(s)) & rownames(s) != \"log-posterior\", , drop = FALSE]\n  \
              print(round(s, 4))\n  \
              if (any(s[, \"Rhat\"] > 1.05 | s[, \"n_eff\"] < 100, na.rm = TRUE))\n    \
              cat(\"\\nWarning: the chains have not converged (R-hat above 1.05 or fewer than \
@@ -373,5 +885,129 @@ mod tests {
         assert_eq!(widgets(&values(&[("save", "d")], &["age"])), vec!["save"]);
         // a typed prior is not checked while the default is chosen
         assert!(widgets(&values(&[("prior_sd", "0")], &["age"])).is_empty());
+        // lists must be numbers; scales and degrees of freedom above 0
+        assert_eq!(
+            widgets(&values(
+                &[
+                    ("prior", "student_t"),
+                    ("prior_mean", "0, x"),
+                    ("prior_sd", "1, -2"),
+                    ("prior_df", "0"),
+                    ("int_prior", "cauchy"),
+                    ("int_sd", "")
+                ],
+                &["age"]
+            )),
+            vec!["prior_mean", "prior_sd", "prior_df", "int_sd"]
+        );
+        // an ordered logit takes no typed priors
+        assert_eq!(
+            widgets(&values(
+                &[
+                    ("family", "ordinal"),
+                    ("prior", "normal"),
+                    ("int_prior", "normal")
+                ],
+                &["age"]
+            )),
+            vec!["prior", "int_prior"]
+        );
+    }
+
+    fn code(set: &[(&str, &str)], x: &[&str], flags: &[&str]) -> String {
+        let mut v = values(set, x);
+        for f in flags {
+            v.set_flag(f, true);
+        }
+        let out = BAYESIAN_REGRESSION.generate(&ctx(), &v, Style::Base);
+        assert!(out.is_ok(), "{out:?}");
+        out.unwrap_or_default()
+    }
+
+    #[test]
+    fn writes_families_and_priors() {
+        let c = code(
+            &[
+                ("family", "neg_binomial"),
+                ("prior", "student_t"),
+                ("prior_mean", "0, 0.5"),
+                ("prior_sd", "0.5,1"),
+                ("prior_df", "3, 5"),
+                ("int_prior", "cauchy"),
+                ("int_mean", "0"),
+                ("int_sd", "5"),
+            ],
+            &["age", "arm span"],
+            &["prior_pd"],
+        );
+        assert!(
+            c.starts_with(
+                "bayes <- rstanarm::stan_glm(y ~ age + `arm span`, data = d, \
+                 family = rstanarm::neg_binomial_2(), \
+                 prior = rstanarm::student_t(df = c(3, 5), location = c(0, 0.5), scale = c(0.5, 1), autoscale = FALSE), \
+                 prior_intercept = rstanarm::cauchy(location = 0, scale = 5, autoscale = FALSE), \
+                 prior_PD = TRUE, chains = 4"
+            ) && c.contains("Prior summary (the data are not used)"),
+            "{c}"
+        );
+        let c = code(&[("family", "gamma")], &["age"], &[]);
+        assert!(c.contains("family = stats::Gamma(link = \"log\")"), "{c}");
+        let c = code(&[("family", "ordinal")], &["age"], &[]);
+        assert!(
+            c.starts_with(
+                "bayes <- local({\n  d <- d\n  d[[\"y\"]] <- if (is.ordered(d[[\"y\"]]))"
+            ) && c.contains("rstanarm::stan_polr(y ~ age, data = d, prior = NULL, chains = 4"),
+            "{c}"
+        );
+    }
+
+    fn model_ctx() -> Context {
+        Context {
+            dataset: "my fit".into(),
+            frames: Vec::new(),
+            columns: Vec::new(),
+        }
+    }
+
+    fn model_code(spec: &Spec, set: &[(&str, &str)]) -> Result<String, Vec<String>> {
+        let mut v = spec.defaults(&model_ctx());
+        for (id, text) in set {
+            v.set_text(id, *text);
+        }
+        spec.generate(&model_ctx(), &v, Style::Base)
+            .map_err(|p| p.iter().map(|p| p.message.clone()).collect())
+    }
+
+    #[test]
+    fn model_menu_dialogs_write_rstanarm() {
+        let c = model_code(
+            &POSTERIOR_PREDICTIONS,
+            &[("data", "d"), ("kind", "predict"), ("seed", "7")],
+        )
+        .unwrap_or_default();
+        assert!(
+            c.starts_with("d <- local({\n  fit <- `my fit`\n  nd <- d\n")
+                && c.contains(
+                    "rstanarm::posterior_predict(fit, newdata = nd[ok, , drop = FALSE], seed = 7)"
+                )
+                && c.contains("put(\"pred_upper\""),
+            "{c}"
+        );
+        assert!(model_code(&POSTERIOR_PREDICTIONS, &[]).is_err());
+        let c = model_code(&BAYES_CHECKS, &[]).unwrap_or_default();
+        assert!(
+            c.contains("print(plot(`my fit`, \"trace\"))")
+                && c.contains("rstanarm::pp_check(`my fit`, nreps = 50, seed = 1)")
+                && c.contains("stats <- list(mean = mean, sd = stats::sd)"),
+            "{c}"
+        );
+        let c = model_code(&BAYES_LOO, &[("others", "m2, m3")]).unwrap_or_default();
+        assert!(
+            c.contains("`my fit`$loo <- rstanarm::loo(`my fit`)")
+                && c.contains("m3$loo <- rstanarm::loo(m3)")
+                && c.contains("loos <- list(`my fit` = `my fit`$loo, m2 = m2$loo, m3 = m3$loo)")
+                && c.contains("loo::loo_compare(loos)"),
+            "{c}"
+        );
     }
 }
