@@ -24,7 +24,7 @@
 use std::time::{Duration, Instant};
 
 use rcraft_catalog::iv::{HECKMAN, IV_ML, IV_REGRESSION, TREATMENT_EFFECTS};
-use rcraft_catalog::postest::{self, MODEL_FIT, ROBUST};
+use rcraft_catalog::postest::{self, COMPARE_MODELS, MODEL_FIT, ROBUST};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Spec, Style, VarKind, Widget};
 use rcraft_rhost::{find_installs, Env, SessionConfig};
@@ -661,6 +661,15 @@ fn liml_and_gmm_match_ivregress() {
     let text = gmm(&mut e, "g", "hetero", "", &[]);
     assert!(text.contains("Hansen's J = 3.980823"), "{text}");
     gmm(&mut e, "gs", "hetero", "", &["small"]);
+    // no choice made: GMM is robust, as ivregress gmm, and LIML conventional
+    fit(&mut e, &[("estimator", "gmm"), ("save", "gd")], &x, &z, &[]);
+    fit(
+        &mut e,
+        &[("estimator", "liml"), ("save", "ld")],
+        &x,
+        &z,
+        &[],
+    );
     gmm(&mut e, "gu", "iid", "", &[]);
     gmm(&mut e, "gus", "iid", "", &["small"]);
     gmm(&mut e, "gc", "iid", "region", &[]);
@@ -752,6 +761,12 @@ fn liml_and_gmm_match_ivregress() {
                 "c(.0860876674412186, .0789254385562032, .973883116678474)",
             ),
             same(&b("gu"), &b("g")),
+            // the dialog's default errors are Stata's: GMM robust, LIML conventional
+            same(
+                &se("gd"),
+                "c(.0839159460935805, .0770453545788644, .94926125117524)",
+            ),
+            same(&se("ld"), &se("l")),
             same(
                 &b("gc"),
                 "c(.522334538671452, .567134273562958, 1.50976405113003)",
@@ -1073,7 +1088,7 @@ fn iv_models_have_the_model_menu() {
     };
     assert!(postest::is_model_class("fixest") && postest::is_model_class("selection"));
     assert_eq!(entries("fixest"), ["Model fit", "Robust standard errors"]);
-    assert_eq!(entries("selection"), ["Model fit"]);
+    assert_eq!(entries("selection"), ["Model fit", "Compare models"]);
     assert!(!postest::takes_model_table("selection"));
     // LIML, GMM, IV probit and tobit and treatment effects are plain lists
     assert!(!postest::is_model_class("list"));
@@ -1100,6 +1115,21 @@ fn iv_models_have_the_model_menu() {
                 ("save", save),
             ],
             &[("x", &["x", "z1"]), ("z", &["x", "kids", "dist", "z1"])],
+            &[],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+    }
+    // two nested fits by maximum likelihood to compare with hm: the selection
+    // equation without dist (hs), the earnings equation without z1 (h3)
+    for (save, x, z) in [
+        ("hs", &["x", "z1"][..], &["x", "kids", "z1"][..]),
+        ("h3", &["x"][..], &["x", "kids", "dist", "z1"][..]),
+    ] {
+        let (outcome, text) = dialog(
+            &mut e,
+            &HECKMAN,
+            &[("y", "earn"), ("selected", "works"), ("save", save)],
+            &[("x", x), ("z", z)],
             &[],
         );
         assert_eq!(outcome, Outcome::Ok, "{text}");
@@ -1149,4 +1179,49 @@ fn iv_models_have_the_model_menu() {
         text.contains("Observations: 118") && text.contains("two steps have no likelihood"),
         "{text}"
     );
+    // Compare models on Heckman fits: the written-out likelihood-ratio test.
+    // Stata 19, lrtest on heckman earn x z1, select(works = x kids dist z1)
+    // against select(works = x kids z1): chi2(1) 6.24266522995, p .01247087;
+    // against heckman earn x, select(works = x kids dist z1): 6.05000726123,
+    // p .01390624
+    let compare = |e: &mut Engine, others: &str| {
+        let ctx = Context {
+            dataset: "hm".into(),
+            frames: Vec::new(),
+            columns: Vec::new(),
+        };
+        let mut values = COMPARE_MODELS.defaults(&ctx);
+        values.set_text("others", others);
+        let code = COMPARE_MODELS.generate(&ctx, &values, Style::Base);
+        assert!(code.is_ok(), "{code:?}");
+        let (outcome, text) = run(
+            e,
+            Source::Menu(COMPARE_MODELS.menu.into()),
+            &code.unwrap_or_default(),
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        text
+    };
+    let text = compare(&mut e, "hs");
+    assert!(
+        text.contains("Likelihood-ratio test")
+            && text.contains("6.242665")
+            && text.contains("0.01247087"),
+        "{text}"
+    );
+    let text = compare(&mut e, "h3");
+    assert!(
+        text.contains("6.050007") && text.contains("0.01390624"),
+        "{text}"
+    );
+    holds(
+        &mut e,
+        &[
+            within("2 * (logLik(hm) - logLik(hs))", "6.24266522995", "1e-7"),
+            within("2 * (logLik(hm) - logLik(h3))", "6.05000726123", "1e-7"),
+        ],
+    );
+    // a two-step fit has no likelihood: a plain message, no R error
+    let text = compare(&mut e, "h2");
+    assert!(text.contains("fitted by maximum likelihood"), "{text}");
 }
