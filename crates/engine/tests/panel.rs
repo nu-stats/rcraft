@@ -1705,10 +1705,7 @@ fn panel_iv_matches_xtivreg() {
         lists,
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
-    assert!(
-        text.contains("Random Effect Model") && text.contains("Balestra-Varadharajan-Krishnakumar"),
-        "{text}"
-    );
+    assert!(text.contains("G2SLS random-effects IV"), "{text}");
     all_hold(
         &mut e,
         &[
@@ -1729,12 +1726,12 @@ fn panel_iv_matches_xtivreg() {
             ),
             // xtivreg y x1 (x2 = z1 z2), re (the default, g2sls); sigma_e, sigma_u
             same(
-                "c(coef(re)[c('x1', 'x2')], sqrt(diag(vcov(re)))[c('x1', 'x2')])",
+                "c(re$coefficients[c('x1', 'x2')], sqrt(diag(re$vcov))[c('x1', 'x2')])",
                 "c(.791934204721017, .860827501504644, sqrt(.00749753294577665), \
                    sqrt(.00871157019311366))",
             ),
             same(
-                "sqrt(plm::ercomp(re)$sigma2)",
+                "c(re$sigma_e, re$sigma_u)",
                 "c(1.03967201756119, .435188502337796)",
             ),
         ],
@@ -1856,7 +1853,7 @@ fn panel_iv_matches_xtivreg() {
         &[
             // xtivreg y x1 (x2 = z1 z2), re ec2sls
             same(
-                "c(coef(ec)[c('x2', 'x1', '(Intercept)')], diag(vcov(ec))[c('x2', 'x1')])",
+                "c(ec$coefficients[c('x2', 'x1', '(Intercept)')], diag(ec$vcov)[c('x2', 'x1')])",
                 "c(.897526784063384, .782649306376429, .966618539048477, \
                    .00835662234849417, .00732571742861951)",
             ),
@@ -2401,8 +2398,8 @@ fn panel_iv_nosa_regress_and_ec2sls_robust_match_xtivreg() {
     all_hold(
         &mut e,
         &[
-            // the direct EC2SLS fit has plm's coefficients
-            same("ecr$coefficients", "coef(ec)[names(ecr$coefficients)]"),
+            // the robust EC2SLS fit has the conventional one's coefficients
+            same("ecr$coefficients", "ec$coefficients"),
             // Stata 19: xtivreg y x1 (x2 = z1 z2), re ec2sls vce(robust): the
             // variances of x2, x1, _cons and the x2, x1 covariance
             same(
@@ -2472,10 +2469,92 @@ fn panel_iv_nosa_regress_and_ec2sls_robust_match_xtivreg() {
             ),
         ],
     );
-    // EC2SLS's instruments on an unbalanced panel are not Stata's yet: refused
-    let mut set = base.to_vec();
-    set.extend([("model", "ec2sls"), ("errors", "robust"), ("save", "ecr2")]);
-    let (outcome, text) = dialog2(&mut e, &unbalanced, &PANEL_IV, &set, lists);
-    assert_ne!(outcome, Outcome::Ok, "{text}");
-    assert!(text.contains("balanced panel"), "{text}");
+    // unbalanced, the default G2SLS and EC2SLS (small-fixes row 19): Stata's
+    // components, and EC2SLS's instruments (each instrument's within deviation
+    // plus its grand mean, its unit mean, and 1 - theta_i for the constant)
+    #[allow(clippy::type_complexity)]
+    let cases: &[(&str, &[(&str, &str)], &str)] = &[
+        // Stata 19 (made-up data, read as doubles): xtivreg y x1 (x2 = z1 z2), re:
+        // x2, x1, _cons, then V[x2, x2], V[x1, x1], V[_cons, _cons], V[x2, x1]
+        (
+            "g2",
+            &[("model", "random")],
+            "c(.835763795162944, .808521513088955, .988466640678397, .0107693882222733, \
+               .008455112436737, .0172926986529926, -.00297228406834773)",
+        ),
+        // ..., re vce(robust)
+        (
+            "g2r",
+            &[("model", "random"), ("errors", "robust")],
+            "c(.835763795162944, .808521513088955, .988466640678397, .00934127947421399, \
+               .006762917850276, .0295363573034669, -.0010204775835982)",
+        ),
+        // ..., re ec2sls
+        (
+            "ec2",
+            &[("model", "ec2sls")],
+            "c(.896447666674341, .791216963965724, .978268070114852, .0100965699017814, \
+               .00811675513691139, .0166362762750261, -.00278427046309351)",
+        ),
+        // ..., re ec2sls vce(robust)
+        (
+            "ecr2",
+            &[("model", "ec2sls"), ("errors", "robust")],
+            "c(.896447666674341, .791216963965724, .978268070114852, .00822969975231575, \
+               .00627766409664171, .0282469265108008, -.000995910864849725)",
+        ),
+        // ..., re ec2sls nosa
+        (
+            "ecn2",
+            &[("model", "ec2sls"), ("nosa", "true")],
+            "c(.906521000175449, .803804774284428, .974992027814495, .0102003302927038, \
+               .00818519616103752, .015496891611605, -.00289299867633724)",
+        ),
+        // ..., re ec2sls nosa vce(robust)
+        (
+            "ecnr2",
+            &[("model", "ec2sls"), ("nosa", "true"), ("errors", "robust")],
+            "c(.906521000175449, .803804774284428, .974992027814495, .00824245557905944, \
+               .00623386337662465, .0276207981320246, -.00102348444584387)",
+        ),
+    ];
+    let mut checks = Vec::new();
+    for (save, extra, want) in cases {
+        fit(&mut e, &unbalanced, extra, save);
+        checks.push(same(
+            &format!(
+                "c({save}$coefficients[c('x2', 'x1', '(Intercept)')], \
+                 diag({save}$vcov)[c('x2', 'x1', '(Intercept)')], {save}$vcov['x2', 'x1'])"
+            ),
+            want,
+        ));
+    }
+    // and the components: e(sigma_u), e(sigma_e)
+    checks.push(same(
+        "c(g2$sigma_u, g2$sigma_e, ec2$sigma_u, ec2$sigma_e)",
+        "c(.516321304896698, 1.04602956165648, .516321304896698, 1.04602956165648)",
+    ));
+    all_hold(&mut e, &checks);
+    // the small option: e(df_r) is N - p + 1 = 171, or the 30 units with robust errors
+    for (extra, df) in [
+        (&[("model", "ec2sls"), ("small", "true")][..], 171),
+        (
+            &[("model", "random"), ("small", "true"), ("nosa", "true")][..],
+            171,
+        ),
+        (
+            &[("model", "random"), ("small", "true"), ("regress", "true")][..],
+            171,
+        ),
+        (
+            &[("model", "ec2sls"), ("small", "true"), ("errors", "robust")][..],
+            30,
+        ),
+    ] {
+        let text = fit(&mut e, &unbalanced, extra, "sm");
+        assert!(
+            text.contains(&format!("t statistics, {df} degrees of freedom")),
+            "{extra:?} should have {df} degrees of freedom: {text}"
+        );
+    }
 }
