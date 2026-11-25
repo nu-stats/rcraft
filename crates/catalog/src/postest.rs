@@ -16,9 +16,12 @@ pub const MODEL_CLASSES: &[&str] = &[
     "lmerMod", "glmerMod", "survreg", "stanreg",
 ];
 
+/// The time-series models (P6.5), which take only Forecast.
+pub const TIME_SERIES_CLASSES: &[&str] = &["Arima", "HoltWinters"];
+
 /// Whether an object whose first class is `class` is a model these dialogs take.
 pub fn is_model_class(class: &str) -> bool {
-    MODEL_CLASSES.contains(&class)
+    MODEL_CLASSES.contains(&class) || TIME_SERIES_CLASSES.contains(&class)
 }
 
 /// Whether `class` is a panel model fitted by `plm` or `fixest`.
@@ -30,7 +33,7 @@ pub fn is_panel_class(class: &str) -> bool {
 /// `class`: every model class but `pgmm`, whose coefficients and covariance
 /// the table does not read.
 pub fn takes_model_table(class: &str) -> bool {
-    is_model_class(class) && class != "pgmm" && class != "stanreg"
+    is_model_class(class) && !matches!(class, "pgmm" | "stanreg" | "Arima" | "HoltWinters")
 }
 
 /// The dialogs offered on a model whose first class is `class`: all of
@@ -52,11 +55,14 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         "lmerMod" | "glmerMod" => vec![&MODEL_FIT, &crate::multilevel::ICC],
         // a Bayesian fit: posterior predictions, checks and loo (P6.9b)
         "stanreg" => crate::bayes::MODEL_SPECS.to_vec(),
+        // a time-series model: its forecasts (P6.5)
+        "Arima" | "HoltWinters" => vec![&crate::timeseries::FORECAST],
         _ => MODEL_SPECS
             .iter()
             .copied()
             .filter(|s| {
                 s.menu != crate::multilevel::ICC.menu
+                    && s.menu != crate::timeseries::FORECAST.menu
                     && !crate::bayes::MODEL_SPECS.iter().any(|b| b.menu == s.menu)
             })
             .collect(),
@@ -907,6 +913,7 @@ pub const MODEL_SPECS: &[&Spec] = &[
     &crate::bayes::POSTERIOR_PREDICTIONS,
     &crate::bayes::BAYES_CHECKS,
     &crate::bayes::BAYES_LOO,
+    &crate::timeseries::FORECAST,
 ];
 
 #[cfg(test)]
@@ -952,7 +959,10 @@ mod tests {
         assert_eq!(entries("plm"), ["Model fit", "Robust standard errors"]);
         assert_eq!(entries("fixest"), ["Model fit", "Robust standard errors"]);
         assert_eq!(entries("pgmm"), ["Model fit"]);
-        assert_eq!(model_specs("lm").len(), MODEL_SPECS.len() - 4);
+        assert_eq!(model_specs("lm").len(), MODEL_SPECS.len() - 5);
+        assert_eq!(entries("Arima"), ["Forecast"]);
+        assert_eq!(entries("HoltWinters"), ["Forecast"]);
+        assert!(!takes_model_table("Arima"));
         assert_eq!(
             entries("stanreg"),
             [

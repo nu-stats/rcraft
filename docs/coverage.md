@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 145 | 144 | 0 | 1 |
+| 150 | 149 | 0 | 1 |
 
 ## File
 
@@ -122,6 +122,11 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Intraclass correlation | verified |
 | ARIMA model | verified |
 | Autocorrelations | verified |
+| Unit-root test | verified |
+| Exponential smoothing | verified |
+| Vector autoregression | verified |
+| Forecast | verified |
+| Time-series plot | verified |
 | Model fit | verified |
 | Compare models | verified |
 | Predicted values and residuals | verified |
