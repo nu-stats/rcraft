@@ -476,6 +476,7 @@ pub const SPECS: &[&Spec] = &[
     &iv::HECKMAN,
     &multilevel::LINEAR_MIXED,
     &multilevel::GENERALIZED_MIXED,
+    &multilevel::TMB_MIXED,
     &timeseries::ARIMA,
     &timeseries::AUTOCORRELATIONS,
 ];

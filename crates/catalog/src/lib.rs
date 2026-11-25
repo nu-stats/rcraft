@@ -231,6 +231,8 @@ pub const ENTRIES: &[Entry] = &[
     verified("Heckman selection model", Area::Statistics),
     verified("Linear mixed model", Area::Statistics),
     verified("Logistic or Poisson mixed model", Area::Statistics),
+    verified("Mixed model (glmmTMB)", Area::Statistics),
+    verified("Intraclass correlation", Area::Statistics),
     verified("ARIMA model", Area::Statistics),
     verified("Autocorrelations", Area::Statistics),
     verified("Model fit", Area::Statistics),

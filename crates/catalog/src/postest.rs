@@ -49,8 +49,12 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         "coxph" | "survreg" => vec![&MODEL_FIT, &COMPARE_MODELS],
         // a mixed model: its fit statistics only (the other dialogs need an
         // lm or glm object)
-        "lmerMod" | "glmerMod" => vec![&MODEL_FIT],
-        _ => MODEL_SPECS.to_vec(),
+        "lmerMod" | "glmerMod" => vec![&MODEL_FIT, &crate::multilevel::ICC],
+        _ => MODEL_SPECS
+            .iter()
+            .copied()
+            .filter(|s| s.menu != crate::multilevel::ICC.menu)
+            .collect(),
     }
 }
 
@@ -894,6 +898,7 @@ pub const MODEL_SPECS: &[&Spec] = &[
     &SUMS_OF_SQUARES,
     &CONTRASTS,
     &MARGINAL_EFFECTS,
+    &crate::multilevel::ICC,
 ];
 
 #[cfg(test)]
@@ -939,7 +944,8 @@ mod tests {
         assert_eq!(entries("plm"), ["Model fit", "Robust standard errors"]);
         assert_eq!(entries("fixest"), ["Model fit", "Robust standard errors"]);
         assert_eq!(entries("pgmm"), ["Model fit"]);
-        assert_eq!(model_specs("lm").len(), MODEL_SPECS.len());
+        assert_eq!(model_specs("lm").len(), MODEL_SPECS.len() - 1);
+        assert_eq!(entries("lmerMod"), ["Model fit", "Intraclass correlation"]);
         assert!(is_panel_class("plm") && !is_panel_class("lm"));
         for class in ["data.frame", "tbl_df", "function", "numeric", ""] {
             assert!(!is_model_class(class), "{class}");
