@@ -382,6 +382,31 @@ fn test_terms_gives_the_tests_r_gives() {
     assert!(text.contains("not terms of the model"), "{text}");
 }
 
+/// Fit statistics, Average marginal effects and Compare models on an object
+/// that is not a model say so in the dialog's own words, not R's
+/// "no 'nobs' method is available" (SW4).
+#[test]
+fn a_non_model_gets_a_clear_message_from_fit_marginal_effects_and_compare() {
+    let Some(mut e) = started() else { return };
+    for (spec, set) in [
+        (&MODEL_FIT, vec![]),
+        (&MARGINAL_EFFECTS, vec![]),
+        (&COMPARE_MODELS, vec![("others", "m1")]),
+    ] {
+        let (outcome, text) = on_model(&mut e, spec, "d", &set, &[]);
+        assert_ne!(outcome, Outcome::Ok, "{}: {text}", spec.entry);
+        assert!(
+            text.contains("fitted model"),
+            "{}: the message should say what the dialog takes: {text}",
+            spec.entry
+        );
+        assert!(!text.contains("nobs"), "{}: {text}", spec.entry);
+    }
+    // a real model still runs
+    let (outcome, text) = on_model(&mut e, &MODEL_FIT, "m1", &[], &[]);
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+}
+
 /// Marginal effects need the marginaleffects package; skipped with a note
 /// where it is missing (CI installs it).
 #[test]

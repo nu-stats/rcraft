@@ -95,6 +95,27 @@ fn linear_guard(model: &str) -> String {
     LINEAR_ONLY.replace("{m}", model)
 }
 
+/// The first-line check of the dialogs that take any fitted model: R's own
+/// error for a data frame or a number would be "no 'nobs' method is available".
+/// `test` is an R expression that is TRUE when the object (or objects) is a model.
+fn any_model_guard(test: &str, what: &str) -> String {
+    format!("stopifnot(\"{what}\" = {test})")
+}
+
+/// R vector of every class the model dialogs take.
+fn model_class_vector() -> String {
+    let names: Vec<String> = MODEL_CLASSES
+        .iter()
+        .chain(SELECTION_CLASSES)
+        .chain(SEM_CLASSES)
+        .map(|c| r_string(c))
+        .collect();
+    format!("c({})", names.join(", "))
+}
+
+const FITTED_MODELS: &str = "this works for fitted models (linear, generalised linear, panel, \
+                             survival, mixed, Bayesian, Heckman and structural equation models)";
+
 // ---- Model fit ----
 
 pub const MODEL_FIT: Spec = Spec {
@@ -114,8 +135,12 @@ pub const MODEL_FIT: Spec = Spec {
     check: |_| Vec::new(),
     code: |a, _| {
         let m = a.data();
+        let guard = any_model_guard(
+            &format!("inherits({m}, {})", model_class_vector()),
+            FITTED_MODELS,
+        );
         format!(
-            "(function(m) {{\n  if (inherits(m, \"lavaan\")) {{\n    \
+            "{guard}\n(function(m) {{\n  if (inherits(m, \"lavaan\")) {{\n    \
              print(lavaan::fitMeasures(m, c(\"ntotal\", \"npar\", \"logl\", \"aic\", \"bic\")))\n    \
              return(invisible(NULL))\n  }}\n  cat(\"Observations: \", if (inherits(m, \"coxph\")) m$n else stats::nobs(m), \
              \"\\n\", sep = \"\")\n  \
@@ -246,7 +271,18 @@ pub const COMPARE_MODELS: Spec = Spec {
                  print(do.call(stats::anova, c(unname(models), test)))\n",
             );
         }
-        format!("(function(models) {{\n{body}}})(list({}))", list.join(", "))
+        let guard = any_model_guard(
+            &format!(
+                "all(vapply(models, inherits, logical(1), {}))",
+                model_class_vector()
+            ),
+            "every object compared must be a fitted model (linear, generalised linear, panel, \
+             survival, mixed, Heckman or structural equation)",
+        );
+        format!(
+            "(function(models) {{\n  {guard}\n{body}}})(list({}))",
+            list.join(", ")
+        )
     },
 };
 
@@ -689,9 +725,13 @@ pub const MARGINAL_EFFECTS: Spec = Spec {
     styles: BASE,
     check: |_| Vec::new(),
     code: |a, _| {
+        let m = a.data();
+        let guard = any_model_guard(
+            &format!("inherits({m}, {})", model_class_vector()),
+            FITTED_MODELS,
+        );
         format!(
-            "print(marginaleffects::avg_slopes({}, conf_level = {}))",
-            a.data(),
+            "{guard}\nprint(marginaleffects::avg_slopes({m}, conf_level = {}))",
             a.choice("conf")
         )
     },
@@ -1175,7 +1215,38 @@ mod tests {
         );
         assert_eq!(
             make(&MARGINAL_EFFECTS, "my fit", &[("conf", "0.9")]).unwrap_or_default(),
-            "print(marginaleffects::avg_slopes(`my fit`, conf_level = 0.9))"
+            "stopifnot(\"this works for fitted models (linear, generalised linear, panel, \
+             survival, mixed, Bayesian, Heckman and structural equation models)\" = \
+             inherits(`my fit`, c(\"lm\", \"glm\", \"aov\", \"negbin\", \"polr\", \"multinom\", \
+             \"plm\", \"pgmm\", \"fixest\", \"svyglm\", \"coxph\", \"lmerMod\", \"glmerMod\", \
+             \"survreg\", \"stanreg\", \"selection\", \"lavaan\")))\n\
+             print(marginaleffects::avg_slopes(`my fit`, conf_level = 0.9))"
+        );
+    }
+
+    #[test]
+    fn fit_statistics_and_compare_start_with_a_clear_model_check() {
+        let fit = make(&MODEL_FIT, "my model", &[]).unwrap_or_default();
+        assert!(
+            fit.starts_with(
+                "stopifnot(\"this works for fitted models (linear, generalised linear, panel, \
+                 survival, mixed, Bayesian, Heckman and structural equation models)\" = \
+                 inherits(`my model`, c(\"lm\", "
+            ),
+            "{fit}"
+        );
+        assert!(
+            fit.contains("\"selection\", \"lavaan\")))\n(function(m) {"),
+            "{fit}"
+        );
+        let cmp = make(&COMPARE_MODELS, "m1", &[("others", "m2")]).unwrap_or_default();
+        assert!(
+            cmp.starts_with(
+                "(function(models) {\n  stopifnot(\"every object compared must be a fitted model \
+                 (linear, generalised linear, panel, survival, mixed, Heckman or structural \
+                 equation)\" = all(vapply(models, inherits, logical(1), c(\"lm\", "
+            ),
+            "{cmp}"
         );
     }
 
