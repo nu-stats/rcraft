@@ -115,6 +115,23 @@ stata_tab2_print <- function(rname, cname, rlabs, clabs, counts, chi2 = NULL) {
   }
   invisible(NULL)
 }
+# a factor or character column made in R has no numeric codes (a name such as b.g, not 2.g):
+# its levels are numbered in order and labelled by their text, as a labelled variable's
+# values are, so its rows are laid out the same way. NULL for any other column.
+stata_level_set <- function(col) {
+  lv <- if (is.factor(col)) levels(col) else if (is.character(col)) sort(unique(col)) else NULL
+  if (length(lv) && any(!grepl("^[0-9]+$", lv))) lv else NULL
+}
+stata_level_codes <- function(nm, data) {
+  one <- "^([^.#]+)\\.([A-Za-z_][A-Za-z0-9_]*)$"
+  vapply(nm, function(n) {
+    m <- regmatches(n, regexec(one, n))[[1]]
+    if (length(m) != 3) return(n)
+    lv <- tryCatch(stata_level_set(data[[m[3]]]), error = function(e) NULL)
+    i <- if (is.null(lv)) NA_integer_ else match(m[2], lv)
+    if (is.na(i)) n else paste0(i, ".", m[3])
+  }, "", USE.NAMES = FALSE)
+}
 # regress's coefficient rows from e(b)'s names: a factor with one level
 # shown inline (1.g), one with more or with value labels, two factors
 # interacted (cells 2 1, or 2#yes with labels) and any interaction with a
@@ -123,12 +140,19 @@ stata_tab2_print <- function(rname, cname, rlabs, clabs, counts, chi2 = NULL) {
 stata_coef_rows <- function(nm, data = NULL) {
   # the model's rows: stata_data (kept by one-outcome fits, read only when needed), or those given
   rows_of <- function() if (is.null(data)) stata_data else data
+  # names as Stata would write them for an R-made factor; `col` is given back as it was
+  orig <- nm
+  nm <- tryCatch(stata_level_codes(nm, rows_of()), error = function(e) nm)
   one_f <- "^([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)$"
   two_f <- "^([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)#([0-9]+)([bo]?)\\.([A-Za-z_][A-Za-z0-9_]*)$"
   f_c <- "^[0-9]+\\.[A-Za-z_][A-Za-z0-9_]*(#c\\.[A-Za-z_][A-Za-z0-9_]*)+$"
   parts <- function(n, re) regmatches(n, regexec(re, n))[[1]]
   # a value's label (the data's value labels), or the value itself
-  labs <- function(v) attr(rows_of()[[v]], "labels")
+  labs <- function(v) {
+    col <- rows_of()[[v]]
+    lv <- stata_level_set(col)
+    if (is.null(lv)) attr(col, "labels") else stats::setNames(seq_along(lv), lv)
+  }
   lab <- function(v, l) {
     s <- labs(v)
     i <- if (is.null(s)) NA else match(as.numeric(l), as.numeric(s))
@@ -159,8 +183,9 @@ stata_coef_rows <- function(nm, data = NULL) {
   keys <- vapply(shown, key, "")
   terms <- list()
   seen <- character(0)
-  for (n in shown) {
-    k <- keys[[n]]
+  for (i in seq_along(shown)) {
+    n <- shown[[i]]
+    k <- keys[[i]]
     if (is.na(k)) {
       plain <- sub("^o\\.", "", n)
       # an interaction of continuous variables (c.x#c.w): a row of its own between separators,
@@ -242,7 +267,11 @@ stata_coef_rows <- function(nm, data = NULL) {
     if (i > 1 && (terms[[i]]$big || terms[[i - 1]]$big)) out[[length(out) + 1]] <- list(kind = "blank")
     out <- c(out, terms[[i]]$rows)
   }
-  out
+  # the columns as they were named
+  lapply(out, function(r) {
+    if (!is.null(r$col)) r$col <- orig[match(r$col, nm)]
+    r
+  })
 }
 # regress as Stata prints it, from e(); FALSE when its shape was not checked
 stata_regress_print <- function(level = 0.95) {
