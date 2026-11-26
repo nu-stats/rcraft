@@ -226,8 +226,10 @@ fn sample_text(id: &str, rule: TextRule) -> Option<&'static str> {
 /// Values for the example: the dialog's defaults, a different fitting column
 /// in every required variable box (starting `shift` columns along, so a
 /// dialog that refuses one pairing gets another), and a plausible word in a
-/// box that must not be empty. `file` goes in the save-path box.
-fn sample_values(spec: &Spec, ctx: &Context, shift: usize, file: &str) -> Values {
+/// box that must not be empty. `file` goes in the save-path box. With `every`,
+/// the optional variable boxes get a column too (for a dialog whose boxes are
+/// all optional, each needed by one of its choices).
+fn sample_values(spec: &Spec, ctx: &Context, shift: usize, file: &str, every: bool) -> Values {
     let mut values = spec.defaults(ctx);
     let mut order: Vec<&ColumnInfo> = ctx.columns.iter().collect();
     let turn = shift.checked_rem(order.len()).unwrap_or(0);
@@ -241,7 +243,7 @@ fn sample_values(spec: &Spec, ctx: &Context, shift: usize, file: &str) -> Values
                 required,
                 ..
             } => {
-                if required {
+                if required || every {
                     if let Some(name) = pick(&order, kinds, &mut used) {
                         values.set_text(id, name);
                     }
@@ -312,11 +314,13 @@ const SAMPLE_FILES: &[&str] = &[
 
 /// The first values for which `spec` writes code in `style`, with that code.
 fn sample_code(spec: &Spec, ctx: &Context, style: Style) -> Option<String> {
-    for shift in 0..ctx.columns.len().max(1) {
-        for file in SAMPLE_FILES {
-            let values = sample_values(spec, ctx, shift, file);
-            if let Ok(code) = spec.generate(ctx, &values, style) {
-                return Some(code);
+    for every in [false, true] {
+        for shift in 0..ctx.columns.len().max(1) {
+            for file in SAMPLE_FILES {
+                let values = sample_values(spec, ctx, shift, file, every);
+                if let Ok(code) = spec.generate(ctx, &values, style) {
+                    return Some(code);
+                }
             }
         }
     }

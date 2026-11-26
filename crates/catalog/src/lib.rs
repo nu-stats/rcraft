@@ -14,6 +14,7 @@ pub mod generalised;
 pub mod graphs;
 pub mod inference;
 pub mod iv;
+pub mod meta;
 pub mod models;
 pub mod multilevel;
 pub mod multivariate;
@@ -236,6 +237,7 @@ pub const ENTRIES: &[Entry] = &[
     verified("Heckman selection model", Area::Statistics),
     verified("Treatment effects", Area::Statistics),
     verified("Structural equation model", Area::Statistics),
+    verified("Meta-analysis", Area::Statistics),
     verified("Linear mixed model", Area::Statistics),
     verified("Logistic or Poisson mixed model", Area::Statistics),
     verified("Mixed model (glmmTMB)", Area::Statistics),

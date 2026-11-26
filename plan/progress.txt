@@ -109,7 +109,7 @@ P6.2 | done | 2026-11-27 | entry: Mixed model (glmmTMB); entry: Intraclass corre
 P6.5 | done | 2026-11-27 | entry: Unit-root test; entry: Exponential smoothing; entry: Vector autoregression; entry: Forecast; entry: Time-series plot; test: crates/engine/tests/timeseries.rs::seasonal_arima_matches_stata; test: crates/engine/tests/timeseries.rs::arimax_matches_stata
 P6.6 | done | 2026-11-28 | entry: IV probit or tobit; entry: Treatment effects; test: crates/engine/tests/iv.rs::liml_and_gmm_match_ivregress; test: crates/engine/tests/iv.rs::iv_models_have_the_model_menu
 P6.10 | done | 2026-11-28 | entry: Structural equation model; test: crates/engine/tests/sem.rs::one_factor_and_its_outcome_match_stata_sem; test: crates/engine/tests/sem.rs::two_factors_with_an_observed_predictor_match_stata_sem; test: crates/engine/tests/sem.rs::missing_values_and_a_path_model_match_stata_sem; test: crates/engine/tests/sem.rs::lavaan_defaults_are_lavaan_sem_by_hand_and_the_model_menu_works
-P6.11 | open | 2026-11-29 | entry: Meta-analysis
+P6.11 | done | 2026-11-29 | entry: Meta-analysis; test: crates/engine/tests/meta.rs::hedges_g_matches_stata_meta_summarize_and_meta_bias; test: crates/engine/tests/meta.rs::odds_and_risk_ratios_match_stata_with_mantel_haenszel; test: crates/engine/tests/meta.rs::given_estimates_and_a_missing_study_match_stata
 P6.12 | open | 2026-11-29 | entry: Machine learning model
 P6.9 | done | 2026-11-30 | entry: Bayesian regression; test: crates/engine/tests/bayes.rs::bayesian_regression_matches_exact_posterior_and_stata; test: crates/engine/tests/bayes.rs::logit_and_poisson_models_match_maximum_likelihood
 P2A.6 | open | 2026-12-01 | entry: RCraft manual; test: crates/ui-egui/src/help_window.rs::manual_pages_are_found_by_search
