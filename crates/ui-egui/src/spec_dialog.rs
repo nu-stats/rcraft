@@ -93,8 +93,7 @@ impl SpecDialog {
         self.folder = folder;
     }
 
-    #[cfg(test)]
-    fn is_open(&self) -> bool {
+    pub fn is_open(&self) -> bool {
         self.open.is_some()
     }
 
@@ -170,6 +169,7 @@ impl SpecDialog {
         ctx: &egui::Context,
         pal: &Palette,
         engine: Option<&mut Engine>,
+        cran: &dyn Fn(&str) -> Option<String>,
     ) -> Option<SpecAction> {
         let SpecDialog { open, packages, .. } = self;
         let open = open.as_mut()?;
@@ -244,7 +244,7 @@ impl SpecDialog {
                     );
                 }
                 if checked {
-                    if let Some(code) = packages.panel(ui, pal, &needed) {
+                    if let Some(code) = packages.panel(ui, pal, &needed, cran) {
                         install = Some(code);
                     }
                 }
@@ -619,7 +619,7 @@ mod tests {
         let pal = Palette::new(crate::look::Accent::default(), false);
         let mut out = None;
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            out = match dialog.show(ctx, &pal, None) {
+            out = match dialog.show(ctx, &pal, None, &|_| None) {
                 Some(SpecAction::Run(run)) => Some(run),
                 _ => None,
             };

@@ -436,3 +436,114 @@ fn a_data_frame_named_e_still_gets_its_estimation_sample() {
     );
     assert_eq!(got, [19.0, 3.0, 19.0]);
 }
+
+/// SW5: a fit that fails leaves the last model as it was, as in Stata, where a
+/// failed command leaves e() alone, so `predict` and `_b[]` still work.
+#[test]
+fn a_failed_fit_leaves_the_earlier_model_in_place() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let mut live = rcraft_statatr::live::Live::new();
+    let mut step = |e: &mut Engine, line: &str| {
+        let mut s = live.step(line);
+        // a value only R knows (the data's column names): asked, then stepped again
+        while let Some(q) = s.ask.clone() {
+            let (o, t) = run(e, &q);
+            live.give(if o == Outcome::Ok { Ok(t) } else { Err(t) });
+            s = live.step(line);
+        }
+        assert!(!s.code.trim().is_empty(), "no R for {line}: {s:?}");
+        run(e, &s.code)
+    };
+    let (o, t) = step(&mut e, &format!("use \"{dir}/panel.dta\""));
+    assert_eq!(o, Outcome::Ok, "{t}");
+    let (o, t) = step(&mut e, "regress y x w");
+    assert_eq!(o, Outcome::Ok, "{t}");
+    let before = numbers(&mut e, "0", "unname(stats::coef(stata_estimates))");
+    // y is not a 0/1 outcome: R stops in the fit (or Stata's own error does)
+    let (o, t) = step(&mut e, "logit y x");
+    assert_eq!(o, Outcome::Error, "the fit should fail: {t}");
+    let after = numbers(&mut e, "0", "unname(stats::coef(stata_estimates))");
+    assert_eq!(before, after);
+    let (o, t) = step(&mut e, "predict yhat");
+    assert_eq!(o, Outcome::Ok, "predict after the failed fit: {t}");
+    let (o, t) = step(&mut e, "display _b[x]");
+    assert_eq!(o, Outcome::Ok, "{t}");
+    close(
+        at(
+            &numbers(&mut e, "0", "unname(stats::coef(stata_estimates))[2]"),
+            0,
+        ),
+        at(&before, 1),
+        1e-12,
+        "_b[x]",
+    );
+    // a fit that works replaces it
+    let (o, t) = step(&mut e, "regress y x");
+    assert_eq!(o, Outcome::Ok, "{t}");
+    let now = numbers(&mut e, "0", "length(stats::coef(stata_estimates))");
+    assert_eq!(at(&now, 0), 2.0);
+}
+
+/// SW6: a variable the data lack, in `by`, `keep`, `drop`, `collapse`, `egen`'s
+/// `by()` or an `if`, says so in Stata's words and changes nothing, instead of
+/// a raw dplyr error; lines that name real variables still run.
+#[test]
+fn a_missing_variable_anywhere_in_a_line_says_so_and_changes_nothing() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    let mut live = rcraft_statatr::live::Live::new();
+    let mut step = |e: &mut Engine, line: &str| {
+        let mut s = live.step(line);
+        while let Some(q) = s.ask.clone() {
+            let (o, t) = run(e, &q);
+            live.give(if o == Outcome::Ok { Ok(t) } else { Err(t) });
+            s = live.step(line);
+        }
+        assert!(!s.code.trim().is_empty(), "no R for {line}: {s:?}");
+        run(e, &s.code)
+    };
+    let (o, t) = step(&mut e, &format!("use \"{dir}/panel.dta\""));
+    assert_eq!(o, Outcome::Ok, "{t}");
+    for line in [
+        "egen m = mean(x), by(nosuch)",
+        "bysort nosuch: summarize x",
+        "keep x nosuch",
+        "drop nosuch",
+        "drop if nosuch > 0",
+        "collapse (mean) y, by(nosuch)",
+        "count if nosuch > 1",
+        "egen m = mean(nosuch)",
+        "summarize x if nosuch > 1",
+        "regress y x, vce(cluster nosuch)",
+    ] {
+        let (o, t) = step(&mut e, line);
+        assert_eq!(o, Outcome::Error, "{line}: {t}");
+        assert!(
+            t.contains("variable nosuch not found (Stata: r(111))"),
+            "{line}: {t}"
+        );
+        assert!(
+            !t.contains("dplyr") && !t.contains("object '"),
+            "{line}: {t}"
+        );
+    }
+    // nothing changed: still twenty rows and the same columns
+    let shape = numbers(&mut e, "0", "c(nrow(panel), ncol(panel))");
+    assert_eq!(shape, [20.0, 6.0]);
+    // lines that name real variables run
+    for line in [
+        "egen m = mean(x), by(cl)",
+        "bysort cl: summarize x",
+        "generate q = log(w) * 2 if x > 3 & _n < 15",
+        "count if x > 3 & cl != 2",
+        "scalar cut = 5",
+        "count if x > cut",
+        "collapse (mean) y, by(cl)",
+        "keep y cl",
+        "drop if cl > 4",
+    ] {
+        let (o, t) = step(&mut e, line);
+        assert_eq!(o, Outcome::Ok, "{line}: {t}");
+    }
+}
