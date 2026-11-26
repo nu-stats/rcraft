@@ -97,7 +97,7 @@ impl Live {
         if !keep {
             // a block left open, or a line the reader cannot take: answered on its own
             let t = run(text);
-            let code = t.lines.iter().map(Line::script).collect();
+            let code = t.lines.iter().map(shown).collect();
             return Step {
                 lines: t.lines,
                 code,
@@ -137,7 +137,7 @@ impl Live {
         let lines: Vec<Line> = t.lines.get(self.done..).unwrap_or_default().to_vec();
         let (mut code, helpers) = self.helpers_code(&t.helpers);
         for l in &lines {
-            code.push_str(&l.script());
+            code.push_str(&shown(l));
         }
         self.done = t.lines.len();
         self.source = whole;
@@ -286,6 +286,21 @@ fn ends_text(t: &Translation, whole: &str) -> bool {
     matches!((last, end), (Some(a), Some(b)) if b >= a)
 }
 
+/// A line's script for a typed step: a line that is not translated also gives
+/// R a warning with its reason, so Results shows it as a notice instead of the
+/// line quietly doing nothing.
+fn shown(l: &Line) -> String {
+    let mut s = l.script();
+    if let Err(e) = &l.result {
+        let text = format!("RCraft did not run this line: {}", e.reason)
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', " ");
+        s.push_str(&format!("warning(\"{text}\", call. = FALSE)\n"));
+    }
+    s
+}
+
 /// The name a helper defines (`stata_fmt <- function` is `stata_fmt`).
 fn helper_name(code: &str) -> Option<&str> {
     let (name, _) = code.split_once(" <- ")?;
@@ -309,6 +324,22 @@ mod tests {
                 _ => return s,
             }
         }
+    }
+
+    #[test]
+    fn a_line_not_translated_gives_r_a_warning_with_its_reason() {
+        let mut live = Live::new();
+        let s = live.step("sysuse auto");
+        assert!(s.code.contains("# Stata: sysuse auto\n"), "{}", s.code);
+        assert!(
+            s.code.contains(
+                "warning(\"RCraft did not run this line: sysuse loads Stata's example datasets"
+            ),
+            "{}",
+            s.code
+        );
+        let s = live.step("summary price");
+        assert!(s.code.contains("did you mean summarize?"), "{}", s.code);
     }
 
     #[test]

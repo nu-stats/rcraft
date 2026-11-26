@@ -850,6 +850,14 @@ impl App {
                     self.stata.held.push((source, text));
                     return;
                 }
+                // help <command>: RCraft's own guide, nothing for R to run
+                if let Some(target) = stata_mode::help_target(&text) {
+                    if source == Source::Typed {
+                        self.stata.typed(text.trim());
+                    }
+                    self.help_window.show_stata(&target);
+                    return;
+                }
                 let mut offer = Vec::new();
                 if let EngineState::Ready(engine) = &mut self.engine {
                     // the translator moves on only if R takes the line
@@ -4970,6 +4978,95 @@ mod tests {
         run(&mut app, "summarize q");
         run(&mut app, "display r(mean)");
         assert!(newest_text(&app).contains("15"), "{}", newest_text(&app));
+    }
+
+    #[test]
+    fn stata_mode_says_why_and_keeps_the_model_when_a_line_fails() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("rcraft-stata-sw3-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir
+            .join("cars.dta")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                format!(
+                    "stopifnot(requireNamespace(\"haven\", quietly = TRUE), requireNamespace(\"dplyr\", quietly = TRUE)); \
+                     haven::write_dta(data.frame(x = c(1, 2, 3, 5), z = c(2, 1, 4, 3), y = c(2, 4, 7, 8)), \"{file}\")"
+                ),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let made = app
+            .engine()
+            .and_then(|e| e.history().entries().last().and_then(|h| h.outcome));
+        if made != Some(Outcome::Ok) {
+            eprintln!("skipped: haven and dplyr are needed");
+            return;
+        }
+        app.perform(&ctx, Action::SetStataMode(true));
+        // everything the newest block printed or said, and how it ended
+        let run = |app: &mut App, line: &str| -> (String, Option<Outcome>) {
+            app.perform(&ctx, Action::SubmitStata(Source::Typed, line.to_string()));
+            assert!(frames_until(app, &ctx, |a| a.is_settled()), "{line}");
+            let mut out = String::new();
+            let mut outcome = None;
+            if let Some(block) = app.engine().and_then(|e| e.results().blocks().last()) {
+                outcome = block.outcome;
+                for item in &block.items {
+                    match item {
+                        Item::Text { text, .. } => out.push_str(text),
+                        Item::Warning(m) => out.push_str(&format!("Warning: {m}\n")),
+                        Item::Error { message, .. } => out.push_str(&format!("Error: {message}\n")),
+                        _ => {}
+                    }
+                }
+            }
+            (out, outcome)
+        };
+        run(&mut app, &format!("use \"{file}\""));
+        let (_, o) = run(&mut app, "regress y x z");
+        assert_eq!(o, Some(Outcome::Ok));
+        // a variable the data lack: Stata's r(111), and the model before stays
+        let (text, o) = run(&mut app, "regress y nosuchvar");
+        assert_ne!(o, Some(Outcome::Ok), "{text}");
+        assert!(text.contains("variable nosuchvar not found"), "{text}");
+        assert!(!text.contains("object 'nosuchvar'"), "{text}");
+        let (text, o) = run(&mut app, "predict p");
+        assert_eq!(o, Some(Outcome::Ok), "{text}");
+        assert!(!text.contains("stata_estimates"), "{text}");
+        let (text, _) = run(&mut app, "tabulate nosuchvar");
+        assert!(text.contains("variable nosuchvar not found"), "{text}");
+        // list leaves no warning about its separator column
+        let (text, o) = run(&mut app, "list x in 1/2");
+        assert_eq!(o, Some(Outcome::Ok), "{text}");
+        assert!(!text.contains("stata_sep_"), "{text}");
+        // a line that is not translated shows its reason in Results
+        let (text, _) = run(&mut app, "sysuse auto");
+        assert!(text.contains("Stata's example datasets"), "{text}");
+        assert!(text.contains("File > Use my file"), "{text}");
+        let (text, _) = run(&mut app, "summary x");
+        assert!(text.contains("summary is not a Stata command"), "{text}");
+        assert!(text.contains("did you mean summarize?"), "{text}");
+        // help <command> opens the guide's page and sends R nothing
+        app.perform(
+            &ctx,
+            Action::SubmitStata(Source::Typed, "help summarize".into()),
+        );
+        assert!(app.help_window.open);
+        assert_eq!(app.help_window.shown_stata(), Some("summarize"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

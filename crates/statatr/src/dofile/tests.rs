@@ -1057,6 +1057,16 @@ fn errors_are_printed_in_statas_words() {
         "x not found\nr(111);"
     );
     assert_eq!(
+        stata_error_text(
+            "Can't select columns that don't exist.\n\u{2716} Column `nosuchvar` doesn't exist."
+        ),
+        "variable nosuchvar not found\nr(111);"
+    );
+    assert_eq!(
+        stata_error_text("Can't combine `x` <character> and `y` <double>."),
+        "type mismatch\nr(109);"
+    );
+    assert_eq!(
         stata_error_text("variable nosuch not found (Stata: r(111))"),
         "variable nosuch not found\nr(111);"
     );
