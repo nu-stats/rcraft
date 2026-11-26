@@ -15,11 +15,18 @@
 //! - `meta bias, egger` (after REML, after DerSimonian-Laird, and after
 //!   Mantel-Haenszel, where Stata uses the inverse-variance model) and
 //!   `meta bias, egger traditional`: the slope on the standard error, its
-//!   standard error, the test statistic and its p-value.
+//!   standard error, the test statistic and its p-value;
+//! - (P6.11b) Stata's default Hedges's g (approximate correction) with every
+//!   tau² estimator (`random(reml)`, `mle`, `ebayes`, `pmandel`, `hedges`,
+//!   `sjonkman`, `dlaird`), `se(khartung)` and `predinterval`;
+//!   `esize(cohend)` and `esize(glassdelta2)`; `esize(rdiff)` (no half
+//!   counts; Mantel-Haenszel with the Greenland-Robins standard error) and
+//!   `esize(lnorpeto)`; each study's effect size and standard error.
 //!
-//! DerSimonian-Laird, the fixed effects and the tests on them agree to 1e-9.
-//! REML is iterated: Stata and metafor each stop within about 3e-6 of the
-//! maximum, so REML figures are held to 1e-5.
+//! DerSimonian-Laird, Hedges, Sidik-Jonkman, the fixed effects and the tests
+//! on them agree to 1e-9. REML, ML, empirical Bayes and Paule-Mandel are
+//! iterated: Stata and metafor each stop within about 3e-6 of the solution,
+//! so their figures are held to 1e-5.
 //!
 //! The test records the R and metafor versions it ran with (AGENTS.md
 //! section 5), and checks R is the one `ENVIRONMENT` pins.
@@ -226,7 +233,12 @@ fn fits_match(e: &mut Engine, measure: &str, save: &str, stata: &[(&str, &str)])
         );
         assert_eq!(outcome, Outcome::Ok, "{text}");
         assert!(text.contains("Test for Heterogeneity"), "{text}");
-        let tol = if *method == "REML" { "1e-5" } else { "1e-9" };
+        // the iterated estimators of tau² stop short of the maximum in both
+        let tol = if matches!(*method, "REML" | "ML" | "EB" | "PM") {
+            "1e-5"
+        } else {
+            "1e-9"
+        };
         checks.push(format!("near(figs({name}), c({values}), {tol})"));
     }
     holds(e, &checks);
@@ -284,11 +296,11 @@ fn hedges_g_matches_stata_meta_summarize_and_meta_bias() {
             ),
         ],
     );
-    // the default REML fit with both plots and Egger's test
+    // the REML fit with both plots and Egger's test
     let (outcome, text, plots) = dialog(
         &mut e,
         "md",
-        &[("label", "study"), ("egger", "model")],
+        &[("measure", "SMD"), ("label", "study"), ("egger", "model")],
         &[("funnel", true)],
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
@@ -465,6 +477,261 @@ fn given_estimates_and_a_missing_study_match_stata() {
              61.749767038037561, 2.6143631621654171, 27.010342539367606, .25555575511447215, \
              .62900161905248142), 1e-5)"
                 .into(),
+        ],
+    );
+}
+
+/// Hedges's g as Stata's default `meta esize` (approximate correction).
+const G_REML: &str = ".25881003882646675, .092330886239529425, .081099022652641892, \
+     69.934047556771844, 3.3260213588385188, 48.239367508140369, .077844827136324235, \
+     .43977525051660926";
+const G_DL: &str = ".25947342943252372, .097452474704541922, .094511939320034322, \
+     73.051056281353084, 3.7107205775492589, 48.239367508140369, .068470088807320917, \
+     .45047677005772646";
+/// The same REML fit with Knapp-Hartung errors (`se(khartung)`).
+const G_KH: &str = ".25881003882646675, .088359544204031193, .081099022652641892, \
+     69.934047556771844, 3.3260213588385188, 48.239367508140369, .067920849028739017, \
+     .44969922862419415";
+
+#[test]
+fn stata_default_g_and_every_tau2_estimator_match_meta_summarize() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // meta esize n1 m1 sd1 n2 m2 sd2, then meta summarize, random(...)
+    fits_match(
+        &mut e,
+        "SMDA",
+        "ga",
+        &[
+            ("REML", G_REML),
+            (
+                "ML",
+                ".25839294672029911, .08940278550358427, .073774054333069244, 67.906874580349495, \
+                 3.1159321098334147, 48.239367508140369, .083166707015714325, .43361918642488384",
+            ),
+            (
+                "EB",
+                ".25827862727834505, .088634520724617819, .071893713190468903, 67.341623592284009, \
+                 3.0620015750805556, 48.239367508140369, .084558158871125139, .43199909568556494",
+            ),
+            // Stata's pmandel and ebayes give the same figures
+            (
+                "PM",
+                ".25827862727834505, .088634520724617819, .071893713190468903, 67.341623592284009, \
+                 3.0620015750805556, 48.239367508140369, .084558158871125139, .43199909568556494",
+            ),
+            (
+                "HE",
+                ".25753895078988048, .083974379160146759, .060859916569161468, 63.577272643765589, \
+                 2.7455384936428491, 48.239367508140369, .092952192011881984, .42212570956787898",
+            ),
+            (
+                "SJ",
+                ".2585824152143314, .090707735566910155, .077007568279829047, 68.834471557964847, \
+                 3.2086733323322352, 48.239367508140369, .080798520384004618, .4363663100446582",
+            ),
+            ("DL", G_DL),
+        ],
+    );
+    // each study's g and its standard error, as Stata's _meta_es and _meta_se
+    holds(
+        &mut e,
+        &[
+            "near(ga_DL$yi[1:3], c(.113178589846906, .2814112449382859, .37339465497615593), 1e-12)"
+                .into(),
+            "near(sqrt(ga_DL$vi[1:3]), c(.19399175470240737, .15342990019084943, \
+             .16446197700618492), 1e-12)"
+                .into(),
+        ],
+    );
+    // se(khartung), predinterval, and both: the pooled figures, then the
+    // prediction interval's ends
+    let cases: [(&str, bool, bool, &str, &str, &str, &str); 5] = [
+        ("REML", true, false, "kh", G_KH, "", "1e-5"),
+        (
+            "DL",
+            true,
+            false,
+            "dlkh",
+            ".25947342943252372, .0880268967397876, .094511939320034322, 73.051056281353084, \
+             3.7107205775492589, 48.239367508140369, .069302880790199695, .44964397807484746",
+            "",
+            "1e-9",
+        ),
+        (
+            "REML",
+            false,
+            true,
+            "gpi",
+            G_REML,
+            "-.39346704697599749, .91108712462893093",
+            "1e-5",
+        ),
+        (
+            "DL",
+            false,
+            true,
+            "gdlpi",
+            G_DL,
+            "-.44320274135426219, .9621496002193096",
+            "1e-9",
+        ),
+        (
+            "REML",
+            true,
+            true,
+            "khpi",
+            G_KH,
+            "-.39085053876360437, .9084706164165379",
+            "1e-5",
+        ),
+    ];
+    for (method, knha, pi, name, figures, ends, tol) in cases {
+        let (outcome, text, _) = dialog(
+            &mut e,
+            "md",
+            &[("method", method), ("save", name)],
+            &[("forest", false), ("knha", knha), ("pi", pi)],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        let mut checks = vec![format!("near(figs({name}), c({figures}), {tol})")];
+        if pi {
+            assert!(text.contains("prediction interval"), "{text}");
+            checks.push(format!(
+                "near(with(predict({name}, pi.type = 'Riley'), c(pi.lb, pi.ub)), c({ends}), {tol})"
+            ));
+        }
+        holds(&mut e, &checks);
+    }
+}
+
+#[test]
+fn cohen_glass_risk_difference_and_peto_match_meta_esize() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // esize(cohend) and esize(glassdelta2), with random(dlaird)
+    fits_match(
+        &mut e,
+        "COHEN",
+        "cd",
+        &[(
+            "DL",
+            ".26110259454547424, .098060256298579951, .095649664516655949, 73.060116160072042, \
+             3.7119684922987179, 48.255590399883324, .068908023885490582, .45329716520545793",
+        )],
+    );
+    fits_match(
+        &mut e,
+        "GLASS",
+        "gd",
+        &[(
+            "DL",
+            ".27287046128033893, .098673869898064245, .096748058053474972, 72.93034135062463, \
+             3.694172922358129, 48.024247990655667, .079473230064942058, .46626769249573574",
+        )],
+    );
+    holds(
+        &mut e,
+        &[
+            "near(cd_DL$yi[1:3], c(.11401078536048619, .28262422444233021, .37507157707934224), \
+             1e-12)"
+                .into(),
+            "near(sqrt(cd_DL$vi[1:3]), c(.19541816466345449, .15409123596753413, \
+             .16520057869932647), 1e-12)"
+                .into(),
+            "near(gd_DL$yi[1:3], c(.11499193981730275, .3982808022922627, .36981835118770323), \
+             1e-12)"
+                .into(),
+            "near(sqrt(gd_DL$vi[1:3]), c(.19559803965787306, .15700803665443355, \
+             .16576284123713728), 1e-12)"
+                .into(),
+        ],
+    );
+    // esize(rdiff): no half counts for study 3's empty cell
+    fits_match(
+        &mut e,
+        "RD",
+        "rd",
+        &[
+            (
+                "DL",
+                ".04194931351007343, .042287860753146223, .019126485758058268, 80.672804977543862, \
+                 5.174056550048296, 67.262735150627861, -.040933370549338002, .12483199756948485",
+            ),
+            (
+                "FE",
+                "-.012221286867065974, .017498788731174511, 0, 80.672804977543862, \
+                 5.1740565500482969, 67.262735150627861, -.046518282553243362, .02207570881911141",
+            ),
+        ],
+    );
+    // fixed (Mantel-Haenszel): the estimate, I², H² and Q are metafor's; the
+    // standard error and interval are Stata's Greenland-Robins ones, printed
+    // after the summary; Egger's test uses the inverse-variance model
+    let (outcome, text, _) = dialog(
+        &mut e,
+        "md",
+        &[
+            ("measure", "RD"),
+            ("method", "MH"),
+            ("egger", "model"),
+            ("save", "rd_MH"),
+        ],
+        NO_PLOTS,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Greenland-Robins"), "{text}");
+    for shown in ["0.041013085", "0.019434501", "0.002922163", "0.079104007"] {
+        assert!(text.contains(shown), "{shown} in\n{text}");
+    }
+    assert!(
+        text.contains("Test for Funnel Plot Asymmetry: z =  5.5166"),
+        "{text}"
+    );
+    holds(
+        &mut e,
+        &[
+            "near(figs(rd_MH)[c(1, 3:6)], c(.041013085231256276, 0, 83.01043621087733, \
+             5.8859663050338957, 76.517561965440649), 1e-9)"
+                .into(),
+            "near(egger(metafor::regtest(metafor::rma(measure = 'RD', ai = a, bi = b, ci = c, \
+             di = d, data = md, to = 'none', method = 'FE'))), c(4.2547003162319736, \
+             .77125941796116004, 5.516561894932007, 3.4569577408841130e-08), 1e-9)"
+                .into(),
+        ],
+    );
+    // esize(lnorpeto): Stata's fixed is inverse variance on Peto's log odds
+    // ratios, with no half counts
+    fits_match(
+        &mut e,
+        "PETO",
+        "peto",
+        &[
+            (
+                "FE",
+                ".25184791494374653, .12240942650699355, 0, 74.971618636173829, \
+                 3.9954641311535735, 51.941033704996457, .011929847621836576, .49176598226565649",
+            ),
+            (
+                "DL",
+                ".16750462818167408, .25110901994843898, .63860819833483573, 74.971618636173829, \
+                 3.9954641311535735, 51.941033704996457, -.3246600071104162, .65966926347376431",
+            ),
+        ],
+    );
+    holds(
+        &mut e,
+        &[
+            "near(egger(metafor::regtest(peto_FE)), c(-2.4879003423156396, 1.1931383740822135, \
+             -2.0851733515229394, .037053567903594681), 1e-9)"
+                .into(),
+            "near(predict(peto_FE, transf = exp)$pred, exp(.25184791494374653), 1e-9)".into(),
         ],
     );
 }
