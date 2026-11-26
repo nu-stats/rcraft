@@ -805,6 +805,7 @@ impl App {
                         engine.unwatch(&old);
                     }
                     engine.watch(&wanted);
+                    self.stata.seen = Some(wanted.clone());
                     self.dataset = Some(wanted);
                 }
                 self.stata.follow = None;
@@ -857,6 +858,13 @@ impl App {
                         let o = engine.history().get(id).and_then(|h| h.outcome);
                         if o.is_some_and(|o| o != Outcome::Ok) {
                             self.stata.live.unsend(&helpers);
+                        }
+                    }
+                    // data opened or picked outside Stata is the data in memory
+                    if self.dataset != self.stata.seen {
+                        self.stata.seen = self.dataset.clone();
+                        if let Some(name) = &self.dataset {
+                            self.stata.live.adopt(name);
                         }
                     }
                     let before = self.stata.live.clone();
@@ -4917,6 +4925,51 @@ mod tests {
         app.perform(&ctx, Action::SetStataMode(false));
         assert_eq!(app.script, SCRIPT_START);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// SW1: data opened outside Stata (File > Use my file, R code, picking a
+    /// data frame) is the data a Stata line works on.
+    #[test]
+    fn stata_mode_works_on_data_opened_outside_stata() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        // the frame as "Use my file" leaves it: made in R, no Stata line
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                "outside <- data.frame(x = c(1, 2, 3), y = c(2, 4, 7)); other <- data.frame(q = c(10, 20))"
+                    .into(),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        app.perform(&ctx, Action::SelectDataset(Some("outside".into())));
+        app.perform(&ctx, Action::SetStataMode(true));
+        let run = |app: &mut App, line: &str| {
+            app.perform(&ctx, Action::SubmitStata(Source::Typed, line.to_string()));
+            assert!(frames_until(app, &ctx, |a| a.is_settled()), "{line}");
+        };
+        run(&mut app, "summarize y");
+        run(&mut app, "display r(mean)");
+        assert!(
+            newest_text(&app).contains("4.3333333"),
+            "{}",
+            newest_text(&app)
+        );
+        // describe sees the variables
+        run(&mut app, "describe");
+        assert!(newest_text(&app).contains("y"), "{}", newest_text(&app));
+        // picking another data frame afterwards moves Stata to it
+        app.perform(&ctx, Action::SelectDataset(Some("other".into())));
+        run(&mut app, "summarize q");
+        run(&mut app, "display r(mean)");
+        assert!(newest_text(&app).contains("15"), "{}", newest_text(&app));
     }
 
     #[test]

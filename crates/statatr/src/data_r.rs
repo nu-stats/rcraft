@@ -318,6 +318,14 @@ impl Translator {
         ));
     }
 
+    /// The session starts with this R data frame in memory (opened outside
+    /// Stata: File > Use my file, the Data window, R code). Nothing else is
+    /// known of it, so its variables are read from R when a line runs.
+    pub fn start_with_data(&mut self, name: &str) {
+        self.s.data = Some(r_name(name));
+        self.s.data_lost = None;
+    }
+
     /// The next command.
     pub fn command(&mut self, c: &Command) -> Line {
         let result = self.s.command(c);

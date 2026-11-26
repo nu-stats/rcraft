@@ -72,6 +72,9 @@ pub struct Live {
     value_labels: Vec<String>,
     locals: Vec<String>,
     globals: Vec<String>,
+    /// The R data frame in memory before any Stata line, when the data was
+    /// opened outside Stata.
+    start: Option<String>,
     /// How many `ssc install` lines have been seen.
     ssc: usize,
     /// What R printed for each value it was asked for, in order; each step
@@ -163,6 +166,28 @@ impl Live {
         }
     }
 
+    /// The data was opened outside Stata (File > Use my file, the Data window,
+    /// R code): this R data frame is what the Stata lines now work on. Does
+    /// nothing when Stata already works on it. When Stata worked on other data,
+    /// the session starts over on this one (its macros and model are those of
+    /// the other data); helpers already sent stay sent.
+    pub fn adopt(&mut self, name: &str) {
+        if self.data.as_deref() == Some(name) {
+            return;
+        }
+        if self.data.is_some() {
+            self.source.clear();
+            self.done = 0;
+            self.locals.clear();
+            self.globals.clear();
+            self.value_labels.clear();
+            self.ssc = 0;
+            self.answers.clear();
+        }
+        self.start = Some(name.to_string());
+        self.data = Some(name.to_string());
+    }
+
     /// The helpers of a step R stopped at, to be given again.
     pub fn unsend(&mut self, names: &[String]) {
         self.sent
@@ -179,6 +204,9 @@ impl Live {
     /// asked; and the next question, if it needs another.
     fn replay(&self, text: &str) -> (Translation, Option<ValueCode>) {
         let mut run = Run::new(text, &NoFiles, Options::default());
+        if let Some(name) = &self.start {
+            run.start_with_data(name);
+        }
         let mut used = 0;
         loop {
             match run.next_event() {
@@ -439,5 +467,44 @@ display \"`hs'\"",
             ["estout".to_string()]
         );
         assert!(answered(&mut live, "summarize price").ssc.is_empty());
+    }
+
+    #[test]
+    fn data_opened_outside_stata_is_the_data_in_memory() {
+        // File > Use my file: the frame is in R, no Stata line made it
+        let mut live = Live::new();
+        assert!(live.step("summarize").code.contains("not translated"));
+        let mut live = Live::new();
+        live.adopt("cars");
+        assert_eq!(live.data(), Some("cars"));
+        let s = live.step("summarize");
+        assert!(s.lines.iter().all(|l| l.result.is_ok()), "{:?}", s.lines);
+        assert!(s.code.contains("stata_summarize(cars"), "{}", s.code);
+        // a name R needs backticks for
+        let mut live = Live::new();
+        live.adopt("my data");
+        let s = live.step("count");
+        assert!(s.code.contains("`my data`"), "{}", s.code);
+    }
+
+    #[test]
+    fn adopting_other_data_starts_the_session_over_on_it() {
+        let mut live = Live::new();
+        live.step("use auto");
+        live.step("local m = 1");
+        live.adopt("cars");
+        assert_eq!(live.data(), Some("cars"));
+        assert!(live.locals().is_empty());
+        let s = live.step("count");
+        assert!(s.lines.iter().all(|l| l.result.is_ok()), "{:?}", s.lines);
+        assert!(s.code.contains("cars"), "{}", s.code);
+        assert!(!s.code.contains("auto"), "{}", s.code);
+        // adopting the data Stata already works on changes nothing
+        let before = live.source().to_string();
+        live.adopt("cars");
+        assert_eq!(live.source(), before);
+        // a later use takes over, as in Stata
+        live.step("use auto");
+        assert_eq!(live.data(), Some("auto"));
     }
 }
