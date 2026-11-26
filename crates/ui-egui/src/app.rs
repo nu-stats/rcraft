@@ -49,6 +49,9 @@ enum SideTab {
 }
 
 const COMMAND_ID: &str = "command-line";
+/// The Command panel's starting and smallest heights.
+const COMMAND_PANE_HEIGHT: f32 = 96.0;
+const COMMAND_PANE_MIN_HEIGHT: f32 = 78.0;
 const SCRIPT_ID: &str = "script-editor";
 /// The find bar's text box.
 const FIND_ID: &str = "script-find";
@@ -1828,8 +1831,8 @@ impl App {
             .show(ctx, |ui| self.status_bar(ui, &pal, &mut actions));
         egui::TopBottomPanel::bottom("command")
             .resizable(true)
-            .default_height(64.0)
-            .min_height(54.0)
+            .default_height(COMMAND_PANE_HEIGHT)
+            .min_height(COMMAND_PANE_MIN_HEIGHT)
             .show(ctx, |ui| {
                 self.command_pane(ui, &pal, busy, &mut actions);
             });
@@ -2963,12 +2966,17 @@ Click to choose another folder"
         let mut cursor_at: Option<usize> = None;
         if has_focus {
             if let EngineState::Ready(engine) = &self.engine {
+                // on a many-line entry the arrows move the cursor between lines
+                // and recall only from its first (Up) or last (Down) line
+                let cursor = cursor_index(ui.ctx(), id, &self.command);
+                let arrow_up = arrow_recalls(&self.command, cursor, true);
+                let arrow_down = arrow_recalls(&self.command, cursor, false);
                 let back = ui.input_mut(|i| {
-                    i.consume_key(Modifiers::NONE, Key::ArrowUp)
+                    (arrow_up && i.consume_key(Modifiers::NONE, Key::ArrowUp))
                         || i.consume_key(Modifiers::NONE, Key::PageUp)
                 });
                 let forward = ui.input_mut(|i| {
-                    i.consume_key(Modifiers::NONE, Key::ArrowDown)
+                    (arrow_down && i.consume_key(Modifiers::NONE, Key::ArrowDown))
                         || i.consume_key(Modifiers::NONE, Key::PageDown)
                 });
                 if self.stata.on {
@@ -3058,38 +3066,64 @@ Click to choose another folder"
                 }
             }
         }
-        let mut submit = false;
-        ui.horizontal(|ui| {
-            let stop_width = 64.0;
-            let run_width = 64.0;
-            let field_width = (ui.available_width() - stop_width - run_width - 24.0).max(80.0);
-            let field = egui::TextEdit::singleline(&mut self.command)
-                .id(id)
-                .font(TextStyle::Monospace)
-                .hint_text(if self.stata.on {
-                    "Type Stata and press Enter"
-                } else {
-                    "Type R code and press Enter"
-                })
-                .desired_width(field_width);
-            let response = ui.add(field);
-            if response.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter)) {
-                submit = true;
-                self.focus_command = true;
-            }
-            if ui
-                .add_enabled(
-                    !busy,
-                    egui::Button::new(RichText::new("Run").strong().color(pal.on_accent))
-                        .fill(pal.accent),
-                )
-                .clicked()
-            {
-                submit = true;
-            }
-            if ui.add_enabled(busy, egui::Button::new("Stop")).clicked() {
-                out.push(Action::Interrupt);
-            }
+        // Enter runs the entry; Shift+Enter starts a new line
+        let mut submit = has_focus
+            && ui.input_mut(|i| {
+                let plain = i.events.iter().any(|e| {
+                    matches!(e, egui::Event::Key { key: Key::Enter, pressed: true, modifiers, .. }
+                        if !modifiers.shift)
+                });
+                plain && i.consume_key(Modifiers::NONE, Key::Enter)
+            });
+        if submit {
+            self.focus_command = true;
+        }
+        let height = ui.available_height().max(24.0);
+        ui.horizontal_top(|ui| {
+            let button_width = 64.0;
+            let field_width = (ui.available_width() - button_width - 16.0).max(80.0);
+            // the box fills the panel, so it follows the panel's edge
+            egui::ScrollArea::vertical()
+                .id_salt("command-scroll")
+                .max_height(height)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    let field = egui::TextEdit::multiline(&mut self.command)
+                        .id(id)
+                        .font(TextStyle::Monospace)
+                        .return_key(egui::KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter))
+                        .hint_text(if self.stata.on {
+                            "Type Stata and press Enter (Shift+Enter: new line)"
+                        } else {
+                            "Type R code and press Enter (Shift+Enter: new line)"
+                        })
+                        .desired_rows(1)
+                        .desired_width(field_width)
+                        .min_size(egui::vec2(field_width, height));
+                    ui.add(field);
+                });
+            ui.vertical(|ui| {
+                if ui
+                    .add_enabled(
+                        !busy,
+                        egui::Button::new(RichText::new("Run").strong().color(pal.on_accent))
+                            .fill(pal.accent)
+                            .min_size(egui::vec2(button_width, 0.0)),
+                    )
+                    .clicked()
+                {
+                    submit = true;
+                }
+                if ui
+                    .add_enabled(
+                        busy,
+                        egui::Button::new("Stop").min_size(egui::vec2(button_width, 0.0)),
+                    )
+                    .clicked()
+                {
+                    out.push(Action::Interrupt);
+                }
+            });
         });
         if let Some(text) = recalled {
             self.command = text;
@@ -3576,6 +3610,27 @@ fn split_at_cursor(ctx: &egui::Context, id: egui::Id, text: &str) -> (String, St
     split_at_char(text, at)
 }
 
+/// The text cursor's place in the box with `id`, in characters (the end when
+/// it has none).
+fn cursor_index(ctx: &egui::Context, id: egui::Id, text: &str) -> usize {
+    egui::TextEdit::load_state(ctx, id)
+        .and_then(|s| s.cursor.char_range())
+        .map_or(usize::MAX, |r| r.primary.index)
+        .min(text.chars().count())
+}
+
+/// Whether the Up (`up`) or Down arrow recalls an earlier command rather than
+/// moving the cursor: always on a one-line entry, otherwise only with the
+/// cursor on the first (Up) or last (Down) line.
+fn arrow_recalls(text: &str, cursor: usize, up: bool) -> bool {
+    let chars = text.chars();
+    if up {
+        !chars.take(cursor).any(|c| c == '\n')
+    } else {
+        !chars.skip(cursor).any(|c| c == '\n')
+    }
+}
+
 fn split_at_char(text: &str, at: usize) -> (String, String) {
     let byte = text.char_indices().nth(at).map_or(text.len(), |(b, _)| b);
     let (before, after) = text.split_at(byte);
@@ -3898,6 +3953,102 @@ mod tests {
         assert_eq!(selection_or_line(text, 7, 13), Some("b <- 2".into()));
         // either end first
         assert_eq!(selection_or_line(text, 13, 7), Some("b <- 2".into()));
+    }
+
+    #[test]
+    fn arrows_recall_on_one_line_and_at_the_ends_of_many() {
+        // one line: both arrows recall wherever the cursor is
+        assert!(arrow_recalls("plot(x)", 3, true));
+        assert!(arrow_recalls("plot(x)", 3, false));
+        assert!(arrow_recalls("", 0, true));
+        // many lines: Up only on the first, Down only on the last
+        let t = "a <- 1\nb <- 2\nc <- 3";
+        assert!(arrow_recalls(t, 3, true));
+        assert!(!arrow_recalls(t, 3, false));
+        assert!(!arrow_recalls(t, 9, true));
+        assert!(!arrow_recalls(t, 9, false));
+        assert!(!arrow_recalls(t, 17, true));
+        assert!(arrow_recalls(t, 17, false));
+        // by characters, not bytes
+        assert!(arrow_recalls("é\nü", 1, true));
+        assert!(!arrow_recalls("é\nü", 1, false));
+    }
+
+    fn key_event(key: Key, modifiers: Modifiers) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        }
+    }
+
+    fn run_frame(app: &mut App, ctx: &egui::Context, events: Vec<egui::Event>, h: f32) {
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1000.0, h));
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(screen),
+                events,
+                ..Default::default()
+            },
+            |ctx| app.ui(ctx),
+        );
+    }
+
+    #[test]
+    fn enter_runs_and_shift_enter_adds_a_line() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        let id = egui::Id::new(COMMAND_ID);
+        app.perform(&ctx, Action::SetCommand("x <- 1".into()));
+        app.focus_command = true;
+        run_frame(&mut app, &ctx, vec![], 700.0);
+        run_frame(&mut app, &ctx, vec![], 700.0);
+        assert!(ctx.memory(|m| m.has_focus(id)));
+        cursor_to_end(&ctx, id, &app.command);
+        run_frame(&mut app, &ctx, vec![], 700.0);
+        run_frame(
+            &mut app,
+            &ctx,
+            vec![key_event(Key::Enter, Modifiers::SHIFT)],
+            700.0,
+        );
+        assert_eq!(app.command, "x <- 1\n");
+        // plain Enter adds no line: it submits (the box clears when R is
+        // there to take it, and stays as typed when it is not)
+        run_frame(
+            &mut app,
+            &ctx,
+            vec![key_event(Key::Enter, Modifiers::NONE)],
+            700.0,
+        );
+        assert!(!app.command.contains("\n\n"));
+        assert!(app.command.is_empty() || app.command == "x <- 1\n");
+    }
+
+    #[test]
+    fn the_command_box_follows_the_panel_height() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        let id = egui::Id::new(COMMAND_ID);
+        let height_at = |app: &mut App, ctx: &egui::Context, panel: f32| -> f32 {
+            let screen_h = 700.0;
+            let state = egui::containers::panel::PanelState {
+                rect: egui::Rect::from_min_size(
+                    egui::pos2(0.0, screen_h - panel),
+                    egui::vec2(1000.0, panel),
+                ),
+            };
+            ctx.data_mut(|d| d.insert_persisted(egui::Id::new("command"), state));
+            run_frame(app, ctx, vec![], screen_h);
+            run_frame(app, ctx, vec![], screen_h);
+            ctx.read_response(id).map_or(0.0, |r| r.rect.height())
+        };
+        let small = height_at(&mut app, &ctx, COMMAND_PANE_MIN_HEIGHT);
+        let big = height_at(&mut app, &ctx, 260.0);
+        assert!(small > 0.0, "the box was not drawn");
+        assert!(big > small + 100.0, "small {small}, big {big}");
     }
 
     #[test]
