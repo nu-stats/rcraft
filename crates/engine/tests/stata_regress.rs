@@ -547,3 +547,62 @@ fn a_missing_variable_anywhere_in_a_line_says_so_and_changes_nothing() {
         assert_eq!(o, Outcome::Ok, "{line}: {t}");
     }
 }
+
+/// SW10: `i.g` on a factor or a text column made in R (not opened with `use`)
+/// prints Stata's layout, the levels named as a labelled variable's are and the
+/// first (or `ib#`'s) left out, and never stops on a raw subscript error.
+#[test]
+fn a_factor_made_in_r_gets_statas_coefficient_layout() {
+    let Some(mut e) = engine() else { return };
+    ok(
+        &mut e,
+        "set.seed(3); rg <- data.frame(y = rnorm(30), x = rnorm(30), \
+         g = factor(rep(c('a', 'b', 'c'), 10)), s = rep(c('u', 'v', 'w'), each = 10), \
+         stringsAsFactors = FALSE)",
+    );
+    let mut live = rcraft_statatr::live::Live::new();
+    live.adopt("rg");
+    let mut step = |e: &mut Engine, line: &str| {
+        let mut s = live.step(line);
+        while let Some(q) = s.ask.clone() {
+            let (o, t) = run(e, &q);
+            live.give(if o == Outcome::Ok { Ok(t) } else { Err(t) });
+            s = live.step(line);
+        }
+        assert!(!s.code.trim().is_empty(), "no R for {line}: {s:?}");
+        run(e, &s.code)
+    };
+    for (line, rows, formula) in [
+        ("regress y x i.g", ["b", "c"], "y ~ x + g"),
+        ("regress y x i.s", ["v", "w"], "y ~ x + s"),
+        (
+            "regress y x ib2.g",
+            ["a", "c"],
+            "y ~ x + relevel(g, ref = 'b')",
+        ),
+    ] {
+        let (o, t) = step(&mut e, line);
+        assert_eq!(o, Outcome::Ok, "{line}: {t}");
+        assert!(
+            !t.contains("subscript") && !t.contains("R's layout"),
+            "{line}: {t}"
+        );
+        // Stata's table: the factor's name over its levels, each named by its label
+        let var = if line.contains(".s") { "s" } else { "g" };
+        assert!(t.contains(&format!("{var:>12} |\n")), "{line}: {t}");
+        for r in rows {
+            assert!(t.contains(&format!("{r:>11}  |")), "{line}: {t}");
+        }
+        // and the numbers are lm's
+        let got = numbers(&mut e, "0", "unname(stats::coef(stata_estimates))");
+        let want = numbers(
+            &mut e,
+            "0",
+            &format!("unname(stats::coef(stats::lm({formula}, data = rg)))"),
+        );
+        assert_eq!(got.len(), want.len(), "{line}");
+        for i in 0..got.len() {
+            close(at(&got, i), at(&want, i), 1e-9, line);
+        }
+    }
+}
