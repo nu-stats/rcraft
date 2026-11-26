@@ -2121,11 +2121,17 @@ impl App {
             self.spec_dialog.refresh(fresh);
         }
         self.watch_chosen_frames();
+        // the package list on disk (read once, no network) says which version CRAN lists
+        if self.spec_dialog.is_open() {
+            self.package_index.ensure_loaded();
+        }
+        let index = self.package_index.index();
+        let cran = |name: &str| index.and_then(|ix| ix.get(name)).map(|p| p.version.clone());
         let engine = match &mut self.engine {
             EngineState::Ready(e) => Some(&mut **e),
             _ => None,
         };
-        match self.spec_dialog.show(ctx, &pal, engine) {
+        match self.spec_dialog.show(ctx, &pal, engine, &cran) {
             Some(SpecAction::Run(run)) => {
                 // a renamed object is followed only when it was the one shown;
                 // otherwise the window would wait for a data frame that never comes
