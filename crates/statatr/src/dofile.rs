@@ -171,6 +171,16 @@ pub fn stata_error_text(message: &str) -> String {
         .filter(|n| !n.contains('\''))
     {
         (format!("{name} not found"), 111)
+    } else if let Some(name) = m
+        .strip_prefix("Can't select columns that don't exist.")
+        .and_then(|s| s.split_once("Column `"))
+        .and_then(|(_, s)| s.split_once('`'))
+        .map(|(n, _)| n)
+        .filter(|n| !n.is_empty())
+    {
+        (format!("variable {name} not found"), 111)
+    } else if m.starts_with("Can't combine `") && m.contains("> and `") && m.contains("<") {
+        ("type mismatch".to_string(), 109)
     } else if m.starts_with("file ") && m.ends_with(" not found") && !m.contains('\n') {
         (m.to_string(), 601)
     } else if m.starts_with("file ") && m.ends_with(" already exists") && !m.contains('\n') {

@@ -2275,7 +2275,7 @@ mod tests {
             "{l}"
         );
         // the last model's results go first
-        assert!(l.starts_with("rm(list = intersect("), "{l}");
+        assert!(l.contains("rm(list = intersect("), "{l}");
         let out = r("use d\nlasso linear y x1 x2, selection(plugin, homoskedastic c(1.5) gamma(.05)) penaltywt(1 2) noconstant");
         for a in [
             "sel = \"plugin\"",

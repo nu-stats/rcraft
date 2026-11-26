@@ -1245,8 +1245,8 @@ const LIST_HELPER: &str = r#"stata_list <- function(d, defaults = character(0), 
                        abbrev = NULL, table = FALSE, display = FALSE) {
   obs <- d$stata_obs_
   d$stata_obs_ <- NULL
-  sk <- d$stata_sep_
-  d$stata_sep_ <- NULL
+  sk <- if ("stata_sep_" %in% names(d)) d$stata_sep_ else NULL
+  if (!is.null(sk)) d$stata_sep_ <- NULL
   if (!nrow(d) || !ncol(d)) return(invisible())
   fallback <- function() print(as.data.frame(if (label) haven::as_factor(d) else haven::zap_labels(d)))
   miss <- function(z) { t <- tryCatch(haven::na_tag(z), error = function(e) NA_character_); if (is.na(t)) "." else paste0(".", t) }
@@ -2273,6 +2273,46 @@ fn names(varlist: &str) -> Result<Vec<String>, Untranslated> {
     Ok(out)
 }
 
+/// The plain variable names a command with a simple varlist names (`i.g` and
+/// `c.x` count as `g` and `x`; anything with an operator, wildcard or range is
+/// left to R), for the check that each is in the data before the line runs.
+fn varlist_names(c: &Command) -> Vec<String> {
+    if !matches!(
+        c.name.as_str(),
+        "summarize"
+            | "tabulate"
+            | "tab1"
+            | "list"
+            | "regress"
+            | "anova"
+            | "logit"
+            | "probit"
+            | "poisson"
+            | "nbreg"
+            | "ologit"
+            | "oprobit"
+            | "mlogit"
+            | "glm"
+            | "correlate"
+            | "pwcorr"
+            | "ttest"
+            | "oneway"
+    ) {
+        return Vec::new();
+    }
+    let mut out: Vec<String> = Vec::new();
+    for t in c.parts.main.split_whitespace() {
+        let t = t
+            .strip_prefix("i.")
+            .or_else(|| t.strip_prefix("c."))
+            .unwrap_or(t);
+        if is_name(t) && !out.iter().any(|o| o == t) {
+            out.push(t.to_string());
+        }
+    }
+    out
+}
+
 fn is_name(t: &str) -> bool {
     t.chars()
         .next()
@@ -3128,6 +3168,26 @@ impl Session {
                 );
             }
         }
+        // a variable the line names that the data lack: Stata's own r(111) before
+        // anything runs, so a model leaves the last one's results as they were
+        if !out.code.is_empty() && self.data_lost.is_none() {
+            if let Some(d) = self.data.clone() {
+                let names = varlist_names(c);
+                if !names.is_empty() {
+                    let list = names
+                        .iter()
+                        .map(|v| r_text(v))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    out.code.insert(
+                        0,
+                        format!(
+                            "if (exists(\"{d}\") && !all(c({list}) %in% names({d}))) stop(\"variable \", setdiff(c({list}), names({d}))[1], \" not found (Stata: r(111))\", call. = FALSE)"
+                        ),
+                    );
+                }
+            }
+        }
         // quietly (or capture): what the line prints is not shown
         if silent(c) && !self.quiet_asked.get() && !out.code.is_empty() {
             let body = out.code.join(
@@ -3668,7 +3728,16 @@ impl Session {
                 ));
                 Ok(())
             }
-            other => Err(no(format!("{other} is not translated yet"))),
+            "sysuse" | "webuse" => Err(no(format!(
+                "{} loads Stata's example datasets, which RCraft cannot ship; open your own file with use or File > Use my file",
+                c.name
+            ))),
+            other => match crate::coverage::did_you_mean(other) {
+                Some(m) => Err(no(format!(
+                    "{other} is not a Stata command (Stata: unrecognized command, r(199)); did you mean {m}?"
+                ))),
+                None => Err(no(format!("{other} is not translated yet"))),
+            },
         }
     }
 
@@ -5835,12 +5904,55 @@ display _b[/a]");
         assert!(out[1].contains("NOT: mpg named twice"), "{out:?}");
         // a new fit takes the last one's results away first
         let out = r("use auto\nregress price mpg");
-        assert!(out[1].starts_with("rm(list = intersect("), "{out:?}");
+        assert!(
+            out[1].contains(
+                "
+rm(list = intersect("
+            ),
+            "{out:?}"
+        );
         assert!(
             out[1].trim_end().ends_with("stata_fit_failed <- FALSE"),
             "{out:?}"
         );
     }
+    #[test]
+    fn a_variable_the_data_lack_stops_the_line_before_a_fit_takes_the_last_one_away() {
+        let out = r("use d\nregress y x z\nregress y nosuchvar\ntab g\nlist x");
+        for i in [1, 2, 3] {
+            let first = out[i].lines().next().unwrap_or("");
+            assert!(first.starts_with("if (exists(\"d\") && !all(c("), "{out:?}");
+            assert!(first.contains("(Stata: r(111))"), "{out:?}");
+        }
+        // the check comes before the line takes the last model away
+        assert!(
+            out[2].find("stop(\"variable").unwrap_or(usize::MAX)
+                < out[2].find("rm(list").unwrap_or(0)
+        );
+        assert!(out[2].contains("c(\"y\", \"nosuchvar\")"), "{out:?}");
+    }
+
+    #[test]
+    fn sysuse_and_an_unknown_command_say_why() {
+        let out = r("sysuse auto\nsummary x\ngobbledygook x");
+        assert!(
+            out[0].contains("NOT: sysuse loads Stata's example datasets"),
+            "{out:?}"
+        );
+        assert!(out[0].contains("File > Use my file"), "{out:?}");
+        assert!(out[1].contains("summary is not a Stata command"), "{out:?}");
+        assert!(out[1].contains("did you mean summarize?"), "{out:?}");
+        assert!(
+            out[2].contains("gobbledygook is not translated yet"),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn list_reads_the_separator_column_only_when_it_is_there() {
+        assert!(LIST_HELPER.contains("if (\"stata_sep_\" %in% names(d)) d$stata_sep_ else NULL"));
+    }
+
     #[test]
     fn files_make_and_keep_the_data_frame() {
         let out = r("use \"study hours.dta\", clear\nsave results, replace\nsave results");

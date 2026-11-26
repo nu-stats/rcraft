@@ -449,6 +449,56 @@ pub fn tier(command: &str) -> Tier {
     Tier::Other
 }
 
+/// A known command the unrecognised `word` is probably a slip for: one it
+/// starts like for five letters or more, or is one edit from (same first letter).
+pub fn did_you_mean(word: &str) -> Option<&'static str> {
+    let w = word.trim().to_lowercase();
+    if w.len() < 3 {
+        return None;
+    }
+    let max = 1;
+    let mut best: Option<(usize, &'static str)> = None;
+    for list in [DATA, STATISTICS, MODELS, GRAPHS, PROGRAMS] {
+        for &n in list {
+            if n == w {
+                return None;
+            }
+            let common = w.chars().zip(n.chars()).take_while(|(a, b)| a == b).count();
+            let d = if common >= 5 {
+                0
+            } else if w.len() >= 5 && common >= 1 {
+                edit_distance(&w, n)
+            } else {
+                continue;
+            };
+            let better = match best {
+                None => true,
+                Some((bd, bn)) => d < bd || (d == bd && n.len() < bn.len()),
+            };
+            if d <= max && better {
+                best = Some((d, n));
+            }
+        }
+    }
+    best.map(|(_, n)| n)
+}
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut row: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut next = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            let diag = row.get(j).copied().unwrap_or(0) + usize::from(ca != *cb);
+            let up = row.get(j + 1).copied().unwrap_or(0) + 1;
+            let left = next.last().copied().unwrap_or(0) + 1;
+            next.push(diag.min(up).min(left));
+        }
+        row = next;
+    }
+    row.last().copied().unwrap_or(0)
+}
+
 /// Lines of one tier, or of one command.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Count {

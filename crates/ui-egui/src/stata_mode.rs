@@ -270,6 +270,25 @@ pub fn line_of(text: &str, at: usize) -> usize {
     text.chars().take(at).filter(|c| *c == '\n').count()
 }
 
+/// What a typed `help summarize` (or `h summarize`) asks the Guide for: the
+/// command it names, or `general` for a bare `help`. None for any other line.
+pub fn help_target(text: &str) -> Option<String> {
+    let text = text.trim();
+    if text.contains('\n') {
+        return None;
+    }
+    let (word, rest) = text.split_once(char::is_whitespace).unwrap_or((text, ""));
+    if !matches!(word, "h" | "he" | "hel" | "help") {
+        return None;
+    }
+    let rest = rest.trim();
+    Some(if rest.is_empty() {
+        "general".to_string()
+    } else {
+        rest.to_string()
+    })
+}
+
 /// The characters from the start of line `first` (1-based) to the end of the
 /// line `lines` later, for selecting a command's Stata.
 pub fn char_range(text: &str, first: usize, lines: usize) -> (usize, usize) {
