@@ -22,11 +22,16 @@ pub const TIME_SERIES_CLASSES: &[&str] = &["Arima", "HoltWinters"];
 /// Heckman's selection model from sampleSelection (P6.6), which takes Model fit.
 pub const SELECTION_CLASSES: &[&str] = &["selection"];
 
+/// A structural equation model from lavaan (P6.10), which takes Model fit and
+/// Compare models.
+pub const SEM_CLASSES: &[&str] = &["lavaan"];
+
 /// Whether an object whose first class is `class` is a model these dialogs take.
 pub fn is_model_class(class: &str) -> bool {
     MODEL_CLASSES.contains(&class)
         || TIME_SERIES_CLASSES.contains(&class)
         || SELECTION_CLASSES.contains(&class)
+        || SEM_CLASSES.contains(&class)
 }
 
 /// Whether `class` is a panel model fitted by `plm` or `fixest`.
@@ -41,7 +46,7 @@ pub fn takes_model_table(class: &str) -> bool {
     is_model_class(class)
         && !matches!(
             class,
-            "pgmm" | "stanreg" | "Arima" | "HoltWinters" | "selection"
+            "pgmm" | "stanreg" | "Arima" | "HoltWinters" | "selection" | "lavaan"
         )
 }
 
@@ -61,6 +66,8 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         "coxph" | "survreg" => vec![&MODEL_FIT, &COMPARE_MODELS],
         // a Heckman model: its fit, and a comparison (a written-out likelihood-ratio test)
         "selection" => vec![&MODEL_FIT, &COMPARE_MODELS],
+        // a structural equation model: its fit, and lavaan's likelihood-ratio test
+        "lavaan" => vec![&MODEL_FIT, &COMPARE_MODELS],
         // a mixed model: its fit statistics only (the other dialogs need an
         // lm or glm object)
         "lmerMod" | "glmerMod" => vec![&MODEL_FIT, &crate::multilevel::ICC],
@@ -99,7 +106,8 @@ pub const MODEL_FIT: Spec = Spec {
             observations. A Cox model also shows its events; a parametric survival model its \
             log-likelihood both as survreg gives it (on the log-time scale) and as Stata reports \
             it, so AIC and BIC compare only with other survreg models. A Heckman model fitted \
-            in two steps has no likelihood, so it shows its observations only.",
+            in two steps has no likelihood, so it shows its observations only. A structural \
+            equation model shows lavaan's own figures, with its number of parameters.",
     widgets: &[],
     needs: &[],
     styles: BASE,
@@ -107,7 +115,9 @@ pub const MODEL_FIT: Spec = Spec {
     code: |a, _| {
         let m = a.data();
         format!(
-            "(function(m) {{\n  cat(\"Observations: \", if (inherits(m, \"coxph\")) m$n else stats::nobs(m), \
+            "(function(m) {{\n  if (inherits(m, \"lavaan\")) {{\n    \
+             print(lavaan::fitMeasures(m, c(\"ntotal\", \"npar\", \"logl\", \"aic\", \"bic\")))\n    \
+             return(invisible(NULL))\n  }}\n  cat(\"Observations: \", if (inherits(m, \"coxph\")) m$n else stats::nobs(m), \
              \"\\n\", sep = \"\")\n  \
              if (inherits(m, \"coxph\")) cat(\"Events: \", m$nevent, \"\\n\", sep = \"\")\n  \
              if (inherits(m, \"selection\") && !identical(m$method, \"ml\")) {{\n    \
@@ -203,8 +213,12 @@ pub const COMPARE_MODELS: Spec = Spec {
             .collect();
         // Heckman models: sampleSelection has no anova, so the nested test is the
         // likelihood-ratio test written out (Stata's lrtest), for ML fits only
+        // structural equation models: lavaan's table and likelihood-ratio test
         let mut body = String::from(
-            "  heckman <- vapply(models, inherits, logical(1), \"selection\")\n  \
+            "  if (any(vapply(models, inherits, logical(1), \"lavaan\"))) {\n    \
+             print(do.call(lavaan::lavTestLRT, c(unname(models), list(model.names = names(models)))))\n    \
+             return(invisible(NULL))\n  }\n  \
+             heckman <-vapply(models, inherits, logical(1), \"selection\")\n  \
              if (any(heckman) && !all(vapply(models[heckman], function(m) identical(m$method, \"ml\"), \
              logical(1)))) {\n    \
              cat(\"Compare models needs every Heckman model fitted by maximum likelihood; a two-step \
@@ -1006,6 +1020,8 @@ mod tests {
         assert_eq!(entries("lmerMod"), ["Model fit", "Intraclass correlation"]);
         assert_eq!(entries("selection"), ["Model fit", "Compare models"]);
         assert!(is_model_class("selection") && !takes_model_table("selection"));
+        assert_eq!(entries("lavaan"), ["Model fit", "Compare models"]);
+        assert!(is_model_class("lavaan") && !takes_model_table("lavaan"));
         assert!(is_panel_class("plm") && !is_panel_class("lm"));
         for class in ["data.frame", "tbl_df", "function", "numeric", ""] {
             assert!(!is_model_class(class), "{class}");
