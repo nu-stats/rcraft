@@ -155,6 +155,10 @@ fn fit_options(a: &Args, method: &str) -> String {
         out.push_str(&format!(", mods = ~ {}", terms.join(" + ")));
     }
     out.push_str(&format!(", method = \"{method}\""));
+    if a.var("cluster").is_some() {
+        // rma.mv maximises its likelihood with optim; no tau² iteration
+        return out;
+    }
     if is_random(method) && a.flag("knha") {
         // the truncated adjustment never makes the errors smaller
         let test = if a.flag("truncated") { "adhoc" } else { "knha" };
@@ -164,12 +168,14 @@ fn fit_options(a: &Args, method: &str) -> String {
     out
 }
 
-/// The iterated estimators of tau², taken to the solution: metafor's default
-/// stops within about 3e-6 of it (Paule-Mandel's root about 3e-5 away),
-/// Stata within about 5e-7.
+/// The iterated estimators of tau², stopped where Stata stops: its
+/// iterations follow the same path as metafor's (each iterate equal to 1e-15)
+/// and stop once tau² changes by less than its default tolerance, 1e-6, one
+/// step after metafor's own default (1e-5). Paule-Mandel's root is taken to
+/// Stata's precision (metafor's own tolerance stops about 3e-5 away).
 fn control(method: &str) -> &'static str {
     match method {
-        "REML" | "ML" | "EB" => ", control = list(threshold = 1e-10)",
+        "REML" | "ML" | "EB" => ", control = list(threshold = 1e-6)",
         "PM" => ", control = list(tol = 1e-10)",
         _ => "",
     }
@@ -228,6 +234,80 @@ fn cells(a: &Args) -> String {
     format!("  t <- stats::na.omit(data.frame({}))\n", cells.join(", "))
 }
 
+fn is_mh_rd(a: &Args) -> bool {
+    a.choice("method") == "MH" && a.choice("measure") == "RD"
+}
+
+/// An R function `gr(m, rows)`: a Mantel-Haenszel risk-difference fit `m`
+/// on the data's `rows`, carrying Greenland and Robins' standard error (with
+/// its z, p and interval) as Stata does, in place of metafor's Sato one.
+fn gr_function(a: &Args) -> String {
+    let cells: Vec<String> = TABLE
+        .iter()
+        .zip(["a", "b", "c", "d"])
+        .map(|((id, _), cell)| format!("{cell} = {}[rows]", column(a, id)))
+        .collect();
+    format!(
+        "  gr <- function(m, rows = seq_len(nrow({}))) {{\n    \
+         t <- stats::na.omit(data.frame({}))\n    \
+         n1 <- t$a + t$b; n2 <- t$c + t$d; N <- n1 + n2\n    \
+         se <- sqrt(sum((t$a * t$b * n2^3 + t$c * t$d * n1^3) / (n1 * n2 * N^2)) / \
+         sum(n1 * n2 / N)^2)\n    \
+         z <- stats::qnorm(0.975)\n    \
+         m$se <- se; m$vb[] <- se^2; m$zval <- m$beta[1] / se\n    \
+         m$pval <- 2 * stats::pnorm(-abs(m$zval))\n    \
+         m$ci.lb <- m$beta[1] - z * se; m$ci.ub <- m$beta[1] + z * se\n    \
+         m\n  }}\n",
+        a.data(),
+        cells.join(", ")
+    )
+}
+
+/// The study labels of the data's rows `rows` (an R expression), for tables.
+fn row_labels(a: &Args, rows: &str) -> String {
+    match a.var_text("label") {
+        "" => format!("paste(\"Study\", {rows})"),
+        _ => format!("as.character({}[{rows}])", column(a, "label")),
+    }
+}
+
+/// A cumulative (`cumulative`) or leave-one-out table for a Mantel-Haenszel
+/// risk difference, each refit carrying the Greenland-Robins error, as
+/// Stata's: `o` holds the data's rows in the order of the steps.
+fn mh_rd_table(a: &Args, fit: &str, cumulative: bool) -> String {
+    let (title, order, rows) = match a.var("cumul") {
+        Some(_) if cumulative => (
+            format!(
+                "\nCumulative meta-analysis, in the order of {}\n",
+                a.var_text("cumul")
+            ),
+            format!("order({})", column(a, "cumul")),
+            "o[seq_len(s)]",
+        ),
+        _ => (
+            "\nLeave-one-out meta-analysis (the study left out)\n".to_string(),
+            format!("seq_len(nrow({}))", a.data()),
+            "o[-s]",
+        ),
+    };
+    format!(
+        "local({{\n\
+         {}  \
+         o <- {order}\n  \
+         tab <- t(vapply(seq_along(o), function(s) {{\n    \
+         .rows <- {rows}\n    \
+         f <- gr(stats::update({fit}, subset = .rows), .rows)\n    \
+         c(estimate = f$b[[1]], se = f$se, zval = f$zval, pval = f$pval, ci.lb = f$ci.lb, \
+         ci.ub = f$ci.ub, Q = f$QE, I2 = f$I2, H2 = f$H2)\n  }}, numeric(9)))\n  \
+         rownames(tab) <- {}\n  \
+         cat({})\n  \
+         print(tab)\n}})\n",
+        gr_function(a),
+        row_labels(a, "o"),
+        r_string(&title)
+    )
+}
+
 /// The fit: `rma` on the effect sizes (computed first, as `<save>_es`, when
 /// the dialog puts them on Stata's footing itself), or `rma.mh`.
 fn fit_code(a: &Args, fit: &str) -> String {
@@ -249,36 +329,63 @@ fn fit_code(a: &Args, fit: &str) -> String {
             // metafor's summary gives Sato's standard error; Stata's is
             // Greenland and Robins', so the fit carries that one instead
             out.push_str(&format!(
-                "{fit} <- local({{\n\
-                 {}  \
-                 n1 <- t$a + t$b; n2 <- t$c + t$d; N <- n1 + n2\n  \
-                 se <- sqrt(sum((t$a * t$b * n2^3 + t$c * t$d * n1^3) / (n1 * n2 * N^2)) / \
-                 sum(n1 * n2 / N)^2)\n  \
-                 m <- {fit}\n  \
-                 z <- stats::qnorm(0.975)\n  \
-                 m$se <- se; m$vb[] <- se^2; m$zval <- m$beta[1] / se\n  \
-                 m$pval <- 2 * stats::pnorm(-abs(m$zval))\n  \
-                 m$ci.lb <- m$beta[1] - z * se; m$ci.ub <- m$beta[1] + z * se\n  \
-                 m\n}})\n\
+                "{fit} <- local({{\n{}  gr({fit})\n}})\n\
                  cat(\"The standard error is Greenland and Robins' (Stata's), not Sato's.\\n\")\n",
-                cells(a)
+                gr_function(a)
             ));
         }
         return out;
     }
     let options = fit_options(a, method);
-    if !is_adjusted(a) {
-        return format!("{fit} <- metafor::rma({}{options})\n", effect_args(a, true));
-    }
     let es = r_name(&format!("{}_es", a.name_text("save")));
-    format!(
-        "{es} <- local({{\n  \
-         es <- metafor::escalc({})\n\
-         {}  es\n}})\n\
-         {fit} <- metafor::rma(yi, vi, data = {es}{options})\n",
-        effect_args(a, true),
-        adjust_lines(a)
-    )
+    let multilevel = a.var("cluster");
+    if !is_adjusted(a) && multilevel.is_none() {
+        return format!(
+            "{fit} <- metafor::rma({}{options})\n{}",
+            effect_args(a, true),
+            stata_stop(a, fit)
+        );
+    }
+    let mut out = if is_adjusted(a) {
+        format!(
+            "{es} <- local({{\n  \
+             es <- metafor::escalc({})\n\
+             {}  es\n}})\n",
+            effect_args(a, true),
+            adjust_lines(a)
+        )
+    } else {
+        format!("{es} <- metafor::escalc({})\n", effect_args(a, true))
+    };
+    match multilevel {
+        // studies within clusters, as Stata's meta multilevel: a random
+        // effect for each level
+        Some(cluster) => {
+            out.push_str(&format!(
+                "{es}$.study <- seq_len(nrow({es}))\n\
+                 {fit} <- metafor::rma.mv(yi, vi, random = ~ 1 | {cluster}/.study, data = {es}{options})\n"
+            ));
+        }
+        None => out.push_str(&format!(
+            "{fit} <- metafor::rma(yi, vi, data = {es}{options})\n{}",
+            stata_stop(a, fit)
+        )),
+    }
+    out
+}
+
+/// For REML, ML and empirical Bayes: the fit again, stopped as Stata stops,
+/// once tau² moves by less than 1e-6 relative to 1 + tau² (the same
+/// iterations, which the first fit's tau² lets metafor's absolute threshold
+/// follow).
+fn stata_stop(a: &Args, fit: &str) -> String {
+    if matches!(a.choice("method"), "REML" | "ML" | "EB") {
+        format!(
+            "{fit} <- stats::update({fit}, control = list(threshold = 1e-6 * (1 + {fit}$tau2)))\n"
+        )
+    } else {
+        String::new()
+    }
 }
 
 /// The model the tests for small-study effects, trim-and-fill and the
@@ -295,22 +402,64 @@ fn alt_model(a: &Args, fit: &str) -> String {
 /// Each subgroup fitted alone (the same model on its rows), then the test of
 /// their differences: Cochran's Q among the subgroups' estimates, as Stata's
 /// Q_b.
-fn subgroup_code(a: &Args, fit: &str) -> String {
+fn subgroup_code(a: &Args, fit: &str, axis: &str) -> String {
     let title = r_string(&format!("\nSubgroups of {}\n", a.var_text("subgroup")));
+    let (helper, refit) = if is_mh_rd(a) {
+        (
+            gr_function(a),
+            format!("gr(stats::update({fit}, subset = .rows), .rows)"),
+        )
+    } else {
+        (
+            String::new(),
+            format!("stats::update({fit}, subset = .rows)"),
+        )
+    };
+    // Stata's Q_b uses the groups' unadjusted errors, also when the table
+    // shows Knapp-Hartung ones
+    let plain = if is_random(a.choice("method")) && a.flag("knha") {
+        format!(
+            "  se <- vapply(split(seq_along(g), g), function(.rows) \
+             stats::update({fit}, subset = .rows, test = \"z\")$se, numeric(1))\n"
+        )
+    } else {
+        "  se <- tab[, \"se\"]\n".to_string()
+    };
+    // the forest plot with the studies in their groups, each group's
+    // diamond under it, and the overall one at the bottom
+    let forest = if a.flag("forest") {
+        format!(
+            "  gi <- as.character(g)[{fit}$not.na]; lv <- names(fits)\n  \
+             rows <- numeric(length(gi)); polys <- numeric(length(lv))\n  \
+             top <- length(gi) + 3 * length(lv); r <- top\n  \
+             for (j in seq_along(lv)) {{\n    \
+             i <- which(gi == lv[j]); rows[i] <- r - seq_along(i) + 1\n    \
+             r <- r - length(i); polys[j] <- r; r <- r - 3\n  }}\n  \
+             metafor::forest({fit}, rows = rows, ylim = c(-1.5, top + 3), header = TRUE, \
+             showweights = TRUE{axis})\n  \
+             for (j in seq_along(lv)) metafor::addpoly(fits[[j]], row = polys[j], \
+             mlab = paste(\"Subgroup\", lv[j]){axis})\n"
+        )
+    } else {
+        String::new()
+    };
     format!(
-        "local({{\n  \
+        "local({{\n\
+         {helper}  \
          g <- {}\n  \
-         fits <- lapply(split(seq_along(g), g), function(.rows) stats::update({fit}, subset = .rows))\n  \
+         fits <- lapply(split(seq_along(g), g), function(.rows) {refit})\n  \
          tab <- t(vapply(fits, function(f) c(k = f$k, estimate = f$b[[1]], se = f$se, \
          ci.lb = f$ci.lb, ci.ub = f$ci.ub, tau2 = f$tau2, I2 = f$I2, H2 = f$H2, Q = f$QE), \
          numeric(9)))\n  \
          cat({title})\n  \
-         print(tab)\n  \
-         w <- 1 / tab[, \"se\"]^2; est <- tab[, \"estimate\"]\n  \
+         print(tab)\n\
+         {plain}  \
+         w <- 1 / se^2; est <- tab[, \"estimate\"]\n  \
          qb <- sum(w * (est - sum(w * est) / sum(w))^2)\n  \
          cat(\"Test of group differences: Q_b =\", format(qb, digits = 7), \"on\", nrow(tab) - 1, \
          \"df, p =\", format(stats::pchisq(qb, nrow(tab) - 1, lower.tail = FALSE), digits = 4), \
-         \"\\n\")\n}})\n",
+         \"\\n\")\n\
+         {forest}}})\n",
         column(a, "subgroup")
     )
 }
@@ -328,12 +477,20 @@ fn bias_code(a: &Args, model: &str) -> String {
         "harbord" => {
             let m = if method == "MH" { "FE" } else { method };
             let ctl = control(m);
+            // the efficient score and its variance: for the log odds ratio
+            // the hypergeometric ones, for the log risk ratio the binomial
+            let score = if a.choice("measure") == "RR" {
+                "  Z <- (t$a * N - m1 * n1) / (N - m1)\n  \
+                 V <- n1 * n2 * m1 / (N * (N - m1))\n"
+            } else {
+                "  Z <- t$a - n1 * m1 / N\n  \
+                 V <- n1 * n2 * m1 * (t$b + t$d) / (N^2 * (N - 1))\n"
+            };
             format!(
                 "local({{\n\
                  {}  \
-                 n1 <- t$a + t$b; n2 <- t$c + t$d; N <- n1 + n2\n  \
-                 Z <- t$a - n1 * (t$a + t$c) / N\n  \
-                 V <- n1 * n2 * (t$a + t$c) * (t$b + t$d) / (N^2 * (N - 1))\n  \
+                 n1 <- t$a + t$b; n2 <- t$c + t$d; N <- n1 + n2; m1 <- t$a + t$c\n\
+                 {score}  \
                  h <- metafor::rma(yi = Z / V, vi = 1 / V, mods = ~ I(1 / sqrt(V)), method = \"{m}\"{ctl})\n  \
                  cat(\"\\nHarbord's test for small-study effects, as Stata's meta bias, harbord\\n\")\n  \
                  print(c(beta1 = h$b[2], se = h$se[2], z = h$zval[2], pval = h$pval[2]))\n}})\n",
@@ -350,12 +507,35 @@ fn bias_code(a: &Args, model: &str) -> String {
              t <- (y - b) / sqrt(v - 1 / sum(w))\n  \
              k <- length(y)\n  \
              S <- sum(sign(outer(t, t, \"-\")) * sign(outer(v, v, \"-\"))) / 2\n  \
-             se <- sqrt(k * (k - 1) * (2 * k + 5) / 18)\n  \
+             tv <- table(v)\n  \
+             se <- sqrt((k * (k - 1) * (2 * k + 5) - sum(tv * (tv - 1) * (2 * tv + 5))) / 18)\n  \
              cat(\"\\nBegg's test for small-study effects, as Stata's meta bias, begg\\n\")\n  \
              print(c(score = S, se = se, z = (S - 1) / se, pval = 2 * stats::pnorm(-(abs(S) - 1) / se)))\n}})\n"
         ),
         _ => String::new(),
     }
+}
+
+/// The moderator values typed for predictions: rows separated by `;`, each
+/// `count` finite numbers separated by commas or spaces; `None` when they do
+/// not parse. Each number is kept as typed (and checked to be finite).
+fn at_rows(text: &str, count: usize) -> Option<Vec<Vec<String>>> {
+    let mut rows = Vec::new();
+    for row in text.split(';').map(str::trim).filter(|r| !r.is_empty()) {
+        let values: Vec<String> = row
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|v| !v.is_empty())
+            .map(str::to_string)
+            .collect();
+        let finite = values
+            .iter()
+            .all(|v| v.parse::<f64>().is_ok_and(f64::is_finite));
+        if values.len() != count || !finite {
+            return None;
+        }
+        rows.push(values);
+    }
+    (!rows.is_empty()).then_some(rows)
 }
 
 fn meta_check(a: &Args) -> Vec<Problem> {
@@ -445,11 +625,84 @@ fn meta_check(a: &Args) -> Vec<Problem> {
             "Hedges and Olkin's variance is for Hedges's g and Cohen's d.",
         ));
     }
-    if matches!(a.choice("egger"), "harbord" | "peters") && measure != "OR" {
-        out.push(Problem::new(
+    match a.choice("egger") {
+        "harbord" if !matches!(measure, "OR" | "RR") => out.push(Problem::new(
             "egger",
-            "Harbord's and Peters's tests are for log odds ratios, as in Stata.",
+            "Harbord's test is for log odds and risk ratios, as in Stata.",
+        )),
+        "peters" if measure != "OR" => out.push(Problem::new(
+            "egger",
+            "Peters's test is for log odds ratios, as in Stata.",
+        )),
+        _ => {}
+    }
+    if a.var("cluster").is_some() {
+        if !matches!(method, "REML" | "ML") {
+            out.push(Problem::new(
+                "method",
+                "A multilevel meta-analysis is fitted by REML or maximum likelihood, as Stata's \
+                 meta multilevel.",
+            ));
+        }
+        for (id, set, what) in [
+            ("subgroup", !a.var_text("subgroup").is_empty(), "Subgroups"),
+            (
+                "cumul",
+                !a.var_text("cumul").is_empty(),
+                "A cumulative analysis",
+            ),
+            ("leave1out", a.flag("leave1out"), "A leave-one-out analysis"),
+            ("trimfill", a.choice("trimfill") != "none", "Trim-and-fill"),
+            (
+                "egger",
+                a.choice("egger") != "none",
+                "A test for small-study effects",
+            ),
+            ("galbraith", a.flag("galbraith"), "The Galbraith plot"),
+            ("labbe", a.flag("labbe"), "The L'Abbé plot"),
+            ("knha", a.flag("knha"), "Knapp-Hartung errors"),
+            ("pi", a.flag("pi"), "The prediction interval"),
+            ("studypred", a.flag("studypred"), "The study predictions"),
+        ] {
+            if set {
+                out.push(Problem::new(
+                    id,
+                    format!("{what} works without clusters: clear the clusters, or this."),
+                ));
+            }
+        }
+    }
+    if a.flag("studypred") && (mods.is_empty() || !is_random(method)) {
+        out.push(Problem::new(
+            "studypred",
+            "The study predictions need moderators and a random-effects model, as Stata's \
+             predict after meta regress.",
         ));
+    }
+    if !a.values.text("at").trim().is_empty() {
+        if mods.is_empty() {
+            out.push(Problem::new(
+                "at",
+                "Predictions at moderator values need moderators.",
+            ));
+        } else if mods
+            .iter()
+            .any(|m| a.ctx.column(m).is_some_and(|c| c.kind != VarKind::Number))
+        {
+            out.push(Problem::new(
+                "at",
+                "Predictions at moderator values need numeric moderators only.",
+            ));
+        } else if at_rows(a.values.text("at"), mods.len()).is_none() {
+            out.push(Problem::new(
+                "at",
+                format!(
+                    "Type one row of {} number(s) per prediction, rows separated by ';' (for \
+                     example 2005; 2010).",
+                    mods.len()
+                ),
+            ));
+        }
     }
     if a.flag("labbe") && !is_table(measure) {
         out.push(Problem::new(
@@ -615,6 +868,32 @@ pub const META: Spec = Spec {
                    regress. The summary then shows their coefficients, the residual tau², I² and \
                    H², R² and the tests of the moderators and of residual homogeneity.",
         },
+        Widget::Check {
+            id: "studypred",
+            label: "Study predictions (meta-regression)",
+            default: false,
+            hint: "Each study's linear prediction and its standard error, random effect and \
+                   fitted value, as Stata's predict xb, stdp, reffects and fitted after meta \
+                   regress.",
+        },
+        Widget::Text {
+            id: "at",
+            label: "Predict at moderator values",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Optional, numeric moderators only: one row per prediction, the moderators' \
+                   values in their order, rows separated by ';' (2005; 2010), as Stata's margins, \
+                   at().",
+        },
+        Widget::Variable {
+            id: "cluster",
+            label: "Clusters (multilevel)",
+            kinds: &[],
+            required: false,
+            hint: "Optional: studies are nested in these clusters (a lab, a paper), with a \
+                   random effect for each level, as Stata's meta multilevel. REML or maximum \
+                   likelihood.",
+        },
         Widget::Variable {
             id: "subgroup",
             label: "Subgroups by",
@@ -685,6 +964,13 @@ pub const META: Spec = Spec {
             hint: "",
         },
         Widget::Check {
+            id: "contours",
+            label: "Contour-enhanced funnel plot",
+            default: false,
+            hint: "The funnel plot around zero, shaded where a study's effect would be \
+                   significant at 10%, 5% and 1%, as Stata's meta funnelplot, contours(1 5 10).",
+        },
+        Widget::Check {
             id: "galbraith",
             label: "Galbraith plot",
             default: false,
@@ -722,7 +1008,7 @@ pub const META: Spec = Spec {
                 },
                 Opt {
                     value: "harbord",
-                    label: "Harbord (meta bias, harbord; log odds ratios)",
+                    label: "Harbord (meta bias, harbord; log odds or risk ratios)",
                 },
                 Opt {
                     value: "peters",
@@ -780,6 +1066,12 @@ pub const META: Spec = Spec {
         let mods = a.vars("mods");
         let mut out = fit_code(a, &fit);
         out.push_str(&format!("summary({fit})\n"));
+        if a.var("cluster").is_some() {
+            out.push_str(&format!(
+                "cat(\"\\nStandard deviation of each level (Stata's sd(_cons))\\n\")\n\
+                 print(stats::setNames(sqrt({fit}$sigma2), {fit}$s.names))\n"
+            ));
+        }
         let shown = back(measure).filter(|_| a.flag("eform"));
         let pi = is_random(method) && a.flag("pi");
         if mods.is_empty() && (shown.is_some() || pi) {
@@ -801,23 +1093,63 @@ pub const META: Spec = Spec {
                  print(predict({fit}{args}))\n"
             ));
         }
-        if !a.var_text("subgroup").is_empty() {
-            out.push_str(&subgroup_code(a, &fit));
-        }
-        if let Some(order) = a.var("cumul") {
-            out.push_str(&format!("print(metafor::cumul({fit}, order = {order}))\n"));
-        }
-        if a.flag("leave1out") {
-            out.push_str(&format!("print(metafor::leave1out({fit}))\n"));
+        if !mods.is_empty() {
+            if a.flag("studypred") {
+                // predict xb and stdp, reffects, fitted (xb plus the random effect)
+                out.push_str(&format!(
+                    "local({{\n  \
+                     p <- predict({fit}); re <- metafor::ranef({fit})\n  \
+                     cat(\"\\nStudy predictions, as Stata's predict after meta regress\\n\")\n  \
+                     print(data.frame(xb = p$pred, stdp = p$se, reffects = re$pred, \
+                     fitted = p$pred + re$pred, row.names = {fit}$slab))\n}})\n"
+                ));
+            }
+            if let Some(rows) = at_rows(a.values.text("at"), mods.len()) {
+                let rows: Vec<String> = rows
+                    .iter()
+                    .map(|r| format!("c({})", r.join(", ")))
+                    .collect();
+                let transf = shown
+                    .map(|(_, f)| format!(", transf = {f}"))
+                    .unwrap_or_default();
+                out.push_str(&format!(
+                    "cat(\"\\nPredictions at the moderator values, as Stata's margins, at()\\n\")\n\
+                     print(predict({fit}, newmods = rbind({}){transf}))\n",
+                    rows.join(", ")
+                ));
+            }
         }
         let axis = shown
             .map(|(_, f)| format!(", atransf = {f}"))
             .unwrap_or_default();
-        if a.flag("forest") {
-            out.push_str(&format!("metafor::forest({fit}, header = TRUE{axis})\n"));
+        let subgroups = !a.var_text("subgroup").is_empty();
+        if subgroups {
+            out.push_str(&subgroup_code(a, &fit, &axis));
+        }
+        if a.var("cumul").is_some() && is_mh_rd(a) {
+            out.push_str(&mh_rd_table(a, &fit, true));
+        } else if let Some(order) = a.var("cumul") {
+            out.push_str(&format!("print(metafor::cumul({fit}, order = {order}))\n"));
+        }
+        if a.flag("leave1out") && is_mh_rd(a) {
+            out.push_str(&mh_rd_table(a, &fit, false));
+        } else if a.flag("leave1out") {
+            out.push_str(&format!("print(metafor::leave1out({fit}))\n"));
+        }
+        // with subgroups the forest plot is drawn with their diamonds
+        if a.flag("forest") && !subgroups {
+            out.push_str(&format!(
+                "metafor::forest({fit}, header = TRUE, showweights = TRUE{axis})\n"
+            ));
         }
         if a.flag("funnel") {
             out.push_str(&format!("metafor::funnel({fit}{axis})\n"));
+        }
+        if a.flag("contours") {
+            out.push_str(&format!(
+                "metafor::funnel({fit}, level = c(90, 95, 99), shade = c(\"white\", \"gray55\", \
+                 \"gray75\"), refline = 0, legend = TRUE{axis})\n"
+            ));
         }
         let alt = alt_model(a, &fit);
         if a.flag("galbraith") {
@@ -830,7 +1162,7 @@ pub const META: Spec = Spec {
             .ctx
             .column(m)
             .is_some_and(|c| c.kind == VarKind::Number));
-        if a.flag("bubble") && numeric_mod {
+        if a.flag("bubble") && numeric_mod && a.var("cluster").is_none() {
             out.push_str(&format!("metafor::regplot({fit})\n"));
         }
         out.push_str(&bias_code(a, &alt));
@@ -843,7 +1175,205 @@ pub const META: Spec = Spec {
     },
 };
 
-pub const SPECS: &[&Spec] = &[&META];
+// ---- Multivariate meta-analysis (P6.11d) ----
+
+/// Names the multivariate dialog's own long table uses.
+const MV_RESERVED: &[&str] = &["study", "outcome", "yi"];
+
+fn mv_check(a: &Args) -> Vec<Problem> {
+    let mut out = Vec::new();
+    let p = a.vars("outcomes").len();
+    let need = p * (p + 1) / 2;
+    if a.vars("wcov").len() != need {
+        out.push(Problem::new(
+            "wcov",
+            format!(
+                "{p} outcomes need {need} columns of within-study variances and covariances, in \
+                 Stata's order: v11 v12 ... v1{p} v22 ... v{p}{p}."
+            ),
+        ));
+    }
+    let outcomes = a.vars("outcomes");
+    for (i, y) in outcomes.iter().enumerate() {
+        if outcomes.iter().take(i).any(|x| x == y) {
+            out.push(Problem::new("outcomes", format!("{y} is chosen twice.")));
+        }
+    }
+    for m in a.vars("mods") {
+        if MV_RESERVED.contains(&m) || outcomes.contains(&m) {
+            out.push(Problem::new(
+                "mods",
+                format!("{m} cannot be a moderator here: rename the column or choose another."),
+            ));
+        }
+    }
+    if a.name_text("save") == a.ctx.dataset {
+        out.push(Problem::new(
+            "save",
+            format!("{} is the data frame; choose another name.", a.ctx.dataset),
+        ));
+    }
+    out
+}
+
+/// R's `c("a", "b")` of column names, as strings.
+fn names_vector(names: &[&str]) -> String {
+    let quoted: Vec<String> = names.iter().map(|n| r_string(n)).collect();
+    format!("c({})", quoted.join(", "))
+}
+
+pub const MV_META: Spec = Spec {
+    entry: "Multivariate meta-analysis",
+    menu: "Statistics > Multivariate meta-analysis",
+    about: "Several outcomes per study, with their within-study variances and covariances, \
+            pooled together by metafor::rma.mv, as Stata's meta mvregress: each outcome's \
+            estimate, the between-study standard deviations and correlations (estat sd), and the \
+            test of homogeneity. With moderators, each outcome has its own coefficients. Studies \
+            missing a value are left out.",
+    widgets: &[
+        Widget::Variables {
+            id: "outcomes",
+            label: "Effect sizes (one column per outcome)",
+            kinds: NUMBERS,
+            min: 2,
+            hint: "",
+        },
+        Widget::Variables {
+            id: "wcov",
+            label: "Within-study variances and covariances",
+            kinds: NUMBERS,
+            min: 3,
+            hint: "In Stata's wcovvariables() order: v11 v12 ... v1p v22 ... vpp (two outcomes: \
+                   the first one's variance, the covariance, the second one's variance).",
+        },
+        Widget::Variables {
+            id: "mods",
+            label: "Moderators",
+            kinds: &[],
+            min: 0,
+            hint: "Optional: each outcome gets its own intercept and coefficients, as \
+                   meta mvregress y1 y2 = x.",
+        },
+        Widget::Choice {
+            id: "method",
+            label: "Model",
+            options: &[
+                Opt {
+                    value: "REML",
+                    label: "Random effects, REML",
+                },
+                Opt {
+                    value: "ML",
+                    label: "Random effects, maximum likelihood",
+                },
+                Opt {
+                    value: "FE",
+                    label: "Fixed effects",
+                },
+            ],
+            default: "REML",
+            hint: "REML is Stata's default; random(mle) and fixed.",
+        },
+        Widget::Choice {
+            id: "struct",
+            label: "Between-study covariance",
+            options: &[
+                Opt {
+                    value: "UN",
+                    label: "Unstructured (Stata's default)",
+                },
+                Opt {
+                    value: "DIAG",
+                    label: "Independent",
+                },
+                Opt {
+                    value: "CS",
+                    label: "Exchangeable",
+                },
+                Opt {
+                    value: "ID",
+                    label: "Identity",
+                },
+            ],
+            default: "UN",
+            hint: "As Stata's covariance() option: unstructured, independent (own variances, no \
+                   correlation), exchangeable (one variance, one correlation) or identity (one \
+                   variance).",
+        },
+        Widget::Text {
+            id: "save",
+            label: "Save the model as",
+            default: TextDefault::Fixed("mv"),
+            rule: TextRule::Name,
+            hint: "The fitted model stays in R's workspace under this name; a name already in \
+                   use is replaced.",
+        },
+    ],
+    needs: &["metafor"],
+    styles: BASE,
+    check: mv_check,
+    code: |a, _| {
+        let fit = a.name("save");
+        let data = a.data();
+        let outcomes = names_vector(&a.vars("outcomes"));
+        let wcov = names_vector(&a.vars("wcov"));
+        let mods = a.vars("mods");
+        let (x, keep, extra, terms) = if mods.is_empty() {
+            (String::new(), "y, w", String::new(), String::new())
+        } else {
+            let terms: Vec<String> = mods
+                .iter()
+                .map(|m| format!(" + outcome:{}", r_name(m)))
+                .collect();
+            (
+                format!("  x <- {data}[{}]\n", names_vector(&mods)),
+                "y, w, x",
+                ", x[rep(seq_len(k), each = p), , drop = FALSE]".to_string(),
+                terms.join(""),
+            )
+        };
+        let subset_x = if mods.is_empty() {
+            ""
+        } else {
+            "; x <- x[keep, , drop = FALSE]"
+        };
+        let method = a.choice("method");
+        let random = if method == "FE" {
+            String::new()
+        } else {
+            format!(
+                ", random = ~ outcome | study, struct = \"{}\", method = \"{method}\"",
+                a.choice("struct")
+            )
+        };
+        let mut out = format!(
+            "{fit} <- local({{\n  \
+             y <- as.matrix({data}[{outcomes}])\n  \
+             w <- as.matrix({data}[{wcov}])\n\
+             {x}  \
+             keep <- stats::complete.cases({keep})\n  \
+             y <- y[keep, , drop = FALSE]; w <- w[keep, , drop = FALSE]{subset_x}\n  \
+             k <- nrow(y); p <- ncol(y)\n  \
+             long <- data.frame(study = rep(seq_len(k), each = p), outcome = factor(rep(colnames(y), \
+             k), levels = colnames(y)), yi = c(t(y)){extra})\n  \
+             # each study's within-study covariance matrix, from Stata's v11 v12 ... vpp\n  \
+             V <- metafor::bldiag(lapply(seq_len(k), function(i) {{\n    \
+             S <- matrix(0, p, p); S[lower.tri(S, diag = TRUE)] <- w[i, ]\n    \
+             S + t(S) - diag(diag(S), p)\n  }}))\n  \
+             metafor::rma.mv(yi, V, mods = ~ outcome - 1{terms}{random}, data = long)\n}})\n\
+             summary({fit})\n"
+        );
+        if method != "FE" {
+            out.push_str(&format!(
+                "cat(\"\\nBetween-study standard deviations and correlations, as Stata's estat sd\\n\")\n\
+                 print(c(sd = sqrt({fit}$tau2), corr = {fit}$rho))\n"
+            ));
+        }
+        out.trim_end().to_string()
+    },
+};
+
+pub const SPECS: &[&Spec] = &[&META, &MV_META];
 
 #[cfg(test)]
 mod tests {
@@ -938,9 +1468,10 @@ mod tests {
              es$vi <- J^2 * es$vi\n  \
              es\n})\n\
              ma <- metafor::rma(yi, vi, data = ma_es, slab = study, method = \"REML\", \
-             control = list(threshold = 1e-10))\n\
+             control = list(threshold = 1e-6))\n\
+             ma <- stats::update(ma, control = list(threshold = 1e-6 * (1 + ma$tau2)))\n\
              summary(ma)\n\
-             metafor::forest(ma, header = TRUE)"
+             metafor::forest(ma, header = TRUE, showweights = TRUE)"
         );
     }
 
@@ -1001,7 +1532,7 @@ mod tests {
         );
         assert!(c.contains("print(predict(ma, transf = exp))"), "{c}");
         assert!(
-            c.contains("metafor::forest(ma, header = TRUE, atransf = exp)"),
+            c.contains("metafor::forest(ma, header = TRUE, showweights = TRUE, atransf = exp)"),
             "{c}"
         );
         assert!(c.contains("metafor::funnel(ma, atransf = exp)"), "{c}");
@@ -1132,7 +1663,30 @@ mod tests {
         assert!(problem(&[("method", "FE")], &[("pi", true)]).contains("random-effects"));
         assert!(problem(&[], &[("truncated", true)]).contains("tick those too"));
         assert!(problem(&[("measure", "OR")], &[("holkinse", true)]).contains("Olkin"));
-        assert!(problem(&[("egger", "harbord")], &[]).contains("log odds ratios"));
+        assert!(problem(&[("egger", "harbord")], &[]).contains("log odds and risk ratios"));
+        assert!(code(&[("measure", "RR"), ("egger", "harbord")]).is_ok());
+        assert!(problem(&[("measure", "RR"), ("egger", "peters")], &[]).contains("Peters"));
+        assert!(problem(&[("cluster", "grp"), ("method", "DL")], &[]).contains("multilevel"));
+        assert!(problem(&[("cluster", "grp"), ("subgroup", "grp")], &[]).contains("clusters"));
+        assert!(problem(&[], &[("studypred", true)]).contains("moderators"));
+        assert!(problem(&[("at", "2005")], &[]).contains("need moderators"));
+        let mut v = values(&[("at", "2005, 1; 2010")]);
+        v.set_list("mods", vec!["year".into()]);
+        let p = META
+            .generate(&ctx(), &v, Style::Base)
+            .err()
+            .unwrap_or_default();
+        assert!(p.iter().any(|p| p.message.contains("1 number(s)")), "{p:?}");
+        let mut v = values(&[("at", "2005")]);
+        v.set_list("mods", vec!["grp".into()]);
+        let p = META
+            .generate(&ctx(), &v, Style::Base)
+            .err()
+            .unwrap_or_default();
+        assert!(
+            p.iter().any(|p| p.message.contains("numeric moderators")),
+            "{p:?}"
+        );
         assert!(problem(&[], &[("labbe", true)]).contains("2×2 table"));
         let mut v = values(&[("cumul", "year")]);
         v.set_list("mods", vec!["year".into()]);
@@ -1147,5 +1701,123 @@ mod tests {
         // the pickers of another effect size are not needed
         assert!(code(&[("measure", "given"), ("n1", "")]).is_ok());
         assert!(code(&[("measure", "GLASS"), ("sd1", "")]).is_ok());
+    }
+
+    #[test]
+    fn multilevel_predictions_and_risk_difference_tables() {
+        let c = with(
+            &[("measure", "given"), ("cluster", "grp")],
+            &[("forest", false)],
+        )
+        .unwrap_or_default();
+        assert_eq!(
+            c,
+            "ma_es <- metafor::escalc(yi = est, sei = se, data = dat)\n\
+             ma_es$.study <- seq_len(nrow(ma_es))\n\
+             ma <- metafor::rma.mv(yi, vi, random = ~ 1 | grp/.study, data = ma_es, method = \"REML\")\n\
+             summary(ma)\n\
+             cat(\"\\nStandard deviation of each level (Stata's sd(_cons))\\n\")\n\
+             print(stats::setNames(sqrt(ma$sigma2), ma$s.names))"
+        );
+        let mut v = values(&[("measure", "given"), ("at", "2005; 2010")]);
+        v.set_list("mods", vec!["year".into()]);
+        v.set_flag("studypred", true);
+        v.set_flag("forest", false);
+        v.set_flag("bubble", false);
+        let c = META.generate(&ctx(), &v, Style::Base).unwrap_or_default();
+        assert!(c.contains("re <- metafor::ranef(ma)"), "{c}");
+        assert!(
+            c.ends_with("print(predict(ma, newmods = rbind(c(2005), c(2010))))"),
+            "{c}"
+        );
+        let c = with(
+            &[
+                ("measure", "RD"),
+                ("method", "MH"),
+                ("cumul", "year"),
+                ("subgroup", "grp"),
+            ],
+            &[("leave1out", true), ("contours", true)],
+        )
+        .unwrap_or_default();
+        assert!(
+            c.contains("gr(stats::update(ma, subset = .rows), .rows)"),
+            "{c}"
+        );
+        assert!(c.contains("o <- order(dat[[\"year\"]])"), "{c}");
+        assert!(c.contains(".rows <- o[-s]"), "{c}");
+        assert!(c.contains("metafor::addpoly(fits[[j]]"), "{c}");
+        assert!(
+            !c.contains("metafor::forest(ma, header = TRUE, showweights = TRUE)\n"),
+            "{c}"
+        );
+        assert!(c.contains("level = c(90, 95, 99)"), "{c}");
+        let c = with(
+            &[("measure", "given"), ("subgroup", "grp")],
+            &[("knha", true), ("forest", false)],
+        )
+        .unwrap_or_default();
+        assert!(c.contains("subset = .rows, test = \"z\")$se"), "{c}");
+        let c = code(&[("measure", "RR"), ("egger", "harbord")]).unwrap_or_default();
+        assert!(c.contains("Z <- (t$a * N - m1 * n1) / (N - m1)"), "{c}");
+    }
+
+    #[test]
+    fn the_multivariate_dialog_builds_stata_s_covariance_blocks() {
+        let mut ctx = ctx();
+        for name in ["est2", "v11", "v12", "v22"] {
+            ctx.columns.push(ColumnInfo {
+                name: name.into(),
+                kind: VarKind::Number,
+            });
+        }
+        let mut v = MV_META.defaults(&ctx);
+        v.set_list("outcomes", vec!["est".into(), "est2".into()]);
+        v.set_list("wcov", vec!["v11".into(), "v12".into(), "v22".into()]);
+        v.set_list("mods", vec!["year".into()]);
+        let c = MV_META.generate(&ctx, &v, Style::Base).unwrap_or_default();
+        assert!(
+            c.starts_with("mv <- local({\n  y <- as.matrix(dat[c(\"est\", \"est2\")])"),
+            "{c}"
+        );
+        assert!(c.contains("x <- dat[c(\"year\")]"), "{c}");
+        assert!(
+            c.contains(
+                "metafor::rma.mv(yi, V, mods = ~ outcome - 1 + outcome:year, random = ~ outcome | \
+                 study, struct = \"UN\", method = \"REML\", data = long)"
+            ),
+            "{c}"
+        );
+        assert!(
+            c.ends_with("print(c(sd = sqrt(mv$tau2), corr = mv$rho))"),
+            "{c}"
+        );
+        v.set_text("method", "FE");
+        let c = MV_META.generate(&ctx, &v, Style::Base).unwrap_or_default();
+        assert!(c.contains("outcome:year, data = long)"), "{c}");
+        assert!(!c.contains("estat sd"), "{c}");
+        v.set_list(
+            "wcov",
+            vec!["v11".into(), "v12".into(), "v22".into(), "se".into()],
+        );
+        let p = MV_META
+            .generate(&ctx, &v, Style::Base)
+            .err()
+            .unwrap_or_default();
+        assert!(
+            p.iter().any(|p| p.message.contains("need 3 columns")),
+            "{p:?}"
+        );
+        v.set_list("wcov", vec!["v11".into(), "v12".into(), "v22".into()]);
+        v.set_list("mods", vec!["study".into()]);
+        let p = MV_META
+            .generate(&ctx, &v, Style::Base)
+            .err()
+            .unwrap_or_default();
+        assert!(
+            p.iter()
+                .any(|p| p.message.contains("cannot be a moderator")),
+            "{p:?}"
+        );
     }
 }

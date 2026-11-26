@@ -26,9 +26,10 @@ pub const SELECTION_CLASSES: &[&str] = &["selection"];
 /// Compare models.
 pub const SEM_CLASSES: &[&str] = &["lavaan"];
 
-/// A meta-analysis or meta-regression fitted by metafor::rma (P6.11c), which
+/// A meta-analysis or meta-regression fitted by metafor::rma (P6.11c), or a
+/// multilevel or multivariate one by rma.mv (P6.11d), which
 /// takes Model fit and Compare models (metafor's likelihood-ratio test).
-pub const META_CLASSES: &[&str] = &["rma.uni"];
+pub const META_CLASSES: &[&str] = &["rma.uni", "rma.mv"];
 
 /// Whether an object whose first class is `class` is a model these dialogs take.
 pub fn is_model_class(class: &str) -> bool {
@@ -51,7 +52,14 @@ pub fn takes_model_table(class: &str) -> bool {
     is_model_class(class)
         && !matches!(
             class,
-            "pgmm" | "stanreg" | "Arima" | "HoltWinters" | "selection" | "lavaan" | "rma.uni"
+            "pgmm"
+                | "stanreg"
+                | "Arima"
+                | "HoltWinters"
+                | "selection"
+                | "lavaan"
+                | "rma.uni"
+                | "rma.mv"
         )
 }
 
@@ -74,7 +82,7 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         // a structural equation model: its fit, and lavaan's likelihood-ratio test
         "lavaan" => vec![&MODEL_FIT, &COMPARE_MODELS],
         // a meta-analysis: its likelihood (on the studies), and metafor's anova
-        "rma.uni" => vec![&MODEL_FIT, &COMPARE_MODELS],
+        "rma.uni" | "rma.mv" => vec![&MODEL_FIT, &COMPARE_MODELS],
         // a mixed model: its fit statistics only (the other dialogs need an
         // lm or glm object)
         "lmerMod" | "glmerMod" => vec![&MODEL_FIT, &crate::multilevel::ICC],
@@ -115,13 +123,14 @@ fn model_class_vector() -> String {
         .iter()
         .chain(SELECTION_CLASSES)
         .chain(SEM_CLASSES)
+        .chain(META_CLASSES)
         .map(|c| r_string(c))
         .collect();
     format!("c({})", names.join(", "))
 }
 
 const FITTED_MODELS: &str = "this works for fitted models (linear, generalised linear, panel, \
-                             survival, mixed, Bayesian, Heckman and structural equation models)";
+                             survival, mixed, Bayesian, Heckman, structural equation and meta-analysis models)";
 
 // ---- Model fit ----
 
@@ -1225,10 +1234,10 @@ mod tests {
         assert_eq!(
             make(&MARGINAL_EFFECTS, "my fit", &[("conf", "0.9")]).unwrap_or_default(),
             "stopifnot(\"this works for fitted models (linear, generalised linear, panel, \
-             survival, mixed, Bayesian, Heckman and structural equation models)\" = \
+             survival, mixed, Bayesian, Heckman, structural equation and meta-analysis models)\" = \
              inherits(`my fit`, c(\"lm\", \"glm\", \"aov\", \"negbin\", \"polr\", \"multinom\", \
              \"plm\", \"pgmm\", \"fixest\", \"svyglm\", \"coxph\", \"lmerMod\", \"glmerMod\", \
-             \"survreg\", \"stanreg\", \"selection\", \"lavaan\")))\n\
+             \"survreg\", \"stanreg\", \"selection\", \"lavaan\", \"rma.uni\", \"rma.mv\")))\n\
              print(marginaleffects::avg_slopes(`my fit`, conf_level = 0.9))"
         );
     }
@@ -1239,13 +1248,13 @@ mod tests {
         assert!(
             fit.starts_with(
                 "stopifnot(\"this works for fitted models (linear, generalised linear, panel, \
-                 survival, mixed, Bayesian, Heckman and structural equation models)\" = \
-                 inherits(`my model`, c(\"lm\", "
+                 survival, mixed, Bayesian, Heckman, structural equation and meta-analysis \
+                 models)\" = inherits(`my model`, c(\"lm\", "
             ),
             "{fit}"
         );
         assert!(
-            fit.contains("\"selection\", \"lavaan\")))\n(function(m) {"),
+            fit.contains("\"selection\", \"lavaan\", \"rma.uni\", \"rma.mv\")))\n(function(m) {"),
             "{fit}"
         );
         let cmp = make(&COMPARE_MODELS, "m1", &[("others", "m2")]).unwrap_or_default();

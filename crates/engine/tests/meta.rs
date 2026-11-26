@@ -27,21 +27,29 @@
 //!   `cumulative(year)` and `leaveoneout`; `meta bias, harbord`, `peters` and
 //!   `begg`; `meta trimfill` (linear and run estimators); `glassdelta1`,
 //!   `holkinse`, `se(khartung, truncated)`, Fisher's z through `meta set`;
-//!   and the Model menu on `rma.uni` fits.
+//!   and the Model menu on `rma.uni` fits;
+//! - (P6.11d) `meta bias, harbord` on log risk ratios; `meta bias, begg`
+//!   with tied variances; Mantel-Haenszel risk-difference subgroups,
+//!   `cumulative()` and `leaveoneout` with the Greenland-Robins error;
+//!   Knapp-Hartung subgroups and cumulative analysis; `predict` (xb, stdp,
+//!   reffects) and `margins, at()` after `meta regress`; `meta multilevel`;
+//!   `meta mvregress` (REML, mle, fixed, a moderator, independent
+//!   covariance); the Model menu on `rma.mv` fits.
 //!
 //! DerSimonian-Laird, Hedges, Sidik-Jonkman, the fixed effects and the tests
-//! on them agree to 1e-9. REML, ML, empirical Bayes and Paule-Mandel are
-//! iterated: metafor is taken to the solution and Stata stops within about
-//! 1e-6 of it, so their figures are held to 3e-6 (1e-5 for trim-and-fill and
-//! the subgroups, refitted from them; 5e-5 for REML on 3 to 5 studies, where
-//! Stata stops further short).
+//! on them agree to 1e-9. REML, ML and empirical Bayes are iterated, and the
+//! dialog stops where Stata stops (both follow the same iterations; Stata
+//! stops once tau² moves by less than 1e-6 relative to 1 + tau²), so they
+//! agree to 1e-9 too. Paule-Mandel agrees to 3e-7, trim-and-fill (whose refit metafor
+//! runs at its own default) to 1e-5, and rma.mv's fits (found by optim) to
+//! 1e-6.
 //!
 //! The test records the R and metafor versions it ran with (AGENTS.md
 //! section 5), and checks R is the one `ENVIRONMENT` pins.
 
 use std::time::{Duration, Instant};
 
-use rcraft_catalog::meta::META;
+use rcraft_catalog::meta::{META, MV_META};
 use rcraft_catalog::postest::{self, COMPARE_MODELS, MODEL_FIT};
 use rcraft_engine::{Engine, Item, Outcome, Source};
 use rcraft_rcodegen::dialog::{ColumnInfo, Context, Widget};
@@ -138,7 +146,10 @@ fn versions(e: &mut Engine) -> bool {
 /// 14 studies: group sizes, means and standard deviations (3 decimals), a
 /// 2×2 table (study 3 has no events in group 1) and an estimate with its
 /// standard error (4 decimals); a year, two alternating groups, a
-/// correlation and its sample size, made without further random draws.
+/// correlation and its sample size, a lab holding two studies each, standard
+/// errors with ties, and a second outcome with its standard error and
+/// within-study covariances (correlation 0.5), made without further random
+/// draws.
 /// `mm` is the same with study 5's estimate missing. The helpers read a
 /// fit's figures and a test's, in Stata's order.
 const MAKE: &str = "md <- local({ \
@@ -151,7 +162,10 @@ const MAKE: &str = "md <- local({ \
      est <- round(rnorm(k, 0.3, 0.35), 4); se <- round(runif(k, 0.08, 0.4), 4); \
      data.frame(study = paste0('S', 1:k), year = 2000 + 1:k, grp = c('A', 'B')[1:k %% 2 + 1], \
        n1, m1, sd1, n2, m2, sd2, a, b, c, d = dd, est, se, r = round(0.3 + 0.25 * sin(1:k), 3), \
-       nr = n1 + n2) }); \
+       nr = n1 + n2, lab = rep(1:7, each = 2), set = round(c(0.1, 0.1, 0.2, 0.2, 0.3, 0.15, \
+       0.15, 0.25, 0.25, 0.3, 0.12, 0.12, 0.35, 0.35), 4), \
+       est2 = round(0.7 * est + 0.45 * sin(2 * (1:k)) + 0.1, 4), se2 = round(0.5 * se, 4)) }); \
+     md$v11 <- md$se^2; md$v12 <- 0.5 * md$se * md$se2; md$v22 <- md$se2^2; \
      mm <- local({ k <- md; k$est[5] <- NA; k }); \
      figs <- function(m) c(m$b[1], m$se, m$tau2, m$I2, m$H2, m$QE, m$ci.lb, m$ci.ub); \
      egger <- function(r) if (inherits(r$fit, 'lm')) { s <- coef(summary(r$fit)); \
@@ -162,6 +176,7 @@ const MAKE: &str = "md <- local({ \
 fn context(dataset: &str) -> Context {
     let mut columns: Vec<ColumnInfo> = [
         "year", "n1", "m1", "sd1", "n2", "m2", "sd2", "a", "b", "c", "d", "est", "se", "r", "nr",
+        "lab", "set", "est2", "se2", "v11", "v12", "v22",
     ]
     .into_iter()
     .map(|name| ColumnInfo {
@@ -256,11 +271,14 @@ fn fits_match(e: &mut Engine, measure: &str, save: &str, stata: &[(&str, &str)])
         );
         assert_eq!(outcome, Outcome::Ok, "{text}");
         assert!(text.contains("Test for Heterogeneity"), "{text}");
-        // the iterated estimators of tau² stop short of the maximum in both
-        let tol = if matches!(*method, "REML" | "ML" | "EB" | "PM") {
-            "3e-6"
-        } else {
-            "1e-9"
+        // REML, ML and empirical Bayes stop where Stata stops (to 1e-9),
+        // except with a large tau² (0.58 for the odds ratios), where Stata's
+        // stop comes one step sooner; metafor finds Paule-Mandel's root exactly,
+        // Stata stops its iteration within 2e-7 of it
+        let tol = match *method {
+            "REML" if measure == "OR" => "1e-9",
+            "PM" => "3e-7",
+            _ => "1e-9",
         };
         checks.push(format!("near(figs({name}), c({values}), {tol})"));
     }
@@ -338,7 +356,7 @@ fn hedges_g_matches_stata_meta_summarize_and_meta_bias() {
         &[
             // meta bias, egger (REML) and meta bias, egger traditional
             "near(egger(metafor::regtest(ma)), c(1.4011073668787877, 2.4533567276476504, \
-             .57109810044714127, .56793314616063151), 3e-6)"
+             .57109810044714127, .56793314616063151), 1e-9)"
                 .into(),
             "near(egger(metafor::regtest(ma, model = 'lm')), c(.93471013845995332, \
              2.802447609838262, .33353349235809565, .74448738141395576), 1e-9)"
@@ -498,7 +516,7 @@ fn given_estimates_and_a_missing_study_match_stata() {
             "miss$k == 13".into(),
             "near(figs(miss), c(.44227868708347678, .095268552607012863, .062916256287157121, \
              61.749767038037561, 2.6143631621654171, 27.010342539367606, .25555575511447215, \
-             .62900161905248142), 3e-6)"
+             .62900161905248142), 1e-9)"
                 .into(),
         ],
     );
@@ -573,7 +591,7 @@ fn stata_default_g_and_every_tau2_estimator_match_meta_summarize() {
     // se(khartung), predinterval, and both: the pooled figures, then the
     // prediction interval's ends
     let cases: [(&str, bool, bool, &str, &str, &str, &str); 5] = [
-        ("REML", true, false, "kh", G_KH, "", "3e-6"),
+        ("REML", true, false, "kh", G_KH, "", "1e-9"),
         (
             "DL",
             true,
@@ -591,7 +609,7 @@ fn stata_default_g_and_every_tau2_estimator_match_meta_summarize() {
             "gpi",
             G_REML,
             "-.39346704697599749, .91108712462893093",
-            "3e-6",
+            "1e-9",
         ),
         (
             "DL",
@@ -609,7 +627,7 @@ fn stata_default_g_and_every_tau2_estimator_match_meta_summarize() {
             "khpi",
             G_KH,
             "-.39085053876360437, .9084706164165379",
-            "3e-6",
+            "1e-9",
         ),
     ];
     for (method, knha, pi, name, figures, ends, tol) in cases {
@@ -785,7 +803,7 @@ fn meta_regression_matches_meta_regress_and_has_the_model_menu() {
             ".000469631229358322, 1891.34424596754",
             "c(mr$tau2, mr$I2, mr$H2, mr$QE, mr$QM), c(.063238416054054294, 58.70461046144041, \
              2.4215778351388346, 26.884601716956038, .25546503884198174)",
-            "3e-6",
+            "1e-9",
         ),
         (
             "DL",
@@ -804,7 +822,7 @@ fn meta_regression_matches_meta_regress_and_has_the_model_menu() {
             ".010953280798438, -21.5379165857404",
             ".00045888577737397, 1848.06912389209",
             "c(mr_kh$QM, mr_kh$QMdf), c(.26144710985814229, 1, 12)",
-            "3e-6",
+            "1e-9",
         ),
     ] {
         let (outcome, text, plots) = dialog(
@@ -850,7 +868,7 @@ fn meta_regression_matches_meta_regress_and_has_the_model_menu() {
             // meta bias year, egger: Egger's test adjusted for the moderator
             "near(with(metafor::regtest(mr), c(fit$beta['sei', 1], fit$se[3], zval, pval)), \
              c(2.2679977298555944, 1.1103640491556253, 2.0425712914429193, .041094895442178397), \
-             3e-6)"
+             1e-9)"
                 .into(),
         ],
     );
@@ -997,9 +1015,9 @@ fn subgroups_cumulative_leave_one_out_and_trim_and_fill_match_stata() {
             "near(sapply(sub(s_reml, md$grp), figs)[c(1, 2, 3, 4, 5, 6), ], c(.296139110837349, \
              .112407082465521, .0394164436165783, 47.6797819255571, 1.91130701821076, \
              11.1650458342743, .566775481621335, .112514173623236, .0351383983621339, \
-             44.0040576184119, 1.78584368343233, 10.7234655741425), 1e-5)"
+             44.0040576184119, 1.78584368343233, 10.7234655741425), 1e-9)"
                 .into(),
-            "near(qb(sub(s_reml, md$grp)), 2.895617673812044, 1e-5)".into(),
+            "near(qb(sub(s_reml, md$grp)), 2.895617673812044, 1e-9)".into(),
             "with(metafor::trimfill(s_reml), k0 == 4 && near(c(b[1], ci.lb, ci.ub), \
              c(.307618260078669, .109446141571852, .505790378585486), 1e-5))"
                 .into(),
@@ -1010,7 +1028,7 @@ fn subgroups_cumulative_leave_one_out_and_trim_and_fill_match_stata() {
             // studies Stata stops up to 2e-5 short of the maximum in tau²
             "near(unlist(as.data.frame(metafor::cumul(s_reml, order = year))[3:5, c('estimate', \
              'tau2')]), c(.36198702, .28166399, .30632856, .02901714, .03776144, .02663685), \
-             5e-5)"
+             1e-6)"
                 .into(),
         ],
     );
@@ -1086,7 +1104,7 @@ fn small_study_tests_effect_size_variants_and_plots_match_stata() {
         &[
             "near(with(metafor::regtest(or_reml, predictor = 'ninv'), c(fit$beta[2], fit$se[2], \
            zval, pval)), c(12.31492006964363, 85.42666648941385, .1441577972748089, \
-           .885375865672394), 1e-5)"
+           .885375865672394), 1e-9)"
                 .into(),
         ],
     );
@@ -1112,7 +1130,7 @@ fn small_study_tests_effect_size_variants_and_plots_match_stata() {
             "REML",
             "kht",
             ".43818306837285304, .08767735888615226, .24876765035377008, .62759848639193572",
-            "3e-6",
+            "1e-9",
         ),
         (
             "DL",
@@ -1208,9 +1226,265 @@ fn small_study_tests_effect_size_variants_and_plots_match_stata() {
                 .into(),
             "near(figs(zc_reml), c(.34668478062702091, .056927373424637058, .037009988950375765, \
              82.950398142668149, 5.8652396012987786, 74.847705910909525, .23510917898026967, \
-             .45826038227377208), 3e-6)"
+             .45826038227377208), 1e-9)"
                 .into(),
             "near(predict(zc_dl, transf = tanh)$pred, tanh(.34666867252727884), 1e-9)".into(),
         ],
+    );
+}
+
+#[test]
+fn harbord_for_risk_ratios_begg_with_ties_and_risk_difference_refits_match_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // meta esize a b c d, esize(lnrratio); meta bias, harbord
+    let (outcome, text, _) = dialog(
+        &mut e,
+        "md",
+        &[("measure", "RR"), ("egger", "harbord")],
+        NO_PLOTS,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    for s in ["-3.39331", "1.80128", "-1.88382", "0.059588"] {
+        assert!(text.contains(s), "{s} in\n{text}");
+    }
+    // meta set est set (seven pairs of tied standard errors); meta bias, begg
+    let (outcome, text, _) = dialog(
+        &mut e,
+        "md",
+        &[("measure", "given"), ("se", "set"), ("egger", "begg")],
+        NO_PLOTS,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    for s in ["-2", "18.07392", "-0.165985", "0.955876"] {
+        assert!(text.contains(s), "{s} in\n{text}");
+    }
+    // meta esize a b c d, esize(rdiff) fixed: subgroups, cumulative(year)
+    // and leaveoneout, each refit with the Greenland-Robins error
+    let (outcome, text, plots) = dialog(
+        &mut e,
+        "md",
+        &[
+            ("measure", "RD"),
+            ("method", "MH"),
+            ("subgroup", "grp"),
+            ("cumul", "year"),
+            ("save", "rd_sub"),
+        ],
+        &[("leave1out", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    // the forest plot with the subgroups' diamonds
+    assert_eq!(plots, 1, "{text}");
+    for s in [
+        "Q_b = 0.03760304 on 1 df",
+        "0.027874",
+        "0.027100",
+        "Cumulative meta-analysis, in the order of year",
+        "0.046335",
+        "0.032129",
+        "0.030012",
+        "Leave-one-out meta-analysis",
+        "0.019963",
+        "0.020748",
+        "0.021130",
+    ] {
+        assert!(text.contains(s), "{s} in\n{text}");
+    }
+    // meta summarize, subgroup(grp) se(khartung): each group's Knapp-Hartung
+    // error, and Q_b from the unadjusted ones
+    let (outcome, text, _) = dialog(
+        &mut e,
+        "md",
+        &[
+            ("measure", "given"),
+            ("subgroup", "grp"),
+            ("cumul", "year"),
+            ("save", "kh_sub"),
+        ],
+        &[("knha", true), ("forest", false)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Q_b = 2.895618 on 1 df"), "{text}");
+    define(&mut e, SUBGROUPS);
+    holds(
+        &mut e,
+        &[
+            "near(sapply(sub(kh_sub, md$grp), function(f) f$se), c(.118115832290721, \
+             .110214602570655), 1e-9)"
+                .into(),
+            // meta summarize, cumulative(year) se(khartung): rows 2 to 4
+            "near(unlist(as.data.frame(metafor::cumul(kh_sub, order = year))[2:4, c('estimate', \
+             'se', 'ci.lb')]), c(.263688675147378, .361987023420823, .281663993304748, \
+             .14748657894908, .150392818576679, .130778539750541, -1.61030599281763, \
+             -.28510104796284, -.13453168733476), 1e-9)"
+                .into(),
+        ],
+    );
+}
+
+#[test]
+fn predictions_multilevel_and_multivariate_fits_match_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // meta regress year; predict xb, stdp, reffects, fitted; margins,
+    // at(year = (2005 2010))
+    let (outcome, text, _) = dialog(
+        &mut e,
+        "md",
+        &[
+            ("measure", "given"),
+            ("mods", "year"),
+            ("at", "2005; 2010"),
+            ("save", "mp"),
+        ],
+        &[("studypred", true), ("forest", false), ("bubble", false)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Study predictions"), "{text}");
+    assert!(
+        text.contains("Predictions at the moderator values"),
+        "{text}"
+    );
+    holds(
+        &mut e,
+        &[
+            "near(with(predict(mp), c(pred[c(1, 5)], se[c(1, 5)])), c(.37959829193412276, \
+             .42341141512787317, .15581480953968349, .099855664237067959), 1e-9)"
+                .into(),
+            "near(metafor::ranef(mp)$pred[c(1, 5)], c(-.01756230005993482, .016271495929339106), \
+             1e-8)"
+                .into(),
+            // the predictions to 1e-9; their variances to 1e-6, since Stata's
+            // margins differs by 1.5e-7 from its own predict, stdp squared
+            // (study 5 is the year 2005)
+            "near(with(predict(mp, newmods = rbind(c(2005), c(2010))), pred), \
+             c(.423411415127873, .478177819120063), 1e-9)"
+                .into(),
+            "near(with(predict(mp, newmods = rbind(c(2005), c(2010))), se^2), \
+             c(.00997115215938305, .0132206825124426), 1e-6)"
+                .into(),
+        ],
+    );
+    // meta multilevel est, relevels(lab study) essevariable(se)
+    let (outcome, text, plots) = dialog(
+        &mut e,
+        "md",
+        &[("measure", "given"), ("cluster", "lab"), ("save", "ml3")],
+        &[("contours", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Standard deviation of each level"), "{text}");
+    // the forest plot and the contour-enhanced funnel plot
+    assert_eq!(plots, 2, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(ml3$b[1], ml3$se^2, sqrt(ml3$sigma2)), c(.443744155435418, \
+           .00898826195461914, exp(-2.10710555540641), exp(-1.58542855357435)), 1e-6)"
+                .into(),
+        ],
+    );
+    // meta mvregress est est2, wcovvariables(v11 v12 v22), with REML, mle,
+    // fixed, a moderator and covariance(independent): coefficients, their
+    // covariances, the between-study SDs and correlation (estat sd), Q_M
+    let ctx = context("md");
+    for (method, structure, mods, name, checks) in [
+        (
+            "REML",
+            "UN",
+            "",
+            "mv_reml",
+            "c(coef(mv_reml), vcov(mv_reml)[c(1, 2, 4)], sqrt(mv_reml$tau2), mv_reml$rho, \
+             mv_reml$QE), c(.438439531162747, .457926532903039, .00789113066144299, \
+             .00315798442459061, .00866750955155163, exp(-1.43540492622176), \
+             exp(-1.12418862308977), tanh(.414615507704636), 195.1458620349403), 1e-6",
+        ),
+        (
+            "ML",
+            "UN",
+            "",
+            "mv_ml",
+            "c(coef(mv_ml), vcov(mv_ml)[c(1, 2, 4)], sqrt(mv_ml$tau2), mv_ml$rho), \
+             c(.432829765655791, .456341043649659, .00714670773634329, .00281117708306984, \
+             .0079789545310019, exp(-1.5243185922843), exp(-1.1714436705672), \
+             tanh(.402470632503434)), 1e-6",
+        ),
+        (
+            "FE",
+            "UN",
+            "",
+            "mv_fe",
+            "c(coef(mv_fe), vcov(mv_fe)[c(1, 2, 4)], mv_fe$QE), c(.373825866704263, \
+             .520532588288754, .00255185614582068, .000637681716110043, .000637399753315889, \
+             195.14586203494025), 1e-9",
+        ),
+        (
+            "REML",
+            "UN",
+            "year",
+            "mv_year",
+            "c(coef(mv_year), sqrt(mv_year$tau2), mv_year$rho), c(-24.1284780263221, \
+             -19.0631614698363, .0122437485672831, .00972609424738155, exp(-1.36028416216164), \
+             exp(-1.07698426028502), tanh(.427249601515083)), 5e-6",
+        ),
+        (
+            "REML",
+            "DIAG",
+            "",
+            "mv_ind",
+            "c(coef(mv_ind), sqrt(mv_ind$tau2)), c(.432568739315214, .4535264012457, \
+             exp(-1.55254573252271), exp(-1.17076930144505)), 1e-6",
+        ),
+    ] {
+        let (made, text, _) = run(&mut e, Source::Typed, MAKE);
+        assert_eq!(made, Outcome::Ok, "{text}");
+        let mut values = MV_META.defaults(&ctx);
+        values.set_list("outcomes", vec!["est".into(), "est2".into()]);
+        values.set_list("wcov", vec!["v11".into(), "v12".into(), "v22".into()]);
+        if !mods.is_empty() {
+            values.set_list("mods", vec![mods.into()]);
+        }
+        values.set_text("method", method);
+        values.set_text("struct", structure);
+        values.set_text("save", name);
+        let code = MV_META.generate(&ctx, &values, Style::Base);
+        assert!(code.is_ok(), "{code:?}");
+        let (outcome, text, _) = run(
+            &mut e,
+            Source::Menu(MV_META.menu.into()),
+            &code.unwrap_or_default(),
+        );
+        assert_eq!(outcome, Outcome::Ok, "{text}");
+        // the maximum optim finds: to 1e-6 of Stata's (5e-6 with the uncentred
+        // year, where the likelihood is flatter)
+        holds(&mut e, &[format!("near({checks})")]);
+    }
+    // the Model menu on an rma.mv fit
+    let fit_ctx = Context {
+        dataset: "mv_reml".into(),
+        frames: Vec::new(),
+        columns: Vec::new(),
+    };
+    let fit_code = MODEL_FIT.generate(&fit_ctx, &MODEL_FIT.defaults(&fit_ctx), Style::Base);
+    let (outcome, text, _) = run(
+        &mut e,
+        Source::Menu(MODEL_FIT.menu.into()),
+        &fit_code.unwrap_or_default(),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Observations: 28"), "{text}");
+    assert_eq!(
+        postest::model_specs("rma.mv")
+            .iter()
+            .map(|s| s.entry)
+            .collect::<Vec<_>>(),
+        ["Model fit", "Compare models"]
     );
 }
