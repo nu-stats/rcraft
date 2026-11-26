@@ -606,3 +606,77 @@ fn a_factor_made_in_r_gets_statas_coefficient_layout() {
         }
     }
 }
+
+/// SW11: a number (or a labelled number) compared with a string, or a string
+/// with a number, in an `if` is Stata's "type mismatch" (r(109)), not dplyr's
+/// error; the same comparison with the right kind still runs.
+#[test]
+fn comparing_a_number_with_a_string_is_a_type_mismatch() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    ok(
+        &mut e,
+        &format!(
+            "local({{
+  d <- haven::read_dta('{dir}/panel.dta')
+  d$g <- haven::labelled(as.numeric(d$g), c(a = 0, b = 1))
+  d$s <- rep(c('u', 'v'), 10)
+  haven::write_dta(d, '{dir}/mixed.dta')
+}})"
+        ),
+    );
+    let mut live = rcraft_statatr::live::Live::new();
+    let mut step = |e: &mut Engine, line: &str| {
+        let mut s = live.step(line);
+        while let Some(q) = s.ask.clone() {
+            let (o, t) = run(e, &q);
+            live.give(if o == Outcome::Ok { Ok(t) } else { Err(t) });
+            s = live.step(line);
+        }
+        assert!(!s.code.trim().is_empty(), "no R for {line}: {s:?}");
+        run(e, &s.code)
+    };
+    let (o, t) = step(&mut e, &format!("use \"{dir}/mixed.dta\""));
+    assert_eq!(o, Outcome::Ok, "{t}");
+    for line in [
+        "summarize x if g == \"a\"",
+        "tabulate g if g == \"a\"",
+        "list x if \"a\" == g",
+        "count if g != \"b\"",
+        "regress y x if g == \"a\"",
+        "keep if g == \"a\"",
+        "drop if g == \"a\"",
+        "count if s == 3",
+        "summarize x if s > 2",
+        "count if x == \"a\"",
+    ] {
+        let (o, t) = step(&mut e, line);
+        assert_eq!(o, Outcome::Error, "{line}: {t}");
+        assert!(t.contains("type mismatch (Stata: r(109))"), "{line}: {t}");
+        assert!(
+            !t.contains("dplyr") && !t.contains("combine"),
+            "{line}: {t}"
+        );
+    }
+    // nothing was kept or dropped
+    let shape = numbers(&mut e, "0", "nrow(mixed)");
+    assert_eq!(shape, [20.0]);
+    // the right kinds still run, and a missing variable is still r(111)
+    for line in [
+        "summarize x if g == 1",
+        "count if g == 0 & x > 3",
+        "count if s == \"u\"",
+        "count if 3 < x",
+        "regress y x if s == \"v\"",
+        "keep if g == 1",
+    ] {
+        let (o, t) = step(&mut e, line);
+        assert_eq!(o, Outcome::Ok, "{line}: {t}");
+    }
+    let (o, t) = step(&mut e, "count if nosuch == \"a\"");
+    assert_eq!(o, Outcome::Error, "{t}");
+    assert!(
+        t.contains("variable nosuch not found (Stata: r(111))"),
+        "{t}"
+    );
+}
