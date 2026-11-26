@@ -31,6 +31,23 @@ pub(crate) fn install_code_from(packages: &[&str], library: Option<&str>, mirror
     .unwrap_or_else(|why| format!("stop({})", r_string(&why)))
 }
 
+/// R code a dialog's install runs: the install into RCraft's library, then a
+/// check that every package now loads (`install.packages` only warns when it
+/// fails, so without this a failed install would look like a finished command).
+pub(crate) fn install_checked_code(packages: &[&str], library: Option<&str>) -> String {
+    let install = install_code(packages, library);
+    let names: Vec<String> = packages.iter().map(|p| r_string(p)).collect();
+    let list = packages.join(", ");
+    let why = r_string(&format!(
+        "The package {list} could not be installed; R's messages above say why."
+    ));
+    format!(
+        "{install}\nif (length(Filter(function(p) !requireNamespace(p, quietly = TRUE), \
+         c({}))) > 0) stop({why}, call. = FALSE)",
+        names.join(", ")
+    )
+}
+
 #[derive(Default)]
 enum Check {
     #[default]
@@ -49,6 +66,8 @@ pub struct PackageCheck {
     /// An install was started from here; look again when R is free.
     installing: bool,
     seen_busy: bool,
+    /// An install from here has ended (the check says whether it worked).
+    tried: bool,
     /// RCraft's own library for the session's R version (where installs go).
     library: Option<String>,
 }
@@ -69,6 +88,7 @@ impl PackageCheck {
             } else if self.seen_busy {
                 self.installing = false;
                 self.seen_busy = false;
+                self.tried = true;
                 self.check = Check::NotAsked;
             }
         }
@@ -100,6 +120,13 @@ impl PackageCheck {
             }
             Check::Got(_) => {}
         }
+    }
+
+    /// Notes that an install was asked for (the panel's button).
+    fn begin_install(&mut self) {
+        self.installing = true;
+        self.seen_busy = false;
+        self.tried = false;
     }
 
     /// Whether R is still answering.
@@ -141,12 +168,23 @@ impl PackageCheck {
             ))
             .color(pal.warning),
         );
-        let code = install_code(&list, self.library.as_deref());
+        if self.tried {
+            ui.label(
+                RichText::new(
+                    "The install did not work. R's messages in Results say why; \
+                     Check again looks once more.",
+                )
+                .color(pal.error),
+            );
+        }
+        let code = install_checked_code(&list, self.library.as_deref());
         ui.label(
-            RichText::new(
-                "RCraft can install it for you. It is downloaded from CRAN (with the packages it \
-                 needs) into RCraft's own library, not into any other app's R:",
-            )
+            RichText::new(format!(
+                "Provider: CRAN, from {} (version: the newest release built for your R). It is \
+                 installed with the packages it needs into RCraft's own library, not into any \
+                 other app's R. Nothing is downloaded until you press Install:",
+                saved_mirror()
+            ))
             .small()
             .color(pal.dim),
         );
@@ -165,11 +203,11 @@ impl PackageCheck {
                 )
                 .clicked()
             {
-                self.installing = true;
-                self.seen_busy = false;
+                self.begin_install();
                 ask = Some(code.clone());
             }
             if ui.button("Check again").clicked() {
+                self.tried = false;
                 self.check = Check::NotAsked;
             }
         });
@@ -243,6 +281,146 @@ mod tests {
             return;
         };
         assert!(check.ready(&["stats", "utils"]));
+    }
+
+    #[test]
+    fn the_dialogs_install_code_checks_that_the_packages_loaded() {
+        let code = install_checked_code(
+            &["fixest", "plm"],
+            Some("C:/Users/me/AppData/Local/RCraft/R-library/4.4"),
+        );
+        assert!(
+            code.contains("install.packages(c(\"fixest\", \"plm\"),"),
+            "{code}"
+        );
+        assert!(code.contains("lib = \"C:/Users/me/AppData/Local/RCraft/R-library/4.4\""));
+        assert!(code.contains("requireNamespace(p, quietly = TRUE)"));
+        assert!(code.contains("could not be installed"), "{code}");
+        assert!(
+            code.contains("c(\"fixest\", \"plm\"))) > 0) stop("),
+            "{code}"
+        );
+    }
+
+    /// Code run from the history or a script (no dialog) that needs one of the
+    /// dialogs' packages gets the install offer in Results (P1A.10): R's message
+    /// for `pkg::f()` names the package.
+    #[test]
+    fn running_a_dialogs_code_without_its_package_offers_the_install() {
+        for pkg in [
+            "fixest",
+            "plm",
+            "rstanarm",
+            "survey",
+            "sampleSelection",
+            "lavaan",
+            "metafor",
+            "vars",
+        ] {
+            let message = format!("there is no package called \u{2018}{pkg}\u{2019}");
+            assert_eq!(
+                rcraft_rcodegen::packages::package_to_install(&message),
+                Some((pkg.to_string(), rcraft_rcodegen::packages::Need::Missing)),
+                "{pkg}"
+            );
+        }
+    }
+
+    /// Starts a real R, or None (skipped) without one.
+    fn start_r() -> Option<Engine> {
+        use rcraft_rhost::{find_installs, Env, SessionConfig};
+        let install = find_installs(&Env::from_process())
+            .into_iter()
+            .find(|i| i.is_supported())?;
+        Engine::start(SessionConfig::new(install)).ok()
+    }
+
+    /// Runs frames until `done`, or fails after a minute.
+    fn until(
+        engine: &mut Engine,
+        check: &mut PackageCheck,
+        needed: &[&'static str],
+        done: impl Fn(&PackageCheck, &Engine) -> bool,
+    ) {
+        use std::time::{Duration, Instant};
+        let limit = Instant::now() + Duration::from_secs(90);
+        loop {
+            engine.poll(Duration::from_millis(50));
+            check.service(engine, needed);
+            if done(check, engine) {
+                return;
+            }
+            assert!(Instant::now() < limit, "R did not answer");
+        }
+    }
+
+    /// R that builds a tiny package, installs it into a temporary library on
+    /// this machine (nothing downloaded) and puts that library on the search path.
+    const FAKE_INSTALL: &str = "tmp <- file.path(tempdir(), 'zzfakeinstall'); \
+        lib <- file.path(tmp, 'lib'); dir.create(lib, recursive = TRUE); \
+        src <- file.path(tmp, 'zzfakepkgq'); dir.create(file.path(src, 'R'), recursive = TRUE); \
+        writeLines(c('Package: zzfakepkgq', 'Version: 0.0.1', 'Title: x', 'Description: x.', \
+          'License: MIT', 'Author: a', 'Maintainer: a <a@b.c>'), file.path(src, 'DESCRIPTION')); \
+        writeLines('f <- function() 1', file.path(src, 'R', 'f.R')); \
+        writeLines('export(f)', file.path(src, 'NAMESPACE')); \
+        install.packages(src, repos = NULL, type = 'source', lib = lib, quiet = TRUE); \
+        .libPaths(c(lib, .libPaths()))";
+
+    #[test]
+    fn a_missing_package_is_installed_and_run_enables_without_reopening() {
+        use rcraft_engine::Source;
+        let Some(mut engine) = start_r() else {
+            eprintln!("skipped: no supported R on this machine");
+            return;
+        };
+        let needed = ["zzfakepkgq"];
+        let mut check = PackageCheck::default();
+        until(&mut engine, &mut check, &needed, |c, _| {
+            matches!(c.check, Check::Got(_))
+        });
+        // missing: Run stays off
+        assert!(!check.ready(&needed));
+        assert!(matches!(&check.check, Check::Got(m) if m == &["zzfakepkgq"]));
+        // the install is built for these packages and waits for the click (no
+        // command has been sent by looking at it)
+        assert!(install_checked_code(&needed, None).contains("install.packages(\"zzfakepkgq\","));
+        assert!(!check.installing);
+        // the click: a made-up install that works
+        check.begin_install();
+        assert!(engine
+            .submit(Source::Menu("Packages > Install".into()), FAKE_INSTALL)
+            .is_ok());
+        until(&mut engine, &mut check, &needed, |c, _| {
+            !c.installing && matches!(c.check, Check::Got(_))
+        });
+        assert!(check.ready(&needed), "Run did not enable after the install");
+        assert!(check.tried);
+    }
+
+    #[test]
+    fn a_failed_install_leaves_run_off_and_says_so() {
+        use rcraft_engine::Source;
+        let Some(mut engine) = start_r() else {
+            eprintln!("skipped: no supported R on this machine");
+            return;
+        };
+        let needed = ["zzfakepkgq"];
+        let mut check = PackageCheck::default();
+        check.begin_install();
+        assert!(engine
+            .submit(
+                Source::Menu("Packages > Install".into()),
+                "stop('made-up install failure')"
+            )
+            .is_ok());
+        until(&mut engine, &mut check, &needed, |c, _| {
+            !c.installing && matches!(c.check, Check::Got(_))
+        });
+        assert!(!check.ready(&needed));
+        assert!(check.tried, "the panel should say the install did not work");
+        // opening the dialog afresh forgets it
+        check.reset();
+        assert!(!check.tried);
     }
 
     #[test]
