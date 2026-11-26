@@ -78,6 +78,9 @@ pub struct HeadlessOptions {
     pub dofile: Option<PathBuf>,
     /// ... and run it on R.
     pub dofile_run: bool,
+    /// Text in the Command box, and the height of the Command panel in points.
+    pub command_text: Option<String>,
+    pub command_height: Option<f32>,
     pub accent: Accent,
     /// Width and height in points.
     pub size: [u32; 2],
@@ -114,6 +117,8 @@ impl HeadlessOptions {
             stata_guide: None,
             dofile: None,
             dofile_run: false,
+            command_text: None,
+            command_height: None,
             accent: Accent::default(),
             size: [1240, 780],
             pixels_per_point: 1.0,
@@ -157,6 +162,9 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
         app.show_stata_guide(line);
     }
     let mut dofile_opened = options.dofile.is_none();
+    if let Some(text) = &options.command_text {
+        app.set_command_text(&ctx, text);
+    }
     if options.show_data {
         app.show_data(&ctx);
     }
@@ -204,6 +212,16 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
         std::collections::VecDeque::new();
     let mut shapes: Vec<egui::epaint::ClippedShape>;
     loop {
+        // the Command panel as if dragged to this height
+        if let Some(h) = options.command_height {
+            let state = egui::containers::panel::PanelState {
+                rect: Rect::from_min_size(
+                    Pos2::new(0.0, screen.height() - h),
+                    egui::vec2(screen.width(), h),
+                ),
+            };
+            ctx.data_mut(|d| d.insert_persisted(egui::Id::new("command"), state));
+        }
         let raw = egui::RawInput {
             screen_rect: Some(screen),
             time: Some(started.elapsed().as_secs_f64()),

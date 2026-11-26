@@ -6036,7 +6036,11 @@ drop _all");
 scalar cut = 3
 generate q = w if x > cut");
         assert!(
-            out[2].lines().next().unwrap_or("").contains("c(\"w\", \"x\")")
+            out[2]
+                .lines()
+                .next()
+                .unwrap_or("")
+                .contains("c(\"w\", \"x\")")
                 && !out[2].lines().next().unwrap_or("").contains("\"cut\""),
             "{out:?}"
         );

@@ -56,8 +56,10 @@ pub struct StataMode {
         Vec<String>,
     )>,
     /// The last Stata step R was given, and the helpers it carried: if R
-    /// stopped there they are given again with the next step.
-    pub sent_with: Option<(rcraft_engine::CommandId, Vec<String>)>,
+    /// stopped there they are given again with the next step. With it, the
+    /// translator as it was before the step, when the step was one line: if R stopped
+    /// there, the line did not happen and the translator goes back to that.
+    pub sent_with: Option<(rcraft_engine::CommandId, Vec<String>, Option<Live>)>,
     /// A typed step whose last line leaves a value only R knows
     /// (`levelsof g, local(gs)`), worked out once the line has run.
     pub after: Option<After>,
