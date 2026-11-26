@@ -34,15 +34,24 @@
 //!   Knapp-Hartung subgroups and cumulative analysis; `predict` (xb, stdp,
 //!   reffects) and `margins, at()` after `meta regress`; `meta multilevel`;
 //!   `meta mvregress` (REML, mle, fixed, a moderator, independent
-//!   covariance); the Model menu on `rma.mv` fits.
+//!   covariance); the Model menu on `rma.mv` fits;
+//! - (P6.11e) `meta mvregress` with outcomes missing in some studies and a
+//!   moderator missing in one, `wsevariables()` with `wcorrelations()`,
+//!   three outcomes, `random(reml, se(jriley))`, `estat heterogeneity` and
+//!   `estat recovariance`; `meta multilevel` with three levels and `mle`;
+//!   `meta meregress`; `meta trimfill` refitted where Stata stops.
 //!
 //! DerSimonian-Laird, Hedges, Sidik-Jonkman, the fixed effects and the tests
-//! on them agree to 1e-9. REML, ML and empirical Bayes are iterated, and the
+//! on them agree to 1e-9. REML, ML, empirical Bayes and Paule-Mandel (by the
+//! empirical-Bayes iteration, as Stata's pmandel) are iterated, and the
 //! dialog stops where Stata stops (both follow the same iterations; Stata
 //! stops once tau² moves by less than 1e-6 relative to 1 + tau²), so they
-//! agree to 1e-9 too. Paule-Mandel agrees to 3e-7, trim-and-fill (whose refit metafor
-//! runs at its own default) to 1e-5, and rma.mv's fits (found by optim) to
-//! 1e-6.
+//! agree to 1e-9 too, as does trim-and-fill, whose filled fit the dialog
+//! refits at Stata's stop. rma.mv's fits (found by optim) agree to 1e-6 on one
+//! machine, but the optimiser stops at slightly different points on Windows,
+//! macOS and Linux (up to 2e-5 apart on a flat likelihood: an uncentred
+//! moderator, three outcomes or levels, a small variance), so the P6.11e
+//! checks of them use 5e-5.
 //!
 //! The test records the R and metafor versions it ran with (AGENTS.md
 //! section 5), and checks R is the one `ENVIRONMENT` pins.
@@ -166,6 +175,10 @@ const MAKE: &str = "md <- local({ \
        0.15, 0.25, 0.25, 0.3, 0.12, 0.12, 0.35, 0.35), 4), \
        est2 = round(0.7 * est + 0.45 * sin(2 * (1:k)) + 0.1, 4), se2 = round(0.5 * se, 4)) }); \
      md$v11 <- md$se^2; md$v12 <- 0.5 * md$se * md$se2; md$v22 <- md$se2^2; \
+     md$reg <- rep(1:3, c(4, 6, 4)); md$est3 <- round(0.5 * md$est2 - 0.3 * cos(1:14) + 0.2, 4); \
+     md$se3 <- round(0.8 * md$se, 4); md$v13 <- 0.3 * md$se * md$se3; \
+     md$v23 <- 0.2 * md$se2 * md$se3; md$v33 <- md$se3^2; \
+     md$e2m <- md$est2; md$e2m[c(3, 8)] <- NA; md$yr <- md$year; md$yr[2] <- NA; \
      mm <- local({ k <- md; k$est[5] <- NA; k }); \
      figs <- function(m) c(m$b[1], m$se, m$tau2, m$I2, m$H2, m$QE, m$ci.lb, m$ci.ub); \
      egger <- function(r) if (inherits(r$fit, 'lm')) { s <- coef(summary(r$fit)); \
@@ -176,7 +189,8 @@ const MAKE: &str = "md <- local({ \
 fn context(dataset: &str) -> Context {
     let mut columns: Vec<ColumnInfo> = [
         "year", "n1", "m1", "sd1", "n2", "m2", "sd2", "a", "b", "c", "d", "est", "se", "r", "nr",
-        "lab", "set", "est2", "se2", "v11", "v12", "v22",
+        "lab", "set", "est2", "se2", "v11", "v12", "v22", "reg", "est3", "se3", "v13", "v23",
+        "v33", "e2m", "yr",
     ]
     .into_iter()
     .map(|name| ColumnInfo {
@@ -230,7 +244,7 @@ fn dialog(
     let ctx = context(dataset);
     let mut values = META.defaults(&ctx);
     for (id, text) in COLUMNS.iter().chain(set) {
-        if *id == "mods" {
+        if matches!(*id, "mods" | "outer" | "fcols") {
             values.set_list(id, text.split(',').map(|m| m.trim().to_string()).collect());
         } else {
             values.set_text(id, *text);
@@ -271,15 +285,9 @@ fn fits_match(e: &mut Engine, measure: &str, save: &str, stata: &[(&str, &str)])
         );
         assert_eq!(outcome, Outcome::Ok, "{text}");
         assert!(text.contains("Test for Heterogeneity"), "{text}");
-        // REML, ML and empirical Bayes stop where Stata stops (to 1e-9),
-        // except with a large tau² (0.58 for the odds ratios), where Stata's
-        // stop comes one step sooner; metafor finds Paule-Mandel's root exactly,
-        // Stata stops its iteration within 2e-7 of it
-        let tol = match *method {
-            "REML" if measure == "OR" => "1e-9",
-            "PM" => "3e-7",
-            _ => "1e-9",
-        };
+        // REML, ML, empirical Bayes and Paule-Mandel (by the empirical-Bayes
+        // iteration, as Stata's pmandel) stop where Stata stops, to 1e-9
+        let tol = "1e-9";
         checks.push(format!("near(figs({name}), c({values}), {tol})"));
     }
     holds(e, &checks);
@@ -1018,17 +1026,31 @@ fn subgroups_cumulative_leave_one_out_and_trim_and_fill_match_stata() {
              44.0040576184119, 1.78584368343233, 10.7234655741425), 1e-9)"
                 .into(),
             "near(qb(sub(s_reml, md$grp)), 2.895617673812044, 1e-9)".into(),
-            "with(metafor::trimfill(s_reml), k0 == 4 && near(c(b[1], ci.lb, ci.ub), \
-             c(.307618260078669, .109446141571852, .505790378585486), 1e-5))"
-                .into(),
-            "with(metafor::trimfill(s_reml, estimator = 'R0'), k0 == 5 && near(c(b[1], ci.lb, \
-             ci.ub), c(.287421577753191, .0925710551214481, .482272100384935), 1e-5))"
+            // the dialog's trim-and-fill, its filled fit stopped where Stata stops
+            "with(s_reml_tf, k0 == 5 && near(c(b[1], ci.lb, ci.ub), c(.287421577753191, \
+             .0925710551214481, .482272100384935), 1e-9))"
                 .into(),
             // meta summarize, cumulative(year) (REML): rows 3 to 5; with 3 to 5
             // studies Stata stops up to 2e-5 short of the maximum in tau²
             "near(unlist(as.data.frame(metafor::cumul(s_reml, order = year))[3:5, c('estimate', \
              'tau2')]), c(.36198702, .28166399, .30632856, .02901714, .03776144, .02663685), \
              1e-6)"
+                .into(),
+        ],
+    );
+    // meta trimfill (linear estimator) after REML
+    let (outcome, text, _) = dialog(
+        &mut e,
+        "md",
+        &[("measure", "given"), ("trimfill", "L0"), ("save", "s_tf")],
+        NO_PLOTS,
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "with(s_tf_tf, k0 == 4 && near(c(b[1], ci.lb, ci.ub), c(.307618260078669, \
+           .109446141571852, .505790378585486), 1e-9))"
                 .into(),
         ],
     );
@@ -1487,4 +1509,343 @@ fn predictions_multilevel_and_multivariate_fits_match_stata() {
             .collect::<Vec<_>>(),
         ["Model fit", "Compare models"]
     );
+}
+
+/// Runs the multivariate dialog on `md` with `lists` (outcomes, wcov,
+/// mods), `texts` and `flags` set.
+fn mv(
+    e: &mut Engine,
+    lists: &[(&str, &[&str])],
+    texts: &[(&str, &str)],
+    flags: &[(&str, bool)],
+) -> (Outcome, String) {
+    let (made, text, _) = run(e, Source::Typed, MAKE);
+    assert_eq!(made, Outcome::Ok, "{text}");
+    let ctx = context("md");
+    let mut values = MV_META.defaults(&ctx);
+    for (id, cols) in lists {
+        values.set_list(id, cols.iter().map(|c| c.to_string()).collect());
+    }
+    for (id, t) in texts {
+        values.set_text(id, *t);
+    }
+    for (id, on) in flags {
+        values.set_flag(id, *on);
+    }
+    let code = MV_META.generate(&ctx, &values, Style::Base);
+    assert!(code.is_ok(), "{code:?}");
+    let (outcome, text, _) = run(
+        e,
+        Source::Menu(MV_META.menu.into()),
+        &code.unwrap_or_default(),
+    );
+    (outcome, text)
+}
+
+/// P6.11e: Stata 19's `meta mvregress` with outcomes missing in some studies,
+/// `wsevariables()` with `wcorrelations()`, `random(reml, se(jriley))`,
+/// `estat heterogeneity` and `estat recovariance`; `meta multilevel` with
+/// three levels and `mle`; `meta meregress`; forest plot columns.
+#[test]
+fn missing_outcomes_correlations_jackson_riley_heterogeneity_and_three_levels_match_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let w2: &[&str] = &["v11", "v12", "v22"];
+    // meta mvregress est e2m (e2m missing in studies 3 and 8): Stata keeps
+    // those studies' est, 26 observations
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "e2m"]), ("wcov", w2)],
+        &[("save", "mv_miss")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("as Stata's estat heterogeneity"), "{text}");
+    holds(
+        &mut e,
+        &[
+            "mv_miss$k == 26 && mv_miss$g.nlevels[2] == 14".into(),
+            "near(c(coef(mv_miss), vcov(mv_miss)[c(1, 2, 4)], sqrt(mv_miss$tau2), mv_miss$rho, \
+             mv_miss$QE), c(.4377391683662153, .4900803191657542, .0077898572053714523, \
+             .0028076182239332812, .0106662966485116875, exp(-1.447930415233669832), \
+             exp(-1.088024864743893927), tanh(.3406520114941014032), 165.2029922547711), 5e-5)"
+                .into(),
+            // estat heterogeneity: Jackson-White-Riley R for est, e2m and
+            // jointly; Cochran's H2
+            "near(mv_miss_het$jwr$R, c(1.747175970467998551, 3.849609539896764243, \
+             2.692898862211889011), 5e-5)"
+                .into(),
+            "near(mv_miss_het$H2, 6.88345801061546414, 1e-9)".into(),
+        ],
+    );
+    // random(reml, se(jriley)) on the same: t on N - p = 24 degrees of
+    // freedom, as Stata's; Stata's scale with outcomes missing (1.0255) is
+    // not Jackson and Riley's residual sum over N - p (0.9972), which it
+    // equals with every outcome given (small-fixes row 30), so the dialog
+    // says so
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "e2m"]), ("wcov", w2)],
+        &[("save", "mv_jr")],
+        &[("jriley", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("as Stata's se(jriley)"), "{text}");
+    assert!(text.contains("Some studies miss an outcome"), "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(mv_jr$seadj, mv_jr$vb[2]), c(.99720710973728, .0028076182239332812), 5e-5)"
+                .into(),
+            "all(mv_jr$ddf == 24)".into(),
+        ],
+    );
+    // all 14 studies with both outcomes: estat heterogeneity and
+    // recovariance (Stata's est row shows its joint R; est2's and the joint
+    // are checked), and se(jriley) with 26 degrees of freedom
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "est2"]), ("wcov", w2)],
+        &[("save", "mv_full")],
+        &[("jriley", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(!text.contains("Some studies miss an outcome"), "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(mv_full_het$jwr$R[2:3], c(3.687578030551223129, 2.630659878884500369), 5e-5)"
+                .into(),
+            "near(mv_full_het$H2, 7.50561007826693416, 1e-9)".into(),
+            "near(mv_full_het$cov[c(1, 2, 4)], c(.0566530274082204799, .030345522274438045, \
+             .1055704004008428398), 5e-5)"
+                .into(),
+            "near(c(mv_full$seadj, mv_full$vb[c(1, 2, 4)]), c(.9935732840770839, \
+             .0078404166067143916, .0031579844246917574, .00861180592948497), 5e-5)"
+                .into(),
+            "all(mv_full$ddf == 26)".into(),
+        ],
+    );
+    // = year with se(jriley): Stata's F test of the moderators keeps the
+    // model's errors; the fit to 5e-5 on every platform
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "est2"]),
+            ("wcov", w2),
+            ("mods", &["year"]),
+        ],
+        &[("save", "mv_jry")],
+        &[("jriley", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(mv_jry$seadj, mv_jry$QM, mv_jry$QMdf, mv_jry$QMp), c(.9817169946100938, \
+             .1772741240502183, 2, 24, .8386368882683426), 5e-5)"
+                .into(),
+            "near(diag(mv_jry$vb), c(1901.18314321006892, 2237.671603694001533, \
+             .0004720664937154873, .0005553363301929454), 5e-5)"
+                .into(),
+            "near(c(mv_jry_het$jwr$R[2], mv_jry_het$H2), c(4.02524830632341768, \
+             7.421256775699202279), 5e-5)"
+                .into(),
+        ],
+    );
+    // est e2m = year: each outcome's R to 5e-5; the joint R, whose
+    // determinant of four coefficients magnifies the fit's last digits, to
+    // 5e-5
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "e2m"]),
+            ("wcov", w2),
+            ("mods", &["year"]),
+        ],
+        &[("save", "mv_my")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(mv_my_het$jwr$R[1:2], c(1.880304525587474851, 4.265838462048480828), 5e-5)"
+                .into(),
+            "near(mv_my_het$jwr$R[3], 2.944426365376759502, 5e-5)".into(),
+            "near(mv_my_het$H2, 6.906050154080543457, 1e-9)".into(),
+        ],
+    );
+    // est e2m = yr (yr missing in study 2): that study left out, 24
+    // observations in 13 studies
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "e2m"]),
+            ("wcov", w2),
+            ("mods", &["yr"]),
+        ],
+        &[("save", "mv_yr")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "mv_yr$k == 24 && mv_yr$g.nlevels[2] == 13".into(),
+            // Stata's Wald test of the moderators only
+            "near(c(mv_yr$QM, mv_yr$QMdf[1], mv_yr$QMp), c(.4156468640139263648, 2, \
+             .812350459139874137), 5e-5)"
+                .into(),
+            "near(coef(mv_yr), c(-3.368350471727069362, 28.34974135208959822, \
+             .0019142971113977933, -.0138406233834085582), 5e-5)"
+                .into(),
+        ],
+    );
+    // wsevariables(se se2) wcorrelations(0.3), and three outcomes with
+    // wcorrelations(0.3 0.2 0.4) (six between-study parameters, which optim
+    // finds to 5e-5 of Stata's on every platform)
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "est2"]), ("wcov", &["se", "se2"])],
+        &[("wcorr", "0.3"), ("save", "mv_r2")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "est2", "est3"]),
+            ("wcov", &["se", "se2", "se3"]),
+        ],
+        &[("wcorr", "0.3 0.2 0.4"), ("save", "mv_r3")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(coef(mv_r2), sqrt(mv_r2$tau2), mv_r2$rho), c(.4385192232436938564, \
+             .4639406075843779398, exp(-1.414680414448238333), exp(-1.118307116859341255), \
+             tanh(.4909807938412857342)), 5e-5)"
+                .into(),
+            "near(c(coef(mv_r3), sqrt(mv_r3$tau2), mv_r3$rho), c(.4393804304146580741, \
+             .4653722669375449095, .4348762406799207003, exp(c(-1.423904196520063836, \
+             -1.12668447122193105, -1.780411883840742115)), tanh(c(.4764551081660816645, \
+             .3070000252538501728, .8892037829868378873))), 5e-5)"
+                .into(),
+        ],
+    );
+    // three outcomes with wcovvariables(v11 v12 v13 v22 v23 v33): estat
+    // heterogeneity and recovariance (the fit to 5e-5, as above)
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "est2", "est3"]),
+            ("wcov", &["v11", "v12", "v13", "v22", "v23", "v33"]),
+        ],
+        &[("save", "mv3")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(mv3_het$jwr$R[2:4], c(3.697929226434258254, 1.628254706317474376, \
+             2.144387150207082815), 5e-5)"
+                .into(),
+            "near(mv3_het$H2, 5.601780882400499983, 1e-9)".into(),
+            "near(mv3_het$cov[lower.tri(mv3_het$cov, diag = TRUE)], c(.0550880632887017011, \
+             .0285094467516277469, .0082520972090099395, .1062918595239152331, \
+             .0422488899549727029, .0298695075329085819), 5e-5)"
+                .into(),
+        ],
+    );
+    // meta multilevel est, relevels(reg lab sid) (the lab level's variance at
+    // zero in both: Stata's sd 4e-7); meta meregress est year || lab: || sid:
+    // and est year set || reg: || lab: || sid: (the uncentred year to 5e-5);
+    // meta multilevel, mle (its small lab variance, on a flat likelihood, to
+    // 5e-5)
+    for (set, name) in [
+        (
+            &[
+                ("measure", "given"),
+                ("cluster", "lab"),
+                ("outer", "reg"),
+                ("save", "ml_reg"),
+            ][..],
+            "ml_reg",
+        ),
+        (
+            &[
+                ("measure", "given"),
+                ("cluster", "lab"),
+                ("mods", "year"),
+                ("save", "mr_lab"),
+            ][..],
+            "mr_lab",
+        ),
+        (
+            &[
+                ("measure", "given"),
+                ("cluster", "lab"),
+                ("outer", "reg"),
+                ("mods", "year, set"),
+                ("save", "mr_reg"),
+            ][..],
+            "mr_reg",
+        ),
+        (
+            &[
+                ("measure", "given"),
+                ("cluster", "lab"),
+                ("method", "ML"),
+                ("save", "ml_ml"),
+            ][..],
+            "ml_ml",
+        ),
+    ] {
+        let (outcome, text, _) = dialog(&mut e, "md", set, NO_PLOTS);
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+    }
+    holds(
+        &mut e,
+        &[
+            "near(c(ml_reg$b[1], ml_reg$se^2, log(sqrt(ml_reg$sigma2[c(1, 3)]))), \
+             c(.4310301937718455378, .0122192325441253646, -2.070107057949499119, \
+             -1.582550302328308733), 5e-5) && sqrt(ml_reg$sigma2[2]) < 1e-4"
+                .into(),
+            "near(c(mr_lab$b[2], mr_lab$b[1], mr_lab$vb[2, 2], mr_lab$vb[1, 1], \
+             log(sqrt(mr_lab$sigma2))), c(.0089170982653387684, -17.44554791946580252, \
+             .0005948513462875196, 2395.991595410474474, -1.86896443917259214, \
+             -1.535839789741080708), 5e-5)"
+                .into(),
+            "near(c(mr_reg$b[2], mr_reg$b[3], mr_reg$b[1], log(sqrt(mr_reg$sigma2))), \
+             c(.0249062069284876168, -1.6324042016968483, -49.20327261914331984, \
+             -1.565734471326559962, -2.107356214110507331, -1.640871665495029497), 5e-5)"
+                .into(),
+            "near(c(ml_ml$b, log(sqrt(ml_ml$sigma2))), c(.4345414096753246747, \
+             -2.764583982891404279, -1.596413041384782572), 5e-5)"
+                .into(),
+        ],
+    );
+    // forest plot columns (meta forestplot _id year grp ...): it draws, also
+    // with a study left out and with subgroups
+    for (data, extra) in [("md", ""), ("mm", ""), ("md", "grp")] {
+        let mut set = vec![
+            ("measure", "given"),
+            ("label", "study"),
+            ("fcols", "year, grp"),
+            ("save", "fc"),
+        ];
+        if !extra.is_empty() {
+            set.push(("subgroup", extra));
+        }
+        let (outcome, text, plots) = dialog(&mut e, data, &set, &[("funnel", false)]);
+        assert_eq!(outcome, Outcome::Ok, "{data} {extra}: {text}");
+        assert_eq!(plots, 1, "{data} {extra}: {text}");
+    }
 }

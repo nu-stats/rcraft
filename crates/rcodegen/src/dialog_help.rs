@@ -214,6 +214,7 @@ fn sample_text(id: &str, rule: TextRule) -> Option<&'static str> {
         "factor" => Some("group"),
         "contrasts" => Some("a = 1, b = -1"),
         "text" => Some("The models below use the survey's second wave."),
+        "wcorr" => Some("0.5"),
         _ => match rule {
             TextRule::Name => Some("new_name"),
             TextRule::Number => Some("1"),
