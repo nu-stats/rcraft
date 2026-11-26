@@ -111,10 +111,16 @@ fn any_model_guard(test: &str, what: &str) -> String {
 
 /// R vector of every class the model dialogs take.
 fn model_class_vector() -> String {
+    class_vector(true)
+}
+
+/// The same, with or without the metafor fits (Marginal effects take no `rma`).
+fn class_vector(meta: bool) -> String {
     let names: Vec<String> = MODEL_CLASSES
         .iter()
         .chain(SELECTION_CLASSES)
         .chain(SEM_CLASSES)
+        .chain(if meta { META_CLASSES } else { &[] })
         .map(|c| r_string(c))
         .collect();
     format!("c({})", names.join(", "))
@@ -734,7 +740,7 @@ pub const MARGINAL_EFFECTS: Spec = Spec {
     code: |a, _| {
         let m = a.data();
         let guard = any_model_guard(
-            &format!("inherits({m}, {})", model_class_vector()),
+            &format!("inherits({m}, {})", class_vector(false)),
             FITTED_MODELS,
         );
         format!(
@@ -1245,7 +1251,10 @@ mod tests {
             "{fit}"
         );
         assert!(
-            fit.contains("\"selection\", \"lavaan\")))\n(function(m) {"),
+            fit.contains(
+                "\"selection\", \"lavaan\", \"rma.uni\")))
+(function(m) {"
+            ),
             "{fit}"
         );
         let cmp = make(&COMPARE_MODELS, "m1", &[("others", "m2")]).unwrap_or_default();
