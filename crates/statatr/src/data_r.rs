@@ -3204,15 +3204,31 @@ impl Session {
         // anything runs, so a model leaves the last one's results as they were
         if !out.code.is_empty() && self.data_lost.is_none() {
             if let Some(d) = self.data.clone() {
-                let names = namecheck::names(
-                    c,
-                    &self
-                        .scalars
-                        .keys()
-                        .chain(self.user_mats.iter())
-                        .cloned()
-                        .collect(),
-                );
+                let known = self
+                    .scalars
+                    .keys()
+                    .chain(self.user_mats.iter())
+                    .cloned()
+                    .collect();
+                // a number compared with a string, or a string with a number, in an if:
+                // Stata's r(109), after the check that the names exist
+                let pairs = namecheck::type_pairs(c, &known);
+                if !pairs.is_empty() {
+                    let list = pairs
+                        .iter()
+                        .map(|(v, s)| {
+                            format!("list({}, {})", r_text(v), if *s { "TRUE" } else { "FALSE" })
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    out.code.insert(
+                        0,
+                        format!(
+                            "if (exists(\"{d}\") && any(vapply(list({list}), function(p) {{ v <- {d}[[p[[1]]]]; !is.null(v) && if (p[[2]]) !(is.character(v) || is.factor(v)) else is.character(v) }}, TRUE))) stop(\"type mismatch (Stata: r(109))\", call. = FALSE)"
+                        ),
+                    );
+                }
+                let names = namecheck::names(c, &known);
                 if !names.is_empty() {
                     let list = names
                         .iter()
@@ -6111,7 +6127,7 @@ stata_chars_write(\"results.dta\", study_hours)"
         let all = r("use s\ngen y = x * 2 if g == 1\ngen double z = 0.1\ngen str5 t = \"a\" + s if x > 1\nreplace y = 0 if y == .\nbysort g: gen n = _n\nreplace x = x[_n-1] if missing(x)");
         // the last line of each is the change; the first checks the name
         assert_eq!(
-            all[1].lines().nth(1),
+            all[1].lines().find(|l| l.contains("already defined")),
             Some("if (\"y\" %in% names(s)) stop(\"variable y already defined\")")
         );
         // (the notes Stata prints, after it, are left aside)
