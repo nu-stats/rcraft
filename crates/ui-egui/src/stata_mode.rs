@@ -35,6 +35,10 @@ pub struct StataMode {
     pub live: Live,
     /// A data frame to show once R lists it (after `use`), staying on Results.
     pub follow: Option<String>,
+    /// The data frame shown the last time a Stata line was given: a different
+    /// one now means the user opened or picked data outside Stata, which the
+    /// next line then works on.
+    pub seen: Option<String>,
     /// What Tab in the Script Editor could complete to, and the script it was
     /// for (shown while the script is unchanged).
     pub script_choices: Option<(String, Vec<String>)>,

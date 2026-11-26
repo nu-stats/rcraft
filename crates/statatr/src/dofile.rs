@@ -501,6 +501,12 @@ enum Flow {
 }
 
 impl<'f> Run<'f> {
+    /// The data in memory when the run starts is this R data frame (opened
+    /// outside Stata).
+    pub fn start_with_data(&mut self, name: &str) {
+        self.t.start_with_data(name);
+    }
+
     pub fn new(text: &str, files: &'f dyn Files, opts: Options) -> Run<'f> {
         let program = reader::read(text);
         let cwd = opts.folder.clone();
