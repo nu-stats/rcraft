@@ -51,3 +51,8 @@ wrong model), 28 errors. Each of the 28 judged:
   "this works for ..." and name the models they take. Fit statistics and Average marginal
   effects were the two that showed raw R errors before (SW4).
 - None of the 28 is a bug in a dialog.
+
+## Found while following up
+
+- SW4's guard on Fit statistics and Compare models left out metafor `rma.uni` fits (P6.11c landed in the same hours), so the meta-analysis engine test failed on main. Fixed in SW4b.
+- The Command box pictures (SW8) showed Run and Stop drawn past the window's edge and Stop cut off at the panel's smallest height. Fixed in SW8.
