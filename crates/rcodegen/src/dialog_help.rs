@@ -228,7 +228,8 @@ fn sample_text(id: &str, rule: TextRule) -> Option<&'static str> {
 /// dialog that refuses one pairing gets another), and a plausible word in a
 /// box that must not be empty. `file` goes in the save-path box. With `every`,
 /// the optional variable boxes get a column too (for a dialog whose boxes are
-/// all optional, each needed by one of its choices).
+/// all optional, each needed by one of its choices), and the lists that may
+/// be empty are left empty.
 fn sample_values(spec: &Spec, ctx: &Context, shift: usize, file: &str, every: bool) -> Values {
     let mut values = spec.defaults(ctx);
     let mut order: Vec<&ColumnInfo> = ctx.columns.iter().collect();
@@ -251,7 +252,8 @@ fn sample_values(spec: &Spec, ctx: &Context, shift: usize, file: &str, every: bo
             }
             Widget::Variables { id, kinds, min, .. } => {
                 let mut picked: Vec<String> = Vec::new();
-                for _ in 0..min.max(1) {
+                let count = if every && min == 0 { 0 } else { min.max(1) };
+                for _ in 0..count {
                     if let Some(name) = pick(&order, kinds, &mut used) {
                         picked.push(name);
                     }

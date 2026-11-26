@@ -26,12 +26,17 @@ pub const SELECTION_CLASSES: &[&str] = &["selection"];
 /// Compare models.
 pub const SEM_CLASSES: &[&str] = &["lavaan"];
 
+/// A meta-analysis or meta-regression fitted by metafor::rma (P6.11c), which
+/// takes Model fit and Compare models (metafor's likelihood-ratio test).
+pub const META_CLASSES: &[&str] = &["rma.uni"];
+
 /// Whether an object whose first class is `class` is a model these dialogs take.
 pub fn is_model_class(class: &str) -> bool {
     MODEL_CLASSES.contains(&class)
         || TIME_SERIES_CLASSES.contains(&class)
         || SELECTION_CLASSES.contains(&class)
         || SEM_CLASSES.contains(&class)
+        || META_CLASSES.contains(&class)
 }
 
 /// Whether `class` is a panel model fitted by `plm` or `fixest`.
@@ -46,7 +51,7 @@ pub fn takes_model_table(class: &str) -> bool {
     is_model_class(class)
         && !matches!(
             class,
-            "pgmm" | "stanreg" | "Arima" | "HoltWinters" | "selection" | "lavaan"
+            "pgmm" | "stanreg" | "Arima" | "HoltWinters" | "selection" | "lavaan" | "rma.uni"
         )
 }
 
@@ -68,6 +73,8 @@ pub fn model_specs(class: &str) -> Vec<&'static Spec> {
         "selection" => vec![&MODEL_FIT, &COMPARE_MODELS],
         // a structural equation model: its fit, and lavaan's likelihood-ratio test
         "lavaan" => vec![&MODEL_FIT, &COMPARE_MODELS],
+        // a meta-analysis: its likelihood (on the studies), and metafor's anova
+        "rma.uni" => vec![&MODEL_FIT, &COMPARE_MODELS],
         // a mixed model: its fit statistics only (the other dialogs need an
         // lm or glm object)
         "lmerMod" | "glmerMod" => vec![&MODEL_FIT, &crate::multilevel::ICC],
@@ -1022,6 +1029,8 @@ mod tests {
         assert!(is_model_class("selection") && !takes_model_table("selection"));
         assert_eq!(entries("lavaan"), ["Model fit", "Compare models"]);
         assert!(is_model_class("lavaan") && !takes_model_table("lavaan"));
+        assert_eq!(entries("rma.uni"), ["Model fit", "Compare models"]);
+        assert!(is_model_class("rma.uni") && !takes_model_table("rma.uni"));
         assert!(is_panel_class("plm") && !is_panel_class("lm"));
         for class in ["data.frame", "tbl_df", "function", "numeric", ""] {
             assert!(!is_model_class(class), "{class}");
