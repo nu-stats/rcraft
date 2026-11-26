@@ -11,7 +11,10 @@
 //! regress`). Then, if asked: subgroups and the test of their differences,
 //! a cumulative and a leave-one-out analysis, forest, funnel, Galbraith,
 //! L'Abbé and bubble plots, a test for small-study effects (Egger's,
-//! Harbord's, Peters's or Begg's) and trim-and-fill.
+//! Harbord's, Peters's or Begg's) and trim-and-fill. Clusters, with outer
+//! levels if given, make it multilevel (`meta multilevel`, and with
+//! moderators `meta meregress`); the multivariate entry below is `meta
+//! mvregress`.
 //!
 //! The effect sizes and the fit are Stata's `meta esize`, `meta summarize`,
 //! `meta regress`, `meta bias` and `meta trimfill`, found by running both:
@@ -154,7 +157,7 @@ fn fit_options(a: &Args, method: &str) -> String {
         let terms: Vec<String> = mods.iter().map(|m| r_name(m)).collect();
         out.push_str(&format!(", mods = ~ {}", terms.join(" + ")));
     }
-    out.push_str(&format!(", method = \"{method}\""));
+    out.push_str(&format!(", method = \"{}\"", rma_method(method)));
     if a.var("cluster").is_some() {
         // rma.mv maximises its likelihood with optim; no tau² iteration
         return out;
@@ -171,14 +174,30 @@ fn fit_options(a: &Args, method: &str) -> String {
 /// The iterated estimators of tau², stopped where Stata stops: its
 /// iterations follow the same path as metafor's (each iterate equal to 1e-15)
 /// and stop once tau² changes by less than its default tolerance, 1e-6, one
-/// step after metafor's own default (1e-5). Paule-Mandel's root is taken to
-/// Stata's precision (metafor's own tolerance stops about 3e-5 away).
+/// step after metafor's own default (1e-5).
 fn control(method: &str) -> &'static str {
-    match method {
-        "REML" | "ML" | "EB" => ", control = list(threshold = 1e-6)",
-        "PM" => ", control = list(tol = 1e-10)",
-        _ => "",
+    if is_iterated(method) {
+        ", control = list(threshold = 1e-6)"
+    } else {
+        ""
     }
+}
+
+/// The estimator `rma` is asked for: Paule-Mandel by the empirical-Bayes
+/// iteration, which solves the same equation and is what Stata's pmandel
+/// iterates (Stata's pmandel and ebayes give the same figures); metafor's
+/// own Paule-Mandel finds the root exactly, about 2e-7 from where Stata stops.
+fn rma_method(method: &str) -> &str {
+    match method {
+        "PM" => "EB",
+        m => m,
+    }
+}
+
+/// Whether tau² is found by iterating, which the dialog stops where Stata
+/// stops.
+fn is_iterated(method: &str) -> bool {
+    matches!(method, "REML" | "ML" | "EB" | "PM")
 }
 
 /// The effect sizes put on Stata's footing, as R lines inside a `local`
@@ -360,10 +379,14 @@ fn fit_code(a: &Args, fit: &str) -> String {
     match multilevel {
         // studies within clusters, as Stata's meta multilevel: a random
         // effect for each level
+        // effect for each level (outer clusters first, as Stata's relevels())
         Some(cluster) => {
+            let mut levels: Vec<String> = a.vars("outer").iter().map(|c| r_name(c)).collect();
+            levels.push(cluster);
             out.push_str(&format!(
                 "{es}$.study <- seq_len(nrow({es}))\n\
-                 {fit} <- metafor::rma.mv(yi, vi, random = ~ 1 | {cluster}/.study, data = {es}{options})\n"
+                 {fit} <- metafor::rma.mv(yi, vi, random = ~ 1 | {}/.study, data = {es}{options})\n",
+                levels.join("/")
             ));
         }
         None => out.push_str(&format!(
@@ -374,18 +397,54 @@ fn fit_code(a: &Args, fit: &str) -> String {
     out
 }
 
-/// For REML, ML and empirical Bayes: the fit again, stopped as Stata stops,
-/// once tau² moves by less than 1e-6 relative to 1 + tau² (the same
-/// iterations, which the first fit's tau² lets metafor's absolute threshold
-/// follow).
+/// For REML, ML, empirical Bayes and Paule-Mandel: the fit again, stopped as
+/// Stata stops, once tau² moves by less than 1e-6 relative to 1 + tau² (the
+/// same iterations, which the first fit's tau² lets metafor's absolute
+/// threshold follow). Paule-Mandel, fitted by the empirical-Bayes iteration,
+/// keeps its own name.
 fn stata_stop(a: &Args, fit: &str) -> String {
-    if matches!(a.choice("method"), "REML" | "ML" | "EB") {
-        format!(
-            "{fit} <- stats::update({fit}, control = list(threshold = 1e-6 * (1 + {fit}$tau2)))\n"
-        )
-    } else {
-        String::new()
+    let method = a.choice("method");
+    if !is_iterated(method) {
+        return String::new();
     }
+    let mut out = format!(
+        "{fit} <- stats::update({fit}, control = list(threshold = 1e-6 * (1 + {fit}$tau2)))\n"
+    );
+    if method == "PM" {
+        out.push_str(&format!(
+            "# Paule-Mandel's estimate, by the empirical-Bayes iteration (the same equation), as \
+             Stata's pmandel\n{fit}$method <- \"PM\"\n"
+        ));
+    }
+    out
+}
+
+/// Trim-and-fill on `model`, kept as `<save>_tf`; for an iterated tau², its
+/// pooled fit with the filled studies again, stopped where Stata stops
+/// (metafor's own refit runs at its default threshold, up to 2.5e-6 away).
+fn trimfill_code(a: &Args, model: &str) -> String {
+    let estimator = match a.choice("trimfill") {
+        "L0" => "",
+        "R0" => ", estimator = \"R0\"",
+        _ => return String::new(),
+    };
+    let tf = r_name(&format!("{}_tf", a.name_text("save")));
+    let method = a.choice("method");
+    if method == "MH" || !is_iterated(method) {
+        return format!("{tf} <- metafor::trimfill({model}{estimator})\nprint({tf})\n");
+    }
+    format!(
+        "{tf} <- local({{\n  \
+         tf <- metafor::trimfill({model}{estimator})\n  \
+         # the pooled fit with the filled studies, stopped where Stata stops\n  \
+         r <- metafor::rma(tf$yi, tf$vi, method = \"{}\", test = tf$test, \
+         control = list(threshold = 1e-6))\n  \
+         r <- stats::update(r, control = list(threshold = 1e-6 * (1 + r$tau2)))\n  \
+         for (n in c(\"b\", \"beta\", \"se\", \"zval\", \"pval\", \"ci.lb\", \"ci.ub\", \"vb\", \
+         \"tau2\", \"se.tau2\", \"I2\", \"H2\", \"QE\", \"QEp\")) tf[[n]] <- r[[n]]\n  \
+         tf\n}})\nprint({tf})\n",
+        rma_method(method)
+    )
 }
 
 /// The model the tests for small-study effects, trim-and-fill and the
@@ -399,10 +458,21 @@ fn alt_model(a: &Args, fit: &str) -> String {
     }
 }
 
+/// The forest plot's extra study columns (`ilab`), headed by their names.
+fn forest_cols(a: &Args) -> String {
+    let cols = a.vars("fcols");
+    if cols.is_empty() {
+        return String::new();
+    }
+    let names = names_vector(&cols);
+    format!(", ilab = {}[{names}], ilab.lab = {names}", a.data())
+}
+
 /// Each subgroup fitted alone (the same model on its rows), then the test of
 /// their differences: Cochran's Q among the subgroups' estimates, as Stata's
 /// Q_b.
 fn subgroup_code(a: &Args, fit: &str, axis: &str) -> String {
+    let cols = forest_cols(a);
     let title = r_string(&format!("\nSubgroups of {}\n", a.var_text("subgroup")));
     let (helper, refit) = if is_mh_rd(a) {
         (
@@ -436,7 +506,7 @@ fn subgroup_code(a: &Args, fit: &str, axis: &str) -> String {
              i <- which(gi == lv[j]); rows[i] <- r - seq_along(i) + 1\n    \
              r <- r - length(i); polys[j] <- r; r <- r - 3\n  }}\n  \
              metafor::forest({fit}, rows = rows, ylim = c(-1.5, top + 3), header = TRUE, \
-             showweights = TRUE{axis})\n  \
+             showweights = TRUE{axis}{cols})\n  \
              for (j in seq_along(lv)) metafor::addpoly(fits[[j]], row = polys[j], \
              mlab = paste(\"Subgroup\", lv[j]){axis})\n"
         )
@@ -477,6 +547,7 @@ fn bias_code(a: &Args, model: &str) -> String {
         "harbord" => {
             let m = if method == "MH" { "FE" } else { method };
             let ctl = control(m);
+            let m = rma_method(m);
             // the efficient score and its variance: for the log odds ratio
             // the hypergeometric ones, for the log risk ratio the binomial
             let score = if a.choice("measure") == "RR" {
@@ -635,6 +706,31 @@ fn meta_check(a: &Args) -> Vec<Problem> {
             "Peters's test is for log odds ratios, as in Stata.",
         )),
         _ => {}
+    }
+    let outer = a.vars("outer");
+    if !outer.is_empty() {
+        let cluster = a.var_text("cluster");
+        if cluster.is_empty() {
+            out.push(Problem::new(
+                "outer",
+                "Outer clusters hold the clusters: choose the clusters too.",
+            ));
+        }
+        for (i, c) in outer.iter().enumerate() {
+            if *c == cluster || outer.iter().take(i).any(|x| x == c) {
+                out.push(Problem::new(
+                    "outer",
+                    format!("{c} is chosen twice among the levels."),
+                ));
+            }
+        }
+    }
+    let fcols = a.vars("fcols");
+    if !fcols.is_empty() && !a.flag("forest") {
+        out.push(Problem::new(
+            "fcols",
+            "The columns are shown in the forest plot: tick Forest plot too.",
+        ));
     }
     if a.var("cluster").is_some() {
         if !matches!(method, "REML" | "ML") {
@@ -892,7 +988,16 @@ pub const META: Spec = Spec {
             required: false,
             hint: "Optional: studies are nested in these clusters (a lab, a paper), with a \
                    random effect for each level, as Stata's meta multilevel. REML or maximum \
-                   likelihood.",
+                   likelihood. With moderators, a multilevel meta-regression, as meta meregress.",
+        },
+        Widget::Variables {
+            id: "outer",
+            label: "Outer clusters (three or more levels)",
+            kinds: &[],
+            min: 0,
+            hint: "Optional: the columns the clusters are nested in, outermost first (a region, \
+                   then the clusters above), each level with its own random effect, as Stata's \
+                   relevels(region lab study).",
         },
         Widget::Variable {
             id: "subgroup",
@@ -956,6 +1061,14 @@ pub const META: Spec = Spec {
             label: "Forest plot",
             default: true,
             hint: "",
+        },
+        Widget::Variables {
+            id: "fcols",
+            label: "Forest plot columns",
+            kinds: &[],
+            min: 0,
+            hint: "Optional: study columns shown beside the study labels in the forest plot, as \
+                   the columns Stata's meta forestplot adds after _id.",
         },
         Widget::Check {
             id: "funnel",
@@ -1139,7 +1252,8 @@ pub const META: Spec = Spec {
         // with subgroups the forest plot is drawn with their diamonds
         if a.flag("forest") && !subgroups {
             out.push_str(&format!(
-                "metafor::forest({fit}, header = TRUE, showweights = TRUE{axis})\n"
+                "metafor::forest({fit}, header = TRUE, showweights = TRUE{axis}{})\n",
+                forest_cols(a)
             ));
         }
         if a.flag("funnel") {
@@ -1166,34 +1280,58 @@ pub const META: Spec = Spec {
             out.push_str(&format!("metafor::regplot({fit})\n"));
         }
         out.push_str(&bias_code(a, &alt));
-        match a.choice("trimfill") {
-            "L0" => out.push_str(&format!("metafor::trimfill({alt})\n")),
-            "R0" => out.push_str(&format!("metafor::trimfill({alt}, estimator = \"R0\")\n")),
-            _ => {}
-        }
+        out.push_str(&trimfill_code(a, &alt));
         out.trim_end().to_string()
     },
 };
 
-// ---- Multivariate meta-analysis (P6.11d) ----
+// ---- Multivariate meta-analysis (P6.11d, P6.11e) ----
 
 /// Names the multivariate dialog's own long table uses.
 const MV_RESERVED: &[&str] = &["study", "outcome", "yi"];
 
+/// The within-study correlations typed (Stata's `wcorrelations()`, in the
+/// order r12 r13 ... r1p r23 ... ): `count` numbers from -1 to 1, kept as
+/// typed; `None` when they do not parse.
+fn correlations(text: &str, count: usize) -> Option<Vec<String>> {
+    let values: Vec<String> = text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .collect();
+    let valid = values.iter().all(|v| {
+        v.parse::<f64>()
+            .is_ok_and(|r| r.is_finite() && (-1.0..=1.0).contains(&r))
+    });
+    (values.len() == count && valid).then_some(values)
+}
+
 fn mv_check(a: &Args) -> Vec<Problem> {
     let mut out = Vec::new();
-    let p = a.vars("outcomes").len();
+    let outcomes = a.vars("outcomes");
+    let p = outcomes.len();
     let need = p * (p + 1) / 2;
-    if a.vars("wcov").len() != need {
+    if is_se_columns(a) {
+        let pairs = p * p.saturating_sub(1) / 2;
+        if correlations(a.values.text("wcorr"), pairs).is_none() {
+            out.push(Problem::new(
+                "wcorr",
+                format!(
+                    "With {p} standard errors, type the {pairs} within-study correlation(s), \
+                     from -1 to 1, in Stata's order r12 r13 ... r23 ... (as wcorrelations())."
+                ),
+            ));
+        }
+    } else if a.vars("wcov").len() != need {
         out.push(Problem::new(
             "wcov",
             format!(
                 "{p} outcomes need {need} columns of within-study variances and covariances, in \
-                 Stata's order: v11 v12 ... v1{p} v22 ... v{p}{p}."
+                 Stata's order v11 v12 ... v1{p} v22 ... v{p}{p}, or {p} standard errors with \
+                 the correlations."
             ),
         ));
     }
-    let outcomes = a.vars("outcomes");
     for (i, y) in outcomes.iter().enumerate() {
         if outcomes.iter().take(i).any(|x| x == y) {
             out.push(Problem::new("outcomes", format!("{y} is chosen twice.")));
@@ -1207,6 +1345,12 @@ fn mv_check(a: &Args) -> Vec<Problem> {
             ));
         }
     }
+    if a.flag("jriley") && a.choice("method") == "FE" {
+        out.push(Problem::new(
+            "jriley",
+            "Jackson-Riley errors need a random-effects model, as in Stata.",
+        ));
+    }
     if a.name_text("save") == a.ctx.dataset {
         out.push(Problem::new(
             "save",
@@ -1216,20 +1360,59 @@ fn mv_check(a: &Args) -> Vec<Problem> {
     out
 }
 
+/// Whether the within-study columns are one standard error per outcome
+/// (Stata's `wsevariables()`), not the p(p + 1)/2 variances and covariances:
+/// with two or more outcomes the counts differ.
+fn is_se_columns(a: &Args) -> bool {
+    a.vars("wcov").len() == a.vars("outcomes").len()
+}
+
 /// R's `c("a", "b")` of column names, as strings.
 fn names_vector(names: &[&str]) -> String {
     let quoted: Vec<String> = names.iter().map(|n| r_string(n)).collect();
     format!("c({})", quoted.join(", "))
 }
 
+/// The lines, inside the fit's `local`, that build `V`: each study's
+/// within-study covariance matrix, from Stata's v11 v12 ... vpp, or from the
+/// standard errors and the correlations.
+fn mv_blocks(a: &Args) -> String {
+    let data = a.data();
+    let wse = a.vars("wcov");
+    if !is_se_columns(a) {
+        return format!(
+            "  w <- as.matrix({data}[{}])\n  \
+             # each study's within-study covariance matrix, from Stata's v11 v12 ... vpp\n  \
+             V <- metafor::bldiag(lapply(seq_len(k), function(i) {{\n    \
+             S <- matrix(0, p, p); S[lower.tri(S, diag = TRUE)] <- w[i, ]\n    \
+             S + t(S) - diag(diag(S), p)\n  }}))\n",
+            names_vector(&a.vars("wcov"))
+        );
+    }
+    let pairs = wse.len() * wse.len().saturating_sub(1) / 2;
+    let r = correlations(a.values.text("wcorr"), pairs).unwrap_or_default();
+    format!(
+        "  s <- as.matrix({data}[{}])\n  \
+         # each study's within-study covariance matrix, from its standard errors and the \
+         correlations r12 r13 ... r23 ...\n  \
+         R <- diag(p); R[lower.tri(R)] <- c({}); R <- R + t(R) - diag(p)\n  \
+         V <- metafor::bldiag(lapply(seq_len(k), function(i) outer(s[i, ], s[i, ]) * R))\n",
+        names_vector(&wse),
+        r.join(", ")
+    )
+}
+
 pub const MV_META: Spec = Spec {
     entry: "Multivariate meta-analysis",
     menu: "Statistics > Multivariate meta-analysis",
-    about: "Several outcomes per study, with their within-study variances and covariances, \
-            pooled together by metafor::rma.mv, as Stata's meta mvregress: each outcome's \
-            estimate, the between-study standard deviations and correlations (estat sd), and the \
-            test of homogeneity. With moderators, each outcome has its own coefficients. Studies \
-            missing a value are left out.",
+    about: "Several outcomes per study, with their within-study variances and covariances (or \
+            standard errors and correlations), pooled together by metafor::rma.mv, as Stata's \
+            meta mvregress: each outcome's estimate, the between-study standard deviations and \
+            correlations (estat sd), and the test of homogeneity; then, if asked, the \
+            heterogeneity statistics (estat heterogeneity) and the between-study covariance \
+            matrix (estat recovariance). With moderators, each outcome has its own \
+            coefficients. An outcome missing in a study leaves out only that outcome, as Stata \
+            does; a study missing a moderator is left out.",
     widgets: &[
         Widget::Variables {
             id: "outcomes",
@@ -1240,11 +1423,22 @@ pub const MV_META: Spec = Spec {
         },
         Widget::Variables {
             id: "wcov",
-            label: "Within-study variances and covariances",
+            label: "Within-study variances and covariances, or standard errors",
             kinds: NUMBERS,
-            min: 3,
-            hint: "In Stata's wcovvariables() order: v11 v12 ... v1p v22 ... vpp (two outcomes: \
-                   the first one's variance, the covariance, the second one's variance).",
+            min: 2,
+            hint: "Either the variances and covariances in Stata's wcovvariables() order: v11 v12 \
+                   ... v1p v22 ... vpp (two outcomes: the first one's variance, the covariance, \
+                   the second one's variance); or one standard error per outcome, in the \
+                   outcomes' order, as Stata's wsevariables(), with the correlations below.",
+        },
+        Widget::Text {
+            id: "wcorr",
+            label: "Within-study correlations",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "With standard errors: the correlations between the outcomes, the same in \
+                   every study, in Stata's wcorrelations() order r12 r13 ... r1p r23 ... (two \
+                   outcomes: one number).",
         },
         Widget::Variables {
             id: "mods",
@@ -1300,6 +1494,26 @@ pub const MV_META: Spec = Spec {
                    correlation), exchangeable (one variance, one correlation) or identity (one \
                    variance).",
         },
+        Widget::Check {
+            id: "jriley",
+            label: "Jackson-Riley standard errors",
+            default: false,
+            hint: "Random effects only: each coefficient's variance scaled by the residuals' \
+                   weighted sum of squares over N - p, with t tests on N - p degrees of freedom, \
+                   as Stata's random(reml, se(jriley)). Stata scales the variances only, not the \
+                   covariances, and its F test of the moderators keeps the model's errors; the \
+                   dialog does the same.",
+        },
+        Widget::Check {
+            id: "het",
+            label: "Heterogeneity and between-study covariance",
+            default: true,
+            hint: "Random effects only: Cochran's I² and H² from the test of homogeneity, and \
+                   Jackson, White and Riley's R and I² for each outcome and jointly, as Stata's \
+                   estat heterogeneity; then the between-study covariance matrix, as estat \
+                   recovariance. The figures stay in R's workspace under the model's name with \
+                   _het.",
+        },
         Widget::Text {
             id: "save",
             label: "Save the model as",
@@ -1316,28 +1530,28 @@ pub const MV_META: Spec = Spec {
         let fit = a.name("save");
         let data = a.data();
         let outcomes = names_vector(&a.vars("outcomes"));
-        let wcov = names_vector(&a.vars("wcov"));
         let mods = a.vars("mods");
-        let (x, keep, extra, terms) = if mods.is_empty() {
-            (String::new(), "y, w", String::new(), String::new())
+        let (x, extra, terms) = if mods.is_empty() {
+            (String::new(), String::new(), String::new())
         } else {
             let terms: Vec<String> = mods
                 .iter()
                 .map(|m| format!(" + outcome:{}", r_name(m)))
                 .collect();
             (
-                format!("  x <- {data}[{}]\n", names_vector(&mods)),
-                "y, w, x",
+                format!(
+                    "  x <- {data}[{}]\n  \
+                     # a study missing a moderator is left out\n  \
+                     y[!stats::complete.cases(x), ] <- NA\n",
+                    names_vector(&mods)
+                ),
                 ", x[rep(seq_len(k), each = p), , drop = FALSE]".to_string(),
-                terms.join(""),
+                // the test of the moderators only, as Stata's
+                format!("{}, btt = \":\"", terms.join("")),
             )
         };
-        let subset_x = if mods.is_empty() {
-            ""
-        } else {
-            "; x <- x[keep, , drop = FALSE]"
-        };
         let method = a.choice("method");
+        let jriley = a.flag("jriley") && method != "FE";
         let random = if method == "FE" {
             String::new()
         } else {
@@ -1346,28 +1560,85 @@ pub const MV_META: Spec = Spec {
                 a.choice("struct")
             )
         };
+        let test = if jriley {
+            ", test = \"t\", dfs = \"residual\""
+        } else {
+            ""
+        };
         let mut out = format!(
             "{fit} <- local({{\n  \
-             y <- as.matrix({data}[{outcomes}])\n  \
-             w <- as.matrix({data}[{wcov}])\n\
+             y <- as.matrix({data}[{outcomes}])\n\
              {x}  \
-             keep <- stats::complete.cases({keep})\n  \
-             y <- y[keep, , drop = FALSE]; w <- w[keep, , drop = FALSE]{subset_x}\n  \
              k <- nrow(y); p <- ncol(y)\n  \
              long <- data.frame(study = rep(seq_len(k), each = p), outcome = factor(rep(colnames(y), \
-             k), levels = colnames(y)), yi = c(t(y)){extra})\n  \
-             # each study's within-study covariance matrix, from Stata's v11 v12 ... vpp\n  \
-             V <- metafor::bldiag(lapply(seq_len(k), function(i) {{\n    \
-             S <- matrix(0, p, p); S[lower.tri(S, diag = TRUE)] <- w[i, ]\n    \
-             S + t(S) - diag(diag(S), p)\n  }}))\n  \
-             metafor::rma.mv(yi, V, mods = ~ outcome - 1{terms}{random}, data = long)\n}})\n\
-             summary({fit})\n"
+             k), levels = colnames(y)), yi = c(t(y)){extra})\n\
+             {}  \
+             # an outcome missing in a study leaves out only that outcome, as Stata does\n  \
+             ok <- !is.na(long$yi)\n  \
+             long <- long[ok, , drop = FALSE]; V <- V[ok, ok, drop = FALSE]\n  \
+             if (anyNA(V)) stop(\"A within-study variance or covariance is missing for outcomes a \
+             study has.\")\n  \
+             metafor::rma.mv(yi, V, mods = ~ outcome - 1{terms}{random}{test}, data = long)\n}})\n",
+            mv_blocks(a)
         );
+        if jriley {
+            // Jackson and Riley's scale: the residuals' weighted sum of
+            // squares over N - p; Stata scales the variances only
+            out.push_str(&format!(
+                "{fit} <- local({{\n  \
+                 m <- {fit}\n  \
+                 r <- m$yi - m$X %*% m$beta\n  \
+                 m$seadj <- c(crossprod(r, solve(m$M, r))) / (m$k - m$p)\n  \
+                 m$vb.model <- m$vb\n  \
+                 diag(m$vb) <- diag(m$vb) * m$seadj\n  \
+                 m$se <- sqrt(diag(m$vb)); m$zval <- c(m$beta) / m$se\n  \
+                 m$pval <- 2 * stats::pt(-abs(m$zval), m$ddf)\n  \
+                 q <- stats::qt(0.975, m$ddf)\n  \
+                 m$ci.lb <- c(m$beta) - q * m$se; m$ci.ub <- c(m$beta) + q * m$se\n  \
+                 m\n}})\n\
+                 cat(\"Jackson-Riley errors, as Stata's se(jriley): the variances scaled by\", \
+                 format({fit}$seadj, digits = 7), \"\\n\")\n\
+                 if (any(table({fit}$data$study) < nlevels({fit}$data$outcome))) cat(\"Some \
+                 studies miss an outcome: Stata's se(jriley) then scales by a figure not \
+                 reproduced here; this scale is Jackson and Riley's, from the outcomes given.\\n\")\n"
+            ));
+        }
+        out.push_str(&format!("summary({fit})\n"));
         if method != "FE" {
             out.push_str(&format!(
                 "cat(\"\\nBetween-study standard deviations and correlations, as Stata's estat sd\\n\")\n\
                  print(c(sd = sqrt({fit}$tau2), corr = {fit}$rho))\n"
             ));
+            if a.flag("het") {
+                // Jackson, White and Riley's R: the random-effects
+                // coefficients' covariance against the fixed-effects one,
+                // for each outcome's coefficients and for all of them
+                let het = r_name(&format!("{}_het", a.name_text("save")));
+                out.push_str(&format!(
+                    "{het} <- local({{\n  \
+                     m <- {fit}\n  \
+                     Vr <- if (is.null(m$vb.model)) m$vb else m$vb.model\n  \
+                     Vf <- solve(crossprod(m$X, solve(m$V, m$X)))\n  \
+                     eq <- sub(\":.*\", \"\", colnames(m$X))\n  \
+                     R <- vapply(unique(eq), function(o) {{\n    \
+                     j <- eq == o\n    \
+                     (det(Vr[j, j, drop = FALSE]) / det(Vf[j, j, drop = FALSE]))^(1 / (2 * sum(j)))\n  \
+                     }}, numeric(1))\n  \
+                     R <- c(R, (det(Vr) / det(Vf))^(1 / (2 * ncol(Vr))))\n  \
+                     names(R) <- c(sub(\"^outcome\", \"\", unique(eq)), \"Joint\")\n  \
+                     H2 <- m$QE / (m$k - m$p)\n  \
+                     cat(\"\\nHeterogeneity, as Stata's estat heterogeneity\\n\")\n  \
+                     cat(\"Cochran, joint: I2 (%) =\", format(100 * max(0, 1 - 1 / H2), digits = 7), \
+                     \" H2 =\", format(H2, digits = 7), \"\\n\")\n  \
+                     jwr <- data.frame(`I2 (%)` = 100 * pmax(0, 1 - 1 / R^2), R = R, row.names = \
+                     names(R), check.names = FALSE)\n  \
+                     cat(\"Jackson-White-Riley:\\n\")\n  \
+                     print(jwr)\n  \
+                     cat(\"\\nBetween-study covariance matrix, as Stata's estat recovariance\\n\")\n  \
+                     print(m$G)\n  \
+                     invisible(list(H2 = H2, jwr = jwr, cov = m$G))\n}})\n"
+                ));
+            }
         }
         out.trim_end().to_string()
     },
@@ -1585,8 +1856,12 @@ mod tests {
         .unwrap_or_default();
         assert_eq!(
             c,
-            "ma <- metafor::rma(yi = est, sei = se, data = dat, method = \"PM\", test = \"knha\", \
-             control = list(tol = 1e-10))\n\
+            "ma <- metafor::rma(yi = est, sei = se, data = dat, method = \"EB\", test = \"knha\", \
+             control = list(threshold = 1e-6))\n\
+             ma <- stats::update(ma, control = list(threshold = 1e-6 * (1 + ma$tau2)))\n\
+             # Paule-Mandel's estimate, by the empirical-Bayes iteration (the same equation), as \
+             Stata's pmandel\n\
+             ma$method <- \"PM\"\n\
              summary(ma)\n\
              cat(\"\\nEstimate, pooled, with its 95% confidence interval and Stata's prediction \
              interval\\n\")\n\
@@ -1633,8 +1908,52 @@ mod tests {
         );
         assert!(c.contains("z = (S - 1) / se"), "{c}");
         assert!(
-            c.ends_with("metafor::trimfill(ma, estimator = \"R0\")"),
+            c.ends_with("ma_tf <- metafor::trimfill(ma, estimator = \"R0\")\nprint(ma_tf)"),
             "{c}"
+        );
+        // REML: the filled studies pooled again, stopped where Stata stops
+        let c = code(&[("measure", "given"), ("trimfill", "L0")]).unwrap_or_default();
+        assert!(
+            c.contains(
+                "ma_tf <- local({\n  tf <- metafor::trimfill(ma)\n  # the pooled fit with the \
+                 filled studies, stopped where Stata stops\n  r <- metafor::rma(tf$yi, tf$vi, \
+                 method = \"REML\", test = tf$test, control = list(threshold = 1e-6))\n"
+            ),
+            "{c}"
+        );
+        assert!(c.ends_with("  tf\n})\nprint(ma_tf)"), "{c}");
+        // Mantel-Haenszel: the inverse-variance fit, not iterated
+        let c =
+            code(&[("measure", "OR"), ("method", "MH"), ("trimfill", "L0")]).unwrap_or_default();
+        assert!(
+            c.contains("ma_tf <- metafor::trimfill(metafor::rma(measure = \"OR\""),
+            "{c}"
+        );
+        // the forest plot's extra columns, also with subgroups
+        let mut v = values(&[("measure", "given")]);
+        v.set_list("fcols", vec!["year".into(), "grp".into()]);
+        let c = META.generate(&ctx(), &v, Style::Base).unwrap_or_default();
+        assert!(
+            c.contains(
+                "metafor::forest(ma, header = TRUE, showweights = TRUE, ilab = dat[c(\"year\", \
+                 \"grp\")], ilab.lab = c(\"year\", \"grp\"))"
+            ),
+            "{c}"
+        );
+        v.set_text("subgroup", "grp");
+        let c = META.generate(&ctx(), &v, Style::Base).unwrap_or_default();
+        assert!(
+            c.contains("showweights = TRUE, ilab = dat[c(\"year\", \"grp\")], ilab.lab"),
+            "{c}"
+        );
+        v.set_flag("forest", false);
+        let p = META
+            .generate(&ctx(), &v, Style::Base)
+            .err()
+            .unwrap_or_default();
+        assert!(
+            p.iter().any(|p| p.message.contains("tick Forest plot")),
+            "{p:?}"
         );
         let c = with(
             &[("measure", "OR"), ("method", "DL"), ("egger", "harbord")],
@@ -1719,6 +2038,36 @@ mod tests {
              cat(\"\\nStandard deviation of each level (Stata's sd(_cons))\\n\")\n\
              print(stats::setNames(sqrt(ma$sigma2), ma$s.names))"
         );
+        // three levels, outermost first, with a moderator (meta meregress)
+        let mut v = values(&[("measure", "given"), ("cluster", "grp")]);
+        v.set_list("outer", vec!["study".into()]);
+        v.set_list("mods", vec!["year".into()]);
+        let c = META.generate(&ctx(), &v, Style::Base).unwrap_or_default();
+        assert!(
+            c.contains(
+                "ma <- metafor::rma.mv(yi, vi, random = ~ 1 | study/grp/.study, data = ma_es, mods \
+                 = ~ year, method = \"REML\")"
+            ),
+            "{c}"
+        );
+        v.set_list("outer", vec!["grp".into()]);
+        let p = META
+            .generate(&ctx(), &v, Style::Base)
+            .err()
+            .unwrap_or_default();
+        assert!(
+            p.iter().any(|p| p.message.contains("chosen twice")),
+            "{p:?}"
+        );
+        v.set_text("cluster", "");
+        let p = META
+            .generate(&ctx(), &v, Style::Base)
+            .err()
+            .unwrap_or_default();
+        assert!(
+            p.iter().any(|p| p.message.contains("choose the clusters")),
+            "{p:?}"
+        );
         let mut v = values(&[("measure", "given"), ("at", "2005; 2010")]);
         v.set_list("mods", vec!["year".into()]);
         v.set_flag("studypred", true);
@@ -1783,19 +2132,82 @@ mod tests {
         assert!(c.contains("x <- dat[c(\"year\")]"), "{c}");
         assert!(
             c.contains(
-                "metafor::rma.mv(yi, V, mods = ~ outcome - 1 + outcome:year, random = ~ outcome | \
-                 study, struct = \"UN\", method = \"REML\", data = long)"
+                "metafor::rma.mv(yi, V, mods = ~ outcome - 1 + outcome:year, btt = \":\", random = \
+                 ~ outcome | study, struct = \"UN\", method = \"REML\", data = long)"
             ),
             "{c}"
         );
+        // a missing outcome leaves out its row only; a missing moderator, the study
+        assert!(c.contains("y[!stats::complete.cases(x), ] <- NA\n"), "{c}");
+        assert!(
+            c.contains("long <- long[ok, , drop = FALSE]; V <- V[ok, ok, drop = FALSE]"),
+            "{c}"
+        );
+        assert!(
+            c.contains("print(c(sd = sqrt(mv$tau2), corr = mv$rho))"),
+            "{c}"
+        );
+        assert!(c.contains("as Stata's estat heterogeneity"), "{c}");
+        assert!(c.contains("mv_het <- local({"), "{c}");
+        assert!(
+            c.ends_with("invisible(list(H2 = H2, jwr = jwr, cov = m$G))\n})"),
+            "{c}"
+        );
+        assert!(!c.contains("se(jriley)"), "{c}");
+        v.set_flag("jriley", true);
+        let c = MV_META.generate(&ctx, &v, Style::Base).unwrap_or_default();
+        assert!(
+            c.contains("method = \"REML\", test = \"t\", dfs = \"residual\", data = long)"),
+            "{c}"
+        );
+        assert!(c.contains("diag(m$vb) <- diag(m$vb) * m$seadj"), "{c}");
+        v.set_flag("het", false);
+        let c = MV_META.generate(&ctx, &v, Style::Base).unwrap_or_default();
         assert!(
             c.ends_with("print(c(sd = sqrt(mv$tau2), corr = mv$rho))"),
             "{c}"
         );
         v.set_text("method", "FE");
+        let p = MV_META
+            .generate(&ctx, &v, Style::Base)
+            .err()
+            .unwrap_or_default();
+        assert!(
+            p.iter().any(|p| p.message.contains("Jackson-Riley")),
+            "{p:?}"
+        );
+        v.set_flag("jriley", false);
+        v.set_flag("het", true);
         let c = MV_META.generate(&ctx, &v, Style::Base).unwrap_or_default();
-        assert!(c.contains("outcome:year, data = long)"), "{c}");
+        assert!(c.contains("outcome:year, btt = \":\", data = long)"), "{c}");
         assert!(!c.contains("estat sd"), "{c}");
+        assert!(!c.contains("estat heterogeneity"), "{c}");
+        // standard errors with correlations, as wsevariables() and wcorrelations()
+        v.set_list("wcov", vec!["se".into(), "v22".into()]);
+        v.set_text("wcorr", "0.3");
+        let c = MV_META.generate(&ctx, &v, Style::Base).unwrap_or_default();
+        assert!(
+            c.contains(
+                "  s <- as.matrix(dat[c(\"se\", \"v22\")])\n  # each study's within-study \
+                 covariance matrix, from its standard errors and the correlations r12 r13 ... r23 \
+                 ...\n  R <- diag(p); R[lower.tri(R)] <- c(0.3); R <- R + t(R) - diag(p)\n  V <- \
+                 metafor::bldiag(lapply(seq_len(k), function(i) outer(s[i, ], s[i, ]) * R))\n"
+            ),
+            "{c}"
+        );
+        for (bad, says) in [
+            ("1.5", "from -1 to 1"),
+            ("0.3 0.2", "from -1 to 1"),
+            ("", "1 within"),
+        ] {
+            v.set_text("wcorr", bad);
+            let p = MV_META
+                .generate(&ctx, &v, Style::Base)
+                .err()
+                .unwrap_or_default();
+            assert!(p.iter().any(|p| p.message.contains(says)), "{bad}: {p:?}");
+        }
+        v.set_text("wcorr", "");
         v.set_list(
             "wcov",
             vec!["v11".into(), "v12".into(), "v22".into(), "se".into()],
