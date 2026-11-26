@@ -11,6 +11,7 @@
 use std::collections::BTreeSet;
 
 use super::{is_name, varlist_names};
+use crate::lang::expr::{is_ts_ops, parse, BinaryOp, Expr};
 use crate::reader::{Command, Prefix};
 
 /// Commands whose `if` and options (`by()`, `over()`, `cluster()`, `absorb()`)
@@ -44,6 +45,12 @@ pub(super) fn names(c: &Command, scalars: &BTreeSet<String>) -> Vec<String> {
                         add_list(&mut out, args);
                     }
                 }
+            }
+        }
+        // generate/replace new = exp: the variables of the expression
+        "generate" | "replace" => {
+            if let Some((_, rhs)) = c.parts.main.split_once('=') {
+                add_expr(&mut out, rhs, scalars);
             }
         }
         // collapse (stat) var newvar=var ...
@@ -136,261 +143,188 @@ fn option_arg<'a>(options: &'a str, name: &str) -> Option<&'a str> {
     None
 }
 
-/// The plain variable names in an expression (see the top of this file for
-/// what is left out).
+/// The plain variable names in an expression, read with the expression parser
+/// (see the top of this file for what is left out). Text the parser cannot
+/// read, or that holds a macro, gives nothing: R, or the line's own error, says
+/// what is wrong with it.
 fn add_expr(out: &mut Vec<String>, text: &str, scalars: &BTreeSet<String>) {
-    let chars: Vec<char> = text.chars().collect();
-    let at = |i: usize| chars.get(i).copied();
-    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
-    let mut i = 0;
-    while i < chars.len() {
-        let Some(c) = at(i) else { break };
-        match c {
-            // a string: "..." (a quote inside is doubled or the line is not understood)
-            '"' => {
-                i += 1;
-                while i < chars.len() && at(i).is_some_and(|d| d != '"') {
-                    i += 1;
-                }
-                i += 1;
+    if text.contains(['`', '$']) {
+        return;
+    }
+    if let Ok(e) = parse(text) {
+        let mut found = Vec::new();
+        walk_names(&e, &mut found, scalars);
+        // the reader runs `(x y)` together as one name: a name counts only if it is
+        // written as a whole word in the text
+        for n in found {
+            if has_word(text, &n) {
+                add(out, &n);
             }
-            // a macro: `name' (nested ones too)
-            '`' => {
-                let mut depth = 0;
-                while i < chars.len() {
-                    match at(i).unwrap_or(' ') {
-                        '`' => depth += 1,
-                        '\'' => {
-                            depth -= 1;
-                            if depth == 0 {
-                                i += 1;
-                                break;
-                            }
-                        }
-                        _ => {}
-                    }
-                    i += 1;
-                }
-            }
-            // a global macro, or anything this does not read
-            '$' => {
-                i += 1;
-                while at(i).is_some_and(word) {
-                    i += 1;
-                }
-            }
-            _ if c.is_ascii_digit() => {
-                // a number, 1e-5 and 3.2 included; 1.x is not a thing
-                while at(i).is_some_and(|d| word(d) || d == '.') {
-                    i += 1;
-                }
-            }
-            _ if c.is_ascii_alphabetic() || c == '_' => {
-                let start = i;
-                while at(i).is_some_and(word) {
-                    i += 1;
-                }
-                let name: String = chars.get(start..i).unwrap_or_default().iter().collect();
-                let prev = if start == 0 { None } else { at(start - 1) };
-                let next = at(i);
-                // _b[x], _se[x], r(mean), e(N): what is inside is not a variable
-                if next == Some('[') && name.starts_with('_') {
-                    while i < chars.len() && at(i).is_some_and(|d| d != ']') {
-                        i += 1;
-                    }
-                    continue;
-                }
-                if next == Some('(') && matches!(name.as_str(), "r" | "e" | "c" | "s") {
-                    let mut depth = 0;
-                    while i < chars.len() {
-                        match at(i).unwrap_or(' ') {
-                            '(' => depth += 1,
-                            ')' => {
-                                depth -= 1;
-                                if depth == 0 {
-                                    i += 1;
-                                    break;
-                                }
-                            }
-                            _ => {}
-                        }
-                        i += 1;
-                    }
-                    continue;
-                }
-                // the name of a function, an operator-prefixed term (L.x), a name
-                // run into a macro, a missing code (.a), or a name R keeps
-                // elsewhere: not read as a variable
-                if next == Some('(')
-                    || next == Some('.')
-                    || next == Some('`')
-                    || next == Some('[')
-                    || prev == Some('.')
-                    || prev == Some('\'')
-                    || prev == Some('}')
-                    || name.starts_with('_')
-                    || scalars.contains(&name)
-                {
-                    continue;
-                }
-                add(out, &name);
-            }
-            _ => i += 1,
         }
     }
 }
 
-/// SW11: the variables an `if` compares with a string literal (`true`) or with a
-/// number (`false`) directly (`g == "a"`, `3 < x`), for the check that each is
-/// of that kind before the line runs: a number or labelled number against a
-/// string, a string against a number, is Stata's "type mismatch", r(109).
-/// Only a plain variable beside a literal counts; anything built (`f(x)`, `x[1]`,
-/// `L.x`, a scalar or a name next to a macro) is left to R.
-pub(super) fn type_pairs(c: &Command, scalars: &BTreeSet<String>) -> Vec<(String, bool)> {
+fn has_word(text: &str, name: &str) -> bool {
+    let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+    text.match_indices(name).any(|(i, m)| {
+        let before = text.get(..i).and_then(|t| t.chars().next_back());
+        let after = text.get(i + m.len()..).and_then(|t| t.chars().next());
+        !before.is_some_and(word) && !after.is_some_and(word)
+    })
+}
+
+fn walk_names(e: &Expr, out: &mut Vec<String>, scalars: &BTreeSet<String>) {
+    match e {
+        Expr::Number(_) | Expr::Text(_) => {}
+        Expr::Name(n) => {
+            // L.x and the like, _n, _N, _pi, _rc, a scalar or a matrix: not variables
+            let ts = n.split_once('.').is_some_and(|(ops, _)| is_ts_ops(ops));
+            if !ts && !n.starts_with('_') && !n.contains('.') && !scalars.contains(n) {
+                add(out, n);
+            }
+        }
+        Expr::Subscript(n, index) => {
+            if !n.starts_with('_') && !scalars.contains(n) {
+                add(out, n);
+                walk_names(index, out, scalars);
+            }
+        }
+        // r(mean), e(N), c(pi), s(...): what is inside is not a variable
+        Expr::Call(f, _) if matches!(f.as_str(), "r" | "e" | "c" | "s") => {}
+        Expr::Call(_, args) => {
+            for a in args {
+                walk_names(a, out, scalars);
+            }
+        }
+        Expr::Unary(_, a) => walk_names(a, out, scalars),
+        Expr::Binary(_, a, b) => {
+            walk_names(a, out, scalars);
+            walk_names(b, out, scalars);
+        }
+    }
+}
+
+/// What the type checks found in an `if`.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) struct Types {
+    /// A plain variable compared with a string (`true`) or a number (`false`):
+    /// checked in R against the variable's own type.
+    pub pairs: Vec<(String, bool)>,
+    /// A string compared with a number whatever the data hold
+    /// (`substr(s, 1, 1) == 3`, `abs(x) == "a"`).
+    pub always: bool,
+}
+
+/// SW11, SW13: the comparisons in an `if` whose two sides are of different kinds,
+/// for Stata's "type mismatch", r(109), before the line runs. Only a plain
+/// variable beside a string or number, or two sides whose kinds the functions
+/// fix (`abs` gives a number, `substr` text), count; any other expression is
+/// left to R.
+pub(super) fn types(c: &Command, scalars: &BTreeSet<String>) -> Types {
+    let mut t = Types::default();
     if c.prefixes.iter().any(|p| matches!(p, Prefix::Frame(_))) {
-        return Vec::new();
+        return t;
     }
     let data = DATA_COMMANDS.contains(&c.name.as_str()) || !varlist_names(c).is_empty();
-    match (&c.parts.if_exp, data) {
-        (Some(e), true) => compared(e, scalars),
-        _ => Vec::new(),
+    if let (Some(text), true) = (&c.parts.if_exp, data) {
+        if !text.contains(['`', '$']) {
+            if let Ok(e) = parse(text) {
+                walk_types(&e, scalars, &mut t);
+            }
+        }
+    }
+    t
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fixed {
+    Text,
+    Number,
+}
+
+/// The kind an expression has whatever the data hold, when it is fixed.
+fn fixed(e: &Expr) -> Option<Fixed> {
+    const NUMBER_FNS: &[&str] = &[
+        "abs", "log", "ln", "sqrt", "exp", "int", "round", "floor", "ceil", "real", "length",
+        "strlen", "mod", "min", "max", "missing", "inlist", "inrange", "sign", "trunc",
+    ];
+    const TEXT_FNS: &[&str] = &[
+        "substr",
+        "lower",
+        "upper",
+        "trim",
+        "ltrim",
+        "rtrim",
+        "itrim",
+        "string",
+        "strtrim",
+        "proper",
+        "subinstr",
+        "reverse",
+        "strreverse",
+        "word",
+    ];
+    match e {
+        Expr::Number(_) => Some(Fixed::Number),
+        Expr::Text(_) => Some(Fixed::Text),
+        Expr::Call(f, _) if NUMBER_FNS.contains(&f.as_str()) => Some(Fixed::Number),
+        Expr::Call(f, _) if TEXT_FNS.contains(&f.as_str()) => Some(Fixed::Text),
+        Expr::Unary(_, _) => Some(Fixed::Number),
+        Expr::Binary(op, a, b) => match op {
+            BinaryOp::Add => match (fixed(a), fixed(b)) {
+                (Some(Fixed::Text), _) | (_, Some(Fixed::Text)) => Some(Fixed::Text),
+                (Some(Fixed::Number), Some(Fixed::Number)) => Some(Fixed::Number),
+                _ => None,
+            },
+            // arithmetic, comparisons and and/or all give numbers
+            _ => Some(Fixed::Number),
+        },
+        _ => None,
     }
 }
 
-/// One side of a comparison.
-#[derive(Debug, PartialEq)]
-enum Side {
-    Var(String),
-    Str,
-    Num,
-    Other,
-}
-
-fn compared(text: &str, scalars: &BTreeSet<String>) -> Vec<(String, bool)> {
-    let chars: Vec<char> = text.chars().collect();
-    let at = |i: usize| chars.get(i).copied();
-    let mut out: Vec<(String, bool)> = Vec::new();
-    let mut i = 0;
-    while let Some(c) = at(i) {
-        match c {
-            // a string: its contents are not operators
-            '"' => {
-                i += 1;
-                while at(i).is_some_and(|d| d != '"') {
-                    i += 1;
-                }
-                i += 1;
+fn walk_types(e: &Expr, scalars: &BTreeSet<String>, t: &mut Types) {
+    match e {
+        Expr::Unary(_, a) => walk_types(a, scalars, t),
+        Expr::Call(_, args) => {
+            for a in args {
+                walk_types(a, scalars, t);
             }
-            '=' | '!' | '~' | '<' | '>' => {
-                let two = at(i + 1) == Some('=');
-                // `=` alone is no comparison; `!` and `~` need the `=`
-                let len = match (c, two) {
-                    (_, true) => 2,
-                    ('<' | '>', false) => 1,
-                    _ => 0,
-                };
-                if len == 0 {
-                    i += 1;
-                    continue;
-                }
-                let left = side_before(&chars, i, scalars);
-                let right = side_after(&chars, i + len, scalars);
-                match (left, right) {
-                    (Side::Var(v), Side::Str) | (Side::Str, Side::Var(v)) => {
-                        push(&mut out, v, true)
+        }
+        Expr::Binary(op, a, b) => {
+            walk_types(a, scalars, t);
+            walk_types(b, scalars, t);
+            if matches!(
+                op,
+                BinaryOp::Eq
+                    | BinaryOp::Ne
+                    | BinaryOp::Lt
+                    | BinaryOp::Le
+                    | BinaryOp::Gt
+                    | BinaryOp::Ge
+            ) {
+                let var = |x: &Expr| match x {
+                    Expr::Name(n)
+                        if !n.starts_with('_') && !n.contains('.') && !scalars.contains(n) =>
+                    {
+                        Some(n.clone())
                     }
-                    (Side::Var(v), Side::Num) | (Side::Num, Side::Var(v)) => {
-                        push(&mut out, v, false)
+                    _ => None,
+                };
+                match (fixed(a), fixed(b), var(a), var(b)) {
+                    (Some(x), Some(y), _, _) if x != y => t.always = true,
+                    (None, Some(k), Some(v), _) | (Some(k), None, _, Some(v)) => {
+                        let pair = (v, k == Fixed::Text);
+                        if !t.pairs.contains(&pair) {
+                            t.pairs.push(pair);
+                        }
                     }
                     _ => {}
                 }
-                i += len;
             }
-            _ => i += 1,
         }
+        _ => {}
     }
-    out
-}
-
-fn push(out: &mut Vec<(String, bool)>, v: String, string: bool) {
-    if !out.iter().any(|(o, s)| *o == v && *s == string) {
-        out.push((v, string));
-    }
-}
-
-fn is_word(c: char) -> bool {
-    c.is_ascii_alphanumeric() || c == '_'
-}
-
-/// The operand that ends just before position `end`.
-fn side_before(chars: &[char], end: usize, scalars: &BTreeSet<String>) -> Side {
-    let mut j = end;
-    while j > 0 && chars.get(j - 1).is_some_and(|c| c.is_whitespace()) {
-        j -= 1;
-    }
-    let Some(last) = j.checked_sub(1).and_then(|k| chars.get(k)).copied() else {
-        return Side::Other;
-    };
-    if last == '"' {
-        return Side::Str;
-    }
-    if !is_word(last) {
-        return Side::Other;
-    }
-    let mut k = j;
-    while k > 0 && chars.get(k - 1).is_some_and(|c| is_word(*c) || *c == '.') {
-        k -= 1;
-    }
-    let text: String = chars.get(k..j).unwrap_or_default().iter().collect();
-    // beside a macro or a closing bracket: not a plain operand
-    let before = k.checked_sub(1).and_then(|p| chars.get(p)).copied();
-    if matches!(before, Some('\'' | '`' | '$' | '}' | ']' | ')')) {
-        return Side::Other;
-    }
-    classify(&text, scalars)
-}
-
-/// The operand that starts at or after position `start`.
-fn side_after(chars: &[char], start: usize, scalars: &BTreeSet<String>) -> Side {
-    let mut j = start;
-    while chars.get(j).is_some_and(|c| c.is_whitespace()) {
-        j += 1;
-    }
-    if chars.get(j) == Some(&'"') {
-        return Side::Str;
-    }
-    if chars.get(j) == Some(&'-') && chars.get(j + 1).is_some_and(|c| c.is_ascii_digit()) {
-        j += 1;
-    }
-    let mut k = j;
-    while chars.get(k).is_some_and(|c| is_word(*c) || *c == '.') {
-        k += 1;
-    }
-    let text: String = chars.get(j..k).unwrap_or_default().iter().collect();
-    // a call, a subscript or a macro follows: not a plain operand
-    if matches!(chars.get(k), Some('(' | '[' | '`')) {
-        return Side::Other;
-    }
-    classify(&text, scalars)
-}
-
-fn classify(text: &str, scalars: &BTreeSet<String>) -> Side {
-    let digit = text.chars().next().is_some_and(|c| c.is_ascii_digit());
-    if text.is_empty() {
-        return Side::Other;
-    }
-    if digit {
-        return if text.parse::<f64>().is_ok() {
-            Side::Num
-        } else {
-            Side::Other
-        };
-    }
-    // a name with a dot (L.x, a missing code .a) or an underscore start is left to R
-    if text.starts_with('_') || scalars.contains(text) || !is_name(text) {
-        return Side::Other;
-    }
-    Side::Var(text.to_string())
 }
 
 #[cfg(test)]
@@ -406,7 +340,7 @@ mod tests {
     #[test]
     fn an_expression_gives_its_variables_and_nothing_else() {
         assert_eq!(exp("x > 0 & g == \"a\""), ["x", "g"]);
-        assert_eq!(exp("log(w) + x[_n-1] * 2.5e-3"), ["w"]);
+        assert_eq!(exp("log(w) + x[_n-1] * 2.5e-3"), ["w", "x"]);
         assert_eq!(exp("r(mean) < x | _n == 1"), ["x"]);
         assert_eq!(
             exp("L.x > 3 & x`i' < 2 & `v' == 1 & $g == 4"),
@@ -417,6 +351,8 @@ mod tests {
             ["g", "y", "z"]
         );
         assert_eq!(exp("_b[x] > 0 & e(N) > c(pi)"), Vec::<String>::new());
+        // text the reader cannot take is left to the line's own error
+        assert_eq!(exp("(x y)"), Vec::<String>::new());
     }
 
     #[test]
@@ -434,42 +370,60 @@ mod tests {
         assert_eq!(option_arg("nobyte", "by"), None);
         assert_eq!(option_arg("vce(cluster id)", "vce"), Some("cluster id"));
     }
-}
 
-#[cfg(test)]
-mod type_tests {
-    use super::*;
-
-    fn pairs(s: &str) -> Vec<(String, bool)> {
-        compared(s, &BTreeSet::new())
+    fn kinds(s: &str) -> Types {
+        let mut t = Types::default();
+        if let Ok(e) = parse(s) {
+            walk_types(&e, &BTreeSet::new(), &mut t);
+        }
+        t
     }
 
     #[test]
     fn a_plain_variable_beside_a_literal_is_paired_with_its_kind() {
         let p = |v: &str, s: bool| (v.to_string(), s);
-        assert_eq!(pairs("g == \"a\""), [p("g", true)]);
-        assert_eq!(pairs("\"a\" != g & x > 3"), [p("g", true), p("x", false)]);
-        assert_eq!(pairs("x <= -1.5 | 2 < y"), [p("x", false), p("y", false)]);
-        assert_eq!(pairs("s ~= \"b\""), [p("s", true)]);
+        assert_eq!(kinds("g == \"a\"").pairs, [p("g", true)]);
+        assert_eq!(
+            kinds("\"a\" != g & x > 3").pairs,
+            [p("g", true), p("x", false)]
+        );
+        assert_eq!(
+            kinds("x <= -1.5 | 2 < y").pairs,
+            [p("x", false), p("y", false)]
+        );
+        // a function fixes the kind of the other side
+        assert_eq!(kinds("g == substr(t, 1, 1)").pairs, [p("g", true)]);
+        assert_eq!(kinds("s == abs(x)").pairs, [p("s", false)]);
     }
 
     #[test]
-    fn anything_built_is_left_to_r() {
+    fn two_sides_of_fixed_kinds_that_differ_always_mismatch() {
+        assert!(kinds("abs(x) == \"a\"").always);
+        assert!(kinds("substr(s, 1, 1) == 3").always);
+        assert!(kinds("\"a\" + \"b\" > 2").always);
+        assert!(!kinds("substr(s, 1, 1) == \"a\"").always);
+        assert!(!kinds("abs(x) == 3").always);
+        assert!(!kinds("x == y").always);
+    }
+
+    #[test]
+    fn anything_not_fixed_is_left_to_r() {
         for e in [
             "f(x) == 3",
             "x[1] == \"a\"",
             "L.x == 3",
             "x == y",
-            "x = 3",
             "_n == 3",
-            "x == .",
-            "x == `v'",
             "r(mean) > 3",
         ] {
-            assert_eq!(pairs(e), Vec::<(String, bool)>::new(), "{e}");
+            let t = kinds(e);
+            assert!(t.pairs.is_empty() && !t.always, "{e}: {t:?}");
         }
-        let mut s = BTreeSet::new();
-        s.insert("cut".to_string());
-        assert!(compared("cut == \"a\"", &s).is_empty());
+        let s: BTreeSet<String> = ["cut".to_string()].into();
+        let mut t = Types::default();
+        if let Ok(e) = parse("cut == \"a\"") {
+            walk_types(&e, &s, &mut t);
+        }
+        assert!(t.pairs.is_empty());
     }
 }
