@@ -314,6 +314,9 @@ stata_ib_factor <- function(x, base) {
     return(structure(f, levels = L, class = "factor"))
   }
   lv <- as.character(sort(unique(x[!is.na(x)])))
+  # a factor or text column made in R has no numeric codes: ib2.g means its 2nd level
+  if (grepl("^[0-9]+$", base) && !(base %in% lv) && any(!grepl("^[0-9]+$", lv)) &&
+      as.integer(base) >= 1 && as.integer(base) <= length(lv)) base <- lv[as.integer(base)]
   factor(x, levels = c(base, setdiff(lv, base)))
 }
 # ibn.x: every level, none the base (with noconstant: each level's own coefficient)

@@ -1825,14 +1825,29 @@ pub(super) const NAMES_HELPER: &str = r##"stata_canon <- function(s) {
   paste0(eq, paste(sort(p), collapse = "#"))
 }
 stata_bnames <- function() {
+  # a level of a factor or character column made in R (not numbers, or numbers with
+  # value labels) is named by its place among the levels, as a value of a labelled
+  # variable is: b.g would read as the continuous-variable prefix for a level "c"
+  xlev <- tryCatch(stata_estimates$xlevels, error = function(e) NULL)
+  code <- function(var, lvl) {
+    if (is.null(names(xlev))) return(lvl)
+    key <- names(xlev)[names(xlev) %in% c(paste0("factor(", var, ")"), paste0("stata_ibn(", var, ")")) |
+                         startsWith(names(xlev), paste0("stata_ib(", var, ","))]
+    lv <- if (length(key) == 1) xlev[[key]] else NULL
+    if (length(lv) && any(!grepl("^[0-9]+$", lv))) {
+      i <- match(lvl, if (startsWith(key, "factor(")) lv else sort(lv))
+      if (!is.na(i)) return(as.character(i))
+    }
+    lvl
+  }
   part <- function(p) {
     if (p == "(Intercept)") return("_cons")
     m <- regmatches(p, regexec("^factor\\(([^()]+)\\)(.+)$", p))[[1]]
-    if (length(m)) return(paste0(m[3], ".", m[2]))
+    if (length(m)) return(paste0(code(m[2], m[3]), ".", m[2]))
     m <- regmatches(p, regexec("^stata_ib\\(([^,]+), \"[^\"]*\"\\)(.+)$", p))[[1]]
-    if (length(m)) return(paste0(m[3], ".", m[2]))
+    if (length(m)) return(paste0(code(m[2], m[3]), ".", m[2]))
     m <- regmatches(p, regexec("^stata_ibn\\(([^()]+)\\)(.+)$", p))[[1]]
-    if (length(m)) return(paste0(m[3], ".", m[2]))
+    if (length(m)) return(paste0(code(m[2], m[3]), ".", m[2]))
     # the cells of two factors interacted alone (stata_cells, level a#b)
     m <- regmatches(p, regexec("^stata_cells\\(([^,]+), ([^,]+), \"[^\"]*\", \"[^\"]*\"\\)([^#]+)#(.+)$", p))[[1]]
     if (length(m)) return(paste0(m[4], ".", m[2], "#", m[5], ".", m[3]))
