@@ -14,6 +14,7 @@ use crate::data::BASE;
 use crate::generalised;
 use crate::inference;
 use crate::iv;
+use crate::meta;
 use crate::models;
 use crate::multilevel;
 use crate::multivariate;
@@ -478,6 +479,7 @@ pub const SPECS: &[&Spec] = &[
     &iv::HECKMAN,
     &iv::TREATMENT_EFFECTS,
     &sem::SEM,
+    &meta::META,
     &multilevel::LINEAR_MIXED,
     &multilevel::GENERALIZED_MIXED,
     &multilevel::TMB_MIXED,
