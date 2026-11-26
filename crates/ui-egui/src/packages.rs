@@ -143,7 +143,13 @@ impl PackageCheck {
     /// Tells the user which packages are missing and offers to install them.
     /// Draws nothing when the code can run. Returns the install code when the
     /// user asks for it.
-    pub fn panel(&mut self, ui: &mut egui::Ui, pal: &Palette, needed: &[&str]) -> Option<String> {
+    pub fn panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        pal: &Palette,
+        needed: &[&str],
+        cran: &dyn Fn(&str) -> Option<String>,
+    ) -> Option<String> {
         if self.ready(needed) {
             return None;
         }
@@ -180,10 +186,11 @@ impl PackageCheck {
         let code = install_checked_code(&list, self.library.as_deref());
         ui.label(
             RichText::new(format!(
-                "Provider: CRAN, from {} (version: the newest release built for your R). It is \
-                 installed with the packages it needs into RCraft's own library, not into any \
-                 other app's R. Nothing is downloaded until you press Install:",
-                saved_mirror()
+                "Provider: CRAN, from {} (version: {}). It is installed with the packages it \
+                 needs into RCraft's own library, not into any other app's R. Nothing is \
+                 downloaded until you press Install:",
+                saved_mirror(),
+                version_text(&list, cran)
             ))
             .small()
             .color(pal.dim),
@@ -212,6 +219,32 @@ impl PackageCheck {
             }
         });
         ask
+    }
+}
+
+/// The version line of the install panel. R installs the newest release built
+/// for its own version, which is not known until it asks the mirror (only when
+/// the user presses Install); the package list RCraft already holds on disk, if
+/// the user has opened it, says which version CRAN lists, and that is shown as
+/// such, with its list's date not guessed at.
+pub(crate) fn version_text(list: &[&str], cran: &dyn Fn(&str) -> Option<String>) -> String {
+    let listed: Vec<String> = list
+        .iter()
+        .filter_map(|p| {
+            cran(p)
+                .filter(|v| !v.is_empty())
+                .map(|v| format!("{p} {v}"))
+        })
+        .collect();
+    let base = "the newest release built for your R";
+    if listed.is_empty() {
+        base.to_string()
+    } else {
+        format!(
+            "{base}; your saved package list shows CRAN's newest as {}, and a release built for \
+             an older R or not yet built for yours can be one behind",
+            listed.join(", ")
+        )
     }
 }
 
@@ -438,5 +471,22 @@ mod tests {
             ..PackageCheck::default()
         };
         assert!(!missing.ready(&["dplyr"]));
+    }
+
+    #[test]
+    fn the_version_line_shows_what_the_saved_package_list_says_and_otherwise_nothing_new() {
+        let none = |_: &str| None;
+        assert_eq!(
+            version_text(&["dplyr"], &none),
+            "the newest release built for your R"
+        );
+        let list = |p: &str| (p == "dplyr").then(|| "1.2.3".to_string());
+        let t = version_text(&["dplyr", "haven"], &list);
+        assert!(
+            t.starts_with("the newest release built for your R; "),
+            "{t}"
+        );
+        assert!(t.contains("CRAN's newest as dplyr 1.2.3,"), "{t}");
+        assert!(!t.contains("haven "), "{t}");
     }
 }

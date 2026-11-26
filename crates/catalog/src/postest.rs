@@ -119,18 +119,23 @@ fn any_model_guard(test: &str, what: &str) -> String {
 
 /// R vector of every class the model dialogs take.
 fn model_class_vector() -> String {
+    class_vector(true)
+}
+
+/// The same, with or without the metafor fits (Marginal effects take no `rma`).
+fn class_vector(meta: bool) -> String {
     let names: Vec<String> = MODEL_CLASSES
         .iter()
         .chain(SELECTION_CLASSES)
         .chain(SEM_CLASSES)
-        .chain(META_CLASSES)
+        .chain(if meta { META_CLASSES } else { &[] })
         .map(|c| r_string(c))
         .collect();
     format!("c({})", names.join(", "))
 }
 
 const FITTED_MODELS: &str = "this works for fitted models (linear, generalised linear, panel, \
-                             survival, mixed, Bayesian, Heckman, structural equation and meta-analysis models)";
+                             survival, mixed, Bayesian, Heckman and structural equation models)";
 
 // ---- Model fit ----
 
@@ -743,7 +748,7 @@ pub const MARGINAL_EFFECTS: Spec = Spec {
     code: |a, _| {
         let m = a.data();
         let guard = any_model_guard(
-            &format!("inherits({m}, {})", model_class_vector()),
+            &format!("inherits({m}, {})", class_vector(false)),
             FITTED_MODELS,
         );
         format!(
@@ -1234,10 +1239,10 @@ mod tests {
         assert_eq!(
             make(&MARGINAL_EFFECTS, "my fit", &[("conf", "0.9")]).unwrap_or_default(),
             "stopifnot(\"this works for fitted models (linear, generalised linear, panel, \
-             survival, mixed, Bayesian, Heckman, structural equation and meta-analysis models)\" = \
+             survival, mixed, Bayesian, Heckman and structural equation models)\" = \
              inherits(`my fit`, c(\"lm\", \"glm\", \"aov\", \"negbin\", \"polr\", \"multinom\", \
              \"plm\", \"pgmm\", \"fixest\", \"svyglm\", \"coxph\", \"lmerMod\", \"glmerMod\", \
-             \"survreg\", \"stanreg\", \"selection\", \"lavaan\", \"rma.uni\", \"rma.mv\")))\n\
+             \"survreg\", \"stanreg\", \"selection\", \"lavaan\")))\n\
              print(marginaleffects::avg_slopes(`my fit`, conf_level = 0.9))"
         );
     }
@@ -1248,8 +1253,8 @@ mod tests {
         assert!(
             fit.starts_with(
                 "stopifnot(\"this works for fitted models (linear, generalised linear, panel, \
-                 survival, mixed, Bayesian, Heckman, structural equation and meta-analysis \
-                 models)\" = inherits(`my model`, c(\"lm\", "
+                 survival, mixed, Bayesian, Heckman and structural equation models)\" = \
+                 inherits(`my model`, c(\"lm\", "
             ),
             "{fit}"
         );

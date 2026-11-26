@@ -49,9 +49,10 @@ enum SideTab {
 }
 
 const COMMAND_ID: &str = "command-line";
-/// The Command panel's starting and smallest heights.
+/// The Command panel's starting and smallest heights (the smallest still shows both
+/// the Run and Stop buttons, one over the other, whole).
 const COMMAND_PANE_HEIGHT: f32 = 96.0;
-const COMMAND_PANE_MIN_HEIGHT: f32 = 78.0;
+const COMMAND_PANE_MIN_HEIGHT: f32 = 96.0;
 const SCRIPT_ID: &str = "script-editor";
 /// The find bar's text box.
 const FIND_ID: &str = "script-find";
@@ -848,6 +849,14 @@ impl App {
                 // a value the line before left is still being worked out: in turn
                 if self.stata.after.is_some() {
                     self.stata.held.push((source, text));
+                    return;
+                }
+                // help <command>: RCraft's own guide, nothing for R to run
+                if let Some(target) = stata_mode::help_target(&text) {
+                    if source == Source::Typed {
+                        self.stata.typed(text.trim());
+                    }
+                    self.help_window.show_stata(&target);
                     return;
                 }
                 let mut offer = Vec::new();
@@ -2112,11 +2121,17 @@ impl App {
             self.spec_dialog.refresh(fresh);
         }
         self.watch_chosen_frames();
+        // the package list on disk (read once, no network) says which version CRAN lists
+        if self.spec_dialog.is_open() {
+            self.package_index.ensure_loaded();
+        }
+        let index = self.package_index.index();
+        let cran = |name: &str| index.and_then(|ix| ix.get(name)).map(|p| p.version.clone());
         let engine = match &mut self.engine {
             EngineState::Ready(e) => Some(&mut **e),
             _ => None,
         };
-        match self.spec_dialog.show(ctx, &pal, engine) {
+        match self.spec_dialog.show(ctx, &pal, engine, &cran) {
             Some(SpecAction::Run(run)) => {
                 // a renamed object is followed only when it was the one shown;
                 // otherwise the window would wait for a data frame that never comes
@@ -3086,30 +3101,41 @@ Click to choose another folder"
         if submit {
             self.focus_command = true;
         }
-        let height = ui.available_height().max(24.0);
+        // (a little under the panel's height, so the box's own border is not cut off)
+        let height = (ui.available_height() - 6.0).max(24.0);
         ui.horizontal_top(|ui| {
             let button_width = 64.0;
             let field_width = (ui.available_width() - button_width - 16.0).max(80.0);
-            // the box fills the panel, so it follows the panel's edge
-            egui::ScrollArea::vertical()
-                .id_salt("command-scroll")
-                .max_height(height)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    let field = egui::TextEdit::multiline(&mut self.command)
-                        .id(id)
-                        .font(TextStyle::Monospace)
-                        .return_key(egui::KeyboardShortcut::new(Modifiers::SHIFT, Key::Enter))
-                        .hint_text(if self.stata.on {
-                            "Type Stata and press Enter (Shift+Enter: new line)"
-                        } else {
-                            "Type R code and press Enter (Shift+Enter: new line)"
-                        })
-                        .desired_rows(1)
-                        .desired_width(field_width)
-                        .min_size(egui::vec2(field_width, height));
-                    ui.add(field);
-                });
+            // the box fills the panel, so it follows the panel's edge; it is given its
+            // width, or the scroll area would take all of it and push Run and Stop out
+            ui.allocate_ui_with_layout(
+                egui::vec2(field_width, height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("command-scroll")
+                        .max_height(height)
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            let field = egui::TextEdit::multiline(&mut self.command)
+                                .id(id)
+                                .font(TextStyle::Monospace)
+                                .return_key(egui::KeyboardShortcut::new(
+                                    Modifiers::SHIFT,
+                                    Key::Enter,
+                                ))
+                                .hint_text(if self.stata.on {
+                                    "Type Stata and press Enter (Shift+Enter: new line)"
+                                } else {
+                                    "Type R code and press Enter (Shift+Enter: new line)"
+                                })
+                                .desired_rows(1)
+                                .desired_width(field_width)
+                                .min_size(egui::vec2(field_width, height));
+                            ui.add(field);
+                        });
+                },
+            );
             ui.vertical(|ui| {
                 if ui
                     .add_enabled(
@@ -4035,6 +4061,86 @@ mod tests {
         assert!(app.command.is_empty() || app.command == "x <- 1\n");
     }
 
+    /// Types `text` in the Command box and presses Enter, as the window does.
+    fn enter_in_command_box(app: &mut App, ctx: &egui::Context, text: &str) {
+        let id = egui::Id::new(COMMAND_ID);
+        app.perform(ctx, Action::SetCommand(text.into()));
+        app.focus_command = true;
+        run_frame(app, ctx, vec![], 700.0);
+        run_frame(app, ctx, vec![], 700.0);
+        cursor_to_end(ctx, id, &app.command);
+        run_frame(app, ctx, vec![], 700.0);
+        run_frame(
+            app,
+            ctx,
+            vec![key_event(Key::Enter, Modifiers::NONE)],
+            700.0,
+        );
+    }
+
+    fn history_codes(app: &App) -> Vec<String> {
+        app.engine()
+            .map(|e| {
+                e.history()
+                    .entries()
+                    .iter()
+                    .map(|h| h.code.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn several_lines_in_the_command_box_run_as_one_submission_in_r_mode() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let before = history_codes(&app).len();
+        let text = "sw7_a <- 2\nsw7_b <- sw7_a + 3\nprint(sw7_b * 10)";
+        enter_in_command_box(&mut app, &ctx, text);
+        assert!(app.command.is_empty(), "the box takes the whole entry");
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let codes = history_codes(&app);
+        assert_eq!(codes.len(), before + 1, "one submission: {codes:?}");
+        assert_eq!(codes.last().map(String::as_str), Some(text));
+        assert!(newest_text(&app).contains("50"), "{}", newest_text(&app));
+    }
+
+    #[test]
+    fn several_lines_in_the_command_box_are_stepped_in_order_in_stata_mode() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        app.perform(&ctx, Action::SetStataMode(true));
+        let before = history_codes(&app).len();
+        let text = "scalar sw7a = 2
+scalar sw7b = sw7a + 3
+display sw7b * 10";
+        enter_in_command_box(&mut app, &ctx, text);
+        assert!(app.command.is_empty(), "the box takes the whole entry");
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let codes = history_codes(&app);
+        assert_eq!(codes.len(), before + 1, "one submission: {codes:?}");
+        let code = codes.last().cloned().unwrap_or_default();
+        let at = |s: &str| code.find(s).unwrap_or(usize::MAX);
+        assert!(
+            at("# Stata: scalar sw7a = 2") < at("# Stata: scalar sw7b = sw7a + 3")
+                && at("# Stata: scalar sw7b = sw7a + 3") < at("# Stata: display sw7b * 10"),
+            "{code}"
+        );
+        assert!(newest_text(&app).contains("50"), "{}", newest_text(&app));
+        // and the Stata the user typed is what Page Up brings back, as one entry
+        assert_eq!(app.stata.previous().as_deref(), Some(text));
+    }
+
     #[test]
     fn the_command_box_follows_the_panel_height() {
         let ctx = egui::Context::default();
@@ -4057,6 +4163,62 @@ mod tests {
         let big = height_at(&mut app, &ctx, 260.0);
         assert!(small > 0.0, "the box was not drawn");
         assert!(big > small + 100.0, "small {small}, big {big}");
+    }
+
+    #[test]
+    fn run_and_stop_stay_inside_the_window_at_every_panel_height() {
+        for stata in [false, true] {
+            for (w, panel) in [
+                (1000.0, COMMAND_PANE_MIN_HEIGHT),
+                (1000.0, 260.0),
+                (520.0, 160.0),
+            ] {
+                let ctx = egui::Context::default();
+                let mut app = App::new(&ctx);
+                if stata {
+                    app.set_stata_mode(&ctx, true);
+                }
+                app.perform(
+                    &ctx,
+                    Action::SetCommand("a <- 1\nb <- 2\nc <- 3\nd <- 4".into()),
+                );
+                let screen_h = 700.0;
+                let mut shapes = Vec::new();
+                for _ in 0..3 {
+                    let state = egui::containers::panel::PanelState {
+                        rect: egui::Rect::from_min_size(
+                            egui::pos2(0.0, screen_h - panel),
+                            egui::vec2(w, panel),
+                        ),
+                    };
+                    ctx.data_mut(|d| d.insert_persisted(egui::Id::new("command"), state));
+                    let screen =
+                        egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(w, screen_h));
+                    let out = ctx.run(
+                        egui::RawInput {
+                            screen_rect: Some(screen),
+                            ..Default::default()
+                        },
+                        |ctx| app.ui(ctx),
+                    );
+                    shapes = out.shapes;
+                }
+                // Run and Stop are drawn inside the window (the box leaves them room,
+                // not pushing them past its edge), one over the other, above the status bar
+                let label = |what: &str| {
+                    shapes.iter().find_map(|s| match &s.shape {
+                        egui::epaint::Shape::Text(t) if t.galley.text() == what => Some(t.pos),
+                        _ => None,
+                    })
+                };
+                let (Some(run), Some(stop)) = (label("Run"), label("Stop")) else {
+                    panic!("Run and Stop are not drawn: stata {stata}, width {w}, panel {panel}");
+                };
+                let at = format!("stata {stata}, width {w}, panel {panel}: {run:?} {stop:?}");
+                assert!(run.x + 30.0 <= w && stop.x + 30.0 <= w, "{at}");
+                assert!(stop.y > run.y && stop.y + 14.0 <= screen_h - 24.0, "{at}");
+            }
+        }
     }
 
     #[test]
@@ -4970,6 +5132,95 @@ mod tests {
         run(&mut app, "summarize q");
         run(&mut app, "display r(mean)");
         assert!(newest_text(&app).contains("15"), "{}", newest_text(&app));
+    }
+
+    #[test]
+    fn stata_mode_says_why_and_keeps_the_model_when_a_line_fails() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        app.keep_settings(false);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("rcraft-stata-sw3-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir
+            .join("cars.dta")
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                format!(
+                    "stopifnot(requireNamespace(\"haven\", quietly = TRUE), requireNamespace(\"dplyr\", quietly = TRUE)); \
+                     haven::write_dta(data.frame(x = c(1, 2, 3, 5), z = c(2, 1, 4, 3), y = c(2, 4, 7, 8)), \"{file}\")"
+                ),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        let made = app
+            .engine()
+            .and_then(|e| e.history().entries().last().and_then(|h| h.outcome));
+        if made != Some(Outcome::Ok) {
+            eprintln!("skipped: haven and dplyr are needed");
+            return;
+        }
+        app.perform(&ctx, Action::SetStataMode(true));
+        // everything the newest block printed or said, and how it ended
+        let run = |app: &mut App, line: &str| -> (String, Option<Outcome>) {
+            app.perform(&ctx, Action::SubmitStata(Source::Typed, line.to_string()));
+            assert!(frames_until(app, &ctx, |a| a.is_settled()), "{line}");
+            let mut out = String::new();
+            let mut outcome = None;
+            if let Some(block) = app.engine().and_then(|e| e.results().blocks().last()) {
+                outcome = block.outcome;
+                for item in &block.items {
+                    match item {
+                        Item::Text { text, .. } => out.push_str(text),
+                        Item::Warning(m) => out.push_str(&format!("Warning: {m}\n")),
+                        Item::Error { message, .. } => out.push_str(&format!("Error: {message}\n")),
+                        _ => {}
+                    }
+                }
+            }
+            (out, outcome)
+        };
+        run(&mut app, &format!("use \"{file}\""));
+        let (_, o) = run(&mut app, "regress y x z");
+        assert_eq!(o, Some(Outcome::Ok));
+        // a variable the data lack: Stata's r(111), and the model before stays
+        let (text, o) = run(&mut app, "regress y nosuchvar");
+        assert_ne!(o, Some(Outcome::Ok), "{text}");
+        assert!(text.contains("variable nosuchvar not found"), "{text}");
+        assert!(!text.contains("object 'nosuchvar'"), "{text}");
+        let (text, o) = run(&mut app, "predict p");
+        assert_eq!(o, Some(Outcome::Ok), "{text}");
+        assert!(!text.contains("stata_estimates"), "{text}");
+        let (text, _) = run(&mut app, "tabulate nosuchvar");
+        assert!(text.contains("variable nosuchvar not found"), "{text}");
+        // list leaves no warning about its separator column
+        let (text, o) = run(&mut app, "list x in 1/2");
+        assert_eq!(o, Some(Outcome::Ok), "{text}");
+        assert!(!text.contains("stata_sep_"), "{text}");
+        // a line that is not translated shows its reason in Results
+        let (text, _) = run(&mut app, "sysuse auto");
+        assert!(text.contains("Stata's example datasets"), "{text}");
+        assert!(text.contains("File > Use my file"), "{text}");
+        let (text, _) = run(&mut app, "summary x");
+        assert!(text.contains("summary is not a Stata command"), "{text}");
+        assert!(text.contains("did you mean summarize?"), "{text}");
+        // help <command> opens the guide's page and sends R nothing
+        app.perform(
+            &ctx,
+            Action::SubmitStata(Source::Typed, "help summarize".into()),
+        );
+        assert!(app.help_window.open);
+        assert_eq!(app.help_window.shown_stata(), Some("summarize"));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
