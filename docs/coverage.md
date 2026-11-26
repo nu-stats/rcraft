@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 154 | 153 | 0 | 1 |
+| 155 | 154 | 0 | 1 |
 
 ## File
 
@@ -120,6 +120,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Treatment effects | verified |
 | Structural equation model | verified |
 | Meta-analysis | verified |
+| Multivariate meta-analysis | verified |
 | Linear mixed model | verified |
 | Logistic or Poisson mixed model | verified |
 | Mixed model (glmmTMB) | verified |

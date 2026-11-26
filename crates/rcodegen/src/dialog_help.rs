@@ -226,11 +226,19 @@ fn sample_text(id: &str, rule: TextRule) -> Option<&'static str> {
 /// Values for the example: the dialog's defaults, a different fitting column
 /// in every required variable box (starting `shift` columns along, so a
 /// dialog that refuses one pairing gets another), and a plausible word in a
-/// box that must not be empty. `file` goes in the save-path box. With `every`,
-/// the optional variable boxes get a column too (for a dialog whose boxes are
-/// all optional, each needed by one of its choices), and the lists that may
-/// be empty are left empty.
-fn sample_values(spec: &Spec, ctx: &Context, shift: usize, file: &str, every: bool) -> Values {
+/// box that must not be empty. `file` goes in the save-path box. With
+/// `optional` other than `Skip`, the optional variable boxes get a column too
+/// (all of them, or only those limited to some kinds of column), for a
+/// dialog whose boxes are all optional, each needed by one of its choices;
+/// the lists that may be empty are then left empty.
+fn sample_values(
+    spec: &Spec,
+    ctx: &Context,
+    shift: usize,
+    file: &str,
+    optional: Optional,
+) -> Values {
+    let every = optional != Optional::Skip;
     let mut values = spec.defaults(ctx);
     let mut order: Vec<&ColumnInfo> = ctx.columns.iter().collect();
     let turn = shift.checked_rem(order.len()).unwrap_or(0);
@@ -244,7 +252,12 @@ fn sample_values(spec: &Spec, ctx: &Context, shift: usize, file: &str, every: bo
                 required,
                 ..
             } => {
-                if required || every {
+                let fill = match optional {
+                    Optional::Skip => false,
+                    Optional::All => true,
+                    Optional::Typed => !kinds.is_empty(),
+                };
+                if required || fill {
                     if let Some(name) = pick(&order, kinds, &mut used) {
                         values.set_text(id, name);
                     }
@@ -314,12 +327,21 @@ const SAMPLE_FILES: &[&str] = &[
     "report.docx",
 ];
 
+/// Which optional variable boxes the example fills.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Optional {
+    Skip,
+    All,
+    /// Only those limited to some kinds of column.
+    Typed,
+}
+
 /// The first values for which `spec` writes code in `style`, with that code.
 fn sample_code(spec: &Spec, ctx: &Context, style: Style) -> Option<String> {
-    for every in [false, true] {
+    for optional in [Optional::Skip, Optional::All, Optional::Typed] {
         for shift in 0..ctx.columns.len().max(1) {
             for file in SAMPLE_FILES {
-                let values = sample_values(spec, ctx, shift, file, every);
+                let values = sample_values(spec, ctx, shift, file, optional);
                 if let Ok(code) = spec.generate(ctx, &values, style) {
                     return Some(code);
                 }

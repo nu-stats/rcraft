@@ -480,6 +480,7 @@ pub const SPECS: &[&Spec] = &[
     &iv::TREATMENT_EFFECTS,
     &sem::SEM,
     &meta::META,
+    &meta::MV_META,
     &multilevel::LINEAR_MIXED,
     &multilevel::GENERALIZED_MIXED,
     &multilevel::TMB_MIXED,

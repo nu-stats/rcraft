@@ -238,6 +238,7 @@ pub const ENTRIES: &[Entry] = &[
     verified("Treatment effects", Area::Statistics),
     verified("Structural equation model", Area::Statistics),
     verified("Meta-analysis", Area::Statistics),
+    verified("Multivariate meta-analysis", Area::Statistics),
     verified("Linear mixed model", Area::Statistics),
     verified("Logistic or Poisson mixed model", Area::Statistics),
     verified("Mixed model (glmmTMB)", Area::Statistics),
