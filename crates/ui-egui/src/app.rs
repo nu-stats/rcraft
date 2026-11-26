@@ -863,9 +863,14 @@ impl App {
                 if let EngineState::Ready(engine) = &mut self.engine {
                     // the translator moves on only if R takes the line
                     // the helpers sent with the step before, again if R stopped there
-                    if let Some((id, helpers)) = self.stata.sent_with.take() {
+                    if let Some((id, helpers, rollback)) = self.stata.sent_with.take() {
                         let o = engine.history().get(id).and_then(|h| h.outcome);
                         if o.is_some_and(|o| o != Outcome::Ok) {
+                            // a line R stopped in did not happen, as in Stata: the translator
+                            // goes back to before it (its variable, its model)
+                            if let Some(before_it) = rollback {
+                                self.stata.live = before_it;
+                            }
                             self.stata.live.unsend(&helpers);
                         }
                     }
@@ -887,7 +892,17 @@ impl App {
                     }
                     match engine.submit(source.clone(), &step.code) {
                         Ok(id) => {
-                            self.stata.sent_with = Some((id, step.helpers.clone()));
+                            // one translated line that is not a command whose failure leaves results
+                            // (lasso and nlsur post theirs before they stop, as Stata does)
+                            let rollback = match step.lines.as_slice() {
+                                [one]
+                                    if one.result.is_ok() && !posts_before_failing(&one.stata) =>
+                                {
+                                    Some(before.clone())
+                                }
+                                _ => None,
+                            };
+                            self.stata.sent_with = Some((id, step.helpers.clone(), rollback));
                             // the value its last line leaves, once it has run
                             if let Some(code) = step.then_ask.clone() {
                                 self.stata.after = Some(After::Line(id, code));
@@ -3191,6 +3206,13 @@ Click to choose another folder"
     }
 }
 
+/// Commands that post their results and then stop with an error (Stata keeps them), so
+/// that a failed line of these is not taken back.
+fn posts_before_failing(line: &str) -> bool {
+    let first = line.split_whitespace().next().unwrap_or("");
+    first.contains("lasso") || first.starts_with("elasticnet") || first.starts_with("nlsur")
+}
+
 /// The Stata mode switch, on the Command and Script panes alike.
 fn stata_switch(ui: &mut egui::Ui, on: bool, out: &mut Vec<Action>) {
     let response = ui
@@ -3912,6 +3934,11 @@ impl App {
         self.perform(ctx, Action::SetStataMode(on));
     }
 
+    /// Puts text in the Command box (pictures).
+    pub fn set_command_text(&mut self, ctx: &egui::Context, text: &str) {
+        self.perform(ctx, Action::SetCommand(text.to_string()));
+    }
+
     /// Runs a line of Stata as if typed in the Command window (pictures).
     pub fn submit_stata(&mut self, ctx: &egui::Context, code: &str) {
         self.perform(ctx, Action::SubmitStata(Source::Typed, code.to_string()));
@@ -4165,6 +4192,55 @@ display sw7b * 10";
         assert!(big > small + 100.0, "small {small}, big {big}");
     }
 
+    #[test]
+    fn a_line_r_stops_in_does_not_happen_for_the_translator_either() {
+        let ctx = egui::Context::default();
+        let mut app = App::new(&ctx);
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        if !app.is_ready() {
+            eprintln!("skipped: R did not start");
+            return;
+        }
+        let dir = std::env::temp_dir()
+            .join(format!("rcraft-sw15-{}", std::process::id()))
+            .display()
+            .to_string()
+            .replace('\\', "/");
+        app.perform(
+            &ctx,
+            Action::Submit(
+                Source::Typed,
+                format!(
+                    "dir.create('{dir}', showWarnings = FALSE); set.seed(1); \
+                     haven::write_dta(data.frame(x = rnorm(20), y = rnorm(20)), '{dir}/a.dta')"
+                ),
+            ),
+        );
+        assert!(frames_until(&mut app, &ctx, |a| a.is_settled()));
+        app.perform(&ctx, Action::SetStataMode(true));
+        let run = |app: &mut App, line: &str| {
+            app.perform(&ctx, Action::SubmitStata(Source::Typed, line.to_string()));
+            assert!(frames_until(app, &ctx, |a| a.is_settled()), "{line}");
+        };
+        run(&mut app, &format!("use \"{dir}/a.dta\", clear"));
+        run(&mut app, "regress y x");
+        // a file that is not there: R stops, and Stata's data are still the first file's
+        run(&mut app, &format!("use \"{dir}/nosuch.dta\", clear"));
+        let outcome = |app: &App| {
+            app.engine()
+                .and_then(|e| e.history().entries().last().and_then(|h| h.outcome))
+        };
+        if outcome(&app) == Some(Outcome::Ok) {
+            eprintln!("skipped: R did not stop on a missing file");
+            return;
+        }
+        run(&mut app, "summarize x");
+        assert_eq!(outcome(&app), Some(Outcome::Ok), "{}", newest_text(&app));
+        assert!(newest_text(&app).contains("Obs"), "{}", newest_text(&app));
+        // and the model is the regression's
+        run(&mut app, "predict yhat");
+        assert_eq!(outcome(&app), Some(Outcome::Ok), "{}", newest_text(&app));
+    }
     #[test]
     fn run_and_stop_stay_inside_the_window_at_every_panel_height() {
         for stata in [false, true] {

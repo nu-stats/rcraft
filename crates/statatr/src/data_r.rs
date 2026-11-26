@@ -3212,9 +3212,16 @@ impl Session {
                     .collect();
                 // a number compared with a string, or a string with a number, in an if:
                 // Stata's r(109), after the check that the names exist
-                let pairs = namecheck::type_pairs(c, &known);
-                if !pairs.is_empty() {
-                    let list = pairs
+                let kinds = namecheck::types(c, &known);
+                if kinds.always {
+                    out.code.insert(
+                        0,
+                        "stop(\"type mismatch (Stata: r(109))\", call. = FALSE)".to_string(),
+                    );
+                }
+                if !kinds.pairs.is_empty() {
+                    let list = kinds
+                        .pairs
                         .iter()
                         .map(|(v, s)| {
                             format!("list({}, {})", r_text(v), if *s { "TRUE" } else { "FALSE" })
@@ -6017,7 +6024,7 @@ drop _all");
         assert!(check(3).contains("c(\"x\", \"nosuch\")"), "{out:?}");
         assert!(check(4).contains("c(\"z\")"), "{out:?}");
         assert!(check(5).contains("c(\"y\", \"w\", \"g\")"), "{out:?}");
-        assert!(check(6).contains("c(\"p\")"), "{out:?}");
+        assert!(check(6).contains("c(\"w\", \"p\")"), "{out:?}");
         assert!(check(7).contains("c(\"k\", \"s\")"), "{out:?}");
         for i in 1..=7 {
             assert!(check(i).contains("(Stata: r(111))"), "{out:?}");
@@ -6029,7 +6036,11 @@ drop _all");
 scalar cut = 3
 generate q = w if x > cut");
         assert!(
-            out[2].lines().next().unwrap_or("").contains("c(\"x\")")
+            out[2]
+                .lines()
+                .next()
+                .unwrap_or("")
+                .contains("c(\"w\", \"x\")")
                 && !out[2].lines().next().unwrap_or("").contains("\"cut\""),
             "{out:?}"
         );

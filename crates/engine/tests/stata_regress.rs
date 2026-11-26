@@ -514,6 +514,8 @@ fn a_missing_variable_anywhere_in_a_line_says_so_and_changes_nothing() {
         "collapse (mean) y, by(nosuch)",
         "count if nosuch > 1",
         "egen m = mean(nosuch)",
+        "generate q = log(nosuch)",
+        "replace x = nosuch + 1 if x > 3",
         "summarize x if nosuch > 1",
         "regress y x, vce(cluster nosuch)",
     ] {
@@ -649,6 +651,8 @@ fn comparing_a_number_with_a_string_is_a_type_mismatch() {
         "count if s == 3",
         "summarize x if s > 2",
         "count if x == \"a\"",
+        "count if abs(x) == \"a\"",
+        "count if substr(s, 1, 1) == 3",
     ] {
         let (o, t) = step(&mut e, line);
         assert_eq!(o, Outcome::Error, "{line}: {t}");
@@ -679,4 +683,86 @@ fn comparing_a_number_with_a_string_is_a_type_mismatch() {
         t.contains("variable nosuch not found (Stata: r(111))"),
         "{t}"
     );
+}
+
+/// SW14: a factor beside a continuous variable (`i.g#c.x`, `i.g##c.x`) prints
+/// Stata's layout (the group `g#c.x`, its levels named by their labels, the
+/// base level of `##` left out), for a factor made in R and for a labelled
+/// number from a .dta alike.
+#[test]
+fn a_factor_beside_a_continuous_variable_gets_statas_layout() {
+    let Some(mut e) = engine() else { return };
+    let dir = fixture(&mut e);
+    ok(
+        &mut e,
+        &format!(
+            "set.seed(3); rg <- data.frame(y = rnorm(30), x = rnorm(30), z = rnorm(30), \
+             g = factor(rep(c('a', 'b', 'c'), 10))); \
+             lab <- rg; lab$g <- haven::labelled(rep(0:2, 10), c(lo = 0, mid = 1, high = 2)); \
+             haven::write_dta(lab, '{dir}/lab.dta')"
+        ),
+    );
+    let run_lines = |e: &mut Engine, adopt: bool, first: Option<String>, lines: &[&str]| {
+        let mut live = rcraft_statatr::live::Live::new();
+        if adopt {
+            live.adopt("rg");
+        }
+        let mut step = |e: &mut Engine, line: &str| {
+            let mut s = live.step(line);
+            while let Some(q) = s.ask.clone() {
+                let (o, t) = run(e, &q);
+                live.give(if o == Outcome::Ok { Ok(t) } else { Err(t) });
+                s = live.step(line);
+            }
+            run(e, &s.code)
+        };
+        if let Some(f) = first {
+            let (o, t) = step(e, &f);
+            assert_eq!(o, Outcome::Ok, "{t}");
+        }
+        lines
+            .iter()
+            .map(|l| (step(e, l), l.to_string()))
+            .collect::<Vec<_>>()
+    };
+    let rows = |t: &str, labels: [&str; 3]| {
+        assert!(t.contains("       g#c.x |\n"), "{t}");
+        for l in labels {
+            assert!(t.contains(&format!("{l:>11}  |")), "{l}: {t}");
+        }
+        assert!(!t.contains("R's layout"), "{t}");
+    };
+    // made in R
+    for ((o, t), line) in run_lines(&mut e, true, None, &["regress y z i.g#c.x"]) {
+        assert_eq!(o, Outcome::Ok, "{line}: {t}");
+        rows(&t, ["a", "b", "c"]);
+    }
+    let want = numbers(
+        &mut e,
+        "0",
+        "unname(stats::coef(stats::lm(y ~ z + g:x, data = rg)))",
+    );
+    let got = numbers(&mut e, "0", "unname(stats::coef(stata_estimates))");
+    assert_eq!(got.len(), want.len());
+    for i in 0..got.len() {
+        close(at(&got, i), at(&want, i), 1e-9, "coefficient");
+    }
+    for ((o, t), line) in run_lines(&mut e, true, None, &["regress y i.g##c.x"]) {
+        assert_eq!(o, Outcome::Ok, "{line}: {t}");
+        assert!(
+            t.contains("           g |\n") && t.contains("       g#c.x |\n"),
+            "{t}"
+        );
+        // the base level is left out of both groups
+        assert_eq!(t.matches("          b  |").count(), 2, "{t}");
+        assert_eq!(t.matches("          c  |").count(), 2, "{t}");
+        assert!(!t.contains("          a  |"), "{t}");
+        assert!(!t.contains("R's layout"), "{t}");
+    }
+    // a labelled number from a .dta
+    let first = Some(format!("use \"{dir}/lab.dta\""));
+    for ((o, t), line) in run_lines(&mut e, false, first, &["regress y z i.g#c.x"]) {
+        assert_eq!(o, Outcome::Ok, "{line}: {t}");
+        rows(&t, ["lo", "mid", "high"]);
+    }
 }

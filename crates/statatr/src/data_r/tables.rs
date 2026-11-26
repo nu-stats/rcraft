@@ -246,7 +246,8 @@ stata_coef_rows <- function(nm, data = NULL) {
       next
     }
     v <- sub("#.*$", "", k)
-    labelled <- !grepl("#", k, fixed = TRUE) && !is.null(labs(v))
+    # a factor beside continuous variables (g#c.x) shows the value labels too (Stata 19)
+    labelled <- !is.null(labs(v)) && (!grepl("#", k, fixed = TRUE) || grepl("^[A-Za-z_][A-Za-z0-9_]*(#c\\.[A-Za-z_][A-Za-z0-9_]*)+$", k))
     if (length(levels) == 1 && !grepl("#", k, fixed = TRUE) && !labelled) {
       terms[[length(terms) + 1]] <- list(big = FALSE, rows = list(
         list(kind = "row", label = sub("o\\.", ".", n), col = n, note = if (grepl("^[0-9]+o\\.", n)) "(omitted)")))

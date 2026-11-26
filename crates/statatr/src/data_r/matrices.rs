@@ -165,6 +165,12 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
         f$nobase <- TRUE
       }
       Ln <- suppressWarnings(as.numeric(L))
+      # a factor or text column made in R: its levels are numbered in order (from the factor
+      # itself, or sorted when the base moved), as stata_level_codes names them in the rows
+      coded <- !is.null(L) && length(L) > 0 && anyNA(Ln) && any(!grepl("^[0-9]+$", L))
+      sortedL <- if (!coded) NULL else if (startsWith(f$key, "factor(")) L else sort(L)
+      if (coded) Ln <- match(L, sortedL)
+      lc <- function(l) if (coded) as.character(match(l, sortedL)) else l
       if (is.null(L) || anyNA(Ln)) return(NULL)
       have <- vapply(ii, function(i) Filter(function(p) p$kind == "f", ps[[i]])[[1]]$lev, "")
       with_c <- if (length(cs)) paste0("#", cont(cs, "c.")) else ""
@@ -175,13 +181,13 @@ pub(super) const EB_HELPER: &str = r##"stata_eb <- function(b, V, cmd, depvar) {
       for (l in L[order(Ln)]) {
         i <- ii[match(l, have)]
         if (l == L[1] && !isTRUE(f$nobase) && (is.na(i) || !length(cs))) {
-          add(paste0(l, "b.", f$var, with_o), NA_character_)
+          add(paste0(lc(l), "b.", f$var, with_o), NA_character_)
           next
         }
         if (!is.na(i) && !is.na(b[idx[i]])) {
-          add(paste0(l, ".", f$var, with_c), nm[idx[i]])
+          add(paste0(lc(l), ".", f$var, with_c), nm[idx[i]])
         } else if (length(cs) == 0) {
-          add(paste0(l, "o.", f$var), NA_character_)
+          add(paste0(lc(l), "o.", f$var), NA_character_)
         } else {
           return(NULL)
         }

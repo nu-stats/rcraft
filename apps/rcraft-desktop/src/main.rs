@@ -33,6 +33,8 @@
 //! --packages-source-demo   ... or a made-up GitHub install waiting for its yes
 //! --packages-failure KIND  ... or a made-up install failure: compiler, newer-r, network
 //! --packages-from FILE    ... over a downloaded packages.rds (default: a tiny made-up list)
+//! --command-text TEXT   put TEXT in the Command box (a backslash and n start a new line)
+//! --command-height N     the Command panel N points tall (as if dragged)
 //! --accent NAME    Blue, Indigo, Teal, Plum, Forest, Amber or Rose
 //! --size WxH       size in points (default 1240x780)
 //! --scale N        pixels per point (default 1)
@@ -122,6 +124,16 @@ fn parse(args: &[String]) -> Result<HeadlessOptions, String> {
                     .into_iter()
                     .find(|a| a.name().eq_ignore_ascii_case(name))
                     .ok_or_else(|| format!("unknown accent {name}"))?;
+            }
+            "--command-text" => {
+                options.command_text = Some(value("--command-text")?.replace("\\n", "\n"));
+            }
+            "--command-height" => {
+                options.command_height = Some(
+                    value("--command-height")?
+                        .parse()
+                        .map_err(|_| "--command-height is a number".to_string())?,
+                );
             }
             "--size" => {
                 let text = value("--size")?;
