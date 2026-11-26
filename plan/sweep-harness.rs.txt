@@ -1,0 +1,273 @@
+//! TEMPORARY sweep harness (2026-11-26), not to be committed as is.
+//! Drives the real App against the user's own R and records every outcome.
+//! Run: cargo test -p rcraft-ui-egui sweep_ -- --ignored --nocapture --test-threads=1
+//! Output: SWEEP_OUT (a folder), one TSV per sweep.
+
+use std::fmt::Write as _;
+use std::path::PathBuf;
+use std::time::{Duration, Instant};
+
+use rcraft_rcodegen::dialog::{ColumnInfo, Context, Frame, TextDefault, TextRule, VarKind, Widget};
+
+use super::*;
+
+fn out_dir() -> PathBuf {
+    let d = std::env::var("SWEEP_OUT").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir().join("rcraft-sweep"));
+    let _ = std::fs::create_dir_all(&d);
+    d
+}
+
+fn frames(app: &mut App, ctx: &egui::Context, secs: u64) -> bool {
+    let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1200.0, 800.0));
+    let started = Instant::now();
+    // a few frames first so a submit has started
+    for _ in 0..3 {
+        let raw = egui::RawInput { screen_rect: Some(screen), time: Some(started.elapsed().as_secs_f64()), ..Default::default() };
+        let _ = ctx.run(raw, |ctx| app.ui(ctx));
+    }
+    while started.elapsed() < Duration::from_secs(secs) {
+        let raw = egui::RawInput { screen_rect: Some(screen), time: Some(started.elapsed().as_secs_f64()), ..Default::default() };
+        let _ = ctx.run(raw, |ctx| app.ui(ctx));
+        if app.is_settled() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    false
+}
+
+fn clean(s: &str) -> String {
+    let s: String = s.replace(['\t', '\r'], " ").replace('\n', " ⏎ ");
+    let s = s.trim().to_string();
+    if s.chars().count() > 600 { s.chars().take(600).collect::<String>() + "…" } else { s }
+}
+
+/// Outcome and text of the newest results block.
+fn newest(app: &App) -> (String, String) {
+    let Some(engine) = app.engine() else { return ("no-engine".into(), String::new()) };
+    let Some(block) = engine.results().blocks().last() else { return ("no-block".into(), String::new()) };
+    let mut text = String::new();
+    for item in &block.items {
+        match item {
+            Item::Text { text: t, .. } => text.push_str(t),
+            Item::Warning(w) => { let _ = write!(text, " [WARNING: {w}] "); }
+            Item::Error { message, call } => { let _ = write!(text, " [ERROR: {message} | call: {call}] "); }
+            Item::Notice(n) => { let _ = write!(text, " [NOTICE: {n}] "); }
+            Item::Plot { .. } => text.push_str(" [PLOT] "),
+        }
+    }
+    (format!("{:?}", block.outcome), text)
+}
+
+fn start(ctx: &egui::Context) -> Option<App> {
+    let mut app = App::new(ctx);
+    app.keep_settings(false);
+    frames(&mut app, ctx, 90);
+    if !app.is_ready() {
+        eprintln!("R did not start");
+        return None;
+    }
+    Some(app)
+}
+
+fn r(app: &mut App, ctx: &egui::Context, code: &str) -> (String, String) {
+    app.perform(ctx, Action::Submit(Source::Typed, code.to_string()));
+    frames(app, ctx, 120);
+    newest(app)
+}
+
+fn setup_code(dir: &str) -> String {
+    format!(
+        "setwd(\"{dir}\"); set.seed(1); sweep_df <- data.frame(id = 1:60, t = rep(1:6, 10), x = rnorm(60), y = rnorm(60, 5), z = runif(60), \
+         w = rexp(60) + 0.1, n = rpois(60, 3), g = factor(sample(c(\"a\",\"b\",\"c\"), 60, TRUE)), h = factor(sample(c(\"lo\",\"hi\"), 60, TRUE)), \
+         s = sample(c(\"red\",\"green\",\"blue\"), 60, TRUE), b = sample(c(TRUE,FALSE), 60, TRUE), d = as.Date(\"2020-01-01\") + 0:59, \
+         stringsAsFactors = FALSE); sweep_df$y01 <- as.integer(sweep_df$y > 5); sweep_df2 <- data.frame(id = 1:60, k = rnorm(60)); invisible(TRUE)"
+    )
+}
+
+fn context() -> Context {
+    use VarKind::*;
+    let cols = [
+        ("id", Number), ("t", Number), ("x", Number), ("y", Number), ("z", Number), ("w", Number), ("n", Number),
+        ("g", Factor), ("h", Factor), ("s", Text), ("b", Logical), ("d", Date), ("y01", Number),
+    ];
+    Context {
+        dataset: "sweep_df".into(),
+        columns: cols.iter().map(|(n, k)| ColumnInfo { name: n.to_string(), kind: *k }).collect(),
+        frames: vec![Frame {
+            name: "sweep_df2".into(),
+            columns: vec![
+                ColumnInfo { name: "id".into(), kind: Number },
+                ColumnInfo { name: "k".into(), kind: Number },
+            ],
+        }],
+    }
+}
+
+fn pick(ctx: &Context, kinds: &[VarKind], used: &mut Vec<String>, n: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    // y first for numbers (outcome-like), then the rest
+    let order = ["y", "x", "z", "w", "n", "g", "h", "s", "b", "d", "id", "t", "y01"];
+    for name in order {
+        if out.len() >= n { break; }
+        let Some(c) = ctx.column(name) else { continue };
+        if !kinds.is_empty() && !kinds.contains(&c.kind) { continue; }
+        if used.iter().any(|u| u == name) { continue; }
+        used.push(name.to_string());
+        out.push(name.to_string());
+    }
+    out
+}
+
+#[test]
+#[ignore]
+fn sweep_catalog() {
+    let ctx = egui::Context::default();
+    let Some(mut app) = start(&ctx) else { return };
+    let dir = out_dir();
+    let dir_s = dir.display().to_string().replace('\\', "/");
+    let version = app.engine().map(|e| e.r_version().to_string()).unwrap_or_default();
+    let (_, pk) = r(&mut app, &ctx, "cat(paste(sort(rownames(installed.packages())), collapse = \" \"))");
+    let installed: Vec<String> = pk.split_whitespace().map(str::to_string).collect();
+    let mut tsv = format!("# R: {version}\n# packages installed: {}\nmenu\tstatus\tdetail\tcode\n", installed.len());
+    let dctx = context();
+    for spec in rcraft_catalog::all_specs() {
+        let (o, t) = r(&mut app, &ctx, &setup_code(&dir_s));
+        if o != "Some(Ok)" {
+            let _ = writeln!(tsv, "SETUP\tsetup-failed\t{}\t", clean(&t));
+        }
+        let mut values = spec.defaults(&dctx);
+        let mut used = Vec::new();
+        for w in spec.widgets {
+            match *w {
+                Widget::Variable { id, kinds, .. } => {
+                    if let Some(v) = pick(&dctx, kinds, &mut used, 1).pop() { values.set_text(id, v); }
+                }
+                Widget::Variables { id, kinds, min, .. } => {
+                    values.set_list(id, pick(&dctx, kinds, &mut used, min.max(1)));
+                }
+                Widget::Text { id, default, rule, .. } => {
+                    let cur = values.text(id).to_string();
+                    let v = match rule {
+                        TextRule::Expression if cur.is_empty() => "x > 0".to_string(),
+                        TextRule::Number if cur.is_empty() => "2".to_string(),
+                        TextRule::Name if cur.is_empty() => format!("sweep_new_{id}"),
+                        TextRule::SavePath if cur.is_empty() || matches!(default, TextDefault::Empty) => format!("{dir_s}/sweep_{id}.csv"),
+                        _ => cur,
+                    };
+                    values.set_text(id, v);
+                }
+                Widget::Frame { id, .. } => values.set_text(id, "sweep_df2"),
+                Widget::FrameVariables { id, .. } => values.set_list(id, vec!["id".into()]),
+                _ => {}
+            }
+        }
+        let style = spec.styles.first().copied().unwrap_or_default();
+        let missing: Vec<&str> = spec.packages(style).into_iter().filter(|p| !installed.iter().any(|i| i == p)).collect();
+        let code = match spec.generate(&dctx, &values, style) {
+            Ok(c) => c,
+            Err(p) => {
+                let why: Vec<String> = p.iter().map(|p| format!("{}: {}", p.widget, p.message)).collect();
+                let _ = writeln!(tsv, "{}\tharness-could-not-fill\t{}\t", spec.menu, clean(&why.join("; ")));
+                continue;
+            }
+        };
+        if !missing.is_empty() {
+            let _ = writeln!(tsv, "{}\tpackage-not-installed\t{}\t{}", spec.menu, missing.join(","), clean(&code));
+            continue;
+        }
+        let started = Instant::now();
+        app.perform(&ctx, Action::Submit(Source::Menu(spec.entry.to_string()), code.clone()));
+        let settled = frames(&mut app, &ctx, 120);
+        let (o, t) = newest(&app);
+        let status = if !settled { "TIMEOUT".to_string() } else { o };
+        let _ = writeln!(tsv, "{}\t{}\t{:.1}s {}\t{}", spec.menu, status, started.elapsed().as_secs_f32(), clean(&t), clean(&code));
+        if !settled {
+            app.perform(&ctx, Action::Interrupt);
+            frames(&mut app, &ctx, 30);
+        }
+        let _ = std::fs::write(dir.join("catalog.tsv"), &tsv);
+    }
+    let _ = std::fs::write(dir.join("catalog.tsv"), &tsv);
+}
+
+const STATA_LINES: &[&str] = &[
+    "describe", "d", "summarize", "sum", "su", "summary", "sum x", "summarize x y, detail", "sum x if g == \"a\"",
+    "tab g", "tabulate g h", "tab g, missing", "tab1 g h", "list in 1/5", "list x y in 1/3", "count", "count if x > 0",
+    "gen x2 = x^2", "generate lx = ln(w)", "replace x2 = 0 if x < 0", "egen mx = mean(x)", "egen mxg = mean(x), by(g)",
+    "bysort g: egen sdx = sd(x)", "sort x", "gsort -x", "codebook x", "inspect x", "mean x", "ttest x == 0",
+    "ttest x, by(h)", "corr x y z", "pwcorr x y z, sig", "regress y x z", "reg y x i.g", "predict yhat", "predict r, resid",
+    "logit y01 x z", "probit y01 x", "tabstat x y, by(g) stat(mean sd n)", "histogram x", "scatter y x", "graph box x, over(g)",
+    "twoway (scatter y x) (lfit y x)", "ci means x", "display 2+2", "di r(mean)", "label variable x \"The x\"",
+    "rename x2 xsq", "drop xsq", "keep id t x y z w n g h s y01", "encode s, gen(sn)", "tostring n, gen(ns)", "destring ns, gen(nn)",
+    "format x %9.2f", "order id y", "xtile q = x, nq(4)", "anova y g", "oneway y g", "kdensity x", "misstable summarize",
+    "duplicates report", "preserve", "collapse (mean) y, by(g)", "restore", "summarize", "save sweep_saved.dta, replace",
+    "export delimited using sweep_out.csv, replace", "import delimited using sweep_out.csv, clear", "sum",
+    "regress y x z", "predict p1", "regress y nosuchvar", "predict p2", "sum p1 p2",
+    "sysuse auto, clear", "webuse auto, clear", "help summarize",
+];
+
+fn stata_sweep(load: &str) -> String {
+    let ctx = egui::Context::default();
+    let Some(mut app) = start(&ctx) else { return "R did not start".into() };
+    let dir = out_dir();
+    let dir_s = dir.display().to_string().replace('\\', "/");
+    let version = app.engine().map(|e| e.r_version().to_string()).unwrap_or_default();
+    let dta = format!("{dir_s}/sweep.dta");
+    let (o, t) = r(&mut app, &ctx, &format!("{}; haven::write_dta(sweep_df[, setdiff(names(sweep_df), c(\"d\",\"b\"))] , \"{dta}\")", setup_code(&dir_s)));
+    let mut tsv = format!("# R: {version}\n# load: {load}\n# setup: {o} {}\nline\toutcome\tapp-message\ttext\n", clean(&t));
+    match load {
+        // the File > Use my file path: the code the import dialog writes
+        "menu" => {
+            let (o, t) = r(&mut app, &ctx, &format!("sweep <- as.data.frame(haven::read_dta(\"{dta}\"))"));
+            let _ = writeln!(tsv, "(menu import)\t{o}\t\t{}", clean(&t));
+            app.perform(&ctx, Action::SelectDataset(Some("sweep".into())));
+            frames(&mut app, &ctx, 30);
+        }
+        _ => {}
+    }
+    app.perform(&ctx, Action::SetStataMode(true));
+    frames(&mut app, &ctx, 30);
+    let mut lines: Vec<String> = Vec::new();
+    if load == "use" {
+        lines.push(format!("use \"{dta}\", clear"));
+    }
+    lines.extend(STATA_LINES.iter().map(|s| s.to_string()));
+    for line in lines {
+        let before = app.engine().map(|e| e.results().blocks().len()).unwrap_or(0);
+        app.message = None;
+        app.perform(&ctx, Action::SubmitStata(Source::Typed, line.clone()));
+        let settled = frames(&mut app, &ctx, 120);
+        let after = app.engine().map(|e| e.results().blocks().len()).unwrap_or(0);
+        let (o, t) = if after > before { newest(&app) } else { ("no-new-block".into(), String::new()) };
+        let o = if settled { o } else { format!("TIMEOUT {o}") };
+        let msg = app.message.clone().unwrap_or_default();
+        let _ = writeln!(tsv, "{line}\t{o}\t{}\t{}", clean(&msg), clean(&t));
+        if !settled {
+            app.perform(&ctx, Action::Interrupt);
+            frames(&mut app, &ctx, 30);
+        }
+    }
+    tsv
+}
+
+#[test]
+#[ignore]
+fn sweep_stata_none() {
+    let t = stata_sweep("none");
+    let _ = std::fs::write(out_dir().join("stata_none.tsv"), t);
+}
+
+#[test]
+#[ignore]
+fn sweep_stata_menu() {
+    let t = stata_sweep("menu");
+    let _ = std::fs::write(out_dir().join("stata_menu.tsv"), t);
+}
+
+#[test]
+#[ignore]
+fn sweep_stata_use() {
+    let t = stata_sweep("use");
+    let _ = std::fs::write(out_dir().join("stata_use.tsv"), t);
+}
