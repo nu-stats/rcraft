@@ -23,6 +23,7 @@ pub mod postest;
 pub mod report;
 pub mod resampling;
 pub mod save;
+pub mod sem;
 pub mod stats;
 pub mod survey;
 pub mod survival;
@@ -234,6 +235,7 @@ pub const ENTRIES: &[Entry] = &[
     verified("IV probit or tobit", Area::Statistics),
     verified("Heckman selection model", Area::Statistics),
     verified("Treatment effects", Area::Statistics),
+    verified("Structural equation model", Area::Statistics),
     verified("Linear mixed model", Area::Statistics),
     verified("Logistic or Poisson mixed model", Area::Statistics),
     verified("Mixed model (glmmTMB)", Area::Statistics),

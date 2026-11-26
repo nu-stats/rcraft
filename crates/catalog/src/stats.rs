@@ -19,6 +19,7 @@ use crate::multilevel;
 use crate::multivariate;
 use crate::panel;
 use crate::resampling;
+use crate::sem;
 use crate::survey;
 use crate::survival;
 use crate::timeseries;
@@ -476,6 +477,7 @@ pub const SPECS: &[&Spec] = &[
     &iv::IV_ML,
     &iv::HECKMAN,
     &iv::TREATMENT_EFFECTS,
+    &sem::SEM,
     &multilevel::LINEAR_MIXED,
     &multilevel::GENERALIZED_MIXED,
     &multilevel::TMB_MIXED,

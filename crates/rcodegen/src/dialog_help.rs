@@ -83,6 +83,10 @@ const SKIPPED: &[&str] = &[
     "NULL",
 ];
 
+/// Methods a package documents on its class's help page rather than under
+/// their own name: the call, and the help topic its link opens.
+const METHOD_TOPICS: &[(&str, &str)] = &[("lavaan::summary", "lavaan::lavaan-class")];
+
 /// The R functions called in `code`: `name(` or `pkg::name(`, outside strings,
 /// comments and `` `names` ``, without the grammar words and the functions the
 /// code defines itself; each once, in order of first use.
@@ -130,6 +134,10 @@ pub fn functions_in(code: &str) -> Vec<String> {
                     start > 0 && chars.get(start - 1).is_some_and(|p| matches!(p, '$' | '@'));
                 if at(i) == Some('(') && !after_dollar {
                     let bare = word.rsplit("::").next().unwrap_or(&word).to_string();
+                    let word = METHOD_TOPICS
+                        .iter()
+                        .find(|(call, _)| *call == word)
+                        .map_or(word, |(_, topic)| topic.to_string());
                     if !SKIPPED.contains(&bare.as_str()) && !found.contains(&word) {
                         found.push(word);
                     }
@@ -610,6 +618,14 @@ mod tests {
         assert_eq!(page.example.as_deref(), Some("stats::mean(x)"));
         assert_eq!(page.functions, vec!["stats::mean"]);
         assert!(page.needs.is_empty() && page.other_style.is_none());
+    }
+
+    #[test]
+    fn a_method_documented_on_its_class_page_links_there() {
+        assert_eq!(
+            functions_in("lavaan::summary(fit)\nlavaan::fitMeasures(fit)"),
+            vec!["lavaan::lavaan-class", "lavaan::fitMeasures"]
+        );
     }
 
     #[test]
