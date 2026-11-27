@@ -53,6 +53,10 @@ const COMMAND_ID: &str = "command-line";
 /// the Run and Stop buttons, one over the other, whole).
 const COMMAND_PANE_HEIGHT: f32 = 96.0;
 const COMMAND_PANE_MIN_HEIGHT: f32 = 96.0;
+/// The Script panel's smallest height, and the least the Results area keeps (its tabs and
+/// a few lines) when the panels above and below it are dragged tall or the window is short.
+const SCRIPT_PANE_MIN_HEIGHT: f32 = 80.0;
+const RESULTS_MIN_HEIGHT: f32 = 120.0;
 const SCRIPT_ID: &str = "script-editor";
 /// The find bar's text box.
 const FIND_ID: &str = "script-find";
@@ -1861,10 +1865,15 @@ impl App {
         });
         egui::TopBottomPanel::bottom("status")
             .show(ctx, |ui| self.status_bar(ui, &pal, &mut actions));
+        // the Command and Script panels give way so the Results area keeps its height
+        let room = ctx.available_rect().height();
         egui::TopBottomPanel::bottom("command")
             .resizable(true)
             .default_height(COMMAND_PANE_HEIGHT)
             .min_height(COMMAND_PANE_MIN_HEIGHT)
+            .max_height(
+                (room - SCRIPT_PANE_MIN_HEIGHT - RESULTS_MIN_HEIGHT).max(COMMAND_PANE_MIN_HEIGHT),
+            )
             .show(ctx, |ui| {
                 self.command_pane(ui, &pal, busy, &mut actions);
             });
@@ -1878,7 +1887,10 @@ impl App {
         egui::TopBottomPanel::top("script")
             .resizable(true)
             .default_height(190.0)
-            .min_height(80.0)
+            .min_height(SCRIPT_PANE_MIN_HEIGHT)
+            .max_height(
+                (ctx.available_rect().height() - RESULTS_MIN_HEIGHT).max(SCRIPT_PANE_MIN_HEIGHT),
+            )
             .show(ctx, |ui| {
                 self.script_pane(ui, &pal, busy, &mut actions);
             });
@@ -4240,6 +4252,56 @@ display sw7b * 10";
         // and the model is the regression's
         run(&mut app, "predict yhat");
         assert_eq!(outcome(&app), Some(Outcome::Ok), "{}", newest_text(&app));
+    }
+
+    #[test]
+    fn the_results_tabs_keep_room_when_the_window_is_short_and_the_command_panel_tall() {
+        for (screen_h, panel) in [
+            (360.0, 400.0),
+            (420.0, 260.0),
+            (520.0, 400.0),
+            (700.0, 600.0),
+            (700.0, COMMAND_PANE_MIN_HEIGHT),
+        ] {
+            let ctx = egui::Context::default();
+            let mut app = App::new(&ctx);
+            let mut shapes = Vec::new();
+            for _ in 0..3 {
+                let state = egui::containers::panel::PanelState {
+                    rect: egui::Rect::from_min_size(
+                        egui::pos2(0.0, screen_h - panel),
+                        egui::vec2(900.0, panel),
+                    ),
+                };
+                ctx.data_mut(|d| d.insert_persisted(egui::Id::new("command"), state));
+                let screen =
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, screen_h));
+                let out = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| app.ui(ctx),
+                );
+                shapes = out.shapes;
+            }
+            let label = |what: &str| {
+                shapes.iter().find_map(|s| match &s.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text() == what => Some(t.pos),
+                    _ => None,
+                })
+            };
+            let (Some(results), Some(command)) = (label("Results"), label("Command")) else {
+                panic!("Results or Command not drawn: window {screen_h}, panel {panel}");
+            };
+            // the Results area (its tabs and some lines) is above the Command panel
+            assert!(
+                command.y - results.y >= 80.0,
+                "window {screen_h}, panel {panel}: Results at {}, Command at {}",
+                results.y,
+                command.y
+            );
+        }
     }
     #[test]
     fn run_and_stop_stay_inside_the_window_at_every_panel_height() {
