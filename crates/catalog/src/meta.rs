@@ -1306,6 +1306,20 @@ fn correlations(text: &str, count: usize) -> Option<Vec<String>> {
     (values.len() == count && valid).then_some(values)
 }
 
+/// The sets of outcome names typed for `jwriley(names)`: sets separated by
+/// semicolons, names by spaces or commas; empty sets dropped.
+fn subsets(text: &str) -> Vec<Vec<String>> {
+    text.split(';')
+        .map(|set| {
+            set.split(|c: char| c == ',' || c.is_whitespace())
+                .filter(|n| !n.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .filter(|set| !set.is_empty())
+        .collect()
+}
+
 fn mv_check(a: &Args) -> Vec<Problem> {
     let mut out = Vec::new();
     let outcomes = a.vars("outcomes");
@@ -1345,11 +1359,25 @@ fn mv_check(a: &Args) -> Vec<Problem> {
             ));
         }
     }
-    if a.flag("jriley") && a.choice("method") == "FE" {
+    if (a.flag("jriley") || a.flag("jtrunc")) && a.choice("method") == "FE" {
         out.push(Problem::new(
             "jriley",
             "Jackson-Riley errors need a random-effects model, as in Stata.",
         ));
+    }
+    if a.choice("method") == "JWR" && a.choice("struct") != "UN" {
+        out.push(Problem::new(
+            "struct",
+            "The Jackson-White-Riley method allows only the unstructured covariance, as in Stata.",
+        ));
+    }
+    for set in subsets(a.values.text("jwsub")) {
+        if let Some(bad) = set.iter().find(|n| !outcomes.contains(&n.as_str())) {
+            out.push(Problem::new(
+                "jwsub",
+                format!("{bad} is not one of the effect-size columns above."),
+            ));
+        }
     }
     if a.name_text("save") == a.ctx.dataset {
         out.push(Problem::new(
@@ -1371,6 +1399,43 @@ fn is_se_columns(a: &Args) -> bool {
 fn names_vector(names: &[&str]) -> String {
     let quoted: Vec<String> = names.iter().map(|n| r_string(n)).collect();
     format!("c({})", quoted.join(", "))
+}
+
+/// The lines, inside the fit's `local`, that compute Jackson, White and
+/// Riley's estimate of the between-study covariance matrix `S` (the
+/// multivariate DerSimonian-Laird, `random(jwriley)`), from the long table and
+/// `V`, and the standard deviations and correlations the fit then fixes.
+/// `terms` is the moderators' part of the model formula.
+fn jwr_code(terms: &str) -> String {
+    format!(
+        "  # Jackson, White and Riley's moment estimate of the between-study covariance, without \
+         iteration: with the studies' blocks padded to d outcomes, W the inverse within-study \
+         covariances, R marking the outcomes given, H the fixed-effects hat matrix, vec(Q) = \
+         vec(sum of B_jj) + (sum over j and l of B_jl' (x) P_lj) vec(S), where P = (I - H)'W and \
+         B = (I - H)'R\n  \
+         d <- p; st <- long$study; idx <- (st - 1L) * d + as.integer(long$outcome); kd <- k * d\n  \
+         X <- stats::model.matrix(~ outcome - 1{terms}, long)\n  \
+         Xp <- matrix(0, kd, ncol(X)); Xp[idx, ] <- X\n  \
+         W <- matrix(0, kd, kd)\n  \
+         for (j in unique(st)) {{ r <- which(st == j); W[idx[r], idx[r]] <- solve(V[r, r, drop = \
+         FALSE]) }}\n  \
+         Rp <- numeric(kd); Rp[idx] <- 1; yp <- numeric(kd); yp[idx] <- long$yi\n  \
+         A <- solve(crossprod(Xp, W %*% Xp))\n  \
+         e <- yp - Xp %*% (A %*% crossprod(Xp, W %*% yp))\n  \
+         IH <- diag(kd) - Xp %*% A %*% crossprod(Xp, W)\n  \
+         P <- crossprod(IH, W); B <- crossprod(IH, diag(Rp)); B4 <- array(B, c(d, k, d, k))\n  \
+         SB <- matrix(rowSums(vapply(seq_len(k), function(j) c(B4[, j, , j]), numeric(d * d))), \
+         d, d)\n  \
+         Q <- matrix(W %*% e, d, k) %*% t(matrix(e * Rp, d, k))\n  \
+         Bm <- matrix(aperm(B4, c(1, 3, 2, 4)), d * d, k * k)\n  \
+         Pm <- matrix(aperm(array(P, c(d, k, d, k)), c(1, 3, 4, 2)), d * d, k * k)\n  \
+         M <- matrix(aperm(array(Bm %*% t(Pm), c(d, d, d, d)), c(3, 2, 4, 1)), d * d, d * d)\n  \
+         S <- matrix(solve(M, c(Q - SB)), d, d); S <- (S + t(S)) / 2\n  \
+         # a covariance matrix with the negative eigenvalues cut to zero\n  \
+         ev <- eigen(S, symmetric = TRUE)\n  \
+         S <- ev$vectors %*% (pmax(ev$values, 0) * t(ev$vectors))\n  \
+         s0 <- sqrt(diag(S)); cr <- S / outer(s0, s0); cr[!is.finite(cr)] <- 0\n"
+    )
 }
 
 /// The lines, inside the fit's `local`, that build `V`: each study's
@@ -1461,12 +1526,19 @@ pub const MV_META: Spec = Spec {
                     label: "Random effects, maximum likelihood",
                 },
                 Opt {
+                    value: "JWR",
+                    label: "Random effects, Jackson-White-Riley (no iteration)",
+                },
+                Opt {
                     value: "FE",
                     label: "Fixed effects",
                 },
             ],
             default: "REML",
-            hint: "REML is Stata's default; random(mle) and fixed.",
+            hint: "REML is Stata's default; random(mle), random(jwriley) and fixed. The \
+                   Jackson-White-Riley estimate of the between-study covariance is a method of \
+                   moments (the multivariate DerSimonian-Laird), needs no iteration, and allows \
+                   only the unstructured covariance.",
         },
         Widget::Choice {
             id: "struct",
@@ -1505,6 +1577,14 @@ pub const MV_META: Spec = Spec {
                    dialog does the same.",
         },
         Widget::Check {
+            id: "jtrunc",
+            label: "Truncate the Jackson-Riley scale at 1",
+            default: false,
+            hint: "As Stata's se(truncjriley): the variances are scaled by the larger of 1 and \
+                   the Jackson-Riley scale, so the errors are never made smaller; it also gives \
+                   the t tests, so the Jackson-Riley box need not be ticked.",
+        },
+        Widget::Check {
             id: "het",
             label: "Heterogeneity and between-study covariance",
             default: true,
@@ -1513,6 +1593,23 @@ pub const MV_META: Spec = Spec {
                    estat heterogeneity; then the between-study covariance matrix, as estat \
                    recovariance. The figures stay in R's workspace under the model's name with \
                    _het.",
+        },
+        Widget::Check {
+            id: "white",
+            label: "White's I² for each outcome",
+            default: false,
+            hint: "As Stata's estat heterogeneity, white: the between-study variance over itself \
+                   plus the typical within-study variance of that outcome alone (from a \
+                   univariate meta-regression). Needs the heterogeneity box above.",
+        },
+        Widget::Text {
+            id: "jwsub",
+            label: "Jackson-White-Riley statistics for outcomes together",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "Optional: outcomes whose coefficients are taken together, separated by spaces, \
+                   as Stata's estat heterogeneity, jwriley(names); several sets separated by \
+                   semicolons. Needs the heterogeneity box above.",
         },
         Widget::Text {
             id: "save",
@@ -1546,19 +1643,55 @@ pub const MV_META: Spec = Spec {
                     names_vector(&mods)
                 ),
                 ", x[rep(seq_len(k), each = p), , drop = FALSE]".to_string(),
-                // the test of the moderators only, as Stata's
-                format!("{}, btt = \":\"", terms.join("")),
+                terms.join(""),
             )
         };
         let method = a.choice("method");
-        let jriley = a.flag("jriley") && method != "FE";
-        let random = if method == "FE" {
-            String::new()
-        } else {
-            format!(
-                ", random = ~ outcome | study, struct = \"{}\", method = \"{method}\"",
-                a.choice("struct")
+        let jtrunc = a.flag("jtrunc") && method != "FE";
+        let jriley = (a.flag("jriley") || jtrunc) && method != "FE";
+        // White's typical within-study variances need the unfiltered rows
+        let white = method != "FE" && a.flag("het") && a.flag("white");
+        let mod_plain: String = mods.iter().map(|m| format!(" + {}", r_name(m))).collect();
+        let (keep_all, assign, s2_white) = if white {
+            (
+                "full <- long; Vall <- V\n  ",
+                "m <- ",
+                format!(
+                    "\n  # White's typical within-study variance of each outcome, as Stata's estat \
+                     heterogeneity: a univariate meta-regression's (n - p) / tr(P), over every \
+                     study that has the moderators (also where this outcome's estimate is \
+                     missing), n the number of estimates given\n  \
+                     m$s2.white <- vapply(levels(full$outcome), function(o) {{\n    \
+                     r <- which(full$outcome == o & full$study %in% long$study)\n    \
+                     w <- 1 / diag(Vall)[r]; g <- is.finite(w); r <- r[g]; w <- w[g]\n    \
+                     Xo <- stats::model.matrix(~ 1{mod_plain}, full[r, , drop = FALSE])\n    \
+                     trP <- sum(w) - sum(diag(solve(crossprod(Xo, w * Xo), crossprod(Xo, w^2 * \
+                     Xo))))\n    \
+                     (sum(!is.na(full$yi[r])) - ncol(Xo)) / trP\n  \
+                     }}, numeric(1))\n  \
+                     m"
+                ),
             )
+        } else {
+            ("", "", String::new())
+        };
+        // the test of the moderators only, as Stata's
+        let btt = if mods.is_empty() { "" } else { ", btt = \":\"" };
+        let (random, jwr) = match method {
+            "FE" => (String::new(), String::new()),
+            "JWR" => (
+                ", random = ~ outcome | study, struct = \"UN\", tau2 = diag(S), \
+                 rho = cr[lower.tri(cr)]"
+                    .to_string(),
+                jwr_code(&terms),
+            ),
+            _ => (
+                format!(
+                    ", random = ~ outcome | study, struct = \"{}\", method = \"{method}\"",
+                    a.choice("struct")
+                ),
+                String::new(),
+            ),
         };
         let test = if jriley {
             ", test = \"t\", dfs = \"residual\""
@@ -1574,21 +1707,34 @@ pub const MV_META: Spec = Spec {
              k), levels = colnames(y)), yi = c(t(y)){extra})\n\
              {}  \
              # an outcome missing in a study leaves out only that outcome, as Stata does\n  \
+             {keep_all}\
              ok <- !is.na(long$yi)\n  \
              long <- long[ok, , drop = FALSE]; V <- V[ok, ok, drop = FALSE]\n  \
              if (anyNA(V)) stop(\"A within-study variance or covariance is missing for outcomes a \
-             study has.\")\n  \
-             metafor::rma.mv(yi, V, mods = ~ outcome - 1{terms}{random}{test}, data = long)\n}})\n",
+             study has.\")\n\
+             {jwr}  \
+             {assign}metafor::rma.mv(yi, V, mods = ~ outcome - 1{terms}{btt}{random}{test}, \
+             data = long){s2_white}\n}})\n",
             mv_blocks(a)
         );
         if jriley {
             // Jackson and Riley's scale: the residuals' weighted sum of
-            // squares over N - p; Stata scales the variances only
+            // squares over N - p (at least 1 when truncated); Stata scales
+            // the variances only
+            let (truncate, label) = if jtrunc {
+                (
+                    "m$seadj <- max(1, m$seadj)\n  ",
+                    "Truncated Jackson-Riley errors, as Stata's se(truncjriley)",
+                )
+            } else {
+                ("", "Jackson-Riley errors, as Stata's se(jriley)")
+            };
             out.push_str(&format!(
                 "{fit} <- local({{\n  \
                  m <- {fit}\n  \
                  r <- m$yi - m$X %*% m$beta\n  \
                  m$seadj <- c(crossprod(r, solve(m$M, r))) / (m$k - m$p)\n  \
+                 {truncate}\
                  m$vb.model <- m$vb\n  \
                  diag(m$vb) <- diag(m$vb) * m$seadj\n  \
                  m$se <- sqrt(diag(m$vb)); m$zval <- c(m$beta) / m$se\n  \
@@ -1596,7 +1742,7 @@ pub const MV_META: Spec = Spec {
                  q <- stats::qt(0.975, m$ddf)\n  \
                  m$ci.lb <- c(m$beta) - q * m$se; m$ci.ub <- c(m$beta) + q * m$se\n  \
                  m\n}})\n\
-                 cat(\"Jackson-Riley errors, as Stata's se(jriley): the variances scaled by\", \
+                 cat(\"{label}: the variances scaled by\", \
                  format({fit}$seadj, digits = 7), \"\\n\")\n\
                  if (any(table({fit}$data$study) < nlevels({fit}$data$outcome))) cat(\"Some \
                  studies miss an outcome: Stata's se(jriley) then scales by a figure not \
@@ -1614,18 +1760,42 @@ pub const MV_META: Spec = Spec {
                 // coefficients' covariance against the fixed-effects one,
                 // for each outcome's coefficients and for all of them
                 let het = r_name(&format!("{}_het", a.name_text("save")));
+                // Jackson-White-Riley statistics for sets of outcomes, as
+                // jwriley(names): the same R over those outcomes' coefficients
+                let sets: String = subsets(a.values.text("jwsub"))
+                    .iter()
+                    .map(|set| {
+                        format!(
+                            "  R <- c(R, {} = Rof(sub(\"^outcome\", \"\", eq) %in% {}))\n",
+                            r_string(&set.join(", ")),
+                            names_vector(&set.iter().map(String::as_str).collect::<Vec<_>>())
+                        )
+                    })
+                    .collect();
+                // White's I²: the between-study variance over itself plus
+                // the typical within-study variance of that outcome alone
+                let (white_code, white_print, white_keep) = if white {
+                    (
+                        "  white <- 100 * diag(m$G) / (diag(m$G) + m$s2.white)\n  \
+                         names(white) <- sub(\"^outcome\", \"\", unique(eq))\n",
+                        "  cat(\"White, I2 (%) for each outcome:\\n\")\n  print(white)\n",
+                        ", white = white",
+                    )
+                } else {
+                    ("", "", "")
+                };
                 out.push_str(&format!(
                     "{het} <- local({{\n  \
                      m <- {fit}\n  \
                      Vr <- if (is.null(m$vb.model)) m$vb else m$vb.model\n  \
                      Vf <- solve(crossprod(m$X, solve(m$V, m$X)))\n  \
                      eq <- sub(\":.*\", \"\", colnames(m$X))\n  \
-                     R <- vapply(unique(eq), function(o) {{\n    \
-                     j <- eq == o\n    \
-                     (det(Vr[j, j, drop = FALSE]) / det(Vf[j, j, drop = FALSE]))^(1 / (2 * sum(j)))\n  \
-                     }}, numeric(1))\n  \
-                     R <- c(R, (det(Vr) / det(Vf))^(1 / (2 * ncol(Vr))))\n  \
-                     names(R) <- c(sub(\"^outcome\", \"\", unique(eq)), \"Joint\")\n  \
+                     Rof <- function(j) (det(Vr[j, j, drop = FALSE]) / det(Vf[j, j, drop = \
+                     FALSE]))^(1 / (2 * sum(j)))\n  \
+                     R <- vapply(unique(eq), function(o) Rof(eq == o), numeric(1))\n  \
+                     R <- c(R, Rof(rep(TRUE, ncol(Vr))))\n  \
+                     names(R) <- c(sub(\"^outcome\", \"\", unique(eq)), \"Joint\")\n\
+                     {sets}{white_code}  \
                      H2 <- m$QE / (m$k - m$p)\n  \
                      cat(\"\\nHeterogeneity, as Stata's estat heterogeneity\\n\")\n  \
                      cat(\"Cochran, joint: I2 (%) =\", format(100 * max(0, 1 - 1 / H2), digits = 7), \
@@ -1633,10 +1803,11 @@ pub const MV_META: Spec = Spec {
                      jwr <- data.frame(`I2 (%)` = 100 * pmax(0, 1 - 1 / R^2), R = R, row.names = \
                      names(R), check.names = FALSE)\n  \
                      cat(\"Jackson-White-Riley:\\n\")\n  \
-                     print(jwr)\n  \
+                     print(jwr)\n\
+                     {white_print}  \
                      cat(\"\\nBetween-study covariance matrix, as Stata's estat recovariance\\n\")\n  \
                      print(m$G)\n  \
-                     invisible(list(H2 = H2, jwr = jwr, cov = m$G))\n}})\n"
+                     invisible(list(H2 = H2, jwr = jwr, cov = m$G{white_keep}))\n}})\n"
                 ));
             }
         }

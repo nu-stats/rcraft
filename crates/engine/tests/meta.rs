@@ -1511,17 +1511,24 @@ fn predictions_multilevel_and_multivariate_fits_match_stata() {
     );
 }
 
-/// Runs the multivariate dialog on `md` with `lists` (outcomes, wcov,
-/// mods), `texts` and `flags` set.
-fn mv(
+/// Runs the multivariate dialog on `md` (or `md2`, made by `MAKE2`) with
+/// `lists` (outcomes, wcov, mods), `texts` and `flags` set.
+fn mv_on(
     e: &mut Engine,
+    dataset: &str,
     lists: &[(&str, &[&str])],
     texts: &[(&str, &str)],
     flags: &[(&str, bool)],
 ) -> (Outcome, String) {
     let (made, text, _) = run(e, Source::Typed, MAKE);
     assert_eq!(made, Outcome::Ok, "{text}");
-    let ctx = context("md");
+    let ctx = if dataset == "md2" {
+        let (made, text, _) = run(e, Source::Typed, MAKE2);
+        assert_eq!(made, Outcome::Ok, "{text}");
+        context2()
+    } else {
+        context("md")
+    };
     let mut values = MV_META.defaults(&ctx);
     for (id, cols) in lists {
         values.set_list(id, cols.iter().map(|c| c.to_string()).collect());
@@ -1540,6 +1547,50 @@ fn mv(
         &code.unwrap_or_default(),
     );
     (outcome, text)
+}
+
+fn mv(
+    e: &mut Engine,
+    lists: &[(&str, &[&str])],
+    texts: &[(&str, &str)],
+    flags: &[(&str, bool)],
+) -> (Outcome, String) {
+    mv_on(e, "md", lists, texts, flags)
+}
+
+/// A second made-up data set for the multivariate dialog (P6.11f): 30
+/// studies, four outcomes y1 to y4 with a moderator x, within-study
+/// covariances v11 v12 ... v44 (correlations 0.3, 0.2, 0.1, 0.4, 0.25, 0.35).
+const MAKE2: &str = "md2 <- local({ \
+     set.seed(7); k <- 30; d <- 4; x <- round(rnorm(k), 3); \
+     se <- matrix(round(runif(k * d, 0.08, 0.35), 4), k, d); \
+     rr <- matrix(c(1, .3, .2, .1, .3, 1, .4, .25, .2, .4, 1, .35, .1, .25, .35, 1), 4); \
+     mu <- c(0.3, 0.5, 0.2, 0.4); \
+     Sig <- matrix(c(.04, .01, .005, 0, .01, .05, .02, .01, .005, .02, .03, .015, 0, .01, \
+       .015, .06), 4); \
+     y <- round(t(sapply(1:k, function(i) mu + 0.1 * x[i] + \
+       MASS::mvrnorm(1, rep(0, d), Sig + outer(se[i, ], se[i, ]) * rr))), 4); \
+     df <- data.frame(id = 1:k, x = x, y1 = y[, 1], y2 = y[, 2], y3 = y[, 3], y4 = y[, 4]); \
+     for (i in 1:d) for (j in i:d) \
+       df[[paste0('v', i, j)]] <- round(se[, i] * se[, j] * rr[i, j], 8); \
+     df })";
+
+fn context2() -> Context {
+    let columns = [
+        "id", "x", "y1", "y2", "y3", "y4", "v11", "v12", "v13", "v14", "v22", "v23", "v24", "v33",
+        "v34", "v44",
+    ]
+    .into_iter()
+    .map(|name| ColumnInfo {
+        name: name.into(),
+        kind: VarKind::Number,
+    })
+    .collect();
+    Context {
+        dataset: "md2".into(),
+        frames: Vec::new(),
+        columns,
+    }
 }
 
 /// P6.11e: Stata 19's `meta mvregress` with outcomes missing in some studies,
@@ -1848,4 +1899,311 @@ fn missing_outcomes_correlations_jackson_riley_heterogeneity_and_three_levels_ma
         assert_eq!(outcome, Outcome::Ok, "{data} {extra}: {text}");
         assert_eq!(plots, 1, "{data} {extra}: {text}");
     }
+}
+
+/// P6.11f: Stata 19's `meta mvregress` with `random(jwriley)` (the
+/// non-iterative Jackson-White-Riley estimate of the between-study
+/// covariance, which needs no optimiser and so agrees to 1e-9 on every
+/// platform), `se(truncjriley)`, and `estat heterogeneity` with `white` and
+/// `jwriley(names)`. The second data set (`md2`, four outcomes, 30 studies)
+/// also has one negative eigenvalue in the Jackson-White-Riley estimate, which
+/// Stata cuts to zero.
+#[test]
+fn jwriley_truncated_jackson_riley_white_and_subset_statistics_match_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let w2: &[&str] = &["v11", "v12", "v22"];
+    // random(jwriley), two outcomes, with and without a moderator, and with
+    // est e2m (e2m missing in studies 3 and 8)
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "est2"]), ("wcov", w2)],
+        &[("method", "JWR"), ("save", "jw")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("as Stata's estat heterogeneity"), "{text}");
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "est2"]),
+            ("wcov", w2),
+            ("mods", &["year"]),
+        ],
+        &[("method", "JWR"), ("save", "jw_year")],
+        &[("white", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "e2m"]), ("wcov", w2)],
+        &[("method", "JWR"), ("save", "jw_miss")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "e2m"]),
+            ("wcov", w2),
+            ("mods", &["year"]),
+        ],
+        &[("method", "JWR"), ("save", "jw_miss_year")],
+        &[],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "est2", "est3"]),
+            ("wcov", &["v11", "v12", "v13", "v22", "v23", "v33"]),
+        ],
+        &[("method", "JWR"), ("save", "jw3")],
+        &[("white", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(coef(jw), jw$vb[c(1, 2, 4)], jw$G[c(1, 2, 4)], jw$QE), \
+             c(.431295021964913, .454813301442204, .00679296773881671, .00204443305085298, \
+             .00776554020402663, .0428945894963681, .0154298103723866, .0932023484122499, \
+             195.1458620349403), 1e-9)"
+                .into(),
+            // with the year (R lists each outcome's intercept, then its slope)
+            "near(c(coef(jw_year), jw_year$G[c(1, 2, 4)]), c(-22.4721436302895, \
+             -18.5148982688156, .0114166650587235, .00945209221086995, .0551602891826477, \
+             .022844634885638, .104710395014491), 1e-8)"
+                .into(),
+            // est2's R and White's I2 (Stata prints the joint R for est,
+            // whose name begins est2's, so est's own is not compared here);
+            // the joint R, a determinant of four coefficients with the
+            // uncentred year, magnifies the fit's last digits (1e-5 apart)
+            "near(c(jw_year_het$jwr$R[2], jw_year_het$white), c(3.8442043555961, \
+             55.356830403471, 90.4023208835041), 1e-8)"
+                .into(),
+            "near(jw_year_het$jwr$R[3], 2.74595529575447, 5e-5)".into(),
+            // outcomes missing in studies: Stata's estimate, 26 observations
+            "jw_miss$k == 26".into(),
+            "near(c(coef(jw_miss), jw_miss$vb[c(1, 2, 4)], jw_miss$G[c(1, 2, 4)], jw_miss$QE), \
+             c(.431133208191916, .487853934175527, .0067947017460108, .00197302702023549, \
+             .00911778121209844, .042904353382233, .0145879421702072, .09411150403916, \
+             165.2029922547711), 1e-9)"
+                .into(),
+            "near(c(coef(jw_miss_year), jw_miss_year$G[c(1, 2, 4)]), c(-22.4559544371355, \
+             -15.3461587583666, .0114081946114289, .00788916686187508, .0551707911152066, \
+             .0255522151785695, .114048581011344), 1e-8)"
+                .into(),
+            // three outcomes
+            "near(c(coef(jw3), jw3$G[lower.tri(jw3$G, diag = TRUE)]), c(.432368444594706, \
+             .454107041014543, .427062056823404, .0428951610656751, .0154310855086791, \
+             .00208546810271108, .093203394416882, .0305794703199518, .0218849014507746), 1e-9)"
+                .into(),
+            "near(c(jw3_het$jwr$R[2:4], jw3_het$white), c(3.49033831948034, 1.50842681864834, \
+             2.06391310035992, 52.08674676789, 90.4340450232792, 46.4208291617586), 1e-8)"
+                .into(),
+        ],
+    );
+    // Jackson-Riley on a Jackson-White-Riley fit, and the truncated one on
+    // REML (the scale of est est2 is 0.9936, which max(1, .) makes 1: the
+    // unscaled variances)
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "est2"]), ("wcov", w2)],
+        &[("method", "JWR"), ("save", "jw_jr")],
+        &[("jriley", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "est2"]), ("wcov", w2)],
+        &[("save", "mv_tr")],
+        &[("jtrunc", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("as Stata's se(truncjriley)"), "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(jw_jr$vb[c(1, 4)], jw_jr$ddf[1]), c(.00737734934323991, .00843358972496141, \
+             26), 1e-9)"
+                .into(),
+            "near(c(mv_tr$seadj, mv_tr$vb[c(1, 2, 4)]), c(1, .00789113066178832, \
+             .00315798442469176, .00866750955112924), 5e-5) && all(mv_tr$ddf == 26)"
+                .into(),
+        ],
+    );
+    // REML, three outcomes: White's I2 and the set of est2 and est3 (to 5e-5:
+    // REML is iterated)
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "est2", "est3"]),
+            ("wcov", &["v11", "v12", "v13", "v22", "v23", "v33"]),
+        ],
+        &[("save", "mv3r"), ("jwsub", "est2 est3")],
+        &[("white", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(mv3r_het$jwr$R[5], mv3r_het$white), c(2.26480863625535, 58.2657524200218, \
+             91.5119861138003, 54.1809411972974), 5e-5)"
+                .into(),
+            "identical(rownames(mv3r_het$jwr)[5], 'est2, est3')".into(),
+        ],
+    );
+    // outcomes missing: White's I2 with REML
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "e2m"]), ("wcov", w2)],
+        &[("save", "mv_w")],
+        &[("white", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    // (Stata takes the typical within-study variance over every study in the
+    // sample, also where the outcome's estimate is missing: e2m's 93.15, not
+    // the 91.66 of its 12 studies alone)
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "e2m"]),
+            ("wcov", w2),
+            ("mods", &["year"]),
+        ],
+        &[("save", "mv_wy")],
+        &[("white", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(mv_w_het$white, c(58.3377464787928, 93.1527011882299), 5e-5)".into(),
+            "near(mv_wy_het$white, c(59.2666823441488, 93.1887052008867), 5e-5)".into(),
+        ],
+    );
+    // four outcomes in 30 studies: the estimate has a negative eigenvalue
+    // (Stata's note), cut to zero; every outcome's R, White's I2 and sets of
+    // outcomes
+    let l4: &[(&str, &[&str])] = &[
+        ("outcomes", &["y1", "y2", "y3", "y4"]),
+        (
+            "wcov",
+            &[
+                "v11", "v12", "v13", "v14", "v22", "v23", "v24", "v33", "v34", "v44",
+            ],
+        ),
+    ];
+    let (outcome, text) = mv_on(
+        &mut e,
+        "md2",
+        l4,
+        &[
+            ("method", "JWR"),
+            ("save", "w4"),
+            ("jwsub", "y1 y2; y2 y3 y4; y1 y3; y4 y1"),
+        ],
+        &[("white", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = mv_on(
+        &mut e,
+        "md2",
+        &[l4[0], l4[1], ("mods", &["x"])],
+        &[("method", "JWR"), ("save", "w4x")],
+        &[("white", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(coef(w4), diag(w4$vb), w4$G[lower.tri(w4$G, diag = TRUE)]), \
+             c(.383601101741094, .542470558283442, .191799108592099, .340450590005175, \
+             .00181184465930263, .00507012321768402, .00294572272599661, .00234809180642428, \
+             .0163901689344822, .00216517354669914, .000305269408326933, .0211459383062021, \
+             .107852259443348, .0437308253889728, .0104691515612187, .0415213935512355, \
+             .00127381459112739, .0280400266817797), 1e-9)"
+                .into(),
+            "near(c(w4_het$jwr$R, w4_het$white), c(1.27320919469447, 2.38578540164254, \
+             1.61626445790456, 1.4412846561886, 1.57636638557716, 1.76201208991595, \
+             1.72817585673164, 1.43891098747257, 1.29313653325085, 31.6851092869862, \
+             78.4534661664947, 52.6104213488529, 43.4038541365984), 1e-8)"
+                .into(),
+            "near(c(coef(w4x), w4x$G[lower.tri(w4x$G, diag = TRUE)]), c(.376820913236591, \
+             .473045718271463, .165948123678452, .303339386028439, .0286292363125273, \
+             .15374946808055, .0622947543999387, .080411511433766, .0125833917978859, \
+             -.014467696003976, -.0044695735024803, .0130468845876921, .0660505891057335, \
+             .0302666026841614, -.014343096591618, .0396019266670404, -.0083154475414235, \
+             .0141751298271349), 1e-9)"
+                .into(),
+            "near(c(w4x_het$jwr$R, w4x_het$white), c(1.21021825889654, 2.03120305813596, \
+             1.62643033683105, 1.26214610000846, 1.47686656328629, 26.0485729504088, \
+             68.163192458189, 50.3629892133875, 27.3922825271476), 1e-8)"
+                .into(),
+        ],
+    );
+    // Jackson-Riley on three outcomes (87 degrees of freedom), and with the
+    // moderator on two, plain and truncated (the scale 0.9795 becomes 1)
+    let (outcome, text) = mv_on(
+        &mut e,
+        "md2",
+        &[
+            ("outcomes", &["y1", "y2", "y3"]),
+            ("wcov", &["v11", "v12", "v13", "v22", "v23", "v33"]),
+        ],
+        &[("method", "JWR"), ("save", "w3j")],
+        &[("jriley", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let l2: &[(&str, &[&str])] = &[
+        ("outcomes", &["y1", "y2"]),
+        ("wcov", &["v11", "v12", "v22"]),
+        ("mods", &["x"]),
+    ];
+    let (outcome, text) = mv_on(
+        &mut e,
+        "md2",
+        l2,
+        &[("method", "JWR"), ("save", "w2t")],
+        &[("jtrunc", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let (outcome, text) = mv_on(
+        &mut e,
+        "md2",
+        l2,
+        &[("method", "JWR"), ("save", "w2j")],
+        &[("jriley", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &[
+            "near(c(diag(w3j$vb), w3j$ddf[1]), c(.00168185455681475, .00473571524747402, \
+             .00271042877097788, 87), 1e-9)"
+                .into(),
+            "near(c(diag(w2t$vb), w2t$seadj, w2t$ddf[1]), c(.00208370780200953, \
+             .00427878523823073, .00144575975739359, .00296279819432482, 1, 56), 1e-9)"
+                .into(),
+            "near(diag(w2j$vb), c(.00204106734888245, .00419122529282205, .00141617410670461, \
+             .00290216826463494), 1e-9)"
+                .into(),
+        ],
+    );
+    // the dialog refuses a structure other than unstructured with
+    // Jackson-White-Riley, and a set naming a column that is not an outcome
+    let ctx = context("md");
+    let mut values = MV_META.defaults(&ctx);
+    values.set_list("outcomes", vec!["est".into(), "est2".into()]);
+    values.set_list("wcov", vec!["v11".into(), "v12".into(), "v22".into()]);
+    values.set_text("method", "JWR");
+    values.set_text("struct", "DIAG");
+    assert!(MV_META.generate(&ctx, &values, Style::Base).is_err());
+    values.set_text("struct", "UN");
+    values.set_text("jwsub", "est zzz");
+    assert!(MV_META.generate(&ctx, &values, Style::Base).is_err());
 }
