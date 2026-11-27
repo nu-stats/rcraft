@@ -890,7 +890,8 @@ pub const POSTERIOR_PREDICTIONS: Spec = Spec {
             "{d} <- local({{\n  fit <- {m}\n  nd <- {d}\n  \
              stopifnot(\"this works on a model fitted with Bayesian regression\" = inherits(fit, \"stanreg\"))\n  \
              ok <- stats::complete.cases(nd[, intersect(all.vars(stats::formula(fit))[-1], names(nd)), drop = FALSE])\n  \
-             put <- function(name, v) {{ nd[[name]] <<- NA_real_; nd[[name]][ok] <<- v }}\n  \
+             added <- character()\n  \
+             put <- function(name, v) {{ nd[[name]] <<- NA_real_; nd[[name]][ok] <<- v; added <<- c(added, name) }}\n  \
              if (inherits(fit, \"polr\") && {}) {{\n    \
              eta <- rstanarm::posterior_linpred(fit, newdata = nd[ok, , drop = FALSE])\n    \
              cuts <- as.matrix(fit)[, names(fit$zeta), drop = FALSE]\n    \
@@ -902,12 +903,14 @@ pub const POSTERIOR_PREDICTIONS: Spec = Spec {
              if (inherits(fit, \"polr\")) draws <- matrix(match(draws, levels(rstanarm::get_y(fit))), nrow(draws))\n    \
              put({}, colMeans(draws))\n    \
              put({}, apply(draws, 2, stats::quantile, probs = (1 - {level}) / 2, names = FALSE))\n    \
-             put({}, apply(draws, 2, stats::quantile, probs = (1 + {level}) / 2, names = FALSE))\n  }}\n  nd\n}})",
+             put({}, apply(draws, 2, stats::quantile, probs = (1 + {level}) / 2, names = FALSE))\n  }}\n  \
+             cat({}, paste(added, collapse = \", \"), \"\\n\", sep = \"\")\n  nd\n}})",
             if a.choice("kind") == "epred" { "TRUE" } else { "FALSE" },
             r_string(p),
             r_string(p),
             r_string(&format!("{p}_lower")),
             r_string(&format!("{p}_upper")),
+            r_string(&format!("Added to {}: ", a.name_text("data"))),
         )
     },
 };

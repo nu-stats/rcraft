@@ -607,7 +607,8 @@ pub const HECKMAN: Spec = Spec {
             "method = \"2step\""
         };
         format!(
-            "{model} <- sampleSelection::selection({selected} ~ {}, {y} ~ {}, data = {}, {method})\n\
+            "suppressPackageStartupMessages(requireNamespace(\"sampleSelection\", quietly = TRUE))\n\
+             {model} <- sampleSelection::selection({selected} ~ {}, {y} ~ {}, data = {}, {method})\n\
              print(summary({model}))",
             joined(&a.vars("z")),
             joined(&a.vars("x")),
@@ -1249,7 +1250,8 @@ mod tests {
         );
         assert_eq!(
             code(&HECKMAN, &v),
-            "model <- sampleSelection::selection(works ~ x + kids + z1, earn ~ x + z1, data = d, \
+            "suppressPackageStartupMessages(requireNamespace(\"sampleSelection\", quietly = TRUE))\n\
+             model <- sampleSelection::selection(works ~ x + kids + z1, earn ~ x + z1, data = d, \
              method = \"ml\", gradtol = 1e-12, reltol = 1e-16, tol = 1e-14)\nprint(summary(model))"
         );
         // no indicator: selected where the outcome is not missing
@@ -1260,7 +1262,8 @@ mod tests {
         );
         assert_eq!(
             code(&HECKMAN, &v),
-            "h <- sampleSelection::selection(!is.na(earn) ~ kids + `home town`, earn ~ x, data = d, \
+            "suppressPackageStartupMessages(requireNamespace(\"sampleSelection\", quietly = TRUE))\n\
+             h <- sampleSelection::selection(!is.na(earn) ~ kids + `home town`, earn ~ x, data = d, \
              method = \"2step\")\nprint(summary(h))"
         );
         let v = values(

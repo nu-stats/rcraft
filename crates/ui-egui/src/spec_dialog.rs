@@ -189,6 +189,11 @@ impl SpecDialog {
             .open(&mut keep)
             .collapsible(false)
             .resizable(true)
+            .vscroll(true)
+            // as tall as the window allows: the longer dialogs scroll, and Run
+            // stays reachable (SW19)
+            .default_height((ctx.screen_rect().height() - 110.0).max(240.0))
+            .max_height((ctx.screen_rect().height() - 90.0).max(240.0))
             .default_width(560.0)
             .default_pos(egui::pos2(280.0, 60.0))
             .show(ctx, |ui| {
@@ -641,6 +646,36 @@ mod tests {
         }
         assert!(frame(&mut d).is_none());
         assert!(d.is_open());
+    }
+
+    /// A long dialog (Bayesian regression is over 1,500 points tall) kept
+    /// growing past the window's bottom edge, so Run could not be reached:
+    /// it is now at most as tall as the window and scrolls (SW19).
+    #[test]
+    fn a_long_dialog_fits_the_window_and_scrolls() {
+        use rcraft_catalog::bayes::BAYESIAN_REGRESSION;
+        let mut d = SpecDialog::default();
+        d.open(&BAYESIAN_REGRESSION, ctx());
+        let ctx = egui::Context::default();
+        let pal = Palette::new(crate::look::Accent::default(), false);
+        for height in [560.0, 780.0] {
+            let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1240.0, height));
+            for _ in 0..4 {
+                let raw = egui::RawInput {
+                    screen_rect: Some(screen),
+                    ..Default::default()
+                };
+                let _ = ctx.run(raw, |ctx| {
+                    let _ = d.show(ctx, &pal, None, &|_| None);
+                });
+            }
+            let rect = ctx.memory(|m| m.area_rect(egui::Id::new(BAYESIAN_REGRESSION.entry)));
+            let bottom = rect.map(|r| r.bottom()).unwrap_or(f32::INFINITY);
+            assert!(
+                bottom <= height,
+                "at {height} points tall the dialog ends at {bottom}"
+            );
+        }
     }
 
     #[test]
