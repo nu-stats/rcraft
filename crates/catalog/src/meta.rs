@@ -1744,25 +1744,63 @@ pub const MV_META: Spec = Spec {
         // White's typical within-study variances need the unfiltered rows
         let white = method != "FE" && a.flag("het") && a.flag("white");
         let mod_plain: String = mods.iter().map(|m| format!(" + {}", r_name(m))).collect();
-        let (keep_all, assign, s2_white) = if white {
+        let white_block = if white {
+            format!(
+                "\n  # White's typical within-study variance of each outcome, as Stata's estat \
+                 heterogeneity: a univariate meta-regression's (n - p) / tr(P), over every \
+                 study that has the moderators (also where this outcome's estimate is \
+                 missing), n the number of estimates given\n  \
+                 m$s2.white <- vapply(levels(full$outcome), function(o) {{\n    \
+                 r <- which(full$outcome == o & full$study %in% long$study)\n    \
+                 w <- 1 / diag(Vall)[r]; g <- is.finite(w); r <- r[g]; w <- w[g]\n    \
+                 Xo <- stats::model.matrix(~ 1{mod_plain}, full[r, , drop = FALSE])\n    \
+                 trP <- sum(w) - sum(diag(solve(crossprod(Xo, w * Xo), crossprod(Xo, w^2 * \
+                 Xo))))\n    \
+                 (sum(!is.na(full$yi[r])) - ncol(Xo)) / trP\n  \
+                 }}, numeric(1))"
+            )
+        } else {
+            String::new()
+        };
+        // Stata's Jackson-Riley scale when studies miss outcomes (found by
+        // black-box runs): the missing estimates are read as zero, the
+        // coefficients refitted with the full inverse weights (Sigma +
+        // Lambda_j)^-1 and the residuals at the missing places set to zero
+        let jr_block = if jriley {
+            format!(
+                "\n  # Stata's se(jriley) scale when studies miss an outcome: the missing estimates \
+                 are read as zero, the coefficients refitted with the whole inverse weights \
+                 (Sigma + Lambda_j)^-1 and the residuals at the missing places set to zero; a \
+                 missing within-study variance there is read as 1e6, a missing covariance as 0\n  \
+                 if (anyNA(full$yi[full$study %in% long$study])) m$seadj.stata <- local({{\n    \
+                 s <- full$study %in% long$study; F <- full[s, , drop = FALSE]; Vf <- Vall[s, s, \
+                 drop = FALSE]\n    \
+                 dg <- diag(Vf); Vf[is.na(Vf)] <- 0; diag(Vf) <- ifelse(is.na(dg), 1e6, dg)\n    \
+                 X <- stats::model.matrix(~ outcome - 1{terms}, F)\n    \
+                 d <- nlevels(F$outcome); st <- split(seq_len(nrow(F)), F$study)\n    \
+                 W <- lapply(st, function(r) solve(m$G + Vf[r, r, drop = FALSE]))\n    \
+                 y0 <- ifelse(is.na(F$yi), 0, F$yi)\n    \
+                 A <- Reduce(`+`, lapply(names(st), function(j) crossprod(X[st[[j]], , drop = \
+                 FALSE], W[[j]] %*% X[st[[j]], , drop = FALSE])))\n    \
+                 b <- Reduce(`+`, lapply(names(st), function(j) crossprod(X[st[[j]], , drop = \
+                 FALSE], W[[j]] %*% y0[st[[j]]])))\n    \
+                 beta <- solve(A, b)\n    \
+                 num <- sum(vapply(names(st), function(j) {{\n      \
+                 r <- y0[st[[j]]] - X[st[[j]], , drop = FALSE] %*% beta\n      \
+                 r[is.na(F$yi[st[[j]]])] <- 0\n      \
+                 c(crossprod(r, W[[j]] %*% r))\n    \
+                 }}, numeric(1)))\n    \
+                 num / (sum(!is.na(F$yi)) - ncol(X))\n  \
+                 }})"
+            )
+        } else {
+            String::new()
+        };
+        let (keep_all, assign, s2_white) = if white || jriley {
             (
                 "full <- long; Vall <- V\n  ",
                 "m <- ",
-                format!(
-                    "\n  # White's typical within-study variance of each outcome, as Stata's estat \
-                     heterogeneity: a univariate meta-regression's (n - p) / tr(P), over every \
-                     study that has the moderators (also where this outcome's estimate is \
-                     missing), n the number of estimates given\n  \
-                     m$s2.white <- vapply(levels(full$outcome), function(o) {{\n    \
-                     r <- which(full$outcome == o & full$study %in% long$study)\n    \
-                     w <- 1 / diag(Vall)[r]; g <- is.finite(w); r <- r[g]; w <- w[g]\n    \
-                     Xo <- stats::model.matrix(~ 1{mod_plain}, full[r, , drop = FALSE])\n    \
-                     trP <- sum(w) - sum(diag(solve(crossprod(Xo, w * Xo), crossprod(Xo, w^2 * \
-                     Xo))))\n    \
-                     (sum(!is.na(full$yi[r])) - ncol(Xo)) / trP\n  \
-                     }}, numeric(1))\n  \
-                     m"
-                ),
+                format!("{white_block}{jr_block}\n  m"),
             )
         } else {
             ("", "", String::new())
@@ -1826,6 +1864,8 @@ pub const MV_META: Spec = Spec {
                  m <- {fit}\n  \
                  r <- m$yi - m$X %*% m$beta\n  \
                  m$seadj <- c(crossprod(r, solve(m$M, r))) / (m$k - m$p)\n  \
+                 if (!is.null(m$seadj.stata)) {{ m$seadj.jr <- m$seadj; m$seadj <- m$seadj.stata \
+                 }}\n  \
                  {truncate}\
                  m$vb.model <- m$vb\n  \
                  diag(m$vb) <- diag(m$vb) * m$seadj\n  \
@@ -1836,9 +1876,10 @@ pub const MV_META: Spec = Spec {
                  m\n}})\n\
                  cat(\"{label}: the variances scaled by\", \
                  format({fit}$seadj, digits = 7), \"\\n\")\n\
-                 if (any(table({fit}$data$study) < nlevels({fit}$data$outcome))) cat(\"Some \
-                 studies miss an outcome: Stata's se(jriley) then scales by a figure not \
-                 reproduced here; this scale is Jackson and Riley's, from the outcomes given.\\n\")\n"
+                 if (!is.null({fit}$seadj.stata)) cat(\"Some studies miss an outcome: Stata's \
+                 se(jriley) reads the missing estimates as zero when it forms its scale, and \
+                 this is that scale (Jackson and Riley's, from the outcomes given, is\", \
+                 format({fit}$seadj.jr, digits = 7), \")\\n\")\n"
             ));
         }
         out.push_str(&format!("summary({fit})\n"));

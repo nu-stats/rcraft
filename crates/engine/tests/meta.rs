@@ -179,6 +179,8 @@ const MAKE: &str = "md <- local({ \
      md$se3 <- round(0.8 * md$se, 4); md$v13 <- 0.3 * md$se * md$se3; \
      md$v23 <- 0.2 * md$se2 * md$se3; md$v33 <- md$se3^2; \
      md$e2m <- md$est2; md$e2m[c(3, 8)] <- NA; md$yr <- md$year; md$yr[2] <- NA; \
+     md$d2 <- md$est2; md$d2[c(3, 8, 11)] <- NA; md$f1 <- md$est; md$f1[c(2, 9)] <- NA; \
+     md$v22m <- md$v22; md$v22m[3] <- NA; \
      md$yc <- md$year - 2007; \
      md$ey <- round(md$est + c(0.24, -0.18, 0.09, -0.27, 0.21, -0.06, 0.30)[md$lab] * md$yc, 4); \
      mm <- local({ k <- md; k$est[5] <- NA; k }); \
@@ -192,7 +194,7 @@ fn context(dataset: &str) -> Context {
     let mut columns: Vec<ColumnInfo> = [
         "year", "n1", "m1", "sd1", "n2", "m2", "sd2", "a", "b", "c", "d", "est", "se", "r", "nr",
         "lab", "set", "est2", "se2", "v11", "v12", "v22", "reg", "est3", "se3", "v13", "v23",
-        "v33", "e2m", "yr", "yc", "ey",
+        "v33", "e2m", "yr", "yc", "ey", "d2", "f1", "v22m",
     ]
     .into_iter()
     .map(|name| ColumnInfo {
@@ -1637,8 +1639,9 @@ fn missing_outcomes_correlations_jackson_riley_heterogeneity_and_three_levels_ma
     // random(reml, se(jriley)) on the same: t on N - p = 24 degrees of
     // freedom, as Stata's; Stata's scale with outcomes missing (1.0255) is
     // not Jackson and Riley's residual sum over N - p (0.9972), which it
-    // equals with every outcome given (small-fixes row 30), so the dialog
-    // says so
+    // equals with every outcome given: Stata reads the missing estimates as
+    // zero when it forms it (small-fixes row 30, P6.11f), as the dialog does
+    // and says
     let (outcome, text) = mv(
         &mut e,
         &[("outcomes", &["est", "e2m"]), ("wcov", w2)],
@@ -1651,7 +1654,9 @@ fn missing_outcomes_correlations_jackson_riley_heterogeneity_and_three_levels_ma
     holds(
         &mut e,
         &[
-            "near(c(mv_jr$seadj, mv_jr$vb[2]), c(.99720710973728, .0028076182239332812), 5e-5)"
+            "near(c(mv_jr$seadj, mv_jr$seadj.jr, mv_jr$vb[1, 1], mv_jr$vb[2], mv_jr$vb[2, 2]), \
+             c(1.025501, .99720710973728, .00798850880744032, .0028076182239332812, \
+             .0109383012387765), 5e-5)"
                 .into(),
             "all(mv_jr$ddf == 24)".into(),
         ],
@@ -2195,6 +2200,100 @@ fn jwriley_truncated_jackson_riley_white_and_subset_statistics_match_stata() {
              .00290216826463494), 1e-9)"
                 .into(),
         ],
+    );
+    // Stata's se(jriley) scale with outcomes missing (small-fixes row 30):
+    // the missing estimates are read as zero, the coefficients refitted with
+    // the whole inverse weights, the residuals at the missing places zero;
+    // exact on Jackson-White-Riley fits. The within-study variance of a
+    // missing outcome that is itself missing is read as 1e6 (Stata's
+    // 1.1349244 to 6 digits).
+    for (outcomes, mods, wcov, name, scale, tol) in [
+        (
+            ["est", "e2m"],
+            "",
+            ["v11", "v12", "v22"],
+            "jm1",
+            1.15690924687533,
+            1e-9,
+        ),
+        (
+            ["est", "d2"],
+            "",
+            ["v11", "v12", "v22"],
+            "jm2",
+            1.21624469704667,
+            1e-9,
+        ),
+        (
+            ["f1", "est2"],
+            "",
+            ["v11", "v12", "v22"],
+            "jm3",
+            1.13414854703647,
+            1e-9,
+        ),
+        (
+            ["est", "e2m"],
+            "year",
+            ["v11", "v12", "v22"],
+            "jm4",
+            1.10651544302722,
+            1e-8,
+        ),
+        (
+            ["est", "d2"],
+            "year",
+            ["v11", "v12", "v22"],
+            "jm5",
+            1.16292638616382,
+            1e-8,
+        ),
+        (
+            ["est", "e2m"],
+            "yr",
+            ["v11", "v12", "v22"],
+            "jm6",
+            1.300756756559,
+            1e-8,
+        ),
+        (
+            ["est", "e2m"],
+            "",
+            ["v11", "v12", "v22m"],
+            "jm7",
+            1.13492444270754,
+            1e-6,
+        ),
+    ] {
+        let mut lists: Vec<(&str, &[&str])> = vec![("outcomes", &outcomes), ("wcov", &wcov)];
+        let year = [mods];
+        if !mods.is_empty() {
+            lists.push(("mods", &year));
+        }
+        let (outcome, text) = mv(
+            &mut e,
+            &lists,
+            &[("method", "JWR"), ("save", name)],
+            &[("jriley", true)],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+        assert!(
+            text.contains("reads the missing estimates as zero"),
+            "{name}: {text}"
+        );
+        holds(&mut e, &[format!("near({name}$seadj, {scale}, {tol})")]);
+    }
+    // the truncated one with outcomes missing is the larger of 1 and that
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "e2m"]), ("wcov", w2)],
+        &[("method", "JWR"), ("save", "jm_tr")],
+        &[("jtrunc", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &["near(jm_tr$seadj, 1.15690924687533, 1e-9)".into()],
     );
     // the dialog refuses a structure other than unstructured with
     // Jackson-White-Riley, and a set naming a column that is not an outcome
