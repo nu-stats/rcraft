@@ -51,6 +51,8 @@ const STEPS: [f32; 12] = [
     0.25, 0.33, 0.5, 0.67, 0.75, 0.9, 1.0, 1.25, 1.5, 2.0, 3.0, 4.0,
 ];
 /// The smallest and largest zoom.
+/// The pane must be this wide (points) for the plot's buttons to share a row with Older and Newer.
+const TOOLBAR_ONE_ROW: f32 = 720.0;
 const SMALLEST: f32 = 0.25;
 const LARGEST: f32 = 4.0;
 
@@ -196,6 +198,9 @@ impl GraphView {
             .textures
             .get(path)
             .map_or(egui::Vec2::ZERO, |t| t.size_vec2());
+        // one row when the pane is wide enough; the buttons drop to a row of their own when
+        // not, so they never sit on top of the plot's name (SW21)
+        let narrow = ui.available_width() < TOOLBAR_ONE_ROW;
         ui.horizontal(|ui| {
             if ui
                 .add_enabled(at > 0, egui::Button::new("◀ Older"))
@@ -210,33 +215,19 @@ impl GraphView {
             {
                 self.index = if at + 1 == last { None } else { Some(at + 1) };
             }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button("Save as PNG…").clicked() {
-                    self.save(path);
-                }
-                if ui
-                    .button("Export…")
-                    .on_hover_text("PNG, SVG or PDF at a size and resolution you choose")
-                    .clicked()
-                {
-                    export = path.file_name().map(|n| n.to_string_lossy().into_owned());
-                }
-                if ui
-                    .button("Copy")
-                    .on_hover_text("Copy the plot to the clipboard as a picture")
-                    .clicked()
-                {
-                    self.problem = None;
-                    self.copied = None;
-                    match copy_picture(path) {
-                        Ok(()) => self.copied = Some(path.clone()),
-                        Err(why) => self.problem = Some(why),
-                    }
-                }
-                ui.separator();
-                self.zoom_buttons(ui);
-            });
+            if !narrow {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.plot_buttons(ui, path, &mut export);
+                });
+            }
         });
+        if narrow {
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    self.plot_buttons(ui, path, &mut export);
+                });
+            });
+        }
         if let Some(entry) = engine.history().get(current.command) {
             let first = entry.code.trim_end().lines().next().unwrap_or("");
             ui.label(
@@ -278,6 +269,34 @@ impl GraphView {
             }
         }
         export
+    }
+
+    /// Save, Export, Copy and the zoom buttons, laid out right to left.
+    fn plot_buttons(&mut self, ui: &mut egui::Ui, path: &Path, export: &mut Option<String>) {
+        if ui.button("Save as PNG…").clicked() {
+            self.save(path);
+        }
+        if ui
+            .button("Export…")
+            .on_hover_text("PNG, SVG or PDF at a size and resolution you choose")
+            .clicked()
+        {
+            *export = path.file_name().map(|n| n.to_string_lossy().into_owned());
+        }
+        if ui
+            .button("Copy")
+            .on_hover_text("Copy the plot to the clipboard as a picture")
+            .clicked()
+        {
+            self.problem = None;
+            self.copied = None;
+            match copy_picture(path) {
+                Ok(()) => self.copied = Some(path.to_path_buf()),
+                Err(why) => self.problem = Some(why),
+            }
+        }
+        ui.separator();
+        self.zoom_buttons(ui);
     }
 
     /// Fit, smaller, the scale shown (press for 100%), larger.
@@ -329,6 +348,51 @@ impl GraphView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// At 820 points wide the plot's buttons sat on top of "Plot 1 of 1" and Newer: the
+    /// one-row width must hold the buttons and the left part, and a narrower pane gives
+    /// the buttons a row of their own (SW21).
+    #[test]
+    fn the_one_row_width_holds_the_plot_buttons_and_the_left_part() {
+        let ctx = egui::Context::default();
+        let mut view = GraphView::default();
+        let (mut buttons, mut left) = (0.0, 0.0);
+        for _ in 0..2 {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(2000.0, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        buttons = ui
+                            .horizontal(|ui| {
+                                view.plot_buttons(ui, Path::new("p.png"), &mut None);
+                            })
+                            .response
+                            .rect
+                            .width();
+                        left = ui
+                            .horizontal(|ui| {
+                                ui.add_enabled(false, egui::Button::new("◀ Older"));
+                                ui.label(RichText::new("Plot 10 of 10").strong());
+                                ui.add_enabled(false, egui::Button::new("Newer ▶"));
+                            })
+                            .response
+                            .rect
+                            .width();
+                    });
+                },
+            );
+        }
+        assert!(
+            buttons + left + 24.0 <= TOOLBAR_ONE_ROW,
+            "buttons {buttons} + left {left} do not fit in {TOOLBAR_ONE_ROW}"
+        );
+    }
 
     #[test]
     fn a_png_file_loads_into_pixels_and_garbage_is_an_error() {

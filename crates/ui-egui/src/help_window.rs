@@ -283,7 +283,12 @@ impl HelpWindow {
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_size([700.0, 560.0])
+            // never taller than the window, so its last lines and buttons stay reachable (SW23)
+            .default_size([
+                700.0_f32.min(ctx.screen_rect().width() - 24.0),
+                560.0_f32.min(ctx.screen_rect().height() - 90.0).max(240.0),
+            ])
+            .max_height((ctx.screen_rect().height() - 60.0).max(240.0))
             .default_pos(egui::pos2(240.0, 60.0))
             .show(ctx, |ui| {
                 self.toolbar(ui, &mut next);
@@ -926,6 +931,39 @@ mod tests {
     const MEAN: &str = "@@PACKAGE\tbase\n@@TOPIC\tmean\n@@TITLE\tArithmetic Mean\n\
                         @@LINK\tweighted.mean\n@@TEXT\n|Arithmetic Mean\n@@END\n\
                         @@EXAMPLES\n|mean(1:3)\n@@END\n";
+
+    /// At 560 points tall the window ran past the bottom edge (it was 560 tall itself, drawn
+    /// 60 down) and its last lines were out of reach: it now fits the window (SW23).
+    #[test]
+    fn the_window_fits_a_short_screen() {
+        let pal = Palette::new(crate::look::Accent::default(), false);
+        for (width, height) in [(820.0, 560.0), (1024.0, 640.0), (1240.0, 780.0)] {
+            let mut w = HelpWindow::default();
+            w.show_dialog(rcraft_rcodegen::dialog_help::use_my_file());
+            let ctx = egui::Context::default();
+            for _ in 0..4 {
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height));
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        let _ = w.show(ctx, &pal, None);
+                    },
+                );
+            }
+            let rect = ctx
+                .memory(|m| m.area_rect(egui::Id::new("Help")))
+                .unwrap_or(egui::Rect::EVERYTHING);
+            assert!(
+                rect.right() <= width + 1.0 && rect.bottom() <= height + 1.0,
+                "at {width}x{height} the Help window spans to {}x{}",
+                rect.right(),
+                rect.bottom()
+            );
+        }
+    }
 
     #[test]
     fn a_request_opens_the_window_and_is_queued() {

@@ -57,6 +57,12 @@ const COMMAND_PANE_MIN_HEIGHT: f32 = 96.0;
 /// a few lines) when the panels above and below it are dragged tall or the window is short.
 const SCRIPT_PANE_MIN_HEIGHT: f32 = 80.0;
 const RESULTS_MIN_HEIGHT: f32 = 120.0;
+/// The window must be this wide (points) for the tagline to show beside the menus and the R
+/// version; narrower, the tagline goes and every menu stays on the bar (SW20).
+const TAGLINE_MIN_WIDTH: f32 = 1100.0;
+/// What the left panel needs besides the variable list (the tabs, the two lists to pick from,
+/// the Properties rows and a little History), in points.
+const SIDE_PANEL_OTHER_HEIGHT: f32 = 330.0;
 const SCRIPT_ID: &str = "script-editor";
 /// The find bar's text box.
 const FIND_ID: &str = "script-find";
@@ -2200,7 +2206,10 @@ impl App {
                     .background_color(pal.accent),
             );
             ui.label(RichText::new("RCraft").strong());
-            ui.label(RichText::new(crate::TAGLINE).color(pal.dim));
+            // the tagline gives way when the window is too narrow for it and the menus
+            if ui.available_width() >= TAGLINE_MIN_WIDTH {
+                ui.label(RichText::new(crate::TAGLINE).color(pal.dim));
+            }
             ui.add_space(6.0);
             ui.menu_button("File", |ui| {
                 if ui.button("Use my file…").clicked() {
@@ -2597,7 +2606,13 @@ Click to choose another folder"
         }
         egui::ScrollArea::vertical()
             .id_salt("variables")
-            .max_height(total * 0.42)
+            // the variable list leaves the Properties rows and some History room when the
+            // window is short (SW24)
+            .max_height(
+                (total * 0.42)
+                    .min(total - SIDE_PANEL_OTHER_HEIGHT)
+                    .max(60.0),
+            )
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.add_space(4.0);
@@ -4371,6 +4386,49 @@ display sw7b * 10";
     fn blank_lines_and_empty_text_run_nothing() {
         assert_eq!(selection_or_line("a\n\nb", 2, 2), None);
         assert_eq!(selection_or_line("", 0, 0), None);
+    }
+
+    /// At 820 points wide the tagline pushed Reports, Packages, Session and Help off the
+    /// bar, and at 1024 the R version sat on top of Help: the tagline now gives way (SW20).
+    #[test]
+    fn every_menu_stays_on_the_bar_in_a_narrow_window() {
+        for width in [820.0, 1024.0, 1240.0] {
+            let ctx = egui::Context::default();
+            let mut app = App::new(&ctx);
+            let mut shapes = Vec::new();
+            for _ in 0..3 {
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, 640.0));
+                let out = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| app.ui(ctx),
+                );
+                shapes = out.shapes;
+            }
+            let text = |what: &str| {
+                shapes.iter().find_map(|s| match &s.shape {
+                    egui::epaint::Shape::Text(t) if t.galley.text() == what => {
+                        Some(t.visual_bounding_rect())
+                    }
+                    _ => None,
+                })
+            };
+            let Some(help) = text("Help") else {
+                panic!("the Help menu is not drawn at {width} points wide");
+            };
+            assert!(
+                help.right() <= width - 60.0,
+                "at {width} points wide the Help menu ends at {}, leaving no room for the R version",
+                help.right()
+            );
+            assert_eq!(
+                text(crate::TAGLINE).is_some(),
+                width >= TAGLINE_MIN_WIDTH,
+                "the tagline at {width} points wide"
+            );
+        }
     }
 
     #[test]
