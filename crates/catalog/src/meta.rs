@@ -381,19 +381,68 @@ fn fit_code(a: &Args, fit: &str) -> String {
         // effect for each level
         // effect for each level (outer clusters first, as Stata's relevels())
         Some(cluster) => {
-            let mut levels: Vec<String> = a.vars("outer").iter().map(|c| r_name(c)).collect();
-            levels.push(cluster);
-            out.push_str(&format!(
-                "{es}$.study <- seq_len(nrow({es}))\n\
-                 {fit} <- metafor::rma.mv(yi, vi, random = ~ 1 | {}/.study, data = {es}{options})\n",
-                levels.join("/")
-            ));
+            let slopes = a.vars("slopes");
+            if slopes.is_empty() {
+                let mut levels: Vec<String> = a.vars("outer").iter().map(|c| r_name(c)).collect();
+                levels.push(cluster);
+                out.push_str(&format!(
+                    "{es}$.study <- seq_len(nrow({es}))\n\
+                     {fit} <- metafor::rma.mv(yi, vi, random = ~ 1 | {}/.study, data = {es}{options})\n",
+                    levels.join("/")
+                ));
+            } else {
+                out.push_str(&slopes_code(a, fit, &es, &options));
+            }
         }
         None => out.push_str(&format!(
             "{fit} <- metafor::rma(yi, vi, data = {es}{options})\n{}",
             stata_stop(a, fit)
         )),
     }
+    out
+}
+
+/// The multilevel fit with random slopes at the clusters, as Stata's
+/// `meta meregress y x || region: || lab: x`: one random-effects term for each
+/// level, the cluster level's with its slopes (and its intercept), and the
+/// studies' own. A level nested in others is identified by the combination of
+/// them, so that cluster labels may repeat across the outer levels. Stata's
+/// default covariance between the slopes and the intercept is independent
+/// (`GDIAG`); `GEN` is its unstructured one.
+fn slopes_code(a: &Args, fit: &str, es: &str, options: &str) -> String {
+    let mut raw: Vec<&str> = a.vars("outer");
+    raw.push(a.var_text("cluster"));
+    let slope_terms: Vec<String> = a.vars("slopes").iter().map(|s| r_name(s)).collect();
+    let mut out = format!("{es}$.study <- seq_len(nrow({es}))\n");
+    let mut terms = Vec::new();
+    for i in 0..raw.len() {
+        let id = raw[..=i].join(".");
+        if i > 0 {
+            let cols: Vec<String> = raw[..=i].iter().map(|c| r_string(c)).collect();
+            out.push_str(&format!(
+                "{es}[[{}]] <- interaction({es}[c({})], drop = TRUE, sep = \".\")\n",
+                r_string(&id),
+                cols.join(", ")
+            ));
+        }
+        let rhs = if i + 1 == raw.len() {
+            slope_terms.join(" + ")
+        } else {
+            "1".to_string()
+        };
+        terms.push(format!("~ {rhs} | {}", r_name(&id)));
+    }
+    terms.push("~ 1 | .study".to_string());
+    let structure = if a.choice("slopecov") == "UN" {
+        "GEN"
+    } else {
+        "GDIAG"
+    };
+    out.push_str(&format!(
+        "{fit} <- metafor::rma.mv(yi, vi, random = list({}), struct = \"{structure}\", data = \
+         {es}{options})\n",
+        terms.join(", ")
+    ));
     out
 }
 
@@ -725,6 +774,12 @@ fn meta_check(a: &Args) -> Vec<Problem> {
             }
         }
     }
+    if !a.vars("slopes").is_empty() && a.var("cluster").is_none() {
+        out.push(Problem::new(
+            "slopes",
+            "Random slopes are at the clusters: choose the clusters too.",
+        ));
+    }
     let fcols = a.vars("fcols");
     if !fcols.is_empty() && !a.flag("forest") {
         out.push(Problem::new(
@@ -999,6 +1054,34 @@ pub const META: Spec = Spec {
                    then the clusters above), each level with its own random effect, as Stata's \
                    relevels(region lab study).",
         },
+        Widget::Variables {
+            id: "slopes",
+            label: "Random slopes at the clusters",
+            kinds: NUMBERS,
+            min: 0,
+            hint: "Optional: columns whose coefficient varies from cluster to cluster (with its \
+                   own standard deviation), as Stata's meta meregress y x || lab: x. They need \
+                   several studies in each cluster and a centred column (the year less its \
+                   middle) to be told apart from the intercept; with one study per cluster Stata \
+                   itself finds their standard deviations at zero.",
+        },
+        Widget::Choice {
+            id: "slopecov",
+            label: "Covariance of the slopes and the intercept",
+            options: &[
+                Opt {
+                    value: "ind",
+                    label: "Independent (Stata's default)",
+                },
+                Opt {
+                    value: "UN",
+                    label: "Unstructured",
+                },
+            ],
+            default: "ind",
+            hint: "As Stata's covariance(independent) and covariance(unstructured) for the \
+                   clusters' random effects; the unstructured one adds the correlations.",
+        },
         Widget::Variable {
             id: "subgroup",
             label: "Subgroups by",
@@ -1184,6 +1267,15 @@ pub const META: Spec = Spec {
                 "cat(\"\\nStandard deviation of each level (Stata's sd(_cons))\\n\")\n\
                  print(stats::setNames(sqrt({fit}$sigma2), {fit}$s.names))\n"
             ));
+            if !a.vars("slopes").is_empty() {
+                out.push_str(&format!(
+                    "cat(\"\\nStandard deviations of the clusters' intercept and slopes (Stata's \
+                     sd(_cons), sd(x))\\n\")\n\
+                     print(stats::setNames(sqrt({fit}$tau2), head({fit}$g.names, -1)))\n\
+                     if (!is.null({fit}$rho) && length({fit}$rho) > 0) {{\n  \
+                     cat(\"Correlations (Stata's corr())\\n\")\n  print({fit}$rho)\n}}\n"
+                ));
+            }
         }
         let shown = back(measure).filter(|_| a.flag("eform"));
         let pi = is_random(method) && a.flag("pi");

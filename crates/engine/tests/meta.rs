@@ -179,6 +179,8 @@ const MAKE: &str = "md <- local({ \
      md$se3 <- round(0.8 * md$se, 4); md$v13 <- 0.3 * md$se * md$se3; \
      md$v23 <- 0.2 * md$se2 * md$se3; md$v33 <- md$se3^2; \
      md$e2m <- md$est2; md$e2m[c(3, 8)] <- NA; md$yr <- md$year; md$yr[2] <- NA; \
+     md$yc <- md$year - 2007; \
+     md$ey <- round(md$est + c(0.24, -0.18, 0.09, -0.27, 0.21, -0.06, 0.30)[md$lab] * md$yc, 4); \
      mm <- local({ k <- md; k$est[5] <- NA; k }); \
      figs <- function(m) c(m$b[1], m$se, m$tau2, m$I2, m$H2, m$QE, m$ci.lb, m$ci.ub); \
      egger <- function(r) if (inherits(r$fit, 'lm')) { s <- coef(summary(r$fit)); \
@@ -190,7 +192,7 @@ fn context(dataset: &str) -> Context {
     let mut columns: Vec<ColumnInfo> = [
         "year", "n1", "m1", "sd1", "n2", "m2", "sd2", "a", "b", "c", "d", "est", "se", "r", "nr",
         "lab", "set", "est2", "se2", "v11", "v12", "v22", "reg", "est3", "se3", "v13", "v23",
-        "v33", "e2m", "yr",
+        "v33", "e2m", "yr", "yc", "ey",
     ]
     .into_iter()
     .map(|name| ColumnInfo {
@@ -244,7 +246,7 @@ fn dialog(
     let ctx = context(dataset);
     let mut values = META.defaults(&ctx);
     for (id, text) in COLUMNS.iter().chain(set) {
-        if matches!(*id, "mods" | "outer" | "fcols") {
+        if matches!(*id, "mods" | "outer" | "fcols" | "slopes") {
             values.set_list(id, text.split(',').map(|m| m.trim().to_string()).collect());
         } else {
             values.set_text(id, *text);
@@ -2206,4 +2208,132 @@ fn jwriley_truncated_jackson_riley_white_and_subset_statistics_match_stata() {
     values.set_text("struct", "UN");
     values.set_text("jwsub", "est zzz");
     assert!(MV_META.generate(&ctx, &values, Style::Base).is_err());
+}
+
+/// P6.11f: random slopes at the clusters, `meta meregress ey yc || lab: yc ||
+/// sid:` (REML and ML, with and without the fixed slope). The effect `ey` is
+/// `est` plus a slope of its own in each lab times the centred year `yc` (no
+/// further random draws), which gives the slope a real standard deviation
+/// (0.20 in Stata's fit); with the uncentred year of the earlier data Stata's
+/// fit puts it at 4e-6. The slope and the intercept are independent (Stata's
+/// default), as `meta meregress`'s `covariance(independent)`.
+#[test]
+fn random_slopes_at_the_clusters_match_stata_meregress() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    for (set, mods, name) in [
+        (
+            &[("measure", "given"), ("est", "ey"), ("cluster", "lab")][..],
+            "yc",
+            "rs_reml",
+        ),
+        (
+            &[
+                ("measure", "given"),
+                ("est", "ey"),
+                ("cluster", "lab"),
+                ("method", "ML"),
+            ][..],
+            "yc",
+            "rs_ml",
+        ),
+        (
+            &[("measure", "given"), ("est", "ey"), ("cluster", "lab")][..],
+            "",
+            "rs_free",
+        ),
+    ] {
+        let mut set = set.to_vec();
+        set.push(("save", name));
+        set.push(("slopes", "yc"));
+        if !mods.is_empty() {
+            set.push(("mods", mods));
+        }
+        let (outcome, text, _) = dialog(&mut e, "md", &set, NO_PLOTS);
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+        assert!(text.contains("intercept and slopes"), "{name}: {text}");
+    }
+    // the clusters' sd(yc), sd(_cons) and the studies' sd(_cons), as the
+    // logs of Stata's standard deviations (lns1_1_1, lns1_1_2, lns2_1_1)
+    holds(
+        &mut e,
+        &[
+            "near(c(coef(rs_reml)[c('yc', 'intrcpt')], log(sqrt(c(rs_reml$tau2[2:1], \
+             rs_reml$sigma2)))), c(.100763536527639, .566186884433251, -1.62331916351221, \
+             -1.37085913213773, -1.24076444511161), 5e-5)"
+                .into(),
+            "near(c(coef(rs_ml)[c('yc', 'intrcpt')], log(sqrt(c(rs_ml$tau2[2:1], \
+             rs_ml$sigma2)))), c(.105486643646759, .556503412233324, -1.77065904900938, \
+             -2.01670366407846, -1.21674129716028), 5e-5)"
+                .into(),
+            // a random slope on the year with no fixed one
+            "near(c(coef(rs_free), log(sqrt(c(rs_free$tau2[2:1], rs_free$sigma2)))), \
+             c(.557500053244608, -1.51319453593271, -1.53931213950666, -1.30607721970856), \
+             5e-5)"
+                .into(),
+        ],
+    );
+    // three levels (meta meregress ey yc || reg: || lab: yc || sid:, the
+    // region's variance at zero), with the unstructured covariance (Stata
+    // finds the correlation at 1, on the boundary, so only the restricted
+    // log-likelihood is compared), and two slopes (yc and set)
+    for (set, name) in [
+        (
+            &[
+                ("outer", "reg"),
+                ("mods", "yc"),
+                ("slopes", "yc"),
+                ("save", "rs_reg"),
+            ][..],
+            "rs_reg",
+        ),
+        (
+            &[
+                ("mods", "yc"),
+                ("slopes", "yc"),
+                ("slopecov", "UN"),
+                ("save", "rs_un"),
+            ][..],
+            "rs_un",
+        ),
+        (
+            &[
+                ("mods", "yc, set"),
+                ("slopes", "yc, set"),
+                ("save", "rs_two"),
+            ][..],
+            "rs_two",
+        ),
+    ] {
+        let mut set = set.to_vec();
+        set.extend([("measure", "given"), ("est", "ey"), ("cluster", "lab")]);
+        let (outcome, text, _) = dialog(&mut e, "md", &set, NO_PLOTS);
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+    }
+    holds(
+        &mut e,
+        &[
+            "near(c(coef(rs_reg)[c('yc', 'intrcpt')], log(sqrt(c(rs_reg$tau2[2:1], \
+             rs_reg$sigma2[2])))), c(.100763658399478, .566187118925602, -1.62332193688727, \
+             -1.37085818921497, -1.24076413889929), 5e-5) && sqrt(rs_reg$sigma2[1]) < 1e-4"
+                .into(),
+            "abs(as.numeric(logLik(rs_un)) - -10.067011) < 2e-5".into(),
+            "near(c(coef(rs_two)[c('yc', 'set', 'intrcpt')], log(sqrt(c(rs_two$tau2[2:3], \
+             rs_two$sigma2)))), c(.103941455280745, -2.06990582074351, .998690048623387, \
+             -1.4539827031814, .419766481874613, -1.38830606763314), 5e-5) && \
+             sqrt(rs_two$tau2[1]) < 1e-4"
+                .into(),
+        ],
+    );
+    // slopes need the clusters
+    let ctx = context("md");
+    let mut values = META.defaults(&ctx);
+    for (id, text) in COLUMNS {
+        values.set_text(id, *text);
+    }
+    values.set_list("slopes", vec!["yc".into()]);
+    assert!(META.generate(&ctx, &values, Style::Base).is_err());
 }
