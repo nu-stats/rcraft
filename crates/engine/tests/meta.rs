@@ -2956,3 +2956,91 @@ fn exchangeable_and_identity_covariance_of_slopes_and_intercept_match_stata_mere
     values.set_flag("onoint", true);
     assert!(META.generate(&ctx, &values, Style::Base).is_ok());
 }
+
+/// P6.11g: the manual's smoking-cessation example of `estat heterogeneity`
+/// (`meta mvregress y*, wcovvariables(v*) random(mle, covariance(exchangeable))`
+/// on StataCorp's `smokecess`, 24 studies, 31 of 72 values given), checked by
+/// hand once: Stata 19 prints the figures of its manual, and the dialog equals
+/// them to 5e-5. The data are StataCorp's and are not in the repository, so the
+/// test runs only when `RCRAFT_SMOKECESS_CSV` names a CSV of `yb yc yd vbb vbc
+/// vbd vcc vcd vdd` (Stata's `export delimited`), and is otherwise ignored.
+#[test]
+#[ignore = "needs StataCorp's smokecess data, not in the repository"]
+fn the_smoking_cessation_example_of_estat_heterogeneity_matches_stata() {
+    let Ok(path) = std::env::var("RCRAFT_SMOKECESS_CSV") else {
+        eprintln!("skipped: RCRAFT_SMOKECESS_CSV is not set");
+        return;
+    };
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let path = path.replace('\\', "/");
+    let (made, text, _) = run(
+        &mut e,
+        Source::Typed,
+        &format!(
+            "smk <- read.csv('{path}'); near <- function(a, b, tol) isTRUE(length(a) == \
+             length(b) && all(abs(a - b) <= tol * pmax(abs(b), 1e-3)))"
+        ),
+    );
+    assert_eq!(made, Outcome::Ok, "{text}");
+    let columns = ["yb", "yc", "yd", "vbb", "vbc", "vbd", "vcc", "vcd", "vdd"]
+        .into_iter()
+        .map(|name| ColumnInfo {
+            name: name.into(),
+            kind: VarKind::Number,
+        })
+        .collect();
+    let ctx = Context {
+        dataset: "smk".into(),
+        frames: Vec::new(),
+        columns,
+    };
+    let mut values = MV_META.defaults(&ctx);
+    values.set_list("outcomes", ["yb", "yc", "yd"].map(String::from).to_vec());
+    values.set_list(
+        "wcov",
+        ["vbb", "vbc", "vbd", "vcc", "vcd", "vdd"]
+            .map(String::from)
+            .to_vec(),
+    );
+    values.set_text("method", "ML");
+    values.set_text("struct", "CS");
+    values.set_text("jwsub", "yb yc");
+    values.set_text("save", "smkfit");
+    values.set_flag("white", true);
+    let code = MV_META.generate(&ctx, &values, Style::Base);
+    assert!(code.is_ok(), "{code:?}");
+    let (outcome, text, _) = run(
+        &mut e,
+        Source::Menu(MV_META.menu.into()),
+        &code.unwrap_or_default(),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    eprintln!("{text}");
+    holds(
+        &mut e,
+        &[
+            "smkfit$k == 31".into(),
+            "near(c(coef(smkfit), as.numeric(logLik(smkfit))), c(.41307718, .70451467, \
+             .83658198, -53.356319178), 5e-5)"
+                .into(),
+            // R and I2 of yb, yc, yd and jointly, then of yb with yc
+            "near(c(smkfit_het$jwr$R[1:4], smkfit_het$jwr$R[5]), c(2.34601416, 3.26142069, \
+             1.64036365, 2.16214496, 2.67435283), 5e-5)"
+                .into(),
+            "near(smkfit_het$jwr[['I2 (%)']], c(81.83067715, 90.59873365, 62.83623306, \
+             78.60903468, 86.01821583), 5e-5)"
+                .into(),
+            "near(c(100 * max(0, 1 - 1 / smkfit_het$H2), smkfit_het$H2), c(86.28906123, \
+             7.29344662), 5e-5)"
+                .into(),
+            "near(smkfit_het$white, c(66.94080585, 85.72997395, 6.87373305), 5e-5)".into(),
+            "near(c(diag(smkfit$G), smkfit$G[1, 2]), c(.451656, .451656, .451656, .3690338), \
+             1e-4)"
+                .into(),
+        ],
+    );
+}
