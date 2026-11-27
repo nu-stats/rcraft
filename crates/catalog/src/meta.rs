@@ -416,9 +416,10 @@ fn slopes_code(a: &Args, fit: &str, es: &str, options: &str) -> String {
     let mut out = format!("{es}$.study <- seq_len(nrow({es}))\n");
     let mut terms = Vec::new();
     for i in 0..raw.len() {
-        let id = raw[..=i].join(".");
+        let upto = raw.get(..=i).unwrap_or_default();
+        let id = upto.join(".");
         if i > 0 {
-            let cols: Vec<String> = raw[..=i].iter().map(|c| r_string(c)).collect();
+            let cols: Vec<String> = upto.iter().map(|c| r_string(c)).collect();
             out.push_str(&format!(
                 "{es}[[{}]] <- interaction({es}[c({})], drop = TRUE, sep = \".\")\n",
                 r_string(&id),
