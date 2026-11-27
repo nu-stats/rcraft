@@ -454,8 +454,15 @@ impl DoFileWindow {
         egui::Window::new(title)
             .id(egui::Id::new("rcraft-dofile-window"))
             .open(&mut open)
-            .default_size([960.0, 600.0])
-            .max_width(ctx.screen_rect().width() - 24.0)
+            // never wider or taller than the window (SW22)
+            .default_size([
+                960.0_f32.min(ctx.screen_rect().width() - 24.0),
+                600.0_f32.min(ctx.screen_rect().height() - 60.0),
+            ])
+            .max_size([
+                ctx.screen_rect().width() - 24.0,
+                ctx.screen_rect().height() - 60.0,
+            ])
             .resizable(true)
             .show(ctx, |ui| {
                 out = self.body(ui, pal, session);
@@ -476,7 +483,8 @@ impl DoFileWindow {
         }
         ui.label(RichText::new(self.path.display().to_string()).color(pal.dim));
         let running = self.is_running();
-        ui.horizontal(|ui| {
+        // wraps, so a long folder never makes the window wider than the screen (SW22)
+        ui.horizontal_wrapped(|ui| {
             ui.label("Runs in:");
             ui.monospace(&self.folder);
             if ui
@@ -505,7 +513,7 @@ impl DoFileWindow {
                     });
             });
         ui.add_space(4.0);
-        ui.horizontal(|ui| {
+        ui.horizontal_wrapped(|ui| {
             if running {
                 if ui.button("Stop").clicked() {
                     self.answer(Choice::Stop);
@@ -558,7 +566,7 @@ impl DoFileWindow {
         ui.label(RichText::new("Not found on this machine:").color(pal.warning));
         let mut mapped: Option<(String, String)> = None;
         for f in missing.iter().take(12) {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.monospace(&f.path);
                 let absolute = is_absolute(&f.written);
                 if absolute
@@ -936,5 +944,59 @@ fn parent(path: &str) -> String {
     match path.rfind('/') {
         Some(i) => path.get(..i).unwrap_or("").to_string(),
         None => String::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// At 820 points wide the window came out wider than the screen (a long "Runs in" folder
+    /// and a row of buttons did not wrap), so its close and Change buttons fell off the right
+    /// edge: it is now at most as wide and as tall as the window (SW22).
+    #[test]
+    fn the_window_fits_a_narrow_screen_even_with_a_long_folder() {
+        let dir = std::env::temp_dir()
+            .join(format!("rcraft-dofile-fit-{}", std::process::id()))
+            .join("a_folder_with_a_rather_long_name_to_push_the_window_wide")
+            .join("and_another_folder_with_an_even_longer_name_than_the_first_one");
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("d.do");
+        let _ = std::fs::write(&file, "set obs 5\ngenerate x = _n\nsummarize x\n");
+        let pal = Palette::new(crate::look::Accent::default(), false);
+        for (width, height) in [(820.0, 560.0), (1024.0, 640.0)] {
+            let mut window = DoFileWindow::default();
+            window.open_file(&file);
+            let ctx = egui::Context::default();
+            for _ in 0..4 {
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width, height));
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        let _ = window.show(ctx, &pal, "s");
+                    },
+                );
+            }
+            let rect = ctx
+                .memory(|m| m.area_rect(egui::Id::new("rcraft-dofile-window")))
+                .unwrap_or(egui::Rect::EVERYTHING);
+            assert!(
+                rect.left() >= -1.0 && rect.right() <= width + 1.0,
+                "at {width} wide the do-file window spans {} to {}",
+                rect.left(),
+                rect.right()
+            );
+            assert!(
+                rect.bottom() <= height + 1.0,
+                "at {height} tall it ends at {}",
+                rect.bottom()
+            );
+        }
+        let _ = std::fs::remove_dir_all(
+            std::env::temp_dir().join(format!("rcraft-dofile-fit-{}", std::process::id())),
+        );
     }
 }
