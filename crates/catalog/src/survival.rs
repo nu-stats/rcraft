@@ -951,7 +951,7 @@ pub const COX_CURVES: Spec = Spec {
             ", stype = 1".to_string()
         };
         let mut code = format!(
-            "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits({model}, \"coxph\"))\n\
+            "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits(tryCatch({model}, error = function(e) NULL), \"coxph\"))\n\
              {curves} <- survival::survfit({fitted}{newdata}, conf.int = {}{stype})\n{}",
             a.choice("conf"),
             EFRON_BASELINE
@@ -1051,7 +1051,7 @@ fn hazard_code(
         )
     };
     let mut code = format!(
-        "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits({model}, \"coxph\"))\n\
+        "stopifnot(\"this needs a Cox model fitted with coxph\" = inherits(tryCatch({model}, error = function(e) NULL), \"coxph\"))\n\
          stopifnot(\"the hazard needs a model without strata or case weights, as Stata's stcurve\" = \
          is.null(attr(stats::terms({model}), \"specials\")$strata) && is.null({model}$weights))\n\
          {curves} <- local({{\n  m <- {model}\n  \

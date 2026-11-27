@@ -1,0 +1,93 @@
+// TEMPORARY targeted sweep (2026-11-26): append to crates/ui-egui/src/app/sweep.rs (the harness in sweep-harness.rs.txt). Not to be committed as source.
+// Needs the R packages fixest, plm, rstanarm, sampleSelection, lavaan, vars, survival. Run: cargo test -p rcraft-ui-egui sweep_targeted -- --ignored --nocapture
+fn panel_context(dataset: &str) -> Context {
+    use VarKind::*;
+    let cols = [("id", Number), ("t", Number), ("x", Number), ("x2", Number), ("z", Number), ("y", Number), ("y01", Number), ("cnt", Number), ("sel", Number), ("ysel", Number), ("g", Factor), ("a", Number), ("b", Number), ("c", Number)];
+    Context { dataset: dataset.into(), columns: cols.iter().map(|(n, k)| ColumnInfo { name: n.to_string(), kind: *k }).collect(), frames: vec![] }
+}
+
+type Case = (&'static str, &'static str, &'static [(&'static str, &'static str)], &'static [(&'static str, &'static [&'static str])], &'static [(&'static str, bool)]);
+
+#[test]
+#[ignore]
+fn sweep_targeted() {
+    let ctx = egui::Context::default();
+    let Some(mut app) = start(&ctx) else { return };
+    let dir = out_dir();
+    let setup = "set.seed(2); pan <- expand.grid(t = 1:8, id = 1:30); pan$x <- rnorm(240); pan$x2 <- rnorm(240); pan$z <- pan$x + rnorm(240); \
+        u <- rnorm(30)[pan$id]; pan$y <- 1 + 0.5 * pan$x + 0.3 * pan$x2 + u + rnorm(240); pan$y01 <- as.integer(pan$y > 1); pan$cnt <- rpois(240, exp(0.2 + 0.2 * pan$x)); \
+        pan$sel <- as.integer(pan$z + rnorm(240) > 0); pan$ysel <- ifelse(pan$sel == 1, pan$y, NA); pan$g <- factor(sample(c('a','b','c'), 240, TRUE)); \
+        pan$a <- rnorm(240); pan$b <- pan$a + rnorm(240); pan$c <- pan$a + rnorm(240); \
+        pan <- pan[order(pan$id, pan$t), ]; rownames(pan) <- NULL; \
+        cox <- survival::coxph(survival::Surv(t, y01) ~ x + x2, data = pan); invisible(TRUE)";
+    let (o, t) = r(&mut app, &ctx, setup);
+    eprintln!("setup {o} {t}");
+    let cases: &[Case] = &[
+        ("Fixed-effects regression", "pan", &[("y", "y"), ("errors", "cluster"), ("cluster", "")], &[("x", &["x", "x2"]), ("fe", &["id"])], &[]),
+        ("Fixed-effects regression", "pan", &[("y", "y"), ("errors", "iid")], &[("x", &["x"]), ("fe", &["id", "t"])], &[]),
+        ("Fixed-effects count or binary", "pan", &[("y", "cnt"), ("family", "poisson"), ("exposure", "")], &[("x", &["x"]), ("fe", &["id"])], &[]),
+        ("Fixed-effects count or binary", "pan", &[("y", "y01"), ("family", "logit")], &[("x", &["x"]), ("fe", &["id"])], &[]),
+        ("Panel models > Panel model", "pan", &[("y", "y"), ("id", "id"), ("time", "t"), ("model", "within"), ("effect", "individual")], &[("x", &["x", "x2"])], &[]),
+        ("Panel models > Panel model", "pan", &[("y", "y"), ("id", "id"), ("time", "t"), ("model", "random"), ("errors", "group")], &[("x", &["x", "x2"])], &[]),
+        ("Hausman", "pan", &[("y", "y"), ("id", "id"), ("time", "t")], &[("x", &["x", "x2"])], &[]),
+        ("Dynamic panel", "pan", &[("y", "y"), ("id", "id"), ("time", "t"), ("method", "difference")], &[("x", &["x"])], &[]),
+        ("Dynamic panel", "pan", &[("y", "y"), ("id", "id"), ("time", "t"), ("method", "system"), ("steps", "onestep")], &[("x", &["x"])], &[]),
+        ("Panel instrumental", "pan", &[("y", "y"), ("id", "id"), ("time", "t"), ("model", "within")], &[("endog", &["x"]), ("inst", &["z"]), ("x", &["x2"])], &[]),
+        ("Panel instrumental", "pan", &[("y", "y"), ("id", "id"), ("time", "t"), ("model", "random")], &[("endog", &["x"]), ("inst", &["z"]), ("x", &["x2"])], &[]),
+        ("Panel unit-root", "pan", &[("var", "y"), ("id", "id"), ("time", "t"), ("test", "levinlin")], &[], &[]),
+        ("Panel unit-root", "pan", &[("var", "y"), ("id", "id"), ("time", "t"), ("test", "ips")], &[], &[]),
+        ("Panel serial-correlation", "pan", &[("y", "y"), ("id", "id"), ("time", "t")], &[("x", &["x", "x2"])], &[]),
+        ("Bayesian regression", "pan", &[("y", "y"), ("family", "gaussian"), ("save", "bayes")], &[("x", &["x", "x2"])], &[]),
+        ("Bayesian regression", "pan", &[("y", "y01"), ("family", "binomial"), ("save", "bayes2")], &[("x", &["x"])], &[]),
+        ("Posterior predictions", "bayes", &[("data", "pan"), ("kind", "epred")], &[], &[]),
+        ("Posterior predictions", "bayes", &[("data", "pan"), ("kind", "predict"), ("prefix", "pp")], &[], &[]),
+        ("Trace plots", "bayes", &[], &[], &[]),
+        ("Compare Bayesian", "bayes", &[("others", "bayes2")], &[], &[]),
+        ("Compare Bayesian", "bayes", &[("others", "")], &[], &[]),
+        ("Two-stage least", "pan", &[("y", "y"), ("estimator", "2sls")], &[("endog", &["x"]), ("instruments", &["z"]), ("x", &["x2"])], &[]),
+        ("Two-stage least", "pan", &[("y", "y"), ("estimator", "2sls")], &[("endog", &["x"]), ("instruments", &["z"]), ("x", &["x2"]), ("fe", &["id"])], &[]),
+        ("Heckman", "pan", &[("y", "ysel"), ("selected", "sel"), ("method", "ml")], &[("x", &["x"]), ("z", &["x", "z"])], &[]),
+        ("Heckman", "pan", &[("y", "ysel"), ("selected", ""), ("method", "2step")], &[("x", &["x"]), ("z", &["x", "z"])], &[]),
+        ("Structural equation", "pan", &[("model", ""), ("latent", "L")], &[("indicators", &["a", "b", "c"]), ("outcomes", &["y"])], &[]),
+        ("Structural equation", "pan", &[("model", "L =~ a + b + c\ny ~ L + x")], &[], &[]),
+        ("Vector autoregression", "pan", &[("time", "t"), ("lags", "2"), ("irf", "8")], &[("ys", &["y", "x"])], &[]),
+        ("Survival curves from a Cox", "cox", &[("kind", "survival")], &[], &[]),
+        ("Survival curves from a Cox", "cox", &[("kind", "cumhaz")], &[], &[]),
+        ("Survival curves from a Cox", "cox", &[("kind", "hazard")], &[], &[]),
+        ("Survival curves from a Cox", "nosuchcox", &[("kind", "survival"), ("model", "nosuchcox")], &[], &[]),
+    ];
+    let mut tsv = String::from("menu\tstatus\tdetail\tcode\n");
+    for (menu, dataset, texts, lists, flags) in cases {
+        let Some(spec) = rcraft_catalog::all_specs().into_iter().find(|s| s.menu.contains(menu)) else {
+            let _ = writeln!(tsv, "{menu}\tno-such-dialog\t\t");
+            continue;
+        };
+        let dctx = panel_context(dataset);
+        let mut values = spec.defaults(&dctx);
+        for (id, v) in texts.iter() { values.set_text(id, *v); }
+        for (id, l) in lists.iter() { values.set_list(id, l.iter().map(|s| s.to_string()).collect()); }
+        for (id, f) in flags.iter() { values.set_flag(id, *f); }
+        let style = spec.styles.first().copied().unwrap_or_default();
+        let code = match spec.generate(&dctx, &values, style) {
+            Ok(c) => c,
+            Err(p) => {
+                let why: Vec<String> = p.iter().map(|p| format!("{}: {}", p.widget, p.message)).collect();
+                let _ = writeln!(tsv, "{menu} {texts:?}\tgenerate-refused\t{}\t", clean(&why.join("; ")));
+                continue;
+            }
+        };
+        let started = Instant::now();
+        app.perform(&ctx, Action::Submit(Source::Menu(spec.entry.to_string()), code.clone()));
+        let settled = frames(&mut app, &ctx, 240);
+        let (o, t) = newest(&app);
+        let status = if !settled { "TIMEOUT".to_string() } else { o };
+        let key = format!("{menu} {}", texts.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(","));
+        let _ = writeln!(tsv, "{key}\t{status}\t{:.1}s {}\t{}", started.elapsed().as_secs_f32(), clean(&t), clean(&code));
+        if !settled {
+            app.perform(&ctx, Action::Interrupt);
+            frames(&mut app, &ctx, 30);
+        }
+        let _ = std::fs::write(dir.join("targeted.tsv"), &tsv);
+    }
+    let _ = std::fs::write(dir.join("targeted.tsv"), &tsv);
+}

@@ -1238,6 +1238,32 @@ fn time_varying_covariates_match_stsplit() {
     );
 }
 
+/// Survival curves from a Cox model, asked of a name that is no model in the
+/// workspace (or not a Cox model), say what the dialog needs instead of R's
+/// "object 'cox' not found" (SW18), for the curves and the smoothed hazard.
+#[test]
+fn cox_curves_without_a_cox_model_say_what_they_need() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    for kind in ["survival", "cumhaz", "hazard"] {
+        for model in ["no_such_cox_model", "time"] {
+            let (outcome, text, _) = dialog(
+                &mut e,
+                &COX_CURVES,
+                &[("model", model), ("kind", kind), ("save", "c_none")],
+                &[],
+                &[],
+            );
+            assert_eq!(outcome, Outcome::Error, "{kind} {model}: {text}");
+            assert!(
+                text.contains("needs a Cox model fitted with coxph"),
+                "{kind} {model}: {text}"
+            );
+            assert!(!text.contains("not found"), "{kind} {model}: {text}");
+        }
+    }
+}
+
 #[test]
 fn survival_models_have_the_model_menu() {
     let Some(mut e) = engine() else { return };
