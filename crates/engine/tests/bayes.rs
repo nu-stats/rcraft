@@ -882,6 +882,13 @@ fn the_model_menu_predicts_checks_and_compares() {
             None,
         );
         assert_eq!(outcome, Outcome::Ok, "{text}");
+        // it says which columns it added (SW19)
+        assert!(
+            text.contains(&format!(
+                "Added to pa2: {prefix}, {prefix}_lower, {prefix}_upper"
+            )),
+            "{text}"
+        );
     }
     define(
         &mut e,
@@ -991,6 +998,7 @@ fn the_model_menu_predicts_checks_and_compares() {
         None,
     );
     assert_eq!(outcome, Outcome::Ok, "{text}");
+    assert!(text.contains("Added to fm: p_low, p_mid, p_high"), "{text}");
     define(
         &mut e,
         "D <- as.matrix(fol); eta <- D[, c('x1', 'x2')] %*% t(as.matrix(fm[, c('x1', 'x2')])); \
