@@ -77,7 +77,7 @@ fn engine() -> Option<Engine> {
 }
 
 fn settle(e: &mut Engine) {
-    let limit = Instant::now() + Duration::from_secs(300);
+    let limit = Instant::now() + Duration::from_secs(900);
     loop {
         e.poll(Duration::from_millis(50));
         if !e.is_working() {
@@ -2846,76 +2846,133 @@ fn outer_random_slopes_and_noconstant_random_effects_match_stata_meregress() {
     assert!(META.generate(&ctx, &values, Style::Base).is_err());
 }
 
-/// P6.11g: exchangeable and identity covariance between a level's random
-/// slopes and its intercept, `meta meregress y xc || lab: xc, covariance(
-/// exchangeable) || sid:` and the like (REML and ML, one slope and two),
-/// on `md3`. Found by a search over `rma.mv` fits, to 5e-5.
-#[test]
-fn exchangeable_and_identity_covariance_of_slopes_and_intercept_match_stata_meregress() {
+/// One fit of `meta meregress y <cols> || lab: <cols>, covariance(exchangeable
+/// or identity) || sid:` on `md3`, found by a search over `rma.mv` fits: the
+/// coefficients (slopes, then the intercept), the log of the common standard
+/// deviation, atanh of the common correlation (exchangeable) and the log of
+/// the studies' standard deviation, then the log-likelihood, to 5e-5. Each fit
+/// is its own test: on a slow runner one takes minutes, and they then run
+/// side by side.
+fn structured_slopes_fit(cov: &str, cols: &str, method: &str, names: &str, want: &[f64], ll: f64) {
     let Some(mut e) = engine() else { return };
     settle(&mut e);
     if !versions(&mut e) {
         return;
     }
-    // (name, covariance, moderators and slopes, method)
-    let fits = [
-        ("x_ex", "EX", "xc", "REML"),
-        ("x_id", "ID", "xc", "REML"),
-        ("x_exml", "EX", "xc", "ML"),
-        ("x_ex3", "EX", "xc, x2", "REML"),
-        ("x_id3", "ID", "xc, x2", "REML"),
+    let set = [
+        ("measure", "given"),
+        ("est", "y"),
+        ("se", "se"),
+        ("cluster", "lab"),
+        ("mods", cols),
+        ("slopes", cols),
+        ("slopecov", cov),
+        ("method", method),
+        ("save", "fit"),
     ];
-    for (name, cov, cols, method) in fits {
-        let set = [
-            ("measure", "given"),
-            ("est", "y"),
-            ("se", "se"),
-            ("cluster", "lab"),
-            ("mods", cols),
-            ("slopes", cols),
-            ("slopecov", cov),
-            ("method", method),
-            ("save", name),
-        ];
-        eprintln!("fitting {name}");
-        let started = Instant::now();
-        let (outcome, text, _) = dialog(&mut e, "md3", &set, NO_PLOTS);
-        eprintln!("{name}: {:?}", started.elapsed());
-        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
-    }
-    // the coefficients (slopes, then the intercept), the log of the common
-    // standard deviation, atanh of the common correlation (exchangeable) and
-    // the log of the studies' standard deviation, then the log-likelihoods
+    let started = Instant::now();
+    let (outcome, text, _) = dialog(&mut e, "md3", &set, NO_PLOTS);
+    eprintln!("{cols} {cov} {method}: {:?}", started.elapsed());
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let correlation = if cov == "EX" {
+        ", atanh(fit$rho[1])"
+    } else {
+        ""
+    };
+    let want: Vec<String> = want.iter().map(|x| format!("{x}")).collect();
     holds(
         &mut e,
         &[
-            "near(c(coef(x_ex)[c('xc', 'intrcpt')], log(sqrt(x_ex$tau2[1])), atanh(x_ex$rho[1]), \
-             log(sqrt(x_ex$sigma2))), c(.06903073, .4865318, -1.41184353, .97108534, \
-             -2.47209704), 5e-5)"
-                .into(),
-            "near(c(coef(x_id)[c('xc', 'intrcpt')], log(sqrt(x_id$tau2[1])), \
-             log(sqrt(x_id$sigma2))), c(.07895141, .48373255, -1.35373786, -2.66594829), 5e-5)"
-                .into(),
-            "near(c(coef(x_exml)[c('xc', 'intrcpt')], log(sqrt(x_exml$tau2[1])), \
-             atanh(x_exml$rho[1]), log(sqrt(x_exml$sigma2))), c(.06813773, .48879591, \
-             -1.47254051, 1.01888738, -2.4458179), 5e-5)"
-                .into(),
-            "near(c(coef(x_ex3)[c('xc', 'x2', 'intrcpt')], log(sqrt(x_ex3$tau2[1])), \
-             atanh(x_ex3$rho[1]), log(sqrt(x_ex3$sigma2))), c(.08934269, .05843243, .47597319, \
-             -1.49366099, .62100493, -2.461148), 5e-5)"
-                .into(),
-            "near(c(coef(x_id3)[c('xc', 'x2', 'intrcpt')], log(sqrt(x_id3$tau2[1])), \
-             log(sqrt(x_id3$sigma2))), c(.08709247, .05703664, .48124488, -1.49585278, \
-             -2.65832387), 5e-5)"
-                .into(),
-            "all(abs(sapply(list(x_ex, x_id, x_exml, x_ex3, x_id3), function(m) \
-             as.numeric(logLik(m))) - c(-15.2672444991, -18.3442085269, -16.2115405151, \
-             -19.5850660873, -21.5714914029)) < 5e-5)"
-                .into(),
+            format!(
+                "near(c(coef(fit)[c({names})], log(sqrt(fit$tau2[1])){correlation}, \
+                 log(sqrt(fit$sigma2))), c({}), 5e-5)",
+                want.join(", ")
+            ),
+            format!("abs(as.numeric(logLik(fit)) - ({ll})) < 5e-5"),
         ],
     );
-    // the structured level second: meta meregress y xc || reg: xc, noconstant ||
-    // lab: xc, covariance(exchangeable) || sid: (the region's slope variance at zero)
+}
+
+/// P6.11g: exchangeable and identity covariance between a level's random
+/// slopes and its intercept (REML and ML, one slope and two), checked against
+/// Stata 19's `meta meregress` on `md3`.
+#[test]
+fn exchangeable_covariance_of_a_slope_and_intercept_matches_stata_meregress() {
+    structured_slopes_fit(
+        "EX",
+        "xc",
+        "REML",
+        "'xc', 'intrcpt'",
+        &[0.06903073, 0.4865318, -1.41184353, 0.97108534, -2.47209704],
+        -15.2672444991,
+    );
+}
+
+#[test]
+fn identity_covariance_of_a_slope_and_intercept_matches_stata_meregress() {
+    structured_slopes_fit(
+        "ID",
+        "xc",
+        "REML",
+        "'xc', 'intrcpt'",
+        &[0.07895141, 0.48373255, -1.35373786, -2.66594829],
+        -18.3442085269,
+    );
+}
+
+#[test]
+fn exchangeable_covariance_of_a_slope_and_intercept_by_ml_matches_stata_meregress() {
+    structured_slopes_fit(
+        "EX",
+        "xc",
+        "ML",
+        "'xc', 'intrcpt'",
+        &[0.06813773, 0.48879591, -1.47254051, 1.01888738, -2.4458179],
+        -16.2115405151,
+    );
+}
+
+#[test]
+fn exchangeable_covariance_of_two_slopes_and_intercept_matches_stata_meregress() {
+    structured_slopes_fit(
+        "EX",
+        "xc, x2",
+        "REML",
+        "'xc', 'x2', 'intrcpt'",
+        &[
+            0.08934269,
+            0.05843243,
+            0.47597319,
+            -1.49366099,
+            0.62100493,
+            -2.461148,
+        ],
+        -19.5850660873,
+    );
+}
+
+#[test]
+fn identity_covariance_of_two_slopes_and_intercept_matches_stata_meregress() {
+    structured_slopes_fit(
+        "ID",
+        "xc, x2",
+        "REML",
+        "'xc', 'x2', 'intrcpt'",
+        &[0.08709247, 0.05703664, 0.48124488, -1.49585278, -2.65832387],
+        -21.5714914029,
+    );
+}
+
+/// The structured level second: `meta meregress y xc || reg: xc, noconstant ||
+/// lab: xc, covariance(exchangeable) || sid:` (the region's slope variance at
+/// zero).
+#[test]
+fn exchangeable_covariance_at_the_second_level_matches_stata_meregress() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
     let (outcome, text, _) = dialog(
         &mut e,
         "md3",
@@ -2939,7 +2996,11 @@ fn exchangeable_and_identity_covariance_of_slopes_and_intercept_match_stata_mere
         &["near(c(coef(x_two)[c('xc', 'intrcpt')], log(sqrt(x_two$gamma2[1])), \n          atanh(x_two$phi[1]), log(sqrt(x_two$sigma2))), c(.06903061, .48653199, -1.41184782, \n          .97109292, -2.47209367), 5e-5) && x_two$tau2 < 1e-6"
             .into()],
     );
-    // two levels with slopes and an intercept each cannot both be structured
+}
+
+/// Two levels with slopes and an intercept each cannot both be structured.
+#[test]
+fn exchangeable_covariance_at_two_levels_is_refused() {
     let ctx = context3();
     let mut values = META.defaults(&ctx);
     for (id, text) in [
