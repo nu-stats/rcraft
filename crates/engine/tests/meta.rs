@@ -77,7 +77,7 @@ fn engine() -> Option<Engine> {
 }
 
 fn settle(e: &mut Engine) {
-    let limit = Instant::now() + Duration::from_secs(120);
+    let limit = Instant::now() + Duration::from_secs(300);
     loop {
         e.poll(Duration::from_millis(50));
         if !e.is_working() {

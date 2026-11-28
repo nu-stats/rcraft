@@ -502,7 +502,7 @@ fn slopes_code(a: &Args, fit: &str, es: &str, options: &str) -> String {
              error = function(e) NULL)\n    \
              if (final) m else if (is.null(m)) 1e10 else -as.numeric(logLik(m))\n  }}\n  \
              th <- stats::optim({start}, fit1, method = \"{method}\", control = list(reltol = \
-             1e-13, maxit = 2000))$par\n  \
+             1e-11, maxit = 500))$par\n  \
              fit1(th, TRUE)\n}})\n",
             terms.join(", "),
             q * (q - 1) / 2
