@@ -15,6 +15,7 @@ pub mod graphs;
 pub mod inference;
 pub mod iv;
 pub mod meta;
+pub mod ml;
 pub mod models;
 pub mod multilevel;
 pub mod multivariate;
@@ -250,6 +251,7 @@ pub const ENTRIES: &[Entry] = &[
     verified("Vector autoregression", Area::Statistics),
     verified("Forecast", Area::Statistics),
     verified("Time-series plot", Area::Statistics),
+    verified("Machine learning model", Area::Statistics),
     verified("Model fit", Area::Statistics),
     verified("Compare models", Area::Statistics),
     verified("Predicted values and residuals", Area::Statistics),
