@@ -299,9 +299,41 @@ pub fn run_headless(options: &HeadlessOptions) -> Result<(), String> {
     let mut canvas = Canvas::new(width, height, background);
     let primitives = ctx.tessellate(shapes, ppp);
     canvas.draw(&primitives, &textures, ppp);
-    let png = encode_png(canvas.width, canvas.height, &canvas.pixels);
+    let png = compressed_png(canvas.width, canvas.height, &canvas.pixels);
     std::fs::write(&options.output, png)
         .map_err(|e| format!("could not write {}: {e}", options.output.display()))
+}
+
+/// The picture as a compressed PNG (the manual's pictures are compiled into
+/// the program, P2A.6), or the plain one `encode_png` writes if that fails.
+/// The window is opaque, so red, green and blue are enough.
+fn compressed_png(width: usize, height: usize, pixels: &[Color32]) -> Vec<u8> {
+    use image::codecs::png::{CompressionType, FilterType, PngEncoder};
+    use image::ImageEncoder;
+    let rgb: Vec<u8> = pixels
+        .iter()
+        .take(width.saturating_mul(height))
+        .flat_map(|p| {
+            let [r, g, b, _] = p.to_srgba_unmultiplied();
+            [r, g, b]
+        })
+        .collect();
+    let mut out = Vec::new();
+    let encoder =
+        PngEncoder::new_with_quality(&mut out, CompressionType::Best, FilterType::Adaptive);
+    // the encoder insists on exactly the pixels the size needs
+    let whole = Some(rgb.len()) == width.checked_mul(height).and_then(|n| n.checked_mul(3));
+    let written = match (u32::try_from(width), u32::try_from(height)) {
+        (Ok(w), Ok(h)) if whole => encoder
+            .write_image(&rgb, w, h, image::ExtendedColorType::Rgb8)
+            .is_ok(),
+        _ => false,
+    };
+    if written {
+        out
+    } else {
+        encode_png(width, height, pixels)
+    }
 }
 
 fn read_demo(path: Option<&Path>) -> Result<Vec<String>, String> {
@@ -321,6 +353,33 @@ fn read_demo(path: Option<&Path>) -> Result<Vec<String>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A picture is compressed, far smaller than its pixels, and reads back
+    /// as the same pixels; a size that does not fit falls back to the plain PNG.
+    #[test]
+    fn a_picture_is_compressed_and_reads_back() {
+        let (w, h) = (300usize, 200usize);
+        let pixels: Vec<Color32> = (0..w * h)
+            .map(|i| {
+                if i % w < 150 {
+                    Color32::from_rgb(244, 246, 248)
+                } else {
+                    Color32::from_rgb(20, 120, 110)
+                }
+            })
+            .collect();
+        let png = compressed_png(w, h, &pixels);
+        assert!(png.len() < w * h / 10, "{} bytes", png.len());
+        let back = image::load_from_memory(&png).map(|i| i.to_rgb8());
+        assert!(back.is_ok());
+        if let Ok(back) = back {
+            assert_eq!((back.width(), back.height()), (300, 200));
+            assert_eq!(back.get_pixel(0, 0).0, [244, 246, 248]);
+            assert_eq!(back.get_pixel(299, 199).0, [20, 120, 110]);
+        }
+        // too few pixels for the size: the plain encoder's PNG, not a crash
+        assert!(!compressed_png(4, 4, &[]).is_empty());
+    }
 
     #[test]
     fn a_missing_demo_file_is_an_error_not_a_crash() {

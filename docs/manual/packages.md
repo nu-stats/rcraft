@@ -14,7 +14,9 @@ CRAN's task views are lists of packages by field, such as econometrics or surviv
 
 ## Installed
 
-The packages installed here, with their versions. You can look for newer versions and update one, or all that are out of date, and remove a package. Each step asks first. Packages go into RCraft's own library, kept apart for each version of R.
+The packages installed here, with their versions. You can look for newer versions and update one, or all that are out of date, and remove a package. Each step asks first. Packages go into RCraft's own library, kept apart for each version of R. **Where does a function come from?** finds the package a function belongs to.
+
+![The Installed tab of a fresh R: the packages that come with R, and which are attached or loaded](images/packages-installed.png)
 
 ## Other sources
 

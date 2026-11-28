@@ -8,7 +8,8 @@
 //!
 //! RCraft's own manual (P2A.6, see `manual`) shows here too: Help > RCraft
 //! manual and `help rcraft` open its contents without asking R, and a search
-//! lists the manual's pages before R's.
+//! ranks the manual's pages and R's help pages together. With no R, a search
+//! answers from the manual alone.
 
 use std::time::Duration;
 
@@ -16,7 +17,7 @@ use eframe::egui::{self, RichText, TextStyle};
 use rcraft_engine::{Engine, QueryId};
 use rcraft_rcodegen::dialog_help::DialogHelp;
 use rcraft_rcodegen::help::{
-    page_code, page_of, parse_page, parse_search, search_code, HelpCommand, Hit, Page, PageAnswer,
+    page_code, page_of, parse_page, parse_search, search_code, HelpCommand, Page, PageAnswer,
 };
 use rcraft_rcodegen::help_docs::{
     extension, file_text_code, file_url, is_base_package, kind_of, manual_url, news_code,
@@ -26,7 +27,7 @@ use rcraft_rcodegen::help_docs::{
 use rcraft_statatr::differences::{self, Guide};
 
 use crate::look::Palette;
-use crate::manual::{self, Block, Span, Target};
+use crate::manual::{self, Block, Found, Span, Target};
 
 /// Most help topics listed on a package's page at once.
 const TOPICS_SHOWN: usize = 300;
@@ -50,9 +51,10 @@ enum Content {
     },
     Results {
         words: String,
-        /// The pages of RCraft's manual that fit, listed first.
-        manual: Vec<manual::Hit>,
-        hits: Vec<Hit>,
+        /// The manual's pages and R's help pages that fit, in one ranking.
+        found: Vec<Found>,
+        /// False when there was no R to ask, so only the manual was searched.
+        asked_r: bool,
     },
     /// A page of RCraft's own manual, by its name.
     Manual(&'static str),
@@ -230,8 +232,8 @@ impl HelpWindow {
                 HelpCommand::Search { words } => match parse_search(words, text) {
                     Some(hits) => Content::Results {
                         words: words.clone(),
-                        manual: manual::search(words),
-                        hits,
+                        found: manual::rank_together(words, manual::search(words), hits),
+                        asked_r: true,
                     },
                     None => Content::Message("The search did not finish.".into()),
                 },
@@ -270,9 +272,22 @@ impl HelpWindow {
         self.push(content);
     }
 
-    /// Sends a queued request to R and takes an answer that has come.
+    /// Sends a queued request to R and takes an answer that has come. With no
+    /// R, a search is answered from the manual alone.
     fn service(&mut self, engine: Option<&mut Engine>) {
-        let Some(engine) = engine else { return };
+        let Some(engine) = engine else {
+            if let Some(HelpCommand::Search { words }) = &self.queued {
+                let found = manual::rank_together(words, manual::search(words), Vec::new());
+                let words = words.clone();
+                self.queued = None;
+                self.push(Content::Results {
+                    words,
+                    found,
+                    asked_r: false,
+                });
+            }
+            return;
+        };
         if let Some((id, request)) = self.pending.clone() {
             if let Some(r) = engine.query_result(id) {
                 let (ok, text) = (r.ok, r.text.clone());
@@ -449,41 +464,42 @@ impl HelpWindow {
             }
             Some(Content::Results {
                 words,
-                manual: manual_hits,
-                hits,
+                found,
+                asked_r,
             }) => {
                 ui.label(
-                    RichText::new(format!(
-                        "{} help pages for \"{words}\"",
-                        manual_hits.len() + hits.len()
-                    ))
-                    .strong(),
+                    RichText::new(format!("{} help pages for \"{words}\"", found.len())).strong(),
                 );
-                if hits.is_empty() {
+                if !asked_r {
+                    ui.label(
+                        RichText::new("R is not running, so only RCraft's manual was searched.")
+                            .color(pal.dim),
+                    );
+                } else if !found.iter().any(|f| matches!(f, Found::R(_))) {
                     ui.label("Nothing found in the installed packages.");
                     if ui.button("Find a package for this…").clicked() {
                         *out = Some(HelpOut::FindPackages(words.clone()));
                     }
                 }
                 egui::ScrollArea::vertical().show(ui, |ui| {
-                    for h in manual_hits {
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.link(RichText::new(h.title).strong()).clicked() {
-                                *manual_page = Some(h.slug);
+                    for f in found {
+                        ui.horizontal_wrapped(|ui| match f {
+                            Found::Manual(h) => {
+                                if ui.link(RichText::new(h.title).strong()).clicked() {
+                                    *manual_page = Some(h.slug);
+                                }
+                                ui.label(RichText::new("(RCraft manual)").color(pal.dim));
                             }
-                            ui.label(RichText::new("(RCraft manual)").color(pal.dim));
-                        });
-                    }
-                    for h in hits {
-                        ui.horizontal_wrapped(|ui| {
-                            if ui.link(RichText::new(&h.topic).strong()).clicked() {
-                                *next = Some(HelpCommand::Page {
-                                    topic: h.topic.clone(),
-                                    package: Some(h.package.clone()),
-                                });
+                            Found::R(h) => {
+                                if ui.link(RichText::new(&h.topic).strong()).clicked() {
+                                    *next = Some(HelpCommand::Page {
+                                        topic: h.topic.clone(),
+                                        package: Some(h.package.clone()),
+                                    });
+                                }
+                                ui.label(RichText::new(format!("({})", h.package)).color(pal.dim));
+                                ui.label(&h.title);
                             }
-                            ui.label(RichText::new(format!("({})", h.package)).color(pal.dim));
-                            ui.label(&h.title);
                         });
                     }
                 });
@@ -960,7 +976,7 @@ fn spans_row(
     });
 }
 
-/// A page of RCraft's manual: headings, paragraphs, list items and code.
+/// A page of RCraft's manual: headings, paragraphs, list items, code and pictures.
 fn manual_view(
     ui: &mut egui::Ui,
     pal: &Palette,
@@ -1013,9 +1029,60 @@ fn manual_view(
                             );
                         });
                     }
+                    Block::Picture { alt, name } => {
+                        ui.add_space(6.0);
+                        picture_view(ui, pal, &alt, &name);
+                    }
                 }
             }
         });
+}
+
+/// A picture of the manual, as wide as there is room for (never wider than
+/// it is), with its caption under it. A picture that cannot be read shows its
+/// caption alone.
+fn picture_view(ui: &mut egui::Ui, pal: &Palette, alt: &str, name: &str) {
+    if let Some(texture) = manual::picture(name).and_then(|p| texture_of(ui.ctx(), p)) {
+        let size = texture.size_vec2();
+        // a thin border, so a picture of the window is not taken for the window
+        let width = size.x.min(ui.available_width() - 2.0).max(1.0);
+        let shown = egui::vec2(width, size.y * width / size.x.max(1.0));
+        egui::Frame::none()
+            .stroke(egui::Stroke::new(1.0_f32, pal.dim))
+            .show(ui, |ui| {
+                ui.add(egui::Image::new((texture.id(), shown)));
+            });
+    }
+    ui.label(RichText::new(alt).small().italics().color(pal.dim));
+}
+
+/// The picture's texture, decoded the first time it is shown and kept.
+fn texture_of(ctx: &egui::Context, p: &'static manual::Picture) -> Option<egui::TextureHandle> {
+    let id = egui::Id::new(("manual-picture", p.name));
+    if let Some(texture) = ctx.data(|d| d.get_temp::<egui::TextureHandle>(id)) {
+        return Some(texture);
+    }
+    let image = picture_pixels(p)?;
+    // mipmaps keep the small text legible when the picture is drawn smaller
+    let options = egui::TextureOptions {
+        mipmap_mode: Some(egui::TextureFilter::Linear),
+        ..egui::TextureOptions::LINEAR
+    };
+    let texture = ctx.load_texture(format!("manual-{}", p.name), image, options);
+    ctx.data_mut(|d| d.insert_temp(id, texture.clone()));
+    Some(texture)
+}
+
+/// A picture's pixels, or `None` when its PNG cannot be read.
+fn picture_pixels(p: &manual::Picture) -> Option<egui::ColorImage> {
+    let img = image::load_from_memory_with_format(p.png, image::ImageFormat::Png)
+        .ok()?
+        .to_rgba8();
+    let size = [
+        usize::try_from(img.width()).ok()?,
+        usize::try_from(img.height()).ok()?,
+    ];
+    Some(egui::ColorImage::from_rgba_unmultiplied(size, img.as_raw()))
 }
 
 /// The words of spans without their marks (a heading).
@@ -1152,13 +1219,23 @@ mod tests {
                 p.slug
             );
             assert!(blocks.len() > 3, "{} has some text", p.slug);
-            // every link names a page, or an R help topic that can be asked for
+            // every link names a page, or an R help topic that can be asked for,
+            // and every picture is one of the manual's
             for block in &blocks {
                 let spans = match block {
                     manual::Block::Heading(_, s)
                     | manual::Block::Paragraph(s)
                     | manual::Block::Item(_, s) => s,
                     manual::Block::Code(_) => continue,
+                    manual::Block::Picture { alt, name } => {
+                        assert!(
+                            manual::picture(name).is_some(),
+                            "{}: the picture \"{name}\" is not in the manual",
+                            p.slug
+                        );
+                        assert!(!alt.is_empty(), "{}: {name} says what it shows", p.slug);
+                        continue;
+                    }
                 };
                 for span in spans {
                     if let Span::Link { text, target } = span {
@@ -1185,6 +1262,23 @@ mod tests {
             Some(Target::Help(HelpCommand::Page { .. }))
         ));
         assert_eq!(manual::resolve("nowhere"), None);
+        // every picture is shown by a page, and reads as a picture of the window
+        for pic in manual::PICTURES {
+            let wanted = format!("](images/{})", pic.name);
+            assert!(
+                manual::PAGES.iter().any(|p| p.text.contains(&wanted)),
+                "{} is shown by a page",
+                pic.name
+            );
+            let pixels = picture_pixels(pic);
+            assert!(
+                pixels
+                    .as_ref()
+                    .is_some_and(|i| i.size[0] >= 600 && i.size[1] >= 400),
+                "{} reads as a picture of the window",
+                pic.name
+            );
+        }
 
         // searching "project" lists the Projects page first
         let found = manual::search("project");
@@ -1213,7 +1307,10 @@ mod tests {
         });
         assert!(w.is_busy());
 
-        // a search puts the manual's pages before R's hits, and keeps them when R has none
+        // a search ranks the manual's pages and R's hits together: R's page named
+        // exactly "project" first, then the Projects page (its title starts with
+        // the word), then R's page that only holds it, then pages that only
+        // mention it; the manual's pages stay when R has none
         let mut w = HelpWindow::default();
         let search = HelpCommand::Search {
             words: "project".into(),
@@ -1221,26 +1318,80 @@ mod tests {
         w.apply_answer(
             &search,
             true,
-            "@@HIT\tbase\tproject\tA Project Of R's\n@@DONE\n",
+            "@@HIT\tbase\tproject\tA Project Of R's\n\
+             @@HIT\tstats\tsubproject\tA Part Of One\n\
+             @@HIT\tutils\tsomething\tMentions It\n@@DONE\n",
         );
-        match w.current() {
-            Some(Content::Results { manual, hits, .. }) => {
-                assert_eq!(
-                    manual.first().map(|h| h.slug),
-                    Some("projects-and-reporting")
-                );
-                assert_eq!(hits.len(), 1);
+        let order = |w: &HelpWindow| -> Vec<String> {
+            match w.current() {
+                Some(Content::Results { found, .. }) => found
+                    .iter()
+                    .map(|f| match f {
+                        Found::Manual(h) => format!("manual:{}", h.slug),
+                        Found::R(h) => format!("r:{}", h.topic),
+                    })
+                    .collect(),
+                _ => Vec::new(),
             }
-            other => panic!("expected results, got {other:?}"),
-        }
-        w.apply_answer(&search, true, "@@DONE\n");
+        };
+        let got = order(&w);
+        assert_eq!(
+            got.get(..3),
+            Some(
+                &[
+                    "r:project".to_string(),
+                    "manual:projects-and-reporting".to_string(),
+                    "r:subproject".to_string()
+                ][..]
+            ),
+            "{got:?}"
+        );
+        // a page that only mentions the word comes before R's page that only matched it
+        let mentions = got.iter().position(|s| s == "r:something");
+        let manual_mention = got
+            .iter()
+            .position(|s| s.starts_with("manual:") && s != "manual:projects-and-reporting");
         assert!(
-            matches!(w.current(), Some(Content::Results { manual, hits, .. })
-                if !manual.is_empty() && hits.is_empty())
+            manual_mention.is_some() && manual_mention < mentions,
+            "{got:?}"
+        );
+        w.apply_answer(&search, true, "@@DONE\n");
+        let got = order(&w);
+        assert!(
+            !got.is_empty() && got.iter().all(|s| s.starts_with("manual:")),
+            "{got:?}"
+        );
+        assert_eq!(
+            got.first().map(String::as_str),
+            Some("manual:projects-and-reporting")
         );
 
-        // the manual draws, page by page, without a session
+        // with no R, a search answers from the manual alone and waits for nothing
         let pal = Palette::new(crate::look::Accent::default(), false);
+        let ctx = egui::Context::default();
+        let mut w = HelpWindow::default();
+        w.request(HelpCommand::Search {
+            words: "histogram".into(),
+        });
+        assert!(w.is_busy());
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            let _ = w.show(ctx, &pal, None);
+        });
+        assert!(!w.is_busy(), "nothing waits for an R that is not there");
+        assert!(matches!(
+            w.current(),
+            Some(Content::Results { found, asked_r: false, .. })
+                if matches!(found.first(), Some(Found::Manual(h)) if h.slug == "graphs-dialogs")
+        ));
+        // ... and a page request still waits for R
+        let mut w = HelpWindow::default();
+        w.request(page_request("mean"));
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            let _ = w.show(ctx, &pal, None);
+        });
+        assert!(w.is_busy());
+
+        // the manual draws, page by page, without a session, pictures and all
         let mut w = HelpWindow::default();
         let ctx = egui::Context::default();
         for p in manual::PAGES {
@@ -1258,6 +1409,16 @@ mod tests {
                     },
                 );
             }
+        }
+        // every picture a page shows was made into a texture as it drew
+        for pic in manual::PICTURES {
+            let id = egui::Id::new(("manual-picture", pic.name));
+            assert!(
+                ctx.data(|d| d.get_temp::<egui::TextureHandle>(id))
+                    .is_some(),
+                "{} was drawn",
+                pic.name
+            );
         }
         // a name that is not a page opens the contents
         w.show_manual(Some("no-such-page"));
@@ -1293,7 +1454,8 @@ mod tests {
             true,
             "@@HIT\tstats\tlm\tFitting Linear Models\n@@DONE\n",
         );
-        assert!(matches!(w.current(), Some(Content::Results { hits, .. }) if hits.len() == 1));
+        assert!(matches!(w.current(), Some(Content::Results { found, .. })
+            if found.iter().filter(|f| matches!(f, Found::R(_))).count() == 1));
         w.apply_answer(&search, true, "half an answer");
         assert!(matches!(w.current(), Some(Content::Message(_))));
         w.apply_answer(&page_request("x"), false, "boom");
