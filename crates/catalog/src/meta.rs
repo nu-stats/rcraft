@@ -497,6 +497,7 @@ fn slopes_code(a: &Args, fit: &str, es: &str, options: &str) -> String {
              standard deviation (and atanh correlation) is found by maximising the likelihood of \
              rma.mv with them fixed; the other variances are estimated inside each fit\n  \
              fit1 <- function(th, final = FALSE) {{\n    \
+             if (!final && (th[1] < -8 || th[1] > 4 || any(abs(th[-1]) > 5))) return(1e10)\n    \
              m <- tryCatch(metafor::rma.mv(yi, vi, random = list({}), struct = \"GEN\", {var} = \
              rep(exp(2 * th[1]), {q}), {cor} = rep({correlation}, {}), data = {es}{options}), \
              error = function(e) NULL)\n    \

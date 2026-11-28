@@ -2877,7 +2877,10 @@ fn exchangeable_and_identity_covariance_of_slopes_and_intercept_match_stata_mere
             ("method", method),
             ("save", name),
         ];
+        eprintln!("fitting {name}");
+        let started = Instant::now();
         let (outcome, text, _) = dialog(&mut e, "md3", &set, NO_PLOTS);
+        eprintln!("{name}: {:?}", started.elapsed());
         assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
     }
     // the coefficients (slopes, then the intercept), the log of the common
