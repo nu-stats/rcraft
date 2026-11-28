@@ -103,6 +103,8 @@ const fn verified(name: &'static str, area: Area) -> Entry {
     }
 }
 
+// no entry is planned now; the next planned one is written with it
+#[allow(dead_code)]
 const fn planned(name: &'static str, area: Area) -> Entry {
     Entry {
         name,
@@ -296,7 +298,7 @@ pub const ENTRIES: &[Entry] = &[
     verified("Help topic", Area::Help),
     verified("Search help", Area::Help),
     verified("Vignettes", Area::Help),
-    planned("RCraft manual", Area::Help),
+    verified("RCraft manual", Area::Help),
 ];
 
 #[cfg(test)]

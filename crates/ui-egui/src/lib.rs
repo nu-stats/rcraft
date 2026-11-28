@@ -15,6 +15,7 @@ mod headless;
 mod help_window;
 mod import_dialog;
 pub mod look;
+mod manual;
 mod package_window;
 mod packages;
 mod project;
