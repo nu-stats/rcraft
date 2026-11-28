@@ -5,6 +5,10 @@
 //! The text comes from R (see `rcodegen::help`): a hidden query asks the
 //! session for the page, so nothing is added to Results, the log or the
 //! history until the user runs an example. Works offline.
+//!
+//! RCraft's own manual (P2A.6, see `manual`) shows here too: Help > RCraft
+//! manual and `help rcraft` open its contents without asking R, and a search
+//! lists the manual's pages before R's.
 
 use std::time::Duration;
 
@@ -22,6 +26,7 @@ use rcraft_rcodegen::help_docs::{
 use rcraft_statatr::differences::{self, Guide};
 
 use crate::look::Palette;
+use crate::manual::{self, Block, Span, Target};
 
 /// Most help topics listed on a package's page at once.
 const TOPICS_SHOWN: usize = 300;
@@ -45,8 +50,12 @@ enum Content {
     },
     Results {
         words: String,
+        /// The pages of RCraft's manual that fit, listed first.
+        manual: Vec<manual::Hit>,
         hits: Vec<Hit>,
     },
+    /// A page of RCraft's own manual, by its name.
+    Manual(&'static str),
     Message(String),
     /// The help page of one of RCraft's own dialogs.
     Dialog(Box<DialogHelp>),
@@ -94,10 +103,34 @@ impl HelpWindow {
     /// Opens the window on a request: a page, or a search.
     pub fn request(&mut self, command: HelpCommand) {
         self.open = true;
+        // `help rcraft` and `?rcraft` are the manual's contents, answered here, not by R
+        if matches!(&command, HelpCommand::Page { topic, package: None } if topic == "rcraft") {
+            self.show_manual(None);
+            return;
+        }
         if let HelpCommand::Search { words } = &command {
             self.query = words.clone();
         }
         self.queued = Some(command);
+    }
+
+    /// Opens the window on a page of RCraft's manual (its contents when none,
+    /// or when the name is not a page). Nothing is asked of R.
+    pub fn show_manual(&mut self, slug: Option<&str>) {
+        self.open = true;
+        let page = slug
+            .and_then(manual::page)
+            .map_or(manual::CONTENTS, |p| p.slug);
+        self.push(Content::Manual(page));
+    }
+
+    /// The manual page showing, if one is (tests).
+    #[cfg(test)]
+    pub fn shown_manual(&self) -> Option<&'static str> {
+        match self.current() {
+            Some(Content::Manual(slug)) => Some(slug),
+            _ => None,
+        }
     }
 
     /// Opens the window on the help page of a dialog. Nothing is asked of R.
@@ -197,6 +230,7 @@ impl HelpWindow {
                 HelpCommand::Search { words } => match parse_search(words, text) {
                     Some(hits) => Content::Results {
                         words: words.clone(),
+                        manual: manual::search(words),
                         hits,
                     },
                     None => Content::Message("The search did not finish.".into()),
@@ -278,6 +312,7 @@ impl HelpWindow {
         let mut out = None;
         let mut next: Option<HelpCommand> = None;
         let mut guide: Option<&'static Guide> = None;
+        let mut page: Option<&'static str> = None;
         let mut open = self.open;
         egui::Window::new("Help")
             .open(&mut open)
@@ -296,11 +331,14 @@ impl HelpWindow {
                 if self.pending.is_some() || self.queued.is_some() {
                     ui.label(RichText::new("Asking R…").color(pal.dim));
                 }
-                self.body(ui, pal, ctx, &mut next, &mut guide, &mut out);
+                self.body(ui, pal, ctx, &mut next, &mut guide, &mut page, &mut out);
             });
         self.open = open;
         if let Some(page) = guide {
             self.push(Content::Stata(page));
+        }
+        if let Some(slug) = page {
+            self.push(Content::Manual(slug));
         }
         if let Some(command) = next {
             self.queued = Some(command);
@@ -347,6 +385,7 @@ impl HelpWindow {
         });
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn body(
         &self,
         ui: &mut egui::Ui,
@@ -354,11 +393,15 @@ impl HelpWindow {
         ctx: &egui::Context,
         next: &mut Option<HelpCommand>,
         guide: &mut Option<&'static Guide>,
+        manual_page: &mut Option<&'static str>,
         out: &mut Option<HelpOut>,
     ) {
         match self.current() {
             None => {
                 ui.add_space(8.0);
+                if ui.link("RCraft manual").clicked() {
+                    *manual_page = Some(manual::CONTENTS);
+                }
                 ui.label("Type a topic or some words above. For example: mean, lm, or linear regression.");
                 ui.label(
                     RichText::new(
@@ -404,9 +447,17 @@ impl HelpWindow {
                     });
                 }
             }
-            Some(Content::Results { words, hits }) => {
+            Some(Content::Results {
+                words,
+                manual: manual_hits,
+                hits,
+            }) => {
                 ui.label(
-                    RichText::new(format!("{} help pages for \"{words}\"", hits.len())).strong(),
+                    RichText::new(format!(
+                        "{} help pages for \"{words}\"",
+                        manual_hits.len() + hits.len()
+                    ))
+                    .strong(),
                 );
                 if hits.is_empty() {
                     ui.label("Nothing found in the installed packages.");
@@ -415,6 +466,14 @@ impl HelpWindow {
                     }
                 }
                 egui::ScrollArea::vertical().show(ui, |ui| {
+                    for h in manual_hits {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.link(RichText::new(h.title).strong()).clicked() {
+                                *manual_page = Some(h.slug);
+                            }
+                            ui.label(RichText::new("(RCraft manual)").color(pal.dim));
+                        });
+                    }
                     for h in hits {
                         ui.horizontal_wrapped(|ui| {
                             if ui.link(RichText::new(&h.topic).strong()).clicked() {
@@ -432,6 +491,7 @@ impl HelpWindow {
             Some(Content::Page(page)) => self.page(ui, pal, ctx, page, next, out),
             Some(Content::Dialog(page)) => self.dialog_page(ui, pal, ctx, page, next),
             Some(Content::Stata(page)) => stata_page(ui, pal, page, guide),
+            Some(Content::Manual(slug)) => manual_view(ui, pal, slug, next, manual_page),
             Some(Content::Package(doc)) => self.package_page(ui, pal, ctx, doc, next),
             Some(Content::NoPackage(package)) => {
                 ui.label(
@@ -856,6 +916,119 @@ impl HelpWindow {
     }
 }
 
+/// One line of a manual page: text, bold, code and links, wrapping together. A
+/// link to a page sets `page`; a `help:` link asks for R's help page. A link
+/// that names nothing is shown as plain text.
+fn spans_row(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    spans: &[Span],
+    next: &mut Option<HelpCommand>,
+    page: &mut Option<&'static str>,
+) {
+    ui.horizontal_wrapped(|ui| {
+        // the spans' own spaces are the only ones
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for span in spans {
+            match span {
+                Span::Text(t) => {
+                    ui.label(t);
+                }
+                Span::Bold(t) => {
+                    ui.label(RichText::new(t).strong());
+                }
+                Span::Code(t) => {
+                    ui.label(RichText::new(t).monospace().color(pal.accent));
+                }
+                Span::Link { text, target } => match manual::resolve(target) {
+                    Some(Target::Page(slug)) => {
+                        if ui.link(text).clicked() {
+                            *page = Some(slug);
+                        }
+                    }
+                    Some(Target::Help(request)) => {
+                        if ui.link(text).clicked() {
+                            *next = Some(request);
+                        }
+                    }
+                    None => {
+                        ui.label(text);
+                    }
+                },
+            }
+        }
+    });
+}
+
+/// A page of RCraft's manual: headings, paragraphs, list items and code.
+fn manual_view(
+    ui: &mut egui::Ui,
+    pal: &Palette,
+    slug: &str,
+    next: &mut Option<HelpCommand>,
+    page: &mut Option<&'static str>,
+) {
+    let Some(shown) = manual::page(slug) else {
+        ui.label("That page is not in the manual.");
+        return;
+    };
+    let top = slug != manual::CONTENTS;
+    egui::ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            if top {
+                if ui.link("◀ Contents").clicked() {
+                    *page = Some(manual::CONTENTS);
+                }
+                ui.add_space(4.0);
+            }
+            for block in manual::parse(shown.text) {
+                match block {
+                    Block::Heading(level, spans) => {
+                        ui.add_space(if level == 1 { 2.0 } else { 8.0 });
+                        let text = spans_text(&spans);
+                        let size = if level == 1 { 19.0 } else { 15.0 };
+                        ui.label(RichText::new(text).strong().size(size));
+                    }
+                    Block::Paragraph(spans) => {
+                        ui.add_space(4.0);
+                        spans_row(ui, pal, &spans, next, page);
+                    }
+                    Block::Item(number, spans) => {
+                        ui.horizontal_top(|ui| {
+                            ui.add_space(12.0);
+                            ui.label(match number {
+                                Some(n) => format!("{n}."),
+                                None => "•".to_string(),
+                            });
+                            ui.vertical(|ui| spans_row(ui, pal, &spans, next, page));
+                        });
+                    }
+                    Block::Code(text) => {
+                        ui.add_space(4.0);
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.set_width(ui.available_width());
+                            ui.add(
+                                egui::Label::new(RichText::new(text).monospace()).selectable(true),
+                            );
+                        });
+                    }
+                }
+            }
+        });
+}
+
+/// The words of spans without their marks (a heading).
+fn spans_text(spans: &[Span]) -> String {
+    spans
+        .iter()
+        .map(|s| match s {
+            Span::Text(t) | Span::Bold(t) | Span::Code(t) => t.as_str(),
+            Span::Link { text, .. } => text.as_str(),
+        })
+        .collect()
+}
+
 /// A page of the differences guide: what the command does, then each point;
 /// the general page ends with the list of the commands' pages.
 fn stata_page(
@@ -963,6 +1136,132 @@ mod tests {
                 rect.bottom()
             );
         }
+    }
+
+    /// P2A.6: every page of RCraft's manual loads and draws, every link in it
+    /// goes somewhere, a search finds the Projects page first for "project", and
+    /// `help rcraft` opens the contents without asking R.
+    #[test]
+    fn manual_pages_are_found_by_search() {
+        // every page loads, has a title and reads into blocks
+        for p in manual::PAGES {
+            let blocks = manual::parse(p.text);
+            assert!(
+                matches!(blocks.first(), Some(manual::Block::Heading(1, _))),
+                "{} starts with its title",
+                p.slug
+            );
+            assert!(blocks.len() > 3, "{} has some text", p.slug);
+            // every link names a page, or an R help topic that can be asked for
+            for block in &blocks {
+                let spans = match block {
+                    manual::Block::Heading(_, s)
+                    | manual::Block::Paragraph(s)
+                    | manual::Block::Item(_, s) => s,
+                    manual::Block::Code(_) => continue,
+                };
+                for span in spans {
+                    if let Span::Link { text, target } = span {
+                        assert!(
+                            manual::resolve(target).is_some(),
+                            "{}: the link \"{text}\" goes to \"{target}\", which is not there",
+                            p.slug
+                        );
+                    }
+                }
+            }
+        }
+        // the contents list every other page
+        let index = manual::page(manual::CONTENTS).map_or("", |p| p.text);
+        for p in manual::PAGES.iter().skip(1) {
+            assert!(
+                index.contains(&format!("]({})", p.slug)),
+                "{} is listed",
+                p.slug
+            );
+        }
+        assert!(matches!(
+            manual::resolve("help:lm"),
+            Some(Target::Help(HelpCommand::Page { .. }))
+        ));
+        assert_eq!(manual::resolve("nowhere"), None);
+
+        // searching "project" lists the Projects page first
+        let found = manual::search("project");
+        assert_eq!(
+            found.first().map(|h| h.slug),
+            Some("projects-and-reporting")
+        );
+
+        // `help rcraft` and `?rcraft` open the contents, and nothing is asked of R
+        for typed in ["help rcraft", "?rcraft", "help(rcraft)"] {
+            let mut w = HelpWindow::default();
+            let command = rcraft_rcodegen::help::parse_command(typed);
+            assert!(command.is_some(), "{typed} is a help request");
+            if let Some(command) = command {
+                w.request(command);
+            }
+            assert!(w.open);
+            assert_eq!(w.shown_manual(), Some(manual::CONTENTS), "{typed}");
+            assert!(!w.is_busy(), "{typed} asks nothing of R");
+        }
+        // a topic of another package is still R's
+        let mut w = HelpWindow::default();
+        w.request(HelpCommand::Page {
+            topic: "rcraft".into(),
+            package: Some("stats".into()),
+        });
+        assert!(w.is_busy());
+
+        // a search puts the manual's pages before R's hits, and keeps them when R has none
+        let mut w = HelpWindow::default();
+        let search = HelpCommand::Search {
+            words: "project".into(),
+        };
+        w.apply_answer(
+            &search,
+            true,
+            "@@HIT\tbase\tproject\tA Project Of R's\n@@DONE\n",
+        );
+        match w.current() {
+            Some(Content::Results { manual, hits, .. }) => {
+                assert_eq!(
+                    manual.first().map(|h| h.slug),
+                    Some("projects-and-reporting")
+                );
+                assert_eq!(hits.len(), 1);
+            }
+            other => panic!("expected results, got {other:?}"),
+        }
+        w.apply_answer(&search, true, "@@DONE\n");
+        assert!(
+            matches!(w.current(), Some(Content::Results { manual, hits, .. })
+                if !manual.is_empty() && hits.is_empty())
+        );
+
+        // the manual draws, page by page, without a session
+        let pal = Palette::new(crate::look::Accent::default(), false);
+        let mut w = HelpWindow::default();
+        let ctx = egui::Context::default();
+        for p in manual::PAGES {
+            w.show_manual(Some(p.slug));
+            assert_eq!(w.shown_manual(), Some(p.slug));
+            for _ in 0..3 {
+                let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(900.0, 700.0));
+                let _ = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(screen),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        let _ = w.show(ctx, &pal, None);
+                    },
+                );
+            }
+        }
+        // a name that is not a page opens the contents
+        w.show_manual(Some("no-such-page"));
+        assert_eq!(w.shown_manual(), Some(manual::CONTENTS));
     }
 
     #[test]
