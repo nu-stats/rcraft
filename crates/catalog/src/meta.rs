@@ -381,8 +381,7 @@ fn fit_code(a: &Args, fit: &str) -> String {
         // effect for each level
         // effect for each level (outer clusters first, as Stata's relevels())
         Some(cluster) => {
-            let slopes = a.vars("slopes");
-            if slopes.is_empty() {
+            if a.vars("slopes").is_empty() && a.vars("oslopes").is_empty() {
                 let mut levels: Vec<String> = a.vars("outer").iter().map(|c| r_name(c)).collect();
                 levels.push(cluster);
                 out.push_str(&format!(
@@ -402,6 +401,25 @@ fn fit_code(a: &Args, fit: &str) -> String {
     out
 }
 
+/// How many levels have two or more random effects (a slope and the intercept,
+/// or two slopes), the ones an exchangeable or identity covariance applies to.
+fn multi_effect_levels(a: &Args) -> usize {
+    let q = |slopes: &str, no_intercept: &str| {
+        let n = a.vars(slopes).len();
+        if n == 0 {
+            0
+        } else {
+            n + usize::from(!a.flag(no_intercept))
+        }
+    };
+    let outer = if q("oslopes", "onoint") >= 2 {
+        a.vars("outer").len()
+    } else {
+        0
+    };
+    outer + usize::from(q("slopes", "noint") >= 2)
+}
+
 /// The multilevel fit with random slopes at the clusters, as Stata's
 /// `meta meregress y x || region: || lab: x`: one random-effects term for each
 /// level, the cluster level's with its slopes (and its intercept), and the
@@ -412,9 +430,11 @@ fn fit_code(a: &Args, fit: &str) -> String {
 fn slopes_code(a: &Args, fit: &str, es: &str, options: &str) -> String {
     let mut raw: Vec<&str> = a.vars("outer");
     raw.push(a.var_text("cluster"));
-    let slope_terms: Vec<String> = a.vars("slopes").iter().map(|s| r_name(s)).collect();
+    let names = |id: &str| -> Vec<String> { a.vars(id).iter().map(|s| r_name(s)).collect() };
+    let (slope_terms, outer_terms) = (names("slopes"), names("oslopes"));
     let mut out = format!("{es}$.study <- seq_len(nrow({es}))\n");
     let mut terms = Vec::new();
+    let (mut structured, mut with_slopes) = (None, 0usize);
     for i in 0..raw.len() {
         let upto = raw.get(..=i).unwrap_or_default();
         let id = upto.join(".");
@@ -426,14 +446,69 @@ fn slopes_code(a: &Args, fit: &str, es: &str, options: &str) -> String {
                 cols.join(", ")
             ));
         }
-        let rhs = if i + 1 == raw.len() {
-            slope_terms.join(" + ")
+        // a level's slopes (the clusters' own, or the outer levels'), with
+        // or without its random intercept (Stata's noconstant)
+        let (cols, no_intercept) = if i + 1 == raw.len() {
+            (&slope_terms, a.flag("noint"))
         } else {
-            "1".to_string()
+            (&outer_terms, a.flag("onoint"))
         };
+        let rhs = if cols.is_empty() {
+            "1".to_string()
+        } else if no_intercept {
+            format!("{} - 1", cols.join(" + "))
+        } else {
+            cols.join(" + ")
+        };
+        // the level whose slopes and intercept get an exchangeable or identity
+        // covariance: its place among the terms with slopes, and its random effects
+        if !cols.is_empty() {
+            let q = cols.len() + usize::from(!no_intercept);
+            if q >= 2 && matches!(a.choice("slopecov"), "EX" | "ID") {
+                structured = Some((with_slopes, q));
+            }
+            with_slopes += 1;
+        }
         terms.push(format!("~ {rhs} | {}", r_name(&id)));
     }
     terms.push("~ 1 | .study".to_string());
+    if let Some((position, q)) = structured {
+        let (var, cor) = if position == 0 {
+            ("tau2", "rho")
+        } else {
+            ("gamma2", "phi")
+        };
+        let correlation = if a.choice("slopecov") == "EX" {
+            "tanh(th[2])"
+        } else {
+            "0"
+        };
+        let (start, method) = if a.choice("slopecov") == "EX" {
+            ("c(log(stats::sd(es$yi) / 2), 0.5)", "Nelder-Mead")
+        } else {
+            ("log(stats::sd(es$yi) / 2)", "BFGS")
+        };
+        let start = start.replace("es$", &format!("{es}$"));
+        return format!(
+            "{out}{fit} <- local({{\n  \
+             # Stata's covariance(exchangeable) and covariance(identity): the level's random \
+             slopes and intercept have one standard deviation (and, exchangeable, one common \
+             correlation). metafor has no such structure for numeric slopes, so the common log \
+             standard deviation (and atanh correlation) is found by maximising the likelihood of \
+             rma.mv with them fixed; the other variances are estimated inside each fit\n  \
+             fit1 <- function(th, final = FALSE) {{\n    \
+             if (!final && (th[1] < -8 || th[1] > 4 || any(abs(th[-1]) > 5))) return(1e10)\n    \
+             m <- tryCatch(metafor::rma.mv(yi, vi, random = list({}), struct = \"GEN\", {var} = \
+             rep(exp(2 * th[1]), {q}), {cor} = rep({correlation}, {}), data = {es}{options}), \
+             error = function(e) NULL)\n    \
+             if (final) m else if (is.null(m)) 1e10 else -as.numeric(logLik(m))\n  }}\n  \
+             th <- stats::optim({start}, fit1, method = \"{method}\", control = list(reltol = \
+             1e-11, maxit = 500))$par\n  \
+             fit1(th, TRUE)\n}})\n",
+            terms.join(", "),
+            q * (q - 1) / 2
+        );
+    }
     let structure = if a.choice("slopecov") == "UN" {
         "GEN"
     } else {
@@ -781,6 +856,31 @@ fn meta_check(a: &Args) -> Vec<Problem> {
             "Random slopes are at the clusters: choose the clusters too.",
         ));
     }
+    if matches!(a.choice("slopecov"), "EX" | "ID") && multi_effect_levels(a) > 1 {
+        out.push(Problem::new(
+            "slopecov",
+            "An exchangeable or identity covariance is fitted for one level at a time: keep the \
+             slopes at one level (or leave the intercept out at the other), or choose \
+             independent or unstructured.",
+        ));
+    }
+    if !a.vars("oslopes").is_empty() && a.vars("outer").is_empty() {
+        out.push(Problem::new(
+            "oslopes",
+            "Random slopes at the outer clusters need outer clusters: choose them above.",
+        ));
+    }
+    for (id, flag, slopes, what) in [
+        ("noint", "noint", "slopes", "the clusters"),
+        ("onoint", "onoint", "oslopes", "the outer clusters"),
+    ] {
+        if a.flag(flag) && a.vars(slopes).is_empty() {
+            out.push(Problem::new(
+                id,
+                format!("Without a random intercept, {what} need random slopes: choose them."),
+            ));
+        }
+    }
     let fcols = a.vars("fcols");
     if !fcols.is_empty() && !a.flag("forest") {
         out.push(Problem::new(
@@ -1066,6 +1166,29 @@ pub const META: Spec = Spec {
                    middle) to be told apart from the intercept; with one study per cluster Stata \
                    itself finds their standard deviations at zero.",
         },
+        Widget::Check {
+            id: "noint",
+            label: "No random intercept with the slopes at the clusters",
+            default: false,
+            hint: "As Stata's || lab: x, noconstant: the clusters get random slopes only, no \
+                   random intercept of their own.",
+        },
+        Widget::Variables {
+            id: "oslopes",
+            label: "Random slopes at the outer clusters",
+            kinds: NUMBERS,
+            min: 0,
+            hint: "Optional: columns whose coefficient varies from one outer cluster to the next \
+                   (at every outer level chosen above), as Stata's meta meregress y x || region: \
+                   x || lab:. Needs outer clusters, and as few as three or four regions leave \
+                   the slope's standard deviation poorly determined.",
+        },
+        Widget::Check {
+            id: "onoint",
+            label: "No random intercept with the slopes at the outer clusters",
+            default: false,
+            hint: "As Stata's || region: x, noconstant.",
+        },
         Widget::Choice {
             id: "slopecov",
             label: "Covariance of the slopes and the intercept",
@@ -1078,10 +1201,22 @@ pub const META: Spec = Spec {
                     value: "UN",
                     label: "Unstructured",
                 },
+                Opt {
+                    value: "EX",
+                    label: "Exchangeable (one standard deviation, one correlation)",
+                },
+                Opt {
+                    value: "ID",
+                    label: "Identity (one standard deviation, no correlation)",
+                },
             ],
             default: "ind",
-            hint: "As Stata's covariance(independent) and covariance(unstructured) for the \
-                   clusters' random effects; the unstructured one adds the correlations.",
+            hint: "As Stata's covariance() for the random effects of a level: independent, \
+                   unstructured (adds the correlations), exchangeable (equal standard \
+                   deviations for the slopes and the intercept, one common correlation) or \
+                   identity (equal standard deviations, no correlation). The last two are found \
+                   by a search over rma.mv fits and are slower; they apply to one level with a \
+                   slope and the intercept (or two slopes) at a time.",
         },
         Widget::Variable {
             id: "subgroup",
@@ -1268,13 +1403,15 @@ pub const META: Spec = Spec {
                 "cat(\"\\nStandard deviation of each level (Stata's sd(_cons))\\n\")\n\
                  print(stats::setNames(sqrt({fit}$sigma2), {fit}$s.names))\n"
             ));
-            if !a.vars("slopes").is_empty() {
+            if !a.vars("slopes").is_empty() || !a.vars("oslopes").is_empty() {
                 out.push_str(&format!(
-                    "cat(\"\\nStandard deviations of the clusters' intercept and slopes (Stata's \
-                     sd(_cons), sd(x))\\n\")\n\
-                     print(stats::setNames(sqrt({fit}$tau2), head({fit}$g.names, -1)))\n\
-                     if (!is.null({fit}$rho) && length({fit}$rho) > 0) {{\n  \
-                     cat(\"Correlations (Stata's corr())\\n\")\n  print({fit}$rho)\n}}\n"
+                    "for (g in list(list({fit}$tau2, {fit}$g.names, {fit}$rho), \
+                     list({fit}$gamma2, {fit}$h.names, {fit}$phi))) if (length(g[[1]]) > 0) {{\n  \
+                     cat(\"\\nStandard deviations of the intercept and slopes at\", tail(g[[2]], \
+                     1), \"(Stata's sd(_cons), sd(x))\\n\")\n  \
+                     print(stats::setNames(sqrt(g[[1]]), head(g[[2]], -1)))\n  \
+                     if (length(g[[3]]) > 0 && !all(is.na(g[[3]]))) {{\n    \
+                     cat(\"Correlations (Stata's corr())\\n\")\n    print(g[[3]])\n  }}\n}}\n"
                 ));
             }
         }
@@ -1399,6 +1536,39 @@ fn correlations(text: &str, count: usize) -> Option<Vec<String>> {
     (values.len() == count && valid).then_some(values)
 }
 
+/// The known between-study covariance typed (Stata's `covariance(fixed())`
+/// matrix) as its `count` = p(p + 1)/2 numbers in the order v11 v12 ... v1p
+/// v22 ... vpp, kept as typed; `None` when they do not parse.
+fn sigma_values(text: &str, count: usize) -> Option<Vec<String>> {
+    let values: Vec<String> = text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|v| !v.is_empty())
+        .map(str::to_string)
+        .collect();
+    let valid = values
+        .iter()
+        .all(|v| v.parse::<f64>().is_ok_and(f64::is_finite));
+    (values.len() == count && valid).then_some(values)
+}
+
+/// The lines, inside the fit's `local`, that set `S` to the known
+/// between-study covariance matrix typed, and the standard deviations and
+/// correlations the fit then fixes (the same `s0` and `cr` as the
+/// Jackson-White-Riley code).
+fn known_sigma_code(a: &Args) -> String {
+    let p = a.vars("outcomes").len();
+    let values = sigma_values(a.values.text("sigma"), p * (p + 1) / 2).unwrap_or_default();
+    format!(
+        "  # the known between-study covariance matrix, typed as v11 v12 ... v1p v22 ... vpp\n  \
+         S <- matrix(0, p, p); S[lower.tri(S, diag = TRUE)] <- c({}); S <- S + t(S) - diag(diag(S), \
+         p)\n  \
+         if (min(eigen(S, symmetric = TRUE, only.values = TRUE)$values) < -1e-10 * max(1, \
+         max(abs(S)))) stop(\"The between-study covariance is not positive semidefinite.\")\n  \
+         s0 <- sqrt(diag(S)); cr <- S / outer(s0, s0); cr[!is.finite(cr)] <- 0\n",
+        values.join(", ")
+    )
+}
+
 /// The sets of outcome names typed for `jwriley(names)`: sets separated by
 /// semicolons, names by spaces or commas; empty sets dropped.
 fn subsets(text: &str) -> Vec<Vec<String>> {
@@ -1463,6 +1633,25 @@ fn mv_check(a: &Args) -> Vec<Problem> {
             "struct",
             "The Jackson-White-Riley method allows only the unstructured covariance, as in Stata.",
         ));
+    }
+    if a.choice("method") == "KNOWN" {
+        if sigma_values(a.values.text("sigma"), need).is_none() {
+            out.push(Problem::new(
+                "sigma",
+                format!(
+                    "With {p} outcomes, type the known between-study covariance as its {need} \
+                     numbers, in the order v11 v12 ... v1{p} v22 ... v{p}{p} (a variance, then \
+                     the covariances of the row)."
+                ),
+            ));
+        }
+        if a.choice("struct") != "UN" {
+            out.push(Problem::new(
+                "struct",
+                "A known between-study covariance has no structure to choose: leave the \
+                 covariance box at its default.",
+            ));
+        }
     }
     for set in subsets(a.values.text("jwsub")) {
         if let Some(bad) = set.iter().find(|n| !outcomes.contains(&n.as_str())) {
@@ -1623,15 +1812,30 @@ pub const MV_META: Spec = Spec {
                     label: "Random effects, Jackson-White-Riley (no iteration)",
                 },
                 Opt {
+                    value: "KNOWN",
+                    label: "Random effects, known between-study covariance",
+                },
+                Opt {
                     value: "FE",
                     label: "Fixed effects",
                 },
             ],
             default: "REML",
-            hint: "REML is Stata's default; random(mle), random(jwriley) and fixed. The \
-                   Jackson-White-Riley estimate of the between-study covariance is a method of \
-                   moments (the multivariate DerSimonian-Laird), needs no iteration, and allows \
-                   only the unstructured covariance.",
+            hint: "REML is Stata's default; random(mle), random(jwriley), \
+                   covariance(fixed(matrix)) and fixed. The Jackson-White-Riley estimate of the \
+                   between-study covariance is a method of moments (the multivariate \
+                   DerSimonian-Laird), needs no iteration, and allows only the unstructured \
+                   covariance. A known covariance is typed in the box below and not estimated.",
+        },
+        Widget::Text {
+            id: "sigma",
+            label: "Known between-study covariance",
+            default: TextDefault::Empty,
+            rule: TextRule::Any,
+            hint: "With a known covariance: the matrix's numbers in the order v11 v12 ... v1p v22 \
+                   ... vpp (two outcomes: the first variance, the covariance, the second \
+                   variance), as Stata's covariance(fixed(matname)). It must be positive \
+                   semidefinite. Good for a sensitivity analysis.",
         },
         Widget::Choice {
             id: "struct",
@@ -1810,11 +2014,15 @@ pub const MV_META: Spec = Spec {
         let btt = if mods.is_empty() { "" } else { ", btt = \":\"" };
         let (random, jwr) = match method {
             "FE" => (String::new(), String::new()),
-            "JWR" => (
+            "JWR" | "KNOWN" => (
                 ", random = ~ outcome | study, struct = \"UN\", tau2 = diag(S), \
                  rho = cr[lower.tri(cr)]"
                     .to_string(),
-                jwr_code(&terms),
+                if method == "JWR" {
+                    jwr_code(&terms)
+                } else {
+                    known_sigma_code(a)
+                },
             ),
             _ => (
                 format!(

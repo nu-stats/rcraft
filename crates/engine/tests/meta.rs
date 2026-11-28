@@ -77,7 +77,7 @@ fn engine() -> Option<Engine> {
 }
 
 fn settle(e: &mut Engine) {
-    let limit = Instant::now() + Duration::from_secs(120);
+    let limit = Instant::now() + Duration::from_secs(900);
     loop {
         e.poll(Duration::from_millis(50));
         if !e.is_working() {
@@ -181,6 +181,9 @@ const MAKE: &str = "md <- local({ \
      md$e2m <- md$est2; md$e2m[c(3, 8)] <- NA; md$yr <- md$year; md$yr[2] <- NA; \
      md$d2 <- md$est2; md$d2[c(3, 8, 11)] <- NA; md$f1 <- md$est; md$f1[c(2, 9)] <- NA; \
      md$v22m <- md$v22; md$v22m[3] <- NA; \
+     md$v12a <- md$v12; md$v12a[3] <- NA; md$v12b <- md$v12; md$v12b[8] <- NA; \
+     md$v12c <- md$v12; md$v12c[c(3, 8)] <- NA; \
+     md$v12e <- md$v12; md$v12e[2] <- NA; md$v12f <- md$v12; md$v12f[c(2, 9)] <- NA; \
      md$yc <- md$year - 2007; \
      md$ey <- round(md$est + c(0.24, -0.18, 0.09, -0.27, 0.21, -0.06, 0.30)[md$lab] * md$yc, 4); \
      mm <- local({ k <- md; k$est[5] <- NA; k }); \
@@ -194,7 +197,7 @@ fn context(dataset: &str) -> Context {
     let mut columns: Vec<ColumnInfo> = [
         "year", "n1", "m1", "sd1", "n2", "m2", "sd2", "a", "b", "c", "d", "est", "se", "r", "nr",
         "lab", "set", "est2", "se2", "v11", "v12", "v22", "reg", "est3", "se3", "v13", "v23",
-        "v33", "e2m", "yr", "yc", "ey", "d2", "f1", "v22m",
+        "v33", "e2m", "yr", "yc", "ey", "d2", "f1", "v22m", "v12a", "v12b", "v12c", "v12e", "v12f",
     ]
     .into_iter()
     .map(|name| ColumnInfo {
@@ -245,10 +248,18 @@ fn dialog(
 ) -> (Outcome, String, usize) {
     let (made, text, _) = run(e, Source::Typed, MAKE);
     assert_eq!(made, Outcome::Ok, "{text}");
-    let ctx = context(dataset);
+    let ctx = if dataset == "md3" {
+        let (made, text, _) = run(e, Source::Typed, MAKE3);
+        assert_eq!(made, Outcome::Ok, "{text}");
+        context3()
+    } else {
+        context(dataset)
+    };
     let mut values = META.defaults(&ctx);
-    for (id, text) in COLUMNS.iter().chain(set) {
-        if matches!(*id, "mods" | "outer" | "fcols" | "slopes") {
+    // md3 has only the columns the test names
+    let base: &[(&str, &str)] = if dataset == "md3" { &[] } else { COLUMNS };
+    for (id, text) in base.iter().chain(set) {
+        if matches!(*id, "mods" | "outer" | "fcols" | "slopes" | "oslopes") {
             values.set_list(id, text.split(',').map(|m| m.trim().to_string()).collect());
         } else {
             values.set_text(id, *text);
@@ -2444,4 +2455,656 @@ fn random_slopes_at_the_clusters_match_stata_meregress() {
     }
     values.set_list("slopes", vec!["yc".into()]);
     assert!(META.generate(&ctx, &values, Style::Base).is_err());
+}
+
+/// P6.11g: `meta mvregress ..., random(reml, covariance(fixed(S)))`, a known
+/// between-study covariance (nothing is iterated, so every figure is Stata's to
+/// 1e-7: Stata stops its own coefficient solve a hair short of the exact one, 2e-9
+/// to 1e-8 away): two outcomes with and without the year, three outcomes, an outcome
+/// missing in two studies, and Jackson-Riley errors on top.
+#[test]
+fn a_known_between_study_covariance_matches_stata_covariance_fixed() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let w2: &[&str] = &["v11", "v12", "v22"];
+    let w3: &[&str] = &["v11", "v12", "v13", "v22", "v23", "v33"];
+    type Lists<'a> = &'a [(&'a str, &'a [&'a str])];
+    let fits: [(Lists, &str, &str, bool); 5] = [
+        (
+            &[("outcomes", &["est", "est2"]), ("wcov", w2)],
+            ".04 .01 .02",
+            "kn",
+            false,
+        ),
+        (
+            &[
+                ("outcomes", &["est", "est2"]),
+                ("wcov", w2),
+                ("mods", &["year"]),
+            ],
+            ".04 .01 .02",
+            "kn_year",
+            false,
+        ),
+        (
+            &[("outcomes", &["est", "est2", "est3"]), ("wcov", w3)],
+            ".05 .01 .005 .03 .002 .02",
+            "kn3",
+            false,
+        ),
+        (
+            &[("outcomes", &["est", "e2m"]), ("wcov", w2)],
+            ".04 .01 .02",
+            "kn_miss",
+            false,
+        ),
+        (
+            &[("outcomes", &["est", "est2"]), ("wcov", w2)],
+            ".04 .01 .02",
+            "kn_jr",
+            true,
+        ),
+    ];
+    for (lists, sigma, name, jriley) in fits {
+        let (outcome, text) = mv(
+            &mut e,
+            lists,
+            &[("method", "KNOWN"), ("sigma", sigma), ("save", name)],
+            &[("jriley", jriley), ("het", false)],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+    }
+    holds(
+        &mut e,
+        &[
+            "near(c(coef(kn), kn$vb[c(1, 2, 4)], kn$QE), c(.429597286966789, .451609610398216, \
+             .00655495399812446, .00163871257063115, .002428363664988, 195.1458605469677), 1e-7)"
+                .into(),
+            "near(c(coef(kn_year), diag(kn_year$vb)), c(-19.8152692524863, -9.2745203245961, \
+             .0100889873349273, .00484663323154115, 1433.76000970417, 551.210448027282, \
+             .000356073590345689, .000136856997592558), 1e-7)"
+                .into(),
+            "near(c(coef(kn3), diag(kn3$vb), kn3$vb[c(2, 3, 6)]), c(.439319512532905, \
+             .453287643911792, .433544865299574, .007365746875019, .00317906687387001, \
+             .00371847455258911, .00164922757777136, .00118682316098082, \
+             .000422335461694211), 1e-7)"
+                .into(),
+            "kn_miss$k == 26 && near(c(coef(kn_miss), kn_miss$vb[c(1, 2, 4)]), \
+             c(.429593263439728, .489096193009911, .00655495401211244, .0016387061833315, \
+             .00283620251936711), 1e-7)"
+                .into(),
+            // Jackson-Riley on top: the variances scaled by 2.36829, the
+            // covariance as it is, t tests on 26 degrees of freedom
+            "near(c(kn_jr$seadj, kn_jr$vb[c(1, 2, 4)]), c(2.36829295738337, \
+             .0155240513897301, .00163871257063115, .00575107656575675), 1e-7) && \
+             all(kn_jr$ddf == 26)"
+                .into(),
+            "near(c(sqrt(kn$tau2), kn$rho), c(.2, .141421356237310, .353553390593274), 1e-12)"
+                .into(),
+        ],
+    );
+    // the dialog needs the numbers, and a covariance that is a matrix
+    let ctx = context("md");
+    let mut values = MV_META.defaults(&ctx);
+    values.set_list("outcomes", vec!["est".into(), "est2".into()]);
+    values.set_list("wcov", vec!["v11".into(), "v12".into(), "v22".into()]);
+    values.set_text("method", "KNOWN");
+    assert!(MV_META.generate(&ctx, &values, Style::Base).is_err());
+    values.set_text("sigma", ".04 .01");
+    assert!(MV_META.generate(&ctx, &values, Style::Base).is_err());
+    values.set_text("sigma", ".04 .01 .02");
+    values.set_text("struct", "DIAG");
+    assert!(MV_META.generate(&ctx, &values, Style::Base).is_err());
+    values.set_text("struct", "UN");
+    assert!(MV_META.generate(&ctx, &values, Style::Base).is_ok());
+    // a matrix that is not positive semidefinite is an error in R, not a fit
+    let (outcome, text) = mv(
+        &mut e,
+        &[("outcomes", &["est", "est2"]), ("wcov", w2)],
+        &[
+            ("method", "KNOWN"),
+            ("sigma", ".01 .05 .01"),
+            ("save", "kn_bad"),
+        ],
+        &[("het", false)],
+    );
+    assert_eq!(outcome, Outcome::Error, "{text}");
+    assert!(text.contains("not positive semidefinite"), "{text}");
+}
+
+/// P6.11g: Stata's `se(jriley)` scale where a within-study covariance is
+/// missing at an outcome that is itself missing (the covariance read as 0).
+#[test]
+fn jackson_riley_scale_with_a_missing_covariance_at_a_missing_outcome_matches_stata() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    for (outs, cov, name, jwr, fixed) in [
+        (
+            ["est", "e2m"],
+            "v12",
+            "cv0",
+            1.1569092607686,
+            2.51142534528901,
+        ),
+        (
+            ["est", "e2m"],
+            "v12a",
+            "cv1",
+            1.15354406183538,
+            2.4902543388654,
+        ),
+        (
+            ["est", "e2m"],
+            "v12b",
+            "cv2",
+            1.15619403534328,
+            2.50345818087167,
+        ),
+        (
+            ["est", "e2m"],
+            "v12c",
+            "cv3",
+            1.15289569356009,
+            2.48373576881418,
+        ),
+        // the covariance missing where the first outcome is the missing one
+        (["f1", "est2"], "v12", "cv4", 1.13414855965688, 0.0),
+        (["f1", "est2"], "v12e", "cv5", 1.12202004213096, 0.0),
+        (["f1", "est2"], "v12f", "cv6", 1.12046714020209, 0.0),
+    ] {
+        let wcov: [&str; 3] = ["v11", cov, "v22"];
+        let (outcome, text) = mv(
+            &mut e,
+            &[("outcomes", &outs), ("wcov", &wcov)],
+            &[("method", "JWR"), ("save", name)],
+            &[("jriley", true), ("het", false)],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+        let kname = format!("{name}k");
+        let (outcome, text) = mv(
+            &mut e,
+            &[("outcomes", &outs), ("wcov", &wcov)],
+            &[
+                ("method", "KNOWN"),
+                ("sigma", ".04 .01 .02"),
+                ("save", &kname),
+            ],
+            &[("jriley", true), ("het", false)],
+        );
+        assert_eq!(outcome, Outcome::Ok, "{kname}: {text}");
+        let mut checks = vec![format!("near({name}$seadj, {jwr}, 1e-7)")];
+        if fixed > 0.0 {
+            checks.push(format!("near({kname}$seadj, {fixed}, 1e-7)"));
+        }
+        holds(&mut e, &checks);
+    }
+    // REML with the variance missing at the missing outcome (Stata's 1.00512387;
+    // the fit does not depend on the missing covariance or variance)
+    let (outcome, text) = mv(
+        &mut e,
+        &[
+            ("outcomes", &["est", "e2m"]),
+            ("wcov", &["v11", "v12a", "v22m"]),
+        ],
+        &[("save", "cv_reml")],
+        &[("jriley", true), ("het", false)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(&mut e, &["near(cv_reml$seadj, 1.00512387, 5e-5)".into()]);
+}
+
+/// A third made-up data set for random slopes (P6.11g): 48 studies in 12 labs
+/// (four each; three regions of four labs), an estimate `y` with its standard
+/// error `se`, a centred moderator `xc` and an unrelated one `x2`. A lab's
+/// intercept and slope on `xc` are correlated (0.6), so that Stata's
+/// unstructured fit puts the correlation inside (0.859), not on the boundary as
+/// with `md`. Plain `rnorm` draws (`set.seed(2611)`) are the same on every
+/// platform.
+const MAKE3: &str = "md3 <- local({ \
+     set.seed(2611); nl <- 12; per <- 4; k <- nl * per; \
+     lab <- rep(1:nl, each = per); reg <- rep(1:3, each = 16); \
+     xc <- round(runif(k, -3, 3), 2); \
+     u0 <- rnorm(nl, 0, 0.25); u1 <- 0.6 * (0.15 / 0.25) * u0 + sqrt(1 - 0.36) * rnorm(nl, 0, 0.15); \
+     se <- round(runif(k, 0.1, 0.3), 4); \
+     y <- round(0.4 + u0[lab] + (0.1 + u1[lab]) * xc + rnorm(k, 0, 0.1) + rnorm(k, 0, se), 4); \
+     data.frame(sid = 1:k, lab = lab, reg = reg, xc = xc, x2 = round(rnorm(k), 2), y = y, \
+       se = se) }); \
+     near <- function(a, b, tol) isTRUE(length(a) == length(b) && \
+       all(abs(a - b) <= tol * pmax(abs(b), 1e-3)))";
+
+fn context3() -> Context {
+    let columns = ["sid", "lab", "reg", "xc", "x2", "y", "se"]
+        .into_iter()
+        .map(|name| ColumnInfo {
+            name: name.into(),
+            kind: VarKind::Number,
+        })
+        .collect();
+    Context {
+        dataset: "md3".into(),
+        frames: Vec::new(),
+        columns,
+    }
+}
+
+/// P6.11g: `meta meregress y xc || lab: xc, covariance(unstructured) || sid:`
+/// on `md3`, where the correlation is not on the boundary, compared
+/// coefficient by coefficient (REML, to 5e-5), with the independent fit beside.
+#[test]
+fn unstructured_random_slopes_off_the_boundary_match_stata_meregress() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    for (cov, name) in [("UN", "s3_un"), ("ind", "s3_ind")] {
+        let (outcome, text, _) = dialog(
+            &mut e,
+            "md3",
+            &[
+                ("measure", "given"),
+                ("est", "y"),
+                ("se", "se"),
+                ("cluster", "lab"),
+                ("mods", "xc"),
+                ("slopes", "xc"),
+                ("slopecov", cov),
+                ("save", name),
+            ],
+            NO_PLOTS,
+        );
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+    }
+    // the coefficients, the logs of sd(xc), sd(_cons) and the studies' sd, and
+    // the atanh of the correlation (Stata's atr1_1_1_2)
+    holds(
+        &mut e,
+        &[
+            "near(c(coef(s3_un)[c('xc', 'intrcpt')], log(sqrt(c(s3_un$tau2[2:1], s3_un$sigma2))), \
+             atanh(s3_un$rho)), c(.0739208, .49433008, -1.72260666, -1.19046505, -2.51558016, \
+             1.28857742), 5e-5)"
+                .into(),
+            "abs(as.numeric(logLik(s3_un)) - -13.7180383541) < 2e-5".into(),
+            "near(c(coef(s3_ind)[c('xc', 'intrcpt')], log(sqrt(c(s3_ind$tau2[2:1], \
+             s3_ind$sigma2)))), c(.08517284, .48134957, -1.57409161, -1.17931568, \
+             -2.77013184), 5e-5)"
+                .into(),
+            "abs(as.numeric(logLik(s3_ind)) - -17.841199) < 2e-5".into(),
+        ],
+    );
+}
+
+/// P6.11g: random slopes at an outer level and `noconstant` random effects,
+/// `meta meregress y xc || reg: xc || lab: xc, noconstant || sid:` and the
+/// like, on `md3` (REML to 5e-5, `mle` for the last).
+#[test]
+fn outer_random_slopes_and_noconstant_random_effects_match_stata_meregress() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    // (name, outer, outer slopes, outer noconstant, slopes, noconstant, method)
+    let fits: [(&str, &str, &str, bool, &str, bool, &str); 6] = [
+        ("n_a", "", "", false, "xc", true, "REML"),
+        ("n_b", "reg", "xc", false, "", false, "REML"),
+        ("n_c", "reg", "xc", false, "xc", false, "REML"),
+        ("n_d", "reg", "xc", true, "", false, "REML"),
+        ("n_e", "reg", "", false, "xc", true, "REML"),
+        ("n_f", "", "", false, "xc", true, "ML"),
+    ];
+    for (name, outer, oslopes, onoint, slopes, noint, method) in fits {
+        let mut set = vec![
+            ("measure", "given"),
+            ("est", "y"),
+            ("se", "se"),
+            ("cluster", "lab"),
+            ("mods", "xc"),
+            ("method", method),
+            ("save", name),
+        ];
+        for (id, v) in [("outer", outer), ("oslopes", oslopes), ("slopes", slopes)] {
+            if !v.is_empty() {
+                set.push((id, v));
+            }
+        }
+        let flags = [
+            ("forest", false),
+            ("funnel", false),
+            ("noint", noint),
+            ("onoint", onoint),
+        ];
+        let (outcome, text, _) = dialog(&mut e, "md3", &set, &flags);
+        assert_eq!(outcome, Outcome::Ok, "{name}: {text}");
+        if name == "n_c" {
+            assert!(text.contains("intercept and slopes at"), "{name}: {text}");
+        }
+    }
+    // the coefficients (xc, then the intercept) and the logs of Stata's
+    // standard deviations in its order, then the log-likelihood
+    holds(
+        &mut e,
+        &[
+            // noconstant slope at the clusters
+            "near(c(coef(n_a)[c('xc', 'intrcpt')], log(sqrt(c(n_a$tau2, n_a$sigma2)))), \
+             c(.07143318, .51531467, -1.36143399, -1.23728176), 5e-5)"
+                .into(),
+            // slope at the region (the clusters keep their intercept)
+            "near(c(coef(n_b)[c('xc', 'intrcpt')], log(sqrt(c(n_b$tau2[2], n_b$tau2[1], \
+             n_b$sigma2)))), c(.09867601, .508976, -2.00257372, -1.52604736, -1.11177612, \
+             -1.45678806), 5e-5)"
+                .into(),
+            // slopes at the region and at the clusters (metafor's second
+            // term is gamma2)
+            "near(c(coef(n_c)[c('xc', 'intrcpt')], log(sqrt(c(n_c$tau2[2], n_c$tau2[1], \
+             n_c$gamma2[2], n_c$gamma2[1], n_c$sigma2)))), c(.09249947, .48691607, -2.18714105, \
+             -1.96887299, -1.74680226, -1.25094589, -2.65717), 5e-5)"
+                .into(),
+            // noconstant slope at the region
+            "near(c(coef(n_d)[c('xc', 'intrcpt')], log(sqrt(c(n_d$tau2, n_d$sigma2)))), \
+             c(.09852808, .50725521, -2.00330522, -.97130562, -1.4549849), 5e-5)"
+                .into(),
+            // noconstant slope at the clusters under a region intercept
+            "near(c(coef(n_e)[c('xc', 'intrcpt')], log(sqrt(c(n_e$sigma2[1], n_e$tau2, \
+             n_e$sigma2[2])))), c(.07581934, .49940768, -1.84047678, -1.41049422, -1.34485451), \
+             5e-5)"
+                .into(),
+            // maximum likelihood
+            "near(c(coef(n_f)[c('xc', 'intrcpt')], log(sqrt(c(n_f$tau2, n_f$sigma2)))), \
+             c(.07142308, .51620748, -1.4199614, -1.25571683), 5e-5)"
+                .into(),
+            "all(abs(sapply(list(n_a, n_b, n_c, n_d, n_e, n_f), function(m) \
+             as.numeric(logLik(m))) - c(-28.0526487077, -24.6595617409, -17.4112083208, \
+             -25.0444134709, -26.6604373463, -29.0564338501)) < 5e-5)"
+                .into(),
+        ],
+    );
+    // outer slopes need outer clusters, and noconstant needs its slopes
+    let ctx = context3();
+    let mut values = META.defaults(&ctx);
+    for (id, text) in [
+        ("measure", "given"),
+        ("est", "y"),
+        ("se", "se"),
+        ("cluster", "lab"),
+    ] {
+        values.set_text(id, text);
+    }
+    values.set_list("oslopes", vec!["xc".into()]);
+    assert!(META.generate(&ctx, &values, Style::Base).is_err());
+    values.set_list("oslopes", Vec::new());
+    values.set_flag("noint", true);
+    assert!(META.generate(&ctx, &values, Style::Base).is_err());
+    values.set_flag("noint", false);
+    values.set_flag("onoint", true);
+    assert!(META.generate(&ctx, &values, Style::Base).is_err());
+}
+
+/// One fit of `meta meregress y <cols> || lab: <cols>, covariance(exchangeable
+/// or identity) || sid:` on `md3`, found by a search over `rma.mv` fits: the
+/// coefficients (slopes, then the intercept), the log of the common standard
+/// deviation, atanh of the common correlation (exchangeable) and the log of
+/// the studies' standard deviation, then the log-likelihood, to 5e-5. Each fit
+/// is its own test: on a slow runner one takes minutes, and they then run
+/// side by side.
+fn structured_slopes_fit(cov: &str, cols: &str, method: &str, names: &str, want: &[f64], ll: f64) {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let set = [
+        ("measure", "given"),
+        ("est", "y"),
+        ("se", "se"),
+        ("cluster", "lab"),
+        ("mods", cols),
+        ("slopes", cols),
+        ("slopecov", cov),
+        ("method", method),
+        ("save", "fit"),
+    ];
+    let started = Instant::now();
+    let (outcome, text, _) = dialog(&mut e, "md3", &set, NO_PLOTS);
+    eprintln!("{cols} {cov} {method}: {:?}", started.elapsed());
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    let correlation = if cov == "EX" {
+        ", atanh(fit$rho[1])"
+    } else {
+        ""
+    };
+    let want: Vec<String> = want.iter().map(|x| format!("{x}")).collect();
+    holds(
+        &mut e,
+        &[
+            format!(
+                "near(c(coef(fit)[c({names})], log(sqrt(fit$tau2[1])){correlation}, \
+                 log(sqrt(fit$sigma2))), c({}), 5e-5)",
+                want.join(", ")
+            ),
+            format!("abs(as.numeric(logLik(fit)) - ({ll})) < 5e-5"),
+        ],
+    );
+}
+
+/// P6.11g: exchangeable and identity covariance between a level's random
+/// slopes and its intercept (REML and ML, one slope and two), checked against
+/// Stata 19's `meta meregress` on `md3`.
+#[test]
+fn exchangeable_covariance_of_a_slope_and_intercept_matches_stata_meregress() {
+    structured_slopes_fit(
+        "EX",
+        "xc",
+        "REML",
+        "'xc', 'intrcpt'",
+        &[0.06903073, 0.4865318, -1.41184353, 0.97108534, -2.47209704],
+        -15.2672444991,
+    );
+}
+
+#[test]
+fn identity_covariance_of_a_slope_and_intercept_matches_stata_meregress() {
+    structured_slopes_fit(
+        "ID",
+        "xc",
+        "REML",
+        "'xc', 'intrcpt'",
+        &[0.07895141, 0.48373255, -1.35373786, -2.66594829],
+        -18.3442085269,
+    );
+}
+
+#[test]
+fn exchangeable_covariance_of_a_slope_and_intercept_by_ml_matches_stata_meregress() {
+    structured_slopes_fit(
+        "EX",
+        "xc",
+        "ML",
+        "'xc', 'intrcpt'",
+        &[0.06813773, 0.48879591, -1.47254051, 1.01888738, -2.4458179],
+        -16.2115405151,
+    );
+}
+
+#[test]
+fn exchangeable_covariance_of_two_slopes_and_intercept_matches_stata_meregress() {
+    structured_slopes_fit(
+        "EX",
+        "xc, x2",
+        "REML",
+        "'xc', 'x2', 'intrcpt'",
+        &[
+            0.08934269,
+            0.05843243,
+            0.47597319,
+            -1.49366099,
+            0.62100493,
+            -2.461148,
+        ],
+        -19.5850660873,
+    );
+}
+
+#[test]
+fn identity_covariance_of_two_slopes_and_intercept_matches_stata_meregress() {
+    structured_slopes_fit(
+        "ID",
+        "xc, x2",
+        "REML",
+        "'xc', 'x2', 'intrcpt'",
+        &[0.08709247, 0.05703664, 0.48124488, -1.49585278, -2.65832387],
+        -21.5714914029,
+    );
+}
+
+/// The structured level second: `meta meregress y xc || reg: xc, noconstant ||
+/// lab: xc, covariance(exchangeable) || sid:` (the region's slope variance at
+/// zero).
+#[test]
+fn exchangeable_covariance_at_the_second_level_matches_stata_meregress() {
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let (outcome, text, _) = dialog(
+        &mut e,
+        "md3",
+        &[
+            ("measure", "given"),
+            ("est", "y"),
+            ("se", "se"),
+            ("cluster", "lab"),
+            ("outer", "reg"),
+            ("oslopes", "xc"),
+            ("mods", "xc"),
+            ("slopes", "xc"),
+            ("slopecov", "EX"),
+            ("save", "x_two"),
+        ],
+        &[("forest", false), ("funnel", false), ("onoint", true)],
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    holds(
+        &mut e,
+        &["near(c(coef(x_two)[c('xc', 'intrcpt')], log(sqrt(x_two$gamma2[1])), \n          atanh(x_two$phi[1]), log(sqrt(x_two$sigma2))), c(.06903061, .48653199, -1.41184782, \n          .97109292, -2.47209367), 5e-5) && x_two$tau2 < 1e-6"
+            .into()],
+    );
+}
+
+/// Two levels with slopes and an intercept each cannot both be structured.
+#[test]
+fn exchangeable_covariance_at_two_levels_is_refused() {
+    let ctx = context3();
+    let mut values = META.defaults(&ctx);
+    for (id, text) in [
+        ("measure", "given"),
+        ("est", "y"),
+        ("se", "se"),
+        ("cluster", "lab"),
+        ("slopecov", "EX"),
+    ] {
+        values.set_text(id, text);
+    }
+    values.set_list("outer", vec!["reg".into()]);
+    values.set_list("oslopes", vec!["xc".into()]);
+    values.set_list("slopes", vec!["xc".into()]);
+    assert!(META.generate(&ctx, &values, Style::Base).is_err());
+    // but a level without its intercept is a single random effect, left alone
+    values.set_flag("onoint", true);
+    assert!(META.generate(&ctx, &values, Style::Base).is_ok());
+}
+
+/// P6.11g: the manual's smoking-cessation example of `estat heterogeneity`
+/// (`meta mvregress y*, wcovvariables(v*) random(mle, covariance(exchangeable))`
+/// on StataCorp's `smokecess`, 24 studies, 31 of 72 values given), checked by
+/// hand once: Stata 19 prints the figures of its manual, and the dialog equals
+/// them to 5e-5. The data are StataCorp's and are not in the repository, so the
+/// test runs only when `RCRAFT_SMOKECESS_CSV` names a CSV of `yb yc yd vbb vbc
+/// vbd vcc vcd vdd` (Stata's `export delimited`), and is otherwise ignored.
+#[test]
+#[ignore = "needs StataCorp's smokecess data, not in the repository"]
+fn the_smoking_cessation_example_of_estat_heterogeneity_matches_stata() {
+    let Ok(path) = std::env::var("RCRAFT_SMOKECESS_CSV") else {
+        eprintln!("skipped: RCRAFT_SMOKECESS_CSV is not set");
+        return;
+    };
+    let Some(mut e) = engine() else { return };
+    settle(&mut e);
+    if !versions(&mut e) {
+        return;
+    }
+    let path = path.replace('\\', "/");
+    let (made, text, _) = run(
+        &mut e,
+        Source::Typed,
+        &format!(
+            "smk <- read.csv('{path}'); near <- function(a, b, tol) isTRUE(length(a) == \
+             length(b) && all(abs(a - b) <= tol * pmax(abs(b), 1e-3)))"
+        ),
+    );
+    assert_eq!(made, Outcome::Ok, "{text}");
+    let columns = ["yb", "yc", "yd", "vbb", "vbc", "vbd", "vcc", "vcd", "vdd"]
+        .into_iter()
+        .map(|name| ColumnInfo {
+            name: name.into(),
+            kind: VarKind::Number,
+        })
+        .collect();
+    let ctx = Context {
+        dataset: "smk".into(),
+        frames: Vec::new(),
+        columns,
+    };
+    let mut values = MV_META.defaults(&ctx);
+    values.set_list("outcomes", ["yb", "yc", "yd"].map(String::from).to_vec());
+    values.set_list(
+        "wcov",
+        ["vbb", "vbc", "vbd", "vcc", "vcd", "vdd"]
+            .map(String::from)
+            .to_vec(),
+    );
+    values.set_text("method", "ML");
+    values.set_text("struct", "CS");
+    values.set_text("jwsub", "yb yc");
+    values.set_text("save", "smkfit");
+    values.set_flag("white", true);
+    let code = MV_META.generate(&ctx, &values, Style::Base);
+    assert!(code.is_ok(), "{code:?}");
+    let (outcome, text, _) = run(
+        &mut e,
+        Source::Menu(MV_META.menu.into()),
+        &code.unwrap_or_default(),
+    );
+    assert_eq!(outcome, Outcome::Ok, "{text}");
+    eprintln!("{text}");
+    holds(
+        &mut e,
+        &[
+            "smkfit$k == 31".into(),
+            "near(c(coef(smkfit), as.numeric(logLik(smkfit))), c(.41307718, .70451467, \
+             .83658198, -53.356319178), 5e-5)"
+                .into(),
+            // R and I2 of yb, yc, yd and jointly, then of yb with yc
+            "near(c(smkfit_het$jwr$R[1:4], smkfit_het$jwr$R[5]), c(2.34601416, 3.26142069, \
+             1.64036365, 2.16214496, 2.67435283), 5e-5)"
+                .into(),
+            "near(smkfit_het$jwr[['I2 (%)']], c(81.83067715, 90.59873365, 62.83623306, \
+             78.60903468, 86.01821583), 5e-5)"
+                .into(),
+            "near(c(100 * max(0, 1 - 1 / smkfit_het$H2), smkfit_het$H2), c(86.28906123, \
+             7.29344662), 5e-5)"
+                .into(),
+            "near(smkfit_het$white, c(66.94080585, 85.72997395, 6.87373305), 5e-5)".into(),
+            "near(c(diag(smkfit$G), smkfit$G[1, 2]), c(.451656, .451656, .451656, .3690338), \
+             1e-4)"
+                .into(),
+        ],
+    );
 }
