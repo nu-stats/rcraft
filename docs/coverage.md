@@ -6,7 +6,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 
 | Entries | Verified | Partial | Planned |
 |---:|---:|---:|---:|
-| 155 | 154 | 0 | 1 |
+| 156 | 155 | 0 | 1 |
 
 ## File
 
@@ -132,6 +132,7 @@ An entry only counts as **verified** when the R its dialog generates, run in the
 | Vector autoregression | verified |
 | Forecast | verified |
 | Time-series plot | verified |
+| Machine learning model | verified |
 | Model fit | verified |
 | Compare models | verified |
 | Predicted values and residuals | verified |

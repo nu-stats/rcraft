@@ -15,6 +15,7 @@ use crate::generalised;
 use crate::inference;
 use crate::iv;
 use crate::meta;
+use crate::ml;
 use crate::models;
 use crate::multilevel;
 use crate::multivariate;
@@ -490,6 +491,7 @@ pub const SPECS: &[&Spec] = &[
     &timeseries::SMOOTHING,
     &timeseries::VAR,
     &timeseries::TS_PLOT,
+    &ml::ML,
 ];
 
 #[cfg(test)]
