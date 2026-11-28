@@ -1,6 +1,8 @@
 # The Command window
 
-Type R at the Command line and press Enter to run it. Shift+Enter starts a new line without running. What you type and what R printed go into Results. A long script is better kept in the Script editor, where Ctrl+Enter runs the selection, or the line the cursor is on.
+Type R at the Command line and press Enter to run it. Shift+Enter starts a new line without running. What you type and what R printed go into Results. A long script is better kept in the Script editor above Results, where Ctrl+Enter runs the selection, or the line the cursor is on.
+
+![Three commands run and a fourth typed at the Command line, waiting for Enter](images/command-window.png)
 
 ## History
 

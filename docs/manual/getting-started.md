@@ -8,9 +8,12 @@ Nothing RCraft shows is made up: every number comes from R, and every menu choic
 
 ## The panes
 
-- **Left:** the Variables tab lists the columns of the data frame you are working on, and the Objects tab lists everything in the session, with a menu on each object. Below them are Properties and History.
+![The RCraft window after a linear model: Variables, Properties and History on the left, the Script editor at the top, Results in the middle and the Command line at the bottom](images/window.png)
+
+- **Left:** the Variables tab lists the columns of the data frame you are working on, and the Objects tab lists everything in the session, with a menu on each object. Below them are Properties and History. See [the Data tab and Properties](data-and-properties).
+- **Top:** the Script editor, where you keep a longer script.
 - **Middle:** the Results tab shows the commands and what they printed. The Data tab shows the data frame in a grid. The Graph tab shows the plots you have drawn.
-- **Bottom:** the Command line, where you type R, and the Script editor, where you keep a longer script.
+- **Bottom:** the Command line, where you type R.
 
 ## Your first data file
 
@@ -20,8 +23,8 @@ Nothing RCraft shows is made up: every number comes from R, and every menu choic
 
 ## Your first model
 
-1. Open the Statistics menu and choose **Linear model**.
+1. Open the Statistics menu and choose **Linear models**, then **Linear model**.
 2. Pick the outcome and the predictors from your columns. The dialog shows the R it will run before you run it.
-3. Press OK. The model prints in Results, and the R code goes into the log and the session, so you can [save the session](projects-and-reporting) as a script afterwards.
+3. Press **Run**. The model prints in Results, and the R code goes into the log and the session, so you can [save the session](projects-and-reporting) as a script afterwards.
 
 Next: [the menus](menus) say what else is there, and [the Command window](command-window) is for typing R yourself.

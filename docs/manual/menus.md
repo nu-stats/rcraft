@@ -1,6 +1,8 @@
 # The menus
 
-Every dialog in Data, Statistics, Graphs and Reports works the same way: you choose columns and options, the dialog shows the R it will write, and nothing runs until you press OK. A dialog that needs a data frame is greyed out until one is loaded. Each dialog has a Help button with its own page.
+Every dialog in Data, Statistics, Graphs and Reports works the same way: you choose columns and options, the dialog shows the R it will write, and nothing runs until you press **Run**. A dialog that needs a data frame is greyed out until one is loaded. Each dialog has a Help button with its own page.
+
+![The Statistics menu with its Descriptives submenu open](images/menu-statistics.png)
 
 ## File
 
@@ -18,15 +20,15 @@ Clear the Results, copy the session log, or copy the session as a script. **Acce
 
 ## Data
 
-Working on the data frame: new variables, recoding, changing a variable's type, text and dates, filtering and sorting rows, labels, joining and appending data frames, aggregating, reshaping wide to long and back, duplicates, random samples and dropping missing values.
+Working on the data frame: new variables, recoding, changing a variable's type, text and dates, filtering and sorting rows, labels, joining and appending data frames, aggregating, reshaping wide to long and back, duplicates, random samples and dropping missing values. See [the Data menu](data-dialogs).
 
 ## Statistics
 
-Summaries, tests and models, from a simple table of means to regression, survival, panel data, time series and more.
+Summaries, tests and models, from a simple table of means to regression, survival, panel data, time series and more. See [the Statistics menu](statistics-dialogs).
 
 ## Graphs
 
-Plots drawn from your data. **Export plot** saves the plot on show to a file, and is greyed out until a plot has been drawn.
+Plots drawn from your data. **Export plot** saves the plot on show to a file, and is greyed out until a plot has been drawn. See [the Graphs menu](graphs-dialogs).
 
 ## Reports
 
